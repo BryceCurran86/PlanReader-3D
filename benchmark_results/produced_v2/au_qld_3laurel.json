@@ -1,0 +1,244 @@
+[
+  {
+    "quantity_id": "produced_wall_face_bathroom_C_shower_net",
+    "trade_category": "tiling",
+    "value": 1.89,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:bathroom_C_shower_net"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_wall_face_ensuite_A_rear_flat_after_niche",
+    "trade_category": "tiling",
+    "value": 4.296,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:ensuite_rear_flat_after_niche"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_wall_face_ensuite_B_shower_return_net",
+    "trade_category": "tiling",
+    "value": 2.43,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:ensuite_B_shower_return_net"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_wall_face_ensuite_D_shower_return_net",
+    "trade_category": "tiling",
+    "value": 2.43,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:ensuite_D_shower_return_net"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_wall_face_laundry_D_skirting",
+    "trade_category": "tiling",
+    "value": 0.5852,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:laundry_D_skirting"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_wall_face_gf_ensuite_B_shower_return_net",
+    "trade_category": "tiling",
+    "value": 2.43,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:gf_ensuite_B_shower_return_net"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_wall_face_gf_ensuite_C_rear_flat_after_niche",
+    "trade_category": "tiling",
+    "value": 4.809,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:gf_ensuite_rear_flat_after_niche"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_wall_face_gf_ensuite_D_shower_return_net",
+    "trade_category": "tiling",
+    "value": 2.43,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:wall_tile:gf_ensuite_D_shower_return_net"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_main_living_ceiling",
+    "trade_category": "ceilings",
+    "value": 168.1,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:ceiling:main_living"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_garage_ceiling",
+    "trade_category": "ceilings",
+    "value": 36.4,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:ceiling:garage"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_main_porch_ceiling",
+    "trade_category": "ceilings",
+    "value": 7.5,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:ceiling:main_porch"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_main_alfresco_ceiling",
+    "trade_category": "ceilings",
+    "value": 13.6,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:ceiling:main_alfresco"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_gf_living_ceiling",
+    "trade_category": "ceilings",
+    "value": 60.0,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:ceiling:gf_living"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_gf_alfresco_ceiling",
+    "trade_category": "ceilings",
+    "value": 10.5,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:ceiling:gf_alfresco"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_gf_porch_ceiling",
+    "trade_category": "ceilings",
+    "value": 1.4,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:ceiling:gf_porch"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_vinyl_media",
+    "trade_category": "flooring",
+    "value": 13.146,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:floor:media"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_vinyl_bed2",
+    "trade_category": "flooring",
+    "value": 12.6,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:floor:bed2"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_vinyl_bed3",
+    "trade_category": "flooring",
+    "value": 12.6,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:floor:bed3"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_wet_floor_bathroom",
+    "trade_category": "tiling",
+    "value": 5.17,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:floor:bathroom"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_wet_floor_main_wc",
+    "trade_category": "tiling",
+    "value": 1.7316,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:floor:main_wc"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_wet_floor_laundry",
+    "trade_category": "tiling",
+    "value": 5.1744,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:floor:laundry"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_3laurel_wet_floor_gf_ensuite_laundry",
+    "trade_category": "tiling",
+    "value": 6.4889,
+    "unit": "m2",
+    "object_refs": [
+      "3laurel:surface:floor:gf_ensuite_laundry"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  }
+]

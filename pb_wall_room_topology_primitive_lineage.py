@@ -380,6 +380,101 @@ def sources_for_fragment(
     return [segment for segment in source_segments if fragment_contained_in_segment(fragment, segment)]
 
 
+_LINEAGE_SPATIAL_CELL_PT = 32.0
+_LINEAGE_SPATIAL_MAX_CELLS_PER_SOURCE = 256
+
+
+def _build_source_fragment_spatial_index(
+    source_segments: Sequence[Mapping[str, Any]],
+) -> tuple[
+    Dict[Tuple[int, int], Tuple[int, ...]],
+    Tuple[int, ...],
+    Tuple[Tuple[float, float, float, float], ...],
+]:
+    """Build an exhaustive broad phase for empty line-bucket fallback.
+
+    A source that contains a fragment must have an expanded axis-aligned bbox
+    containing the fragment midpoint. Sources with very large bboxes are kept
+    in a separate wide list rather than being replicated through thousands of
+    grid cells. The exact containment predicate remains authoritative.
+    """
+    grid: Dict[Tuple[int, int], List[int]] = {}
+    wide: List[int] = []
+    bounds: List[Tuple[float, float, float, float]] = []
+    cell = _LINEAGE_SPATIAL_CELL_PT
+    tol = _CONTAINMENT_TOL_PT
+
+    for index, segment in enumerate(source_segments):
+        x1 = float(segment["x1"])
+        y1 = float(segment["y1"])
+        x2 = float(segment["x2"])
+        y2 = float(segment["y2"])
+        x0 = min(x1, x2)
+        y0 = min(y1, y2)
+        x3 = max(x1, x2)
+        y3 = max(y1, y2)
+        bounds.append((x0, y0, x3, y3))
+        gx0 = math.floor((x0 - tol) / cell)
+        gy0 = math.floor((y0 - tol) / cell)
+        gx1 = math.floor((x3 + tol) / cell)
+        gy1 = math.floor((y3 + tol) / cell)
+        cell_count = (gx1 - gx0 + 1) * (gy1 - gy0 + 1)
+        if cell_count > _LINEAGE_SPATIAL_MAX_CELLS_PER_SOURCE:
+            wide.append(index)
+            continue
+        for gx in range(gx0, gx1 + 1):
+            for gy in range(gy0, gy1 + 1):
+                grid.setdefault((gx, gy), []).append(index)
+
+    return (
+        {key: tuple(values) for key, values in grid.items()},
+        tuple(wide),
+        tuple(bounds),
+    )
+
+
+def _sources_for_fragment_spatial(
+    fragment: SegmentPair,
+    source_segments: Sequence[Mapping[str, Any]],
+    spatial_index: tuple[
+        Dict[Tuple[int, int], Tuple[int, ...]],
+        Tuple[int, ...],
+        Tuple[Tuple[float, float, float, float], ...],
+    ],
+) -> List[Mapping[str, Any]]:
+    """Exact global-fallback equivalent using only spatially possible sources."""
+    grid, wide, bounds = spatial_index
+    (x1, y1), (x2, y2) = fragment
+    midpoint_x = (float(x1) + float(x2)) / 2.0
+    midpoint_y = (float(y1) + float(y2)) / 2.0
+    cell_key = (
+        math.floor(midpoint_x / _LINEAGE_SPATIAL_CELL_PT),
+        math.floor(midpoint_y / _LINEAGE_SPATIAL_CELL_PT),
+    )
+    candidate_indexes = set(grid.get(cell_key, ()))
+    candidate_indexes.update(wide)
+
+    fragment_x0 = min(float(x1), float(x2))
+    fragment_y0 = min(float(y1), float(y2))
+    fragment_x1 = max(float(x1), float(x2))
+    fragment_y1 = max(float(y1), float(y2))
+    tol = _CONTAINMENT_TOL_PT
+    candidates: List[Mapping[str, Any]] = []
+    for index in sorted(candidate_indexes):
+        source_x0, source_y0, source_x1, source_y1 = bounds[index]
+        if (
+            fragment_x0 < source_x0 - tol
+            or fragment_y0 < source_y0 - tol
+            or fragment_x1 > source_x1 + tol
+            or fragment_y1 > source_y1 + tol
+        ):
+            continue
+        candidate = source_segments[index]
+        if fragment_contained_in_segment(fragment, candidate):
+            candidates.append(candidate)
+    return candidates
+
+
 def isolated_lineage(payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     return copy.deepcopy(payload) if payload else empty_lineage()
 
@@ -418,6 +513,7 @@ def attach_lineage_to_split_fragments(
     for segment in source_segments:
         buckets.setdefault(source_line_bucket(segment), []).append(segment)
 
+    spatial_index = None
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
         p1, p2 = pair
@@ -434,8 +530,18 @@ def attach_lineage_to_split_fragments(
         if not parents:
             # Splitter endpoints are rounded to 8 decimals. A fragment can
             # leave its source's coarse line bucket while still lying on the
-            # source. Scan sources only for that miss — not every fragment.
-            parents = sources_for_fragment(pair, source_segments)
+            # source. Preserve the historical exhaustive fallback, but use a
+            # source-bbox spatial broad phase instead of rescanning every
+            # primitive for every miss. Exact containment remains authoritative.
+            if spatial_index is None:
+                spatial_index = _build_source_fragment_spatial_index(
+                    source_segments
+                )
+            parents = _sources_for_fragment_spatial(
+                pair,
+                source_segments,
+                spatial_index,
+            )
         fragment = {
             "id": f"{id_prefix}_{idx}",
             "x1": p1[0],

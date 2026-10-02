@@ -846,11 +846,17 @@ def test_clip_proof_is_translation_and_scale_invariant() -> None:
     assert not _classify(b).trusted
 
 
-def test_rotated_page_with_clips_fails_closed() -> None:
+def test_rotated_page_with_exact_containing_clip_is_trusted() -> None:
     pdf = _pdf(f"q 20 100 100 40 re W n {_DOT} {_TXT} {_DOT} Q", rotate=90)
-    decision = _classify(pdf)
+    assert _classify(pdf).trusted
+
+
+def test_rotated_page_with_exact_excluding_clip_stays_blocked() -> None:
+    clipped = _pdf(f"q 200 10 50 20 re W n {_DOT} {_TXT} {_DOT} Q", rotate=90)
+    reference = _pdf(_TXT, rotate=90)
+    decision = _supplied_word_decision(clipped, reference)
     assert not decision.trusted
-    assert TEXT_CLIP_STATE_UNRESOLVED in decision.reason_codes
+    assert TEXT_CLIPPED_BY_CLIP_REGION in decision.reason_codes
 
 
 # ---------------------------------------------------------------------------

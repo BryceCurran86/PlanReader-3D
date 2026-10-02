@@ -50,6 +50,7 @@ from pb_source_observation_authority import (
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationProducer,
+    SourceObservationRecord,
     SourceRevisionRecord,
 )
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
@@ -785,6 +786,45 @@ class SourceVisibilityProducer:
             return cached
 
         snapshot = base.snapshot
+
+        # Reuse the producer-owned identities already minted during the base
+        # native-source ingest. Re-hashing the exact same ~60k native segment /
+        # word identities here is redundant and dominates dense CAD pages.
+        # The key includes every observation identity field that varies within
+        # this immutable snapshot, so a lookup can only return the exact parent
+        # record already authenticated by the base producer.
+        base_parent_ids: dict[
+            tuple[str, str, str, str, str, tuple[float, ...]], str
+        ] = {}
+        store = self._producer._store
+        for observation_id in base.snapshot.observation_ids:
+            record = store.observations.get(
+                (base.snapshot.snapshot_id, observation_id)
+            )
+            if record is None:
+                raise RuntimeError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: base observation missing"
+                )
+            if record.observation_kind not in {
+                "native_pdf_segment",
+                "native_pdf_word",
+            }:
+                continue
+            identity_key = (
+                record.page_id,
+                record.source_partition_id,
+                record.observation_kind,
+                record.source_primitive_ref,
+                record.raw_text,
+                tuple(record.geometry),
+            )
+            prior = base_parent_ids.get(identity_key)
+            if prior is not None and prior != observation_id:
+                raise RuntimeError(
+                    f"{PRODUCER_INTEGRITY_FAILURE}: native parent identity ambiguous"
+                )
+            base_parent_ids[identity_key] = observation_id
+
         visible_ids: list[str] = []
         visible_specs: list[dict[str, object]] = []
         text_receipts: list[tuple[str, PdfTextIntegrityReceipt]] = []
@@ -795,20 +835,32 @@ class SourceVisibilityProducer:
                 page_id = str(page_number)
                 partition_id = f"page:{page_number}"
                 page = pdf.load_page(page_index)
-                native = extract_native_page(page)
+                native = self._producer._native_page_cache_by_revision_page.get(
+                    (base.revision.revision_id, page_id)
+                )
+                if native is None:
+                    # Defensive compatibility fallback for producer instances
+                    # created before this ephemeral cache existed. Geometry is
+                    # still decoded from the immutable producer-owned PDF.
+                    native = extract_native_page(page)
                 for word in native.get("words") or ():
                     raw_text = str(word.get("text") or "")
                     geometry = tuple(float(value) for value in (word.get("bbox") or ()))
                     primitive_ref = native_word_primitive_ref(word)
-                    parent_id = _native_word_observation_id(
-                        document_id=base.revision.document_id,
-                        revision_id=base.revision.revision_id,
-                        page_id=page_id,
-                        partition_id=partition_id,
-                        primitive_ref=primitive_ref,
-                        raw_text=raw_text,
-                        geometry=geometry,
+                    parent_id = base_parent_ids.get(
+                        (
+                            page_id,
+                            partition_id,
+                            "native_pdf_word",
+                            primitive_ref,
+                            raw_text,
+                            geometry,
+                        )
                     )
+                    if parent_id is None:
+                        raise RuntimeError(
+                            f"{PRODUCER_INTEGRITY_FAILURE}: native word parent missing"
+                        )
                     decision = classify_native_word_integrity(page, word)
                     text_receipts.append(
                         (
@@ -836,14 +888,20 @@ class SourceVisibilityProducer:
                     if not raw_segment_id:
                         continue
                     parent_ref = f"segment:{raw_segment_id}"
-                    parent_id = _native_parent_observation_id(
-                        document_id=base.revision.document_id,
-                        revision_id=base.revision.revision_id,
-                        page_id=page_id,
-                        partition_id=partition_id,
-                        primitive_ref=parent_ref,
-                        geometry=decision.geometry,
+                    parent_id = base_parent_ids.get(
+                        (
+                            page_id,
+                            partition_id,
+                            "native_pdf_segment",
+                            parent_ref,
+                            "",
+                            tuple(decision.geometry),
+                        )
                     )
+                    if parent_id is None:
+                        raise RuntimeError(
+                            f"{PRODUCER_INTEGRITY_FAILURE}: native segment parent missing"
+                        )
                     visible_ref = f"visible:{parent_ref}"
                     origin_kind = (
                         RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND
@@ -895,36 +953,33 @@ class SourceVisibilityProducer:
             text_observation_ids=tuple(sorted({item[0] for item in text_receipts})),
         )
         source_authority = self._producer.authority()
-        for visible_id in published.visible_observation_ids:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=visible_id,
-                )
+        receipt_ids = tuple(
+            sorted(
+                set(published.visible_observation_ids)
+                | {item[0] for item in text_receipts}
             )
-            if result.observation is None or len(result.observation.derivation_parent_ids) != 1:
+        )
+        resolved_records = source_authority.resolve_many(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_ids=receipt_ids,
+        )
+        resolved_by_id = {record.observation_id: record for record in resolved_records}
+
+        for visible_id in published.visible_observation_ids:
+            observation = resolved_by_id.get(visible_id)
+            if observation is None or len(observation.derivation_parent_ids) != 1:
                 raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: visible receipt missing parent")
             self._visibility_receipts[
                 (published.snapshot.snapshot_id, visible_id)
-            ] = result.observation.derivation_parent_ids[0]
+            ] = observation.derivation_parent_ids[0]
 
         for observation_id, receipt in text_receipts:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            observation = result.observation
+            observation = resolved_by_id.get(observation_id)
             if (
                 observation is None
-                or result.status != EvidenceResolutionStatus.CORROBORATED
                 or observation.observation_kind != "native_pdf_word"
                 or observation.origin_kind != "native"
                 or observation.observation_id != receipt.parent_observation_id
@@ -972,19 +1027,22 @@ class SourceVisibilityProducer:
 
         source_authority = self._producer.authority()
         old_snapshot_id = published.snapshot.snapshot_id
-        pages_with_visible: set[str] = set()
-        for observation_id in published.visible_observation_ids:
-            result = source_authority.resolve(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=old_snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            if result.observation is not None:
-                pages_with_visible.add(str(result.observation.page_id))
+        # Dense CAD pages can carry tens of thousands of producer-owned visible
+        # segments. Resolve the immutable visible records under one shared
+        # revision / source-hash / snapshot check instead of repeating those
+        # identical checks once per observation merely to discover page
+        # ownership. Record fingerprints are still verified individually by
+        # SourceObservationAuthority.resolve_many().
+        visible_records = source_authority.resolve_many(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=old_snapshot_id,
+            observation_ids=published.visible_observation_ids,
+        )
+        pages_with_visible: set[str] = {
+            str(observation.page_id) for observation in visible_records
+        }
 
         snapshot = published.snapshot
         visible_ids = list(published.visible_observation_ids)
@@ -1245,6 +1303,151 @@ class SourceVisibilityAuthority:
             physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
             reason_codes=(reason,),
         )
+
+    def resolve_many_visible(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        observation_ids: Sequence[str],
+    ) -> tuple[SourceObservationRecord, ...]:
+        """Resolve visible observations and their provenance in one batch.
+
+        This is semantically equivalent to calling ``resolve_visible`` for each
+        id and accepting only corroborated results.  The source authority's
+        immutable revision/snapshot/hash checks and every requested record
+        fingerprint are still verified; shared lineage is simply checked once
+        instead of tens of thousands of times on dense CAD pages.
+        """
+
+        ids = tuple(str(value) for value in observation_ids)
+        if not ids:
+            return ()
+
+        related_ids: list[str] = []
+        native_receipts: dict[str, str] = {}
+        raster_receipts: dict[str, RasterSegmentVisibilityReceipt] = {}
+        for observation_id in ids:
+            expected_parent = self._visibility_receipts.get(
+                (snapshot_id, observation_id)
+            )
+            raster_receipt = self._raster_visibility_receipts.get(
+                (snapshot_id, observation_id)
+            )
+            if expected_parent is None and raster_receipt is None:
+                raise RuntimeError(VISIBILITY_RECEIPT_UNAVAILABLE)
+            related_ids.append(observation_id)
+            if expected_parent is not None:
+                native_receipts[observation_id] = expected_parent
+                related_ids.append(expected_parent)
+            else:
+                assert raster_receipt is not None
+                raster_receipts[observation_id] = raster_receipt
+                related_ids.extend(
+                    (
+                        raster_receipt.parent_observation_id,
+                        raster_receipt.page_parent_observation_id,
+                    )
+                )
+
+        records = self._source_authority.resolve_many(
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+            observation_ids=tuple(dict.fromkeys(related_ids)),
+        )
+        by_id = {record.observation_id: record for record in records}
+        resolved: list[SourceObservationRecord] = []
+
+        for observation_id in ids:
+            observation = by_id.get(observation_id)
+            if observation is None:
+                raise RuntimeError(OBSERVATION_UNAVAILABLE)
+            expected_parent = native_receipts.get(observation_id)
+            if expected_parent is not None:
+                if (
+                    observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
+                    or observation.origin_kind not in (
+                        VISIBLE_SEGMENT_ORIGIN_KIND,
+                        RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
+                    )
+                    or observation.viewport_id is not None
+                    or observation.derivation_parent_ids != (expected_parent,)
+                ):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                parent = by_id.get(expected_parent)
+                if parent is None:
+                    raise RuntimeError(OBSERVATION_UNAVAILABLE)
+                if (
+                    parent.observation_kind != "native_pdf_segment"
+                    or parent.origin_kind != "native"
+                    or parent.document_id != observation.document_id
+                    or parent.revision_id != observation.revision_id
+                    or parent.source_sha256 != observation.source_sha256
+                    or parent.page_id != observation.page_id
+                    or parent.source_partition_id != observation.source_partition_id
+                    or parent.geometry != observation.geometry
+                    or observation.source_primitive_ref
+                    != f"visible:{parent.source_primitive_ref}"
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+            else:
+                raster_receipt = raster_receipts.get(observation_id)
+                if raster_receipt is None:
+                    raise RuntimeError(VISIBILITY_RECEIPT_UNAVAILABLE)
+                if (
+                    observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
+                    or observation.origin_kind != RASTER_VISIBLE_SEGMENT_ORIGIN_KIND
+                    or observation.viewport_id is not None
+                    or observation.derivation_parent_ids
+                    != (raster_receipt.parent_observation_id,)
+                    or observation.document_id != raster_receipt.document_id
+                    or observation.revision_id != raster_receipt.revision_id
+                    or observation.source_sha256 != raster_receipt.source_sha256
+                    or observation.page_id != raster_receipt.page_id
+                    or observation.source_partition_id
+                    != raster_receipt.source_partition_id
+                    or tuple(observation.geometry) != tuple(raster_receipt.geometry)
+                ):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                parent = by_id.get(raster_receipt.parent_observation_id)
+                if parent is None:
+                    raise RuntimeError(OBSERVATION_UNAVAILABLE)
+                if (
+                    parent.observation_kind != RASTER_PDF_SEGMENT
+                    or parent.origin_kind != RASTER_SEGMENT_ORIGIN_KIND
+                    or parent.derivation_parent_ids
+                    != (raster_receipt.page_parent_observation_id,)
+                    or parent.document_id != observation.document_id
+                    or parent.revision_id != observation.revision_id
+                    or parent.source_sha256 != observation.source_sha256
+                    or parent.page_id != observation.page_id
+                    or parent.source_partition_id != observation.source_partition_id
+                    or parent.geometry != observation.geometry
+                    or observation.source_primitive_ref
+                    != f"visible:{parent.source_primitive_ref}"
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+                page_parent = by_id.get(raster_receipt.page_parent_observation_id)
+                if page_parent is None:
+                    raise RuntimeError(OBSERVATION_UNAVAILABLE)
+                if (
+                    page_parent.observation_kind != "native_pdf_page"
+                    or page_parent.origin_kind != "native"
+                    or page_parent.derivation_parent_ids
+                    or page_parent.document_id != observation.document_id
+                    or page_parent.revision_id != observation.revision_id
+                    or page_parent.source_sha256 != observation.source_sha256
+                    or page_parent.page_id != observation.page_id
+                    or page_parent.source_partition_id != observation.source_partition_id
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+            resolved.append(replace(observation))
+
+        return tuple(resolved)
 
     def resolve_visible(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
         expected_parent = self._visibility_receipts.get(

@@ -1417,9 +1417,13 @@ def planreader_to_canonical_model(
             polygon=poly_pts,
             thickness_m=_safe_float(c_raw.get("thickness_m")),
             elevation_offset_m=_safe_float(c_raw.get("elevation_offset_m")),
+            substrate=c_raw.get("substrate"),
+            finish=c_raw.get("finish") or c_raw.get("ceiling_finish"),
+            confidence=parse_optional_confidence(c_raw.get("confidence")),
             review_state=ReviewState.CONFIRMED,
             takeoff_eligible=bool(is_validated_internal_workspace),
             provenance=_parse_provenance(c_raw.get("provenance")),
+            metadata=dict(c_raw.get("metadata") or {}),
         )
         if c_raw.get("derived_quantities") and isinstance(c_raw["derived_quantities"], list):
             for qb_raw in c_raw["derived_quantities"]:
@@ -1663,6 +1667,8 @@ def collect_workspace_3d_evidence(app: Any, workspace_id: int) -> Dict[str, Any]
         "mapper_shapes": [],
         "elevation_opening_candidates": [],
         "evidence_observations": [],
+        "spaces": [],
+        "ceilings": [],
         "roof_data": None,
         "takeoff_rows": [],
         "diagnostics_log": [],
@@ -1922,6 +1928,110 @@ def collect_workspace_3d_evidence(app: Any, workspace_id: int) -> Dict[str, Any]
                     })
         except Exception as e:
             snapshot["diagnostics_log"].append({"type": "auto_geometry_evidence_error", "msg": str(e)})
+
+        # 10. Collect room faces as spaces and ceilings from floor plan pages
+        try:
+            from pb_room_face_takeoff import extract_room_faces_from_page
+            for p in valid_pages:
+                p_id = p.get("id")
+                p_no = p.get("page_no")
+                p_label = str(p.get("page_label") or "")
+                p_type = str(p.get("page_type") or "").lower()
+
+                # Skip pages that are explicitly not floor plans
+                if any(k in p_type for k in ("elevation", "section", "detail", "render", "schedule")):
+                    continue
+
+                source_level = _resolve_mapper_storey({}, {}, p, registered_levels)
+                if not source_level and len(registered_levels) == 1:
+                    source_level = next(iter(registered_levels.values()))
+                if not source_level:
+                    norm_label = _normalise_level_identity(p_label)
+                    source_level = registered_levels.get(norm_label) if norm_label else None
+                level_info = source_level if source_level else {"id": "ground", "name": p_label or "Ground"}
+
+                try:
+                    room_faces = extract_room_faces_from_page(app, p)
+                except Exception as rf_err:
+                    snapshot["diagnostics_log"].append({"type": "room_face_extraction_error", "page_id": p_id, "msg": str(rf_err)})
+                    continue
+
+                for rf_idx, rf in enumerate(room_faces or []):
+                    poly_m = [
+                        {"x": float(pt[0]), "y": float(pt[1])}
+                        for pt in (rf.polygon_m or [])
+                        if len(pt) >= 2
+                    ]
+                    if not poly_m or len(poly_m) < 3:
+                        continue
+
+                    sp_ref = str(rf.room_ref or f"space_{p_id}_{rf_idx+1}")
+                    sp_name = str(rf.label or f"Space {rf_idx+1}").strip()
+                    if not sp_name:
+                        sp_name = f"Space {rf_idx+1}"
+
+                    area_val = round(float(rf.floor_area_m2), 4) if rf.floor_area_m2 else None
+
+                    prov = {
+                        "workspace_id": str(wid),
+                        "document_id": str(p.get("document_id")),
+                        "page_id": str(p_id),
+                        "page_number": p_no,
+                        "source_page": str(p_no),
+                        "drawing_number": str(rf.drawing_number or p_label),
+                        "scale_text": str(rf.scale_source or p.get("scale_text") or ""),
+                    }
+
+                    is_confirmed = (rf.status == "Measured")
+                    geom_conf = float(rf.geometry_confidence) if rf.geometry_confidence is not None else 0.9
+
+                    finish_assignments: Dict[str, Any] = dict(getattr(rf, "finish_assignments", {}) or {})
+
+                    space_dict = {
+                        "id": sp_ref,
+                        "name": sp_name,
+                        "level": level_info,
+                        "level_id": level_info.get("id") if isinstance(level_info, dict) else None,
+                        "boundary_polygon": poly_m,
+                        "specified_floor_area_m2": area_val,
+                        "confidence": geom_conf,
+                        "status": "confirmed" if is_confirmed else "review",
+                        "takeoff_eligible": True,
+                        "finish_assignments": finish_assignments,
+                        "provenance": prov,
+                        "metadata": {
+                            "source_page": p_no,
+                            "room_ref": rf.room_ref,
+                            "raw_label": rf.label,
+                            "has_voids": rf.has_voids,
+                            "calibration_confidence": rf.calibration_confidence,
+                        }
+                    }
+                    snapshot["spaces"].append(space_dict)
+
+                    ceiling_id = f"ceiling_{sp_ref}"
+                    ceiling_dict = {
+                        "id": ceiling_id,
+                        "name": f"Ceiling {sp_name}",
+                        "level": level_info,
+                        "level_id": level_info.get("id") if isinstance(level_info, dict) else None,
+                        "polygon": poly_m,
+                        "specified_floor_area_m2": area_val,
+                        "confidence": geom_conf,
+                        "status": "confirmed" if is_confirmed else "review",
+                        "takeoff_eligible": True,
+                        "ceiling_finish": finish_assignments.get("ceiling"),
+                        "finish": finish_assignments.get("ceiling"),
+                        "provenance": prov,
+                        "metadata": {
+                            "space_id": sp_ref,
+                            "source_page": p_no,
+                            "ceiling_finish": finish_assignments.get("ceiling"),
+                        }
+                    }
+                    snapshot["ceilings"].append(ceiling_dict)
+        except Exception as e:
+            snapshot["diagnostics_log"].append({"type": "room_face_spaces_error", "msg": str(e)})
 
     except Exception as e:
         snapshot["diagnostics_log"].append({"type": "evidence_collection_error", "msg": str(e)})

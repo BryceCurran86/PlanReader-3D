@@ -1,0 +1,68 @@
+[
+  {
+    "quantity_id": "produced_q5446_alfresco_floor",
+    "trade_category": "flooring",
+    "value": 12.0,
+    "unit": "m2",
+    "object_refs": [
+      "q5446:surface:floor:alfresco"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_q5446_ground_ensuite_floor_tiling",
+    "trade_category": "tiling",
+    "value": 4.2224,
+    "unit": "m2",
+    "object_refs": [
+      "q5446:surface:floor:ground_ensuite"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_q5446_ground_laundry_floor_tiling",
+    "trade_category": "tiling",
+    "value": 4.1864,
+    "unit": "m2",
+    "object_refs": [
+      "q5446:surface:floor:ground_laundry"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_q5446_ground_living_floor_tiling",
+    "trade_category": "tiling",
+    "value": 12.92,
+    "unit": "m2",
+    "object_refs": [
+      "q5446:surface:floor:ground_living"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_q5446_first_ensuite_floor_tiling",
+    "trade_category": "tiling",
+    "value": 5.9572,
+    "unit": "m2",
+    "object_refs": [
+      "q5446:surface:floor:first_ensuite"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  },
+  {
+    "quantity_id": "produced_q5446_first_bath_floor_tiling",
+    "trade_category": "tiling",
+    "value": 5.8446,
+    "unit": "m2",
+    "object_refs": [
+      "q5446:surface:floor:first_bath"
+    ],
+    "lineage_ok": true,
+    "abstained": false
+  }
+]

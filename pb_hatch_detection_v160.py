@@ -352,40 +352,99 @@ def _cluster_strokes(
     n = len(strokes)
     uf = _UnionFind(n)
 
+    # These geometric properties are immutable for the duration of clustering.
+    # Cache them once: dense CAD pages otherwise recompute atan2/hypot/bboxes
+    # millions of times inside the candidate loop.
+    angles = [stroke.angle_deg for stroke in strokes]
+    lengths = [stroke.length for stroke in strokes]
+    bboxes = [stroke.bbox for stroke in strokes]
+
     # Pre-compute average stroke length for gap threshold
-    avg_len = sum(s.length for s in strokes) / max(n, 1)
+    avg_len = sum(lengths) / max(n, 1)
 
     # Angle-bucket acceleration: group strokes into angle buckets
     bucket_size = angle_tol * 2
     angle_buckets: Dict[int, List[int]] = {}
     for i, s in enumerate(strokes):
-        bucket = int(s.angle_deg / bucket_size)
+        bucket = int(angles[i] / bucket_size)
         if bucket not in angle_buckets:
             angle_buckets[bucket] = []
         angle_buckets[bucket].append(i)
 
-    # Within each bucket (and neighbours), check proximity
+    # Within each bucket (and neighbours), check only spatially plausible
+    # candidates.  The former implementation compared every stroke against
+    # every stroke in the same/adjacent angle buckets, which becomes quadratic
+    # on dense CAD sheets.  Any pair accepted by the exact predicates below has
+    # perpendicular separation <= max_dist and along-axis gap <= max_gap, so
+    # its axis-aligned bounding boxes cannot be separated by more than
+    # max_dist + max_gap on either axis.  A producer-owned spatial grid can
+    # therefore reject impossible pairs without changing the acceptance rule.
     merge_count = 0
-    checked: set = set()
+    max_gap = avg_len * 1.5
+    search_margin = max_dist + max_gap
+    cell_size = max(16.0, max_dist)
+
+    spatial_buckets: Dict[Tuple[int, int, int], List[int]] = {}
+    for i, stroke in enumerate(strokes):
+        x0, y0, x1, y1 = bboxes[i]
+        cx0 = math.floor(x0 / cell_size)
+        cy0 = math.floor(y0 / cell_size)
+        cx1 = math.floor(x1 / cell_size)
+        cy1 = math.floor(y1 / cell_size)
+        angle_bucket = int(angles[i] / bucket_size)
+        for cell_x in range(cx0, cx1 + 1):
+            for cell_y in range(cy0, cy1 + 1):
+                spatial_buckets.setdefault(
+                    (angle_bucket, cell_x, cell_y), []
+                ).append(i)
+
     for bucket, indices in angle_buckets.items():
-        # Check this bucket and the next (for angles near bucket boundary)
-        neighbor_indices = list(indices)
-        if (bucket + 1) in angle_buckets:
-            neighbor_indices.extend(angle_buckets[bucket + 1])
-        if (bucket - 1) in angle_buckets:
-            neighbor_indices.extend(angle_buckets[bucket - 1])
+        neighbor_buckets = (
+            bucket,
+            *((bucket + 1,) if (bucket + 1) in angle_buckets else ()),
+            *((bucket - 1,) if (bucket - 1) in angle_buckets else ()),
+        )
+        bucket_priority = {
+            neighbor_bucket: priority
+            for priority, neighbor_bucket in enumerate(neighbor_buckets)
+        }
 
-        for ii, i in enumerate(indices):
-            for j in neighbor_indices:
-                if j <= i:
-                    continue
-                pair_key = (i, j)
-                if pair_key in checked:
-                    continue
-                checked.add(pair_key)
+        for i in indices:
+            si = strokes[i]
+            x0, y0, x1, y1 = bboxes[i]
+            qx0 = math.floor((x0 - search_margin) / cell_size)
+            qy0 = math.floor((y0 - search_margin) / cell_size)
+            qx1 = math.floor((x1 + search_margin) / cell_size)
+            qy1 = math.floor((y1 + search_margin) / cell_size)
 
-                si, sj = strokes[i], strokes[j]
-                if _angle_delta(si.angle_deg, sj.angle_deg) > angle_tol:
+            candidate_pairs: set[Tuple[int, int]] = set()
+            for neighbor_bucket in neighbor_buckets:
+                for cell_x in range(qx0, qx1 + 1):
+                    for cell_y in range(qy0, qy1 + 1):
+                        for j in spatial_buckets.get(
+                            (neighbor_bucket, cell_x, cell_y), ()
+                        ):
+                            if j > i:
+                                candidate_pairs.add((neighbor_bucket, j))
+
+            # Match the former deterministic iteration order: same angle bucket
+            # first, then +1, then -1, with original stroke order within each.
+            ordered_candidates = sorted(
+                candidate_pairs,
+                key=lambda item: (bucket_priority[item[0]], item[1]),
+            )
+
+            for _candidate_bucket, j in ordered_candidates:
+                sj = strokes[j]
+                sx0, sy0, sx1, sy1 = bboxes[j]
+                if (
+                    sx0 > x1 + search_margin
+                    or x0 > sx1 + search_margin
+                    or sy0 > y1 + search_margin
+                    or y0 > sy1 + search_margin
+                ):
+                    continue
+                if _angle_delta(angles[i], angles[j]) > angle_tol:
                     continue
                 dist = _strokes_midpoint_distance(si, sj)
                 if dist > max_dist:
@@ -398,7 +457,7 @@ def _cluster_strokes(
                 # perpendicular to the lines for parallel strokes offset
                 # in the perpendicular direction.
                 mean_angle_rad = math.radians(
-                    _circular_mean([si.angle_deg, sj.angle_deg])
+                    _circular_mean([angles[i], angles[j]])
                 )
                 dir_x = math.cos(mean_angle_rad)
                 dir_y = math.sin(mean_angle_rad)
@@ -425,7 +484,7 @@ def _cluster_strokes(
                 else:
                     # No overlap — check gap
                     gap = b_start - a_end if b_start > a_end else a_start - b_end
-                    if gap <= avg_len * 1.5:
+                    if gap <= max_gap:
                         uf.union(i, j)
                         merge_count += 1
 

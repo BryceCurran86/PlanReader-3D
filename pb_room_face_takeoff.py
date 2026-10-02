@@ -81,6 +81,7 @@ ROOM_LABEL_EXACT: set[str] = {
     # Utility
     "garage", "carport", "shed", "plant", "mech", "mechanical",
     "electrical", "server", "comms", "riser", "duct",
+    "freezer", "coolroom", "coldroom",
     # Other rooms
     "nursery", "playroom", "sunroom", "conservatory", "cellar",
     "basement", "attic", "loft", "void",
@@ -92,6 +93,7 @@ ROOM_LABEL_PREFIXES: tuple[str, ...] = (
     "bedroom", "kitchen", "bathroom", "laundry", "garage",
     "lounge", "dining", "office", "study", "store",
     "pantry", "ensuite", "corridor", "hallway",
+    "cold", "cool", "dry",
 )
 
 # Compiled regex: exact match or starts with a known prefix
@@ -142,6 +144,7 @@ KNOWN_ROOM_PHRASES: frozenset[str] = frozenset({
     "guest room", "nurse room",
     "sun room", "sunroom",
     "service duct", "service riser",
+    "cold room", "cool room", "dry store", "food prep", "wash up",
 })
 
 # Maximum horizontal gap (PDF pts) between words to consider them contiguous
@@ -319,40 +322,63 @@ def filter_room_label_candidates(
     if not words:
         return []
 
-    # Group words into lines by vertical proximity
-    sorted_words = sorted(words, key=lambda w: (
-        float(w.get("bbox", [0, 0, 0, 0])[1]),  # sort by y0
-        float(w.get("bbox", [0, 0, 0, 0])[0]),  # then by x0
-    ))
+    # Check if words carry native PDF block and line metadata from fitz
+    has_block_line = any("block_no" in w and "line_no" in w for w in words[:20])
+    if has_block_line:
+        line_groups: Dict[Tuple[Any, Any], List[Dict[str, Any]]] = {}
+        for word in words:
+            b_no = word.get("block_no")
+            l_no = word.get("line_no")
+            if b_no is not None and l_no is not None:
+                line_groups.setdefault((b_no, l_no), []).append(word)
+            else:
+                line_groups.setdefault((id(word), 0), []).append(word)
+        lines = list(line_groups.values())
+    else:
+        # Group words into lines by vertical proximity
+        sorted_words = sorted(words, key=lambda w: (
+            float(w.get("bbox", [0, 0, 0, 0])[1]),  # sort by y0
+            float(w.get("bbox", [0, 0, 0, 0])[0]),  # then by x0
+        ))
 
-    lines: List[List[Dict[str, Any]]] = []
-    current_line: List[Dict[str, Any]] = []
-    current_y: float = -9999.0
+        lines = []
+        current_line: List[Dict[str, Any]] = []
+        current_y: float = -9999.0
 
-    for word in sorted_words:
-        bbox = word.get("bbox", [])
-        if len(bbox) < 4:
-            continue
-        text = str(word.get("text") or "").strip()
-        if not text:
-            continue
-        y0 = float(bbox[1])
-        if abs(y0 - current_y) > line_y_tolerance and current_line:
+        for word in sorted_words:
+            bbox = word.get("bbox", [])
+            if len(bbox) < 4:
+                continue
+            text = str(word.get("text") or "").strip()
+            if not text:
+                continue
+            y0 = float(bbox[1])
+            if abs(y0 - current_y) > line_y_tolerance and current_line:
+                lines.append(current_line)
+                current_line = []
+            current_y = y0
+            current_line.append(word)
+        if current_line:
             lines.append(current_line)
-            current_line = []
-        current_y = y0
-        current_line.append(word)
-    if current_line:
-        lines.append(current_line)
 
     # For each line, find room label candidates using phrase reconstruction
     candidates: List[Dict[str, Any]] = []
     for line_words in lines:
-        # Sort words left to right
-        line_words.sort(key=lambda w: float(w.get("bbox", [0, 0, 0, 0])[0]))
-
         if not line_words:
             continue
+
+        # Sort words along line direction (native word order or primary axis)
+        if has_block_line and all("word_no" in w for w in line_words):
+            line_words.sort(key=lambda w: int(w.get("word_no", 0)))
+        else:
+            xs = [float(w.get("bbox", [0, 0, 0, 0])[0]) for w in line_words]
+            ys = [float(w.get("bbox", [0, 0, 0, 0])[1]) for w in line_words]
+            dx = max(xs) - min(xs) if xs else 0.0
+            dy = max(ys) - min(ys) if ys else 0.0
+            if dy > dx:
+                line_words.sort(key=lambda w: float(w.get("bbox", [0, 0, 0, 0])[1]))
+            else:
+                line_words.sort(key=lambda w: float(w.get("bbox", [0, 0, 0, 0])[0]))
 
         # Mark which words are room-label candidates
         is_room: List[bool] = []
@@ -363,12 +389,13 @@ def filter_room_label_candidates(
         if not any(is_room):
             continue
 
+        def _bbox_dist(b1: List[float], b2: List[float]) -> float:
+            gap_x = max(0.0, float(b2[0]) - float(b1[2]), float(b1[0]) - float(b2[2]))
+            gap_y = max(0.0, float(b2[1]) - float(b1[3]), float(b1[1]) - float(b2[3]))
+            return (gap_x ** 2 + gap_y ** 2) ** 0.5
+
         # Try contiguous phrase reconstruction.
-        # Iterate over ALL words on the line, but only start phrases from
-        # room-label anchor words.  Extend forward through adjacent words
-        # (even non-room-label words like "IN" in "WALK IN ROBE") to match
-        # known multi-word room phrases.
-        used_in_phrase: set[int] = set()  # indices into line_words
+        used_in_phrase: set[int] = set()
         for i in range(len(line_words)):
             if not is_room[i] or i in used_in_phrase:
                 continue
@@ -380,10 +407,10 @@ def filter_room_label_candidates(
                 w3 = str(line_words[i + 2].get("text") or "").strip()
                 phrase_3 = _match_room_phrase([anchor_text, w2, w3])
                 if phrase_3:
-                    # Check gaps between consecutive words
-                    g1 = float(line_words[i + 1].get("bbox", [0,0,0,0])[0]) - float(line_words[i].get("bbox", [0,0,0,0])[2])
-                    g2 = float(line_words[i + 2].get("bbox", [0,0,0,0])[0]) - float(line_words[i + 1].get("bbox", [0,0,0,0])[2])
-                    if g1 <= _MAX_PHRASE_GAP_PT and g2 <= _MAX_PHRASE_GAP_PT:
+                    b0 = line_words[i].get("bbox", [0, 0, 0, 0])
+                    b1 = line_words[i + 1].get("bbox", [0, 0, 0, 0])
+                    b2 = line_words[i + 2].get("bbox", [0, 0, 0, 0])
+                    if _bbox_dist(b0, b1) <= _MAX_PHRASE_GAP_PT and _bbox_dist(b1, b2) <= _MAX_PHRASE_GAP_PT:
                         three = line_words[i:i + 3]
                         bboxes = [w["bbox"] for w in three if len(w.get("bbox", [])) >= 4]
                         if bboxes:
@@ -405,8 +432,9 @@ def filter_room_label_candidates(
                 w2 = str(line_words[i + 1].get("text") or "").strip()
                 phrase_2 = _match_room_phrase([anchor_text, w2])
                 if phrase_2:
-                    g = float(line_words[i + 1].get("bbox", [0,0,0,0])[0]) - float(line_words[i].get("bbox", [0,0,0,0])[2])
-                    if g <= _MAX_PHRASE_GAP_PT:
+                    b0 = line_words[i].get("bbox", [0, 0, 0, 0])
+                    b1 = line_words[i + 1].get("bbox", [0, 0, 0, 0])
+                    if _bbox_dist(b0, b1) <= _MAX_PHRASE_GAP_PT:
                         two = line_words[i:i + 2]
                         bboxes = [w["bbox"] for w in two if len(w.get("bbox", [])) >= 4]
                         if bboxes:
@@ -481,43 +509,187 @@ def calibrate_polygon_m(
 # ---------------------------------------------------------------------------
 
 
-def page_scale_info(page: Dict[str, Any]) -> Dict[str, Any]:
-    """Derive the authoritative page calibration from a PlanReader page dict.
+def _is_cad_text_wipeout_mask(
+    drawing: Any,
+    rect: Any,
+    words: Optional[Sequence[Dict[str, Any]]] = None,
+) -> bool:
+    """Multi-factor authority check to identify CAD text wipeout masks.
 
-    Uses the same ``px_per_m`` stored by PlanReader's registration/scale
-    pipeline (auto_scale, floor mapper, vector geometry).  Does NOT create
-    a parallel scale representation.
+    A CAD wipeout mask is an unstroked filled white/blank background polygon
+    placed immediately behind text annotations to mask out background linework.
 
-    Single conversion rule:
-        real_metres_per_page_mm = render_zoom × 2.834646 / px_per_m
+    Authority factors:
+    1. No physical-wall authority: unstroked (stroke color is None or stroke width <= 0).
+    2. Background fill: filled with white or near-white background (RGB >= 0.90).
+    3. Text-sized geometry: height <= 150 pt, width <= 350 pt, area between 10 and 25,000 pt².
+    4. Text association: spatially encloses or overlaps at least one text word bounding box.
+    5. No canonical/source-owned object identity.
 
-    Derivation:
-        From auto_scale: px_per_m = render_zoom × 2834.646 / ratio
-        Therefore: ratio = render_zoom × 2834.646 / px_per_m
-        And: real_metres_per_page_mm = ratio / 1000
-              = render_zoom × 2.834646 / px_per_m
+    Legitimate physical elements (stroked boxes, structural plinths, non-text slabs,
+    dark/colored fills, or non-overlapping geometry) NEVER match and are preserved.
+    """
+    if not isinstance(drawing, dict):
+        return False
 
-    This yields the same value that ``real_metres_per_page_mm()`` in
-    ``pb_planreader_offline.py`` produces for ratio 1:N → N/1000.
+    # 1. Stroked geometry has physical linework authority -> never a wipeout mask
+    stroke_color = drawing.get("color")
+    stroke_width = float(drawing.get("width") or 0.0)
+    if stroke_color is not None and stroke_width > 0.0:
+        return False
+
+    # 2. Must have fill (unstroked un-filled items have no visual presence)
+    fill = drawing.get("fill")
+    if fill is None:
+        return False
+
+    # Must be white or near-white background fill (RGB values >= 0.90)
+    if isinstance(fill, (list, tuple)) and len(fill) >= 3:
+        if any(float(c) < 0.90 for c in fill[:3]):
+            return False
+
+    # 3. Geometry dimensions check (must be text-sized annotation box)
+    try:
+        rx0, ry0, rx1, ry1 = float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)
+    except Exception:
+        try:
+            rx0, ry0, rx1, ry1 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+        except Exception:
+            return False
+
+    w = abs(rx1 - rx0)
+    h = abs(ry1 - ry0)
+    area = w * h
+    if h > 150.0 or w > 350.0 or area > 25000.0 or area < 10.0:
+        return False
+
+    # 4. Must overlap or associate with text words
+    if not words:
+        return False
+
+    for w_item in words:
+        wb = w_item.get("bbox") if isinstance(w_item, dict) else getattr(w_item, "bbox", None)
+        if not wb or len(wb) < 4:
+            continue
+        try:
+            wx0, wy0, wx1, wy1 = float(wb[0]), float(wb[1]), float(wb[2]), float(wb[3])
+        except Exception:
+            continue
+        # Check bounding box intersection
+        ix0 = max(min(rx0, rx1), min(wx0, wx1))
+        iy0 = max(min(ry0, ry1), min(wy0, wy1))
+        ix1 = min(max(rx0, rx1), max(wx0, wx1))
+        iy1 = min(max(ry0, ry1), max(wy0, wy1))
+        if ix1 > ix0 and iy1 > iy0:
+            return True
+
+    return False
+
+
+def page_scale_info(page: Dict[str, Any], viewport: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Derive the authoritative calibration for a page or specific viewport.
+
+    Enforces scale authority:
+    1. Do not publish a parsed 1:N scale unless it belongs to the same authenticated
+       viewport, or there is exactly one applicable scale candidate for the geometry.
+    2. Multiple applicable incompatible scales on a single sheet without viewport
+       isolation must CONFLICT / ABSTAIN.
+    3. Explicit conflict flags must fail closed (status="conflict", real_metres_per_page_mm=None).
 
     Args:
-        page: Page dict from database with px_per_m, render_zoom, scale_text.
+        page: Page dict from database with px_per_m, render_zoom, scale_text, scales, etc.
+        viewport: Optional specific viewport dict.
 
     Returns:
-        Dict with 'real_metres_per_page_mm', 'scale_text', 'px_per_m', etc.
+        Dict with 'real_metres_per_page_mm', 'scale_text', 'px_per_m', 'source', 'status'.
     """
-    px_per_m = float(page.get("px_per_m") or 0)
     render_zoom = float(page.get("render_zoom") or 1.0)
     if render_zoom <= 0:
         render_zoom = 1.0
 
     scale_text = str(page.get("scale_text") or "").strip()
 
+    # 1. Explicit conflict flags
+    if page.get("scale_conflict") is True or str(page.get("scale_status") or "").lower() == "conflict":
+        return {
+            "real_metres_per_page_mm": None,
+            "px_per_m": 0.0,
+            "render_zoom": render_zoom,
+            "scale_text": scale_text,
+            "source": "conflict",
+            "status": "conflict",
+        }
+
+    # 2. Viewport-authenticated scale (highest authority for multi-viewport sheets)
+    if viewport and isinstance(viewport, dict):
+        if viewport.get("scale_conflict") is True or str(viewport.get("scale_status") or "").lower() == "conflict":
+            return {
+                "real_metres_per_page_mm": None,
+                "px_per_m": 0.0,
+                "render_zoom": render_zoom,
+                "scale_text": str(viewport.get("scale_text") or scale_text),
+                "source": "conflict",
+                "status": "conflict",
+            }
+        vp_ppm = float(viewport.get("px_per_m") or 0.0)
+        if vp_ppm > 0:
+            rpm = render_zoom * 2.834646 / vp_ppm
+            return {
+                "real_metres_per_page_mm": rpm,
+                "px_per_m": vp_ppm,
+                "render_zoom": render_zoom,
+                "scale_text": str(viewport.get("scale_text") or scale_text),
+                "source": "viewport.px_per_m",
+                "status": "calibrated",
+            }
+        vp_ratio = float(viewport.get("scale_denominator") or viewport.get("ratio") or 0.0)
+        if vp_ratio <= 0:
+            vp_text = str(viewport.get("scale_text") or viewport.get("scale_raw") or "")
+            m = re.search(r"1\s*:\s*(\d+(?:\.\d+)?)", vp_text)
+            if m:
+                vp_ratio = float(m.group(1))
+        if vp_ratio > 0:
+            rpm = vp_ratio / 1000.0
+            derived_ppm = render_zoom * 2834.646 / vp_ratio
+            return {
+                "real_metres_per_page_mm": rpm,
+                "px_per_m": derived_ppm,
+                "render_zoom": render_zoom,
+                "scale_text": str(viewport.get("scale_text") or f"1:{int(vp_ratio)}"),
+                "source": "viewport.ratio",
+                "status": "calibrated",
+            }
+
+    # 3. Detect candidate scale ratios across the page
+    candidate_ratios: set[float] = set()
+    if scale_text:
+        for m in re.finditer(r"1\s*:\s*(\d+(?:\.\d+)?)", scale_text):
+            r_val = float(m.group(1))
+            if r_val > 0:
+                candidate_ratios.add(r_val)
+
+    scales_list = page.get("scales") or page.get("scale_observations")
+    if isinstance(scales_list, list):
+        for s in scales_list:
+            if isinstance(s, dict):
+                r_val = float(s.get("ratio") or s.get("scale_denominator") or 0.0)
+                if r_val > 0:
+                    candidate_ratios.add(r_val)
+
+    # If multiple incompatible scale candidates exist without viewport isolation -> CONFLICT / ABSTAIN
+    if len(candidate_ratios) > 1:
+        return {
+            "real_metres_per_page_mm": None,
+            "px_per_m": 0.0,
+            "render_zoom": render_zoom,
+            "scale_text": scale_text,
+            "source": "conflict",
+            "status": "conflict",
+        }
+
+    # 4. Authoritative page px_per_m (when verified or single scale)
+    px_per_m = float(page.get("px_per_m") or 0.0)
     if px_per_m > 0:
-        # Authoritative: derive real_metres_per_page_mm from stored px_per_m
-        # From auto_scale: px_per_m = zoom × 2834.646 / ratio
-        # Therefore: ratio = zoom × 2834.646 / px_per_m
-        # And: real_metres_per_page_mm = ratio / 1000 = zoom × 2.834646 / px_per_m
         rpm = render_zoom * 2.834646 / px_per_m
         return {
             "real_metres_per_page_mm": rpm,
@@ -525,15 +697,31 @@ def page_scale_info(page: Dict[str, Any]) -> Dict[str, Any]:
             "render_zoom": render_zoom,
             "scale_text": scale_text,
             "source": "page.px_per_m",
+            "status": "calibrated",
         }
 
-    # No px_per_m available — unknown scale
+    # 5. Exactly one applicable scale candidate parsed from text/observations
+    if len(candidate_ratios) == 1:
+        ratio = next(iter(candidate_ratios))
+        rpm = ratio / 1000.0
+        derived_px_per_m = render_zoom * 2834.646 / ratio
+        return {
+            "real_metres_per_page_mm": rpm,
+            "px_per_m": derived_px_per_m,
+            "render_zoom": render_zoom,
+            "scale_text": scale_text,
+            "source": "page.scale_text_ratio",
+            "status": "calibrated",
+        }
+
+    # No calibration available — unknown scale
     return {
         "real_metres_per_page_mm": None,
         "px_per_m": 0.0,
         "render_zoom": render_zoom,
         "scale_text": scale_text,
         "source": "unknown",
+        "status": "uncalibrated",
     }
 
 
@@ -715,6 +903,23 @@ def filter_face(
     has_label = bool(label and label.strip())
     if area_m2 < SOFT_MIN_ROOM_AREA_M2:
         if has_label:
+            # Check if this small polygon is geometrically inside a larger candidate that contains it
+            if all_polygons:
+                candidate_centroid = _polygon_centroid(polygon_pdf_pts)
+                is_contained = False
+                for other in all_polygons:
+                    if _polygon_tuples(other) == _polygon_tuples(polygon_pdf_pts):
+                        continue
+                    if len(other) >= 3 and _polygon_area_abs(other) > area_page_pts2 * 2.0 and _point_in_polygon(candidate_centroid, other):
+                        is_contained = True
+                        break
+                if is_contained:
+                    return FilterResult(
+                        is_room=False,
+                        reason="contained_annotation_box (small polygon inside larger room)",
+                        area_m2=area_m2,
+                        area_page_pts2=area_page_pts2,
+                    )
             # Small polygon with room label → provisional
             confidence_adj -= 0.15
         else:
@@ -755,8 +960,12 @@ def filter_face(
             other_centroid = _polygon_centroid(other)
             if _point_in_polygon(other_centroid, polygon_pdf_pts):
                 other_area = _polygon_area_abs(other)
-                # Only count as void if it's a meaningful fraction
+                # Only count as void if it's a meaningful fraction (> 1% of area)
+                # and not a tiny sub-0.3m2 annotation/tag box
                 if other_area > area_page_pts2 * 0.01:
+                    scale_factor = _scale_factor_m_per_pt(scale_info)
+                    if scale_factor and (other_area * (scale_factor ** 2)) < SOFT_MIN_ROOM_AREA_M2:
+                        continue
                     has_voids = True
                     break
 
@@ -876,7 +1085,9 @@ def extract_and_calibrate_rooms(
         y1 = seg.get("y1", 0.0)
         x2 = seg.get("x2", 0.0)
         y2 = seg.get("y2", 0.0)
-        if abs(x2 - x1) < 0.5 and abs(y2 - y1) < 0.5:
+        dx = float(x2) - float(x1)
+        dy = float(y2) - float(y1)
+        if (dx * dx + dy * dy) < 1.0:
             continue
         v145_segments.append(((float(x1), float(y1)), (float(x2), float(y2))))
 
@@ -1155,6 +1366,25 @@ def extract_room_faces_from_page(
         page_width_pt = float(pdf_page.rect.width)
         page_height_pt = float(pdf_page.rect.height)
 
+        # Extract ALL text positions first (for wipeout mask detection and label filtering)
+        words_raw = pdf_page.get_text("words") or []
+        words = []
+        for word in words_raw:
+            if len(word) < 5:
+                continue
+            try:
+                x0, y0, x1, y1 = map(float, word[:4])
+            except Exception:
+                continue
+            text = str(word[4]).strip()
+            if text:
+                w_entry = {"text": text, "bbox": [x0, y0, x1, y1]}
+                if len(word) >= 8:
+                    w_entry["block_no"] = word[5]
+                    w_entry["line_no"] = word[6]
+                    w_entry["word_no"] = word[7]
+                words.append(w_entry)
+
         # Extract vector segments
         drawings = pdf_page.get_drawings() or []
         segments = []
@@ -1172,11 +1402,15 @@ def extract_room_faces_from_page(
                             x1, y1, x2, y2 = float(p1[0]), float(p1[1]), float(p2[0]), float(p2[1])
                         except Exception:
                             continue
-                    if abs(x2 - x1) < 0.5 and abs(y2 - y1) < 0.5:
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    if (dx * dx + dy * dy) < 1.0:
                         continue
                     segments.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
                 elif kind == "re" and len(item) >= 2:
                     rect = item[1]
+                    if _is_cad_text_wipeout_mask(drawing, rect, words):
+                        continue
                     try:
                         rx0, ry0, rx1, ry1 = map(float, (rect.x0, rect.y0, rect.x1, rect.y1))
                     except Exception:
@@ -1184,22 +1418,11 @@ def extract_room_faces_from_page(
                     pts = [(rx0, ry0), (rx1, ry0), (rx1, ry1), (rx0, ry1)]
                     for edge in range(4):
                         a, b = pts[edge], pts[(edge + 1) % 4]
+                        dx = b[0] - a[0]
+                        dy = b[1] - a[1]
+                        if (dx * dx + dy * dy) < 1.0:
+                            continue
                         segments.append({"x1": a[0], "y1": a[1], "x2": b[0], "y2": b[1]})
-
-        # Extract ALL text positions (for label filtering — filter_room_label_candidates
-        # handles the semantic filtering internally)
-        words_raw = pdf_page.get_text("words") or []
-        words = []
-        for word in words_raw:
-            if len(word) < 5:
-                continue
-            try:
-                x0, y0, x1, y1 = map(float, word[:4])
-            except Exception:
-                continue
-            text = str(word[4]).strip()
-            if text:
-                words.append({"text": text, "bbox": [x0, y0, x1, y1]})
     finally:
         pdf.close()
 

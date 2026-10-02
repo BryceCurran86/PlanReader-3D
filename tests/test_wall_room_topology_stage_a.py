@@ -4,7 +4,9 @@ import random
 
 import pytest
 
+from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
 from pb_wall_room_topology_stage_a import (
+    _split_segments_at_intersections_indexed,
     build_wall_graph_for_viewport,
     filter_structural_segments,
     is_structural_candidate_segment,
@@ -37,6 +39,34 @@ def _rectangle_segments():
         _seg("s2", 10, 10, 0, 10),
         _seg("s3", 0, 10, 0, 0),
     ]
+
+
+class TestIndexedIntersectionSplit:
+    def test_randomized_output_matches_shared_exact_splitter(self) -> None:
+        rng = random.Random(271828)
+        for _case in range(200):
+            count = rng.randint(2, 40)
+            segments = [
+                (
+                    (rng.uniform(-80, 80), rng.uniform(-80, 80)),
+                    (rng.uniform(-80, 80), rng.uniform(-80, 80)),
+                )
+                for _ in range(count)
+            ]
+            assert _split_segments_at_intersections_indexed(
+                segments
+            ) == split_segments_at_intersections(segments)
+
+    def test_wide_y_span_path_matches_shared_exact_splitter(self) -> None:
+        segments = [
+            ((0.0, -50000.0), (0.0, 50000.0)),
+            ((-100.0, 0.0), (100.0, 0.0)),
+            ((-75.0, -75.0), (75.0, 75.0)),
+            ((-75.0, 75.0), (75.0, -75.0)),
+        ]
+        assert _split_segments_at_intersections_indexed(
+            segments
+        ) == split_segments_at_intersections(segments)
 
 
 class TestStructuralSegmentFilter:

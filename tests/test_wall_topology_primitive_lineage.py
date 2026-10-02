@@ -14,9 +14,12 @@ from pb_vector_geometry_v130 import extract_native_page
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     SNAP_COLLAPSE_REASON,
+    _build_source_fragment_spatial_index,
+    _sources_for_fragment_spatial,
     attach_lineage_to_split_fragments,
     fabricated_live_fields,
     lineage_from_source_segments,
+    sources_for_fragment,
 )
 from pb_wall_room_topology_stage_a import (
     build_wall_graph_for_viewport,
@@ -121,6 +124,36 @@ class TestDuplicateAndOverlappingSources:
         fragments = attach_lineage_to_split_fragments([pair], segments)
         assert len(fragments) == 1
         assert _ids(fragments[0]) == ["a", "b"]
+
+    def test_spatial_fallback_matches_exhaustive_parent_scan(self) -> None:
+        rng = random.Random(161803)
+        segments = [
+            _seg(
+                f"s{index}",
+                rng.uniform(-500, 500),
+                rng.uniform(-500, 500),
+                rng.uniform(-500, 500),
+                rng.uniform(-500, 500),
+            )
+            for index in range(120)
+        ]
+        segments.append(_seg("wide", -50000, -50000, 50000, 50000))
+        spatial = _build_source_fragment_spatial_index(segments)
+
+        for _case in range(120):
+            source = rng.choice(segments)
+            start, end = sorted((rng.random(), rng.random()))
+            x1, y1 = float(source["x1"]), float(source["y1"])
+            x2, y2 = float(source["x2"]), float(source["y2"])
+            fragment = (
+                (x1 + (x2 - x1) * start, y1 + (y2 - y1) * start),
+                (x1 + (x2 - x1) * end, y1 + (y2 - y1) * end),
+            )
+            exhaustive = sources_for_fragment(fragment, segments)
+            indexed = _sources_for_fragment_spatial(fragment, segments, spatial)
+            assert [row["id"] for row in indexed] == [
+                row["id"] for row in exhaustive
+            ]
 
     def test_overlapping_coincident_sources_are_multi_parent(self) -> None:
         segments = [

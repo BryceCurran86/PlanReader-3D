@@ -14,6 +14,7 @@ PhysicalOpeningAuthority remains the sole owner of PHYSICAL_OPENING_EXISTS.
 """
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 import math
 from typing import Iterable
@@ -136,25 +137,64 @@ def _snap_intersections(
     list[tuple[float, float, float, float]],
     list[tuple[float, float, float, float]],
 ]:
+    """Snap perpendicular line endpoints without quadratic all-pairs scans.
+
+    The input lists are already deterministic/sorted via _dedupe().  The helper
+    below preserves the original one-pass ordering semantics, including chained
+    endpoint moves, while starting at the first vertical that could possibly
+    match the initial endpoint and stopping once the sorted x coordinates can
+    no longer match the current endpoint.
+    """
+
+    vertical_x = [segment[0] for segment in vertical]
+
+    def snap_x(
+        x: float,
+        y: float,
+        candidates: list[tuple[float, float, float, float]],
+        candidate_x: list[float],
+    ) -> float:
+        if not candidates:
+            return x
+        current = x
+        index = bisect_left(candidate_x, x - tolerance_px)
+        while index < len(candidates):
+            vx0, vy0, _vx1, vy1 = candidates[index]
+            if vx0 > current + tolerance_px:
+                break
+            if (
+                vy0 - tolerance_px <= y <= vy1 + tolerance_px
+                and abs(current - vx0) <= tolerance_px
+            ):
+                current = vx0
+            index += 1
+        return current
+
     snapped_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in horizontal:
-        left = x0
-        right = x1
-        for vx0, vy0, _vx1, vy1 in vertical:
-            vx = vx0
-            if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
-                if abs(left - vx) <= tolerance_px:
-                    left = vx
-                if abs(right - vx) <= tolerance_px:
-                    right = vx
+        left = snap_x(x0, y0, vertical, vertical_x)
+        right = snap_x(x1, y0, vertical, vertical_x)
         if right - left > 0.0:
             snapped_h.append((left, y0, right, y0))
+
+    # Index horizontal intervals into coarse x buckets.  Each bucket retains
+    # original horizontal iteration order, so the vertical endpoint mutation
+    # order is identical to the former all-pairs loop.
+    bucket_width = max(16.0, tolerance_px * 8.0)
+    horizontal_buckets: dict[int, list[int]] = {}
+    for index, (hx0, _hy0, hx1, _hy1) in enumerate(snapped_h):
+        first_bucket = math.floor((hx0 - tolerance_px) / bucket_width)
+        last_bucket = math.floor((hx1 + tolerance_px) / bucket_width)
+        for bucket in range(first_bucket, last_bucket + 1):
+            horizontal_buckets.setdefault(bucket, []).append(index)
 
     snapped_v: list[tuple[float, float, float, float]] = []
     for x0, y0, _x1, y1 in vertical:
         top = y0
         bottom = y1
-        for hx0, hy0, hx1, _hy1 in snapped_h:
+        bucket = math.floor(x0 / bucket_width)
+        for index in horizontal_buckets.get(bucket, ()):
+            hx0, hy0, hx1, _hy1 = snapped_h[index]
             if hx0 - tolerance_px <= x0 <= hx1 + tolerance_px:
                 if abs(top - hy0) <= tolerance_px:
                     top = hy0
@@ -163,18 +203,13 @@ def _snap_intersections(
         if bottom - top > 0.0:
             snapped_v.append((x0, top, x0, bottom))
 
-    # A second horizontal pass picks up any y coordinates standardized by the
+    # A second horizontal pass picks up y coordinates standardized by the
     # vertical pass without ever bridging a real gap.
+    snapped_vertical_x = [segment[0] for segment in snapped_v]
     final_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in snapped_h:
-        left = x0
-        right = x1
-        for vx0, vy0, _vx1, vy1 in snapped_v:
-            if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
-                if abs(left - vx0) <= tolerance_px:
-                    left = vx0
-                if abs(right - vx0) <= tolerance_px:
-                    right = vx0
+        left = snap_x(x0, y0, snapped_v, snapped_vertical_x)
+        right = snap_x(x1, y0, snapped_v, snapped_vertical_x)
         final_h.append((left, y0, right, y0))
 
     return _dedupe(final_h), _dedupe(snapped_v)

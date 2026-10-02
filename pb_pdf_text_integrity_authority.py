@@ -11,6 +11,7 @@ Instances of :class:`PdfTextIntegrityAuthority` are minted by the trusted
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import math
 import re
@@ -252,12 +253,12 @@ def _valid_tounicode_cmap(stream: bytes | bytearray | memoryview | None) -> bool
         (
             "beginbfchar",
             "endbfchar",
-            r"<[0-9A-Fa-f]+>\s+<[0-9A-Fa-f]+>",
+            r"<[0-9A-Fa-f]+>\s*<[0-9A-Fa-f]+>",
         ),
         (
             "beginbfrange",
             "endbfrange",
-            r"<[0-9A-Fa-f]+>\s+<[0-9A-Fa-f]+>\s+(?:<[0-9A-Fa-f]+>|\[)",
+            r"<[0-9A-Fa-f]+>\s*<[0-9A-Fa-f]+>\s*(?:<[0-9A-Fa-f]+>|\[)",
         ),
     )
     for begin, end, mapping_pattern in block_specs:
@@ -303,9 +304,14 @@ def _valid_tounicode_cmap(stream: bytes | bytearray | memoryview | None) -> bool
 
 
 def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Sequence[object]], tuple[str, ...]]:
-    try:
-        fonts = page.get_fonts(full=True) or []  # type: ignore[attr-defined]
-    except Exception:
+    cache = _page_cache(page)
+    if "fonts_full" not in cache:
+        try:
+            cache["fonts_full"] = tuple(page.get_fonts(full=True) or ())  # type: ignore[attr-defined]
+        except Exception:
+            cache["fonts_full"] = None
+    fonts = cache.get("fonts_full")
+    if fonts is None:
         return None, (TEXT_FONT_BINDING_AMBIGUOUS,)
     target = _normalise_font_name(span.get("font"))
     matches: dict[int, Sequence[object]] = {}
@@ -323,12 +329,11 @@ def _font_binding(page: object, span: Mapping[str, object]) -> tuple[Optional[Se
 
 
 def _font_for_glyph_validation(page: object, font: Sequence[object]):
-    """Return a no-fallback font view suitable for glyph-id verification.
+    """Return a cached no-fallback font view suitable for glyph-id verification.
 
-    ``get_texttrace()`` exposes both decoded Unicode and the actual glyph id.
-    A structurally valid ToUnicode CMap is therefore insufficient by itself:
-    the decoded code point must also resolve to the glyph that was rendered.
-    If the font cannot be reconstructed independently, callers must fail closed.
+    The font bytes and reconstructed ``fitz.Font`` are immutable for one page
+    revision. Reusing the producer-owned view changes no evidence rule; it only
+    avoids extracting and rebuilding the same embedded font for every word.
     """
 
     try:
@@ -336,6 +341,12 @@ def _font_for_glyph_validation(page: object, font: Sequence[object]):
     except (IndexError, TypeError, ValueError):
         return None
 
+    cache = _page_cache(page)
+    font_cache = cache.setdefault("glyph_validation_fonts", {})
+    if xref in font_cache:
+        return font_cache[xref]
+
+    result = None
     try:
         extracted = page.parent.extract_font(xref)  # type: ignore[attr-defined]
         font_buffer = extracted[3] if len(extracted) >= 4 else b""
@@ -343,20 +354,22 @@ def _font_for_glyph_validation(page: object, font: Sequence[object]):
         font_buffer = b""
     if font_buffer:
         try:
-            return fitz.Font(fontbuffer=font_buffer)
+            result = fitz.Font(fontbuffer=font_buffer)
         except Exception:
-            return None
+            result = None
+    else:
+        try:
+            base_font = str(font[3] or "")
+        except (IndexError, TypeError):
+            base_font = ""
+        if _normalise_font_name(base_font) in _BASE14_SIMPLE_FONTS:
+            try:
+                result = fitz.Font(fontname=base_font)
+            except Exception:
+                result = None
 
-    try:
-        base_font = str(font[3] or "")
-    except (IndexError, TypeError):
-        return None
-    if _normalise_font_name(base_font) not in _BASE14_SIMPLE_FONTS:
-        return None
-    try:
-        return fitz.Font(fontname=base_font)
-    except Exception:
-        return None
+    font_cache[xref] = result
+    return result
 
 
 def _glyph_unicode_consistency_reasons(
@@ -522,6 +535,56 @@ def _texttrace_spans(page: object) -> Optional[list]:
         except Exception:
             cache["texttrace"] = None
     return cache["texttrace"]
+
+
+_TEXTTRACE_GRID_CELL_PT = 64.0
+
+
+def _texttrace_spans_for_bbox(
+    page: object,
+    spans: Sequence[Mapping[str, object]],
+    bbox: Sequence[object],
+) -> tuple[Mapping[str, object], ...]:
+    """Return only trace spans whose grid cells can overlap ``bbox``.
+
+    The grid is a candidate accelerator only. Callers still apply the exact
+    intersection/text/ownership predicates, so no evidence rule is weakened.
+    """
+    try:
+        x0, y0, x1, y1 = _rect_tuple(bbox)
+    except (TypeError, ValueError):
+        return tuple(spans)
+
+    cache = _page_cache(page)
+    cached = cache.get("texttrace_spatial_index")
+    if cached is None:
+        grid: dict[tuple[int, int], list[int]] = {}
+        for index, span in enumerate(spans):
+            if not isinstance(span, Mapping):
+                continue
+            try:
+                sx0, sy0, sx1, sy1 = _rect_tuple(span.get("bbox") or ())
+            except (TypeError, ValueError):
+                continue
+            gx0 = math.floor(sx0 / _TEXTTRACE_GRID_CELL_PT)
+            gy0 = math.floor(sy0 / _TEXTTRACE_GRID_CELL_PT)
+            gx1 = math.floor(sx1 / _TEXTTRACE_GRID_CELL_PT)
+            gy1 = math.floor(sy1 / _TEXTTRACE_GRID_CELL_PT)
+            for gx in range(gx0, gx1 + 1):
+                for gy in range(gy0, gy1 + 1):
+                    grid.setdefault((gx, gy), []).append(index)
+        cached = {key: tuple(values) for key, values in grid.items()}
+        cache["texttrace_spatial_index"] = cached
+
+    qx0 = math.floor(x0 / _TEXTTRACE_GRID_CELL_PT)
+    qy0 = math.floor(y0 / _TEXTTRACE_GRID_CELL_PT)
+    qx1 = math.floor(x1 / _TEXTTRACE_GRID_CELL_PT)
+    qy1 = math.floor(y1 / _TEXTTRACE_GRID_CELL_PT)
+    indices: set[int] = set()
+    for gx in range(qx0, qx1 + 1):
+        for gy in range(qy0, qy1 + 1):
+            indices.update(cached.get((gx, gy), ()))
+    return tuple(spans[index] for index in sorted(indices))
 
 
 def _span_seqno(span: Mapping[str, object]) -> Optional[int]:
@@ -763,7 +826,7 @@ def _exact_fill_stroke_overprint_pair(
         return None
 
     try:
-        bboxlog = list(page.get_bboxlog() or ())  # type: ignore[attr-defined]
+        bboxlog = _cached_bboxlog(page)
     except Exception:
         return None
     sequence_numbers = (ordered[0][0], ordered[1][0])
@@ -793,8 +856,9 @@ def _matching_trace_spans(
     spans = _texttrace_spans(page)
     if spans is None:
         return (), "", (TEXT_TRACE_UNAVAILABLE,)
+    nearby_spans = _texttrace_spans_for_bbox(page, spans, bbox)
     candidates: list[tuple[Mapping[str, object], str]] = []
-    for span in spans:
+    for span in nearby_spans:
         if not isinstance(span, Mapping):
             continue
         text = _trace_text(span)
@@ -818,7 +882,7 @@ def _matching_trace_spans(
             return pair, _trace_text(pair[0]), ()
         return (), "", (TEXT_TRACE_AMBIGUOUS,)
 
-    chain, reasons = _owned_span_chain(spans, raw_text, bbox)
+    chain, reasons = _owned_span_chain(nearby_spans, raw_text, bbox)
     if chain is None:
         return (), "", reasons
     return chain, "".join(_trace_text(span) for span in chain), ()
@@ -1017,12 +1081,32 @@ def _clip_model(page: object) -> Optional[_ClipModel]:
     return cache["clip_model"]
 
 
+def _clip_search_index(
+    page: object,
+    model: _ClipModel,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return cached monotonic seqno/position indexes for one immutable clip model."""
+    cache = _page_cache(page)
+    if "clip_search_index" not in cache:
+        cache["clip_search_index"] = (
+            tuple(path[0] for path in model.paths),
+            tuple(position for position, _clip_id in model.pushes),
+        )
+    return cache["clip_search_index"]
+
+
 def _page_content_has_clip_operator(page: object) -> Optional[bool]:
-    try:
-        content = bytes(page.read_contents() or b"")  # type: ignore[attr-defined]
-    except Exception:
-        return None
-    return re.search(rb"(?<!\S)W\*?(?!\S)", content) is not None
+    cache = _page_cache(page)
+    if "content_has_clip_operator" not in cache:
+        try:
+            content = bytes(page.read_contents() or b"")  # type: ignore[attr-defined]
+        except Exception:
+            cache["content_has_clip_operator"] = None
+        else:
+            cache["content_has_clip_operator"] = (
+                re.search(rb"(?<!\S)W\*?(?!\S)", content) is not None
+            )
+    return cache["content_has_clip_operator"]
 
 
 def _rect_contains(
@@ -1072,24 +1156,28 @@ def _native_word_is_present(
         return False
 
     cache = _page_cache(page)
-    if "native_words" not in cache:
+    if "native_word_bboxes_by_text" not in cache:
         try:
-            cache["native_words"] = list(
-                page.get_text("words") or []
-            )
+            words = list(page.get_text("words") or [])
         except Exception:
-            cache["native_words"] = None
-    words = cache.get("native_words")
-    if words is None:
+            cache["native_word_bboxes_by_text"] = None
+        else:
+            by_text: dict[str, list[tuple[float, float, float, float]]] = {}
+            for row in words:
+                try:
+                    text = str(row[4])
+                    row_bbox = _rect_tuple(row[:4])
+                except (IndexError, TypeError, ValueError):
+                    continue
+                by_text.setdefault(text, []).append(row_bbox)
+            cache["native_word_bboxes_by_text"] = {
+                text: tuple(boxes) for text, boxes in by_text.items()
+            }
+    by_text = cache.get("native_word_bboxes_by_text")
+    if by_text is None:
         return False
 
-    for row in words:
-        try:
-            if str(row[4]) != raw_text:
-                continue
-            row_bbox = _rect_tuple(row[:4])
-        except (IndexError, TypeError, ValueError):
-            continue
+    for row_bbox in by_text.get(raw_text, ()):
         if all(abs(left - right) <= 1e-6 for left, right in zip(row_bbox, bbox)):
             return True
     return False
@@ -1113,28 +1201,33 @@ def _text_clip_reasons(
     if not model.consistent or seqno is None:
         return (TEXT_CLIP_STATE_UNRESOLVED,)
     try:
-        if int(getattr(page, "rotation", 0) or 0) != 0:
-            return (TEXT_CLIP_STATE_UNRESOLVED,)
+        # PyMuPDF reports native text geometry and extended-drawing clip
+        # geometry in the same page coordinate frame even when /Rotate is set.
+        # Rotation therefore does not invalidate the exact containment /
+        # disjointness proof below; treating it as a blanket blocker discards
+        # source-proven clip state on rotated architectural sheets.
         bbox = _rect_tuple(subject_bbox)
     except (TypeError, ValueError):
         return (TEXT_CLIP_STATE_UNRESOLVED,)
 
-    before = None
-    after = None
-    for path in model.paths:
-        if path[0] < seqno:
-            before = path
-        elif path[0] > seqno:
-            after = path
-            break
+    path_seqnos, push_positions = _clip_search_index(page, model)
+    before_index = bisect_left(path_seqnos, int(seqno)) - 1
+    after_index = bisect_right(path_seqnos, int(seqno))
+    before = model.paths[before_index] if before_index >= 0 else None
+    after = model.paths[after_index] if after_index < len(model.paths) else None
     lo_position = before[3] if before is not None else -1
     hi_position = after[3] if after is not None else None
     stack_before = set(before[2]) if before is not None else set()
     stack_after = set(after[2]) if after is not None else None
+    push_start = bisect_right(push_positions, lo_position)
+    push_end = (
+        len(model.pushes)
+        if hi_position is None
+        else bisect_left(push_positions, hi_position)
+    )
     between = {
         clip_id
-        for position, clip_id in model.pushes
-        if position > lo_position and (hi_position is None or position < hi_position)
+        for _position, clip_id in model.pushes[push_start:push_end]
     }
 
     if before is not None and after is not None and not between and before[1] == after[1]:
@@ -1450,6 +1543,95 @@ def _cached_bboxlog(page: object) -> list:
     return cache["bboxlog"]
 
 
+def _cached_occluding_paints(
+    page: object,
+    bboxlog: Sequence[object],
+) -> tuple[tuple[int, ...], tuple[tuple[int, object], ...]]:
+    """Cache only bboxlog entries that can occlude text, preserving seqno order."""
+    cache = _page_cache(page)
+    if "occluding_paints" not in cache:
+        relevant = []
+        for seqno, item in enumerate(bboxlog):
+            try:
+                kind = str(item[0])  # type: ignore[index]
+            except (IndexError, TypeError):
+                continue
+            if kind in {"fill-path", "fill-image", "fill-shade", "fill-text"}:
+                relevant.append((seqno, item))
+        cache["occluding_paints"] = (
+            tuple(seqno for seqno, _item in relevant),
+            tuple(relevant),
+        )
+    return cache["occluding_paints"]
+
+
+_OCCLUDING_PAINT_GRID_CELL_PT = 64.0
+
+
+def _cached_occluding_paint_spatial_index(
+    page: object,
+    bboxlog: Sequence[object],
+) -> tuple[dict[tuple[int, int], tuple[int, ...]], tuple[int, ...]]:
+    """Index occluding-paint positions by bbox cells without changing proof rules."""
+    cache = _page_cache(page)
+    cached = cache.get("occluding_paint_spatial_index")
+    if cached is not None:
+        return cached
+
+    _seqnos, paints = _cached_occluding_paints(page, bboxlog)
+    grid: dict[tuple[int, int], list[int]] = {}
+    fallback: list[int] = []
+    for position, (_seqno, item) in enumerate(paints):
+        try:
+            x0, y0, x1, y1 = _rect_tuple(item[1])  # type: ignore[index]
+        except (IndexError, TypeError, ValueError):
+            fallback.append(position)
+            continue
+        gx0 = math.floor(x0 / _OCCLUDING_PAINT_GRID_CELL_PT)
+        gy0 = math.floor(y0 / _OCCLUDING_PAINT_GRID_CELL_PT)
+        gx1 = math.floor(x1 / _OCCLUDING_PAINT_GRID_CELL_PT)
+        gy1 = math.floor(y1 / _OCCLUDING_PAINT_GRID_CELL_PT)
+        for gx in range(gx0, gx1 + 1):
+            for gy in range(gy0, gy1 + 1):
+                grid.setdefault((gx, gy), []).append(position)
+
+    cached = (
+        {key: tuple(values) for key, values in grid.items()},
+        tuple(fallback),
+    )
+    cache["occluding_paint_spatial_index"] = cached
+    return cached
+
+
+def _candidate_occluding_paint_positions(
+    page: object,
+    subject_bbox: Sequence[object],
+    bboxlog: Sequence[object],
+    *,
+    start: int,
+) -> tuple[int, ...]:
+    try:
+        x0, y0, x1, y1 = _rect_tuple(subject_bbox)
+    except (TypeError, ValueError):
+        _seqnos, paints = _cached_occluding_paints(page, bboxlog)
+        return tuple(range(start, len(paints)))
+
+    grid, fallback = _cached_occluding_paint_spatial_index(page, bboxlog)
+    qx0 = math.floor(x0 / _OCCLUDING_PAINT_GRID_CELL_PT)
+    qy0 = math.floor(y0 / _OCCLUDING_PAINT_GRID_CELL_PT)
+    qx1 = math.floor(x1 / _OCCLUDING_PAINT_GRID_CELL_PT)
+    qy1 = math.floor(y1 / _OCCLUDING_PAINT_GRID_CELL_PT)
+    positions = {position for position in fallback if position >= start}
+    for gx in range(qx0, qx1 + 1):
+        for gy in range(qy0, qy1 + 1):
+            positions.update(
+                position
+                for position in grid.get((gx, gy), ())
+                if position >= start
+            )
+    return tuple(sorted(positions))
+
+
 def _cached_extended_drawings_by_seqno(
     page: object,
 ) -> Optional[dict[int, tuple[Mapping[str, object], ...]]]:
@@ -1499,20 +1681,19 @@ def _later_paint_occlusion_reasons(
     *,
     threshold: float = 0.65,
 ) -> tuple[str, ...]:
-    for paint_seqno, item in enumerate(
-        bboxlog[text_sequence_number + 1 :],
-        start=text_sequence_number + 1,
-    ):
+    paint_seqnos, paints = _cached_occluding_paints(page, bboxlog)
+    start = bisect_right(paint_seqnos, int(text_sequence_number))
+    positions = _candidate_occluding_paint_positions(
+        page,
+        subject_bbox,
+        bboxlog,
+        start=start,
+    )
+    for position in positions:
+        paint_seqno, item = paints[position]
         try:
             paint_kind, paint_bbox = str(item[0]), item[1]  # type: ignore[index]
         except (IndexError, TypeError):
-            continue
-        if paint_kind not in {
-            "fill-path",
-            "fill-image",
-            "fill-shade",
-            "fill-text",
-        }:
             continue
         if _intersection_ratio(subject_bbox, paint_bbox) < threshold:
             continue
@@ -1790,6 +1971,140 @@ class PdfTextIntegrityAuthority:
             reason_codes=("producer_owned_pdf_text_integrity_resolved",),
             receipt=receipt,
         )
+
+    def resolve_many_text(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        observation_ids: Sequence[str],
+    ) -> tuple[PdfTextIntegrityResult, ...]:
+        """Resolve producer-owned text receipts under one shared source check.
+
+        Valid observations retain the exact same receipt/geometry/trust rules as
+        ``resolve_text``. The source authority's revision, hash and snapshot
+        checks are shared across the batch while each record fingerprint remains
+        individually verified. If the batch source check cannot be completed,
+        fall back to the single-item resolver so abnormal failure semantics stay
+        unchanged.
+        """
+
+        ids = tuple(str(value) for value in observation_ids)
+        if not ids:
+            return ()
+
+        receipts = {
+            observation_id: self._receipts.get((snapshot_id, observation_id))
+            for observation_id in ids
+        }
+        source_ids = tuple(
+            observation_id
+            for observation_id in ids
+            if receipts[observation_id] is not None
+        )
+        by_id = {}
+        if source_ids:
+            try:
+                records = self._source_authority.resolve_many(
+                    document_id=document_id,
+                    revision_id=revision_id,
+                    source_sha256=source_sha256,
+                    snapshot_id=snapshot_id,
+                    observation_ids=source_ids,
+                )
+            except Exception:
+                return tuple(
+                    self.resolve_text(
+                        ObservationSelector(
+                            document_id=document_id,
+                            revision_id=revision_id,
+                            source_sha256=source_sha256,
+                            snapshot_id=snapshot_id,
+                            observation_id=observation_id,
+                        )
+                    )
+                    for observation_id in ids
+                )
+            by_id = {record.observation_id: record for record in records}
+
+        results: list[PdfTextIntegrityResult] = []
+        for observation_id in ids:
+            receipt = receipts[observation_id]
+            if receipt is None:
+                results.append(
+                    PdfTextIntegrityResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        proposition=None,
+                        trusted_text=None,
+                        reason_codes=(TEXT_INTEGRITY_RECEIPT_UNAVAILABLE,),
+                    )
+                )
+                continue
+
+            observation = by_id.get(observation_id)
+            if observation is None:
+                results.append(
+                    self.resolve_text(
+                        ObservationSelector(
+                            document_id=document_id,
+                            revision_id=revision_id,
+                            source_sha256=source_sha256,
+                            snapshot_id=snapshot_id,
+                            observation_id=observation_id,
+                        )
+                    )
+                )
+                continue
+
+            if (
+                observation.observation_kind != "native_pdf_word"
+                or observation.origin_kind != "native"
+                or observation.viewport_id is not None
+                or observation.observation_id != receipt.parent_observation_id
+                or observation.document_id != receipt.document_id
+                or observation.revision_id != receipt.revision_id
+                or observation.source_sha256 != receipt.source_sha256
+                or observation.page_id != receipt.page_id
+                or observation.source_partition_id != receipt.source_partition_id
+                or observation.raw_text != receipt.raw_text
+                or tuple(observation.geometry) != tuple(receipt.geometry)
+            ):
+                results.append(
+                    PdfTextIntegrityResult(
+                        status=EvidenceResolutionStatus.CONFLICT,
+                        proposition=None,
+                        trusted_text=None,
+                        reason_codes=(TEXT_INTEGRITY_RECEIPT_MISMATCH,),
+                        receipt=receipt,
+                    )
+                )
+                continue
+
+            if not receipt.trusted:
+                results.append(
+                    PdfTextIntegrityResult(
+                        status=EvidenceResolutionStatus.ABSTAINED,
+                        proposition=None,
+                        trusted_text=None,
+                        reason_codes=receipt.reason_codes,
+                        receipt=receipt,
+                    )
+                )
+                continue
+
+            results.append(
+                PdfTextIntegrityResult(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    proposition=TRUSTED_PDF_TEXT,
+                    trusted_text=receipt.raw_text,
+                    reason_codes=("producer_owned_pdf_text_integrity_resolved",),
+                    receipt=receipt,
+                )
+            )
+
+        return tuple(results)
 
 
 __all__ = [

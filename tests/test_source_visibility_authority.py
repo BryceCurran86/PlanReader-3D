@@ -85,6 +85,27 @@ def test_unclipped_native_segments_publish_producer_owned_visible_receipts() -> 
     assert not hasattr(producer, "publish_derived_observation")
 
 
+def test_batch_visible_resolution_matches_individual_provenance() -> None:
+    _, published, authority = _visible_ingest(
+        _rectangle_pdf_bytes(),
+        document_id="batch-visible-resolution",
+    )
+    observation_ids = tuple(published.visible_observation_ids)
+    batch = authority.resolve_many_visible(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        observation_ids=observation_ids,
+    )
+
+    assert tuple(record.observation_id for record in batch) == observation_ids
+    for observation_id, record in zip(observation_ids, batch):
+        individual = authority.resolve_visible(_selector(published, observation_id))
+        assert individual.status == EvidenceResolutionStatus.CORROBORATED
+        assert individual.observation == record
+
+
 def test_native_visible_segments_publish_in_one_derived_snapshot() -> None:
     producer, published, authority = _visible_ingest(
         _rectangle_pdf_bytes(),

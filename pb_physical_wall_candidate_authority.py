@@ -470,23 +470,24 @@ def _visible_observations_by_page(
     every requested wall page.
     """
     visibility = source_producer.authority()
-    by_page: dict[str, list[tuple[str, object]]] = {}
-    for observation_id in published.visible_observation_ids:
-        result = visibility.resolve_visible(
-            ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                observation_id=observation_id,
-            )
+    observation_ids = tuple(published.visible_observation_ids)
+    try:
+        observations = visibility.resolve_many_visible(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_ids=observation_ids,
         )
-        observation = result.observation
-        if (
-            result.status is not EvidenceResolutionStatus.CORROBORATED
-            or observation is None
-        ):
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    except Exception as exc:
+        raise RuntimeError(
+            PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE
+        ) from exc
+    if len(observations) != len(observation_ids):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+
+    by_page: dict[str, list[tuple[str, object]]] = {}
+    for observation_id, observation in zip(observation_ids, observations):
         by_page.setdefault(str(observation.page_id), []).append(
             (observation_id, observation)
         )
@@ -577,13 +578,21 @@ def _source_page_segments(
     if page_number < 1:
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
-    pdf = fitz.open(stream=source_bytes, filetype="pdf")
-    try:
-        if page_number > int(pdf.page_count):
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        native = extract_native_page(pdf.load_page(page_number - 1))
-    finally:
-        pdf.close()
+    native = source_producer._producer._native_page_cache_by_revision_page.get(
+        (published.revision.revision_id, str(page_id))
+    )
+    if native is None:
+        # Defensive compatibility fallback. The cache is producer-owned and
+        # keyed by immutable revision/page identity; when unavailable, preserve
+        # the historical exact-byte decode path rather than accepting caller
+        # geometry.
+        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        try:
+            if page_number > int(pdf.page_count):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            native = extract_native_page(pdf.load_page(page_number - 1))
+        finally:
+            pdf.close()
 
     segments: list[dict] = []
     native_visible_ids: set[str] = set()
@@ -1355,11 +1364,23 @@ def _producer_opening_relation_overrides(
 
     prefix = "visible:segment:"
 
+    proof_rows = page_visible_rows
+    if resolved_visible_observations is not None:
+        for _observation_id, observation in page_visible_rows:
+            if str(observation.page_id) != str(page_id):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+        for existence in opening_authority.prove_visible_page_existence_records(
+            tuple(observation for _observation_id, observation in page_visible_rows)
+        ):
+            if existence.page_id == page_id:
+                proven_records[existence.record_id] = existence
+        proof_rows = []
+
     # Preserve the #969 authority contract exactly: every authenticated visible
     # observation on this page is proved once. The page index removes repeated
     # document-wide ownership scans, but does not narrow the opening authority's
     # evidence universe or preflight candidate membership.
-    for observation_id, observation in page_visible_rows:
+    for observation_id, observation in proof_rows:
         if str(observation.page_id) != str(page_id):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         selector = ObservationSelector(
@@ -2406,8 +2427,18 @@ class PhysicalWallCandidateProducer:
         # Preserve the current mainline raster-wall path while keeping page
         # addressing operationally narrow. Validate the requested source pages
         # against producer-owned decode coverage first, then render raster
-        # fallback only for those pages. No caller pixels, segments, DPI,
-        # thresholds, labels, or quantities enter this path.
+        # fallback only for pages that can actually contribute to the requested
+        # authority.
+        #
+        # Viewport-only construction has a stronger early proof available: F.07
+        # viewport eligibility is derived directly from the immutable PDF and is
+        # independent of raster wall materialization. If a page has no eligible
+        # authenticated viewport, that page can never publish a viewport wall
+        # scope. Preflight that proposition before authenticating / rasterizing
+        # tens of thousands of wall primitives.
+        store = source_visibility_producer._producer._store
+        viewport_pages_by_revision: dict[str, tuple[str, ...]] = {}
+        viewport_only = include_authenticated_viewports and not include_page_scopes
         for revision_id in tuple(
             sorted(source_visibility_producer._published_by_revision)
         ):
@@ -2423,22 +2454,43 @@ class PhysicalWallCandidateProducer:
                 and not selected_page_ids <= decoded_page_ids
             ):
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+
+            addressed_page_ids = tuple(
+                sorted(
+                    selected_page_ids if selected_page_ids is not None else decoded_page_ids,
+                    key=lambda value: int(value),
+                )
+            )
+            augmentation_page_ids: Optional[tuple[str, ...]] = addressed_page_ids
+
+            if viewport_only:
+                source_bytes = store.source_bytes_by_revision.get(revision_id)
+                if source_bytes is None or hashlib.sha256(source_bytes).hexdigest() != pre_augmented.revision.source_sha256:
+                    raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+                eligible_page_ids: list[str] = []
+                pdf = fitz.open(stream=source_bytes, filetype="pdf")
+                try:
+                    for page_id in addressed_page_ids:
+                        page_number = int(page_id)
+                        authenticated = _authenticated_viewports(
+                            pdf.load_page(page_number - 1),
+                            page_number=page_number,
+                        )
+                        if authenticated is not None and authenticated[1]:
+                            eligible_page_ids.append(page_id)
+                finally:
+                    pdf.close()
+                viewport_pages_by_revision[revision_id] = tuple(eligible_page_ids)
+                augmentation_page_ids = tuple(eligible_page_ids)
+                if not augmentation_page_ids:
+                    continue
+
             source_visibility_producer.augment_with_raster_visible_segments(
                 revision_id,
-                page_ids=(
-                    tuple(
-                        sorted(
-                            selected_page_ids,
-                            key=lambda value: int(value),
-                        )
-                    )
-                    if selected_page_ids is not None
-                    else None
-                ),
+                page_ids=augmentation_page_ids,
             )
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
-        store = source_visibility_producer._producer._store
         scopes: dict[_ScopeKey, PhysicalWallCandidateScopeResult] = {}
 
         for revision_id, published in sorted(published_by_revision.items()):
@@ -2459,11 +2511,18 @@ class PhysicalWallCandidateProducer:
             }
             if selected_page_ids is not None and not selected_page_ids <= decoded_page_ids:
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
-            materialized_page_ids = (
-                sorted(selected_page_ids, key=lambda value: int(value))
-                if selected_page_ids is not None
-                else sorted(decoded_page_ids, key=lambda value: int(value))
-            )
+            if viewport_only:
+                materialized_page_ids = list(
+                    viewport_pages_by_revision.get(revision_id, ())
+                )
+                if not materialized_page_ids:
+                    continue
+            else:
+                materialized_page_ids = (
+                    sorted(selected_page_ids, key=lambda value: int(value))
+                    if selected_page_ids is not None
+                    else sorted(decoded_page_ids, key=lambda value: int(value))
+                )
             visible_by_page = _visible_observations_by_page(
                 source_producer=source_visibility_producer,
                 published=published,
@@ -2471,10 +2530,19 @@ class PhysicalWallCandidateProducer:
             physical_opening_authority = PhysicalOpeningAuthority(
                 source_visibility_producer.authority()
             )
+            # Page scopes always require physical scale, so build it once and
+            # reuse it across the selected pages. Viewport-only construction is
+            # different: authenticated viewport discovery can legitimately
+            # yield no eligible drawing viewport. In that case a scale producer
+            # would be pure wasted work. Leave it lazy and let
+            # _build_authenticated_viewport_scope_results() create it only
+            # after an eligible source-owned viewport has been proven.
             physical_scale_producer = (
                 PhysicalScaleProducer.from_source_visibility_producer(
                     source_visibility_producer
                 )
+                if include_page_scopes
+                else None
             )
 
             for page_id in materialized_page_ids:

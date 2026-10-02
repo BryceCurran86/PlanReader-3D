@@ -54,7 +54,7 @@ def canonicalize_evidence_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             return [_canonicalize_obj(x) for x in lst]
 
-    _GEOM_LIST_KEYS = frozenset({"polygon", "points", "triangles", "vertices", "source_coords"})
+    _GEOM_LIST_KEYS = frozenset({"polygon", "points", "triangles", "vertices", "source_coords", "boundary_polygon"})
 
     def _canonicalize_obj(obj: Any, is_ordered_geometry: bool = False) -> Any:
         if isinstance(obj, dict):
@@ -82,6 +82,10 @@ def canonicalize_evidence_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "takeoff_rows": _canonicalize_unordered_list(snapshot.get("takeoff_rows") or []),
         "producer_versions": snapshot.get("producer_versions"),
     }
+    if "spaces" in snapshot:
+        clean_snapshot["spaces"] = _canonicalize_unordered_list(snapshot.get("spaces") or [])
+    if "ceilings" in snapshot:
+        clean_snapshot["ceilings"] = _canonicalize_unordered_list(snapshot.get("ceilings") or [])
 
     return clean_snapshot
 

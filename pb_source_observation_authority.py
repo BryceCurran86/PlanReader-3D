@@ -277,6 +277,13 @@ class SourceObservationProducer:
         # None means the complete source document; a tuple means an explicit
         # page subset. Replaying a revision at a different scope fails closed.
         self._ingest_scope_by_revision: dict[str, tuple[int, ...] | None] = {}
+        # Ephemeral producer-owned decode cache. Downstream producer stages may
+        # reuse the exact native extraction generated from this immutable
+        # revision instead of decoding the same page twice. It is never exposed
+        # through the consumer authority and never accepts caller geometry.
+        self._native_page_cache_by_revision_page: dict[
+            tuple[str, str], dict[str, Any]
+        ] = {}
 
     def authority(self) -> "SourceObservationAuthority":
         return SourceObservationAuthority(self._store)
@@ -630,6 +637,9 @@ class SourceObservationProducer:
                 try:
                     page = pdf.load_page(page_index)
                     native = extract_native_page(page)
+                    self._native_page_cache_by_revision_page[
+                        (revision_id, str(page_number))
+                    ] = native
                     decoded_pages.append(page_number)
                     pending.append(
                         {
@@ -1193,6 +1203,85 @@ class SourceObservationAuthority:
             physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
             reason_codes=(PRODUCER_INTEGRITY_FAILURE,),
         )
+
+    def resolve_many(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        observation_ids: Sequence[str],
+    ) -> tuple[SourceObservationRecord, ...]:
+        """Resolve many observations under one immutable lineage check.
+
+        This is equivalent to repeated resolve calls for one shared lineage,
+        but avoids repeating source and snapshot checks for every observation.
+        Every record fingerprint and every derivation parent is still verified.
+        Any unavailable or inconsistent member fails the whole batch closed.
+        """
+        document_id = _nonempty(document_id, "document_id")
+        revision_id = _nonempty(revision_id, "revision_id")
+        source_sha256 = _nonempty(source_sha256, "source_sha256")
+        snapshot_id = _nonempty(snapshot_id, "snapshot_id")
+        ids = tuple(str(value) for value in observation_ids)
+        if not ids:
+            return ()
+
+        current = self._store.current_revision_by_document.get(document_id)
+        if current is None:
+            raise ValueError(SOURCE_UNAVAILABLE)
+        if current != revision_id:
+            raise ValueError(STALE_REVISION)
+
+        revision = self._store.revisions.get(revision_id)
+        source_bytes = self._store.source_bytes_by_revision.get(revision_id)
+        if revision is None or source_bytes is None:
+            raise ProducerIntegrityError(PRODUCER_INTEGRITY_FAILURE)
+        if not self._store.source_bytes_match_revision(
+            revision_id, source_bytes, revision.source_sha256
+        ):
+            raise ProducerIntegrityError(PRODUCER_INTEGRITY_FAILURE)
+        if source_sha256 != revision.source_sha256:
+            raise ValueError(SOURCE_HASH_MISMATCH)
+
+        snapshot = self._store.snapshots.get(snapshot_id)
+        if (
+            snapshot is None
+            or snapshot.document_id != document_id
+            or snapshot.revision_id != revision_id
+            or snapshot.source_sha256 != source_sha256
+        ):
+            raise ValueError(SNAPSHOT_MISMATCH)
+
+        membership = self._store.snapshot_observation_id_sets.get(snapshot_id)
+        if membership is None or membership[0] is not snapshot:
+            membership = (snapshot, frozenset(snapshot.observation_ids))
+            self._store.snapshot_observation_id_sets[snapshot_id] = membership
+        member_ids = membership[1]
+
+        resolved: list[SourceObservationRecord] = []
+        for observation_id in ids:
+            if observation_id not in member_ids:
+                raise ValueError(OBSERVATION_UNAVAILABLE)
+            key = (snapshot_id, observation_id)
+            record = self._store.observations.get(key)
+            if record is None:
+                raise ValueError(OBSERVATION_UNAVAILABLE)
+            expected = self._store.record_fingerprints.get(key)
+            actual = _content_sha256(_record_payload(record))
+            if (
+                expected is None
+                or expected != actual
+                or record.observation_payload_sha256 != actual
+            ):
+                raise ProducerIntegrityError(PRODUCER_INTEGRITY_FAILURE)
+            for parent_id in record.derivation_parent_ids:
+                if (snapshot_id, parent_id) not in self._store.observations:
+                    raise ValueError(LINEAGE_UNAVAILABLE)
+            resolved.append(replace(record))
+
+        return tuple(resolved)
 
     def resolve(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
         if not isinstance(selector, ObservationSelector):

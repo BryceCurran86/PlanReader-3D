@@ -67,30 +67,48 @@ def test_shared_scale_producer_matches_fresh_producer_per_page():
 
 def test_scale_snapshot_inputs_are_authenticated_once(monkeypatch):
     source, published = _source(page_count=5)
-    visible_original = SourceVisibilityAuthority.resolve_visible
-    text_original = PdfTextIntegrityAuthority.resolve_text
-    visible_calls = 0
-    text_calls = 0
+    visible_batch_original = SourceVisibilityAuthority.resolve_many_visible
+    text_batch_original = PdfTextIntegrityAuthority.resolve_many_text
+    visible_batch_calls = 0
+    visible_observations_authenticated = 0
+    text_batch_calls = 0
+    text_observations_authenticated = 0
 
-    def counted_visible(self, selector):
-        nonlocal visible_calls
-        visible_calls += 1
-        return visible_original(self, selector)
+    def counted_visible_batch(self, **kwargs):
+        nonlocal visible_batch_calls, visible_observations_authenticated
+        visible_batch_calls += 1
+        visible_observations_authenticated += len(kwargs["observation_ids"])
+        return visible_batch_original(self, **kwargs)
 
-    def counted_text(self, selector):
-        nonlocal text_calls
-        text_calls += 1
-        return text_original(self, selector)
+    def counted_text_batch(self, **kwargs):
+        nonlocal text_batch_calls, text_observations_authenticated
+        text_batch_calls += 1
+        text_observations_authenticated += len(kwargs["observation_ids"])
+        return text_batch_original(self, **kwargs)
 
-    monkeypatch.setattr(SourceVisibilityAuthority, "resolve_visible", counted_visible)
-    monkeypatch.setattr(PdfTextIntegrityAuthority, "resolve_text", counted_text)
+    def forbidden_visible(self, selector):
+        raise AssertionError("physical scale must not re-enter per-observation visible resolution")
+
+    def forbidden_text(self, selector):
+        raise AssertionError("physical scale must not re-enter per-observation text resolution")
+
+    monkeypatch.setattr(
+        SourceVisibilityAuthority, "resolve_many_visible", counted_visible_batch
+    )
+    monkeypatch.setattr(SourceVisibilityAuthority, "resolve_visible", forbidden_visible)
+    monkeypatch.setattr(
+        PdfTextIntegrityAuthority, "resolve_many_text", counted_text_batch
+    )
+    monkeypatch.setattr(PdfTextIntegrityAuthority, "resolve_text", forbidden_text)
 
     producer = PhysicalScaleProducer.from_source_visibility_producer(source)
     for page_id in ("1", "2", "3", "4", "5"):
         producer.publish_scope(_selector(published, page_id))
 
-    assert visible_calls == len(published.visible_observation_ids)
-    assert text_calls == len(published.text_observation_ids)
+    assert visible_batch_calls == 1
+    assert visible_observations_authenticated == len(published.visible_observation_ids)
+    assert text_batch_calls == 1
+    assert text_observations_authenticated == len(published.text_observation_ids)
 
 
 def test_wall_candidate_build_constructs_one_scale_producer_per_revision(monkeypatch):

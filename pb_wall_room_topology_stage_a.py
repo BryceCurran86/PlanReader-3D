@@ -41,7 +41,12 @@ import math
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
-from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
+from pb_accuracy_v13_engines_v145 import (
+    _same,
+    _segment_intersection,
+    segment_length,
+    split_segments_at_intersections,
+)
 from pb_vector_geometry_v130 import snap_geometry
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
@@ -174,6 +179,159 @@ def _segments_to_point_pairs(
             ((float(seg["x1"]), float(seg["y1"])), (float(seg["x2"]), float(seg["y2"])))
         )
     return pairs
+
+
+_INTERSECTION_Y_BUCKET_PT = 8.0
+_INTERSECTION_MAX_BUCKET_SPAN = 4096
+
+
+def _split_segments_at_intersections_indexed(
+    segments: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]],
+) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+    """Exact intersection splitting with an x-sweep / y-bucket broad phase.
+
+    The broad phase only rejects pairs whose axis-aligned bounds cannot
+    intersect. Every surviving pair still uses the canonical
+    ``_segment_intersection`` predicate, and per-segment split points are
+    de-duplicated and ordered exactly as the shared engine does. The bucket
+    size is therefore performance-only, never an evidence or geometry
+    threshold.
+    """
+    if not segments:
+        return []
+
+    tol = 1e-9
+    pts: List[List[Tuple[float, float]]] = [
+        [tuple(map(float, segment[0])), tuple(map(float, segment[1]))]
+        for segment in segments
+    ]
+    bounds = [
+        (
+            min(float(segment[0][0]), float(segment[1][0])),
+            min(float(segment[0][1]), float(segment[1][1])),
+            max(float(segment[0][0]), float(segment[1][0])),
+            max(float(segment[0][1]), float(segment[1][1])),
+            index,
+        )
+        for index, segment in enumerate(segments)
+    ]
+    ordered = sorted(
+        bounds,
+        key=lambda item: (item[0], item[2], item[1], item[3], item[4]),
+    )
+    rank = {item[4]: position for position, item in enumerate(ordered)}
+    bounds_by_index = {item[4]: item for item in bounds}
+
+    y_grid: Dict[int, set[int]] = {}
+    active_heap: List[Tuple[float, int, int]] = []
+    active_ids: set[int] = set()
+    buckets_by_index: Dict[int, Tuple[int, ...]] = {}
+    wide_active: set[int] = set()
+    candidates_by_left: Dict[int, set[int]] = {}
+
+    def bucket_limits(y0: float, y1: float) -> Tuple[int, int]:
+        return (
+            math.floor((y0 - tol) / _INTERSECTION_Y_BUCKET_PT),
+            math.floor((y1 + tol) / _INTERSECTION_Y_BUCKET_PT),
+        )
+
+    def remove_active(index: int) -> None:
+        active_ids.discard(index)
+        if index in wide_active:
+            wide_active.discard(index)
+            buckets_by_index.pop(index, None)
+            return
+        for bucket in buckets_by_index.pop(index, ()):
+            members = y_grid.get(bucket)
+            if members is None:
+                continue
+            members.discard(index)
+            if not members:
+                y_grid.pop(bucket, None)
+
+    for right_rank, right in enumerate(ordered):
+        right_x0, right_y0, right_x1, right_y1, right_index = right
+        while active_heap and active_heap[0][0] < right_x0 - tol:
+            _x1, _rank, expired_index = heapq.heappop(active_heap)
+            if expired_index in active_ids:
+                remove_active(expired_index)
+
+        first_bucket, last_bucket = bucket_limits(right_y0, right_y1)
+        span = last_bucket - first_bucket + 1
+        if span > _INTERSECTION_MAX_BUCKET_SPAN:
+            candidate_indexes = set(active_ids)
+            right_buckets: Tuple[int, ...] = ()
+            right_is_wide = True
+        else:
+            candidate_indexes = set(wide_active)
+            right_buckets = tuple(range(first_bucket, last_bucket + 1))
+            for bucket in right_buckets:
+                candidate_indexes.update(y_grid.get(bucket, ()))
+            right_is_wide = False
+
+        for left_index in candidate_indexes:
+            left_x0, left_y0, left_x1, left_y1, _ = bounds_by_index[left_index]
+            if (
+                right_x0 > left_x1 + tol
+                or right_y0 > left_y1 + tol
+                or right_y1 < left_y0 - tol
+            ):
+                continue
+            candidates_by_left.setdefault(left_index, set()).add(right_index)
+
+        active_ids.add(right_index)
+        buckets_by_index[right_index] = right_buckets
+        if right_is_wide:
+            wide_active.add(right_index)
+        else:
+            for bucket in right_buckets:
+                y_grid.setdefault(bucket, set()).add(right_index)
+        heapq.heappush(active_heap, (right_x1, right_rank, right_index))
+
+    for left in ordered:
+        left_x0, left_y0, left_x1, left_y1, left_index = left
+        for right_index in sorted(
+            candidates_by_left.get(left_index, ()),
+            key=rank.__getitem__,
+        ):
+            right_x0, right_y0, _right_x1, right_y1, _ = bounds_by_index[
+                right_index
+            ]
+            if (
+                right_x0 > left_x1 + tol
+                or right_y0 > left_y1 + tol
+                or right_y1 < left_y0 - tol
+            ):
+                continue
+            point = _segment_intersection(
+                segments[left_index],
+                segments[right_index],
+            )
+            if point is not None:
+                pts[left_index].append(point)
+                pts[right_index].append(point)
+
+    output: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
+    for original, candidates in zip(segments, pts):
+        first, second = original
+        dx = second[0] - first[0]
+        dy = second[1] - first[1]
+        denom = dx * dx + dy * dy or 1.0
+        unique: List[Tuple[float, float]] = []
+        for point in candidates:
+            if not any(_same(point, prior) for prior in unique):
+                unique.append(point)
+        unique.sort(
+            key=lambda point: (
+                (point[0] - first[0]) * dx + (point[1] - first[1]) * dy
+            )
+            / denom
+        )
+        for point, next_point in zip(unique, unique[1:]):
+            pair = (point, next_point)
+            if segment_length(pair) > 1e-7:
+                output.append(pair)
+    return output
 
 
 def _point_pairs_to_segment_dicts(
@@ -604,7 +762,7 @@ def build_wall_graph_for_viewport(
     """
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
-    split_pairs = split_segments_at_intersections(point_pairs)
+    split_pairs = _split_segments_at_intersections_indexed(point_pairs)
     split_segment_dicts = _point_pairs_to_segment_dicts(
         split_pairs, source_segments=structural_segments
     )

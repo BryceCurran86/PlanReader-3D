@@ -18,6 +18,7 @@ Fail-Closed & Zero-Made-Up-Data Rules:
 from dataclasses import dataclass, field
 from enum import Enum
 import math
+import re
 import uuid
 import json
 from typing import List, Dict, Any, Optional, Tuple, Union
@@ -1089,22 +1090,76 @@ class CanonicalSpace(CanonicalElement):
             or self.metadata.get("floor_finish")
             or default_finish
             or ""
-        ).lower()
+        ).lower().strip()
 
+        # Check for legend conflict upstream
+        legend_status = str(self.metadata.get("legend_status") or self.metadata.get("floor_legend_status") or "").lower()
+        if legend_status == "conflict" or self.metadata.get("floor_finish_conflict") is True:
+            self.derived_quantities = []
+            return []
+
+        # Do NOT guess finish from room name if unannotated
         if not floor_finish:
-            name_l = self.name.lower()
-            if any(w in name_l for w in ("bed", "robe", "wir")):
-                floor_finish = "carpet"
-            elif any(w in name_l for w in ("bath", "ensuite", "wc", "powder", "laundry")):
-                floor_finish = "tiles"
-            elif any(w in name_l for w in ("living", "dining", "entry", "hall", "kitchen", "family", "meals")):
-                floor_finish = "timber"
+            self.derived_quantities = []
+            return []
+
+        tokens = [t for t in re.split(r"[\s,;:/]+", floor_finish) if t]
+        is_raw_epx = ("epx" in tokens) or (floor_finish == "epx")
+        is_semantic_epoxy = any(k in floor_finish for k in ("epoxy", "resin"))
+
+        if is_raw_epx and not is_semantic_epoxy:
+            legend_def = str(self.metadata.get("legend_definition") or self.metadata.get("floor_legend_definition") or "").lower()
+            is_authenticated = (
+                self.metadata.get("legend_authenticated") is True
+                or self.metadata.get("floor_finish_authenticated") is True
+                or legend_status == "confirmed"
+                or "epoxy" in legend_def
+                or self.metadata.get("authenticated_floor_finish") in ("epoxy", "resin")
+            )
+            if is_authenticated:
+                is_semantic_epoxy = True
             else:
-                floor_finish = "carpet"
+                # Bare EPX without applicable legend must ABSTAIN
+                self.derived_quantities = []
+                return []
 
         bindings: List[QuantityFormulaBinding] = []
 
-        if any(k in floor_finish for k in ("timber", "laminate", "hybrid", "vinyl", "wood")):
+        if is_semantic_epoxy:
+            bindings.append(QuantityFormulaBinding(
+                trade_category="flooring",
+                item_code="FLOOR_EPOXY",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            if perimeter > 0.9:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="flooring",
+                    item_code="FLOOR_EPOXY_COVE_SKIRTING",
+                    formula_expression="perimeter_lm - 0.90",
+                    unit="lm",
+                    quantity=round(max(0.0, perimeter - 0.90), 2),
+                ))
+
+        elif any(k in floor_finish for k in ("vinyl", "linoleum", "sheet_vinyl")):
+            bindings.append(QuantityFormulaBinding(
+                trade_category="flooring",
+                item_code="FLOOR_VINYL",
+                formula_expression="effective_floor_area_m2",
+                unit="m²",
+                quantity=round(area, 2),
+            ))
+            if perimeter > 0.9:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="flooring",
+                    item_code="FLOOR_VINYL_COVE_SKIRTING",
+                    formula_expression="perimeter_lm - 0.90",
+                    unit="lm",
+                    quantity=round(max(0.0, perimeter - 0.90), 2),
+                ))
+
+        elif any(k in floor_finish for k in ("timber", "laminate", "hybrid", "wood")):
             bindings.append(QuantityFormulaBinding(
                 trade_category="flooring",
                 item_code="FLOOR_TIMBER",
@@ -1152,7 +1207,7 @@ class CanonicalSpace(CanonicalElement):
                     quantity=round(max(0.0, perimeter - 0.90), 2),
                 ))
 
-        elif any(k in floor_finish for k in ("tile", "tiling", "ceramic", "porcelain")):
+        elif any(k in floor_finish for k in ("tile", "tiling", "ceramic", "porcelain")) or floor_finish.startswith("ft"):
             bindings.append(QuantityFormulaBinding(
                 trade_category="tiling",
                 item_code="FLOOR_TILES",
@@ -1391,6 +1446,69 @@ class CanonicalCeiling(PolygonElement):
         if not area or area <= 0.0:
             return []
         perim = self.perimeter_lm()
+        sub = (self.substrate or "").lower()
+        fin = (self.finish or "").lower()
+        meta_fin = str(self.metadata.get("ceiling_finish") or "").lower()
+        raw_code = (fin or meta_fin or sub).strip()
+
+        # Check for legend conflict upstream
+        legend_status = str(self.metadata.get("legend_status") or self.metadata.get("finish_status") or "").lower()
+        if legend_status == "conflict" or self.metadata.get("finish_conflict") is True:
+            self.derived_quantities = []
+            return []
+
+        # 1. Direct semantic finish check (full semantic material names)
+        is_semantic_insulated = any(k in raw_code for k in (
+            "insulated_panel", "sandwich_panel", "sandwich panel",
+            "insulated sandwich panel", "insulated panel"
+        ))
+
+        # 2. Raw abbreviation check (e.g. "ip")
+        tokens = [t for t in re.split(r"[\s,;:/]+", raw_code) if t]
+        is_raw_ip = ("ip" in tokens) or (raw_code == "ip")
+
+        if is_raw_ip and not is_semantic_insulated:
+            legend_def = str(self.metadata.get("legend_definition") or self.metadata.get("meaning") or "").lower()
+            is_authenticated = (
+                self.metadata.get("legend_authenticated") is True
+                or self.metadata.get("finish_authenticated") is True
+                or legend_status == "confirmed"
+                or any(k in legend_def for k in ("insulated", "sandwich"))
+                or self.metadata.get("authenticated_finish") in ("insulated_panel", "sandwich_panel")
+            )
+            if is_authenticated:
+                is_semantic_insulated = True
+            else:
+                # Bare IP without applicable legend must ABSTAIN
+                self.derived_quantities = []
+                return []
+
+        if is_semantic_insulated:
+            bindings = [
+                QuantityFormulaBinding(
+                    trade_category="ceilings",
+                    item_code="CEILING_INSULATED_PANEL",
+                    formula_expression="effective_area_m2",
+                    unit="m²",
+                    quantity=round(area, 2),
+                )
+            ]
+            if perim > 0.0:
+                bindings.append(QuantityFormulaBinding(
+                    trade_category="ceilings",
+                    item_code="CEILING_INSULATED_PANEL_TRIM",
+                    formula_expression="perimeter_lm",
+                    unit="lm",
+                    quantity=round(perim, 2),
+                ))
+            self.derived_quantities = bindings
+            return bindings
+
+        # If raw_code was an unauthenticated non-standard abbreviation, ABSTAIN
+        if raw_code and not any(k in raw_code for k in ("plasterboard", "pb", "wfpb", "fpb", "lining", "flat_white", "paint")):
+            self.derived_quantities = []
+            return []
+
         bindings = [
             QuantityFormulaBinding(
                 trade_category="plastering",
@@ -3088,7 +3206,7 @@ class CanonicalProject(CanonicalElement):
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
                     "notes": _prov_notes(f"{b.trade_category.title()} derived from {sp.name} ({b.formula_expression}).", sp.provenance),
-                    "row_role": "floor_area" if b.item_code.startswith("FLOOR_") and b.unit == "m²" else "",
+                    "row_role": "floor_area" if b.item_code in {"FLOOR_TIMBER", "FLOOR_CARPET", "FLOOR_TILES", "FLOOR_VINYL", "FLOOR_EPOXY"} and b.unit == "m²" else "",
                     "created_at": stamp,
                     "updated_at": stamp,
                 })
@@ -3103,6 +3221,8 @@ class CanonicalProject(CanonicalElement):
             for b in c.derived_quantities:
                 elem_name = (
                     "Ceiling plasterboard lining" if b.item_code == "CEILING_PLASTERBOARD_LINING"
+                    else "Ceiling insulated sandwich panel" if b.item_code == "CEILING_INSULATED_PANEL"
+                    else "Ceiling insulated panel perimeter trim" if b.item_code == "CEILING_INSULATED_PANEL_TRIM"
                     else "Ceiling thermal insulation batts" if b.item_code == "CEILING_INSULATION_BATTS"
                     else "Ceiling cornice / perimeter trim" if b.item_code == "CEILING_CORNICE_TRIM"
                     else b.item_code.replace("_", " ").title()
@@ -3126,7 +3246,7 @@ class CanonicalProject(CanonicalElement):
                     "rate_per_unit": 0.0,
                     "confidence": "Documented",
                     "notes": _prov_notes(f"Ceiling trade {elem_name} ({b.formula_expression} = {b.quantity:.2f} {b.unit}).", c.provenance),
-                    "row_role": "ceiling_area" if b.item_code == "CEILING_PLASTERBOARD_LINING" else "",
+                    "row_role": "ceiling_area" if b.item_code in ("CEILING_PLASTERBOARD_LINING", "CEILING_INSULATED_PANEL") else "",
                     "created_at": stamp,
                     "updated_at": stamp,
                 })

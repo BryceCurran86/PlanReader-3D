@@ -1176,10 +1176,10 @@ def test_end_to_end_concreting_and_flooring_takeoff_publishing():
             assert slab_row["unit"] == "m²"
             assert slab_row["section"] == "Substructure"
 
-            # 2. Verify Concrete Volume Supply (10.0 item / m3)
+            # 2. Verify Concrete Volume Supply (10.0 m³)
             vol_row = next(r for r in db_rows if "Concrete supply & pump" in str(r.get("element") or ""))
             assert vol_row["quantity"] == 10.0  # 100m2 * 0.100m = 10.0 m3
-            assert vol_row["unit"] == "item"
+            assert vol_row["unit"] == "m³"
             assert "10.00 m³" in vol_row["notes"]
 
             # 3. Verify Under-slab Vapor Barrier (110.0 m2 with 10% laps)
@@ -1533,7 +1533,7 @@ def test_column_trade_quantities_and_serialization():
     assert b_map["COLUMN_FORMWORK"].quantity == round(2.0 * (0.35 + 0.35) * 2.70, 2)  # 3.78 m²
     assert b_map["COLUMN_FORMWORK"].unit == "m²"
     assert b_map["COLUMN_CONCRETE_SUPPLY"].quantity == round(0.35 * 0.35 * 2.70, 3)  # 0.331 m³
-    assert b_map["COLUMN_CONCRETE_SUPPLY"].unit == "item"
+    assert b_map["COLUMN_CONCRETE_SUPPLY"].unit == "m³"
 
     d = col.to_dict()
     assert len(d["derived_quantities"]) == 2

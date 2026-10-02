@@ -71,7 +71,8 @@ def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment
     ordered = sorted(bounds, key=lambda item: (item[0], item[2], item[1], item[3], item[4]))
     for pos, left in enumerate(ordered):
         left_x0, left_y0, left_x1, left_y1, i = left
-        for right in ordered[pos + 1:]:
+        for right_pos in range(pos + 1, len(ordered)):
+            right = ordered[right_pos]
             right_x0, right_y0, right_x1, right_y1, j = right
             if right_x0 > left_x1 + tol:
                 break

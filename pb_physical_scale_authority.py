@@ -667,17 +667,19 @@ class PhysicalScaleProducer:
         cached = self._trusted_words_by_snapshot.get(snapshot_key)
         if cached is None:
             authority = self._source.text_integrity_authority()
+            observation_ids = tuple(published.text_observation_ids)
+            results = authority.resolve_many_text(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                observation_ids=observation_ids,
+            )
+            if len(results) != len(observation_ids):
+                raise RuntimeError(PHYSICAL_SCALE_SOURCE_INTEGRITY_FAILURE)
+
             by_page: dict[str, list[_TrustedWord]] = {}
-            for observation_id in published.text_observation_ids:
-                result = authority.resolve_text(
-                    ObservationSelector(
-                        document_id=selector.document_id,
-                        revision_id=selector.revision_id,
-                        source_sha256=selector.source_sha256,
-                        snapshot_id=selector.snapshot_id,
-                        observation_id=observation_id,
-                    )
-                )
+            for observation_id, result in zip(observation_ids, results):
                 receipt = result.receipt
                 if (
                     result.status is EvidenceResolutionStatus.CORROBORATED
@@ -711,24 +713,20 @@ class PhysicalScaleProducer:
         cached = self._visible_segments_by_snapshot.get(snapshot_key)
         if cached is None:
             authority = self._source.authority()
+            observation_ids = tuple(published.visible_observation_ids)
+            observations = authority.resolve_many_visible(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                observation_ids=observation_ids,
+            )
+            if len(observations) != len(observation_ids):
+                raise RuntimeError(PHYSICAL_SCALE_SOURCE_INTEGRITY_FAILURE)
+
             by_page: dict[str, list[_VisibleSegment]] = {}
-            for observation_id in published.visible_observation_ids:
-                result = authority.resolve_visible(
-                    ObservationSelector(
-                        document_id=selector.document_id,
-                        revision_id=selector.revision_id,
-                        source_sha256=selector.source_sha256,
-                        snapshot_id=selector.snapshot_id,
-                        observation_id=observation_id,
-                    )
-                )
-                observation = result.observation
-                if (
-                    result.status is EvidenceResolutionStatus.CORROBORATED
-                    and result.proposition == VISIBLE_SOURCE_OBSERVATION_EXISTS
-                    and observation is not None
-                    and len(observation.geometry) == 4
-                ):
+            for observation_id, observation in zip(observation_ids, observations):
+                if len(observation.geometry) == 4:
                     x0, y0, x1, y1 = (
                         float(value) for value in observation.geometry
                     )

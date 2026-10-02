@@ -187,7 +187,8 @@ def _stamp_segment_page_viewports_product(
 
 _TITLE_SHAPE_RE = re.compile(
     r"^\s*(?:"
-    r"(?:GROUND|FIRST|SECOND|THIRD|UPPER|LOWER|LEVEL\s*[A-Z0-9.-]+)?\s*FLOOR\s+PLAN|"
+    r"(?:(?:PROP(?:OSED)?\.?|EXISTING|NEW)\s+)?(?:GROUND|FIRST|SECOND|THIRD|UPPER|LOWER|LEVEL\s*[A-Z0-9.-]+)?\s*FLOOR\s+PLAN|"
+    r"(?:(?:PROP(?:OSED)?\.?|EXISTING|NEW)\s+)?FLOOR\s+FINISH(?:ES)?\s*(?:&|AND)\s*PARTITION(?:S)?\s+PLAN|"
     r"PLAN\s*:\s*FLOOR\s+LAYOUT|FLOOR\s+LAYOUT|LAYOUT\s+PLAN|ROOF(?:ING)?\s+(?:LAYOUT\s+)?PLAN|"
     r"(?:NORTH|SOUTH|EAST|WEST|FRONT|REAR|SIDE)?\s*ELEV(?:ATION)?(?:\s+[A-Z0-9.-]+)?|"
     r"SECTION(?:\s+[A-Z0-9.-]+)?|CROSS\s+SECTION|LONGITUDINAL\s+SECTION|"
@@ -368,7 +369,18 @@ def _collapse_nested_band_frames(
                 break
         if not nested_band:
             kept.append(frame)
-    return kept
+
+    outer_to_drop: set[int] = set()
+    for i, frame in enumerate(kept):
+        frame_area = _bbox_area(frame)
+        for j, other in enumerate(kept):
+            if i == j:
+                continue
+            if _bbox_contains(other, frame, margin=2.0):
+                other_area = _bbox_area(other)
+                if other_area > 0 and frame_area / other_area >= 0.95:
+                    outer_to_drop.add(j)
+    return [f for idx, f in enumerate(kept) if idx not in outer_to_drop]
 
 
 def _frame_has_title_block_labels(
@@ -398,22 +410,30 @@ def _frame_looks_like_table(
     page: Any,
 ) -> bool:
     cells = 0
+    drawing_lines = 0
     frame_area = _bbox_area(frame)
     if frame_area <= 0:
         return False
     for drawing in page.get_drawings() or []:
         for item in drawing.get("items", []) or []:
-            if not item or item[0] != "re" or len(item) < 2:
+            if not item:
                 continue
-            rect = item[1]
-            cell = _normalized_bbox(float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
-            if not _bbox_contains(frame, cell, margin=1.0):
-                continue
-            if _bbox_area(cell) < 0.15 * frame_area and _bbox_area(cell) > 4.0:
-                cells += 1
-            if cells >= _TABLE_CELL_COUNT:
-                return True
-    return False
+            kind = item[0]
+            if kind == "re" and len(item) >= 2:
+                rect = item[1]
+                cell = _normalized_bbox(float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+                if not _bbox_contains(frame, cell, margin=1.0):
+                    continue
+                if _bbox_area(cell) < 0.15 * frame_area and _bbox_area(cell) > 4.0:
+                    cells += 1
+            elif kind in ("l", "c", "qu"):
+                if kind == "l" and len(item) >= 3:
+                    p1 = item[1]
+                    if _point_in_bbox((float(p1.x), float(p1.y)), frame):
+                        drawing_lines += 1
+                        if drawing_lines >= 30:
+                            return False
+    return cells >= _TABLE_CELL_COUNT
 
 
 def _rejected_ownership_frame(
@@ -489,9 +509,31 @@ def _text_fragments(page: Any) -> list[tuple[tuple[float, float, float, float], 
     return unique
 
 
-def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
+def _native_page_dimensions(page: Any) -> tuple[float, float]:
+    """Return dimensions in the native PDF geometry frame used by text/drawings.
+
+    PyMuPDF's ``page.rect`` is rotation-aware: for /Rotate 90/270 it swaps
+    width/height into visual orientation, while ``get_text()`` and
+    ``get_drawings()`` continue to report native unrotated page coordinates.
+    Viewport partitioning must therefore calibrate against the crop/media box,
+    not the visual rect, or valid native title/frame geometry can lie outside
+    the calibrated page extent.
+    """
+    for attr in ("cropbox", "mediabox"):
+        try:
+            rect = getattr(page, attr)
+            width = float(rect.width)
+            height = float(rect.height)
+            if width > 0.0 and height > 0.0:
+                return width, height
+        except Exception:
+            continue
     rect = page.rect
-    width = float(rect.width); height = float(rect.height)
+    return float(rect.width), float(rect.height)
+
+
+def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
+    width, height = _native_page_dimensions(page)
     word_heights = [
         float(w[3]) - float(w[1])
         for w in page.get_text("words")
@@ -606,6 +648,112 @@ def _wrapped_continuation(previous: _NativeLine, current: _NativeLine) -> bool:
     return smaller > 0 and overlap >= _WRAP_MIN_ALIGNED_OVERLAP * smaller
 
 
+def _wrapped_title_continuation_visual(
+    page: Any,
+    previous: _NativeLine,
+    current: _NativeLine,
+) -> bool:
+    """Visual-orientation equivalent of ``_wrapped_continuation`` for titles.
+
+    PyMuPDF text-line directions and bboxes are reported in native page space.
+    On /Rotate 90/270 sheets a visually horizontal two-line drawing title is
+    therefore vertical in native coordinates.  Compare its transformed visual
+    boxes while preserving the same spacing, size, boldness and overlap rules.
+    """
+    if previous.size <= 0 or current.size <= 0:
+        return False
+    previous_bbox = _to_visual_bbox(page, previous.bbox)
+    current_bbox = _to_visual_bbox(page, current.bbox)
+    previous_width = previous_bbox[2] - previous_bbox[0]
+    previous_height = previous_bbox[3] - previous_bbox[1]
+    current_width = current_bbox[2] - current_bbox[0]
+    current_height = current_bbox[3] - current_bbox[1]
+    if (
+        previous_width <= max(previous_height, 0.0)
+        or current_width <= max(current_height, 0.0)
+    ):
+        return False
+    gap = current_bbox[1] - previous_bbox[3]
+    if (
+        gap > _WRAP_MAX_GAP_SIZE_FRACTION * previous.size
+        or gap < -_WRAP_MAX_OVERLAP_INTRUSION * previous_height
+    ):
+        return False
+    if abs(current.size - previous.size) > _WRAP_SIZE_TOLERANCE * previous.size:
+        return False
+    if current.bold and not previous.bold:
+        return False
+    overlap = min(current_bbox[2], previous_bbox[2]) - max(
+        current_bbox[0], previous_bbox[0]
+    )
+    smaller = min(previous_width, current_width)
+    return smaller > 0 and overlap >= _WRAP_MIN_ALIGNED_OVERLAP * smaller
+
+
+def _wrapped_title_anchors(page: Any) -> list[_TitleAnchor]:
+    """Recover two-line native drawing titles without block over-merging.
+
+    CAD writers may emit the two visual lines as separate PDF text blocks. We
+    therefore pair native lines by visual adjacency, but admit a pair only when
+    typography/geometry proves continuation and the merged text independently
+    matches both the viewport title grammar and the page-title authority.
+    """
+    try:
+        data = page.get_text("dict") or {}
+    except Exception:
+        return []
+
+    lines: list[_NativeLine] = []
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        lines.extend(
+            line
+            for line in (
+                _native_line(raw_line)
+                for raw_line in block.get("lines", []) or []
+            )
+            if line is not None
+        )
+
+    visual_order = sorted(
+        lines,
+        key=lambda line: (
+            _to_visual_bbox(page, line.bbox)[1],
+            _to_visual_bbox(page, line.bbox)[0],
+            line.text,
+        ),
+    )
+    anchors: list[_TitleAnchor] = []
+    for index, previous in enumerate(visual_order):
+        previous_visual = _to_visual_bbox(page, previous.bbox)
+        max_gap = _WRAP_MAX_GAP_SIZE_FRACTION * max(previous.size, 0.0)
+        for current in visual_order[index + 1 :]:
+            current_visual = _to_visual_bbox(page, current.bbox)
+            if current_visual[1] - previous_visual[3] > max_gap:
+                break
+            if not _wrapped_title_continuation_visual(page, previous, current):
+                continue
+            merged = _normalise_text(f"{previous.text} {current.text}")
+            if not _TITLE_SHAPE_RE.match(merged):
+                continue
+            view_type = DrawingViewClassifier.classify_text(
+                _strip_scale_suffix(merged)
+            ).value
+            if view_type == DrawingViewType.UNKNOWN.value:
+                continue
+            if _title_authority.title_shape(merged, bound=False)[0] == 0.0:
+                continue
+            bbox = (
+                min(previous.bbox[0], current.bbox[0]),
+                min(previous.bbox[1], current.bbox[1]),
+                max(previous.bbox[2], current.bbox[2]),
+                max(previous.bbox[3], current.bbox[3]),
+            )
+            anchors.append(_TitleAnchor(text=merged, bbox=bbox, view_type=view_type))
+    return anchors
+
+
 def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float, float], str]]:
     """Lines (box, text) that are the wrapped tail of a note in the same native text block.
 
@@ -673,6 +821,12 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
             continue  # the wrapped tail of a note, not a drawing-view title
         candidates.append(_TitleAnchor(text=text, bbox=bbox, view_type=view_type))
 
+    # Some CAD title blocks wrap one drawing title across adjacent native text
+    # lines (especially on rotated A1 sheets). Recover only producer-native,
+    # visually contiguous wrapped headings whose merged text independently
+    # satisfies the exact drawing-title grammar.
+    candidates.extend(_wrapped_title_anchors(page))
+
     # Prefer the tighter span when a line-level fragment duplicates it.
     candidates.sort(key=lambda a: (_bbox_area(a.bbox), a.bbox[1], a.bbox[0], a.text))
     anchors: list[_TitleAnchor] = []
@@ -734,21 +888,57 @@ def _frame_candidates_for_title(
     frames: Sequence[tuple[float, float, float, float]],
     calibration: ViewportLayoutCalibration,
     anchors: Sequence[_TitleAnchor] = (),
+    *,
+    page: Any = None,
 ) -> list[tuple[float, float, float, float]]:
+    """Bind a native title to a native frame using visual ownership geometry.
+
+    PyMuPDF reports text/drawing primitives in native page coordinates even on
+    /Rotate 90/270 sheets. The architectural convention tested here (title
+    horizontally aligned and visually below its view frame) is a *visual*
+    relationship, so compare transformed bboxes when a page is available while
+    returning the original native frame as the source-owned boundary.
+    """
     candidates: list[tuple[float, float, float, float]] = []
-    title_center = anchor.center
+    title_bbox = anchor.bbox if page is None else _to_visual_bbox(page, anchor.bbox)
+    title_center = _bbox_center(title_bbox)
+    visual_anchors = [
+        (other, other.bbox if page is None else _to_visual_bbox(page, other.bbox))
+        for other in anchors
+    ]
     for frame in frames:
-        if _bbox_contains(frame, anchor.bbox, margin=calibration.median_word_height_pt * 0.25):
+        comparison_frame = frame if page is None else _to_visual_bbox(page, frame)
+        if _bbox_contains(
+            comparison_frame,
+            title_bbox,
+            margin=calibration.median_word_height_pt * 0.25,
+        ):
             candidates.append(frame)
             continue
-        if _title_horizontal_overlap_fraction(anchor, frame) < _TITLE_HORIZONTAL_OVERLAP_FRACTION:
+        overlap = min(float(comparison_frame[2]), title_bbox[2]) - max(
+            float(comparison_frame[0]), title_bbox[0]
+        )
+        title_width = max(title_bbox[2] - title_bbox[0], 1e-6)
+        if max(0.0, overlap) / title_width < _TITLE_HORIZONTAL_OVERLAP_FRACTION:
             continue
-        if not (frame[0] <= title_center[0] <= frame[2]):
+        if not (comparison_frame[0] <= title_center[0] <= comparison_frame[2]):
             continue
-        gap = anchor.bbox[1] - frame[3]
-        if not (0 <= gap <= _max_title_below_frame_gap(frame, calibration)):
+        gap = title_bbox[1] - comparison_frame[3]
+        if not (
+            0 <= gap <= _max_title_below_frame_gap(comparison_frame, calibration)
+        ):
             continue
-        if _other_title_in_title_gap(anchor, frame, anchors):
+        gap_box = (
+            float(comparison_frame[0]),
+            float(comparison_frame[3]),
+            float(comparison_frame[2]),
+            float(title_bbox[1]),
+        )
+        if gap_box[3] > gap_box[1] and any(
+            other is not anchor
+            and _point_in_bbox(_bbox_center(other_bbox), gap_box)
+            for other, other_bbox in visual_anchors
+        ):
             continue
         candidates.append(frame)
     return candidates
@@ -786,7 +976,9 @@ def _frame_resolved_viewports(
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
     for index, anchor in enumerate(anchors):
-        candidates = _frame_candidates_for_title(anchor, frames, calibration, anchors=anchors)
+        candidates = _frame_candidates_for_title(
+            anchor, frames, calibration, anchors=anchors, page=page
+        )
         usable = [
             frame for frame in candidates
             if not _rejected_ownership_frame(page, frame, calibration, fragments)
