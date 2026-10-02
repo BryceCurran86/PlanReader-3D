@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Optional
+from typing import Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_hardened_authority_contract import (
