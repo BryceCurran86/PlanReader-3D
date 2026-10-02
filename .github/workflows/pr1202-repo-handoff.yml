@@ -1,0 +1,37 @@
+name: PR1202 Repo Handoff
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pr1202-repo-handoff.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build repository handoff archive
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root = Path(".")
+          output = Path("/tmp/planreader-pr1202-handoff.zip")
+          excluded = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+          with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  if any(part in excluded for part in path.parts):
+                      continue
+                  archive.write(path, path.as_posix())
+          print(output, output.stat().st_size)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-pr1202-handoff
+          path: /tmp/planreader-pr1202-handoff.zip
+          retention-days: 1
