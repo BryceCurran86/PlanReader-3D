@@ -208,6 +208,50 @@ def _reason_tuple(values) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(value) for value in values if str(value)))
 
 
+def _canonical_opening_area(
+    *,
+    width_m: Optional[float],
+    height_m: Optional[float],
+    figured_label_evidence,
+) -> tuple[Optional[float], Optional[str], Optional[str]]:
+    """Resolve customer-facing opening area without inventing axis order.
+
+    Existing fully-resolved width+height geometry remains authoritative here.
+    Otherwise a corroborated two-axis figured label may provide only its
+    order-invariant product. It never back-fills width_m or height_m.
+    """
+
+    if width_m is not None and height_m is not None:
+        return (
+            float(width_m) * float(height_m),
+            "resolved_opening_geometry",
+            (
+                str(figured_label_evidence.evidence_id)
+                if figured_label_evidence is not None
+                else None
+            ),
+        )
+    if (
+        figured_label_evidence is not None
+        and getattr(figured_label_evidence, "area_m2", None) is not None
+        and getattr(figured_label_evidence, "axis_order_resolved", None) is False
+    ):
+        return (
+            float(figured_label_evidence.area_m2),
+            str(getattr(figured_label_evidence, "basis", "figured_opening_label")),
+            str(figured_label_evidence.evidence_id),
+        )
+    return (
+        None,
+        None,
+        (
+            str(figured_label_evidence.evidence_id)
+            if figured_label_evidence is not None
+            else None
+        ),
+    )
+
+
 def compose_live_physical_opening_voids(
     *,
     source_visibility_producer: SourceVisibilityProducer,
@@ -608,26 +652,11 @@ def compose_live_physical_opening_voids(
         if void_record is not None:
             width_m = u1 - u0
             height_m = z1 - z0
-        area_m2 = (
-            width_m * height_m
-            if width_m is not None and height_m is not None
-            else None
+        area_m2, area_basis, figured_area_record_id = _canonical_opening_area(
+            width_m=width_m,
+            height_m=height_m,
+            figured_label_evidence=figured_label_evidence,
         )
-        area_basis = "resolved_opening_geometry" if area_m2 is not None else None
-        figured_area_record_id = None
-        if figured_label_evidence is not None:
-            figured_area_record_id = str(figured_label_evidence.evidence_id)
-            # A two-axis figured label can prove AREA without proving which
-            # printed token is width versus height. Preserve existing complete
-            # opening geometry when it exists; otherwise publish the
-            # order-invariant figured product only.
-            if (
-                area_m2 is None
-                and figured_label_evidence.area_m2 is not None
-                and figured_label_evidence.axis_order_resolved is False
-            ):
-                area_m2 = float(figured_label_evidence.area_m2)
-                area_basis = str(figured_label_evidence.basis)
 
         if existence_record is not None:
             evidence_ids = tuple(
