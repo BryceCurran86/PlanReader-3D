@@ -241,6 +241,56 @@ def test_immediately_painted_tight_text_backing_rectangle_is_authenticated() -> 
     assert _filter(list(annotated)) == ()
 
 
+def test_text_mask_uses_established_majority_coverage_boundary() -> None:
+    edges = _sequenced_fill_rect_edges(sequence_number=40)
+    at_boundary = SimpleNamespace(
+        sequence_number=41,
+        geometry=(15.0, 10.0, 25.0, 30.0),
+    )
+    below_boundary = SimpleNamespace(
+        sequence_number=41,
+        geometry=(15.1, 10.0, 25.0, 30.0),
+    )
+
+    accepted = _annotate_producer_owned_annotation_masks(
+        edges, text_receipts=(at_boundary,)
+    )
+    rejected = _annotate_producer_owned_annotation_masks(
+        edges, text_receipts=(below_boundary,)
+    )
+
+    assert all(
+        edge.get("annotation_mask_authority") == "producer_owned"
+        for edge in accepted
+    )
+    assert all(not edge.get("annotation_mask_authority") for edge in rejected)
+
+
+def test_text_mask_uses_established_pdf_text_geometry_tolerance() -> None:
+    edges = _sequenced_fill_rect_edges(sequence_number=40)
+    within_tolerance = SimpleNamespace(
+        sequence_number=41,
+        geometry=(9.6, 9.6, 30.4, 30.4),
+    )
+    outside_tolerance = SimpleNamespace(
+        sequence_number=41,
+        geometry=(9.4, 9.4, 30.6, 30.6),
+    )
+
+    accepted = _annotate_producer_owned_annotation_masks(
+        edges, text_receipts=(within_tolerance,)
+    )
+    rejected = _annotate_producer_owned_annotation_masks(
+        edges, text_receipts=(outside_tolerance,)
+    )
+
+    assert all(
+        edge.get("annotation_mask_authority") == "producer_owned"
+        for edge in accepted
+    )
+    assert all(not edge.get("annotation_mask_authority") for edge in rejected)
+
+
 def test_nonadjacent_text_does_not_authenticate_fill_rectangle() -> None:
     edges = _sequenced_fill_rect_edges(sequence_number=40)
     receipt = SimpleNamespace(
