@@ -73,6 +73,67 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
         doc.close()
 
 
+def _semantic_kind_only_pdf() -> bytes:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=760.0, height=650.0)
+        for first, second in (
+            ((20.0, 100.0), (100.0, 100.0)),
+            ((145.0, 100.0), (220.0, 100.0)),
+            ((20.0, 110.0), (100.0, 110.0)),
+            ((145.0, 110.0), (220.0, 110.0)),
+            ((100.0, 100.0), (100.0, 110.0)),
+            ((145.0, 100.0), (145.0, 110.0)),
+            ((100.0, 70.0), (145.0, 70.0)),
+            ((100.0, 70.0), (100.0, 100.0)),
+            ((145.0, 70.0), (145.0, 100.0)),
+        ):
+            page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
+
+        # The compact token remains dimension-unresolved in DEF-03. Only the
+        # label code is semantically authenticated by the source legend.
+        page.insert_text(fitz.Point(108.0, 106.0), "1218 ZX", fontsize=7.0)
+        page.insert_text(fitz.Point(300.0, 180.0), "LEGEND", fontsize=7.0)
+        page.insert_text(
+            fitz.Point(300.0, 194.0),
+            "ZX - SLIDING GLASS WINDOW",
+            fontsize=7.0,
+        )
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+
+def test_live_canonical_opening_consumes_owned_legend_kind_without_area() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-opening-semantic-only-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-opening-semantic-only",
+        source_bytes=_semantic_kind_only_pdf(),
+        source_locator="memory://live-opening-semantic-only.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    assert wall_opening.semantic_enumeration_result.record is not None
+
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.opening_kind == "window"
+    assert opening.area_m2 is None
+    assert opening.geometry_complete is False
+    assert opening.figured_area_record_id is None
+
+
 def test_canonical_opening_provenance_union_is_order_invariant_without_collapsing_ids() -> None:
     forward = _canonical_provenance_ids(("ev-b", "ev-a", "ev-b", "opening-1"))
     reverse = _canonical_provenance_ids(("opening-1", "ev-a", "ev-b"))
