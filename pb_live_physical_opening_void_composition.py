@@ -227,15 +227,20 @@ def _canonical_opening_area(
     order-invariant product. It never back-fills width_m or height_m.
     """
 
+    figured_area_record_id = (
+        str(figured_label_evidence.evidence_id)
+        if (
+            figured_label_evidence is not None
+            and getattr(figured_label_evidence, "area_m2", None) is not None
+        )
+        else None
+    )
+
     if width_m is not None and height_m is not None:
         return (
             float(width_m) * float(height_m),
             "resolved_opening_geometry",
-            (
-                str(figured_label_evidence.evidence_id)
-                if figured_label_evidence is not None
-                else None
-            ),
+            figured_area_record_id,
         )
     if (
         figured_label_evidence is not None
@@ -247,15 +252,7 @@ def _canonical_opening_area(
             str(getattr(figured_label_evidence, "basis", "figured_opening_label")),
             str(figured_label_evidence.evidence_id),
         )
-    return (
-        None,
-        None,
-        (
-            str(figured_label_evidence.evidence_id)
-            if figured_label_evidence is not None
-            else None
-        ),
-    )
+    return (None, None, None)
 
 
 def compose_live_physical_opening_voids(
