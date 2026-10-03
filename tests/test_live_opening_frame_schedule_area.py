@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import fitz
 import pytest
 
+import pb_auto_geometry_v1219 as auto
 from pb_live_opening_area_quantity_publication import (
     LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY,
 )
@@ -80,6 +84,54 @@ def test_explicit_frame_schedule_dimensions_publish_gross_frame_area(
     assert quantity.metadata["area_basis"] == "authenticated_frame_schedule"
     assert quantity.metadata["schedule_row_dimension_basis"] == "frame"
     assert quantity.metadata["measurement_record_id"] == opening.schedule_binding_record_id
+
+
+def test_frame_schedule_area_reaches_customer_runtime_row_without_net_wall(
+    tmp_path,
+) -> None:
+    path = tmp_path / "frame-schedule-customer.pdf"
+    path.write_bytes(_frame_schedule_pdf(explicit_frame_basis=True))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert claim.opening_quantity_evidence
+    area_quantity = claim.opening_quantity_evidence[0]
+
+    app = SimpleNamespace(
+        lquery=lambda *_args, **_kwargs: [{"id": 1, "path": str(path)}]
+    )
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        wall_rows = auto._try_physical_net_wall_rows(
+            app,
+            1,
+            [{
+                "document_id": 1,
+                "page_no": 1,
+                "selected": 1,
+                "page_type": "floor plan",
+            }],
+            [],
+        )
+
+    assert wall_rows is None
+    opening_rows = app._live_opening_takeoff_rows_by_workspace[1]
+    area_rows = [
+        dict(zip(auto.TAKEOFF_ROW_FIELDS, row))
+        for row in opening_rows
+        if area_quantity.quantity_id in str(
+            dict(zip(auto.TAKEOFF_ROW_FIELDS, row))["source_reference"]
+        )
+    ]
+    assert len(area_rows) == 1
+    row = area_rows[0]
+    assert row["section"] == "Openings"
+    assert row["element"] == "Window area"
+    assert row["location"] == "W1"
+    assert row["quantity"] == pytest.approx(2.16)
+    assert row["unit"] == "m²"
+    assert row["quantity_status"] == "Measured"
+    assert row["inclusion_status"] == "PROVISIONAL"
 
 
 def test_generic_width_height_schedule_does_not_mint_frame_area(
