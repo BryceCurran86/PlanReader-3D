@@ -127,6 +127,31 @@ def _legend_semantics(lines):
 
     resolved = {}
     conflicted = set()
+
+    # Some PDF producers keep code + definition on one native line.
+    for block_no, _line_no, line in lines:
+        if block_no not in legend_blocks:
+            continue
+        parts = line.text.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        code = parts[0].upper()
+        if _LEGEND_CODE_RE.fullmatch(code) is None:
+            continue
+        kind, conflict = _explicit_word_kind(parts[1])
+        if conflict:
+            conflicted.add(code)
+            resolved.pop(code, None)
+            continue
+        if kind is None:
+            continue
+        prior = resolved.get(code)
+        if prior is not None and prior[0] != kind:
+            conflicted.add(code)
+            resolved.pop(code, None)
+            continue
+        resolved[code] = (kind, tuple(sorted(line.observation_ids)))
+
     for block_no, _line_no, code_line in lines:
         if block_no not in legend_blocks:
             continue
