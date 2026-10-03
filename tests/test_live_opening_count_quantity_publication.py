@@ -10,18 +10,36 @@ from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
-from tests.test_live_physical_opening_void_composition import _complete_void_pdf
-
-
 def _floor_plan_with_schedule_quantity(*, quantity: int | None) -> bytes:
-    payload = _complete_void_pdf(tag="W1")
-    doc = fitz.open(stream=payload, filetype="pdf")
+    """One floor-plan opening plus a separately authenticated schedule page."""
+    doc = fitz.open()
     try:
-        page = doc[0]
-        page.insert_text(fitz.Point(20.0, 24.0), "FLOOR PLAN")
+        plan = doc.new_page(width=760.0, height=650.0)
+        plan.insert_text(fitz.Point(20.0, 24.0), "GROUND FLOOR PLAN")
+        for first, second in (
+            ((20.0, 100.0), (100.0, 100.0)),
+            ((145.0, 100.0), (220.0, 100.0)),
+            ((20.0, 110.0), (100.0, 110.0)),
+            ((145.0, 110.0), (220.0, 110.0)),
+            ((100.0, 100.0), (100.0, 110.0)),
+            ((145.0, 100.0), (145.0, 110.0)),
+        ):
+            plan.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
+        plan.insert_text(fitz.Point(112.0, 106.0), "W1")
+
+        schedule = doc.new_page(width=760.0, height=650.0)
+        schedule.insert_text(fitz.Point(20.0, 24.0), "WINDOW SCHEDULE")
+        headings = ["MARK", "WIDTH", "HEIGHT"]
+        values = ["W1", "900", "2100"]
         if quantity is not None:
-            page.insert_text(fitz.Point(680.0, 500.0), "QTY")
-            page.insert_text(fitz.Point(680.0, 530.0), str(int(quantity)))
+            headings.append("QTY")
+            values.append(str(int(quantity)))
+        xs = (50.0, 180.0, 310.0, 440.0)
+        for text, x in zip(headings, xs):
+            schedule.insert_text(fitz.Point(x, 120.0), text)
+        for text, x in zip(values, xs):
+            schedule.insert_text(fitz.Point(x, 150.0), text)
+
         return bytes(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
