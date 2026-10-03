@@ -93,10 +93,18 @@ _Key = tuple[str, str, str, str, str]
 
 @dataclass(frozen=True)
 class ParsedOpeningLabel:
+    """Syntax-only opening-label parse; semantics resolve after ownership."""
+
     raw_text: str
+    dimension_tokens: tuple[str, ...]
     dimension_values_mm: tuple[float, ...]
+    suffix_text: str
     semantic_kind: Optional[str]
     compact_hundreds_used: bool
+
+    @property
+    def dimension_count(self) -> int:
+        return len(self.dimension_tokens)
 
     @property
     def area_m2(self) -> Optional[float]:
@@ -158,12 +166,22 @@ def _blocked(status: EvidenceResolutionStatus, *reasons: str) -> OpeningLabelDim
     )
 
 
-def _semantic_kind(text: str) -> Optional[str]:
+def _semantic_kind_evidence(text: str) -> tuple[Optional[str], bool]:
+    """Resolve suffix semantics only after authenticated opening ownership."""
     has_window = _WINDOW_TOKEN_RE.search(text or "") is not None
     has_door = _DOOR_TOKEN_RE.search(text or "") is not None
-    if has_window == has_door:
-        return None
-    return "window" if has_window else "door"
+    if has_window and has_door:
+        return None, True
+    if has_window:
+        return "window", False
+    if has_door:
+        return "door", False
+    return None, False
+
+
+def _semantic_kind(text: str) -> Optional[str]:
+    kind, conflict = _semantic_kind_evidence(text)
+    return None if conflict else kind
 
 
 def _dimension_token_mm(raw: str, *, compact_allowed: bool) -> Optional[tuple[float, bool]]:
@@ -181,19 +199,12 @@ def _dimension_token_mm(raw: str, *, compact_allowed: bool) -> Optional[tuple[fl
     return value, compact
 
 
-def parse_opening_label_dimensions(
-    text: str,
-    *,
-    structural_kind_hint: Optional[str] = None,
-) -> Optional[ParsedOpeningLabel]:
-    """Parse one source opening callout without deciding physical identity.
+def _normalised_suffix(text: str) -> str:
+    return " ".join(str(text or "").split())
 
-    Exact opening-code semantics are accepted only as text evidence. This
-    parser cannot create a physical opening; the producer binds parsed text to
-    an independently proven opening before publication. A structural hint is
-    used only to permit compact hundred-millimetre notation when an opening is
-    already proven, and contradictory semantic sources still fail closed.
-    """
+
+def parse_opening_label_dimensions(text: str) -> Optional[ParsedOpeningLabel]:
+    """Parse syntax only; never infer door/window kind or physical ownership."""
     raw = " ".join(str(text or "").split())
     if not raw:
         return None
@@ -201,25 +212,19 @@ def parse_opening_label_dimensions(
     pair = _PAIR_RE.fullmatch(raw)
     if pair is not None:
         tail = str(pair.group("tail") or "")
-        kind = _semantic_kind(tail)
-        clean_hint = str(structural_kind_hint or "").strip().lower()
-        compact_allowed = bool(
-            kind is not None
-            or (
-                clean_hint in {"door", "window"}
-                and _OPENING_MODIFIER_TOKEN_RE.search(tail) is not None
-            )
-        )
+        if tail.strip() and _ALLOWED_TAIL_RE.fullmatch(tail) is None:
+            return None
+        compact_allowed = _OPENING_MODIFIER_TOKEN_RE.search(tail) is not None
         first = _dimension_token_mm(pair.group("a"), compact_allowed=compact_allowed)
         second = _dimension_token_mm(pair.group("b"), compact_allowed=compact_allowed)
         if first is None or second is None:
             return None
-        if tail.strip() and _ALLOWED_TAIL_RE.fullmatch(tail) is None:
-            return None
         return ParsedOpeningLabel(
             raw_text=raw,
+            dimension_tokens=(str(pair.group("a")), str(pair.group("b"))),
             dimension_values_mm=(first[0], second[0]),
-            semantic_kind=kind,
+            suffix_text=_normalised_suffix(tail),
+            semantic_kind=None,
             compact_hundreds_used=bool(first[1] or second[1]),
         )
 
@@ -227,7 +232,6 @@ def parse_opening_label_dimensions(
     if single is None:
         return None
     tail = str(single.group("tail") or "")
-    kind = _semantic_kind(tail)
     if tail.strip() and _ALLOWED_SINGLE_TAIL_RE.fullmatch(tail) is None:
         return None
     value = _dimension_token_mm(single.group("a"), compact_allowed=False)
@@ -235,11 +239,12 @@ def parse_opening_label_dimensions(
         return None
     return ParsedOpeningLabel(
         raw_text=raw,
+        dimension_tokens=(str(single.group("a")),),
         dimension_values_mm=(value[0],),
-        semantic_kind=kind,
+        suffix_text=_normalised_suffix(tail),
+        semantic_kind=None,
         compact_hundreds_used=False,
     )
-
 
 def _line(record: SourceObservationRecord) -> Optional[tuple[float, float, float, float]]:
     if len(record.geometry) != 4:
