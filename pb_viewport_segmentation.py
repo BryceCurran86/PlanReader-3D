@@ -122,6 +122,9 @@ _TITLE_HORIZONTAL_OVERLAP_FRACTION = 0.5
 _NESTED_BAND_SPAN_FRACTION = 0.35
 _TITLE_BLOCK_AREA_FRACTION = 0.20
 _TABLE_CELL_COUNT = 8
+_TABLE_GRID_OCCUPANCY_FRACTION = 0.75
+_TABLE_GRID_FRAME_COVERAGE_FRACTION = 0.20
+_TABLE_CELL_DIMENSION_ROUND_DIGITS = 3
 
 # Private in-process producer token. Migration authority must not be minted from
 # caller-copied provenance dictionaries. Only segment_page_viewports stamps this
@@ -403,23 +406,111 @@ def _frame_has_title_block_labels(
 def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
+    calibration: ViewportLayoutCalibration,
 ) -> bool:
-    cells = 0
+    """Return True only for positive repeated table-grid structure.
+
+    A dense architectural drawing can legitimately contain hundreds or
+    thousands of rectangle primitives. Rectangle count alone is therefore not
+    table evidence. A table requires a repeated same-size cell family arranged
+    as a substantially occupied row/column grid spanning a meaningful fraction
+    of the candidate frame.
+    """
+
     frame_area = _bbox_area(frame)
-    if frame_area <= 0:
+    frame_width = max(0.0, float(frame[2]) - float(frame[0]))
+    frame_height = max(0.0, float(frame[3]) - float(frame[1]))
+    if frame_area <= 0.0 or frame_width <= 0.0 or frame_height <= 0.0:
         return False
+
+    cells: list[tuple[float, float, float, float]] = []
     for drawing in page.get_drawings() or []:
         for item in drawing.get("items", []) or []:
             if not item or item[0] != "re" or len(item) < 2:
                 continue
             rect = item[1]
-            cell = _normalized_bbox(float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+            cell = _normalized_bbox(
+                float(rect.x0),
+                float(rect.y0),
+                float(rect.x1),
+                float(rect.y1),
+            )
             if not _bbox_contains(frame, cell, margin=1.0):
                 continue
-            if _bbox_area(cell) < 0.15 * frame_area and _bbox_area(cell) > 4.0:
-                cells += 1
-            if cells >= _TABLE_CELL_COUNT:
-                return True
+            area = _bbox_area(cell)
+            if 4.0 < area < 0.15 * frame_area:
+                cells.append(cell)
+
+    if len(cells) < _TABLE_CELL_COUNT:
+        return False
+
+    # Group by scale-invariant cell dimensions. Real table cells repeat their
+    # shape; unrelated CAD rectangles should not be pooled merely because they
+    # coexist in one drawing frame.
+    by_dimensions: dict[
+        tuple[float, float],
+        list[tuple[float, float, float, float]],
+    ] = {}
+    for cell in cells:
+        key = (
+            round(
+                (cell[2] - cell[0]) / frame_width,
+                _TABLE_CELL_DIMENSION_ROUND_DIGITS,
+            ),
+            round(
+                (cell[3] - cell[1]) / frame_height,
+                _TABLE_CELL_DIMENSION_ROUND_DIGITS,
+            ),
+        )
+        by_dimensions.setdefault(key, []).append(cell)
+
+    cluster_tol = max(
+        calibration.median_word_height_pt * 0.5,
+        min(frame_width, frame_height) * 0.002,
+        1.0,
+    )
+    for family in by_dimensions.values():
+        if len(family) < _TABLE_CELL_COUNT:
+            continue
+
+        centers_x = [(cell[0] + cell[2]) / 2.0 for cell in family]
+        centers_y = [(cell[1] + cell[3]) / 2.0 for cell in family]
+        x_clusters = _cluster_values(centers_x, cluster_tol)
+        y_clusters = _cluster_values(centers_y, cluster_tol)
+        if len(x_clusters) < 2 or len(y_clusters) < 2:
+            continue
+
+        occupied: set[tuple[int, int]] = set()
+        for x, y in zip(centers_x, centers_y):
+            x_index = min(
+                range(len(x_clusters)),
+                key=lambda index: abs(x - x_clusters[index]),
+            )
+            y_index = min(
+                range(len(y_clusters)),
+                key=lambda index: abs(y - y_clusters[index]),
+            )
+            occupied.add((x_index, y_index))
+
+        if len(occupied) < _TABLE_CELL_COUNT:
+            continue
+        occupancy = len(occupied) / (len(x_clusters) * len(y_clusters))
+        if occupancy < _TABLE_GRID_OCCUPANCY_FRACTION:
+            continue
+
+        grid_bbox = (
+            min(cell[0] for cell in family),
+            min(cell[1] for cell in family),
+            max(cell[2] for cell in family),
+            max(cell[3] for cell in family),
+        )
+        if (
+            _bbox_area(grid_bbox) / frame_area
+            < _TABLE_GRID_FRAME_COVERAGE_FRACTION
+        ):
+            continue
+        return True
+
     return False
 
 
@@ -433,7 +524,7 @@ def _rejected_ownership_frame(
         return True
     if _frame_has_title_block_labels(frame, fragments, calibration):
         return True
-    if _frame_looks_like_table(frame, page):
+    if _frame_looks_like_table(frame, page, calibration):
         return True
     return False
 
