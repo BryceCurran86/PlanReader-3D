@@ -75,7 +75,10 @@ def test_explicit_frame_schedule_dimensions_publish_gross_frame_area(
     assert opening.area_basis == "authenticated_frame_schedule"
     assert opening.area_m2 == pytest.approx(2.16)
 
-    assert len(claim.opening_quantity_evidence) == 1
+    assert len(claim.opening_quantity_evidence) == 1, {
+        "claim_reasons": claim.reason_codes,
+        "opening": opening.to_dict(),
+    }
     quantity = claim.opening_quantity_evidence[0]
     assert quantity.value == pytest.approx(2.16)
     assert quantity.unit == "m2"
@@ -92,7 +95,10 @@ def test_frame_schedule_area_reaches_customer_runtime_row_without_net_wall(
     path = tmp_path / "frame-schedule-customer.pdf"
     path.write_bytes(_frame_schedule_pdf(explicit_frame_basis=True))
     claim = collect_live_physical_net_wall_claim(path, pages=(0,))
-    assert claim.opening_quantity_evidence
+    assert claim.opening_quantity_evidence, {
+        "claim_reasons": claim.reason_codes,
+        "opening": claim.canonical_openings[0].to_dict() if claim.canonical_openings else None,
+    }
     area_quantity = claim.opening_quantity_evidence[0]
 
     app = SimpleNamespace(
