@@ -26,6 +26,10 @@ from pb_opening_kind_authority import (
 from pb_opening_label_dimension_authority import (
     OpeningLabelDimensionProducer,
 )
+from pb_opening_label_semantic_authority import (
+    OPENING_LABEL_SEMANTIC_CONFLICT,
+    OpeningLabelSemanticProducer,
+)
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_opening_vertical_placement_authority import (
     OpeningVerticalPlacementProducer,
@@ -457,6 +461,15 @@ def compose_live_physical_opening_voids(
         opening_id: label_dimension_producer.publish_scope(opening_selector)
         for opening_id, opening_selector in opening_selectors.items()
     }
+    label_semantic_producer = (
+        OpeningLabelSemanticProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
+    )
+    label_semantic_results = {
+        opening_id: label_semantic_producer.publish_scope(opening_selector)
+        for opening_id, opening_selector in opening_selectors.items()
+    }
     height_authority = height_producer.authority()
     vertical_authority = vertical_producer.authority()
     scale_authority = scale_producer.authority()
@@ -507,6 +520,8 @@ def compose_live_physical_opening_voids(
         width = dimension_authority.resolve_width(opening_selector)
         figured_label = label_dimension_results.get(opening_id)
         figured_label_evidence = getattr(figured_label, "evidence", None)
+        semantic_label = label_semantic_results.get(opening_id)
+        semantic_label_evidence = getattr(semantic_label, "evidence", None)
         schedule = schedule_results.get(opening_id)
         height = height_results.get(opening_id)
         vertical = vertical_results.get(opening_id)
@@ -588,14 +603,23 @@ def compose_live_physical_opening_voids(
             ),
             schedule_trade_type=schedule_trade_type,
             label_kind=(
-                getattr(figured_label_evidence, "semantic_kind", None)
-                if figured_label_evidence is not None
-                else None
+                getattr(semantic_label_evidence, "semantic_kind", None)
+                if semantic_label_evidence is not None
+                else (
+                    getattr(figured_label_evidence, "semantic_kind", None)
+                    if figured_label_evidence is not None
+                    else None
+                )
             ),
         )
         opening_kind = kind_resolution.opening_kind
-        if OPENING_KIND_CONFLICT in kind_resolution.reason_codes:
+        if (
+            OPENING_KIND_CONFLICT in kind_resolution.reason_codes
+            or OPENING_LABEL_SEMANTIC_CONFLICT
+            in tuple(getattr(semantic_label, "reason_codes", ()))
+        ):
             kind_conflict_opening_ids.add(opening_id)
+            opening_kind = None
         void_record = void.record
         binding_trace = binding_by_opening.get(opening_id)
         frame_trace = frame_by_opening.get(opening_id)
@@ -695,6 +719,16 @@ def compose_live_physical_opening_voids(
                     *(
                         figured_label_evidence.source_text_observation_ids
                         if figured_label_evidence is not None
+                        else ()
+                    ),
+                    *(
+                        semantic_label_evidence.source_text_observation_ids
+                        if semantic_label_evidence is not None
+                        else ()
+                    ),
+                    *(
+                        semantic_label_evidence.legend_observation_ids
+                        if semantic_label_evidence is not None
                         else ()
                     ),
                     (
