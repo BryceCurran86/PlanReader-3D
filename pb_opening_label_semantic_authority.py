@@ -117,12 +117,14 @@ def _trusted_native_lines(source: SourceVisibilityProducer, opening):
 
 
 def _legend_semantics(lines):
-    legend_blocks = {
-        block_no
-        for block_no, _line_no, line in lines
-        if block_no is not None and _LEGEND_HEADER_RE.search(line.text or "")
-    }
-    if not legend_blocks:
+    # A legend heading may be emitted as a separate native text block from the
+    # table it governs. Gate semantics at page scope, but still require each
+    # code/definition pair to share one producer-owned block and align.
+    has_legend_header = any(
+        _LEGEND_HEADER_RE.search(line.text or "") is not None
+        for _block_no, _line_no, line in lines
+    )
+    if not has_legend_header:
         return {}, set()
 
     resolved = {}
@@ -130,7 +132,7 @@ def _legend_semantics(lines):
 
     # Some PDF producers keep code + definition on one native line.
     for block_no, _line_no, line in lines:
-        if block_no not in legend_blocks:
+        if block_no is None:
             continue
         parts = line.text.strip().split(maxsplit=1)
         if len(parts) != 2:
@@ -153,7 +155,7 @@ def _legend_semantics(lines):
         resolved[code] = (kind, tuple(sorted(line.observation_ids)))
 
     for block_no, _line_no, code_line in lines:
-        if block_no not in legend_blocks:
+        if block_no is None:
             continue
         code = code_line.text.strip().upper()
         if _LEGEND_CODE_RE.fullmatch(code) is None:
