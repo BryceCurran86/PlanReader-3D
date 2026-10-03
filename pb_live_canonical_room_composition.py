@@ -9,10 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Collection, Mapping, Optional
 
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_face_authority import (
     SourceRoomFaceSelector,
     build_source_room_face_authority,
@@ -24,6 +26,9 @@ LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.0.0"
 LIVE_CANONICAL_ROOM_RESOLVED = "live_canonical_room_composition_resolved"
 LIVE_CANONICAL_ROOM_PARTIAL = "live_canonical_room_composition_partial"
 LIVE_CANONICAL_ROOM_UNAVAILABLE = "live_canonical_room_composition_unavailable"
+LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED = (
+    "live_canonical_room_viewport_fallback_resolved"
+)
 
 @dataclass(frozen=True)
 class LiveCanonicalRoomObject:
@@ -87,6 +92,54 @@ class LiveCanonicalRoomComposition:
 def _dedupe(values: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
 
+
+def _room_object_from_record(
+    record,
+    *,
+    viewport_id: Optional[str],
+    canonical_wall_ids_by_candidate: Optional[Mapping[str, str]],
+    unresolved_wall_candidate_ids: Optional[Collection[str]],
+) -> LiveCanonicalRoomObject:
+    canonical_boundary_ids: tuple[str, ...] = ()
+    wall_relationships_complete = False
+    if canonical_wall_ids_by_candidate is not None:
+        mapped = [
+            str(canonical_wall_ids_by_candidate.get(wall_id) or "")
+            for wall_id in record.bounding_wall_ids
+        ]
+        if mapped and all(mapped):
+            canonical_boundary_ids = tuple(dict.fromkeys(mapped))
+            unresolved_ids = {
+                str(value)
+                for value in (unresolved_wall_candidate_ids or ())
+                if str(value)
+            }
+            wall_relationships_complete = not any(
+                wall_id in unresolved_ids for wall_id in record.bounding_wall_ids
+            )
+
+    return LiveCanonicalRoomObject(
+        canonical_room_id=record.face_id,
+        physical_room_id=record.face_id,
+        document_id=record.document_id,
+        revision_id=record.revision_id,
+        source_sha256=record.source_sha256,
+        snapshot_id=record.snapshot_id,
+        page_id=record.page_id,
+        viewport_id=viewport_id,
+        decision_scope_id=record.decision_scope_id,
+        polygon_pdf_pts=record.polygon_pdf_pts,
+        bounding_wall_ids=record.bounding_wall_ids,
+        canonical_bounding_wall_ids=canonical_boundary_ids,
+        wall_relationships_complete=wall_relationships_complete,
+        area_page_pts2=float(record.area_page_pts2),
+        source_room_face_record_id=record.record_id,
+        evidence_ids=(record.record_id,),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+    )
+
+
 def compose_live_canonical_rooms(
     *,
     source_visibility_producer: SourceVisibilityProducer,
@@ -118,6 +171,8 @@ def compose_live_canonical_rooms(
     rooms: list[LiveCanonicalRoomObject] = []
     reasons: list[str] = []
     resolved_pages: set[int] = set()
+    unresolved_pages: list[str] = []
+    viewport_fallback_used = False
 
     for page_id in wall_opening_composition.page_ids:
         selector = SourceRoomFaceSelector(
@@ -136,62 +191,129 @@ def compose_live_canonical_rooms(
         ):
             if str(page_id).isdigit():
                 resolved_pages.add(int(page_id))
-            for record in result.records:
-                canonical_boundary_ids: tuple[str, ...] = ()
-                wall_relationships_complete = False
-                if canonical_wall_ids_by_candidate is not None:
-                    mapped = [
-                        str(canonical_wall_ids_by_candidate.get(wall_id) or "")
-                        for wall_id in record.bounding_wall_ids
-                    ]
-                    if mapped and all(mapped):
-                        canonical_boundary_ids = tuple(dict.fromkeys(mapped))
-                        unresolved_ids = {
-                            str(value)
-                            for value in (unresolved_wall_candidate_ids or ())
-                            if str(value)
-                        }
-                        wall_relationships_complete = not any(
-                            wall_id in unresolved_ids
-                            for wall_id in record.bounding_wall_ids
-                        )
-                rooms.append(
-                    LiveCanonicalRoomObject(
-                        canonical_room_id=record.face_id,
-                        physical_room_id=record.face_id,
-                        document_id=record.document_id,
-                        revision_id=record.revision_id,
-                        source_sha256=record.source_sha256,
-                        snapshot_id=record.snapshot_id,
-                        page_id=record.page_id,
-                        viewport_id=None,
-                        decision_scope_id=record.decision_scope_id,
-                        polygon_pdf_pts=record.polygon_pdf_pts,
-                        bounding_wall_ids=record.bounding_wall_ids,
-                        canonical_bounding_wall_ids=canonical_boundary_ids,
-                        wall_relationships_complete=wall_relationships_complete,
-                        area_page_pts2=float(record.area_page_pts2),
-                        source_room_face_record_id=record.record_id,
-                        evidence_ids=(record.record_id,),
-                        geometry_complete=True,
-                        metric_geometry_complete=False,
-                    )
+            rooms.extend(
+                _room_object_from_record(
+                    record,
+                    viewport_id=None,
+                    canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
+                    unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
                 )
+                for record in result.records
+            )
         else:
             reasons.extend(result.reason_codes)
+            unresolved_pages.append(str(page_id))
+
+    # Page-wide ownership can abstain when unrelated reference furniture shares
+    # the sheet with a physical drawing. Only for those pages, ask the existing
+    # producer-owned viewport wall authority for authenticated floor-plan scopes.
+    # No caller-supplied title, bbox, geometry, wall list, or completeness flag
+    # enters this fallback.
+    if unresolved_pages:
+        viewport_wall_producer = (
+            PhysicalWallCandidateProducer.from_authenticated_viewports(
+                source_visibility_producer,
+                page_ids=tuple(unresolved_pages),
+            )
+        )
+        viewport_wall_authority = viewport_wall_producer.authority()
+        viewport_published = source_visibility_producer.published_snapshot_for_revision(
+            wall_opening_composition.revision_id
+        )
+        if (
+            viewport_published is not None
+            and viewport_published.revision.document_id
+            == published.revision.document_id
+            and viewport_published.revision.revision_id
+            == published.revision.revision_id
+            and viewport_published.revision.source_sha256
+            == published.revision.source_sha256
+        ):
+            viewport_room_authority = build_source_room_face_authority(
+                viewport_wall_authority
+            )
+            for page_id in unresolved_pages:
+                selectors = (
+                    viewport_wall_authority.selectors_for_authenticated_viewports(
+                        document_id=viewport_published.revision.document_id,
+                        revision_id=viewport_published.revision.revision_id,
+                        source_sha256=viewport_published.revision.source_sha256,
+                        snapshot_id=viewport_published.snapshot.snapshot_id,
+                        page_id=page_id,
+                        view_type=DrawingViewType.FLOOR_PLAN.value,
+                    )
+                )
+                page_resolved = False
+                for wall_selector in selectors:
+                    wall_scope = viewport_wall_authority.resolve_scope(wall_selector)
+                    if (
+                        wall_scope.status is not EvidenceResolutionStatus.CORROBORATED
+                        or not wall_scope.scope_complete
+                        or not wall_scope.records
+                    ):
+                        reasons.extend(wall_scope.reason_codes)
+                        continue
+
+                    room_result = viewport_room_authority.resolve_scope(
+                        SourceRoomFaceSelector(
+                            document_id=wall_selector.document_id,
+                            revision_id=wall_selector.revision_id,
+                            source_sha256=wall_selector.source_sha256,
+                            snapshot_id=wall_selector.snapshot_id,
+                            page_id=wall_selector.page_id,
+                            decision_scope_id=wall_selector.decision_scope_id,
+                        )
+                    )
+                    if (
+                        room_result.status is not EvidenceResolutionStatus.CORROBORATED
+                        or not room_result.scope_complete
+                        or not room_result.records
+                    ):
+                        reasons.extend(room_result.reason_codes)
+                        continue
+
+                    rooms.extend(
+                        _room_object_from_record(
+                            record,
+                            viewport_id=wall_scope.viewport_id,
+                            canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
+                            unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
+                        )
+                        for record in room_result.records
+                    )
+                    page_resolved = True
+                    viewport_fallback_used = True
+
+                if page_resolved and str(page_id).isdigit():
+                    resolved_pages.add(int(page_id))
 
     rooms.sort(key=lambda room: (room.page_id, room.canonical_room_id))
     if rooms and len(resolved_pages) == len(wall_opening_composition.page_ids):
         return LiveCanonicalRoomComposition(
             status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(LIVE_CANONICAL_ROOM_RESOLVED,),
+            reason_codes=(
+                (LIVE_CANONICAL_ROOM_RESOLVED,)
+                if not viewport_fallback_used
+                else (
+                    LIVE_CANONICAL_ROOM_RESOLVED,
+                    LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED,
+                )
+            ),
             rooms=tuple(rooms),
             source_pages=tuple(sorted(resolved_pages)),
         )
     if rooms:
         return LiveCanonicalRoomComposition(
             status=EvidenceResolutionStatus.CANDIDATE,
-            reason_codes=(LIVE_CANONICAL_ROOM_PARTIAL, *_dedupe(reasons)),
+            reason_codes=(
+                LIVE_CANONICAL_ROOM_PARTIAL,
+                *(
+                    (LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED,)
+                    if viewport_fallback_used
+                    else ()
+                ),
+                *_dedupe(reasons),
+            ),
             rooms=tuple(rooms),
             source_pages=tuple(sorted(resolved_pages)),
         )
@@ -208,6 +330,7 @@ __all__ = [
     "LIVE_CANONICAL_ROOM_RESOLVED",
     "LIVE_CANONICAL_ROOM_SCHEMA_VERSION",
     "LIVE_CANONICAL_ROOM_UNAVAILABLE",
+    "LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED",
     "LiveCanonicalRoomComposition",
     "LiveCanonicalRoomObject",
     "compose_live_canonical_rooms",
