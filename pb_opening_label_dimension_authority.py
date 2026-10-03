@@ -84,6 +84,9 @@ _FRAGMENT_EXCLUSION_TOKEN_RE = re.compile(
     r"^(?:CLEAR|NICHE|SCALE)$",
     re.IGNORECASE,
 )
+_FRAGMENT_CONTINUATION_TOKEN_RE = re.compile(
+    r"^(?:[-–—xX×])$",
+)
 
 _Key = tuple[str, str, str, str, str]
 
@@ -405,14 +408,20 @@ def _adjacent_exclusion_token(
     if start > 0:
         token = str(rows[start - 1][2] or "").strip()
         if (
-            _FRAGMENT_EXCLUSION_TOKEN_RE.fullmatch(token) is not None
+            (
+                _FRAGMENT_EXCLUSION_TOKEN_RE.fullmatch(token) is not None
+                or _FRAGMENT_CONTINUATION_TOKEN_RE.fullmatch(token) is not None
+            )
             and _is_close(rows[start - 1][3], rows[start][3])
         ):
             return True
     if end < len(rows):
         token = str(rows[end][2] or "").strip()
         if (
-            _FRAGMENT_EXCLUSION_TOKEN_RE.fullmatch(token) is not None
+            (
+                _FRAGMENT_EXCLUSION_TOKEN_RE.fullmatch(token) is not None
+                or _FRAGMENT_CONTINUATION_TOKEN_RE.fullmatch(token) is not None
+            )
             and _is_close(rows[end - 1][3], rows[end][3])
         ):
             return True
@@ -745,14 +754,7 @@ def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
 
     cross = _dot(center, gap.normal)
     glyph_height = max(_COORD_TOL, min(abs(x1 - x0), abs(y1 - y0)))
-    gap_span = max(_COORD_TOL, gap.along_max - gap.along_min)
-    # Keep text ownership local to the physical gap. Glyph size is useful for
-    # ordinary drafting offsets, but a large text box must not expand the
-    # search corridor far beyond the opening itself.
-    cross_allowance = max(
-        2.0 * gap.cross_spread,
-        min(3.0 * glyph_height, 0.5 * gap_span),
-    )
+    cross_allowance = max(3.0 * glyph_height, 2.0 * gap.cross_spread)
     return abs(cross - gap.cross_center) <= cross_allowance + _COORD_TOL
 
 
