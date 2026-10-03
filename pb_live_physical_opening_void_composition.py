@@ -8,6 +8,7 @@ from the exact source-owned opening/host/completeness lineage.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 from typing import Mapping, Optional
 
@@ -37,6 +38,7 @@ from pb_opening_vertical_placement_authority import (
     ScheduleRowVerticalPlacementProducer,
     ScheduleRowVerticalPlacementSelector,
 )
+from pb_page_view_class_source_adapter import page_viewport_id
 from pb_physical_opening_void_authority import (
     PhysicalOpeningVoidAuthority,
     PhysicalOpeningVoidProducer,
@@ -115,6 +117,8 @@ class LiveCanonicalOpeningObject:
     tag_observation_id: Optional[str]
     evidence_ids: tuple[str, ...]
     geometry_complete: bool
+    schedule_row_dimension_basis: str = ""
+    schedule_row_basis_source: str = ""
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -166,6 +170,8 @@ class LiveCanonicalOpeningObject:
             "tag_observation_id": self.tag_observation_id,
             "evidence_ids": list(self.evidence_ids),
             "geometry_complete": self.geometry_complete,
+            "schedule_row_dimension_basis": self.schedule_row_dimension_basis,
+            "schedule_row_basis_source": self.schedule_row_basis_source,
             "schema_version": self.schema_version,
         }
 
@@ -214,7 +220,15 @@ def _reason_tuple(values) -> tuple[str, ...]:
 
 def _canonical_provenance_ids(values) -> tuple[str, ...]:
     """Deterministic set-like provenance union for one canonical object."""
-    return tuple(sorted({str(value) for value in values if str(value)}))
+    return tuple(
+        sorted(
+            {
+                str(value).strip()
+                for value in values
+                if value is not None and str(value).strip()
+            }
+        )
+    )
 
 
 def _canonical_opening_area(
@@ -222,43 +236,77 @@ def _canonical_opening_area(
     width_m: Optional[float],
     height_m: Optional[float],
     figured_label_evidence,
+    schedule_record=None,
+    geometry_complete: bool = True,
 ) -> tuple[Optional[float], Optional[str], Optional[str]]:
     """Resolve customer-facing opening area without inventing axis order.
 
-    Existing fully-resolved width+height geometry remains authoritative here.
-    Otherwise a corroborated two-axis figured label may provide only its
-    order-invariant product. It never back-fills width_m or height_m.
+    Existing fully-resolved width+height geometry remains authoritative when the
+    physical opening geometry is complete. Otherwise an explicitly based outer-
+    frame schedule may provide gross frame area. Failing that, a corroborated
+    unordered two-axis figured label may provide only its order-invariant
+    product. None of these paths back-fills width_m or height_m.
     """
 
-    if width_m is not None and height_m is not None:
+    figured_record_id = (
+        str(figured_label_evidence.evidence_id)
+        if figured_label_evidence is not None
+        else None
+    )
+
+    if geometry_complete and width_m is not None and height_m is not None:
         return (
             float(width_m) * float(height_m),
             "resolved_opening_geometry",
-            (
-                str(figured_label_evidence.evidence_id)
-                if figured_label_evidence is not None
-                else None
-            ),
+            figured_record_id,
         )
+
+    if (
+        schedule_record is not None
+        and str(
+            getattr(schedule_record, "schedule_row_dimension_basis", "") or ""
+        ).strip().lower() == "frame"
+        and getattr(schedule_record, "schedule_row_width_mm", None) is not None
+        and getattr(schedule_record, "schedule_row_height_mm", None) is not None
+    ):
+        try:
+            frame_width_mm = float(schedule_record.schedule_row_width_mm)
+            frame_height_mm = float(schedule_record.schedule_row_height_mm)
+        except (TypeError, ValueError, OverflowError):
+            frame_width_mm = 0.0
+            frame_height_mm = 0.0
+        if (
+            math.isfinite(frame_width_mm)
+            and math.isfinite(frame_height_mm)
+            and frame_width_mm > 0.0
+            and frame_height_mm > 0.0
+        ):
+            return (
+                (frame_width_mm / 1000.0) * (frame_height_mm / 1000.0),
+                "authenticated_frame_schedule",
+                None,
+            )
+
     if (
         figured_label_evidence is not None
         and getattr(figured_label_evidence, "area_m2", None) is not None
         and getattr(figured_label_evidence, "axis_order_resolved", None) is False
     ):
-        return (
-            float(figured_label_evidence.area_m2),
-            str(getattr(figured_label_evidence, "basis", "figured_opening_label")),
-            str(figured_label_evidence.evidence_id),
-        )
-    return (
-        None,
-        None,
-        (
-            str(figured_label_evidence.evidence_id)
-            if figured_label_evidence is not None
-            else None
-        ),
-    )
+        value = float(figured_label_evidence.area_m2)
+        if math.isfinite(value) and value > 0.0:
+            return (
+                value,
+                str(
+                    getattr(
+                        figured_label_evidence,
+                        "basis",
+                        "figured_opening_label",
+                    )
+                ),
+                figured_record_id,
+            )
+
+    return None, None, figured_record_id
 
 
 def compose_live_physical_opening_voids(
@@ -557,6 +605,8 @@ def compose_live_physical_opening_voids(
         schedule_declared_height_mm = None
         schedule_declared_count = None
         schedule_count_explicit = False
+        schedule_row_dimension_basis = ""
+        schedule_row_basis_source = ""
         schedule_row_observation_ids: tuple[str, ...] = ()
         tag_observation_id = None
         if schedule_record is not None and normalized_schedule_tag is not None:
@@ -568,6 +618,12 @@ def compose_live_physical_opening_voids(
             schedule_declared_count = schedule_record.schedule_row_count
             schedule_count_explicit = bool(
                 schedule_record.schedule_row_count_explicit
+            )
+            schedule_row_dimension_basis = str(
+                schedule_record.schedule_row_dimension_basis or ""
+            )
+            schedule_row_basis_source = str(
+                schedule_record.schedule_row_basis_source or ""
             )
             schedule_row_observation_ids = tuple(
                 schedule_record.schedule_row_observation_ids
@@ -690,6 +746,8 @@ def compose_live_physical_opening_voids(
             width_m=width_m,
             height_m=height_m,
             figured_label_evidence=figured_label_evidence,
+            schedule_record=schedule_record,
+            geometry_complete=void_record is not None,
         )
 
         if existence_record is not None:
@@ -747,7 +805,11 @@ def compose_live_physical_opening_voids(
                     source_sha256=existence_record.source_sha256,
                     snapshot_id=existence_record.snapshot_id,
                     page_id=existence_record.page_id,
-                    viewport_id=existence_record.viewport_id,
+                    viewport_id=(
+                        str(existence_record.viewport_id)
+                        if existence_record.viewport_id is not None
+                        else page_viewport_id(existence_record.page_id)
+                    ),
                     semantic_class=existence_record.semantic_class,
                     structural_pattern=existence_record.structural_pattern,
                     representative_observation_id=representative_by_opening[opening_id],
@@ -819,6 +881,8 @@ def compose_live_physical_opening_voids(
                     tag_observation_id=tag_observation_id,
                     evidence_ids=evidence_ids,
                     geometry_complete=void_record is not None,
+                    schedule_row_dimension_basis=schedule_row_dimension_basis,
+                    schedule_row_basis_source=schedule_row_basis_source,
                 )
             )
 
