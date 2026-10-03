@@ -98,6 +98,8 @@ class ScheduleOpeningInstanceBindingRecord:
     # reconciliation can never treat the default as evidence.
     schedule_row_count: int | None = None
     schedule_row_count_explicit: bool = False
+    schedule_row_dimension_basis: str = ""
+    schedule_row_basis_source: str = ""
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -948,6 +950,8 @@ class ScheduleOpeningInstanceBindingProducer:
             "schedule_row_height_mm": entry.height_mm,
             "schedule_row_count": entry.count if entry.count_explicit else None,
             "schedule_row_count_explicit": bool(entry.count_explicit),
+            "schedule_row_dimension_basis": str(entry.dimension_basis or ""),
+            "schedule_row_basis_source": str(entry.basis_source or ""),
         }
         record = ScheduleOpeningInstanceBindingRecord(
             record_id=stable_contract_id(
