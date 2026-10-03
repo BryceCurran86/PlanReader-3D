@@ -1025,6 +1025,8 @@ class ScheduleOpeningInstanceBindingProducer:
             schedule_row_height_mm=entry.height_mm,
             schedule_row_count=entry.count if entry.count_explicit else None,
             schedule_row_count_explicit=bool(entry.count_explicit),
+            schedule_row_dimension_basis=str(entry.dimension_basis or ""),
+            schedule_row_basis_source=str(entry.basis_source or ""),
         )
         return self._store(
             key,
