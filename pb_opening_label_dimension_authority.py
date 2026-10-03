@@ -87,6 +87,11 @@ _FRAGMENT_EXCLUSION_TOKEN_RE = re.compile(
 _FRAGMENT_CONTINUATION_TOKEN_RE = re.compile(
     r"^(?:[-–—xX×])$",
 )
+_EXPLICIT_WINDOW_WORD_RE = re.compile(r"\bWINDOWS?\b", re.IGNORECASE)
+_EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.IGNORECASE)
+_LEGEND_HEADER_RE = re.compile(r"\b(?:LEGEND|ABBREVIATIONS?)\b", re.IGNORECASE)
+_LEGEND_CODE_RE = re.compile(r"^[A-Z][A-Z0-9._/+\-]{0,14}$", re.IGNORECASE)
+_LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.IGNORECASE)
 
 _Key = tuple[str, str, str, str, str]
 
@@ -677,6 +682,8 @@ def _prefer_richer_label_fragments(
 def _trusted_text_lines(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
+    *,
+    include_unparsed: bool = False,
 ) -> tuple[_TrustedTextLine, ...]:
     published = source.published_snapshot_for_revision(opening.revision_id)
     if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
@@ -735,6 +742,20 @@ def _trusted_text_lines(
         )
         fragments.extend(
             _parseable_opening_label_fragments(ordered)
+        )
+
+    if include_unparsed:
+        return tuple(
+            sorted(
+                raw_lines,
+                key=lambda item: (
+                    item.bbox[1],
+                    item.bbox[0],
+                    item.bbox[3],
+                    item.bbox[2],
+                    item.observation_ids,
+                ),
+            )
         )
 
     # Some CAD exports wrap one callout over two immediately adjacent native
