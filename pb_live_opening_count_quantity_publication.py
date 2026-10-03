@@ -63,28 +63,7 @@ def publish_live_authenticated_opening_count_quantities(
     page_bindings: dict[str, dict[str, object]] = {}
     page_selectors: dict[str, dict[str, ScheduleOpeningInstanceBindingSelector]] = {}
 
-    semantic_record = wall_opening_composition.semantic_enumeration_result.record
-    representative_ids = (
-        tuple(semantic_record.representative_observation_ids)
-        if semantic_record is not None
-        else ()
-    )
-    for observation_id in representative_ids:
-        opening_selector = ObservationSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            observation_id=str(observation_id),
-        )
-        existence = physical.prove_existence(opening_selector)
-        opening = existence.existence_record
-        if (
-            existence.status is not EvidenceResolutionStatus.CORROBORATED
-            or opening is None
-        ):
-            continue
-        page_id = str(opening.page_id)
+    for page_id in wall_opening_composition.page_ids:
         universe_result = wall_opening_composition.opening_universe_results.get(page_id)
         universe_record = universe_result.record if universe_result is not None else None
         if (
@@ -94,21 +73,47 @@ def publish_live_authenticated_opening_count_quantities(
             or not bool(universe_record.decision_scope_complete)
         ):
             continue
-        scope_id = str(universe_record.decision_scope_id)
-        result = binding_producer.publish_scope(
-            opening_selector=opening_selector,
-            decision_scope_id=scope_id,
+
+        accounted_ids = tuple(
+            getattr(universe_record, "accounted_source_observation_ids", ()) or ()
         )
-        selector = ScheduleOpeningInstanceBindingSelector(
-            document_id=opening.document_id,
-            revision_id=opening.revision_id,
-            source_sha256=opening.source_sha256,
-            snapshot_id=opening.snapshot_id,
-            decision_scope_id=scope_id,
-            opening_record_id=opening.record_id,
-        )
-        page_bindings.setdefault(page_id, {})[opening.record_id] = result
-        page_selectors.setdefault(page_id, {})[opening.record_id] = selector
+        if not accounted_ids:
+            accounted_ids = tuple(
+                getattr(universe_record, "accounted_member_ids", ()) or ()
+            )
+
+        for observation_id in accounted_ids:
+            opening_selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=str(observation_id),
+            )
+            existence = physical.prove_existence(opening_selector)
+            opening = existence.existence_record
+            if (
+                existence.status is not EvidenceResolutionStatus.CORROBORATED
+                or opening is None
+                or str(opening.page_id) != str(page_id)
+            ):
+                continue
+
+            scope_id = str(universe_record.decision_scope_id)
+            result = binding_producer.publish_scope(
+                opening_selector=opening_selector,
+                decision_scope_id=scope_id,
+            )
+            selector = ScheduleOpeningInstanceBindingSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                decision_scope_id=scope_id,
+                opening_record_id=opening.record_id,
+            )
+            page_bindings.setdefault(str(page_id), {})[opening.record_id] = result
+            page_selectors.setdefault(str(page_id), {})[opening.record_id] = selector
 
     if not page_bindings:
         return ()
