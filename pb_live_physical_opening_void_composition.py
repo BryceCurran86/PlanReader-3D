@@ -8,6 +8,7 @@ from the exact source-owned opening/host/completeness lineage.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 from typing import Mapping, Optional
 
