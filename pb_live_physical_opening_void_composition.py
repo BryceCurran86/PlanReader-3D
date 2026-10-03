@@ -38,6 +38,7 @@ from pb_opening_vertical_placement_authority import (
     ScheduleRowVerticalPlacementProducer,
     ScheduleRowVerticalPlacementSelector,
 )
+from pb_page_view_class_source_adapter import page_viewport_id
 from pb_physical_opening_void_authority import (
     PhysicalOpeningVoidAuthority,
     PhysicalOpeningVoidProducer,
@@ -219,7 +220,15 @@ def _reason_tuple(values) -> tuple[str, ...]:
 
 def _canonical_provenance_ids(values) -> tuple[str, ...]:
     """Deterministic set-like provenance union for one canonical object."""
-    return tuple(sorted({str(value) for value in values if str(value)}))
+    return tuple(
+        sorted(
+            {
+                str(value).strip()
+                for value in values
+                if value is not None and str(value).strip()
+            }
+        )
+    )
 
 
 def _canonical_opening_area(
@@ -796,7 +805,11 @@ def compose_live_physical_opening_voids(
                     source_sha256=existence_record.source_sha256,
                     snapshot_id=existence_record.snapshot_id,
                     page_id=existence_record.page_id,
-                    viewport_id=existence_record.viewport_id,
+                    viewport_id=(
+                        str(existence_record.viewport_id)
+                        if existence_record.viewport_id is not None
+                        else page_viewport_id(existence_record.page_id)
+                    ),
                     semantic_class=existence_record.semantic_class,
                     structural_pattern=existence_record.structural_pattern,
                     representative_observation_id=representative_by_opening[opening_id],
