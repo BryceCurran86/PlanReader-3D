@@ -796,6 +796,231 @@ def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
     return abs(cross - gap.cross_center) <= cross_allowance + _COORD_TOL
 
 
+
+def _explicit_word_kind(text: str) -> tuple[Optional[str], bool]:
+    has_window = _EXPLICIT_WINDOW_WORD_RE.search(text or "") is not None
+    has_door = _EXPLICIT_DOOR_WORD_RE.search(text or "") is not None
+    if has_window and has_door:
+        return None, True
+    if has_window:
+        return "window", False
+    if has_door:
+        return "door", False
+    return None, False
+
+
+def _authenticated_legend_kinds(
+    source: SourceVisibilityProducer,
+    opening: PhysicalOpeningExistenceRecord,
+) -> tuple[Mapping[str, tuple[str, tuple[str, ...]]], frozenset[str]]:
+    """Read code meaning only from trusted source legend text."""
+
+    published = source.published_snapshot_for_revision(opening.revision_id)
+    if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
+        return MappingProxyType({}), frozenset()
+    integrity = source.text_integrity_authority()
+
+    grouped: dict[
+        tuple[str, int, int],
+        list[tuple[int, str, str, tuple[float, ...]]],
+    ] = {}
+    for observation_id in published.text_observation_ids:
+        resolved = integrity.resolve_text(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        receipt = getattr(resolved, "receipt", None)
+        if (
+            resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or resolved.trusted_text is None
+            or receipt is None
+            or receipt.block_no is None
+            or receipt.line_no is None
+        ):
+            continue
+        grouped.setdefault(
+            (str(receipt.page_id), int(receipt.block_no), int(receipt.line_no)),
+            [],
+        ).append(
+            (
+                int(receipt.word_no or 0),
+                observation_id,
+                resolved.trusted_text,
+                tuple(float(value) for value in receipt.geometry),
+            )
+        )
+
+    lines: list[
+        tuple[
+            str,
+            int,
+            str,
+            tuple[str, ...],
+            tuple[float, float, float, float],
+        ]
+    ] = []
+    for (page_id, block_no, _line_no), rows in grouped.items():
+        ordered = sorted(rows, key=lambda item: (item[0], item[1]))
+        bbox = _bbox_union([row[3] for row in ordered])
+        if bbox is None:
+            continue
+        lines.append(
+            (
+                page_id,
+                block_no,
+                " ".join(row[2] for row in ordered).strip(),
+                tuple(row[1] for row in ordered),
+                bbox,
+            )
+        )
+
+    legend_pages = {
+        page_id
+        for page_id, _block, text, _ids, _bbox in lines
+        if _LEGEND_HEADER_RE.search(text or "") is not None
+    }
+    resolved_codes: dict[str, tuple[str, tuple[str, ...]]] = {}
+    conflicts: set[str] = set()
+
+    # Same-line representation: "SGW SLIDING GLASS WINDOW".
+    for page_id, _block, text, ids, _bbox in lines:
+        if page_id not in legend_pages:
+            continue
+        parts = text.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        code = parts[0].upper()
+        if _LEGEND_CODE_RE.fullmatch(code) is None:
+            continue
+        kind, conflict = _explicit_word_kind(parts[1])
+        if conflict:
+            conflicts.add(code)
+            resolved_codes.pop(code, None)
+            continue
+        if kind is None:
+            continue
+        prior = resolved_codes.get(code)
+        if prior is not None and prior[0] != kind:
+            conflicts.add(code)
+            resolved_codes.pop(code, None)
+            continue
+        resolved_codes[code] = (kind, tuple(sorted(ids)))
+
+    # Column representation: code and definition are separate native lines in
+    # the same PDF text block and share the same row by majority Y overlap.
+    for page_id, block_no, code_text, code_ids, code_bbox in lines:
+        code = code_text.strip().upper()
+        if page_id not in legend_pages or _LEGEND_CODE_RE.fullmatch(code) is None:
+            continue
+        candidates: list[tuple[str, tuple[str, ...]]] = []
+        for other_page, other_block, desc_text, desc_ids, desc_bbox in lines:
+            if other_page != page_id or other_block != block_no:
+                continue
+            if desc_bbox[0] <= code_bbox[2]:
+                continue
+            if (
+                _bbox_overlap_fraction(
+                    code_bbox[1],
+                    code_bbox[3],
+                    desc_bbox[1],
+                    desc_bbox[3],
+                )
+                < 0.5
+            ):
+                continue
+            kind, conflict = _explicit_word_kind(desc_text)
+            if conflict:
+                conflicts.add(code)
+                continue
+            if kind is not None:
+                candidates.append((kind, desc_ids))
+        kinds = {kind for kind, _ids in candidates}
+        if len(kinds) > 1:
+            conflicts.add(code)
+            resolved_codes.pop(code, None)
+            continue
+        if len(kinds) != 1 or code in conflicts:
+            continue
+        kind = next(iter(kinds))
+        evidence_ids = tuple(
+            sorted(
+                {
+                    *code_ids,
+                    *(
+                        observation_id
+                        for candidate_kind, ids in candidates
+                        if candidate_kind == kind
+                        for observation_id in ids
+                    ),
+                }
+            )
+        )
+        prior = resolved_codes.get(code)
+        if prior is not None and prior[0] != kind:
+            conflicts.add(code)
+            resolved_codes.pop(code, None)
+            continue
+        resolved_codes[code] = (kind, evidence_ids)
+
+    for code in conflicts:
+        resolved_codes.pop(code, None)
+    return MappingProxyType(dict(sorted(resolved_codes.items()))), frozenset(conflicts)
+
+
+def _owned_label_semantics(
+    source: SourceVisibilityProducer,
+    opening: PhysicalOpeningExistenceRecord,
+    gap: _GapSpan,
+) -> tuple[Optional[str], tuple[str, ...], tuple[str, ...], bool]:
+    """Resolve semantic kind only from an opening-owned label plus source authority."""
+
+    legend_map, legend_conflicts = _authenticated_legend_kinds(source, opening)
+    kinds: set[str] = set()
+    label_ids: set[str] = set()
+    authority_ids: set[str] = set()
+
+    for line in _trusted_text_lines(source, opening, include_unparsed=True):
+        if not _label_matches_gap(line, gap):
+            continue
+        direct_kind, direct_conflict = _explicit_word_kind(line.text)
+        if direct_conflict:
+            return None, (), (), True
+        if direct_kind is not None:
+            kinds.add(direct_kind)
+            label_ids.update(line.observation_ids)
+
+        tokens = {
+            match.group(0).upper()
+            for match in _LABEL_CODE_TOKEN_RE.finditer(line.text or "")
+        }
+        if tokens & legend_conflicts:
+            return None, (), (), True
+        for token in sorted(tokens):
+            definition = legend_map.get(token)
+            if definition is None:
+                continue
+            kind, ids = definition
+            kinds.add(kind)
+            label_ids.update(line.observation_ids)
+            authority_ids.update(ids)
+
+    if len(kinds) > 1:
+        return None, (), (), True
+    if not kinds:
+        return None, (), (), False
+    return (
+        next(iter(kinds)),
+        tuple(sorted(label_ids)),
+        tuple(sorted(authority_ids)),
+        False,
+    )
+
+
 def _structural_kind(pattern: str) -> Optional[str]:
     if pattern == GAP_CORROBORATED_DOOR_JAMB_LEAF:
         return "door"
