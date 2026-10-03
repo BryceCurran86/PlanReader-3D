@@ -37,16 +37,21 @@ def test_parser_accepts_full_metric_opening_labels_without_resolving_axis_order(
 def test_parser_accepts_typed_compact_hundred_mm_notation_only() -> None:
     door = parse_opening_label_dimensions("21 - 15 - asd")
     assert door is not None
-    assert door.dimension_values_mm == (2100.0, 1500.0)
+    assert door.dimension_values_mm == ()
     assert door.semantic_kind is None
     assert door.suffix_text.lower().endswith("asd")
-    assert door.compact_hundreds_used is True
+    assert door.compact_hundreds_present is True
+    assert door.compact_hundreds_used is False
+    assert door.area_m2 is None
 
     window = parse_opening_label_dimensions("18 - 09 adh")
     assert window is not None
-    assert window.dimension_values_mm == (1800.0, 900.0)
+    assert window.dimension_values_mm == ()
     assert window.semantic_kind is None
     assert window.suffix_text.lower() == "adh"
+    assert window.compact_hundreds_present is True
+    assert window.compact_hundreds_used is False
+    assert window.area_m2 is None
 
     # Untyped two-digit arithmetic/text cannot silently become dimensions.
     assert parse_opening_label_dimensions("21 - 15") is None
@@ -287,6 +292,44 @@ def test_producer_binds_one_figured_pair_by_gap_projection_not_nearest_choice() 
     assert result.evidence.axis_order_resolved is False
     assert result.evidence.source_text_observation_ids
 
+
+def test_compact_expansion_requires_authenticated_owned_opening() -> None:
+    from pb_opening_label_dimension_authority import (
+        _resolve_owned_dimension_values_mm,
+    )
+
+    parsed = parse_opening_label_dimensions("18 - 09 adh")
+    assert parsed is not None
+    assert parsed.dimension_values_mm == ()
+    assert _resolve_owned_dimension_values_mm(
+        parsed, opening_record_id="", semantic_kind="window"
+    ) is None
+    assert _resolve_owned_dimension_values_mm(
+        parsed, opening_record_id="owned-opening", semantic_kind=None
+    ) is None
+    resolved = _resolve_owned_dimension_values_mm(
+        parsed, opening_record_id="owned-opening", semantic_kind="window"
+    )
+    assert resolved == ((1800.0, 900.0), True)
+
+
+def test_producer_expands_compact_dimensions_only_after_physical_ownership() -> None:
+    source, published = _ingest(
+        _pdf(labels=((88.0, 124.0, "18 - 09 adh"),)),
+        "compact-owned",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.dimension_values_mm == (1800.0, 900.0)
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.area_m2 == pytest.approx(1.62)
+    assert result.evidence.opening_record_id
+    assert result.evidence.source_text_observation_ids
 
 def test_producer_stitches_one_source_callout_split_over_adjacent_native_lines() -> None:
     source, published = _ingest(
