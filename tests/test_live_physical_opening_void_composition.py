@@ -73,7 +73,11 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
         doc.close()
 
 
-def _semantic_kind_only_pdf() -> bytes:
+def _semantic_kind_only_pdf(
+    *,
+    label: str = "1218 ZX",
+    legend_rows: tuple[str, ...] = ("ZX - SLIDING GLASS WINDOW",),
+) -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=760.0, height=650.0)
@@ -92,11 +96,11 @@ def _semantic_kind_only_pdf() -> bytes:
 
         # The compact token remains dimension-unresolved in DEF-03. Only the
         # label code is semantically authenticated by the source legend.
-        page.insert_text(fitz.Point(108.0, 106.0), "1218 ZX", fontsize=7.0)
+        page.insert_text(fitz.Point(108.0, 106.0), label, fontsize=7.0)
         page.insert_text(fitz.Point(300.0, 180.0), "LEGEND", fontsize=7.0)
         page.insert_text(
             fitz.Point(300.0, 194.0),
-            "ZX - SLIDING GLASS WINDOW",
+            "\n".join(legend_rows),
             fontsize=7.0,
         )
         return bytes(doc.tobytes(garbage=4, deflate=True))
@@ -132,6 +136,41 @@ def test_live_canonical_opening_consumes_owned_legend_kind_without_area() -> Non
     assert opening.area_m2 is None
     assert opening.geometry_complete is False
     assert opening.figured_area_record_id is None
+
+
+def test_live_kind_conflict_cannot_be_erased_by_downstream_composition() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-opening-semantic-conflict-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-opening-semantic-conflict",
+        source_bytes=_semantic_kind_only_pdf(
+            label="1218 ZX ZD",
+            legend_rows=(
+                "ZX - SLIDING GLASS WINDOW",
+                "ZD - SLIDING GLASS DOOR",
+            ),
+        ),
+        source_locator="memory://live-opening-semantic-conflict.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    assert wall_opening.semantic_enumeration_result.record is not None
+
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert composition.status is EvidenceResolutionStatus.CONFLICT
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.opening_kind is None
+    assert opening.area_m2 is None
 
 
 def test_canonical_opening_provenance_union_is_order_invariant_without_collapsing_ids() -> None:
