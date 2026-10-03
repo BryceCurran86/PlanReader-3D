@@ -56,6 +56,13 @@ class ConsolidatedPhysicalOpening:
             raise ValueError("height_m must be a finite non-negative number")
         if not math.isfinite(self.area_m2) or self.area_m2 < 0.0:
             raise ValueError("area_m2 must be a finite non-negative number")
+        self.source_evidence_ids = sorted(
+            {
+                str(value).strip()
+                for value in self.source_evidence_ids
+                if str(value).strip()
+            }
+        )
 
 
 def detail_definition_to_schedule_entry(
@@ -95,7 +102,6 @@ def _explicit_physical_opening_id(raw: Mapping[str, Any]) -> str:
         "physical_opening_id",
         "canonical_opening_id",
         "opening_id",
-        "id",
     ):
         value = str(raw.get(field_name) or "").strip()
         if value:
