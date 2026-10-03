@@ -1081,7 +1081,24 @@ def _try_physical_net_wall_rows(
         try:
             from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
-            claim = collect_live_physical_net_wall_claim(group["path"], pages=tuple(sorted(group["page_indices"])))
+            claim_pages = tuple(sorted(group["page_indices"]))
+            claim_kwargs: Dict[str, Any] = {"pages": claim_pages}
+            # Opening/wall topology belongs to source-classified floor-plan pages.
+            # Other selected sheets stay in the evidence universe (cross-sheet
+            # registration, wall height) but never mint walls, openings or
+            # canonical objects. Unreadable or unproven sources are not narrowed.
+            try:
+                from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
+
+                page_scope = source_floor_plan_topology_scope(group["path"], claim_pages)
+            except Exception:
+                page_scope = None
+            if page_scope is not None:
+                source_report["page_scope"] = page_scope.to_dict()
+                topology_pages = page_scope.topology_page_indices()
+                if topology_pages is not None:
+                    claim_kwargs["topology_pages"] = topology_pages
+            claim = collect_live_physical_net_wall_claim(group["path"], **claim_kwargs)
             status_val = getattr(claim.status, "value", str(claim.status))
             source_report.update(status=status_val, quantity_id=claim.quantity_id,
                                  reason_codes=list(getattr(claim, "reason_codes", ())))

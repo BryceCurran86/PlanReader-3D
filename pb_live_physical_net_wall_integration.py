@@ -109,8 +109,16 @@ def collect_live_physical_net_wall_claim(
     pdf_path: Path | str,
     *,
     pages: Optional[Sequence[int]] = None,
+    topology_pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
-    """Run the complete source-owned physical external wall chain for one PDF."""
+    """Run the complete source-owned physical external wall chain for one PDF.
+
+    ``pages`` is the decoded evidence universe. ``topology_pages`` (default: all
+    of ``pages``) names the subset whose linework may become walls, openings,
+    rooms and canonical objects; the remaining pages only supply cross-sheet
+    registration and wall-height evidence. A subset that is empty or not inside
+    ``pages`` is rejected rather than widened.
+    """
 
     path = Path(pdf_path)
     payload = path.read_bytes()
@@ -120,10 +128,22 @@ def collect_live_physical_net_wall_claim(
     doc = fitz.open(stream=payload, filetype="pdf")
     try:
         selected = _selected_page_indices(int(doc.page_count), pages)
+        if topology_pages is None:
+            topology_selected = selected
+        else:
+            topology_selected = _selected_page_indices(
+                int(doc.page_count), topology_pages
+            )
+            if not set(topology_selected) <= set(selected):
+                raise ValueError("topology_pages must be a subset of pages")
     finally:
         doc.close()
 
     page_ids = tuple(str(index + 1) for index in selected)
+    topology_page_ids = tuple(str(index + 1) for index in topology_selected)
+    evidence_page_ids = tuple(
+        page_id for page_id in page_ids if page_id not in topology_page_ids
+    )
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
@@ -139,7 +159,8 @@ def collect_live_physical_net_wall_claim(
         wall_opening = compose_live_wall_opening_authority(
             source_visibility_producer=source,
             revision_id=published.revision.revision_id,
-            page_ids=page_ids,
+            page_ids=topology_page_ids,
+            evidence_page_ids=evidence_page_ids,
         )
     except Exception as exc:
         from pb_live_wall_opening_authority_composition import (
