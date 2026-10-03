@@ -100,6 +100,7 @@ class ParsedOpeningLabel:
     dimension_values_mm: tuple[float, ...]
     suffix_text: str
     semantic_kind: Optional[str]
+    compact_hundreds_present: bool
     compact_hundreds_used: bool
 
     @property
@@ -214,18 +215,32 @@ def parse_opening_label_dimensions(text: str) -> Optional[ParsedOpeningLabel]:
         tail = str(pair.group("tail") or "")
         if tail.strip() and _ALLOWED_TAIL_RE.fullmatch(tail) is None:
             return None
-        compact_allowed = _OPENING_MODIFIER_TOKEN_RE.search(tail) is not None
-        first = _dimension_token_mm(pair.group("a"), compact_allowed=compact_allowed)
-        second = _dimension_token_mm(pair.group("b"), compact_allowed=compact_allowed)
-        if first is None or second is None:
+        first_raw = str(pair.group("a"))
+        second_raw = str(pair.group("b"))
+        first_clean = first_raw.replace(",", "").replace(".", "").strip()
+        second_clean = second_raw.replace(",", "").replace(".", "").strip()
+        if not first_clean.isdigit() or not second_clean.isdigit():
             return None
+        compact_present = len(first_clean) <= 2 or len(second_clean) <= 2
+        if compact_present and _OPENING_MODIFIER_TOKEN_RE.search(tail) is None:
+            return None
+
+        values: list[float] = []
+        if not compact_present:
+            first = _dimension_token_mm(first_raw, compact_allowed=False)
+            second = _dimension_token_mm(second_raw, compact_allowed=False)
+            if first is None or second is None:
+                return None
+            values = [first[0], second[0]]
+
         return ParsedOpeningLabel(
             raw_text=raw,
-            dimension_tokens=(str(pair.group("a")), str(pair.group("b"))),
-            dimension_values_mm=(first[0], second[0]),
+            dimension_tokens=(first_raw, second_raw),
+            dimension_values_mm=tuple(values),
             suffix_text=_normalised_suffix(tail),
             semantic_kind=None,
-            compact_hundreds_used=bool(first[1] or second[1]),
+            compact_hundreds_present=compact_present,
+            compact_hundreds_used=False,
         )
 
     single = _SINGLE_RE.fullmatch(raw)
@@ -243,8 +258,41 @@ def parse_opening_label_dimensions(text: str) -> Optional[ParsedOpeningLabel]:
         dimension_values_mm=(value[0],),
         suffix_text=_normalised_suffix(tail),
         semantic_kind=None,
+        compact_hundreds_present=False,
         compact_hundreds_used=False,
     )
+
+def _resolve_owned_dimension_values_mm(
+    parsed: ParsedOpeningLabel,
+    *,
+    opening_record_id: str,
+    semantic_kind: Optional[str],
+) -> Optional[tuple[tuple[float, ...], bool]]:
+    """Resolve compact units only after authenticated opening ownership exists."""
+    if not parsed.compact_hundreds_present:
+        return parsed.dimension_values_mm, False
+    if (
+        not str(opening_record_id or "").strip()
+        or semantic_kind not in {"door", "window"}
+        or _OPENING_MODIFIER_TOKEN_RE.search(parsed.suffix_text) is None
+    ):
+        return None
+
+    resolved: list[float] = []
+    for token in parsed.dimension_tokens:
+        value = _dimension_token_mm(token, compact_allowed=True)
+        if value is None:
+            return None
+        resolved.append(value[0])
+    if len(resolved) != parsed.dimension_count:
+        return None
+    return tuple(resolved), True
+
+
+def _area_from_dimension_values(values: Sequence[float]) -> Optional[float]:
+    if len(values) != 2:
+        return None
+    return float(values[0]) * float(values[1]) / 1_000_000.0
 
 def _line(record: SourceObservationRecord) -> Optional[tuple[float, float, float, float]]:
     if len(record.geometry) != 4:
@@ -823,7 +871,13 @@ class OpeningLabelDimensionProducer:
         structural_kind = _structural_kind(opening.structural_pattern)
         candidates: dict[
             tuple[str, tuple[float, ...], Optional[str], tuple[float, float, float, float]],
-            tuple[_TrustedTextLine, ParsedOpeningLabel, Optional[str]],
+            tuple[
+                _TrustedTextLine,
+                ParsedOpeningLabel,
+                Optional[str],
+                tuple[float, ...],
+                bool,
+            ],
         ] = {}
         for line in _trusted_text_lines(self._source, opening):
             parsed = parse_opening_label_dimensions(line.text)
@@ -843,13 +897,24 @@ class OpeningLabelDimensionProducer:
                     ),
                 )
             semantic_kind = structural_kind or suffix_kind
+            owned_values = _resolve_owned_dimension_values_mm(
+                parsed,
+                opening_record_id=opening.record_id,
+                semantic_kind=semantic_kind,
+            )
+            if owned_values is None:
+                continue
+            resolved_values_mm, compact_used = owned_values
             signature = (
                 parsed.raw_text.lower(),
-                parsed.dimension_values_mm,
+                resolved_values_mm,
                 semantic_kind,
                 tuple(round(value, 4) for value in line.bbox),
             )
-            candidates.setdefault(signature, (line, parsed, semantic_kind))
+            candidates.setdefault(
+                signature,
+                (line, parsed, semantic_kind, resolved_values_mm, compact_used),
+            )
         if not candidates:
             return self._store(
                 key,
@@ -867,7 +932,13 @@ class OpeningLabelDimensionProducer:
                 ),
             )
 
-        line, parsed, semantic_kind = next(iter(candidates.values()))
+        (
+            line,
+            parsed,
+            semantic_kind,
+            resolved_values_mm,
+            compact_used,
+        ) = next(iter(candidates.values()))
         payload = {
             "schema_version": OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
             "opening_record_id": opening.record_id,
@@ -875,7 +946,8 @@ class OpeningLabelDimensionProducer:
             "viewport_id": opening.viewport_id,
             "source_text_observation_ids": tuple(sorted(line.observation_ids)),
             "raw_text": parsed.raw_text,
-            "dimension_values_mm": parsed.dimension_values_mm,
+            "dimension_values_mm": resolved_values_mm,
+            "compact_hundreds_used": compact_used,
             "semantic_kind": semantic_kind,
         }
         evidence = OpeningLabelDimensionEvidence(
@@ -889,9 +961,9 @@ class OpeningLabelDimensionProducer:
             viewport_id=opening.viewport_id,
             source_text_observation_ids=tuple(sorted(line.observation_ids)),
             raw_text=parsed.raw_text,
-            dimension_values_mm=parsed.dimension_values_mm,
+            dimension_values_mm=resolved_values_mm,
             semantic_kind=semantic_kind,
-            area_m2=parsed.area_m2,
+            area_m2=_area_from_dimension_values(resolved_values_mm),
         )
         return self._store(
             key,
