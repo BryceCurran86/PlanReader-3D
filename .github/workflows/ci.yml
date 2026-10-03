@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 628386f592898332465c24c5a00913d7d1fe4ec8
+          ref: 149c603ad615a423e78d75c05e3297f610d99afc
       - name: Package exact #1264 head
         run: |
           python - <<'PY'
@@ -44,6 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: 149c603ad615a423e78d75c05e3297f610d99afc
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
