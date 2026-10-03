@@ -1285,8 +1285,8 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
         self.assertEqual(w["net_m2"], 18.2)
         self.assertEqual(w["consolidated_opening_ids"], ["op-north-w01"])
 
-    def test_ag06_cross_sheet_consolidation_single_deduction(self):
-        """AG-06: Multiple cross-sheet observations of an opening consolidate to 1 physical opening and 1 deduction."""
+    def test_ag06_cross_sheet_observations_without_physical_identity_fail_closed(self):
+        """AG-06: wall + mark alone cannot prove one physical opening instance."""
         from pb_opening_detail_definition_bridge import (
             consolidate_opening_identities,
             apply_opening_deductions_to_walls,
@@ -1300,26 +1300,16 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
         ]
 
         consolidated = consolidate_opening_identities(raw_observations)
-        self.assertEqual(len(consolidated), 1)
-        cop = consolidated[0]
-        self.assertEqual(cop.host_wall_id, "wall-south")
-        self.assertEqual(cop.type_mark, "D01")
-        self.assertEqual(cop.width_m, 0.9)
-        self.assertEqual(cop.height_m, 2.1)
-        self.assertEqual(cop.area_m2, 1.89)
-        self.assertEqual(cop.plan_page_id, "1")
-        self.assertEqual(cop.elevation_page_id, "2")
-        self.assertEqual(cop.schedule_page_id, "3")
-        self.assertEqual(cop.detail_page_id, "4")
+        self.assertEqual(consolidated, [])
 
         walls = [
             {"wall_ref": "wall-south", "gross_m2": 30.0, "opening_deduction_m2": 0.0, "net_m2": 30.0},
         ]
         updated = apply_opening_deductions_to_walls(walls, consolidated)
         self.assertEqual(len(updated), 1)
-        # Deducted exactly once (1.89 m2), not 4 times (7.56 m2)
-        self.assertEqual(updated[0]["opening_deduction_m2"], 1.89)
-        self.assertEqual(updated[0]["net_m2"], 28.11)
+        self.assertEqual(updated[0]["opening_deduction_m2"], 0.0)
+        self.assertEqual(updated[0]["net_m2"], 30.0)
+        self.assertNotIn("consolidated_opening_ids", updated[0])
 
     def test_ag06_detail_definition_without_host_wall_does_not_mint_physical_opening(self):
         """AG-06: Detail definitions describe TYPES, not physical instances; unhosted details do not mint deductions."""

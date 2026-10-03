@@ -89,6 +89,83 @@ class TestStableObjectIdentityParity(unittest.TestCase):
         self.assertEqual(op.schedule_page_id, "3")
         self.assertEqual(op.detail_page_id, "4")
 
+    def test_same_identity_merge_is_order_invariant_and_provenance_sorted(self) -> None:
+        observations = [
+            {
+                "opening_id": "door_main",
+                "host_wall_id": "wall_south",
+                "type_mark": "D01",
+                "width_m": 0.9,
+                "plan_page_id": "1",
+                "source_evidence_ids": ["ev-b", "ev-a"],
+            },
+            {
+                "opening_id": "door_main",
+                "host_wall_id": "wall_south",
+                "type_mark": "D01",
+                "height_m": 2.1,
+                "schedule_page_id": "3",
+                "source_evidence_ids": ["ev-c", "ev-a"],
+            },
+        ]
+
+        forward = consolidate_opening_identities(observations)
+        reverse = consolidate_opening_identities(list(reversed(observations)))
+        self.assertEqual(forward, reverse)
+        self.assertEqual(len(forward), 1)
+        self.assertEqual(forward[0].source_evidence_ids, ["ev-a", "ev-b", "ev-c"])
+
+    def test_same_wall_and_mark_without_physical_identity_never_collapse(self) -> None:
+        raw = [
+            {
+                "host_wall_id": "wall_north",
+                "type_mark": "W01",
+                "width_m": 1.2,
+                "height_m": 1.5,
+                "source_evidence_ids": ["obs-1"],
+            },
+            {
+                "host_wall_id": "wall_north",
+                "type_mark": "W01",
+                "width_m": 1.2,
+                "height_m": 1.5,
+                "source_evidence_ids": ["obs-2"],
+            },
+        ]
+        self.assertEqual(consolidate_opening_identities(raw), [])
+
+    def test_generic_row_id_is_not_physical_opening_identity(self) -> None:
+        raw = [
+            {
+                "id": "row-17",
+                "host_wall_id": "wall_north",
+                "type_mark": "W01",
+                "width_m": 1.2,
+                "height_m": 1.5,
+            }
+        ]
+        self.assertEqual(consolidate_opening_identities(raw), [])
+
+    def test_conflicting_observations_for_same_physical_identity_fail_closed(self) -> None:
+        raw = [
+            {
+                "opening_id": "door_main",
+                "host_wall_id": "wall_south",
+                "type_mark": "D01",
+                "width_m": 0.9,
+            },
+            {
+                "opening_id": "door_main",
+                "host_wall_id": "wall_south",
+                "type_mark": "D01",
+                "width_m": 1.0,
+            },
+        ]
+        with self.assertRaisesRegex(ValueError, "conflicting width_m"):
+            consolidate_opening_identities(raw)
+        with self.assertRaisesRegex(ValueError, "conflicting width_m"):
+            consolidate_opening_identities(list(reversed(raw)))
+
     def test_registered_walls_stable_identity_fallback(self) -> None:
         """Walls without wall_ref retain distinct identities via wall_id or candidate_id."""
         class MockApp:

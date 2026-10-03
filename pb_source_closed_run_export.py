@@ -175,14 +175,14 @@ def seal_source_closed_quantity(
         source_page=trace.source_page,
         viewport_id=trace.viewport_id,
         revision_id=trace.revision_id,
-        object_identity_refs=tuple(quantity.input_entity_ids),
-        trace_canonical_entity_ids=tuple(trace.canonical_entity_ids),
-        evidence_ids=tuple(quantity.evidence_ids),
-        trace_evidence_ids=tuple(trace.evidence_ids),
-        blocking_reasons=tuple(quantity.blocking_reasons),
-        reason_codes=tuple(quantity.reason_codes),
+        object_identity_refs=tuple(sorted(quantity.input_entity_ids)),
+        trace_canonical_entity_ids=tuple(sorted(trace.canonical_entity_ids)),
+        evidence_ids=tuple(sorted(quantity.evidence_ids)),
+        trace_evidence_ids=tuple(sorted(trace.evidence_ids)),
+        blocking_reasons=tuple(sorted(quantity.blocking_reasons)),
+        reason_codes=tuple(sorted(quantity.reason_codes)),
         lineage_ok=not reasons,
-        lineage_reason_codes=reasons,
+        lineage_reason_codes=tuple(sorted(reasons)),
     )
 
 

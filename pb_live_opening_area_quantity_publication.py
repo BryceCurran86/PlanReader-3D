@@ -61,10 +61,12 @@ def _opening_quantity(
         return None
 
     evidence_ids = tuple(
-        dict.fromkeys(
-            str(value).strip()
-            for value in opening.evidence_ids
-            if str(value).strip()
+        sorted(
+            {
+                str(value).strip()
+                for value in opening.evidence_ids
+                if str(value).strip()
+            }
         )
     )
     if not evidence_ids:

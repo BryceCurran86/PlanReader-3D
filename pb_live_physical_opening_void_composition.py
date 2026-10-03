@@ -208,6 +208,11 @@ def _reason_tuple(values) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(value) for value in values if str(value)))
 
 
+def _canonical_provenance_ids(values) -> tuple[str, ...]:
+    """Deterministic set-like provenance union for one canonical object."""
+    return tuple(sorted({str(value) for value in values if str(value)}))
+
+
 def _canonical_opening_area(
     *,
     width_m: Optional[float],
@@ -664,43 +669,39 @@ def compose_live_physical_opening_voids(
         )
 
         if existence_record is not None:
-            evidence_ids = tuple(
-                dict.fromkeys(
-                    str(value)
-                    for value in (
-                        existence_record.record_id,
-                        *existence_record.source_observation_ids,
-                        *existence_record.source_lineage_root_ids,
-                        host_binding_record_id,
-                        host_frame_record_id,
-                        width_record_id,
-                        height_record_id,
-                        vertical_record_id,
-                        (
-                            scale_evidence.record_id
-                            if scale_evidence is not None
-                            else None
-                        ),
-                        (
-                            schedule_record.record_id
-                            if schedule_record is not None
-                            else None
-                        ),
-                        tag_observation_id,
-                        *schedule_row_observation_ids,
-                        figured_area_record_id,
-                        *(
-                            figured_label_evidence.source_text_observation_ids
-                            if figured_label_evidence is not None
-                            else ()
-                        ),
-                        (
-                            void_record.record_id
-                            if void_record is not None
-                            else None
-                        ),
-                    )
-                    if value
+            evidence_ids = _canonical_provenance_ids(
+                (
+                    existence_record.record_id,
+                    *existence_record.source_observation_ids,
+                    *existence_record.source_lineage_root_ids,
+                    host_binding_record_id,
+                    host_frame_record_id,
+                    width_record_id,
+                    height_record_id,
+                    vertical_record_id,
+                    (
+                        scale_evidence.record_id
+                        if scale_evidence is not None
+                        else None
+                    ),
+                    (
+                        schedule_record.record_id
+                        if schedule_record is not None
+                        else None
+                    ),
+                    tag_observation_id,
+                    *schedule_row_observation_ids,
+                    figured_area_record_id,
+                    *(
+                        figured_label_evidence.source_text_observation_ids
+                        if figured_label_evidence is not None
+                        else ()
+                    ),
+                    (
+                        void_record.record_id
+                        if void_record is not None
+                        else None
+                    ),
                 )
             )
             canonical_openings.append(
