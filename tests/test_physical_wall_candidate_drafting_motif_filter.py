@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from pb_physical_wall_candidate_authority import (
     MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS,
+    _annotate_producer_owned_annotation_masks,
     _filter_repeated_non_physical_drafting_primitives,
     filtered_wall_topology_source_segment_count,
 )
@@ -178,3 +181,93 @@ def test_complexity_census_preserves_unproven_filled_physical_geometry() -> None
         )
         == len(fill_edges)
     )
+
+
+def _sequenced_fill_rect_edges(
+    *,
+    sequence_number: int,
+    x0: float = 10.0,
+    y0: float = 10.0,
+    x1: float = 30.0,
+    y1: float = 30.0,
+) -> list[dict]:
+    points = ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
+    result = []
+    for edge_index, (first, second) in enumerate(
+        zip(points, points[1:] + points[:1])
+    ):
+        result.append(
+            {
+                "id": f"mask-edge-{edge_index}",
+                "kind": "rect_edge",
+                "x1": first[0],
+                "y1": first[1],
+                "x2": second[0],
+                "y2": second[1],
+                "path_index": 77,
+                "item_index": 3,
+                "edge_index": edge_index,
+                "sequence_number": sequence_number,
+                "stroke": None,
+                "stroke_present": False,
+                "fill": (1.0, 1.0, 1.0),
+                "fill_present": True,
+                "width": 0.0,
+                "width_present": False,
+            }
+        )
+    return result
+
+
+def test_immediately_painted_tight_text_backing_rectangle_is_authenticated() -> None:
+    edges = _sequenced_fill_rect_edges(sequence_number=40)
+    receipt = SimpleNamespace(
+        sequence_number=41,
+        geometry=(11.0, 11.0, 29.0, 29.0),
+    )
+
+    annotated = _annotate_producer_owned_annotation_masks(
+        edges, text_receipts=(receipt,)
+    )
+
+    assert all(
+        edge.get("annotation_mask_authority") == "producer_owned"
+        and edge.get("annotation_mask_text_sized") is True
+        and edge.get("annotation_text_overlap") is True
+        and edge.get("physical_wall_authority") is False
+        and edge.get("participates_in_source_physical_object") is False
+        for edge in annotated
+    )
+    assert _filter(list(annotated)) == ()
+
+
+def test_nonadjacent_text_does_not_authenticate_fill_rectangle() -> None:
+    edges = _sequenced_fill_rect_edges(sequence_number=40)
+    receipt = SimpleNamespace(
+        sequence_number=42,
+        geometry=(11.0, 11.0, 29.0, 29.0),
+    )
+
+    annotated = _annotate_producer_owned_annotation_masks(
+        edges, text_receipts=(receipt,)
+    )
+
+    assert all(not edge.get("annotation_mask_authority") for edge in annotated)
+    assert _filter(list(annotated)) == tuple(annotated)
+
+
+def test_oversized_fill_rectangle_does_not_authenticate_as_text_mask() -> None:
+    edges = _sequenced_fill_rect_edges(
+        sequence_number=40, x0=0.0, y0=0.0, x1=100.0, y1=100.0
+    )
+    receipt = SimpleNamespace(
+        sequence_number=41,
+        geometry=(45.0, 45.0, 55.0, 55.0),
+    )
+
+    annotated = _annotate_producer_owned_annotation_masks(
+        edges, text_receipts=(receipt,)
+    )
+
+    assert all(not edge.get("annotation_mask_authority") for edge in annotated)
+    assert _filter(list(annotated)) == tuple(annotated)
