@@ -56,6 +56,45 @@ def test_parser_accepts_typed_compact_hundred_mm_notation_only() -> None:
     # Untyped two-digit arithmetic/text cannot silently become dimensions.
     assert parse_opening_label_dimensions("21 - 15") is None
 
+def test_parser_supports_unseparated_four_digit_compact_syntax_without_semantics() -> None:
+    compact = parse_opening_label_dimensions("1218 SGW")
+    assert compact is not None
+    assert compact.dimension_tokens == ("12", "18")
+    assert compact.dimension_values_mm == ()
+    assert compact.compact_hundreds_present is True
+    assert compact.compact_hundreds_used is False
+    assert compact.semantic_kind is None
+    assert compact.suffix_text == "SGW"
+    assert compact.area_m2 is None
+
+    # Bare NNNN remains an ambiguous/single metric token. The parser does not
+    # silently reinterpret every four-digit number as HHWW.
+    bare = parse_opening_label_dimensions("1218")
+    assert bare is not None
+    assert bare.dimension_tokens == ("1218",)
+    assert bare.dimension_values_mm == (1218.0,)
+    assert bare.compact_hundreds_present is False
+    assert bare.area_m2 is None
+
+
+def test_four_digit_compact_parser_is_deterministic_and_descriptor_agnostic() -> None:
+    first = parse_opening_label_dimensions("2127 STACKER")
+    second = parse_opening_label_dimensions("2127 STACKER")
+    unknown = parse_opening_label_dimensions("2127 UNKNOWN")
+
+    assert first == second
+    assert first is not None
+    assert first.dimension_tokens == ("21", "27")
+    assert first.semantic_kind is None
+    assert first.suffix_text == "STACKER"
+
+    # Syntax can be recognized without granting semantic authority.
+    assert unknown is not None
+    assert unknown.dimension_tokens == ("21", "27")
+    assert unknown.semantic_kind is None
+    assert unknown.dimension_values_mm == ()
+
+
 def _word_row(order: int, text: str, x0: float):
     width = max(4.0, len(text) * 4.0)
     return (order, f"obs-{order}", text, (x0, 10.0, x0 + width, 18.0))
@@ -312,6 +351,20 @@ def test_compact_expansion_requires_authenticated_owned_opening() -> None:
     )
     assert resolved == ((1800.0, 900.0), True)
 
+    opaque = parse_opening_label_dimensions("1218 SGW")
+    assert opaque is not None
+    assert _resolve_owned_dimension_values_mm(
+        opaque,
+        opening_record_id="owned-opening",
+        semantic_kind="window",
+    ) is None
+    assert _resolve_owned_dimension_values_mm(
+        opaque,
+        opening_record_id="owned-opening",
+        semantic_kind="window",
+        authenticated_semantic_evidence=True,
+    ) == ((1200.0, 1800.0), True)
+
 
 def test_producer_expands_compact_dimensions_only_after_physical_ownership() -> None:
     source, published = _ingest(
@@ -330,6 +383,43 @@ def test_producer_expands_compact_dimensions_only_after_physical_ownership() -> 
     assert result.evidence.area_m2 == pytest.approx(1.62)
     assert result.evidence.opening_record_id
     assert result.evidence.source_text_observation_ids
+
+def test_owned_legend_semantics_unlock_four_digit_compact_dimensions() -> None:
+    payload = _pdf(
+        labels=(
+            (105.0, 124.0, "1218 SGW"),
+            (20.0, 180.0, "LEGEND"),
+            (20.0, 195.0, "SGW SLIDING GLASS WINDOW"),
+        )
+    )
+    source, published = _ingest(payload, "compact-four-digit-owned")
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.dimension_values_mm == (1200.0, 1800.0)
+    assert result.evidence.area_m2 == pytest.approx(2.16)
+    assert result.evidence.opening_record_id
+    assert result.evidence.source_text_observation_ids
+
+
+def test_unowned_or_unauthenticated_four_digit_suffix_cannot_unlock_dimensions() -> None:
+    source, published = _ingest(
+        _pdf(labels=((105.0, 124.0, "1218 UNKNOWN"),)),
+        "compact-four-digit-unknown",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
+
 
 def test_producer_stitches_one_source_callout_split_over_adjacent_native_lines() -> None:
     source, published = _ingest(
