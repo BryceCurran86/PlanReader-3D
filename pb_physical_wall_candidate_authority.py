@@ -31,6 +31,7 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_RESOLVED,
@@ -931,6 +932,29 @@ def _all_viewports(page: fitz.Page, *, page_number: int) -> Optional[list]:
         return None
 
 
+def _wall_scope_relevant_viewports(all_viewports):
+    """Discard only unbounded non-spatial reference regions from wall scope.
+
+    Legends, schedules, and specifications cannot by themselves define or crop
+    physical wall topology when viewport segmentation has no bounding box for
+    them. Physical drawing types, unknown types, and any viewport with actual
+    bounds remain conservative and fail-closed.
+    """
+
+    non_spatial_unbounded_types = {
+        DrawingViewType.LEGEND.value,
+        DrawingViewType.SCHEDULE.value,
+        DrawingViewType.SPECIFICATION.value,
+    }
+    return [
+        viewport
+        for viewport in all_viewports
+        if getattr(viewport, "bounding_box", None) is not None
+        or str(getattr(viewport, "view_type", "") or "")
+        not in non_spatial_unbounded_types
+    ]
+
+
 def _scope_boundary_reason_from_viewports(
     wall: WallCandidate,
     *,
@@ -952,15 +976,19 @@ def _scope_boundary_reason_from_viewports(
             # cropped against is genuinely unknown.
             return PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED
 
-        if not all_viewports:
-            # No viewport structure was found on this page at all (no title
-            # anchors) -- the drawing genuinely occupies the whole page as
-            # one undivided scope, and the page-boundary check above is the
-            # only applicable one.
+        relevant_viewports = _wall_scope_relevant_viewports(all_viewports)
+        if not relevant_viewports:
+            # No physical/spatial viewport structure is present. Unbounded
+            # legend/schedule/specification titles are reference content, not
+            # evidence that a physical wall scope may be cropped elsewhere on
+            # the sheet. The page boundary remains the applicable scope.
             continue
 
         resolved_viewports = [
-            v for v in all_viewports if v.status == ViewportSegmentationStatus.RESOLVED.value and v.bounding_box
+            v
+            for v in relevant_viewports
+            if v.status == ViewportSegmentationStatus.RESOLVED.value
+            and v.bounding_box
         ]
 
         containing = [
