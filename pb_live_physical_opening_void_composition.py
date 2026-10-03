@@ -24,6 +24,7 @@ from pb_opening_kind_authority import (
     resolve_opening_kind,
 )
 from pb_opening_label_dimension_authority import (
+    OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT,
     OpeningLabelDimensionProducer,
 )
 from pb_opening_tag_normalization import normalize_opening_tag
@@ -593,9 +594,18 @@ def compose_live_physical_opening_voids(
                 else None
             ),
         )
+        label_semantic_conflict = (
+            figured_label is not None
+            and OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT
+            in tuple(getattr(figured_label, "reason_codes", ()))
+        )
         opening_kind = kind_resolution.opening_kind
-        if OPENING_KIND_CONFLICT in kind_resolution.reason_codes:
+        if (
+            OPENING_KIND_CONFLICT in kind_resolution.reason_codes
+            or label_semantic_conflict
+        ):
             kind_conflict_opening_ids.add(opening_id)
+            opening_kind = None
         void_record = void.record
         binding_trace = binding_by_opening.get(opening_id)
         frame_trace = frame_by_opening.get(opening_id)
