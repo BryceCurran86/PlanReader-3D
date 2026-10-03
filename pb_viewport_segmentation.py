@@ -36,6 +36,7 @@ import statistics
 from typing import Any, Iterable, Optional, Sequence
 
 from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewRegion, DrawingViewType
+from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 import pb_page_title_authority as _title_authority
 
 
@@ -496,8 +497,15 @@ def _text_fragments(page: Any) -> list[tuple[tuple[float, float, float, float], 
 
 
 def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
-    rect = page.rect
-    width = float(rect.width); height = float(rect.height)
+    """Calibrate native viewport geometry in native page user space.
+
+    Text fragments and get_drawings() geometry are native/unrotated. Using
+    display-rotated page.rect dimensions here mixes coordinate spaces on
+    quarter-turn sheets, so the calibration must use the same native frame.
+    """
+
+    frame = native_page_frame(page)
+    width = float(frame.native_width); height = float(frame.native_height)
     word_heights = [
         float(w[3]) - float(w[1])
         for w in page.get_text("words")
@@ -1398,6 +1406,15 @@ def _single_floor_plan_printable_partition(
     """Resolve one unframed floor plan from page ownership, fail-closed."""
     if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
         return None
+    # pb_page_title_authority deliberately works in visual/display space.
+    # Until that title-block rectangle has an explicit display->native bridge,
+    # do not compare it with native viewport geometry on a rotated page. The
+    # independent native vector-frame route above remains available.
+    try:
+        if native_page_frame(page).rotation != 0:
+            return None
+    except NativePageFrameUnresolved:
+        return None
     title_block = _proven_title_block_region(page)
     if title_block is None:
         return None
@@ -1588,7 +1605,10 @@ def _derived_partitions(
 
 
 def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:
-    calibration = calibrate_viewport_layout(page)
+    try:
+        calibration = calibrate_viewport_layout(page)
+    except NativePageFrameUnresolved:
+        return []
     anchors = extract_view_title_anchors(page)
     if not anchors:
         return []
