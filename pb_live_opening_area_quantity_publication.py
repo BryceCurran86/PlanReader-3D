@@ -25,6 +25,9 @@ LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY = (
 LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY = (
     "pb_live_physical_opening_void_composition.resolved_opening_geometry_area"
 )
+LIVE_OPENING_FRAME_AREA_QUANTITY_AUTHORITY = (
+    "pb_schedule_opening_instance_binding_authority.authenticated_frame_dimensions"
+)
 
 
 def _opening_quantity(
@@ -84,6 +87,13 @@ def _opening_quantity(
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
         quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
+    elif basis == "schedule_frame_outer_dimensions":
+        if str(opening.schedule_dimension_basis or "").strip().lower() != "frame":
+            return None
+        measurement_record_id = str(opening.schedule_binding_record_id or "").strip()
+        if not measurement_record_id or measurement_record_id not in evidence_ids:
+            return None
+        quantity_authority = LIVE_OPENING_FRAME_AREA_QUANTITY_AUTHORITY
     else:
         # Unknown area bases cannot silently become commercial quantities.
         return None
@@ -113,7 +123,11 @@ def _opening_quantity(
         formula=(
             "authenticated figured opening-label dimension product"
             if basis == "figured_opening_label"
-            else "authenticated physical opening width * height"
+            else (
+                "authenticated schedule frame width * height"
+                if basis == "schedule_frame_outer_dimensions"
+                else "authenticated physical opening width * height"
+            )
         ),
         formula_version=LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION,
         evidence_ids=evidence_ids,
@@ -137,6 +151,8 @@ def _opening_quantity(
             "opening_kind": opening_kind,
             "area_basis": basis,
             "measurement_record_id": measurement_record_id,
+            "schedule_dimension_basis": opening.schedule_dimension_basis,
+            "schedule_dimension_basis_source": opening.schedule_dimension_basis_source,
             "commercial_projection_allowed": True,
             "section": "Openings",
             "element": f"{opening_kind.title()} area",
@@ -181,6 +197,7 @@ def publish_live_opening_area_quantities(
 
 __all__ = [
     "LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_FRAME_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_AREA_QUANTITY_RESOLVED",
     "LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION",
