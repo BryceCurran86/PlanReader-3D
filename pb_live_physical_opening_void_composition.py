@@ -729,6 +729,11 @@ def compose_live_physical_opening_voids(
                             else ()
                         ),
                         (
+                            joinery_figured_area_evidence.label_evidence_id
+                            if joinery_figured_area_evidence is not None
+                            else None
+                        ),
+                        (
                             joinery_figured_area_evidence.joinery_height_evidence_id
                             if joinery_figured_area_evidence is not None
                             else None
