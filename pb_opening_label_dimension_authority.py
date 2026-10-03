@@ -976,30 +976,38 @@ def _owned_label_semantics(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
     gap: _GapSpan,
-) -> tuple[Optional[str], tuple[str, ...], tuple[str, ...], bool]:
+) -> tuple[
+    Optional[str],
+    tuple[str, ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+]:
     """Resolve semantic kind only from an opening-owned label plus source authority."""
 
     legend_map, legend_conflicts = _authenticated_legend_kinds(source, opening)
     kinds: set[str] = set()
     label_ids: set[str] = set()
     authority_ids: set[str] = set()
+    raw_texts: set[str] = set()
 
     for line in _trusted_text_lines(source, opening, include_unparsed=True):
         if not _label_matches_gap(line, gap):
             continue
         direct_kind, direct_conflict = _explicit_word_kind(line.text)
         if direct_conflict:
-            return None, (), (), True
+            return None, (), (), (), True
         if direct_kind is not None:
             kinds.add(direct_kind)
             label_ids.update(line.observation_ids)
+            raw_texts.add(line.text)
 
         tokens = {
             match.group(0).upper()
             for match in _LABEL_CODE_TOKEN_RE.finditer(line.text or "")
         }
         if tokens & legend_conflicts:
-            return None, (), (), True
+            return None, (), (), (), True
         for token in sorted(tokens):
             definition = legend_map.get(token)
             if definition is None:
@@ -1008,15 +1016,17 @@ def _owned_label_semantics(
             kinds.add(kind)
             label_ids.update(line.observation_ids)
             authority_ids.update(ids)
+            raw_texts.add(line.text)
 
     if len(kinds) > 1:
-        return None, (), (), True
+        return None, (), (), (), True
     if not kinds:
-        return None, (), (), False
+        return None, (), (), (), False
     return (
         next(iter(kinds)),
         tuple(sorted(label_ids)),
         tuple(sorted(authority_ids)),
+        tuple(sorted(raw_texts)),
         False,
     )
 
