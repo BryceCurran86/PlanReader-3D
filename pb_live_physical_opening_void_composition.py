@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping, Optional
 
+from pb_document_joinery_head_height_authority import (
+    DocumentJoineryHeadHeightProducer,
+)
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
@@ -18,6 +21,9 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_height_authority import (
     OpeningHeightProducer,
     OpeningHeightSelector,
+)
+from pb_opening_joinery_figured_area_authority import (
+    resolve_opening_joinery_figured_area,
 )
 from pb_opening_kind_authority import (
     OPENING_KIND_CONFLICT,
@@ -213,6 +219,7 @@ def _canonical_opening_area(
     width_m: Optional[float],
     height_m: Optional[float],
     figured_label_evidence,
+    joinery_figured_area_evidence=None,
 ) -> tuple[Optional[float], Optional[str], Optional[str]]:
     """Resolve customer-facing opening area without inventing axis order.
 
@@ -240,6 +247,15 @@ def _canonical_opening_area(
             float(figured_label_evidence.area_m2),
             str(getattr(figured_label_evidence, "basis", "figured_opening_label")),
             str(figured_label_evidence.evidence_id),
+        )
+    if (
+        joinery_figured_area_evidence is not None
+        and getattr(joinery_figured_area_evidence, "area_m2", None) is not None
+    ):
+        return (
+            float(joinery_figured_area_evidence.area_m2),
+            str(joinery_figured_area_evidence.basis),
+            str(joinery_figured_area_evidence.evidence_id),
         )
     return (
         None,
@@ -452,6 +468,11 @@ def compose_live_physical_opening_voids(
         opening_id: label_dimension_producer.publish_scope(opening_selector)
         for opening_id, opening_selector in opening_selectors.items()
     }
+    joinery_height_result = (
+        DocumentJoineryHeadHeightProducer.from_source_visibility_producer(
+            source_visibility_producer
+        ).publish_revision(published.revision.revision_id)
+    )
     height_authority = height_producer.authority()
     vertical_authority = vertical_producer.authority()
     scale_authority = scale_producer.authority()
@@ -591,6 +612,18 @@ def compose_live_physical_opening_voids(
         opening_kind = kind_resolution.opening_kind
         if OPENING_KIND_CONFLICT in kind_resolution.reason_codes:
             kind_conflict_opening_ids.add(opening_id)
+
+        joinery_figured_area = None
+        joinery_figured_area_evidence = None
+        if existence_record is not None and figured_label_evidence is not None:
+            joinery_figured_area = resolve_opening_joinery_figured_area(
+                opening=existence_record,
+                label=figured_label_evidence,
+                joinery_height=joinery_height_result,
+                opening_kind=kind_resolution,
+            )
+            joinery_figured_area_evidence = joinery_figured_area.evidence
+
         void_record = void.record
         binding_trace = binding_by_opening.get(opening_id)
         frame_trace = frame_by_opening.get(opening_id)
@@ -661,6 +694,7 @@ def compose_live_physical_opening_voids(
             width_m=width_m,
             height_m=height_m,
             figured_label_evidence=figured_label_evidence,
+            joinery_figured_area_evidence=joinery_figured_area_evidence,
         )
 
         if existence_record is not None:
@@ -692,6 +726,16 @@ def compose_live_physical_opening_voids(
                         *(
                             figured_label_evidence.source_text_observation_ids
                             if figured_label_evidence is not None
+                            else ()
+                        ),
+                        (
+                            joinery_figured_area_evidence.joinery_height_evidence_id
+                            if joinery_figured_area_evidence is not None
+                            else None
+                        ),
+                        *(
+                            joinery_figured_area_evidence.source_text_observation_ids
+                            if joinery_figured_area_evidence is not None
                             else ()
                         ),
                         (
