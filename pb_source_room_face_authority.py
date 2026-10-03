@@ -99,6 +99,7 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
             result.append(edge)
     return tuple(result)
 
+
 def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
     """Return True only when a child edge is a quantized subsegment of parent.
 
