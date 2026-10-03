@@ -286,6 +286,7 @@ def _resolve_owned_dimension_values_mm(
     *,
     opening_record_id: str,
     semantic_kind: Optional[str],
+    authenticated_semantic_evidence: bool = False,
 ) -> Optional[tuple[tuple[float, ...], bool]]:
     """Resolve compact units only after authenticated opening ownership exists."""
     if not parsed.compact_hundreds_present:
@@ -293,7 +294,15 @@ def _resolve_owned_dimension_values_mm(
     if (
         not str(opening_record_id or "").strip()
         or semantic_kind not in {"door", "window"}
-        or _OPENING_MODIFIER_TOKEN_RE.search(parsed.suffix_text) is None
+    ):
+        return None
+    # Historical compact forms with an established modifier remain supported.
+    # New/opaque suffixes do not gain meaning from parsing: they may unlock
+    # compact expansion only when the independent producer-owned semantic
+    # authority has authenticated the same physical opening label.
+    if (
+        _OPENING_MODIFIER_TOKEN_RE.search(parsed.suffix_text) is None
+        and not authenticated_semantic_evidence
     ):
         return None
 
@@ -958,6 +967,9 @@ class OpeningLabelDimensionProducer:
                 parsed,
                 opening_record_id=opening.record_id,
                 semantic_kind=semantic_kind,
+                authenticated_semantic_evidence=(
+                    authenticated_label_kind is not None
+                ),
             )
             if owned_values is None:
                 continue
