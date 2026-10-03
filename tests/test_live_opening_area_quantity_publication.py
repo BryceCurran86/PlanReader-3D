@@ -276,7 +276,7 @@ def test_live_opening_run_seals_identity_and_source_lineage_without_identity_map
         trace = traces[quantity.quantity_id]
         assert trace.project_id == "source-project"
         assert trace.source_sha256 == SHA
-        assert trace.viewport_id == "viewport-1"
+        assert trace.viewport_id == quantity.metadata["viewport_id"]
         assert trace.canonical_entity_ids == quantity.input_entity_ids
         assert set(quantity.evidence_ids).issubset(set(trace.evidence_ids))
 
