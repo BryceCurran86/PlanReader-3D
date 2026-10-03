@@ -85,109 +85,148 @@ def detail_definition_to_schedule_entry(
     )
 
 
+def _explicit_physical_opening_id(raw: Mapping[str, Any]) -> str:
+    """Return only an existing producer/canonical physical identity.
+
+    A type mark or host wall is classification/relationship evidence, not an
+    instance identity. Never synthesize a physical identity from those fields.
+    """
+    for field_name in (
+        "physical_opening_id",
+        "canonical_opening_id",
+        "opening_id",
+        "id",
+    ):
+        value = str(raw.get(field_name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _one_consistent_text(
+    items: Sequence[Mapping[str, Any]],
+    keys: Sequence[str],
+    *,
+    default: str = "",
+) -> str:
+    values = {
+        str(item.get(key) or "").strip()
+        for item in items
+        for key in keys
+        if str(item.get(key) or "").strip()
+    }
+    if len(values) > 1:
+        raise ValueError(
+            "conflicting observations for one physical opening identity: "
+            + ", ".join(sorted(values))
+        )
+    return next(iter(values), default)
+
+
+def _one_consistent_positive_float(
+    items: Sequence[Mapping[str, Any]],
+    key: str,
+) -> float:
+    values: set[float] = set()
+    for item in items:
+        raw = item.get(key)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(value) and value > 0.0:
+            values.add(value)
+    if len(values) > 1:
+        raise ValueError(
+            f"conflicting {key} observations for one physical opening identity"
+        )
+    return next(iter(values), 0.0)
+
+
 def consolidate_opening_identities(
     raw_openings: Sequence[Dict[str, Any]],
 ) -> List[ConsolidatedPhysicalOpening]:
-    """Consolidate multiple opening references (plan, elevation, schedule, detail) into physical openings.
+    """Merge observations only when they share one explicit physical identity.
 
-    Prevents opening duplication where the same door or window appears across multiple sheets.
-    Group key: (host_wall_id, type_mark). If host_wall_id is unknown or empty, falls back to opening_id.
+    Wall, type mark, geometry and schedule type describe an opening but cannot
+    prove two observations are the same physical instance. Observations with no
+    producer/canonical physical identity therefore remain outside this
+    customer-deduction bridge rather than being collapsed or double-counted.
     """
-    grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
 
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
     for raw in raw_openings:
-        wall_id = str(raw.get("host_wall_id") or raw.get("wall_ref") or raw.get("wall_id") or "")
-        mark = str(raw.get("type_mark") or raw.get("mark") or raw.get("opening_tag") or "").strip().upper()
-        op_id = str(raw.get("opening_id") or raw.get("id") or "")
-
-        # If op_id is present, it explicitly identifies the physical instance.
-        # Multiple cross-sheet observations of the same opening share op_id or (wall_id, mark).
-        key = (wall_id, mark, op_id) if op_id else (wall_id, mark, "")
-        grouped.setdefault(key, []).append(dict(raw))
+        if not isinstance(raw, Mapping):
+            continue
+        opening_id = _explicit_physical_opening_id(raw)
+        if not opening_id:
+            continue
+        grouped.setdefault(opening_id, []).append(dict(raw))
 
     consolidated: List[ConsolidatedPhysicalOpening] = []
+    for opening_id in sorted(grouped):
+        items = grouped[opening_id]
 
-    for (wall_id, mark, op_id_key), items in sorted(grouped.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
-        # Merge observations across sheets
-        widths: List[float] = []
-        heights: List[float] = []
-        areas: List[float] = []
-        family = "opening"
-        subtype = ""
-        material = ""
-        detail_rec_id = None
-        detail_sem_id = None
-        plan_p = None
-        elev_p = None
-        sched_p = None
-        det_p = None
-        evidence_ids: List[str] = []
+        wall_id = _one_consistent_text(
+            items,
+            ("host_wall_id", "wall_ref", "wall_id"),
+        )
+        mark = _one_consistent_text(
+            items,
+            ("type_mark", "mark", "opening_tag"),
+        ).upper()
 
-        canonical_op_id = None
+        width_m = _one_consistent_positive_float(items, "width_m")
+        height_m = _one_consistent_positive_float(items, "height_m")
+        explicit_area_m2 = _one_consistent_positive_float(items, "area_m2")
 
-        for item in items:
-            w_val = item.get("width_m")
-            if w_val is not None and math.isfinite(float(w_val)) and float(w_val) > 0.0:
-                widths.append(float(w_val))
+        family_values = {
+            str(item.get("family") or "").strip()
+            for item in items
+            if str(item.get("family") or "").strip()
+            and str(item.get("family") or "").strip() != "opening"
+        }
+        if len(family_values) > 1:
+            raise ValueError(
+                "conflicting family observations for one physical opening identity"
+            )
+        family = next(iter(family_values), "opening")
 
-            h_val = item.get("height_m")
-            if h_val is not None and math.isfinite(float(h_val)) and float(h_val) > 0.0:
-                heights.append(float(h_val))
+        subtype = _one_consistent_text(items, ("subtype",))
+        material = _one_consistent_text(items, ("material",))
+        detail_rec_id = _one_consistent_text(items, ("detail_record_id",)) or None
+        detail_sem_id = (
+            _one_consistent_text(items, ("detail_semantic_identity_id",)) or None
+        )
+        plan_p = _one_consistent_text(items, ("plan_page_id",)) or None
+        elev_p = _one_consistent_text(items, ("elevation_page_id",)) or None
+        sched_p = _one_consistent_text(items, ("schedule_page_id",)) or None
+        det_p = _one_consistent_text(items, ("detail_page_id",)) or None
 
-            a_val = item.get("area_m2")
-            if a_val is not None and math.isfinite(float(a_val)) and float(a_val) > 0.0:
-                areas.append(float(a_val))
+        evidence_ids = sorted(
+            {
+                str(eid).strip()
+                for item in items
+                for eid in (item.get("source_evidence_ids") or ())
+                if str(eid).strip()
+            }
+        )
 
-            if item.get("family") and item["family"] != "opening":
-                family = str(item["family"])
-            if item.get("subtype"):
-                subtype = str(item["subtype"])
-            if item.get("material"):
-                material = str(item["material"])
-
-            if item.get("detail_record_id"):
-                detail_rec_id = str(item["detail_record_id"])
-            if item.get("detail_semantic_identity_id"):
-                detail_sem_id = str(item["detail_semantic_identity_id"])
-
-            if item.get("plan_page_id"):
-                plan_p = str(item["plan_page_id"])
-            if item.get("elevation_page_id"):
-                elev_p = str(item["elevation_page_id"])
-            if item.get("schedule_page_id"):
-                sched_p = str(item["schedule_page_id"])
-            if item.get("detail_page_id"):
-                det_p = str(item["detail_page_id"])
-
-            if item.get("source_evidence_ids"):
-                for eid in item["source_evidence_ids"]:
-                    if eid not in evidence_ids:
-                        evidence_ids.append(str(eid))
-
-            if not canonical_op_id and item.get("opening_id"):
-                canonical_op_id = str(item["opening_id"])
-
-        final_w = widths[0] if widths else 0.0
-        final_h = heights[0] if heights else 0.0
-        if final_w > 0.0 and final_h > 0.0:
-            final_area = round(final_w * final_h, 4)
-        elif areas:
-            final_area = areas[0]
+        if width_m > 0.0 and height_m > 0.0:
+            area_m2 = round(width_m * height_m, 4)
         else:
-            final_area = 0.0
-
-        if not canonical_op_id:
-            tag_suffix = f"_{mark}" if mark else ""
-            canonical_op_id = f"open_{wall_id}{tag_suffix}" if wall_id else f"open_{mark}"
+            area_m2 = explicit_area_m2
 
         consolidated.append(
             ConsolidatedPhysicalOpening(
-                opening_id=canonical_op_id,
+                opening_id=opening_id,
                 type_mark=mark,
                 host_wall_id=wall_id,
-                width_m=final_w,
-                height_m=final_h,
-                area_m2=final_area,
+                width_m=width_m,
+                height_m=height_m,
+                area_m2=area_m2,
                 family=family,
                 subtype=subtype,
                 material=material,
@@ -203,7 +242,6 @@ def consolidate_opening_identities(
         )
 
     return consolidated
-
 
 def enrich_openings_with_detail_definitions(
     openings: Sequence[ConsolidatedPhysicalOpening | Dict[str, Any]],
