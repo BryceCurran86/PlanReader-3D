@@ -31,6 +31,7 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_RESOLVED,
@@ -114,6 +115,9 @@ PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY = (
 )
 PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED = (
     "physical_wall_candidate_scope_bounds_unresolved"
+)
+PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED = (
+    "physical_wall_candidate_page_frame_unresolved"
 )
 PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID = (
     "physical_wall_candidate_viewport_authority_invalid"
@@ -394,6 +398,22 @@ def _is_orthogonal_angle(angle_deg: float) -> bool:
         abs(angle_deg - 90.0),
         abs(angle_deg - 180.0),
     ) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG
+
+
+class WallPageFrameUnresolved(RuntimeError):
+    """The source page frame cannot safely bound native wall geometry."""
+
+
+def native_wall_scope_page_extent(page: fitz.Page) -> tuple[float, float]:
+    """Return the producer-owned native page extent used by wall topology."""
+
+    try:
+        frame = native_page_frame(page)
+    except NativePageFrameUnresolved as exc:
+        raise WallPageFrameUnresolved(
+            PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
+        ) from exc
+    return frame.native_width, frame.native_height
 
 
 def _is_proven_annotation_mask_edge(
@@ -774,7 +794,9 @@ def _source_page_segments(
     try:
         if page_number > int(pdf.page_count):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        native = extract_native_page(pdf.load_page(page_number - 1))
+        page = pdf.load_page(page_number - 1)
+        native = extract_native_page(page)
+        page_width, page_height = native_wall_scope_page_extent(page)
     finally:
         pdf.close()
 
@@ -857,8 +879,8 @@ def _source_page_segments(
     return (
         segments,
         tuple(sorted(page_visible_ids)),
-        float(native["width"]),
-        float(native["height"]),
+        page_width,
+        page_height,
     )
 
 
@@ -2342,14 +2364,17 @@ def _build_scope_result(
     ):
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
 
-    segments, source_observation_ids, page_width, page_height = _source_page_segments(
-        source_producer=source_producer,
-        published=published,
-        source_bytes=source_bytes,
-        page_id=page_id,
-        decision_scope_id=scope_id,
-        resolved_visible_observations=resolved_visible_observations,
-    )
+    try:
+        segments, source_observation_ids, page_width, page_height = _source_page_segments(
+            source_producer=source_producer,
+            published=published,
+            source_bytes=source_bytes,
+            page_id=page_id,
+            decision_scope_id=scope_id,
+            resolved_visible_observations=resolved_visible_observations,
+        )
+    except WallPageFrameUnresolved:
+        return _blocked(selector, PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED)
     scale_producer = (
         physical_scale_producer
         if physical_scale_producer is not None
@@ -2398,14 +2423,17 @@ def _build_authenticated_viewport_scope_results(
         return ()
 
     page_scope_id = _decision_scope_id(page_id)
-    page_segments, _page_observation_ids, page_width, page_height = _source_page_segments(
-        source_producer=source_producer,
-        published=published,
-        source_bytes=source_bytes,
-        page_id=page_id,
-        decision_scope_id=page_scope_id,
-        resolved_visible_observations=resolved_visible_observations,
-    )
+    try:
+        page_segments, _page_observation_ids, page_width, page_height = _source_page_segments(
+            source_producer=source_producer,
+            published=published,
+            source_bytes=source_bytes,
+            page_id=page_id,
+            decision_scope_id=page_scope_id,
+            resolved_visible_observations=resolved_visible_observations,
+        )
+    except WallPageFrameUnresolved:
+        return ()
     pdf = fitz.open(stream=source_bytes, filetype="pdf")
     try:
         page = pdf.load_page(page_number - 1)
@@ -2843,6 +2871,47 @@ class PhysicalWallCandidateAuthority:
             return None
         return self._selector_for_result(matches[0])
 
+    def selectors_for_authenticated_viewports(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_id: str,
+        view_type: Optional[str] = None,
+    ) -> tuple[PhysicalWallCandidateSelector, ...]:
+        """Return sealed selectors for producer-materialized viewport scopes.
+
+        This is addressing only. It cannot create viewport geometry, change
+        scope completeness, or promote a wall result. Optional view_type merely
+        filters the producer-owned viewport classification already sealed into
+        each scope.
+        """
+
+        expected_view_type = None if view_type is None else str(view_type)
+        matches = [
+            result
+            for result in self._scopes.values()
+            if result.scope_kind == "viewport"
+            and result.document_id == str(document_id)
+            and result.revision_id == str(revision_id)
+            and result.source_sha256 == str(source_sha256)
+            and result.snapshot_id == str(snapshot_id)
+            and result.page_id == str(page_id)
+            and (
+                expected_view_type is None
+                or result.viewport_view_type == expected_view_type
+            )
+        ]
+        matches.sort(
+            key=lambda result: (
+                str(result.viewport_id or ""),
+                str(result.decision_scope_id),
+            )
+        )
+        return tuple(self._selector_for_result(result) for result in matches)
+
     def selector_for_decision_scope(
         self,
         *,
@@ -2870,6 +2939,7 @@ class PhysicalWallCandidateAuthority:
 
 __all__ = [
     "PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION",
+    "PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_PAGE_BOUNDARY",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY",
@@ -2878,6 +2948,8 @@ __all__ = [
     "PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS",
     "PHYSICAL_WALL_CANDIDATE_VIEWPORT_AUTHORITY_INVALID",
     "PHYSICAL_WALL_CANDIDATE_VIEWPORT_LINEAGE_MISMATCH",
+    "WallPageFrameUnresolved",
+    "native_wall_scope_page_extent",
     "PhysicalWallCandidateAuthority",
     "PhysicalWallCandidateProducer",
     "PhysicalWallCandidateRecord",
