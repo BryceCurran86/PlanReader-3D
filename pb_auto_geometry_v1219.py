@@ -1797,7 +1797,18 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     facade_rows, facades = _build_facade_rows(app, int(workspace_id), [dict(p) for p in pages])
     partition_rows, partitions = _build_internal_partition_rows(app, int(workspace_id), [dict(p) for p in pages], footprint)
     finish_rows, finishes = _build_bound_wall_finish_rows(app, int(workspace_id), [dict(p) for p in pages])
-    all_auto_rows = unit_rows + facade_rows + partition_rows + finish_rows
+    opening_rows = list(
+        getattr(app, "_live_opening_takeoff_rows_by_workspace", {}).get(
+            int(workspace_id), ()
+        )
+    )
+    all_auto_rows = (
+        unit_rows
+        + facade_rows
+        + opening_rows
+        + partition_rows
+        + finish_rows
+    )
 
     # AG-08: Collect identity-proven semantic conflicts from live runtime
     # evidence and annotate only the affected canonical takeoff rows. No
@@ -1828,6 +1839,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
             "partitions": partitions, "finishes": finishes,
+            "opening_takeoff_rows": len(opening_rows),
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "coverage_lifecycle": coverage_lifecycle,
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
