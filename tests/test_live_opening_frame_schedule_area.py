@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ import pytest
 import pb_auto_geometry_v1219 as auto
 from pb_live_opening_area_quantity_publication import (
     LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY,
+    _opening_quantity,
 )
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
@@ -75,11 +77,19 @@ def test_explicit_frame_schedule_dimensions_publish_gross_frame_area(
     assert opening.area_basis == "authenticated_frame_schedule"
     assert opening.area_m2 == pytest.approx(2.16)
 
-    assert len(claim.opening_quantity_evidence) == 1, {
-        "claim_reasons": claim.reason_codes,
-        "opening": opening.to_dict(),
-    }
-    quantity = claim.opening_quantity_evidence[0]
+    # The source fixture deliberately does not establish an authenticated host
+    # wall, so commercial publication must still fail closed at the host gate.
+    assert opening.host_wall_id is None
+    assert claim.opening_quantity_evidence == ()
+
+    hosted = replace(
+        opening,
+        host_wall_id="wall-1",
+        host_binding_record_id="host-binding-1",
+        evidence_ids=tuple((*opening.evidence_ids, "host-binding-1")),
+    )
+    quantity = _opening_quantity(hosted)
+    assert quantity is not None
     assert quantity.value == pytest.approx(2.16)
     assert quantity.unit == "m2"
     assert quantity.input_entity_ids == (opening.canonical_opening_id,)
@@ -95,18 +105,27 @@ def test_frame_schedule_area_reaches_customer_runtime_row_without_net_wall(
     path = tmp_path / "frame-schedule-customer.pdf"
     path.write_bytes(_frame_schedule_pdf(explicit_frame_basis=True))
     claim = collect_live_physical_net_wall_claim(path, pages=(0,))
-    assert claim.opening_quantity_evidence, {
-        "claim_reasons": claim.reason_codes,
-        "opening": claim.canonical_openings[0].to_dict() if claim.canonical_openings else None,
-    }
-    area_quantity = claim.opening_quantity_evidence[0]
+    opening = claim.canonical_openings[0]
+    hosted = replace(
+        opening,
+        host_wall_id="wall-1",
+        host_binding_record_id="host-binding-1",
+        evidence_ids=tuple((*opening.evidence_ids, "host-binding-1")),
+    )
+    area_quantity = _opening_quantity(hosted)
+    assert area_quantity is not None
+    hosted_claim = replace(
+        claim,
+        canonical_openings=(hosted,),
+        opening_quantity_evidence=(area_quantity,),
+    )
 
     app = SimpleNamespace(
         lquery=lambda *_args, **_kwargs: [{"id": 1, "path": str(path)}]
     )
     with patch(
         "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
-        return_value=claim,
+        return_value=hosted_claim,
     ):
         wall_rows = auto._try_physical_net_wall_rows(
             app,
