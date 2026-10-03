@@ -90,7 +90,7 @@ _FRAGMENT_CONTINUATION_TOKEN_RE = re.compile(
 )
 _EXPLICIT_WINDOW_WORD_RE = re.compile(r"\bWINDOWS?\b", re.IGNORECASE)
 _EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.IGNORECASE)
-_LEGEND_HEADER_RE = re.compile(r"\b(?:LEGEND|ABBREVIATIONS?)\b", re.IGNORECASE)
+_LEGEND_HEADER_RE = re.compile(r"^\s*(?:LEGEND|ABBREVIATIONS?)\s*$", re.IGNORECASE)
 _LEGEND_CODE_RE = re.compile(r"^[A-Z][A-Z0-9._/+\-]{0,14}$", re.IGNORECASE)
 _LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.IGNORECASE)
 
