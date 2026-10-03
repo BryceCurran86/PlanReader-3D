@@ -74,10 +74,15 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
 
 
 def test_canonical_opening_provenance_union_is_order_invariant_without_collapsing_ids() -> None:
-    forward = _canonical_provenance_ids(("ev-b", "ev-a", "ev-b", "opening-1"))
-    reverse = _canonical_provenance_ids(("opening-1", "ev-a", "ev-b"))
+    forward = _canonical_provenance_ids(
+        ("ev-b", None, "ev-a", "ev-b", "", "opening-1")
+    )
+    reverse = _canonical_provenance_ids(
+        ("opening-1", "ev-a", None, "ev-b")
+    )
     assert forward == reverse == ("ev-a", "ev-b", "opening-1")
     assert "opening-1" in forward
+    assert "None" not in forward
 
 def test_live_composition_resolves_sealed_physical_opening_void() -> None:
     source = SourceVisibilityProducer(
@@ -132,6 +137,7 @@ def test_live_composition_resolves_sealed_physical_opening_void() -> None:
     assert opening.canonical_opening_id == trace.opening_identity_id
     assert opening.physical_opening_id == trace.opening_identity_id
     assert opening.page_id == trace.page_id
+    assert opening.viewport_id == f"page:{trace.page_id}"
     assert opening.semantic_class == "opening"
     assert opening.structural_pattern
     assert opening.representative_observation_id == trace.representative_observation_id
