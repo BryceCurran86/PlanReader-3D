@@ -31,6 +31,10 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_pdf_text_integrity_authority import (
+    PDF_TEXT_GEOMETRY_TOLERANCE_PT,
+    PDF_TEXT_MAJORITY_OVERLAP_RATIO,
+)
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
@@ -417,6 +421,149 @@ def native_wall_scope_page_extent(page: fitz.Page) -> tuple[float, float]:
     return frame.native_width, frame.native_height
 
 
+def _receipt_geometry_bbox(receipt: object) -> Optional[tuple[float, float, float, float]]:
+    geometry = tuple(getattr(receipt, "geometry", ()) or ())
+    if len(geometry) < 4:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(geometry[index]) for index in range(4))
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+        return None
+    return (
+        min(x0, x1),
+        min(y0, y1),
+        max(x0, x1),
+        max(y0, y1),
+    )
+
+
+def _annotate_producer_owned_annotation_masks(
+    segments: Sequence[dict],
+    *,
+    text_receipts: Sequence[object],
+) -> tuple[dict, ...]:
+    """Attach positive producer-owned proof to text-backing fill rectangles.
+
+    The proof is source-structural and does not trust decoded text semantics.
+    A rectangle is authenticated only when the native PDF paint stream proves
+    all of the following:
+
+    - one exact four-edge fill-only, unstroked rectangle source path;
+    - a text draw occurs immediately after that rectangle in PDF paint order;
+    - the text geometry is fully contained by the rectangle;
+    - rectangle area is tightly text-sized rather than a page/object fill.
+
+    Missing any proposition preserves the rectangle unchanged. The downstream
+    wall filter therefore still fails closed for ordinary filled rectangles.
+    """
+
+    text_boxes_by_sequence: dict[int, list[tuple[float, float, float, float]]] = (
+        defaultdict(list)
+    )
+    for receipt in text_receipts:
+        sequence_number = getattr(receipt, "sequence_number", None)
+        try:
+            sequence_number = int(sequence_number)
+        except (TypeError, ValueError):
+            continue
+        bbox = _receipt_geometry_bbox(receipt)
+        if bbox is not None:
+            text_boxes_by_sequence[sequence_number].append(bbox)
+
+    rect_groups: dict[tuple[object, object], list[dict]] = defaultdict(list)
+    for segment in segments:
+        if str(segment.get("kind") or "") != "rect_edge":
+            continue
+        rect_groups[
+            (segment.get("path_index"), segment.get("item_index"))
+        ].append(segment)
+
+    proven_ids: set[int] = set()
+    for group in rect_groups.values():
+        if len(group) != 4:
+            continue
+        if {segment.get("edge_index") for segment in group} != {0, 1, 2, 3}:
+            continue
+        if any(bool(segment.get("stroke_present", False)) for segment in group):
+            continue
+        if not all(bool(segment.get("fill_present", False)) for segment in group):
+            continue
+
+        sequence_values = {segment.get("sequence_number") for segment in group}
+        if len(sequence_values) != 1:
+            continue
+        sequence_number = next(iter(sequence_values))
+        try:
+            sequence_number = int(sequence_number)
+        except (TypeError, ValueError):
+            continue
+        text_boxes = text_boxes_by_sequence.get(sequence_number + 1, ())
+        if not text_boxes:
+            continue
+
+        xs = [
+            float(value)
+            for segment in group
+            for value in (segment["x1"], segment["x2"])
+        ]
+        ys = [
+            float(value)
+            for segment in group
+            for value in (segment["y1"], segment["y2"])
+        ]
+        rect_bbox = (min(xs), min(ys), max(xs), max(ys))
+        rx0, ry0, rx1, ry1 = rect_bbox
+        rect_width = rx1 - rx0
+        rect_height = ry1 - ry0
+        if rect_width <= 0.0 or rect_height <= 0.0:
+            continue
+
+        tx0 = min(box[0] for box in text_boxes)
+        ty0 = min(box[1] for box in text_boxes)
+        tx1 = max(box[2] for box in text_boxes)
+        ty1 = max(box[3] for box in text_boxes)
+        text_width = tx1 - tx0
+        text_height = ty1 - ty0
+        if text_width <= 0.0 or text_height <= 0.0:
+            continue
+
+        tol = PDF_TEXT_GEOMETRY_TOLERANCE_PT
+        if (
+            tx0 < rx0 - tol
+            or ty0 < ry0 - tol
+            or tx1 > rx1 + tol
+            or ty1 > ry1 + tol
+        ):
+            continue
+        rect_area = rect_width * rect_height
+        text_area = text_width * text_height
+        if text_area <= 0.0:
+            continue
+        text_coverage = min(1.0, text_area / rect_area)
+        if text_coverage < PDF_TEXT_MAJORITY_OVERLAP_RATIO:
+            continue
+
+        proven_ids.update(id(segment) for segment in group)
+
+    annotated: list[dict] = []
+    for original in segments:
+        segment = dict(original)
+        if id(original) in proven_ids:
+            segment.update(
+                {
+                    "annotation_mask_authority": "producer_owned",
+                    "annotation_mask_text_sized": True,
+                    "annotation_text_overlap": True,
+                    "physical_wall_authority": False,
+                    "participates_in_source_physical_object": False,
+                }
+            )
+        annotated.append(segment)
+    return tuple(annotated)
+
+
 def _is_proven_annotation_mask_edge(
     segment: Mapping[str, object],
 ) -> bool:
@@ -710,6 +857,40 @@ def _visible_observations_by_page(
     }
 
 
+def _text_receipts_by_page(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+) -> dict[str, tuple[object, ...]]:
+    """Resolve producer-owned text receipts once and index exact page ownership.
+
+    Receipt geometry and paint sequence are usable here even when decoded text
+    semantics fail integrity checks: annotation-mask proof depends only on
+    source paint structure, never on the text content.
+    """
+
+    authority = source_producer.text_integrity_authority()
+    by_page: dict[str, list[object]] = {}
+    for observation_id in published.text_observation_ids:
+        result = authority.resolve_text(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        receipt = result.receipt
+        if receipt is None:
+            continue
+        by_page.setdefault(str(receipt.page_id), []).append(receipt)
+    return {
+        page_id: tuple(rows)
+        for page_id, rows in by_page.items()
+    }
+
+
 def _source_page_segments(
     *,
     source_producer: SourceVisibilityProducer,
@@ -718,6 +899,7 @@ def _source_page_segments(
     page_id: str,
     decision_scope_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    resolved_text_receipts: Optional[Sequence[object]] = None,
 ) -> tuple[list[dict], tuple[str, ...], float, float]:
     """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
 
@@ -835,6 +1017,21 @@ def _source_page_segments(
         for observation_id, _geometry in native_visible_by_raw_id.values()
     }:
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+
+    text_receipts = (
+        tuple(resolved_text_receipts)
+        if resolved_text_receipts is not None
+        else _text_receipts_by_page(
+            source_producer=source_producer,
+            published=published,
+        ).get(str(page_id), ())
+    )
+    segments = list(
+        _annotate_producer_owned_annotation_masks(
+            segments,
+            text_receipts=text_receipts,
+        )
+    )
 
     # Raster-visible observations have already passed the producer-owned
     # visibility authority, including page-render provenance, image hash, DPI,
@@ -2368,6 +2565,7 @@ def _build_scope_result(
     source_bytes: bytes,
     page_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    resolved_text_receipts: Optional[Sequence[object]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
 ) -> PhysicalWallCandidateScopeResult:
@@ -2400,6 +2598,7 @@ def _build_scope_result(
             page_id=page_id,
             decision_scope_id=scope_id,
             resolved_visible_observations=resolved_visible_observations,
+            resolved_text_receipts=resolved_text_receipts,
         )
     except WallPageFrameUnresolved:
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED)
@@ -2436,6 +2635,7 @@ def _build_authenticated_viewport_scope_results(
     source_bytes: bytes,
     page_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    resolved_text_receipts: Optional[Sequence[object]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
@@ -2459,6 +2659,7 @@ def _build_authenticated_viewport_scope_results(
             page_id=page_id,
             decision_scope_id=page_scope_id,
             resolved_visible_observations=resolved_visible_observations,
+            resolved_text_receipts=resolved_text_receipts,
         )
     except WallPageFrameUnresolved:
         return ()
@@ -2727,6 +2928,10 @@ class PhysicalWallCandidateProducer:
                 source_producer=source_visibility_producer,
                 published=published,
             )
+            text_receipts_by_page = _text_receipts_by_page(
+                source_producer=source_visibility_producer,
+                published=published,
+            )
             physical_opening_authority = (
                 source_visibility_producer.physical_opening_authority()
             )
@@ -2745,6 +2950,7 @@ class PhysicalWallCandidateProducer:
                         source_bytes=source_bytes,
                         page_id=page_id,
                         resolved_visible_observations=page_visible_observations,
+                        resolved_text_receipts=text_receipts_by_page.get(page_id, ()),
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
                     )
@@ -2765,6 +2971,7 @@ class PhysicalWallCandidateProducer:
                         source_bytes=source_bytes,
                         page_id=page_id,
                         resolved_visible_observations=page_visible_observations,
+                        resolved_text_receipts=text_receipts_by_page.get(page_id, ()),
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
                     ):
