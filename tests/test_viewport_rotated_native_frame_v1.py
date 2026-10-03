@@ -21,6 +21,18 @@ def _rotated_framed_plan(*, rotation: int = 90):
     frame = fitz.Rect(60.0, 80.0, 500.0, 650.0)
     page.draw_rect(frame, color=(0, 0, 0), width=1.0)
 
+    # Dense plans commonly contain far more than eight rectangle primitives.
+    # Keep a repeated same-size family, but deliberately not a row/column grid:
+    # count alone must never make the physical drawing frame look like a table.
+    for index in range(12):
+        x0 = 80.0 + index * 24.0
+        y0 = 110.0 + index * 28.0
+        page.draw_rect(
+            fitz.Rect(x0, y0, x0 + 12.0, y0 + 8.0),
+            color=(0, 0, 0),
+            width=0.5,
+        )
+
     # Mirror a real /Rotate 90 CAD convention: the visually horizontal drawing
     # title is authored vertically in native space, just to the right of the
     # native frame. After page rotation it appears directly below the frame.
