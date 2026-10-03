@@ -3171,9 +3171,9 @@ class GenericPlanReaderExtractor:
                     "reason_codes": ["source_plan_opening_callouts_resolved"],
                     "openings": [item.to_dict() for item in source_callouts],
                 }
-                _coverage_quantities.extend(
-                    item.quantity_evidence for item in source_callouts
-                )
+                # Source callouts are measurement/type observations only.
+                # They cannot enter quantity coverage until bound to an
+                # independently proven physical opening identity.
                 self.extraction_status["source_plan_opening_callouts"] = (
                     "corroborated"
                 )
