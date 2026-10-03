@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import fitz
 
@@ -14,6 +15,10 @@ from pb_source_room_face_authority import (
     SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS,
     SOURCE_ROOM_FACE_SCOPE_RESOLVED,
     SourceRoomFaceSelector,
+    _derive_scope,
+    _edge,
+    _edge_contains_edge,
+    _unique_containing_wall_owner,
     build_source_room_face_authority,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -138,3 +143,140 @@ def test_selector_lookup_is_exact_lineage(tmp_path: Path) -> None:
     )
     assert missing.status is EvidenceResolutionStatus.ABSTAINED
     assert missing.records == ()
+
+
+def test_planarized_subedge_inherits_unique_authenticated_wall_owner() -> None:
+    parent = _edge((0.0, 0.0), (10.0, 0.0))
+    child = _edge((2.0, 0.0), (8.0, 0.0))
+
+    assert _edge_contains_edge(parent, child)
+    assert _unique_containing_wall_owner(
+        child,
+        edge_owner={},
+        wall_edges={"wall-a": (parent,)},
+    ) == "wall-a"
+
+
+def test_planarized_diagonal_subedge_inherits_unique_owner() -> None:
+    parent = _edge((0.0, 0.0), (10.0, 10.0))
+    child = _edge((2.5, 2.5), (7.5, 7.5))
+
+    assert _edge_contains_edge(parent, child)
+    assert _unique_containing_wall_owner(
+        child,
+        edge_owner={},
+        wall_edges={"wall-diagonal": (parent,)},
+    ) == "wall-diagonal"
+
+
+def test_contained_edge_owner_fails_closed_for_extension_or_offset() -> None:
+    parent = _edge((0.0, 0.0), (10.0, 0.0))
+    extended = _edge((-1.0, 0.0), (8.0, 0.0))
+    offset = _edge((2.0, 0.001), (8.0, 0.001))
+
+    assert not _edge_contains_edge(parent, extended)
+    assert not _edge_contains_edge(parent, offset)
+    for edge in (extended, offset):
+        assert _unique_containing_wall_owner(
+            edge, edge_owner={}, wall_edges={"wall-a": (parent,)}
+        ) is None
+
+
+def test_contained_edge_owner_fails_closed_for_competing_wall_ids() -> None:
+    child = _edge((3.0, 0.0), (7.0, 0.0))
+    walls = {
+        "wall-a": (_edge((0.0, 0.0), (10.0, 0.0)),),
+        "wall-b": (_edge((2.0, 0.0), (8.0, 0.0)),),
+    }
+
+    assert _unique_containing_wall_owner(
+        child, edge_owner={}, wall_edges=walls
+    ) is None
+    assert _unique_containing_wall_owner(
+        child, edge_owner={}, wall_edges=dict(reversed(tuple(walls.items())))
+    ) is None
+
+
+def test_exact_edge_owner_remains_primary_authority() -> None:
+    edge = _edge((3.0, 0.0), (7.0, 0.0))
+    assert _unique_containing_wall_owner(
+        edge,
+        edge_owner={edge: "wall-exact"},
+        wall_edges={
+            "wall-exact": (edge,),
+            "wall-broader": (_edge((0.0, 0.0), (10.0, 0.0)),),
+        },
+    ) == "wall-exact"
+
+
+def test_planar_face_split_at_partition_keeps_room_face_authority() -> None:
+    def record(wall_id: str, first, second):
+        return SimpleNamespace(
+            wall_candidate_id=wall_id,
+            wall_candidate=SimpleNamespace(centerline_pts=(first, second)),
+        )
+
+    scope = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(
+            record("top", (0.0, 0.0), (10.0, 0.0)),
+            record("right", (10.0, 0.0), (10.0, 10.0)),
+            record("bottom", (10.0, 10.0), (0.0, 10.0)),
+            record("left", (0.0, 10.0), (0.0, 0.0)),
+            record("partition", (5.0, 0.0), (5.0, 10.0)),
+        ),
+        document_id="doc-planar-split",
+        revision_id="rev-planar-split",
+        source_sha256="a" * 64,
+        snapshot_id="snap-planar-split",
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+    )
+
+    result = _derive_scope(scope)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.scope_complete is True
+    assert result.reason_codes == (SOURCE_ROOM_FACE_SCOPE_RESOLVED,)
+    assert len(result.records) == 2
+    assert all("partition" in row.bounding_wall_ids for row in result.records)
+
+def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> None:
+    def record(wall_id: str, first, second):
+        return SimpleNamespace(
+            wall_candidate_id=wall_id,
+            wall_candidate=SimpleNamespace(centerline_pts=(first, second)),
+        )
+
+    # Two independent boxes hang from disjoint subsegments of one long top
+    # wall. They do not share an interior boundary with each other. Planar
+    # splitting therefore gives the long wall two owned face subedges, but
+    # neither exact subedge is shared by both faces.
+    scope = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(
+            record("long-top", (0.0, 0.0), (20.0, 0.0)),
+            record("box1-left", (0.0, 0.0), (0.0, 10.0)),
+            record("box1-bottom", (0.0, 10.0), (8.0, 10.0)),
+            record("box1-right", (8.0, 10.0), (8.0, 0.0)),
+            record("box2-left", (12.0, 0.0), (12.0, 10.0)),
+            record("box2-bottom", (12.0, 10.0), (20.0, 10.0)),
+            record("box2-right", (20.0, 10.0), (20.0, 0.0)),
+        ),
+        document_id="doc-disjoint-boxes",
+        revision_id="rev-disjoint-boxes",
+        source_sha256="b" * 64,
+        snapshot_id="snap-disjoint-boxes",
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+    )
+
+    result = _derive_scope(scope)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.scope_complete is False
+    assert result.records == ()
+    assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes
+

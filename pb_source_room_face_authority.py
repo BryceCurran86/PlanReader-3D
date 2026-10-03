@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 from typing import Iterable, Mapping
 
@@ -97,6 +98,63 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
         if edge[0] != edge[1]:
             result.append(edge)
     return tuple(result)
+
+
+def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
+    """Return True only when a child edge is a quantized subsegment of parent.
+
+    ``extract_planar_faces`` may split an authenticated wall centerline at an
+    intersection. Those split points are rounded through the same six-decimal
+    page-space contract as wall edges, so containment is allowed only within
+    the maximum error implied by that quantization. No geometric extension,
+    nearest-edge selection, or angle-only matching is permitted.
+    """
+    (ax, ay), (bx, by) = parent
+    tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+    dx, dy = bx - ax, by - ay
+    length = math.hypot(dx, dy)
+    if length <= tolerance:
+        return False
+
+    xmin, xmax = min(ax, bx) - tolerance, max(ax, bx) + tolerance
+    ymin, ymax = min(ay, by) - tolerance, max(ay, by) + tolerance
+
+    for px, py in child:
+        if not (xmin <= px <= xmax and ymin <= py <= ymax):
+            return False
+        perpendicular_distance = abs((px - ax) * dy - (py - ay) * dx) / length
+        if perpendicular_distance > tolerance:
+            return False
+    return child[0] != child[1]
+
+
+def _unique_containing_wall_owner(
+    edge: Edge,
+    *,
+    edge_owner: Mapping[Edge, str],
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> str | None:
+    """Resolve a planarized face edge to exactly one authenticated wall.
+
+    Exact ownership remains authoritative. A fallback is used only when the
+    face edge is wholly contained by an original collinear authenticated wall
+    edge. Competing physical wall ids fail closed instead of selecting first,
+    nearest, shortest, or longest.
+    """
+    exact = edge_owner.get(edge)
+    if exact is not None:
+        return exact
+
+    owner: str | None = None
+    for wall_id in sorted(wall_edges):
+        if not any(
+            _edge_contains_edge(parent, edge) for parent in wall_edges[wall_id]
+        ):
+            continue
+        if owner is not None and owner != wall_id:
+            return None
+        owner = wall_id
+    return owner
 
 
 @dataclass(frozen=True)
@@ -240,6 +298,7 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
 
     polygons: dict[str, tuple[Point, ...]] = {}
     face_walls: dict[str, tuple[str, ...]] = {}
+    face_wall_edges: dict[str, tuple[tuple[str, Edge], ...]] = {}
     face_areas: dict[str, float] = {}
 
     for raw_face in raw_faces:
@@ -247,12 +306,19 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         if not polygon:
             continue
         owners: list[str] = []
+        owned_edges: list[tuple[str, Edge]] = []
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
-            owner = edge_owner.get(_edge(first, second))
+            face_edge = _edge(first, second)
+            owner = _unique_containing_wall_owner(
+                face_edge,
+                edge_owner=edge_owner,
+                wall_edges=wall_edges,
+            )
             if owner is None:
                 return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
             owners.append(owner)
+            owned_edges.append((owner, face_edge))
         face_id = stable_contract_id(
             "source_room_face",
             {
@@ -268,6 +334,7 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         )
         polygons[face_id] = polygon
         face_walls[face_id] = tuple(sorted(set(owners)))
+        face_wall_edges[face_id] = tuple(owned_edges)
         face_areas[face_id] = _polygon_area(polygon)
 
     if not polygons:
@@ -285,10 +352,16 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
 
     wall_faces: dict[str, set[str]] = {wall_id: set() for wall_id in wall_ids}
+    wall_face_edges: dict[str, dict[Edge, set[str]]] = {
+        wall_id: defaultdict(set) for wall_id in wall_ids
+    }
     for face_id, owners in face_walls.items():
         for wall_id in owners:
             if wall_id in wall_faces:
                 wall_faces[wall_id].add(face_id)
+        for wall_id, face_edge in face_wall_edges[face_id]:
+            if wall_id in wall_face_edges:
+                wall_face_edges[wall_id][face_edge].add(face_id)
 
     parent = {wall_id: wall_id for wall_id in wall_ids}
 
@@ -317,8 +390,14 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         component_faces = set().union(
             *(wall_faces[wall_id] for wall_id in component)
         )
+        # A long physical wall may own disjoint subedges of several rooms on
+        # the same side. That is not a shared interior boundary. Require the
+        # exact same planarized subedge to bound two faces before treating a
+        # wall as two-sided for the anti-box/component gate.
         has_two_sided_wall = any(
-            len(wall_faces[wall_id]) == 2 for wall_id in component
+            len(face_ids) == 2
+            for wall_id in component
+            for face_ids in wall_face_edges[wall_id].values()
         )
         if len(component_faces) >= 2 and has_two_sided_wall:
             resolved_faces.update(component_faces)
