@@ -830,25 +830,73 @@ def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> 
 
 
 def _frame_candidates_for_title(
+    page: Any,
     anchor: _TitleAnchor,
     frames: Sequence[tuple[float, float, float, float]],
     calibration: ViewportLayoutCalibration,
     anchors: Sequence[_TitleAnchor] = (),
 ) -> list[tuple[float, float, float, float]]:
+    """Bind native vector frames to drawing titles in visual orientation.
+
+    The source frame and returned viewport bbox remain in native page user
+    space. A title may be inside that frame directly. For the common
+    "title-below-frame" convention, however, below/overlap are visual-layout
+    relationships, so both title and frame are explicitly transformed into
+    display orientation before evaluating that relation. This is essential on
+    /Rotate 90 pages, where visual "below" is native "to the right".
+    """
+
     candidates: list[tuple[float, float, float, float]] = []
-    title_center = anchor.center
+    visual_anchor_bbox = _to_visual_bbox(page, anchor.bbox)
+    visual_title_center = _bbox_center(visual_anchor_bbox)
     for frame in frames:
-        if _bbox_contains(frame, anchor.bbox, margin=calibration.median_word_height_pt * 0.25):
+        if _bbox_contains(
+            frame,
+            anchor.bbox,
+            margin=calibration.median_word_height_pt * 0.25,
+        ):
             candidates.append(frame)
             continue
-        if _title_horizontal_overlap_fraction(anchor, frame) < _TITLE_HORIZONTAL_OVERLAP_FRACTION:
+
+        visual_frame = _to_visual_bbox(page, frame)
+        overlap = min(visual_frame[2], visual_anchor_bbox[2]) - max(
+            visual_frame[0], visual_anchor_bbox[0]
+        )
+        title_width = max(
+            visual_anchor_bbox[2] - visual_anchor_bbox[0],
+            1e-6,
+        )
+        if max(0.0, overlap) / title_width < _TITLE_HORIZONTAL_OVERLAP_FRACTION:
             continue
-        if not (frame[0] <= title_center[0] <= frame[2]):
+        if not (
+            visual_frame[0]
+            <= visual_title_center[0]
+            <= visual_frame[2]
+        ):
             continue
-        gap = anchor.bbox[1] - frame[3]
-        if not (0 <= gap <= _max_title_below_frame_gap(frame, calibration)):
+
+        gap = visual_anchor_bbox[1] - visual_frame[3]
+        if not (
+            0
+            <= gap
+            <= _max_title_below_frame_gap(visual_frame, calibration)
+        ):
             continue
-        if _other_title_in_title_gap(anchor, frame, anchors):
+
+        gap_box = (
+            visual_frame[0],
+            visual_frame[3],
+            visual_frame[2],
+            visual_anchor_bbox[1],
+        )
+        if any(
+            other is not anchor
+            and _point_in_bbox(
+                _bbox_center(_to_visual_bbox(page, other.bbox)),
+                gap_box,
+            )
+            for other in anchors
+        ):
             continue
         candidates.append(frame)
     return candidates
@@ -886,7 +934,13 @@ def _frame_resolved_viewports(
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
     for index, anchor in enumerate(anchors):
-        candidates = _frame_candidates_for_title(anchor, frames, calibration, anchors=anchors)
+        candidates = _frame_candidates_for_title(
+            page,
+            anchor,
+            frames,
+            calibration,
+            anchors=anchors,
+        )
         usable = [
             frame for frame in candidates
             if not _rejected_ownership_frame(page, frame, calibration, fragments)
@@ -1613,9 +1667,52 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
-    framed, consumed = _frame_resolved_viewports(page, anchors, frames, calibration, page_number=page_number)
+    framed, consumed = _frame_resolved_viewports(
+        page,
+        anchors,
+        frames,
+        calibration,
+        page_number=page_number,
+    )
     unresolved = [i for i in range(len(anchors)) if i not in consumed]
-    derived = _derived_partitions(page, anchors, unresolved, calibration, page_number=page_number) if unresolved else []
+    try:
+        page_rotation = native_page_frame(page).rotation
+    except NativePageFrameUnresolved:
+        return []
+    if unresolved and page_rotation != 0:
+        derived = [
+            SegmentedViewport(
+                view_id=f"view_p{page_number}_{index + 1}",
+                page_number=page_number,
+                view_type=anchors[index].view_type,
+                label=anchors[index].text,
+                title_bbox=anchors[index].bbox,
+                bounding_box=None,
+                status=ViewportSegmentationStatus.UNSUPPORTED.value,
+                boundary_source=ViewportBoundarySource.NONE.value,
+                confidence=0.0,
+                notes=[
+                    "rotated page requires producer-owned vector-frame ownership"
+                ],
+                provenance={
+                    "rotation": page_rotation,
+                    "derived_partition_disabled": True,
+                },
+            )
+            for index in unresolved
+        ]
+    else:
+        derived = (
+            _derived_partitions(
+                page,
+                anchors,
+                unresolved,
+                calibration,
+                page_number=page_number,
+            )
+            if unresolved
+            else []
+        )
     ordered = sorted(
         framed + derived,
         key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id),
