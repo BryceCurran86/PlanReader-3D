@@ -36,6 +36,7 @@ import statistics
 from typing import Any, Iterable, Optional, Sequence
 
 from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewRegion, DrawingViewType
+from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 import pb_page_title_authority as _title_authority
 
 
@@ -121,6 +122,9 @@ _TITLE_HORIZONTAL_OVERLAP_FRACTION = 0.5
 _NESTED_BAND_SPAN_FRACTION = 0.35
 _TITLE_BLOCK_AREA_FRACTION = 0.20
 _TABLE_CELL_COUNT = 8
+_TABLE_GRID_OCCUPANCY_FRACTION = 0.75
+_TABLE_GRID_FRAME_COVERAGE_FRACTION = 0.20
+_TABLE_CELL_DIMENSION_ROUND_DIGITS = 3
 
 # Private in-process producer token. Migration authority must not be minted from
 # caller-copied provenance dictionaries. Only segment_page_viewports stamps this
@@ -402,23 +406,111 @@ def _frame_has_title_block_labels(
 def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
+    calibration: ViewportLayoutCalibration,
 ) -> bool:
-    cells = 0
+    """Return True only for positive repeated table-grid structure.
+
+    A dense architectural drawing can legitimately contain hundreds or
+    thousands of rectangle primitives. Rectangle count alone is therefore not
+    table evidence. A table requires a repeated same-size cell family arranged
+    as a substantially occupied row/column grid spanning a meaningful fraction
+    of the candidate frame.
+    """
+
     frame_area = _bbox_area(frame)
-    if frame_area <= 0:
+    frame_width = max(0.0, float(frame[2]) - float(frame[0]))
+    frame_height = max(0.0, float(frame[3]) - float(frame[1]))
+    if frame_area <= 0.0 or frame_width <= 0.0 or frame_height <= 0.0:
         return False
+
+    cells: list[tuple[float, float, float, float]] = []
     for drawing in page.get_drawings() or []:
         for item in drawing.get("items", []) or []:
             if not item or item[0] != "re" or len(item) < 2:
                 continue
             rect = item[1]
-            cell = _normalized_bbox(float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+            cell = _normalized_bbox(
+                float(rect.x0),
+                float(rect.y0),
+                float(rect.x1),
+                float(rect.y1),
+            )
             if not _bbox_contains(frame, cell, margin=1.0):
                 continue
-            if _bbox_area(cell) < 0.15 * frame_area and _bbox_area(cell) > 4.0:
-                cells += 1
-            if cells >= _TABLE_CELL_COUNT:
-                return True
+            area = _bbox_area(cell)
+            if 4.0 < area < 0.15 * frame_area:
+                cells.append(cell)
+
+    if len(cells) < _TABLE_CELL_COUNT:
+        return False
+
+    # Group by scale-invariant cell dimensions. Real table cells repeat their
+    # shape; unrelated CAD rectangles should not be pooled merely because they
+    # coexist in one drawing frame.
+    by_dimensions: dict[
+        tuple[float, float],
+        list[tuple[float, float, float, float]],
+    ] = {}
+    for cell in cells:
+        key = (
+            round(
+                (cell[2] - cell[0]) / frame_width,
+                _TABLE_CELL_DIMENSION_ROUND_DIGITS,
+            ),
+            round(
+                (cell[3] - cell[1]) / frame_height,
+                _TABLE_CELL_DIMENSION_ROUND_DIGITS,
+            ),
+        )
+        by_dimensions.setdefault(key, []).append(cell)
+
+    cluster_tol = max(
+        calibration.median_word_height_pt * 0.5,
+        min(frame_width, frame_height) * 0.002,
+        1.0,
+    )
+    for family in by_dimensions.values():
+        if len(family) < _TABLE_CELL_COUNT:
+            continue
+
+        centers_x = [(cell[0] + cell[2]) / 2.0 for cell in family]
+        centers_y = [(cell[1] + cell[3]) / 2.0 for cell in family]
+        x_clusters = _cluster_values(centers_x, cluster_tol)
+        y_clusters = _cluster_values(centers_y, cluster_tol)
+        if len(x_clusters) < 2 or len(y_clusters) < 2:
+            continue
+
+        occupied: set[tuple[int, int]] = set()
+        for x, y in zip(centers_x, centers_y):
+            x_index = min(
+                range(len(x_clusters)),
+                key=lambda index: abs(x - x_clusters[index]),
+            )
+            y_index = min(
+                range(len(y_clusters)),
+                key=lambda index: abs(y - y_clusters[index]),
+            )
+            occupied.add((x_index, y_index))
+
+        if len(occupied) < _TABLE_CELL_COUNT:
+            continue
+        occupancy = len(occupied) / (len(x_clusters) * len(y_clusters))
+        if occupancy < _TABLE_GRID_OCCUPANCY_FRACTION:
+            continue
+
+        grid_bbox = (
+            min(cell[0] for cell in family),
+            min(cell[1] for cell in family),
+            max(cell[2] for cell in family),
+            max(cell[3] for cell in family),
+        )
+        if (
+            _bbox_area(grid_bbox) / frame_area
+            < _TABLE_GRID_FRAME_COVERAGE_FRACTION
+        ):
+            continue
+        return True
+
     return False
 
 
@@ -432,7 +524,7 @@ def _rejected_ownership_frame(
         return True
     if _frame_has_title_block_labels(frame, fragments, calibration):
         return True
-    if _frame_looks_like_table(frame, page):
+    if _frame_looks_like_table(frame, page, calibration):
         return True
     return False
 
@@ -496,8 +588,15 @@ def _text_fragments(page: Any) -> list[tuple[tuple[float, float, float, float], 
 
 
 def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
-    rect = page.rect
-    width = float(rect.width); height = float(rect.height)
+    """Calibrate native viewport geometry in native page user space.
+
+    Text fragments and get_drawings() geometry are native/unrotated. Using
+    display-rotated page.rect dimensions here mixes coordinate spaces on
+    quarter-turn sheets, so the calibration must use the same native frame.
+    """
+
+    frame = native_page_frame(page)
+    width = float(frame.native_width); height = float(frame.native_height)
     word_heights = [
         float(w[3]) - float(w[1])
         for w in page.get_text("words")
@@ -822,25 +921,73 @@ def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> 
 
 
 def _frame_candidates_for_title(
+    page: Any,
     anchor: _TitleAnchor,
     frames: Sequence[tuple[float, float, float, float]],
     calibration: ViewportLayoutCalibration,
     anchors: Sequence[_TitleAnchor] = (),
 ) -> list[tuple[float, float, float, float]]:
+    """Bind native vector frames to drawing titles in visual orientation.
+
+    The source frame and returned viewport bbox remain in native page user
+    space. A title may be inside that frame directly. For the common
+    "title-below-frame" convention, however, below/overlap are visual-layout
+    relationships, so both title and frame are explicitly transformed into
+    display orientation before evaluating that relation. This is essential on
+    /Rotate 90 pages, where visual "below" is native "to the right".
+    """
+
     candidates: list[tuple[float, float, float, float]] = []
-    title_center = anchor.center
+    visual_anchor_bbox = _to_visual_bbox(page, anchor.bbox)
+    visual_title_center = _bbox_center(visual_anchor_bbox)
     for frame in frames:
-        if _bbox_contains(frame, anchor.bbox, margin=calibration.median_word_height_pt * 0.25):
+        if _bbox_contains(
+            frame,
+            anchor.bbox,
+            margin=calibration.median_word_height_pt * 0.25,
+        ):
             candidates.append(frame)
             continue
-        if _title_horizontal_overlap_fraction(anchor, frame) < _TITLE_HORIZONTAL_OVERLAP_FRACTION:
+
+        visual_frame = _to_visual_bbox(page, frame)
+        overlap = min(visual_frame[2], visual_anchor_bbox[2]) - max(
+            visual_frame[0], visual_anchor_bbox[0]
+        )
+        title_width = max(
+            visual_anchor_bbox[2] - visual_anchor_bbox[0],
+            1e-6,
+        )
+        if max(0.0, overlap) / title_width < _TITLE_HORIZONTAL_OVERLAP_FRACTION:
             continue
-        if not (frame[0] <= title_center[0] <= frame[2]):
+        if not (
+            visual_frame[0]
+            <= visual_title_center[0]
+            <= visual_frame[2]
+        ):
             continue
-        gap = anchor.bbox[1] - frame[3]
-        if not (0 <= gap <= _max_title_below_frame_gap(frame, calibration)):
+
+        gap = visual_anchor_bbox[1] - visual_frame[3]
+        if not (
+            0
+            <= gap
+            <= _max_title_below_frame_gap(visual_frame, calibration)
+        ):
             continue
-        if _other_title_in_title_gap(anchor, frame, anchors):
+
+        gap_box = (
+            visual_frame[0],
+            visual_frame[3],
+            visual_frame[2],
+            visual_anchor_bbox[1],
+        )
+        if any(
+            other is not anchor
+            and _point_in_bbox(
+                _bbox_center(_to_visual_bbox(page, other.bbox)),
+                gap_box,
+            )
+            for other in anchors
+        ):
             continue
         candidates.append(frame)
     return candidates
@@ -878,7 +1025,13 @@ def _frame_resolved_viewports(
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
     for index, anchor in enumerate(anchors):
-        candidates = _frame_candidates_for_title(anchor, frames, calibration, anchors=anchors)
+        candidates = _frame_candidates_for_title(
+            page,
+            anchor,
+            frames,
+            calibration,
+            anchors=anchors,
+        )
         usable = [
             frame for frame in candidates
             if not _rejected_ownership_frame(page, frame, calibration, fragments)
@@ -1398,6 +1551,15 @@ def _single_floor_plan_printable_partition(
     """Resolve one unframed floor plan from page ownership, fail-closed."""
     if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
         return None
+    # pb_page_title_authority deliberately works in visual/display space.
+    # Until that title-block rectangle has an explicit display->native bridge,
+    # do not compare it with native viewport geometry on a rotated page. The
+    # independent native vector-frame route above remains available.
+    try:
+        if native_page_frame(page).rotation != 0:
+            return None
+    except NativePageFrameUnresolved:
+        return None
     title_block = _proven_title_block_region(page)
     if title_block is None:
         return None
@@ -1588,14 +1750,60 @@ def _derived_partitions(
 
 
 def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:
-    calibration = calibrate_viewport_layout(page)
+    try:
+        calibration = calibrate_viewport_layout(page)
+    except NativePageFrameUnresolved:
+        return []
     anchors = extract_view_title_anchors(page)
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
-    framed, consumed = _frame_resolved_viewports(page, anchors, frames, calibration, page_number=page_number)
+    framed, consumed = _frame_resolved_viewports(
+        page,
+        anchors,
+        frames,
+        calibration,
+        page_number=page_number,
+    )
     unresolved = [i for i in range(len(anchors)) if i not in consumed]
-    derived = _derived_partitions(page, anchors, unresolved, calibration, page_number=page_number) if unresolved else []
+    try:
+        page_rotation = native_page_frame(page).rotation
+    except NativePageFrameUnresolved:
+        return []
+    if unresolved and page_rotation != 0:
+        derived = [
+            SegmentedViewport(
+                view_id=f"view_p{page_number}_{index + 1}",
+                page_number=page_number,
+                view_type=anchors[index].view_type,
+                label=anchors[index].text,
+                title_bbox=anchors[index].bbox,
+                bounding_box=None,
+                status=ViewportSegmentationStatus.UNSUPPORTED.value,
+                boundary_source=ViewportBoundarySource.NONE.value,
+                confidence=0.0,
+                notes=[
+                    "rotated page requires producer-owned vector-frame ownership"
+                ],
+                provenance={
+                    "rotation": page_rotation,
+                    "derived_partition_disabled": True,
+                },
+            )
+            for index in unresolved
+        ]
+    else:
+        derived = (
+            _derived_partitions(
+                page,
+                anchors,
+                unresolved,
+                calibration,
+                page_number=page_number,
+            )
+            if unresolved
+            else []
+        )
     ordered = sorted(
         framed + derived,
         key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id),

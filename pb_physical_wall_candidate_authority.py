@@ -31,6 +31,7 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_RESOLVED,
@@ -403,121 +404,16 @@ class WallPageFrameUnresolved(RuntimeError):
     """The source page frame cannot safely bound native wall geometry."""
 
 
-def _effective_pdf_rotation(page: fitz.Page) -> int:
-    """Return the exact effective orthogonal /Rotate value or fail closed.
-
-    Wall primitives from extract_native_page live in unrotated native page
-    user space, while page.rect lives in display-rotated space. Before a
-    display extent can be converted into a native wall-scope extent, the PDF
-    page-tree rotation itself must be an exact orthogonal integer and agree
-    with PyMuPDF's reported rotation.
-    """
-
-    parent = getattr(page, "parent", None)
-    getter = getattr(parent, "xref_get_key", None)
-    xref = getattr(page, "xref", None)
-    if not callable(getter) or not isinstance(xref, int) or isinstance(xref, bool):
-        raise WallPageFrameUnresolved(PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED)
-
-    raw_rotate: Optional[str] = None
-    seen = {xref}
-    node = xref
-    for _ in range(32):
-        try:
-            kind, raw = getter(node, "Rotate")
-        except Exception as exc:
-            raise WallPageFrameUnresolved(
-                PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
-            ) from exc
-        if kind != "null":
-            raw_rotate = str(raw)
-            break
-        try:
-            parent_kind, parent_raw = getter(node, "Parent")
-        except Exception:
-            break
-        if parent_kind != "xref":
-            break
-        try:
-            node = int(str(parent_raw).split()[0])
-        except (TypeError, ValueError, IndexError):
-            break
-        if node in seen:
-            raise WallPageFrameUnresolved(
-                PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
-            )
-        seen.add(node)
-
-    if raw_rotate is None:
-        effective = 0
-    else:
-        try:
-            numeric = float(raw_rotate)
-        except (TypeError, ValueError) as exc:
-            raise WallPageFrameUnresolved(
-                PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
-            ) from exc
-        if (
-            not math.isfinite(numeric)
-            or numeric != int(numeric)
-            or int(numeric) % 90 != 0
-        ):
-            raise WallPageFrameUnresolved(
-                PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
-            )
-        effective = int(numeric) % 360
-
-    reported = getattr(page, "rotation", None)
-    if (
-        not isinstance(reported, int)
-        or isinstance(reported, bool)
-        or reported % 360 != effective
-    ):
-        raise WallPageFrameUnresolved(
-            PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
-        )
-    return effective
-
-
 def native_wall_scope_page_extent(page: fitz.Page) -> tuple[float, float]:
-    """Return a fail-closed native-page extent for wall boundary checks.
+    """Return the producer-owned native page extent used by wall topology."""
 
-    Rotation 0 is unchanged. Rotation 90 is promoted after real-source
-    validation. Rotation 180/270 remains fail-closed until its separate
-    real-source promotion gate is satisfied. Geometry is not transformed;
-    only the page extent is expressed in the same native coordinate space as
-    the source wall primitives.
-    """
-
-    rotation = _effective_pdf_rotation(page)
-    if rotation not in (0, 90):
-        raise WallPageFrameUnresolved(
-            PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
-        )
     try:
-        rect = page.rect
-        x0 = float(rect.x0)
-        y0 = float(rect.y0)
-        display_width = float(rect.width)
-        display_height = float(rect.height)
-    except Exception as exc:
+        frame = native_page_frame(page)
+    except NativePageFrameUnresolved as exc:
         raise WallPageFrameUnresolved(
             PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
         ) from exc
-    values = (x0, y0, display_width, display_height)
-    if (
-        not all(math.isfinite(value) for value in values)
-        or display_width <= 0.0
-        or display_height <= 0.0
-        or abs(x0) > _COORD_TOL
-        or abs(y0) > _COORD_TOL
-    ):
-        raise WallPageFrameUnresolved(
-            PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
-        )
-    if rotation == 90:
-        return display_height, display_width
-    return display_width, display_height
+    return frame.native_width, frame.native_height
 
 
 def _is_proven_annotation_mask_edge(
