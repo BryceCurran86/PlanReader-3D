@@ -143,6 +143,8 @@ def test_selector_lookup_is_exact_lineage(tmp_path: Path) -> None:
     )
     assert missing.status is EvidenceResolutionStatus.ABSTAINED
     assert missing.records == ()
+
+
 def test_planarized_subedge_inherits_unique_authenticated_wall_owner() -> None:
     parent = _edge((0.0, 0.0), (10.0, 0.0))
     child = _edge((2.0, 0.0), (8.0, 0.0))
