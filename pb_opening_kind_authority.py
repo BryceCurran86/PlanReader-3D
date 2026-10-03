@@ -26,6 +26,7 @@ OPENING_KIND_SCHEMA_VERSION = "1.0.0"
 OPENING_KIND_STRUCTURAL_DOOR = "opening_kind_structural_door"
 OPENING_KIND_STRUCTURAL_WINDOW = "opening_kind_structural_window"
 OPENING_KIND_SCHEDULE = "opening_kind_schedule"
+OPENING_KIND_LABEL = "opening_kind_label"
 OPENING_KIND_CORROBORATED = "opening_kind_corroborated"
 OPENING_KIND_CONFLICT = "opening_kind_conflict"
 OPENING_KIND_UNAVAILABLE = "opening_kind_unavailable"
@@ -42,11 +43,12 @@ class OpeningKindResolution:
     opening_kind: Optional[str]
     structural_kind: Optional[str]
     schedule_kind: Optional[str]
+    label_kind: Optional[str]
     reason_codes: tuple[str, ...]
     schema_version: str = OPENING_KIND_SCHEMA_VERSION
 
 
-def _normalize_schedule_kind(value: object) -> Optional[str]:
+def _normalize_kind(value: object) -> Optional[str]:
     text = str(value or "").strip().lower()
     if text in {"door", "doors"}:
         return "door"
@@ -59,6 +61,7 @@ def resolve_opening_kind(
     *,
     structural_pattern: object,
     schedule_trade_type: object = None,
+    label_kind: object = None,
 ) -> OpeningKindResolution:
     """Resolve a physical opening subtype without guessing from labels.
 
@@ -69,7 +72,8 @@ def resolve_opening_kind(
 
     pattern = str(structural_pattern or "").strip()
     structural_kind = _STRUCTURAL_KIND.get(pattern)
-    schedule_kind = _normalize_schedule_kind(schedule_trade_type)
+    schedule_kind = _normalize_kind(schedule_trade_type)
+    normalized_label_kind = _normalize_kind(label_kind)
 
     reasons: list[str] = []
     if structural_kind == "door":
@@ -78,31 +82,32 @@ def resolve_opening_kind(
         reasons.append(OPENING_KIND_STRUCTURAL_WINDOW)
     if schedule_kind is not None:
         reasons.append(OPENING_KIND_SCHEDULE)
+    if normalized_label_kind is not None:
+        reasons.append(OPENING_KIND_LABEL)
 
-    if structural_kind is not None and schedule_kind is not None:
-        if structural_kind != schedule_kind:
-            return OpeningKindResolution(
-                status=EvidenceResolutionStatus.CONFLICT,
-                opening_kind=None,
-                structural_kind=structural_kind,
-                schedule_kind=schedule_kind,
-                reason_codes=tuple((*reasons, OPENING_KIND_CONFLICT)),
-            )
+    authenticated_kinds = tuple(
+        kind
+        for kind in (structural_kind, schedule_kind, normalized_label_kind)
+        if kind is not None
+    )
+    if len(set(authenticated_kinds)) > 1:
         return OpeningKindResolution(
-            status=EvidenceResolutionStatus.CORROBORATED,
-            opening_kind=structural_kind,
+            status=EvidenceResolutionStatus.CONFLICT,
+            opening_kind=None,
             structural_kind=structural_kind,
             schedule_kind=schedule_kind,
-            reason_codes=tuple((*reasons, OPENING_KIND_CORROBORATED)),
+            label_kind=normalized_label_kind,
+            reason_codes=tuple((*reasons, OPENING_KIND_CONFLICT)),
         )
 
-    resolved = structural_kind or schedule_kind
+    resolved = authenticated_kinds[0] if authenticated_kinds else None
     if resolved is not None:
         return OpeningKindResolution(
             status=EvidenceResolutionStatus.CORROBORATED,
             opening_kind=resolved,
             structural_kind=structural_kind,
             schedule_kind=schedule_kind,
+            label_kind=normalized_label_kind,
             reason_codes=tuple((*reasons, OPENING_KIND_CORROBORATED)),
         )
 
@@ -111,6 +116,7 @@ def resolve_opening_kind(
         opening_kind=None,
         structural_kind=None,
         schedule_kind=None,
+        label_kind=None,
         reason_codes=(OPENING_KIND_UNAVAILABLE,),
     )
 
@@ -120,6 +126,7 @@ __all__ = [
     "OPENING_KIND_CORROBORATED",
     "OPENING_KIND_SCHEMA_VERSION",
     "OPENING_KIND_SCHEDULE",
+    "OPENING_KIND_LABEL",
     "OPENING_KIND_STRUCTURAL_DOOR",
     "OPENING_KIND_STRUCTURAL_WINDOW",
     "OPENING_KIND_UNAVAILABLE",

@@ -582,6 +582,11 @@ def compose_live_physical_opening_voids(
                 else None
             ),
             schedule_trade_type=schedule_trade_type,
+            label_kind=(
+                getattr(figured_label_evidence, "semantic_kind", None)
+                if figured_label_evidence is not None
+                else None
+            ),
         )
         opening_kind = kind_resolution.opening_kind
         if OPENING_KIND_CONFLICT in kind_resolution.reason_codes:
