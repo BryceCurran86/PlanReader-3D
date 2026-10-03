@@ -7,7 +7,9 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_label_dimension_authority import (
     OPENING_LABEL_DIMENSION_AMBIGUOUS,
     OPENING_LABEL_DIMENSION_RESOLVED,
+    OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT,
     OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE,
+    OPENING_LABEL_SEMANTIC_ONLY_RESOLVED,
     OpeningLabelDimensionProducer,
     _parseable_opening_label_fragments,
     parse_opening_label_dimensions,
@@ -272,6 +274,95 @@ def _opening_selector(source, published) -> ObservationSelector:
             found[result.existence_record.record_id] = selector
     assert len(found) == 1
     return next(iter(found.values()))
+
+
+
+def _semantic_legend_pdf(
+    *,
+    label: str,
+    legend_rows: tuple[str, ...] = (),
+) -> bytes:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=320.0, height=240.0)
+        for first, second in (
+            ((20.0, 100.0), (100.0, 100.0)),
+            ((140.0, 100.0), (220.0, 100.0)),
+            ((20.0, 110.0), (100.0, 110.0)),
+            ((140.0, 110.0), (220.0, 110.0)),
+            ((100.0, 100.0), (100.0, 110.0)),
+            ((140.0, 100.0), (140.0, 110.0)),
+        ):
+            page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
+        page.insert_text(fitz.Point(88.0, 124.0), label, fontsize=7.0)
+        if legend_rows:
+            page.insert_text(fitz.Point(20.0, 180.0), "LEGEND", fontsize=7.0)
+            y = 194.0
+            for row in legend_rows:
+                page.insert_text(fitz.Point(20.0, y), row, fontsize=7.0)
+                y += 10.0
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+
+def test_generic_topology_without_authenticated_label_semantics_abstains() -> None:
+    source, published = _ingest(
+        _semantic_legend_pdf(label="1218 ZX"),
+        "semantic-unresolved",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
+    assert OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE in result.reason_codes
+
+
+def test_owned_label_uses_authenticated_source_legend_for_semantic_kind_only() -> None:
+    source, published = _ingest(
+        _semantic_legend_pdf(
+            label="1218 ZX",
+            legend_rows=("ZX SLIDING GLASS WINDOW",),
+        ),
+        "semantic-source-legend",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.reason_codes == (OPENING_LABEL_SEMANTIC_ONLY_RESOLVED,)
+    assert result.evidence is not None
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.dimension_values_mm == ()
+    assert result.evidence.area_m2 is None
+    assert result.evidence.basis == "owned_opening_label_semantics"
+    assert len(result.evidence.source_text_observation_ids) >= 2
+
+
+def test_conflicting_authenticated_legend_semantics_fail_closed() -> None:
+    source, published = _ingest(
+        _semantic_legend_pdf(
+            label="1218 ZX ZD",
+            legend_rows=(
+                "ZX SLIDING GLASS WINDOW",
+                "ZD SLIDING GLASS DOOR",
+            ),
+        ),
+        "semantic-source-conflict",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.evidence is None
+    assert OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT in result.reason_codes
 
 
 def test_producer_binds_one_figured_pair_by_gap_projection_not_nearest_choice() -> None:
