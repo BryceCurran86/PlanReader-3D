@@ -224,13 +224,14 @@ def _page_report(*, src, pub, pdf_bytes: bytes, document, page_no: int, auth) ->
             # Exercise the same source-segment consumer seam the shadow tool
             # audits. Its dimensions are intentionally not used here because
             # this report freezes the historical display-space comparator.
-            pw._source_page_segments(
-                source_producer=src,
-                published=current,
-                source_bytes=pdf_bytes,
-                page_id=page_id,
-                decision_scope_id=scope_id,
-            )
+            with _frozen_legacy_wall_extent():
+                pw._source_page_segments(
+                    source_producer=src,
+                    published=current,
+                    source_bytes=pdf_bytes,
+                    page_id=page_id,
+                    decision_scope_id=scope_id,
+                )
             consumer_w, consumer_h = _legacy_display_page_extent(
                 document[page_no - 1]
             )
