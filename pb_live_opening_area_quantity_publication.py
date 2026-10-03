@@ -26,7 +26,7 @@ LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY = (
     "pb_live_physical_opening_void_composition.resolved_opening_geometry_area"
 )
 LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY = (
-    "pb_schedule_opening_instance_binding_authority.authenticated_frame_area"
+    "pb_schedule_opening_instance_binding_authority.authenticated_figured_frame_area"
 )
 
 
