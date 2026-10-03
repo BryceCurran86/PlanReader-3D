@@ -81,6 +81,14 @@ def test_semantic_callout_outranks_its_untyped_subparse() -> None:
     assert fragments[0].text == "1,200 - 1,810 asw"
 
 
+def test_dimension_pair_delimiter_prevents_single_token_subparse() -> None:
+    rows = (
+        _word_row(0, "1,800", 0.0),
+        _word_row(1, "-", 28.0),
+    )
+    assert _parseable_opening_label_fragments(rows) == ()
+
+
 def test_pair_callout_outranks_single_dimension_subparses() -> None:
     rows = (
         _word_row(0, "2,100", 0.0),
