@@ -50,7 +50,10 @@ def test_explicit_schedule_quantity_reaches_live_opening_count_quantity_and_regi
     assert opening.opening_kind == "window"
     assert opening.type_mark == "W1"
 
-    assert len(claim.opening_count_quantity_evidence) == 1
+    assert len(claim.opening_count_quantity_evidence) == 1, {
+        "claim_reasons": claim.reason_codes,
+        "opening": claim.canonical_openings[0].to_dict() if claim.canonical_openings else None,
+    }
     quantity = claim.opening_count_quantity_evidence[0]
     assert quantity.family == "opening_count"
     assert quantity.semantic_key == "opening_count:W1"
@@ -88,7 +91,10 @@ def test_explicit_schedule_count_reaches_customer_runtime_row_even_without_wall_
     path = tmp_path / "counted-opening-customer.pdf"
     path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
     claim = collect_live_physical_net_wall_claim(path, pages=(0,))
-    assert claim.opening_count_quantity_evidence
+    assert claim.opening_count_quantity_evidence, {
+        "claim_reasons": claim.reason_codes,
+        "opening": claim.canonical_openings[0].to_dict() if claim.canonical_openings else None,
+    }
     count_quantity = claim.opening_count_quantity_evidence[0]
 
     app = SimpleNamespace(
