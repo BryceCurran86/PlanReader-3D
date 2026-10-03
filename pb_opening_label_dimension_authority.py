@@ -973,6 +973,33 @@ def _trusted_legend_semantics(
 
     resolved_codes: dict[str, tuple[str, tuple[str, ...]]] = {}
     conflicts: set[str] = set()
+
+    # Some producers place a legend code and its definition on one native
+    # text line rather than two aligned lines. Accept that representation only
+    # when the definition itself contains an explicit DOOR/WINDOW word.
+    for page_id, _block_no, line_text, line_ids, _line_bbox in lines:
+        if page_id not in legend_pages:
+            continue
+        parts = line_text.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        code = parts[0].upper()
+        if _LEGEND_CODE_RE.fullmatch(code) is None:
+            continue
+        kind, semantic_conflict = _explicit_word_semantic_kind(parts[1])
+        if semantic_conflict:
+            conflicts.add(code)
+            resolved_codes.pop(code, None)
+            continue
+        if kind is None:
+            continue
+        prior = resolved_codes.get(code)
+        if prior is not None and prior[0] != kind:
+            conflicts.add(code)
+            resolved_codes.pop(code, None)
+            continue
+        resolved_codes[code] = (kind, tuple(sorted(line_ids)))
+
     for page_id, block_no, code_text, code_ids, code_bbox in lines:
         code = code_text.strip().upper()
         if page_id not in legend_pages or _LEGEND_CODE_RE.fullmatch(code) is None:
@@ -1476,6 +1503,15 @@ __all__ = [
     "OPENING_LABEL_DIMENSION_SOURCE_SCOPE_UNAVAILABLE",
     "OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE",
     "OPENING_LABEL_DIMENSION_UNAVAILABLE",
+    "OPENING_LABEL_SEMANTIC_CONFLICT",
+    "OPENING_LABEL_SEMANTIC_RESOLVED",
+    "OPENING_LABEL_SEMANTIC_SCHEMA_VERSION",
+    "OPENING_LABEL_SEMANTIC_SOURCE_SCOPE_UNAVAILABLE",
+    "OPENING_LABEL_SEMANTIC_TEXT_UNAVAILABLE",
+    "OPENING_LABEL_SEMANTIC_UNAVAILABLE",
+    "OpeningLabelSemanticEvidence",
+    "OpeningLabelSemanticProducer",
+    "OpeningLabelSemanticResult",
     "OpeningLabelDimensionAuthority",
     "OpeningLabelDimensionEvidence",
     "OpeningLabelDimensionProducer",
