@@ -25,6 +25,10 @@ LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY = (
 LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY = (
     "pb_live_physical_opening_void_composition.resolved_opening_geometry_area"
 )
+LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY = (
+    "pb_opening_joinery_figured_area_authority."
+    "figured_opening_width_x_joinery_height"
+)
 
 
 def _opening_quantity(
@@ -77,6 +81,13 @@ def _opening_quantity(
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
         quantity_authority = LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
+    elif basis == "figured_opening_width_x_joinery_height":
+        measurement_record_id = str(opening.figured_area_record_id or "").strip()
+        if not measurement_record_id or measurement_record_id not in evidence_ids:
+            return None
+        if opening_kind != "door":
+            return None
+        quantity_authority = LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY
     elif basis == "resolved_opening_geometry":
         measurement_record_id = str(opening.opening_void_record_id or "").strip()
         if not measurement_record_id or measurement_record_id not in evidence_ids:
@@ -111,7 +122,11 @@ def _opening_quantity(
         formula=(
             "authenticated figured opening-label dimension product"
             if basis == "figured_opening_label"
-            else "authenticated physical opening width * height"
+            else (
+                "authenticated figured opening width * document joinery height"
+                if basis == "figured_opening_width_x_joinery_height"
+                else "authenticated physical opening width * height"
+            )
         ),
         formula_version=LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION,
         evidence_ids=evidence_ids,
@@ -180,6 +195,7 @@ def publish_live_opening_area_quantities(
 __all__ = [
     "LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_AREA_QUANTITY_RESOLVED",
     "LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION",
     "publish_live_opening_area_quantities",
