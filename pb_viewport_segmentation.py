@@ -35,6 +35,8 @@ import re
 import statistics
 from typing import Any, Iterable, Optional, Sequence
 
+import fitz
+
 from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewRegion, DrawingViewType
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 import pb_page_title_authority as _title_authority
@@ -630,15 +632,22 @@ def _text_fragments(page: Any) -> list[tuple[tuple[float, float, float, float], 
 
 
 def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
-    """Calibrate native viewport geometry in native page user space.
+    """Calibrate viewport geometry in the page's source coordinate space.
 
-    Text fragments and get_drawings() geometry are native/unrotated. Using
-    display-rotated page.rect dimensions here mixes coordinate spaces on
-    quarter-turn sheets, so the calibration must use the same native frame.
+    Real PyMuPDF pages must resolve through the native page-frame contract.
+    Lightweight synthetic test doubles have no PDF page tree, so they retain
+    the historical unrotated page.rect calibration without weakening the
+    production fail-closed path.
     """
 
-    frame = native_page_frame(page)
-    width = float(frame.native_width); height = float(frame.native_height)
+    try:
+        frame = native_page_frame(page)
+        width = float(frame.native_width); height = float(frame.native_height)
+    except NativePageFrameUnresolved:
+        if isinstance(page, fitz.Page):
+            raise
+        rect = page.rect
+        width = float(rect.width); height = float(rect.height)
     word_heights = [
         float(w[3]) - float(w[1])
         for w in page.get_text("words")
@@ -1796,7 +1805,34 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     try:
         calibration = calibrate_viewport_layout(page)
     except NativePageFrameUnresolved:
-        return []
+        # Unvalidated real-page rotations remain non-authoritative, but retain
+        # the historical diagnostic title rows rather than disappearing.
+        anchors = extract_view_title_anchors(page)
+        rotation = getattr(page, "rotation", None)
+        if not anchors or not isinstance(rotation, int) or isinstance(rotation, bool):
+            return []
+        rotation %= 360
+        if rotation not in (180, 270):
+            return []
+        return _stamp_segment_page_viewports_product([
+            SegmentedViewport(
+                view_id=f"view_p{page_number}_{index + 1}",
+                page_number=page_number,
+                view_type=anchor.view_type,
+                label=anchor.text,
+                title_bbox=anchor.bbox,
+                bounding_box=None,
+                status=ViewportSegmentationStatus.UNSUPPORTED.value,
+                boundary_source=ViewportBoundarySource.NONE.value,
+                confidence=0.0,
+                notes=["page rotation is not promoted for viewport authority"],
+                provenance={
+                    "rotation": rotation,
+                    "derived_partition_disabled": True,
+                },
+            )
+            for index, anchor in enumerate(anchors)
+        ])
     anchors = extract_view_title_anchors(page)
     if not anchors:
         return []
