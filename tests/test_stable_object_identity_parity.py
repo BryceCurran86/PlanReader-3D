@@ -134,6 +134,18 @@ class TestStableObjectIdentityParity(unittest.TestCase):
         ]
         self.assertEqual(consolidate_opening_identities(raw), [])
 
+    def test_generic_row_id_is_not_physical_opening_identity(self) -> None:
+        raw = [
+            {
+                "id": "row-17",
+                "host_wall_id": "wall_north",
+                "type_mark": "W01",
+                "width_m": 1.2,
+                "height_m": 1.5,
+            }
+        ]
+        self.assertEqual(consolidate_opening_identities(raw), [])
+
     def test_conflicting_observations_for_same_physical_identity_fail_closed(self) -> None:
         raw = [
             {
