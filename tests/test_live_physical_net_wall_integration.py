@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 
+import fitz
 import pytest
 
 from pb_live_physical_net_wall_integration import (
@@ -9,6 +10,57 @@ from pb_live_physical_net_wall_integration import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
+
+
+
+
+def _complete_void_floor_plan_pdf() -> bytes:
+    doc = fitz.open(stream=_complete_void_pdf(), filetype="pdf")
+    try:
+        page = doc[0]
+        page.insert_text(fitz.Point(20.0, 25.0), "GROUND FLOOR PLAN")
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+
+def test_live_opening_counts_reuse_generic_count_authority(tmp_path) -> None:
+    path = tmp_path / "physical-opening-count.pdf"
+    path.write_bytes(_complete_void_floor_plan_pdf())
+
+    result = collect_live_physical_net_wall_claim(path, pages=(0,))
+
+    assert result.canonical_openings
+    assert result.opening_count_quantity_evidence
+    count = result.opening_count_quantity_evidence[0]
+    assert count.family == "opening_count"
+    assert count.value == 1.0
+    assert count.unit == "ea"
+    assert count.input_entity_ids == (
+        result.canonical_openings[0].canonical_opening_id,
+    )
+    assert count.semantic_key.endswith(":window:W1")
+    assert count.abstained is False
+
+
+def test_live_opening_area_quantities_survive_even_when_wall_quantity_abstains(
+    tmp_path,
+) -> None:
+    path = tmp_path / "physical-opening-area.pdf"
+    path.write_bytes(_complete_void_pdf())
+
+    result = collect_live_physical_net_wall_claim(path, pages=(0,))
+
+    assert result.quantity_m2 is None
+    assert result.canonical_openings
+    assert result.opening_quantity_evidence
+    area = result.opening_quantity_evidence[0]
+    assert area.family == "opening_area"
+    assert area.input_entity_ids == (
+        result.canonical_openings[0].canonical_opening_id,
+    )
+    assert area.value is not None
+    assert area.value > 0.0
 
 
 def test_live_physical_net_wall_runs_real_source_chain_and_fails_closed_without_height(
