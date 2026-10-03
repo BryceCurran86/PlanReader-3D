@@ -4,6 +4,7 @@ from dataclasses import replace
 from types import MappingProxyType
 
 import fitz
+import pytest
 
 from pb_live_opening_area_quantity_publication import (
     LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY,
@@ -276,7 +277,7 @@ def test_single_figured_door_width_plus_joinery_note_publishes_area_without_void
     assert opening.opening_kind == "door"
     assert opening.height_m is None
     assert opening.geometry_complete is False
-    assert opening.area_m2 == 0.9 * 2.1
+    assert opening.area_m2 == pytest.approx(1.89)
     assert opening.area_basis == "figured_opening_width_x_joinery_height"
     assert opening.figured_area_record_id
     assert opening.figured_area_record_id in opening.evidence_ids
@@ -284,7 +285,7 @@ def test_single_figured_door_width_plus_joinery_note_publishes_area_without_void
     quantities = publish_live_opening_area_quantities(composition)
     assert len(quantities) == 1
     quantity = quantities[0]
-    assert quantity.value == 0.9 * 2.1
+    assert quantity.value == pytest.approx(1.89)
     assert (
         quantity.authority
         == LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY
