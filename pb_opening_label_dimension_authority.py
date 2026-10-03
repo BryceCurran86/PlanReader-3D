@@ -880,17 +880,36 @@ def _authenticated_legend_kinds(
             )
         )
 
-    legend_pages = {
-        page_id
-        for page_id, _block, text, _ids, _bbox in lines
-        if _LEGEND_HEADER_RE.search(text or "") is not None
-    }
+    heading_blocks: dict[str, set[int]] = {}
+    for page_id, block_no, text, _ids, _bbox in lines:
+        if _LEGEND_HEADER_RE.search(text or "") is not None:
+            heading_blocks.setdefault(page_id, set()).add(block_no)
+
+    # A compact plan legend is commonly emitted as a heading block followed by
+    # one native text block containing the key. Keep semantic authority inside
+    # that producer-owned structural neighborhood instead of treating every
+    # line on the page as a legend definition.
+    legend_blocks: set[tuple[str, int]] = set()
+    page_blocks: dict[str, list[int]] = {}
+    for page_id, block_no, _text, _ids, _bbox in lines:
+        page_blocks.setdefault(page_id, []).append(block_no)
+    for page_id, headings in heading_blocks.items():
+        ordered_blocks = sorted(set(page_blocks.get(page_id, ())))
+        for heading_block in headings:
+            legend_blocks.add((page_id, heading_block))
+            try:
+                position = ordered_blocks.index(heading_block)
+            except ValueError:
+                continue
+            if position + 1 < len(ordered_blocks):
+                legend_blocks.add((page_id, ordered_blocks[position + 1]))
+
     resolved_codes: dict[str, tuple[str, tuple[str, ...]]] = {}
     conflicts: set[str] = set()
 
     # Same-line representation: "SGW SLIDING GLASS WINDOW".
     for page_id, _block, text, ids, _bbox in lines:
-        if page_id not in legend_pages:
+        if (page_id, _block) not in legend_blocks:
             continue
         parts = text.strip().split(maxsplit=1)
         if len(parts) != 2:
@@ -916,7 +935,10 @@ def _authenticated_legend_kinds(
     # the same PDF text block and share the same row by majority Y overlap.
     for page_id, block_no, code_text, code_ids, code_bbox in lines:
         code = code_text.strip().upper()
-        if page_id not in legend_pages or _LEGEND_CODE_RE.fullmatch(code) is None:
+        if (
+            (page_id, block_no) not in legend_blocks
+            or _LEGEND_CODE_RE.fullmatch(code) is None
+        ):
             continue
         candidates: list[tuple[str, tuple[str, ...]]] = []
         for other_page, other_block, desc_text, desc_ids, desc_bbox in lines:
