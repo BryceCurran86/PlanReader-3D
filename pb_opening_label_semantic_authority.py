@@ -22,11 +22,11 @@ OPENING_LABEL_SEMANTIC_RESOLVED = "opening_label_semantic_resolved"
 OPENING_LABEL_SEMANTIC_UNAVAILABLE = "opening_label_semantic_unavailable"
 OPENING_LABEL_SEMANTIC_CONFLICT = "opening_label_semantic_conflict"
 
-_LEGEND_HEADER_RE = re.compile(r"\\b(?:LEGEND|ABBREVIATIONS?)\\b", re.I)
-_LEGEND_CODE_RE = re.compile(r"^[A-Z][A-Z0-9._/+\\-]{1,14}$", re.I)
-_LABEL_CODE_TOKEN_RE = re.compile(r"\\b[A-Z][A-Z0-9._/+\\-]{1,14}\\b", re.I)
-_EXPLICIT_WINDOW_WORD_RE = re.compile(r"\\bWINDOWS?\\b", re.I)
-_EXPLICIT_DOOR_WORD_RE = re.compile(r"\\bDOORS?\\b", re.I)
+_LEGEND_HEADER_RE = re.compile(r"\b(?:LEGEND|ABBREVIATIONS?)\b", re.I)
+_LEGEND_CODE_RE = re.compile(r"^[A-Z][A-Z0-9._/+\-]{1,14}$", re.I)
+_LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.I)
+_EXPLICIT_WINDOW_WORD_RE = re.compile(r"\bWINDOWS?\b", re.I)
+_EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.I)
 
 
 @dataclass(frozen=True)
