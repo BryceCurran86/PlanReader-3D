@@ -39,6 +39,9 @@ from pb_live_physical_opening_void_composition import (
 from pb_live_opening_area_quantity_publication import (
     publish_live_opening_area_quantities,
 )
+from pb_live_opening_count_quantity_publication import (
+    publish_live_opening_count_quantities,
+)
 from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
@@ -82,6 +85,7 @@ class LivePhysicalNetWallClaim:
     confidence: float
     publication: LiveExternalPhysicalNetWallPublication
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -236,6 +240,10 @@ def collect_live_physical_net_wall_claim(
     opening_quantity_evidence = publish_live_opening_area_quantities(
         physical_void
     )
+    opening_count_quantity_evidence = publish_live_opening_count_quantities(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
     gross = compose_live_gross_wall_geometry(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
@@ -309,6 +317,7 @@ def collect_live_physical_net_wall_claim(
             confidence=float(evidence.confidence),
             publication=publication,
             opening_quantity_evidence=opening_quantity_evidence,
+            opening_count_quantity_evidence=opening_count_quantity_evidence,
         )
 
     return LivePhysicalNetWallClaim(
@@ -341,6 +350,7 @@ def collect_live_physical_net_wall_claim(
         confidence=0.0,
         publication=publication,
         opening_quantity_evidence=opening_quantity_evidence,
+        opening_count_quantity_evidence=opening_count_quantity_evidence,
     )
 
 
