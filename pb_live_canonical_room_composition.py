@@ -16,6 +16,7 @@ from pb_live_wall_opening_authority_composition import (
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_face_authority import (
+    SOURCE_ROOM_FACE_CANDIDATES_WITHHELD,
     SourceRoomFaceSelector,
     build_source_room_face_authority,
 )
@@ -173,6 +174,10 @@ def compose_live_canonical_rooms(
     resolved_pages: set[int] = set()
     unresolved_pages: list[str] = []
     viewport_fallback_used = False
+    # Every published room is independently proven; this only records that some
+    # bounded face on a resolved scope was withheld, so the room set is not the
+    # whole arrangement.
+    withheld_candidates_present = False
 
     for page_id in wall_opening_composition.page_ids:
         selector = SourceRoomFaceSelector(
@@ -191,6 +196,8 @@ def compose_live_canonical_rooms(
         ):
             if str(page_id).isdigit():
                 resolved_pages.add(int(page_id))
+            if not result.face_universe_complete:
+                withheld_candidates_present = True
             rooms.extend(
                 _room_object_from_record(
                     record,
@@ -272,6 +279,8 @@ def compose_live_canonical_rooms(
                         reasons.extend(room_result.reason_codes)
                         continue
 
+                    if not room_result.face_universe_complete:
+                        withheld_candidates_present = True
                     rooms.extend(
                         _room_object_from_record(
                             record,
@@ -298,7 +307,8 @@ def compose_live_canonical_rooms(
                     LIVE_CANONICAL_ROOM_RESOLVED,
                     LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED,
                 )
-            ),
+            )
+            + ((SOURCE_ROOM_FACE_CANDIDATES_WITHHELD,) if withheld_candidates_present else ()),
             rooms=tuple(rooms),
             source_pages=tuple(sorted(resolved_pages)),
         )
@@ -310,6 +320,11 @@ def compose_live_canonical_rooms(
                 *(
                     (LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED,)
                     if viewport_fallback_used
+                    else ()
+                ),
+                *(
+                    (SOURCE_ROOM_FACE_CANDIDATES_WITHHELD,)
+                    if withheld_candidates_present
                     else ()
                 ),
                 *_dedupe(reasons),
