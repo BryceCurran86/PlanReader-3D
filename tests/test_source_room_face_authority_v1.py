@@ -280,3 +280,85 @@ def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> No
     assert result.records == ()
     assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes
 
+
+
+def _partitioned_room_scope(*, width: float, partitions: tuple[float, ...]):
+    def record(wall_id: str, first, second):
+        return SimpleNamespace(
+            wall_candidate_id=wall_id,
+            wall_candidate=SimpleNamespace(centerline_pts=(first, second)),
+        )
+
+    records = [
+        record("top", (0.0, 0.0), (width, 0.0)),
+        record("right", (width, 0.0), (width, 10.0)),
+        record("bottom", (width, 10.0), (0.0, 10.0)),
+        record("left", (0.0, 10.0), (0.0, 0.0)),
+    ]
+    for index, x in enumerate(partitions):
+        records.append(
+            record(
+                f"partition-{index}",
+                (float(x), 0.0),
+                (float(x), 10.0),
+            )
+        )
+    return SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=tuple(records),
+        document_id="doc-room-face-degenerate-filter",
+        revision_id="rev-room-face-degenerate-filter",
+        source_sha256="c" * 64,
+        snapshot_id="snap-room-face-degenerate-filter",
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+    )
+
+
+def test_micro_sliver_does_not_poison_other_resolved_room_faces() -> None:
+    # The first partition creates a 0.5 pt2 planarization sliver. The second
+    # still provides a genuine shared wall between two non-degenerate faces.
+    # A source-local artifact must not erase those otherwise valid rooms.
+    result = _derive_scope(
+        _partitioned_room_scope(width=20.0, partitions=(0.05, 10.0))
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.scope_complete is True
+    assert result.reason_codes == (SOURCE_ROOM_FACE_SCOPE_RESOLVED,)
+    assert len(result.records) == 2
+    assert sorted(record.area_page_pts2 for record in result.records) == [
+        99.5,
+        100.0,
+    ]
+
+
+def test_legitimate_small_room_is_not_rejected_by_largest_face_ratio() -> None:
+    # 5 pt2 is geometrically non-degenerate but only ~0.5% of the adjacent
+    # 995 pt2 face. Relative size is not evidence that a bounded room is fake.
+    result = _derive_scope(
+        _partitioned_room_scope(width=100.0, partitions=(0.5,))
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.scope_complete is True
+    assert result.reason_codes == (SOURCE_ROOM_FACE_SCOPE_RESOLVED,)
+    assert len(result.records) == 2
+    assert sorted(record.area_page_pts2 for record in result.records) == [
+        5.0,
+        995.0,
+    ]
+
+
+def test_filtered_micro_sliver_cannot_help_single_box_pass_anti_box_gate() -> None:
+    # Once the 0.5 pt2 artifact is excluded, only one valid bounded face
+    # remains. The existing anti-box rule must still fail closed.
+    result = _derive_scope(
+        _partitioned_room_scope(width=10.0, partitions=(0.05,))
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.scope_complete is False
+    assert result.records == ()
+    assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes

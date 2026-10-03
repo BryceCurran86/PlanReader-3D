@@ -8,7 +8,8 @@ topologically resolved.
 Positive publication is intentionally narrow:
 - the physical-wall scope is CORROBORATED and complete;
 - every bounded-face edge belongs to exactly one authenticated physical wall;
-- tiny/degenerate faces fail closed;
+- absolute geometric slivers are omitted per face and can never help establish
+  room authority; a scope with no non-degenerate face still fails closed;
 - a connected component contains at least two bounded faces and at least one
   wall shared by two faces, preventing isolated boxes/title blocks from
   becoming room authority;
@@ -42,7 +43,6 @@ SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS = "source_room_face_component_ambiguous"
 
 _AUTHORITY_SEAL = object()
 _ABSOLUTE_DEGENERATE_AREA_PT2 = 1.0
-_TINY_RELATIVE_THRESHOLD = 0.01
 _NDIGITS = 6
 
 Point = tuple[float, float]
@@ -340,15 +340,26 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
     if not polygons:
         return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
-    largest_area = max(face_areas.values())
-    if any(
-        area < _ABSOLUTE_DEGENERATE_AREA_PT2
-        or (
-            largest_area > 0.0
-            and area < _TINY_RELATIVE_THRESHOLD * largest_area
-        )
-        for area in face_areas.values()
-    ):
+    # Planarization can create source-local micro-slivers at intersections.
+    # Degeneracy is a property of that face, not evidence that every other
+    # fully wall-owned bounded face in the scope is invalid. Remove only
+    # absolute geometric degeneracies before the component/anti-box proof.
+    #
+    # Do not compare one room's area with another: page-space relative size is
+    # not semantic room authority, and a legitimate small room may sit beside a
+    # much larger bounded space.
+    degenerate_face_ids = {
+        face_id
+        for face_id, area in face_areas.items()
+        if area < _ABSOLUTE_DEGENERATE_AREA_PT2
+    }
+    for face_id in degenerate_face_ids:
+        polygons.pop(face_id, None)
+        face_walls.pop(face_id, None)
+        face_wall_edges.pop(face_id, None)
+        face_areas.pop(face_id, None)
+
+    if not polygons:
         return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
 
     wall_faces: dict[str, set[str]] = {wall_id: set() for wall_id in wall_ids}
