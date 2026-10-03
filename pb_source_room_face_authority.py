@@ -298,6 +298,7 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
 
     polygons: dict[str, tuple[Point, ...]] = {}
     face_walls: dict[str, tuple[str, ...]] = {}
+    face_wall_edges: dict[str, tuple[tuple[str, Edge], ...]] = {}
     face_areas: dict[str, float] = {}
 
     for raw_face in raw_faces:
@@ -305,16 +306,19 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         if not polygon:
             continue
         owners: list[str] = []
+        owned_edges: list[tuple[str, Edge]] = []
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
+            face_edge = _edge(first, second)
             owner = _unique_containing_wall_owner(
-                _edge(first, second),
+                face_edge,
                 edge_owner=edge_owner,
                 wall_edges=wall_edges,
             )
             if owner is None:
                 return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
             owners.append(owner)
+            owned_edges.append((owner, face_edge))
         face_id = stable_contract_id(
             "source_room_face",
             {
@@ -330,6 +334,7 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         )
         polygons[face_id] = polygon
         face_walls[face_id] = tuple(sorted(set(owners)))
+        face_wall_edges[face_id] = tuple(owned_edges)
         face_areas[face_id] = _polygon_area(polygon)
 
     if not polygons:
@@ -347,10 +352,16 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
 
     wall_faces: dict[str, set[str]] = {wall_id: set() for wall_id in wall_ids}
+    wall_face_edges: dict[str, dict[Edge, set[str]]] = {
+        wall_id: defaultdict(set) for wall_id in wall_ids
+    }
     for face_id, owners in face_walls.items():
         for wall_id in owners:
             if wall_id in wall_faces:
                 wall_faces[wall_id].add(face_id)
+        for wall_id, face_edge in face_wall_edges[face_id]:
+            if wall_id in wall_face_edges:
+                wall_face_edges[wall_id][face_edge].add(face_id)
 
     parent = {wall_id: wall_id for wall_id in wall_ids}
 
@@ -379,8 +390,14 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         component_faces = set().union(
             *(wall_faces[wall_id] for wall_id in component)
         )
+        # A long physical wall may own disjoint subedges of several rooms on
+        # the same side. That is not a shared interior boundary. Require the
+        # exact same planarized subedge to bound two faces before treating a
+        # wall as two-sided for the anti-box/component gate.
         has_two_sided_wall = any(
-            len(wall_faces[wall_id]) == 2 for wall_id in component
+            len(face_ids) == 2
+            for wall_id in component
+            for face_ids in wall_face_edges[wall_id].values()
         )
         if len(component_faces) >= 2 and has_two_sided_wall:
             resolved_faces.update(component_faces)
