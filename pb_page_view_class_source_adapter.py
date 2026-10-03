@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import hashlib
-import math
-
 import fitz
 
 from pb_drawing_evidence_binding import DrawingViewType
@@ -76,41 +74,6 @@ def _producer_source_bytes(
     if hashlib.sha256(payload).hexdigest() != str(source_sha256):
         return None
     return payload
-
-
-def _geometry_bbox(geometry: Sequence[float]) -> tuple[float, float, float, float] | None:
-    try:
-        values = tuple(float(value) for value in geometry)
-    except (TypeError, ValueError):
-        return None
-    if len(values) < 4 or len(values) % 2 or not all(math.isfinite(v) for v in values):
-        return None
-    if len(values) == 4:
-        x0, y0, x1, y1 = values
-        return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
-    xs = values[0::2]
-    ys = values[1::2]
-    return (min(xs), min(ys), max(xs), max(ys))
-
-
-def _center_inside(
-    bbox: tuple[float, float, float, float],
-    outer: Sequence[float],
-    *,
-    margin: float = _TITLE_EVIDENCE_MARGIN,
-) -> bool:
-    if len(outer) != 4:
-        return False
-    cx = (bbox[0] + bbox[2]) / 2.0
-    cy = (bbox[1] + bbox[3]) / 2.0
-    try:
-        x0, y0, x1, y1 = (float(value) for value in outer)
-    except (TypeError, ValueError):
-        return False
-    return (
-        min(x0, x1) - margin <= cx <= max(x0, x1) + margin
-        and min(y0, y1) - margin <= cy <= max(y0, y1) + margin
-    )
 
 
 def build_source_page_view_class_authority(
@@ -194,10 +157,10 @@ def build_source_page_view_class_authority(
             evidence_observation_ids=evidence,
         )
 
-    # F.07 can establish finer viewport ownership than a whole-page class.
-    # Reuse only its producer-authenticated eligible viewports and attach the
-    # exact trusted title observations whose geometry lies on that viewport's
-    # title anchor. No viewport name guessing or caller-supplied class enters.
+    # F.07 already establishes finer viewport ownership and view type from
+    # producer-owned source execution. Reuse that exact authenticated result;
+    # trusted page text ids are retained only as audit provenance and do not
+    # classify the viewport here. No viewport-name guessing or caller class enters.
     payload = _producer_source_bytes(
         source_visibility_producer,
         revision_id=published.revision.revision_id,
@@ -235,13 +198,15 @@ def build_source_page_view_class_authority(
                 )
                 if view_kind == VIEW_KIND_UNKNOWN:
                     continue
-                title_bbox = tuple(getattr(viewport, "title_bbox", ()) or ())
-                title_evidence = []
-                for observation_id, _text, geometry in words_by_page.get(page_id, ()):
-                    bbox = _geometry_bbox(geometry)
-                    if bbox is not None and _center_inside(bbox, title_bbox):
-                        title_evidence.append(observation_id)
-                evidence = tuple(sorted(set(title_evidence)))
+                evidence = tuple(
+                    sorted(
+                        {
+                            observation_id
+                            for observation_id, _text, _geometry
+                            in words_by_page.get(page_id, ())
+                        }
+                    )
+                )
                 if not evidence:
                     continue
                 viewport_id = str(getattr(viewport, "view_id", "") or "").strip()
