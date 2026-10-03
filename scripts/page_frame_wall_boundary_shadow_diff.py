@@ -221,9 +221,17 @@ def _page_report(*, src, pub, pdf_bytes: bytes, document, page_no: int, auth) ->
             and pw.PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE not in scope_codes
         )
         if scope_resolved:
-            consumer_w, consumer_h = _legacy_display_page_extent(
-                document[page_no - 1]
-            )
+            # Exercise the same historical source-segment seam the shadow
+            # originally audited, but freeze its extent resolver so later live
+            # promotion cannot move this diagnostic baseline forward.
+            with _frozen_legacy_wall_extent():
+                _segments, _ids, consumer_w, consumer_h = pw._source_page_segments(
+                    source_producer=src,
+                    published=current,
+                    source_bytes=pdf_bytes,
+                    page_id=page_id,
+                    decision_scope_id=scope_id,
+                )
     except Exception as exc:  # report, never raise: diagnostic tool
         return _no_comparison(
             report,
