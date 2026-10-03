@@ -1005,6 +1005,9 @@ def _owned_label_semantics(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
     gap: _GapSpan,
+    *,
+    legend_map: Mapping[str, tuple[str, tuple[str, ...]]],
+    legend_conflicts: frozenset[str],
 ) -> tuple[
     Optional[str],
     tuple[str, ...],
@@ -1014,7 +1017,6 @@ def _owned_label_semantics(
 ]:
     """Resolve semantic kind only from an opening-owned label plus source authority."""
 
-    legend_map, legend_conflicts = _authenticated_legend_kinds(source, opening)
     kinds: set[str] = set()
     label_ids: set[str] = set()
     authority_ids: set[str] = set()
@@ -1084,6 +1086,13 @@ class OpeningLabelDimensionProducer:
         self._source = source
         self._physical = source.physical_opening_authority()
         self._results: dict[_Key, OpeningLabelDimensionResult] = {}
+        self._legend_semantics_cache: dict[
+            tuple[str, str, str, str],
+            tuple[
+                Mapping[str, tuple[str, tuple[str, ...]]],
+                frozenset[str],
+            ],
+        ] = {}
 
     @classmethod
     def from_source_visibility_producer(
@@ -1154,13 +1163,31 @@ class OpeningLabelDimensionProducer:
             )
 
         structural_kind = _structural_kind(opening.structural_pattern)
+        legend_cache_key = (
+            opening.document_id,
+            opening.revision_id,
+            opening.source_sha256,
+            opening.snapshot_id,
+        )
+        legend_semantics = self._legend_semantics_cache.get(legend_cache_key)
+        if legend_semantics is None:
+            legend_semantics = _authenticated_legend_kinds(self._source, opening)
+            self._legend_semantics_cache[legend_cache_key] = legend_semantics
+        legend_map, legend_conflicts = legend_semantics
+
         (
             owned_label_kind,
             owned_label_ids,
             owned_authority_ids,
             owned_raw_texts,
             owned_semantic_conflict,
-        ) = _owned_label_semantics(self._source, opening, gap)
+        ) = _owned_label_semantics(
+            self._source,
+            opening,
+            gap,
+            legend_map=legend_map,
+            legend_conflicts=legend_conflicts,
+        )
         if owned_semantic_conflict or (
             structural_kind is not None
             and owned_label_kind is not None
