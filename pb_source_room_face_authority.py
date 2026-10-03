@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 from typing import Iterable, Mapping
 
@@ -97,6 +98,62 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
         if edge[0] != edge[1]:
             result.append(edge)
     return tuple(result)
+
+def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
+    """Return True only when a child edge is a quantized subsegment of parent.
+
+    ``extract_planar_faces`` may split an authenticated wall centerline at an
+    intersection. Those split points are rounded through the same six-decimal
+    page-space contract as wall edges, so containment is allowed only within
+    the maximum error implied by that quantization. No geometric extension,
+    nearest-edge selection, or angle-only matching is permitted.
+    """
+    (ax, ay), (bx, by) = parent
+    tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+    dx, dy = bx - ax, by - ay
+    length = math.hypot(dx, dy)
+    if length <= tolerance:
+        return False
+
+    xmin, xmax = min(ax, bx) - tolerance, max(ax, bx) + tolerance
+    ymin, ymax = min(ay, by) - tolerance, max(ay, by) + tolerance
+
+    for px, py in child:
+        if not (xmin <= px <= xmax and ymin <= py <= ymax):
+            return False
+        perpendicular_distance = abs((px - ax) * dy - (py - ay) * dx) / length
+        if perpendicular_distance > tolerance:
+            return False
+    return child[0] != child[1]
+
+
+def _unique_containing_wall_owner(
+    edge: Edge,
+    *,
+    edge_owner: Mapping[Edge, str],
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> str | None:
+    """Resolve a planarized face edge to exactly one authenticated wall.
+
+    Exact ownership remains authoritative. A fallback is used only when the
+    face edge is wholly contained by an original collinear authenticated wall
+    edge. Competing physical wall ids fail closed instead of selecting first,
+    nearest, shortest, or longest.
+    """
+    exact = edge_owner.get(edge)
+    if exact is not None:
+        return exact
+
+    owner: str | None = None
+    for wall_id in sorted(wall_edges):
+        if not any(
+            _edge_contains_edge(parent, edge) for parent in wall_edges[wall_id]
+        ):
+            continue
+        if owner is not None and owner != wall_id:
+            return None
+        owner = wall_id
+    return owner
 
 
 @dataclass(frozen=True)
@@ -249,7 +306,11 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         owners: list[str] = []
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
-            owner = edge_owner.get(_edge(first, second))
+            owner = _unique_containing_wall_owner(
+                _edge(first, second),
+                edge_owner=edge_owner,
+                wall_edges=wall_edges,
+            )
             if owner is None:
                 return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
             owners.append(owner)
