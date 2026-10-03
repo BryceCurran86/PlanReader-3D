@@ -227,16 +227,29 @@ def _canonical_opening_area(
     width_m: Optional[float],
     height_m: Optional[float],
     figured_label_evidence,
-    schedule_record,
-    geometry_complete: bool,
+    schedule_record=None,
+    geometry_complete: bool = True,
 ) -> tuple[Optional[float], Optional[str], Optional[str]]:
-    """Resolve area only from authenticated physical or figured measurement."""
+    """Resolve customer-facing opening area without inventing axis order.
+
+    Existing fully-resolved width+height geometry remains authoritative when the
+    physical opening geometry is complete. Otherwise an explicitly based outer-
+    frame schedule may provide gross frame area. Failing that, a corroborated
+    unordered two-axis figured label may provide only its order-invariant
+    product. None of these paths back-fills width_m or height_m.
+    """
+
+    figured_record_id = (
+        str(figured_label_evidence.evidence_id)
+        if figured_label_evidence is not None
+        else None
+    )
 
     if geometry_complete and width_m is not None and height_m is not None:
         return (
             float(width_m) * float(height_m),
             "resolved_opening_geometry",
-            None,
+            figured_record_id,
         )
 
     if (
@@ -253,7 +266,12 @@ def _canonical_opening_area(
         except (TypeError, ValueError, OverflowError):
             frame_width_mm = 0.0
             frame_height_mm = 0.0
-        if frame_width_mm > 0.0 and frame_height_mm > 0.0:
+        if (
+            math.isfinite(frame_width_mm)
+            and math.isfinite(frame_height_mm)
+            and frame_width_mm > 0.0
+            and frame_height_mm > 0.0
+        ):
             return (
                 (frame_width_mm / 1000.0) * (frame_height_mm / 1000.0),
                 "authenticated_frame_schedule",
@@ -263,16 +281,23 @@ def _canonical_opening_area(
     if (
         figured_label_evidence is not None
         and getattr(figured_label_evidence, "area_m2", None) is not None
+        and getattr(figured_label_evidence, "axis_order_resolved", None) is False
     ):
         value = float(figured_label_evidence.area_m2)
         if math.isfinite(value) and value > 0.0:
             return (
                 value,
-                "figured_opening_label",
-                str(figured_label_evidence.evidence_id),
+                str(
+                    getattr(
+                        figured_label_evidence,
+                        "basis",
+                        "figured_opening_label",
+                    )
+                ),
+                figured_record_id,
             )
 
-    return None, None, None
+    return None, None, figured_record_id
 
 
 def compose_live_physical_opening_voids(
