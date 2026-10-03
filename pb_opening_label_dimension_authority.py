@@ -93,6 +93,11 @@ _EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.IGNORECASE)
 _LEGEND_HEADER_RE = re.compile(r"^\s*(?:LEGEND|ABBREVIATIONS?)\s*$", re.IGNORECASE)
 _LEGEND_CODE_RE = re.compile(r"^[A-Z][A-Z0-9._/+\-]{0,14}$", re.IGNORECASE)
 _LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.IGNORECASE)
+_LEGEND_INLINE_DEFINITION_RE = re.compile(
+    r"^\s*(?P<code>[A-Z][A-Z0-9._/+\-]{0,14})\s*"
+    r"(?:[:=]|[-–—])\s*(?P<description>.+?)\s*$",
+    re.IGNORECASE,
+)
 
 _Key = tuple[str, str, str, str, str]
 
@@ -907,17 +912,18 @@ def _authenticated_legend_kinds(
     resolved_codes: dict[str, tuple[str, tuple[str, ...]]] = {}
     conflicts: set[str] = set()
 
-    # Same-line representation: "SGW SLIDING GLASS WINDOW".
+    # Same-line definitions require an explicit separator, for example
+    # "SGW - SLIDING GLASS WINDOW". Plain description text such as
+    # "DOUBLE HUNG WINDOW" cannot manufacture a code from its first word.
     for page_id, _block, text, ids, _bbox in lines:
         if (page_id, _block) not in legend_blocks:
             continue
-        parts = text.strip().split(maxsplit=1)
-        if len(parts) != 2:
+        match = _LEGEND_INLINE_DEFINITION_RE.fullmatch(text or "")
+        if match is None:
             continue
-        code = parts[0].upper()
-        if _LEGEND_CODE_RE.fullmatch(code) is None:
-            continue
-        kind, conflict = _explicit_word_kind(parts[1])
+        code = match.group("code").upper()
+        description = match.group("description")
+        kind, conflict = _explicit_word_kind(description)
         if conflict:
             conflicts.add(code)
             resolved_codes.pop(code, None)
