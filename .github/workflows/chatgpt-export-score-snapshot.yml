@@ -1,0 +1,19 @@
+name: ChatGPT Export Score Snapshot
+on:
+  push:
+    branches:
+      - chatgpt/export-score-snapshot-5af00b4
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package repository snapshot
+        run: |
+          tar --exclude=.git -czf /tmp/planreader-score-snapshot.tar.gz .
+      - name: Upload snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: planreader-score-snapshot
+          path: /tmp/planreader-score-snapshot.tar.gz
+          retention-days: 1
