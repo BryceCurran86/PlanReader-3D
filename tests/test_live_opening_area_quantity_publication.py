@@ -327,6 +327,27 @@ def test_live_opening_run_seals_identity_and_source_lineage_without_identity_map
     assert sealed.revision_ids == ("rev-1",)
 
 
+def test_joinery_figured_area_seals_before_any_benchmark_identity_mapping() -> None:
+    opening = _opening(
+        canonical_id="door-joinery-1",
+        kind="door",
+        area_m2=1.827,
+        area_basis="figured_opening_width_x_joinery_height",
+        figured_area_record_id="joinery-area-1",
+    )
+    sealed = seal_live_opening_area_run(
+        _composition(opening),
+        workspace_id=9,
+        project_id="source-project",
+    )
+    assert len(sealed.quantities) == 1
+    row = sealed.quantities[0]
+    assert row.lineage_ok is True
+    assert row.object_identity_refs == ("door-joinery-1",)
+    assert row.value == pytest.approx(1.827)
+    assert row.authority == LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY
+
+
 def test_source_closed_export_excludes_unhosted_openings() -> None:
     hosted = _opening(canonical_id="hosted")
     unhosted = replace(
