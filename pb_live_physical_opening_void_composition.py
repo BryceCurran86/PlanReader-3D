@@ -115,6 +115,8 @@ class LiveCanonicalOpeningObject:
     tag_observation_id: Optional[str]
     evidence_ids: tuple[str, ...]
     geometry_complete: bool
+    schedule_dimension_basis: Optional[str] = None
+    schedule_dimension_basis_source: Optional[str] = None
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -166,6 +168,8 @@ class LiveCanonicalOpeningObject:
             "tag_observation_id": self.tag_observation_id,
             "evidence_ids": list(self.evidence_ids),
             "geometry_complete": self.geometry_complete,
+            "schedule_dimension_basis": self.schedule_dimension_basis,
+            "schedule_dimension_basis_source": self.schedule_dimension_basis_source,
             "schema_version": self.schema_version,
         }
 
@@ -222,6 +226,10 @@ def _canonical_opening_area(
     width_m: Optional[float],
     height_m: Optional[float],
     figured_label_evidence,
+    physical_geometry_complete: bool = False,
+    schedule_dimension_basis: Optional[str] = None,
+    schedule_width_mm: Optional[int] = None,
+    schedule_height_mm: Optional[int] = None,
 ) -> tuple[Optional[float], Optional[str], Optional[str]]:
     """Resolve customer-facing opening area without inventing axis order.
 
@@ -229,6 +237,31 @@ def _canonical_opening_area(
     Otherwise a corroborated two-axis figured label may provide only its
     order-invariant product. It never back-fills width_m or height_m.
     """
+
+    if physical_geometry_complete and width_m is not None and height_m is not None:
+        return (
+            float(width_m) * float(height_m),
+            "resolved_opening_geometry",
+            (
+                str(figured_label_evidence.evidence_id)
+                if figured_label_evidence is not None
+                else None
+            ),
+        )
+
+    basis = str(schedule_dimension_basis or "").strip().lower()
+    if (
+        basis == "frame"
+        and schedule_width_mm is not None
+        and schedule_height_mm is not None
+        and int(schedule_width_mm) > 0
+        and int(schedule_height_mm) > 0
+    ):
+        return (
+            (float(schedule_width_mm) * float(schedule_height_mm)) / 1_000_000.0,
+            "schedule_frame_outer_dimensions",
+            None,
+        )
 
     if width_m is not None and height_m is not None:
         return (
@@ -557,6 +590,8 @@ def compose_live_physical_opening_voids(
         schedule_declared_height_mm = None
         schedule_declared_count = None
         schedule_count_explicit = False
+        schedule_dimension_basis = None
+        schedule_dimension_basis_source = None
         schedule_row_observation_ids: tuple[str, ...] = ()
         tag_observation_id = None
         if schedule_record is not None and normalized_schedule_tag is not None:
@@ -569,6 +604,12 @@ def compose_live_physical_opening_voids(
             schedule_count_explicit = bool(
                 schedule_record.schedule_row_count_explicit
             )
+            schedule_dimension_basis = str(
+                getattr(schedule_record, "schedule_row_dimension_basis", "") or ""
+            ) or None
+            schedule_dimension_basis_source = str(
+                getattr(schedule_record, "schedule_row_basis_source", "") or ""
+            ) or None
             schedule_row_observation_ids = tuple(
                 schedule_record.schedule_row_observation_ids
             )
@@ -690,6 +731,10 @@ def compose_live_physical_opening_voids(
             width_m=width_m,
             height_m=height_m,
             figured_label_evidence=figured_label_evidence,
+            physical_geometry_complete=void_record is not None,
+            schedule_dimension_basis=schedule_dimension_basis,
+            schedule_width_mm=schedule_declared_width_mm,
+            schedule_height_mm=schedule_declared_height_mm,
         )
 
         if existence_record is not None:
@@ -819,6 +864,8 @@ def compose_live_physical_opening_voids(
                     tag_observation_id=tag_observation_id,
                     evidence_ids=evidence_ids,
                     geometry_complete=void_record is not None,
+                    schedule_dimension_basis=schedule_dimension_basis,
+                    schedule_dimension_basis_source=schedule_dimension_basis_source,
                 )
             )
 
