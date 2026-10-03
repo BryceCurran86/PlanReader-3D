@@ -297,10 +297,11 @@ def _semantic_legend_pdf(
         page.insert_text(fitz.Point(88.0, 124.0), label, fontsize=7.0)
         if legend_rows:
             page.insert_text(fitz.Point(20.0, 180.0), "LEGEND", fontsize=7.0)
-            y = 194.0
-            for row in legend_rows:
-                page.insert_text(fitz.Point(20.0, y), row, fontsize=7.0)
-                y += 10.0
+            page.insert_text(
+                fitz.Point(20.0, 194.0),
+                "\n".join(legend_rows),
+                fontsize=7.0,
+            )
         return bytes(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
@@ -342,6 +343,38 @@ def test_owned_label_uses_authenticated_source_legend_for_semantic_kind_only() -
     assert result.evidence.area_m2 is None
     assert result.evidence.basis == "owned_opening_label_semantics"
     assert len(result.evidence.source_text_observation_ids) >= 2
+
+
+def test_same_page_text_outside_legend_scope_cannot_define_opening_code() -> None:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=320.0, height=260.0)
+        for first, second in (
+            ((20.0, 100.0), (100.0, 100.0)),
+            ((140.0, 100.0), (220.0, 100.0)),
+            ((20.0, 110.0), (100.0, 110.0)),
+            ((140.0, 110.0), (220.0, 110.0)),
+            ((100.0, 100.0), (100.0, 110.0)),
+            ((140.0, 100.0), (140.0, 110.0)),
+        ):
+            page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
+        page.insert_text(fitz.Point(88.0, 124.0), "1218 ZX", fontsize=7.0)
+        page.insert_text(fitz.Point(20.0, 180.0), "LEGEND", fontsize=7.0)
+        page.insert_text(fitz.Point(20.0, 194.0), "AA AWNING WINDOW", fontsize=7.0)
+        # This looks definition-like but is emitted in a later unrelated block.
+        page.insert_text(fitz.Point(20.0, 230.0), "ZX SLIDING GLASS WINDOW", fontsize=7.0)
+        payload = bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+    source, published = _ingest(payload, "semantic-outside-legend")
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.evidence is None
 
 
 def test_conflicting_authenticated_legend_semantics_fail_closed() -> None:
