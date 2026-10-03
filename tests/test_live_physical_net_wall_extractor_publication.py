@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import fitz
 
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_planreader_pdf_extractor import GenericPlanReaderExtractor
 
 
@@ -134,6 +134,31 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         "commercial_quantity_authority": False,
     }
     canonical_floor = SimpleNamespace(to_dict=lambda: canonical_floor_payload)
+    opening_area_quantity = QuantityEvidence(
+        quantity_id="opening-area-q1",
+        family="opening_area",
+        semantic_key="window_area:opening-1",
+        value=2.5,
+        unit="m2",
+        input_entity_ids=("opening-1",),
+        evidence_ids=("opening-1", "figured-1"),
+        authority="test_opening_area",
+        status="corroborated",
+        confidence=1.0,
+    )
+    opening_count_quantity = QuantityEvidence(
+        quantity_id="opening-count-q1",
+        family="opening_count",
+        semantic_key="opening_count:window:W1",
+        value=1.0,
+        unit="ea",
+        input_entity_ids=("opening-1",),
+        evidence_ids=("opening-1", "schedule-row-1"),
+        authority="test_opening_count",
+        status="corroborated",
+        confidence=1.0,
+    )
+    captured_coverage: dict[str, object] = {}
 
     def fake_physical_wall_claim(pdf_path, *, pages=None):
         seen["pdf_path"] = pdf_path
@@ -161,11 +186,22 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
             evidence_ids=("gross-1", "void-1", "role-1"),
             quantity_id="physical-net-wall-q1",
             confidence=1.0,
+            opening_quantity_evidence=(opening_area_quantity,),
+            opening_count_quantity_evidence=(opening_count_quantity,),
         )
 
     monkeypatch.setattr(
         "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
         fake_physical_wall_claim,
+    )
+
+    def capture_coverage(*, objects, quantities, registry_run_scope, output_rows=None):
+        captured_coverage["quantity_ids"] = tuple(q.quantity_id for q in quantities)
+        return (), {}
+
+    monkeypatch.setattr(
+        "pb_live_canonical_coverage_registry.collect_live_canonical_coverage",
+        capture_coverage,
     )
     _disable_unrelated_late_live_paths(monkeypatch)
 
@@ -215,6 +251,8 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         canonical_opening_payload
     ]
     assert extractor.extraction_status["physical_net_wall_live"] == "corroborated"
+    assert "opening-area-q1" in captured_coverage["quantity_ids"]
+    assert "opening-count-q1" in captured_coverage["quantity_ids"]
 
 
 def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
