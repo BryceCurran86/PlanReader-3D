@@ -98,6 +98,8 @@ class ScheduleOpeningInstanceBindingRecord:
     # reconciliation can never treat the default as evidence.
     schedule_row_count: int | None = None
     schedule_row_count_explicit: bool = False
+    schedule_row_dimension_basis: str = ""
+    schedule_row_basis_source: str = ""
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -460,6 +462,49 @@ def _is_header_row(cells: Sequence[str]) -> bool:
     return "mark" in mapping or "dims" in mapping
 
 
+def _collapse_explicit_dimension_header_phrases(
+    cells: Sequence[str],
+    bounds: Sequence[tuple[float, float]],
+) -> tuple[list[str], list[tuple[float, float]]]:
+    """Collapse tokenized explicit dimension headings into logical columns.
+
+    Native PDF extraction frequently exposes "FRAME WIDTH", "ROUGH OPENING
+    HEIGHT", "LEAF SIZE", etc. as separate word observations even though they
+    are one schedule column heading. Collapse only phrases whose combined text
+    already resolves to an explicit dimension basis *and* one shared schedule
+    dimension role. Generic WIDTH/HEIGHT tokens are never merged or promoted.
+    """
+
+    logical_cells: list[str] = []
+    logical_bounds: list[tuple[float, float]] = []
+    i = 0
+    while i < len(cells):
+        chosen_span = 1
+        chosen_text = str(cells[i]).strip()
+        for span in (3, 2):
+            if i + span > len(cells):
+                continue
+            phrase = " ".join(str(value).strip() for value in cells[i:i + span]).strip()
+            mapping = detect_header([phrase])
+            basis = str(mapping.get("dimension_basis") or "")
+            dimension_roles = [
+                role for role in ("dims", "width", "height") if role in mapping
+            ]
+            if basis and len(dimension_roles) == 1:
+                chosen_span = span
+                chosen_text = phrase
+                break
+        logical_cells.append(chosen_text)
+        logical_bounds.append(
+            (
+                float(bounds[i][0]),
+                float(bounds[i + chosen_span - 1][1]),
+            )
+        )
+        i += chosen_span
+    return logical_cells, logical_bounds
+
+
 def _header_table_specs(
     row: dict[str, Any],
     ids: Sequence[str],
@@ -509,6 +554,14 @@ def _header_table_specs(
     for position, start in enumerate(mark_starts):
         end = mark_starts[position + 1] if position + 1 < len(mark_starts) else len(cells)
         table_cells = cells[start:end]
+        table_bounds = [
+            (float(bound[0]), float(bound[1]))
+            for bound in bounds[start:end]
+        ]
+        table_cells, table_bounds = _collapse_explicit_dimension_header_phrases(
+            table_cells,
+            table_bounds,
+        )
         mapping = detect_header(table_cells)
         if "mark" not in mapping:
             continue
@@ -532,7 +585,7 @@ def _header_table_specs(
             (
                 {
                     "text": "\t".join(table_cells),
-                    "bounds": bounds[start:end],
+                    "bounds": table_bounds,
                     "center_y": row.get("center_y", -math.inf),
                     "header_observation_ids": tuple(ids[start:end]),
                 },
@@ -948,6 +1001,8 @@ class ScheduleOpeningInstanceBindingProducer:
             "schedule_row_height_mm": entry.height_mm,
             "schedule_row_count": entry.count if entry.count_explicit else None,
             "schedule_row_count_explicit": bool(entry.count_explicit),
+            "schedule_row_dimension_basis": str(entry.dimension_basis or ""),
+            "schedule_row_basis_source": str(entry.basis_source or ""),
         }
         record = ScheduleOpeningInstanceBindingRecord(
             record_id=stable_contract_id(
@@ -970,6 +1025,8 @@ class ScheduleOpeningInstanceBindingProducer:
             schedule_row_height_mm=entry.height_mm,
             schedule_row_count=entry.count if entry.count_explicit else None,
             schedule_row_count_explicit=bool(entry.count_explicit),
+            schedule_row_dimension_basis=str(entry.dimension_basis or ""),
+            schedule_row_basis_source=str(entry.basis_source or ""),
         )
         return self._store(
             key,
