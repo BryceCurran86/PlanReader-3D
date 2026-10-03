@@ -7,19 +7,19 @@ on:
     branches: [main]
 
 jobs:
-  handoff_1264:
+  handoff_1267:
     if: github.event_name == 'pull_request' && github.head_ref == 'ops/maryborough-1264-exact-handoff'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: af18ef9652f2fab895f21cbd09e765706c11ca1f
+          ref: 628386f592898332465c24c5a00913d7d1fe4ec8
       - name: Package exact #1264 head
         run: |
           python - <<'PY'
           from pathlib import Path
           import zipfile
-          out = Path('/tmp/planreader-maryborough-1264-exact.zip')
+          out = Path('/tmp/planreader-maryborough-1267-exact.zip')
           excluded = {'.git', '.venv', '__pycache__', '.pytest_cache', '.ruff_cache'}
           with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:
               for p in Path('.').rglob('*'):
@@ -32,8 +32,8 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: planreader-maryborough-1264-exact
-          path: /tmp/planreader-maryborough-1264-exact.zip
+          name: planreader-maryborough-1267-exact
+          path: /tmp/planreader-maryborough-1267-exact.zip
           retention-days: 1
 
   test:
