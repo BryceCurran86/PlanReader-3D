@@ -12,6 +12,7 @@ from pb_live_opening_source_closed_export import (
 from pb_live_opening_area_quantity_publication import (
     LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY,
     LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY,
+    LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY,
     _opening_quantity,
     publish_live_opening_area_quantities,
 )
@@ -130,6 +131,38 @@ def test_figured_opening_area_becomes_identity_bound_quantity_evidence() -> None
     assert quantity.metadata["measurement_record_id"] == "figured-1"
     assert quantity.metadata["host_wall_id"] == "wall-1"
     assert quantity.metadata["host_binding_record_id"] == "host-binding-1"
+
+
+def test_joinery_figured_door_area_becomes_identity_bound_quantity() -> None:
+    opening = _opening(
+        kind="door",
+        area_m2=1.827,
+        area_basis="figured_opening_width_x_joinery_height",
+        figured_area_record_id="joinery-area-1",
+    )
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+    assert quantity.semantic_key == "door_area:opening-1"
+    assert quantity.value == pytest.approx(1.827)
+    assert (
+        quantity.authority
+        == LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY
+    )
+    assert quantity.metadata["measurement_record_id"] == "joinery-area-1"
+    assert quantity.metadata["area_basis"] == (
+        "figured_opening_width_x_joinery_height"
+    )
+    assert "document joinery height" in quantity.formula
+
+
+def test_joinery_height_area_route_never_applies_to_window() -> None:
+    opening = _opening(
+        kind="window",
+        area_m2=1.827,
+        area_basis="figured_opening_width_x_joinery_height",
+        figured_area_record_id="joinery-area-1",
+    )
+    assert _opening_quantity(opening) is None
 
 
 def test_untyped_opening_never_publishes_trade_area() -> None:
