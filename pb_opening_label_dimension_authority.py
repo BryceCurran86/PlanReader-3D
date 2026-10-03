@@ -74,6 +74,10 @@ _ALLOWED_SINGLE_TAIL_RE = re.compile(
     r"PANEL|LIFT|DOOR)\b\s*)*$",
     re.IGNORECASE,
 )
+_FRAGMENT_EXCLUSION_TOKEN_RE = re.compile(
+    r"^(?:CLEAR|NICHE|SCALE)$",
+    re.IGNORECASE,
+)
 
 _Key = tuple[str, str, str, str, str]
 
@@ -369,6 +373,45 @@ def _bbox_union(values: Sequence[Sequence[float]]) -> Optional[tuple[float, floa
     )
 
 
+def _adjacent_exclusion_token(
+    rows: Sequence[tuple[int, str, str, tuple[float, ...]]],
+    *,
+    start: int,
+    end: int,
+) -> bool:
+    """Reject a partial parse when a nearby source token changes its meaning."""
+
+    def _is_close(left: tuple[float, ...], right: tuple[float, ...]) -> bool:
+        lx0, ly0, lx1, ly1 = (float(v) for v in left[:4])
+        rx0, ry0, rx1, ry1 = (float(v) for v in right[:4])
+        horizontal_gap = max(0.0, max(lx0, rx0) - min(lx1, rx1))
+        vertical_overlap = max(0.0, min(ly1, ry1) - max(ly0, ry0))
+        min_height = max(
+            _COORD_TOL,
+            min(abs(ly1 - ly0), abs(ry1 - ry0)),
+        )
+        return (
+            vertical_overlap >= 0.5 * min_height
+            and horizontal_gap <= 1.5 * min_height
+        )
+
+    if start > 0:
+        token = str(rows[start - 1][2] or "").strip()
+        if (
+            _FRAGMENT_EXCLUSION_TOKEN_RE.fullmatch(token) is not None
+            and _is_close(rows[start - 1][3], rows[start][3])
+        ):
+            return True
+    if end < len(rows):
+        token = str(rows[end][2] or "").strip()
+        if (
+            _FRAGMENT_EXCLUSION_TOKEN_RE.fullmatch(token) is not None
+            and _is_close(rows[end - 1][3], rows[end][3])
+        ):
+            return True
+    return False
+
+
 def _parseable_opening_label_fragments(
     rows: Sequence[tuple[int, str, str, tuple[float, ...]]],
     *,
@@ -409,6 +452,8 @@ def _parseable_opening_label_fragments(
                 structural_kind_hint=structural_kind_hint,
             )
             if parsed is None:
+                continue
+            if _adjacent_exclusion_token(ordered, start=start, end=end):
                 continue
             bbox = _bbox_union([row[3] for row in subset])
             if bbox is None:
