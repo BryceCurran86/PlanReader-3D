@@ -433,45 +433,72 @@ def _adjacent_exclusion_token(
     return False
 
 
+def _select_fragment_candidates(
+    candidates: Sequence[tuple[tuple[int, int], int, int, _TrustedTextLine]],
+) -> tuple[_TrustedTextLine, ...]:
+    """Resolve overlap components by syntax rank; preserve equal-rank ties."""
+    pending = sorted(
+        candidates,
+        key=lambda item: (item[1], item[2], item[3].observation_ids, item[3].text),
+    )
+    components: list[list[tuple[tuple[int, int], int, int, _TrustedTextLine]]] = []
+    for candidate in pending:
+        _rank, start, end, _fragment = candidate
+        touched: list[int] = []
+        for index, component in enumerate(components):
+            if any(
+                start < other_end and other_start < end
+                for _r, other_start, other_end, _f in component
+            ):
+                touched.append(index)
+        if not touched:
+            components.append([candidate])
+            continue
+        merged = [candidate]
+        for index in reversed(touched):
+            merged.extend(components.pop(index))
+        components.append(merged)
+
+    winners: list[tuple[int, int, _TrustedTextLine]] = []
+    for component in components:
+        best_rank = max(item[0] for item in component)
+        seen: set[tuple[int, int, tuple[str, ...], str]] = set()
+        for rank, start, end, fragment in sorted(
+            component,
+            key=lambda item: (item[1], item[2], item[3].observation_ids, item[3].text),
+        ):
+            if rank != best_rank:
+                continue
+            key = (start, end, fragment.observation_ids, fragment.text)
+            if key in seen:
+                continue
+            seen.add(key)
+            winners.append((start, end, fragment))
+
+    return tuple(
+        fragment
+        for _start, _end, fragment in sorted(
+            winners,
+            key=lambda item: (item[0], item[1], item[2].observation_ids, item[2].text),
+        )
+    )
+
+
 def _parseable_opening_label_fragments(
     rows: Sequence[tuple[int, str, str, tuple[float, ...]]],
-    *,
-    structural_kind_hint: Optional[str] = None,
 ) -> tuple[_TrustedTextLine, ...]:
-    """Split one native PDF text line into non-overlapping opening callouts.
-
-    PyMuPDF can place several architectural opening callouts in one native text
-    line. Treating the whole line as one label loses those individual source
-    claims. We therefore enumerate only short contiguous word spans that are
-    independently accepted by the existing fail-closed label grammar.
-
-    Overlapping parses are resolved by evidence richness: two-axis dimensions
-    outrank single dimensions, explicit opening semantics outrank untyped text,
-    and then the longer source span wins. This suppresses sub-parses of a
-    semantic callout without merging adjacent callouts on the same PDF line.
-    """
-
+    """Split one native text line using deterministic syntax evidence only."""
     ordered = sorted(rows, key=lambda item: (item[0], item[1]))
     if not ordered:
         return ()
 
-    candidates: list[
-        tuple[
-            tuple[int, int, int],
-            int,
-            int,
-            _TrustedTextLine,
-        ]
-    ] = []
+    candidates: list[tuple[tuple[int, int], int, int, _TrustedTextLine]] = []
     max_words = 7
     for start in range(len(ordered)):
         for end in range(start + 1, min(len(ordered), start + max_words) + 1):
             subset = ordered[start:end]
             text_value = " ".join(row[2] for row in subset)
-            parsed = parse_opening_label_dimensions(
-                text_value,
-                structural_kind_hint=structural_kind_hint,
-            )
+            parsed = parse_opening_label_dimensions(text_value)
             if parsed is None:
                 continue
             if _adjacent_exclusion_token(ordered, start=start, end=end):
@@ -479,49 +506,15 @@ def _parseable_opening_label_fragments(
             bbox = _bbox_union([row[3] for row in subset])
             if bbox is None:
                 continue
-            rank = (
-                len(parsed.dimension_values_mm),
-                1 if parsed.semantic_kind is not None else 0,
-                end - start,
-            )
+            rank = (parsed.dimension_count, end - start)
             candidates.append(
-                (
-                    rank,
-                    start,
-                    end,
-                    _TrustedTextLine(
-                        observation_ids=tuple(row[1] for row in subset),
-                        text=text_value,
-                        bbox=bbox,
-                    ),
-                )
+                (rank, start, end, _TrustedTextLine(
+                    observation_ids=tuple(row[1] for row in subset),
+                    text=text_value,
+                    bbox=bbox,
+                ))
             )
-
-    selected: list[tuple[int, int, _TrustedTextLine]] = []
-    occupied: set[int] = set()
-    for _rank, start, end, fragment in sorted(
-        candidates,
-        key=lambda item: (
-            -item[0][0],
-            -item[0][1],
-            -item[0][2],
-            item[1],
-            item[2],
-        ),
-    ):
-        token_indexes = set(range(start, end))
-        if token_indexes & occupied:
-            continue
-        selected.append((start, end, fragment))
-        occupied.update(token_indexes)
-
-    return tuple(
-        fragment
-        for _start, _end, fragment in sorted(
-            selected,
-            key=lambda item: (item[0], item[1], item[2].observation_ids),
-        )
-    )
+    return _select_fragment_candidates(candidates)
 
 def _bbox_overlap_fraction(
     first_min: float,
@@ -567,29 +560,24 @@ def _line_stitchable(
 def _stitched_opening_label_fragment(
     first: _TrustedTextLine,
     second: _TrustedTextLine,
-    *,
-    structural_kind_hint: Optional[str] = None,
 ) -> Optional[_TrustedTextLine]:
-    """Join two contiguous native lines only when one unique parse results."""
+    """Join contiguous native lines only for one unique syntax parse."""
     if not _line_stitchable(first, second):
         return None
     bbox = _bbox_union((first.bbox, second.bbox))
     if bbox is None:
         return None
 
-    possibilities: dict[
-        tuple[tuple[float, ...], Optional[str]],
-        tuple[str, tuple[str, ...]],
-    ] = {}
+    possibilities: dict[tuple[tuple[str, ...], str], tuple[str, tuple[str, ...]]] = {}
     for left, right in ((first, second), (second, first)):
         combined = f"{left.text} {right.text}"
-        parsed = parse_opening_label_dimensions(
-            combined,
-            structural_kind_hint=structural_kind_hint,
-        )
+        parsed = parse_opening_label_dimensions(combined)
         if parsed is None:
             continue
-        signature = (parsed.dimension_values_mm, parsed.semantic_kind)
+        signature = (
+            tuple(token.lower() for token in parsed.dimension_tokens),
+            parsed.suffix_text.lower(),
+        )
         possibilities.setdefault(
             signature,
             (combined, (*left.observation_ids, *right.observation_ids)),
@@ -603,19 +591,13 @@ def _stitched_opening_label_fragment(
         bbox=bbox,
     )
 
-
 def _prefer_richer_label_fragments(
     fragments: Sequence[_TrustedTextLine],
-    *,
-    structural_kind_hint: Optional[str] = None,
 ) -> tuple[_TrustedTextLine, ...]:
-    """Suppress only provenance-contained weaker parses of the same dimensions."""
+    """Suppress only strictly weaker provenance-contained syntax parses."""
     parsed_rows: list[tuple[_TrustedTextLine, ParsedOpeningLabel]] = []
     for fragment in fragments:
-        parsed = parse_opening_label_dimensions(
-            fragment.text,
-            structural_kind_hint=structural_kind_hint,
-        )
+        parsed = parse_opening_label_dimensions(fragment.text)
         if parsed is not None:
             parsed_rows.append((fragment, parsed))
 
@@ -629,21 +611,15 @@ def _prefer_richer_label_fragments(
             other_ids = set(other.observation_ids)
             if not own_ids < other_ids:
                 continue
-            if (
-                len(other_parsed.dimension_values_mm)
-                > len(parsed.dimension_values_mm)
-            ):
+            if other_parsed.dimension_count > parsed.dimension_count:
                 dominated = True
                 break
-            if parsed.dimension_values_mm != other_parsed.dimension_values_mm:
-                continue
             if (
-                parsed.semantic_kind is None
-                and other_parsed.semantic_kind is not None
+                other_parsed.dimension_count == parsed.dimension_count
+                and tuple(token.lower() for token in other_parsed.dimension_tokens)
+                == tuple(token.lower() for token in parsed.dimension_tokens)
+                and len(other.observation_ids) > len(fragment.observation_ids)
             ):
-                dominated = True
-                break
-            if parsed.semantic_kind == other_parsed.semantic_kind:
                 dominated = True
                 break
         if not dominated:
@@ -653,8 +629,6 @@ def _prefer_richer_label_fragments(
 def _trusted_text_lines(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
-    *,
-    structural_kind_hint: Optional[str] = None,
 ) -> tuple[_TrustedTextLine, ...]:
     published = source.published_snapshot_for_revision(opening.revision_id)
     if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
@@ -712,29 +686,19 @@ def _trusted_text_lines(
             )
         )
         fragments.extend(
-            _parseable_opening_label_fragments(
-                ordered,
-                structural_kind_hint=structural_kind_hint,
-            )
+            _parseable_opening_label_fragments(ordered)
         )
 
     # Some CAD exports wrap one callout over two immediately adjacent native
     # lines. Add only syntax-valid, geometry-contiguous two-line claims.
     for index, first in enumerate(raw_lines):
         for second in raw_lines[index + 1:]:
-            stitched = _stitched_opening_label_fragment(
-                first,
-                second,
-                structural_kind_hint=structural_kind_hint,
-            )
+            stitched = _stitched_opening_label_fragment(first, second)
             if stitched is not None:
                 fragments.append(stitched)
 
     fragments = list(
-        _prefer_richer_label_fragments(
-            fragments,
-            structural_kind_hint=structural_kind_hint,
-        )
+        _prefer_richer_label_fragments(fragments)
     )
     return tuple(
         sorted(
@@ -859,23 +823,17 @@ class OpeningLabelDimensionProducer:
         structural_kind = _structural_kind(opening.structural_pattern)
         candidates: dict[
             tuple[str, tuple[float, ...], Optional[str], tuple[float, float, float, float]],
-            tuple[_TrustedTextLine, ParsedOpeningLabel],
+            tuple[_TrustedTextLine, ParsedOpeningLabel, Optional[str]],
         ] = {}
-        for line in _trusted_text_lines(
-            self._source,
-            opening,
-            structural_kind_hint=structural_kind,
-        ):
-            parsed = parse_opening_label_dimensions(
-                line.text,
-                structural_kind_hint=structural_kind,
-            )
+        for line in _trusted_text_lines(self._source, opening):
+            parsed = parse_opening_label_dimensions(line.text)
             if parsed is None or not _label_matches_gap(line, gap):
                 continue
-            if (
+            suffix_kind, suffix_conflict = _semantic_kind_evidence(parsed.suffix_text)
+            if suffix_conflict or (
                 structural_kind is not None
-                and parsed.semantic_kind is not None
-                and structural_kind != parsed.semantic_kind
+                and suffix_kind is not None
+                and structural_kind != suffix_kind
             ):
                 return self._store(
                     key,
@@ -884,14 +842,14 @@ class OpeningLabelDimensionProducer:
                         OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT,
                     ),
                 )
+            semantic_kind = structural_kind or suffix_kind
             signature = (
                 parsed.raw_text.lower(),
                 parsed.dimension_values_mm,
-                parsed.semantic_kind,
+                semantic_kind,
                 tuple(round(value, 4) for value in line.bbox),
             )
-            candidates.setdefault(signature, (line, parsed))
-
+            candidates.setdefault(signature, (line, parsed, semantic_kind))
         if not candidates:
             return self._store(
                 key,
@@ -909,7 +867,7 @@ class OpeningLabelDimensionProducer:
                 ),
             )
 
-        line, parsed = next(iter(candidates.values()))
+        line, parsed, semantic_kind = next(iter(candidates.values()))
         payload = {
             "schema_version": OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
             "opening_record_id": opening.record_id,
@@ -918,7 +876,7 @@ class OpeningLabelDimensionProducer:
             "source_text_observation_ids": tuple(sorted(line.observation_ids)),
             "raw_text": parsed.raw_text,
             "dimension_values_mm": parsed.dimension_values_mm,
-            "semantic_kind": parsed.semantic_kind,
+            "semantic_kind": semantic_kind,
         }
         evidence = OpeningLabelDimensionEvidence(
             evidence_id=stable_contract_id(
@@ -932,7 +890,7 @@ class OpeningLabelDimensionProducer:
             source_text_observation_ids=tuple(sorted(line.observation_ids)),
             raw_text=parsed.raw_text,
             dimension_values_mm=parsed.dimension_values_mm,
-            semantic_kind=parsed.semantic_kind,
+            semantic_kind=semantic_kind,
             area_m2=parsed.area_m2,
         )
         return self._store(
