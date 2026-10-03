@@ -8,6 +8,7 @@ import fitz
 from pb_live_physical_opening_void_composition import (
     LIVE_PHYSICAL_OPENING_VOID_RESOLVED,
     LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE,
+    _canonical_provenance_ids,
     compose_live_physical_opening_voids,
 )
 from pb_live_wall_opening_authority_composition import (
@@ -71,6 +72,12 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
     finally:
         doc.close()
 
+
+def test_canonical_opening_provenance_union_is_order_invariant_without_collapsing_ids() -> None:
+    forward = _canonical_provenance_ids(("ev-b", "ev-a", "ev-b", "opening-1"))
+    reverse = _canonical_provenance_ids(("opening-1", "ev-a", "ev-b"))
+    assert forward == reverse == ("ev-a", "ev-b", "opening-1")
+    assert "opening-1" in forward
 
 def test_live_composition_resolves_sealed_physical_opening_void() -> None:
     source = SourceVisibilityProducer(
