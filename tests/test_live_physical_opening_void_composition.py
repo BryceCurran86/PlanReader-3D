@@ -5,6 +5,10 @@ from types import MappingProxyType
 
 import fitz
 
+from pb_live_opening_area_quantity_publication import (
+    LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY,
+    publish_live_opening_area_quantities,
+)
 from pb_live_physical_opening_void_composition import (
     LIVE_PHYSICAL_OPENING_VOID_RESOLVED,
     LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE,
@@ -17,7 +21,12 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes:
+def _complete_void_pdf(
+    *,
+    include_height: bool = True,
+    tag: str = "W1",
+    include_joinery_note: bool = False,
+) -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=760.0, height=650.0)
@@ -35,6 +44,11 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
             page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
         page.insert_text(fitz.Point(112.0, 65.0), "900")
         page.insert_text(fitz.Point(112.0, 106.0), tag)
+        if include_joinery_note:
+            page.insert_text(
+                fitz.Point(60.0, 350.0),
+                "JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+            )
 
         headings = (
             "MARK",
@@ -231,6 +245,51 @@ def test_live_void_composition_never_uses_default_height_when_source_height_is_m
     assert opening.area_m2 is None
     assert opening.opening_void_record_id is None
     assert opening.geometry_complete is False
+
+
+def test_single_figured_door_width_plus_joinery_note_publishes_area_without_void_height() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-opening-joinery-figured-area-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-opening-joinery-figured-area",
+        source_bytes=_complete_void_pdf(
+            include_height=False,
+            tag="D1",
+            include_joinery_note=True,
+        ),
+        source_locator="memory://live-opening-joinery-figured-area.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.opening_kind == "door"
+    assert opening.height_m is None
+    assert opening.geometry_complete is False
+    assert opening.area_m2 == 0.9 * 2.1
+    assert opening.area_basis == "figured_opening_width_x_joinery_height"
+    assert opening.figured_area_record_id
+    assert opening.figured_area_record_id in opening.evidence_ids
+
+    quantities = publish_live_opening_area_quantities(composition)
+    assert len(quantities) == 1
+    quantity = quantities[0]
+    assert quantity.value == 0.9 * 2.1
+    assert (
+        quantity.authority
+        == LIVE_OPENING_JOINERY_FIGURED_AREA_QUANTITY_AUTHORITY
+    )
+    assert quantity.input_entity_ids == (opening.canonical_opening_id,)
 
 
 def test_live_void_composition_cannot_resolve_a_narrowed_opening_subset() -> None:
