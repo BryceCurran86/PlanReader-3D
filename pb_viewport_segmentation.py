@@ -381,6 +381,48 @@ def _collapse_nested_band_frames(
     return kept
 
 
+def _collapse_equivalent_nested_frames(
+    frames: Sequence[tuple[float, float, float, float]],
+    calibration: ViewportLayoutCalibration,
+) -> list[tuple[float, float, float, float]]:
+    """Collapse only source rectangles that are duplicate backing borders.
+
+    Two genuinely distinct nested viewports remain separate. The outer frame is
+    discarded only when it fully contains another candidate, three sides align
+    within ordinary source-coordinate tolerance, and the remaining side differs
+    by no more than one calibrated text height. This captures double/background
+    border strokes without inventing an averaged boundary.
+    """
+
+    edge_tol = max(calibration.median_word_height_pt * 0.1, 0.75)
+    band_tol = max(calibration.median_word_height_pt, edge_tol)
+    kept: list[tuple[float, float, float, float]] = []
+    for frame in frames:
+        duplicate_outer = False
+        for other in frames:
+            if other == frame:
+                continue
+            if not _bbox_contains(frame, other, margin=edge_tol):
+                continue
+            deltas = [
+                abs(float(frame[index]) - float(other[index]))
+                for index in range(4)
+            ]
+            aligned = sum(delta <= edge_tol for delta in deltas)
+            differing = [delta for delta in deltas if delta > edge_tol]
+            if (
+                aligned == 3
+                and len(differing) == 1
+                and differing[0] <= band_tol
+                and _bbox_area(other) < _bbox_area(frame)
+            ):
+                duplicate_outer = True
+                break
+        if not duplicate_outer:
+            kept.append(frame)
+    return kept
+
+
 def _frame_has_title_block_labels(
     frame: Sequence[float],
     fragments: Sequence[tuple[tuple[float, float, float, float], str]],
@@ -1037,6 +1079,7 @@ def _frame_resolved_viewports(
             if not _rejected_ownership_frame(page, frame, calibration, fragments)
         ]
         usable = _collapse_nested_band_frames(usable)
+        usable = _collapse_equivalent_nested_frames(usable, calibration)
         if len(usable) > 1:
             out.append(SegmentedViewport(
                 view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
