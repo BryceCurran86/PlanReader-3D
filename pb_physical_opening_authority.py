@@ -1090,6 +1090,63 @@ class PhysicalOpeningAuthority:
             segments, walls, (), page_no=int(seed.page_id)
         )
 
+        # Generic opening corroboration historically rescanned every source
+        # segment twice for every wall gap to find endpoint-touching jambs.
+        # Build a conservative endpoint broad phase once. A segment is only
+        # admitted to the exact predicate below when one of its endpoints lies
+        # in the queried point's 3x3 coordinate-bin neighborhood; _touches()
+        # still owns final membership at the existing 1e-6 tolerance.
+        endpoint_cell = _COORD_EQ_ABS_TOL
+
+        def endpoint_bin(point: tuple[float, float]) -> tuple[int, int]:
+            return (
+                math.floor(float(point[0]) / endpoint_cell),
+                math.floor(float(point[1]) / endpoint_cell),
+            )
+
+        endpoint_segment_index: dict[tuple[int, int], list[int]] = {}
+        for segment_index, segment in enumerate(segments):
+            for point in (
+                (float(segment.x1), float(segment.y1)),
+                (float(segment.x2), float(segment.y2)),
+            ):
+                endpoint_segment_index.setdefault(endpoint_bin(point), []).append(
+                    segment_index
+                )
+
+        def _touches(
+            segment: LegacyPlanSegment,
+            point: tuple[float, float],
+        ) -> bool:
+            return min(
+                math.hypot(segment.x1 - point[0], segment.y1 - point[1]),
+                math.hypot(segment.x2 - point[0], segment.y2 - point[1]),
+            ) <= _COORD_EQ_ABS_TOL
+
+        def endpoint_touching_segments(
+            point: tuple[float, float],
+        ) -> tuple[LegacyPlanSegment, ...]:
+            bx, by = endpoint_bin(point)
+            indexes: set[int] = set()
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    indexes.update(
+                        endpoint_segment_index.get((bx + dx, by + dy), ())
+                    )
+            return tuple(
+                segments[index]
+                for index in sorted(indexes)
+                if _touches(segments[index], point)
+            )
+
+        door_indexes_by_wall_identity: dict[int, list[int]] = {}
+        for door_index, door in enumerate(doors):
+            if door.wall_segment is None:
+                continue
+            door_indexes_by_wall_identity.setdefault(
+                id(door.wall_segment), []
+            ).append(door_index)
+
         def record_for(segment: LegacyPlanSegment | None) -> Optional[SourceObservationRecord]:
             if segment is None:
                 return None
@@ -1206,15 +1263,6 @@ class PhysicalOpeningAuthority:
                 ),
             )
 
-            def _touches(
-                segment: LegacyPlanSegment,
-                point: tuple[float, float],
-            ) -> bool:
-                return min(
-                    math.hypot(segment.x1 - point[0], segment.y1 - point[1]),
-                    math.hypot(segment.x2 - point[0], segment.y2 - point[1]),
-                ) <= _COORD_EQ_ABS_TOL
-
             def _parallel_segments(
                 first: LegacyPlanSegment,
                 second: LegacyPlanSegment,
@@ -1228,19 +1276,17 @@ class PhysicalOpeningAuthority:
 
             left_jambs = tuple(
                 segment
-                for segment in segments
+                for segment in endpoint_touching_segments(gap_endpoint_a)
                 if segment is not gap_wall_a
                 and segment is not gap_wall_b
                 and _perpendicular_to_wall(segment)
-                and _touches(segment, gap_endpoint_a)
             )
             right_jambs = tuple(
                 segment
-                for segment in segments
+                for segment in endpoint_touching_segments(gap_endpoint_b)
                 if segment is not gap_wall_a
                 and segment is not gap_wall_b
                 and _perpendicular_to_wall(segment)
-                and _touches(segment, gap_endpoint_b)
             )
             for first in left_jambs:
                 for second in right_jambs:
@@ -1266,7 +1312,14 @@ class PhysicalOpeningAuthority:
                             )
                         )
 
-            for door in doors:
+            candidate_door_indexes = sorted(
+                {
+                    *door_indexes_by_wall_identity.get(id(gap_wall_a), ()),
+                    *door_indexes_by_wall_identity.get(id(gap_wall_b), ()),
+                }
+            )
+            for door_index in candidate_door_indexes:
+                door = doors[door_index]
                 if door.wall_segment not in gap.wall_segments or door.jamb_segment is None:
                     continue
                 door_center = midpoint(door.jamb_segment)
