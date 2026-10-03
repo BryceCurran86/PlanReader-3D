@@ -351,6 +351,20 @@ def test_compact_expansion_requires_authenticated_owned_opening() -> None:
     )
     assert resolved == ((1800.0, 900.0), True)
 
+    opaque = parse_opening_label_dimensions("1218 SGW")
+    assert opaque is not None
+    assert _resolve_owned_dimension_values_mm(
+        opaque,
+        opening_record_id="owned-opening",
+        semantic_kind="window",
+    ) is None
+    assert _resolve_owned_dimension_values_mm(
+        opaque,
+        opening_record_id="owned-opening",
+        semantic_kind="window",
+        authenticated_semantic_evidence=True,
+    ) == ((1200.0, 1800.0), True)
+
 
 def test_producer_expands_compact_dimensions_only_after_physical_ownership() -> None:
     source, published = _ingest(
