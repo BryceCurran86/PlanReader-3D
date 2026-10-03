@@ -720,10 +720,12 @@ def _prefer_richer_label_fragments(
             kept.append(fragment)
     return tuple(kept)
 
-def _trusted_text_lines(
+def _trusted_raw_text_lines(
     source: SourceVisibilityProducer,
     opening: PhysicalOpeningExistenceRecord,
 ) -> tuple[_TrustedTextLine, ...]:
+    """Return producer-trusted native text lines on the opening source page."""
+
     published = source.published_snapshot_for_revision(opening.revision_id)
     if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
         return ()
@@ -766,7 +768,6 @@ def _trusted_text_lines(
         )
 
     raw_lines: list[_TrustedTextLine] = []
-    fragments: list[_TrustedTextLine] = []
     for rows in grouped.values():
         ordered = sorted(rows, key=lambda item: (item[0], item[1]))
         bbox = _bbox_union([row[3] for row in ordered])
@@ -779,9 +780,70 @@ def _trusted_text_lines(
                 bbox=bbox,
             )
         )
-        fragments.extend(
-            _parseable_opening_label_fragments(ordered)
+    return tuple(
+        sorted(
+            raw_lines,
+            key=lambda item: (
+                item.bbox[1],
+                item.bbox[0],
+                item.bbox[3],
+                item.bbox[2],
+                item.observation_ids,
+            ),
         )
+    )
+
+
+def _trusted_text_lines(
+    source: SourceVisibilityProducer,
+    opening: PhysicalOpeningExistenceRecord,
+) -> tuple[_TrustedTextLine, ...]:
+    raw_lines = list(_trusted_raw_text_lines(source, opening))
+    fragments: list[_TrustedTextLine] = []
+
+    published = source.published_snapshot_for_revision(opening.revision_id)
+    if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
+        return ()
+    integrity = source.text_integrity_authority()
+    grouped: dict[
+        tuple[object, ...],
+        list[tuple[int, str, str, tuple[float, ...]]],
+    ] = {}
+    for observation_id in published.text_observation_ids:
+        resolved = integrity.resolve_text(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or resolved.trusted_text is None
+            or resolved.receipt is None
+            or str(resolved.receipt.page_id) != str(opening.page_id)
+        ):
+            continue
+        receipt = resolved.receipt
+        if receipt.block_no is not None and receipt.line_no is not None:
+            key = ("native-line", int(receipt.block_no), int(receipt.line_no))
+            order = int(receipt.word_no or 0)
+        else:
+            key = ("observation", observation_id)
+            order = 0
+        grouped.setdefault(key, []).append(
+            (
+                order,
+                observation_id,
+                resolved.trusted_text,
+                tuple(float(value) for value in receipt.geometry),
+            )
+        )
+
+    for rows in grouped.values():
+        fragments.extend(_parseable_opening_label_fragments(rows))
 
     # Some CAD exports wrap one callout over two immediately adjacent native
     # lines. Add only syntax-valid, geometry-contiguous two-line claims.
@@ -791,9 +853,7 @@ def _trusted_text_lines(
             if stitched is not None:
                 fragments.append(stitched)
 
-    fragments = list(
-        _prefer_richer_label_fragments(fragments)
-    )
+    fragments = list(_prefer_richer_label_fragments(fragments))
     return tuple(
         sorted(
             fragments,
