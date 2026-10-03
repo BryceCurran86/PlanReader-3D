@@ -15,7 +15,7 @@ from pb_viewport_segmentation import (
 )
 
 
-def _rotated_framed_plan(*, rotation: int = 90):
+def _rotated_framed_plan(*, rotation: int = 90, title: str = "GROUND FLOOR PLAN"):
     doc = fitz.open()
     page = doc.new_page(width=600.0, height=800.0)
     frame = fitz.Rect(60.0, 80.0, 500.0, 650.0)
@@ -38,7 +38,7 @@ def _rotated_framed_plan(*, rotation: int = 90):
     # native frame. After page rotation it appears directly below the frame.
     page.insert_text(
         (530.0, 300.0),
-        "GROUND FLOOR PLAN",
+        title,
         fontsize=12.0,
         rotate=90,
     )
@@ -111,3 +111,45 @@ def test_unvalidated_rotations_do_not_mint_viewport_authority(rotation: int) -> 
         assert segment_page_viewports(page, page_number=1) == []
     finally:
         doc.close()
+
+
+@pytest.mark.parametrize("title", ["PROP. FLOOR PLAN", "PROPOSED FLOOR PLAN"])
+def test_rotated_proposed_floor_plan_title_resolves_vector_frame(title: str) -> None:
+    doc, page, frame = _rotated_framed_plan(title=title)
+    try:
+        rows = segment_page_viewports(page, page_number=1)
+    finally:
+        doc.close()
+
+    floor_rows = [row for row in rows if row.view_type == "floor_plan"]
+    assert len(floor_rows) == 1
+    floor = floor_rows[0]
+    assert floor.label == title
+    assert floor.status == ViewportSegmentationStatus.RESOLVED.value
+    assert floor.bounding_box == pytest.approx(
+        (frame.x0, frame.y0, frame.x1, frame.y1)
+    )
+
+
+def test_near_identical_nested_backing_frames_collapse_to_inner_source_rect() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=600.0, height=800.0)
+    outer = fitz.Rect(50.0, 80.0, 500.0, 650.0)
+    inner = fitz.Rect(60.0, 80.0, 500.0, 650.0)
+    page.draw_rect(outer, color=None, fill=(1, 1, 1))
+    page.draw_rect(inner, color=None, fill=(1, 1, 1))
+    page.insert_text((530.0, 300.0), "PROP. FLOOR PLAN", fontsize=12.0, rotate=90)
+    page.insert_text((100.0, 720.0), "LEGEND", fontsize=12.0)
+    page.set_rotation(90)
+    try:
+        rows = segment_page_viewports(page, page_number=1)
+    finally:
+        doc.close()
+
+    floor_rows = [row for row in rows if row.view_type == "floor_plan"]
+    assert len(floor_rows) == 1
+    floor = floor_rows[0]
+    assert floor.status == ViewportSegmentationStatus.RESOLVED.value
+    assert floor.bounding_box == pytest.approx(
+        (inner.x0, inner.y0, inner.x1, inner.y1)
+    )

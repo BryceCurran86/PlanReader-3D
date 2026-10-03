@@ -2878,6 +2878,47 @@ class PhysicalWallCandidateAuthority:
             return None
         return self._selector_for_result(matches[0])
 
+    def selectors_for_authenticated_viewports(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_id: str,
+        view_type: Optional[str] = None,
+    ) -> tuple[PhysicalWallCandidateSelector, ...]:
+        """Return sealed selectors for producer-materialized viewport scopes.
+
+        This is addressing only. It cannot create viewport geometry, change
+        scope completeness, or promote a wall result. Optional view_type merely
+        filters the producer-owned viewport classification already sealed into
+        each scope.
+        """
+
+        expected_view_type = None if view_type is None else str(view_type)
+        matches = [
+            result
+            for result in self._scopes.values()
+            if result.scope_kind == "viewport"
+            and result.document_id == str(document_id)
+            and result.revision_id == str(revision_id)
+            and result.source_sha256 == str(source_sha256)
+            and result.snapshot_id == str(snapshot_id)
+            and result.page_id == str(page_id)
+            and (
+                expected_view_type is None
+                or result.viewport_view_type == expected_view_type
+            )
+        ]
+        matches.sort(
+            key=lambda result: (
+                str(result.viewport_id or ""),
+                str(result.decision_scope_id),
+            )
+        )
+        return tuple(self._selector_for_result(result) for result in matches)
+
     def selector_for_decision_scope(
         self,
         *,
