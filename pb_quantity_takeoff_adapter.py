@@ -283,10 +283,15 @@ def _projection_provenance(
     trace: CommercialTakeoffSourceTrace,
     authority: CommercialMeasurementAuthority,
 ) -> dict[str, Any]:
+    quantity_payload = quantity.to_dict()
+    quantity_payload["input_entity_ids"] = sorted(quantity.input_entity_ids)
+    quantity_payload["evidence_ids"] = sorted(quantity.evidence_ids)
+    quantity_payload["blocking_reasons"] = sorted(quantity.blocking_reasons)
+    quantity_payload["reason_codes"] = sorted(quantity.reason_codes)
     return {
         "adapter": "commercial_takeoff",
         "adapter_version": COMMERCIAL_TAKEOFF_ADAPTER_VERSION,
-        "quantity": quantity.to_dict(),
+        "quantity": quantity_payload,
         "source_trace": {
             "workspace_id": trace.workspace_id,
             "project_id": trace.project_id,
