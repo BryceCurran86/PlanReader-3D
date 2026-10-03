@@ -108,7 +108,13 @@ def test_unvalidated_rotations_do_not_mint_viewport_authority(rotation: int) -> 
             match=NATIVE_PAGE_FRAME_UNRESOLVED,
         ):
             native_page_frame(page)
-        assert segment_page_viewports(page, page_number=1) == []
+        rows = segment_page_viewports(page, page_number=1)
+        assert rows
+        assert all(
+            row.status == ViewportSegmentationStatus.UNSUPPORTED.value
+            and row.bounding_box is None
+            for row in rows
+        )
     finally:
         doc.close()
 
