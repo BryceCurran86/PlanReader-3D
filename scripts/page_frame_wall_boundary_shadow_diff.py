@@ -39,8 +39,16 @@ on a resolved page is still vacuous when no wall end touches a page edge: check
 ``current_at_boundary`` / ``shadow_*_at_boundary`` before reading anything into it.
 
 It changes no authority, publishes no quantity, writes nothing (the CLI prints
-JSON to stdout only) and is imported by no production module. Synthetic
-validation only: see the PROMOTION GATE in ``pb_page_frame_shadow``.
+JSON to stdout only) and is imported by no production module.
+
+IMPORTANT: the report's historical ``current_*`` column is deliberately frozen
+to the pre-promotion display-space wall consumer that this shadow was created to
+audit. Once production adopts the native frame, the diagnostic must not silently
+move its baseline forward or the original defect evidence becomes vacuous.
+Production code is never monkey-patched outside this diagnostic's tightly scoped
+construction context.
+
+Synthetic validation only: see the PROMOTION GATE in ``pb_page_frame_shadow``.
 
 CLI:  python scripts/page_frame_wall_boundary_shadow_diff.py --pdf FILE --document-id ID [--pages 1,2]
 The document id is an explicit input; it is never derived from the file name.
@@ -51,6 +59,7 @@ import argparse
 import hashlib
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
@@ -90,6 +99,30 @@ def _native_boundary(point, *, width: float, height: float, tol: Optional[float]
     """The EXISTING predicate, called unchanged; only the extent (and optionally tol) differ."""
     kwargs = {} if tol is None else {"tol": tol}
     return bool(pw._on_rect_boundary(point, x0=0.0, y0=0.0, x1=width, y1=height, **kwargs))
+
+
+def _legacy_display_page_extent(page) -> tuple[float, float]:
+    """Frozen pre-promotion wall extent: PyMuPDF display-rotated page.rect.
+
+    This exists only so the shadow report can continue comparing the historical
+    consumer it was designed to audit against the declared native frame. It is
+    never exported to or used by production code.
+    """
+
+    rect = page.rect
+    return float(rect.width), float(rect.height)
+
+
+@contextmanager
+def _frozen_legacy_wall_extent():
+    """Temporarily freeze wall-scope construction to the historical comparator."""
+
+    original = pw.native_wall_scope_page_extent
+    pw.native_wall_scope_page_extent = _legacy_display_page_extent
+    try:
+        yield
+    finally:
+        pw.native_wall_scope_page_extent = original
 
 
 def _wall_ends(wall) -> list:
@@ -188,12 +221,8 @@ def _page_report(*, src, pub, pdf_bytes: bytes, document, page_no: int, auth) ->
             and pw.PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE not in scope_codes
         )
         if scope_resolved:
-            _segments, _ids, consumer_w, consumer_h = pw._source_page_segments(
-                source_producer=src,
-                published=current,
-                source_bytes=pdf_bytes,
-                page_id=page_id,
-                decision_scope_id=scope_id,
+            consumer_w, consumer_h = _legacy_display_page_extent(
+                document[page_no - 1]
             )
     except Exception as exc:  # report, never raise: diagnostic tool
         return _no_comparison(
@@ -311,7 +340,8 @@ def run_shadow_diff(
     data = bytes(pdf_bytes)
     src = SourceVisibilityProducer(producer_method=PRODUCER_METHOD, producer_version="1")
     pub = src.ingest_native_pdf_bytes(document_id=document_id, source_bytes=data, source_locator=SOURCE_LOCATOR)
-    auth = PhysicalWallCandidateProducer.from_source_visibility_producer(src).authority()
+    with _frozen_legacy_wall_extent():
+        auth = PhysicalWallCandidateProducer.from_source_visibility_producer(src).authority()
     document = fitz.open(stream=data, filetype="pdf")
     try:
         wanted = sorted(set(page_numbers)) if page_numbers is not None else list(range(1, document.page_count + 1))
