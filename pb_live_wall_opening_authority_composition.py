@@ -119,6 +119,7 @@ class LiveWallOpeningAuthorityComposition:
     opening_host_frame_authority: OpeningHostFrameAuthority
     binding_selectors: Mapping[str, OpeningHostBindingSelector]
     host_frame_selectors: Mapping[str, OpeningHostFrameSelector]
+    evidence_page_ids: tuple[str, ...] = ()
     schema_version: str = LIVE_WALL_OPENING_COMPOSITION_SCHEMA_VERSION
 
 
@@ -134,17 +135,37 @@ def _clean_page_ids(page_ids: Sequence[str]) -> tuple[str, ...]:
     return cleaned
 
 
+def _clean_optional_page_ids(page_ids: Sequence[str]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            },
+            key=lambda value: (
+                (0, int(value)) if value.isdigit() else (1, value)
+            ),
+        )
+    )
+
+
 def compose_live_wall_opening_authority(
     *,
     source_visibility_producer: SourceVisibilityProducer,
     revision_id: str,
     page_ids: Sequence[str],
+    evidence_page_ids: Sequence[str] = (),
 ) -> LiveWallOpeningAuthorityComposition:
     """Compose exact source-owned wall/opening host authority for source pages.
 
     Page ids are addressing only.  Every wall, opening, equivalence relation,
     completeness state, and host proposition is re-derived by producer-owned
     authorities from the immutable source snapshot.
+
+    page_ids are topology pages. evidence_page_ids are additional pages whose
+    wall scopes may support cross-sheet evidence but cannot mint openings,
+    hosts, completeness obligations or canonical topology objects.
     """
     if type(source_visibility_producer) is not SourceVisibilityProducer:
         raise TypeError("source_visibility_producer must be producer-owned")
@@ -152,6 +173,11 @@ def compose_live_wall_opening_authority(
     if not revision_id:
         raise ValueError("revision_id must be non-empty")
     selected_pages = _clean_page_ids(page_ids)
+    evidence_pages = tuple(
+        page_id
+        for page_id in _clean_optional_page_ids(evidence_page_ids)
+        if page_id not in selected_pages
+    )
 
     published = source_visibility_producer.published_snapshot_for_revision(revision_id)
     if published is None:
@@ -159,7 +185,7 @@ def compose_live_wall_opening_authority(
 
     wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source_visibility_producer,
-        page_ids=selected_pages,
+        page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
     )
 
     # Wall-candidate materialization may legitimately augment the producer-owned
@@ -523,6 +549,7 @@ def compose_live_wall_opening_authority(
         opening_host_frame_authority=host_frame_authority,
         binding_selectors=MappingProxyType(dict(binding_selectors)),
         host_frame_selectors=MappingProxyType(dict(host_frame_selectors)),
+        evidence_page_ids=evidence_pages,
     )
 
 
