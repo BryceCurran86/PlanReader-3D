@@ -31,6 +31,10 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_pdf_text_integrity_authority import (
+    PDF_TEXT_GEOMETRY_TOLERANCE_PT,
+    PDF_TEXT_MAJORITY_OVERLAP_RATIO,
+)
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
@@ -102,8 +106,6 @@ _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION = 0.03
 _REPEATED_MOTIF_NON_ORTHOGONAL_SPAN_FRACTION = 0.10
 _REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION = 0.006
 _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG = 2.0
-_ANNOTATION_MASK_MAX_RECT_TO_TEXT_AREA_RATIO = 2.0
-_ANNOTATION_MASK_GEOMETRY_TOL_PT = 0.75
 PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
     "physical_wall_candidate_source_integrity_failure"
 )
@@ -527,7 +529,7 @@ def _annotate_producer_owned_annotation_masks(
         if text_width <= 0.0 or text_height <= 0.0:
             continue
 
-        tol = _ANNOTATION_MASK_GEOMETRY_TOL_PT
+        tol = PDF_TEXT_GEOMETRY_TOLERANCE_PT
         if (
             tx0 < rx0 - tol
             or ty0 < ry0 - tol
@@ -537,11 +539,10 @@ def _annotate_producer_owned_annotation_masks(
             continue
         rect_area = rect_width * rect_height
         text_area = text_width * text_height
-        if (
-            text_area <= 0.0
-            or rect_area / text_area
-            > _ANNOTATION_MASK_MAX_RECT_TO_TEXT_AREA_RATIO
-        ):
+        if text_area <= 0.0:
+            continue
+        text_coverage = min(1.0, text_area / rect_area)
+        if text_coverage < PDF_TEXT_MAJORITY_OVERLAP_RATIO:
             continue
 
         proven_ids.update(id(segment) for segment in group)
