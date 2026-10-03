@@ -326,7 +326,7 @@ def test_owned_label_uses_authenticated_source_legend_for_semantic_kind_only() -
     source, published = _ingest(
         _semantic_legend_pdf(
             label="1218 ZX",
-            legend_rows=("ZX SLIDING GLASS WINDOW",),
+            legend_rows=("ZX - SLIDING GLASS WINDOW",),
         ),
         "semantic-source-legend",
     )
@@ -360,9 +360,9 @@ def test_same_page_text_outside_legend_scope_cannot_define_opening_code() -> Non
             page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
         page.insert_text(fitz.Point(88.0, 124.0), "1218 ZX", fontsize=7.0)
         page.insert_text(fitz.Point(20.0, 180.0), "LEGEND", fontsize=7.0)
-        page.insert_text(fitz.Point(20.0, 194.0), "AA AWNING WINDOW", fontsize=7.0)
+        page.insert_text(fitz.Point(20.0, 194.0), "AA - AWNING WINDOW", fontsize=7.0)
         # This looks definition-like but is emitted in a later unrelated block.
-        page.insert_text(fitz.Point(20.0, 230.0), "ZX SLIDING GLASS WINDOW", fontsize=7.0)
+        page.insert_text(fitz.Point(20.0, 230.0), "ZX - SLIDING GLASS WINDOW", fontsize=7.0)
         payload = bytes(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
@@ -382,8 +382,8 @@ def test_conflicting_authenticated_legend_semantics_fail_closed() -> None:
         _semantic_legend_pdf(
             label="1218 ZX ZD",
             legend_rows=(
-                "ZX SLIDING GLASS WINDOW",
-                "ZD SLIDING GLASS DOOR",
+                "ZX - SLIDING GLASS WINDOW",
+                "ZD - SLIDING GLASS DOOR",
             ),
         ),
         "semantic-source-conflict",
