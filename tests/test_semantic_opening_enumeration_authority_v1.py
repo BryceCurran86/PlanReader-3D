@@ -31,6 +31,8 @@ from pb_semantic_opening_enumeration_authority import (
     SemanticOpeningEnumerationProducer,
     SemanticOpeningEnumerationSelector,
 )
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -61,6 +63,31 @@ def _draw_opening(
             color=(0, 0, 0),
             width=1,
         )
+
+
+def _adjacent_openings_pdf() -> bytes:
+    """Two openings share the wall run between them but remain distinct."""
+
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=300)
+    for y in (100.0, 110.0):
+        for x0, x1 in ((20.0, 100.0), (140.0, 200.0), (240.0, 340.0)):
+            page.draw_line(
+                fitz.Point(x0, y),
+                fitz.Point(x1, y),
+                color=(0, 0, 0),
+                width=1,
+            )
+    for x in (100.0, 140.0, 200.0, 240.0):
+        page.draw_line(
+            fitz.Point(x, 100.0),
+            fitz.Point(x, 110.0),
+            color=(0, 0, 0),
+            width=1,
+        )
+    payload = doc.tobytes()
+    doc.close()
+    return payload
 
 
 def _pdf(*, extra_line: bool = False) -> bytes:
@@ -146,6 +173,62 @@ def test_real_g17_support_is_grouped_into_one_semantic_opening() -> None:
     assert SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE in record.reason_codes
     assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN not in record.reason_codes
 
+    resolved = producer.authority().resolve(
+        SemanticOpeningEnumerationSelector(
+            document_id=record.document_id,
+            revision_id=record.revision_id,
+            source_sha256=record.source_sha256,
+            snapshot_id=record.snapshot_id,
+            decision_scope_id=record.decision_scope_id,
+        )
+    )
+    assert resolved == result
+
+
+def test_representatives_reprove_exact_record_when_adjacent_openings_share_support() -> None:
+    src = SourceVisibilityProducer(
+        producer_method="semantic-enum-safe-representative-test",
+        producer_version="1.0",
+    )
+    ingested = _ingest(
+        src,
+        _adjacent_openings_pdf(),
+        "semantic-adjacent-openings",
+    )
+    producer, result = _enumerate(src, ingested.revision.revision_id)
+
+    assert result.record is not None
+    record = result.record
+    assert len(record.physical_opening_record_ids) >= 2
+    assert len(record.representative_observation_ids) == len(
+        record.physical_opening_record_ids
+    )
+
+    published = src.published_snapshot_for_revision(ingested.revision.revision_id)
+    assert published is not None
+    physical = src.physical_opening_authority()
+
+    reproved_ids = []
+    for observation_id in record.representative_observation_ids:
+        reproved = physical.prove_existence(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        assert reproved.status is EvidenceResolutionStatus.CORROBORATED
+        assert reproved.proposition == PHYSICAL_OPENING_EXISTS
+        assert reproved.existence_record is not None
+        reproved_ids.append(reproved.existence_record.record_id)
+
+    assert tuple(sorted(reproved_ids)) == tuple(
+        sorted(record.physical_opening_record_ids)
+    )
+
+    # The producer-owned authority must replay the same inventory unchanged.
     resolved = producer.authority().resolve(
         SemanticOpeningEnumerationSelector(
             document_id=record.document_id,
