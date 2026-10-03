@@ -2671,15 +2671,8 @@ class PhysicalWallCandidateProducer:
                 source_producer=source_visibility_producer,
                 published=published,
             )
-            from_producer = getattr(
-                PhysicalOpeningAuthority,
-                "from_source_visibility_producer",
-                None,
-            )
             physical_opening_authority = (
-                from_producer(source_visibility_producer)
-                if callable(from_producer)
-                else PhysicalOpeningAuthority(source_visibility_producer.authority())
+                source_visibility_producer.physical_opening_authority()
             )
             physical_scale_producer = (
                 PhysicalScaleProducer.from_source_visibility_producer(

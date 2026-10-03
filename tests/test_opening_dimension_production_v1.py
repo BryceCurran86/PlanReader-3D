@@ -94,6 +94,18 @@ def test_dimension_authority_is_producer_minted_and_selector_only() -> None:
         )
 
 
+def test_dimension_authority_reuses_source_opening_authority_cache() -> None:
+    producer, published, visibility = _ingest(
+        _opening_pdf(), "odim-shared-opening-cache"
+    )
+    _positive_selector(published, visibility)
+    cached = producer.physical_opening_authority()
+
+    authority = producer.opening_dimension_authority()
+
+    assert authority._physical is cached
+
+
 def test_explicit_witnessed_visible_width_resolves_without_inventing_height() -> None:
     producer, published, visibility = _ingest(_opening_pdf(), "odim-positive")
     selector = _positive_selector(published, visibility)
