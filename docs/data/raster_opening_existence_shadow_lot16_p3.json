@@ -1,0 +1,1563 @@
+{
+ "algorithm_version": "raster_poche_interruption_v1",
+ "decision_reason_histogram": {
+  "raster_flanks_not_collinear_bands|raster_gap_too_small": 1,
+  "raster_gap_not_clean|raster_flanks_not_collinear_bands": 1,
+  "raster_gap_not_clean|raster_flanks_not_collinear_bands|raster_gap_too_small": 2,
+  "raster_no_opening_evidence_in_gap": 1,
+  "raster_opening_existence_proven": 21,
+  "raster_wall_face_continues_across_gap": 4
+ },
+ "lineage": {
+  "algorithm_version": "raster_poche_interruption_v1",
+  "layer_id": "raster_layer_dbdccdbf704d27522545e3fe6b60445e",
+  "page_number": 3,
+  "pixel_shape": [
+   3508,
+   4961
+  ],
+  "placements": [
+   {
+    "bbox_pt": [
+     0.0,
+     0.0,
+     238.08,
+     631.44
+    ],
+    "image_sha256": "4aa505f297c8478b8f79ebe18bc376e68e6989e920b40acced82ad7088e5e11f",
+    "image_xref": 93,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     2631
+    ]
+   },
+   {
+    "bbox_pt": [
+     0.0,
+     631.44,
+     238.08,
+     841.92
+    ],
+    "image_sha256": "f2c36c1280b640fcc91c28564c5e60491f96b56ea995e60833b4a6d6266ed300",
+    "image_xref": 57,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     877
+    ]
+   },
+   {
+    "bbox_pt": [
+     43.32,
+     671.04,
+     385.56,
+     769.68
+    ],
+    "image_sha256": "489a140c397600b99a843b180e22d19ecaf85f9802b4d0906d30fb0673ab1426",
+    "image_xref": 36,
+    "native_dpi": 663.534,
+    "pixel_size": [
+     3154,
+     907
+    ]
+   },
+   {
+    "bbox_pt": [
+     238.08,
+     0.0,
+     476.16,
+     631.44
+    ],
+    "image_sha256": "f167d89275a3f05e5bdf9a036ca21af6a2ca49c58d4344a5cc6c08f5a544afe9",
+    "image_xref": 94,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     2631
+    ]
+   },
+   {
+    "bbox_pt": [
+     238.08,
+     631.44,
+     476.16,
+     841.92
+    ],
+    "image_sha256": "f2c36c1280b640fcc91c28564c5e60491f96b56ea995e60833b4a6d6266ed300",
+    "image_xref": 57,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     877
+    ]
+   },
+   {
+    "bbox_pt": [
+     476.16,
+     0.0,
+     714.36,
+     210.48
+    ],
+    "image_sha256": "42ec5a207ef7ae742b7cf6f6b586e17ca1e4328db53477f3c12b691598277759",
+    "image_xref": 96,
+    "native_dpi": 300.151,
+    "pixel_size": [
+     993,
+     877
+    ]
+   },
+   {
+    "bbox_pt": [
+     476.16,
+     210.48,
+     714.36,
+     841.92
+    ],
+    "image_sha256": "e51ec938d3a773cf74a7759ca3cbe792736c230d81d47237a28fd4e05c74429e",
+    "image_xref": 95,
+    "native_dpi": 300.151,
+    "pixel_size": [
+     993,
+     2631
+    ]
+   },
+   {
+    "bbox_pt": [
+     714.36,
+     0.0,
+     952.44,
+     210.48
+    ],
+    "image_sha256": "2257c6a95abb66449d9e29fa35f1ce7ff1a61518ab7ddc9a191e2c1f8c5f2918",
+    "image_xref": 98,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     877
+    ]
+   },
+   {
+    "bbox_pt": [
+     714.36,
+     210.48,
+     952.44,
+     841.92
+    ],
+    "image_sha256": "fd00d29bbb88dab25c84555739e178f11d846275178b2a0e878d7b9bae96e6e8",
+    "image_xref": 97,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     2631
+    ]
+   },
+   {
+    "bbox_pt": [
+     952.44,
+     0.0,
+     1190.52,
+     631.44
+    ],
+    "image_sha256": "2985b70edc3b8c62dd74a628842e9627f8c868aeca05b26ba24d0001c7f84118",
+    "image_xref": 99,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     2631
+    ]
+   },
+   {
+    "bbox_pt": [
+     952.44,
+     631.44,
+     1190.52,
+     841.92
+    ],
+    "image_sha256": "f2c36c1280b640fcc91c28564c5e60491f96b56ea995e60833b4a6d6266ed300",
+    "image_xref": 57,
+    "native_dpi": 300.0,
+    "pixel_size": [
+     992,
+     877
+    ]
+   }
+  ],
+  "render_dpi": 300,
+  "render_spec": "page_images_only_gray_v1",
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+ },
+ "page_number": 3,
+ "purpose": "Regression oracle for pb_raster_opening_existence_shadow on one raster-underlay floor plan. Evidence only: no V2 truth, no quantity.",
+ "records": [
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     403.92,
+     192.0,
+     487.68,
+     195.6
+    ],
+    "box_px": [
+     1683,
+     800,
+     2031,
+     814
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     503.76,
+     192.0,
+     533.52,
+     195.6
+    ],
+    "box_px": [
+     2099,
+     800,
+     2222,
+     814
+    ]
+   },
+   "gap_box_pt": [
+    487.68,
+    192.0,
+    503.76,
+    195.36
+   ],
+   "gap_box_px": [
+    2032,
+    800,
+    2098,
+    813
+   ],
+   "gap_length_pt": 16.08,
+   "record_id": "raster_physical_opening_existence_400df3a6fd7ccdf22e28d4e509679a94",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        802,
+        803
+       ],
+       [
+        811,
+        812
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     503.76,
+     192.0,
+     533.52,
+     195.6
+    ],
+    "box_px": [
+     2099,
+     800,
+     2222,
+     814
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     583.44,
+     191.76,
+     645.12,
+     195.6
+    ],
+    "box_px": [
+     2431,
+     799,
+     2687,
+     814
+    ]
+   },
+   "gap_box_pt": [
+    533.52,
+    192.0,
+    583.44,
+    195.36
+   ],
+   "gap_box_px": [
+    2223,
+    800,
+    2430,
+    813
+   ],
+   "gap_length_pt": 49.92,
+   "record_id": "raster_physical_opening_existence_068e9cce901a29c24c77d20c6c3c5268",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        802,
+        803
+       ],
+       [
+        811,
+        812
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     583.44,
+     191.76,
+     645.12,
+     195.6
+    ],
+    "box_px": [
+     2431,
+     799,
+     2687,
+     814
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     695.28,
+     192.0,
+     782.4,
+     195.6
+    ],
+    "box_px": [
+     2897,
+     800,
+     3259,
+     814
+    ]
+   },
+   "gap_box_pt": [
+    645.12,
+    192.0,
+    695.28,
+    195.36
+   ],
+   "gap_box_px": [
+    2688,
+    800,
+    2896,
+    813
+   ],
+   "gap_length_pt": 50.16,
+   "record_id": "raster_physical_opening_existence_14a5d9772c5cbf61f8a338527e476fcb",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        802,
+        803
+       ],
+       [
+        811,
+        812
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.12,
+   "flank_a": {
+    "box_pt": [
+     695.28,
+     192.0,
+     782.4,
+     195.6
+    ],
+    "box_px": [
+     2897,
+     800,
+     3259,
+     814
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     865.68,
+     192.0,
+     886.56,
+     195.6
+    ],
+    "box_px": [
+     3607,
+     800,
+     3693,
+     814
+    ]
+   },
+   "gap_box_pt": [
+    782.4,
+    192.24,
+    865.68,
+    195.36
+   ],
+   "gap_box_px": [
+    3260,
+    801,
+    3606,
+    813
+   ],
+   "gap_length_pt": 83.28,
+   "record_id": "raster_physical_opening_existence_23b59c49f9fa30337521ccbd556db024",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 3,
+      "line_rows_px": [
+       [
+        802,
+        802
+       ],
+       [
+        806,
+        807
+       ],
+       [
+        812,
+        812
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 2.64,
+   "flank_a": {
+    "box_pt": [
+     323.52,
+     192.96,
+     346.8,
+     195.6
+    ],
+    "box_px": [
+     1348,
+     804,
+     1444,
+     814
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     403.92,
+     192.0,
+     487.68,
+     195.6
+    ],
+    "box_px": [
+     1683,
+     800,
+     2031,
+     814
+    ]
+   },
+   "gap_box_pt": [
+    346.8,
+    192.96,
+    403.92,
+    195.36
+   ],
+   "gap_box_px": [
+    1445,
+    804,
+    1682,
+    813
+   ],
+   "gap_length_pt": 57.12,
+   "record_id": "raster_physical_opening_existence_07ddd33cac7a862d19809803b3d56204",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        802,
+        803
+       ],
+       [
+        811,
+        812
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 2.4,
+   "flank_a": {
+    "box_pt": [
+     604.8,
+     191.76,
+     607.68,
+     197.76
+    ],
+    "box_px": [
+     2520,
+     799,
+     2531,
+     823
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     604.8,
+     243.12,
+     607.68,
+     300.0
+    ],
+    "box_px": [
+     2520,
+     1013,
+     2531,
+     1249
+    ]
+   },
+   "gap_box_pt": [
+    604.8,
+    197.76,
+    607.2,
+    243.12
+   ],
+   "gap_box_px": [
+    2520,
+    824,
+    2529,
+    1012
+   ],
+   "gap_length_pt": 45.36,
+   "record_id": "raster_physical_opening_existence_7a8e3e7a22c09d2288f78d6d445e9de8",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        2521,
+        2521
+       ],
+       [
+        2527,
+        2527
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 3.12,
+   "flank_a": {
+    "box_pt": [
+     761.76,
+     192.0,
+     765.12,
+     217.68
+    ],
+    "box_px": [
+     3174,
+     800,
+     3187,
+     906
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     761.76,
+     245.04,
+     764.88,
+     300.0
+    ],
+    "box_px": [
+     3174,
+     1021,
+     3186,
+     1249
+    ]
+   },
+   "gap_box_pt": [
+    761.76,
+    217.68,
+    764.88,
+    245.04
+   ],
+   "gap_box_px": [
+    3174,
+    907,
+    3186,
+    1020
+   ],
+   "gap_length_pt": 27.36,
+   "record_id": "raster_physical_opening_existence_997192b1832d77a3b29880e6b60f5d1e",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        3175,
+        3177
+       ],
+       [
+        3183,
+        3185
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 2.4,
+   "flank_a": {
+    "box_pt": [
+     425.28,
+     192.0,
+     428.16,
+     223.92
+    ],
+    "box_px": [
+     1772,
+     800,
+     1783,
+     932
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     425.28,
+     247.68,
+     427.68,
+     252.72
+    ],
+    "box_px": [
+     1772,
+     1032,
+     1781,
+     1052
+    ]
+   },
+   "gap_box_pt": [
+    425.28,
+    223.92,
+    427.68,
+    247.68
+   ],
+   "gap_box_px": [
+    1772,
+    933,
+    1781,
+    1031
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_d6c36dfb105d1ba4080286a8270bba40",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        1774,
+        1774
+       ],
+       [
+        1782,
+        1782
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 2.4,
+   "flank_a": {
+    "box_pt": [
+     425.28,
+     247.68,
+     427.68,
+     252.72
+    ],
+    "box_px": [
+     1772,
+     1032,
+     1781,
+     1052
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     425.28,
+     276.48,
+     428.16,
+     300.0
+    ],
+    "box_px": [
+     1772,
+     1152,
+     1783,
+     1249
+    ]
+   },
+   "gap_box_pt": [
+    425.28,
+    252.72,
+    427.68,
+    276.48
+   ],
+   "gap_box_px": [
+    1772,
+    1053,
+    1781,
+    1151
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_404aa253a4a038332f4760d1cc101d1b",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "arc_coverage": 0.826,
+      "hinge_end": "low",
+      "leaf_coverage": 1.0,
+      "radius_px": 102,
+      "swing_side": "high_rows"
+     },
+     "kind": "door_swing"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     969.36,
+     279.12,
+     972.72,
+     295.2
+    ],
+    "box_px": [
+     4039,
+     1163,
+     4052,
+     1229
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     969.36,
+     413.28,
+     972.72,
+     429.6
+    ],
+    "box_px": [
+     4039,
+     1722,
+     4052,
+     1789
+    ]
+   },
+   "gap_box_pt": [
+    969.36,
+    295.2,
+    972.72,
+    413.28
+   ],
+   "gap_box_px": [
+    4039,
+    1230,
+    4052,
+    1721
+   ],
+   "gap_length_pt": 118.08,
+   "record_id": "raster_physical_opening_existence_0f00e79ca5ea56dfb984121fdf1a4583",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        4040,
+        4040
+       ],
+       [
+        4051,
+        4051
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     323.28,
+     296.64,
+     400.32,
+     300.0
+    ],
+    "box_px": [
+     1347,
+     1236,
+     1667,
+     1249
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     424.08,
+     296.64,
+     579.6,
+     300.0
+    ],
+    "box_px": [
+     1767,
+     1236,
+     2414,
+     1249
+    ]
+   },
+   "gap_box_pt": [
+    400.32,
+    296.64,
+    424.08,
+    300.0
+   ],
+   "gap_box_px": [
+    1668,
+    1236,
+    1766,
+    1249
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_76a1b4c160b21cec88ee0671e913916c",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "arc_coverage": 0.978,
+      "hinge_end": "high",
+      "leaf_coverage": 1.0,
+      "radius_px": 100,
+      "swing_side": "low_rows"
+     },
+     "kind": "door_swing"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     424.08,
+     296.64,
+     579.6,
+     300.0
+    ],
+    "box_px": [
+     1767,
+     1236,
+     2414,
+     1249
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     603.36,
+     296.64,
+     626.4,
+     300.0
+    ],
+    "box_px": [
+     2514,
+     1236,
+     2609,
+     1249
+    ]
+   },
+   "gap_box_pt": [
+    579.6,
+    296.64,
+    603.36,
+    300.0
+   ],
+   "gap_box_px": [
+    2415,
+    1236,
+    2513,
+    1249
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_913d9eed0b303a09f0d336f6bf286dfe",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "arc_coverage": 0.978,
+      "hinge_end": "high",
+      "leaf_coverage": 1.0,
+      "radius_px": 100,
+      "swing_side": "low_rows"
+     },
+     "kind": "door_swing"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     603.36,
+     296.64,
+     626.4,
+     300.0
+    ],
+    "box_px": [
+     2514,
+     1236,
+     2609,
+     1249
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     650.16,
+     296.64,
+     718.56,
+     300.0
+    ],
+    "box_px": [
+     2709,
+     1236,
+     2993,
+     1249
+    ]
+   },
+   "gap_box_pt": [
+    626.4,
+    296.64,
+    650.16,
+    300.0
+   ],
+   "gap_box_px": [
+    2610,
+    1236,
+    2708,
+    1249
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_0d499b6a49cd6c8d4118a3cbabad6f47",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "arc_coverage": 0.978,
+      "hinge_end": "low",
+      "leaf_coverage": 1.0,
+      "radius_px": 100,
+      "swing_side": "low_rows"
+     },
+     "kind": "door_swing"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     379.2,
+     296.64,
+     382.56,
+     305.76
+    ],
+    "box_px": [
+     1580,
+     1236,
+     1593,
+     1273
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     379.2,
+     338.64,
+     382.56,
+     344.64
+    ],
+    "box_px": [
+     1580,
+     1411,
+     1593,
+     1435
+    ]
+   },
+   "gap_box_pt": [
+    379.2,
+    305.76,
+    382.56,
+    338.64
+   ],
+   "gap_box_px": [
+    1580,
+    1274,
+    1593,
+    1410
+   ],
+   "gap_length_pt": 32.88,
+   "record_id": "raster_physical_opening_existence_a5d864049f8ee87a7d31a41370933718",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        1581,
+        1581
+       ],
+       [
+        1592,
+        1592
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.6,
+   "flank_a": {
+    "box_pt": [
+     682.8,
+     329.76,
+     689.52,
+     333.36
+    ],
+    "box_px": [
+     2845,
+     1374,
+     2872,
+     1388
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     713.28,
+     329.76,
+     740.64,
+     333.36
+    ],
+    "box_px": [
+     2972,
+     1374,
+     3085,
+     1388
+    ]
+   },
+   "gap_box_pt": [
+    689.52,
+    329.76,
+    713.28,
+    333.36
+   ],
+   "gap_box_px": [
+    2873,
+    1374,
+    2971,
+    1388
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_32d1d2cb48c596e039d74d8c1518571c",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "arc_coverage": 0.978,
+      "hinge_end": "low",
+      "leaf_coverage": 1.0,
+      "radius_px": 99,
+      "swing_side": "high_rows"
+     },
+     "kind": "door_swing"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 2.4,
+   "flank_a": {
+    "box_pt": [
+     581.04,
+     361.68,
+     585.12,
+     364.08
+    ],
+    "box_px": [
+     2421,
+     1507,
+     2437,
+     1516
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     608.88,
+     361.44,
+     687.84,
+     364.56
+    ],
+    "box_px": [
+     2537,
+     1506,
+     2865,
+     1518
+    ]
+   },
+   "gap_box_pt": [
+    585.12,
+    361.68,
+    608.88,
+    364.08
+   ],
+   "gap_box_px": [
+    2438,
+    1507,
+    2536,
+    1516
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_b07d1480425f392e03327e0822d63f2b",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "arc_coverage": 0.978,
+      "hinge_end": "low",
+      "leaf_coverage": 1.0,
+      "radius_px": 101,
+      "swing_side": "high_rows"
+     },
+     "kind": "door_swing"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 3.6,
+   "flank_a": {
+    "box_pt": [
+     408.24,
+     341.04,
+     411.84,
+     369.6
+    ],
+    "box_px": [
+     1701,
+     1421,
+     1715,
+     1539
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     408.24,
+     504.72,
+     411.84,
+     533.76
+    ],
+    "box_px": [
+     1701,
+     2103,
+     1715,
+     2223
+    ]
+   },
+   "gap_box_pt": [
+    408.24,
+    369.6,
+    411.84,
+    504.72
+   ],
+   "gap_box_px": [
+    1701,
+    1540,
+    1715,
+    2102
+   ],
+   "gap_length_pt": 135.12,
+   "record_id": "raster_physical_opening_existence_fc066285187a181f0c03b1a935774c91",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 3,
+      "line_rows_px": [
+       [
+        1703,
+        1703
+       ],
+       [
+        1710,
+        1711
+       ],
+       [
+        1716,
+        1717
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     581.04,
+     426.24,
+     619.92,
+     429.6
+    ],
+    "box_px": [
+     2421,
+     1776,
+     2582,
+     1789
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     661.44,
+     426.24,
+     692.64,
+     429.6
+    ],
+    "box_px": [
+     2756,
+     1776,
+     2885,
+     1789
+    ]
+   },
+   "gap_box_pt": [
+    619.92,
+    426.24,
+    661.44,
+    429.6
+   ],
+   "gap_box_px": [
+    2583,
+    1776,
+    2755,
+    1789
+   ],
+   "gap_length_pt": 41.52,
+   "record_id": "raster_physical_opening_existence_3fbad17c4fe2cb44bfce00f93dc5384d",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        1777,
+        1778
+       ],
+       [
+        1787,
+        1788
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     661.44,
+     426.24,
+     692.64,
+     429.6
+    ],
+    "box_px": [
+     2756,
+     1776,
+     2885,
+     1789
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     716.16,
+     426.24,
+     760.56,
+     429.6
+    ],
+    "box_px": [
+     2984,
+     1776,
+     3168,
+     1789
+    ]
+   },
+   "gap_box_pt": [
+    692.64,
+    426.24,
+    716.16,
+    429.6
+   ],
+   "gap_box_px": [
+    2886,
+    1776,
+    2983,
+    1789
+   ],
+   "gap_length_pt": 23.52,
+   "record_id": "raster_physical_opening_existence_554d51ba614dd4c18420300948d7bf4a",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        1777,
+        1777
+       ],
+       [
+        1788,
+        1788
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  },
+  {
+   "axis": "vertical",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     581.04,
+     411.84,
+     584.4,
+     503.28
+    ],
+    "box_px": [
+     2421,
+     1716,
+     2434,
+     2096
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     581.04,
+     527.04,
+     584.4,
+     533.76
+    ],
+    "box_px": [
+     2421,
+     2196,
+     2434,
+     2223
+    ]
+   },
+   "gap_box_pt": [
+    581.04,
+    503.28,
+    584.4,
+    527.04
+   ],
+   "gap_box_px": [
+    2421,
+    2097,
+    2434,
+    2195
+   ],
+   "gap_length_pt": 23.76,
+   "record_id": "raster_physical_opening_existence_40f604a11e651b81fa66eada1bc1cbe0",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "arc_coverage": 0.978,
+      "hinge_end": "high",
+      "leaf_coverage": 1.0,
+      "radius_px": 100,
+      "swing_side": "low_rows"
+     },
+     "kind": "door_swing"
+    }
+   ]
+  },
+  {
+   "axis": "horizontal",
+   "band_thickness_pt": 3.36,
+   "flank_a": {
+    "box_pt": [
+     408.24,
+     530.16,
+     440.16,
+     536.16
+    ],
+    "box_px": [
+     1701,
+     2209,
+     1833,
+     2233
+    ]
+   },
+   "flank_b": {
+    "box_pt": [
+     481.68,
+     530.16,
+     584.4,
+     533.76
+    ],
+    "box_px": [
+     2007,
+     2209,
+     2434,
+     2223
+    ]
+   },
+   "gap_box_pt": [
+    440.16,
+    530.16,
+    481.68,
+    533.52
+   ],
+   "gap_box_px": [
+    1834,
+    2209,
+    2006,
+    2222
+   ],
+   "gap_length_pt": 41.52,
+   "record_id": "raster_physical_opening_existence_db4242ed3334f7775d5a68d8e7c5e29b",
+   "render_dpi": 300,
+   "status": "corroborated",
+   "symbol_evidence": [
+    {
+     "detail": {
+      "gap_coverage_min": 0.8,
+      "line_count": 2,
+      "line_rows_px": [
+       [
+        2211,
+        2212
+       ],
+       [
+        2220,
+        2221
+       ]
+      ]
+     },
+     "kind": "frame_lines"
+    }
+   ]
+  }
+ ],
+ "schema_version": "1.0.0",
+ "shadow_only": true,
+ "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+}
