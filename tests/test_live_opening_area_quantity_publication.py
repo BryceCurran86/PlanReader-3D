@@ -5,6 +5,10 @@ from types import MappingProxyType
 
 import pytest
 
+from pb_live_opening_source_closed_export import (
+    build_live_opening_area_source_traces,
+    seal_live_opening_area_run,
+)
 from pb_live_opening_area_quantity_publication import (
     LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY,
     LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY,
@@ -248,3 +252,103 @@ def test_figured_opening_quantity_is_sealable_and_commercially_projectable() -> 
     # Existing commercial governance remains intact: automated quantities
     # enter customer takeoff as review rows rather than bypassing approval.
     assert row["quantity_status"] == "To review"
+
+
+def test_live_opening_run_seals_identity_and_source_lineage_without_identity_map() -> None:
+    composition = _composition(
+        _opening(canonical_id="opening-a"),
+        _opening(
+            canonical_id="opening-b",
+            kind="door",
+            area_m2=3.15,
+            figured_area_record_id="figured-b",
+        ),
+    )
+    traces = build_live_opening_area_source_traces(
+        composition,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    quantities = publish_live_opening_area_quantities(composition)
+
+    assert set(traces) == {quantity.quantity_id for quantity in quantities}
+    for quantity in quantities:
+        trace = traces[quantity.quantity_id]
+        assert trace.project_id == "source-project"
+        assert trace.source_sha256 == SHA
+        assert trace.viewport_id == quantity.metadata["viewport_id"]
+        assert trace.canonical_entity_ids == quantity.input_entity_ids
+        assert set(quantity.evidence_ids).issubset(set(trace.evidence_ids))
+
+    sealed = seal_live_opening_area_run(
+        composition,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    assert len(sealed.quantities) == 2
+    assert all(row.lineage_ok for row in sealed.quantities)
+    assert {
+        row.object_identity_refs[0] for row in sealed.quantities
+    } == {"opening-a", "opening-b"}
+    assert sealed.source_sha256s == (SHA,)
+    assert sealed.revision_ids == ("rev-1",)
+
+
+def test_source_closed_export_excludes_unhosted_openings() -> None:
+    hosted = _opening(canonical_id="hosted")
+    unhosted = replace(
+        _opening(canonical_id="unhosted"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+    )
+    sealed = seal_live_opening_area_run(
+        _composition(hosted, unhosted),
+        workspace_id=3,
+        project_id="source-project",
+    )
+    assert len(sealed.quantities) == 1
+    assert sealed.quantities[0].object_identity_refs == ("hosted",)
+
+
+def test_source_closed_trace_rejects_canonical_evidence_dropout() -> None:
+    opening = _opening()
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+    damaged = replace(
+        opening,
+        evidence_ids=tuple(
+            value
+            for value in opening.evidence_ids
+            if value != opening.figured_area_record_id
+        ),
+    )
+    composition = _composition(damaged)
+    # The publication gate itself rejects this quantity before sealing rather
+    # than allowing an incomplete source trace to be constructed.
+    assert publish_live_opening_area_quantities(composition) == ()
+
+
+def test_live_opening_source_closed_run_is_deterministic() -> None:
+    composition = _composition(
+        _opening(canonical_id="opening-a"),
+        _opening(
+            canonical_id="opening-b",
+            kind="door",
+            area_m2=3.15,
+            figured_area_record_id="figured-b",
+        ),
+    )
+    first = seal_live_opening_area_run(
+        composition,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    second = seal_live_opening_area_run(
+        composition,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    assert first.run_id == second.run_id
+    assert first.fingerprint == second.fingerprint
+    assert first.to_json() == second.to_json()
