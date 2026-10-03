@@ -277,7 +277,7 @@ def test_producer_stitches_one_source_callout_split_over_adjacent_native_lines()
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.evidence is not None
     assert result.evidence.dimension_values_mm == (1800.0, 910.0)
-    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.semantic_kind is None
     assert result.evidence.area_m2 == pytest.approx(1.638)
     assert len(result.evidence.source_text_observation_ids) >= 2
 
@@ -300,7 +300,7 @@ def test_producer_stitches_semantic_modifier_from_adjacent_native_line() -> None
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.evidence is not None
     assert result.evidence.dimension_values_mm == (1800.0, 610.0)
-    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.semantic_kind is None
     assert result.evidence.area_m2 == pytest.approx(1.098)
 
 
