@@ -39,7 +39,11 @@ from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateSelector,
 )
-from pb_physical_wall_identity import PhysicalEquivalenceClass
+from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
+    physical_wall_pair_identity_candidacy,
+)
+from pb_wall_room_topology_contracts import JunctionType
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityAuthority
 
@@ -126,6 +130,39 @@ def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]
         except ValueError:
             continue
     return result
+
+
+def _positively_non_competing(left_record, right_record, equivalence) -> bool:
+    """True only when the equivalence candidacy gate itself excludes this pair.
+
+    The resolver records a relation only for pairs that could plausibly be one
+    physical wall; every other pair is "not an identity competitor" and carries
+    no relation. Absence of a relation proves nothing on its own, so the same gate
+    is replayed with the same producer-owned scale: an explicit exclusion is
+    required, and an unusable identity never qualifies.
+    """
+    left = left_record.physical_identity
+    right = right_record.physical_identity
+    if not (left.usable and right.usable):
+        return False
+    audit = getattr(equivalence, "candidate_pair_audit", None)
+    eligible, reason = physical_wall_pair_identity_candidacy(
+        left, right, points_per_mm=getattr(audit, "verified_points_per_mm", None)
+    )
+    return (not eligible) and bool(reason)
+
+
+def _end_is_corner(record, axis: _Point, target_u: float) -> bool:
+    """True when the candidate end that lies at ``target_u`` is a W3 L corner."""
+    wall = record.wall_candidate
+    points = wall.centerline_pts
+    junctions = tuple(wall.junction_types)
+    if len(points) < 2 or len(junctions) != 2:
+        return False
+    for point, junction in ((points[0], junctions[0]), (points[-1], junctions[1])):
+        if abs(_dot((float(point[0]), float(point[1])), axis) - target_u) <= _COORD_TOL:
+            return getattr(junction, "value", junction) == JunctionType.L_CORNER.value
+    return False
 
 
 @dataclass(frozen=True)
@@ -470,6 +507,40 @@ class OpeningHostFrameProducer:
             return None
         return min(projected_u), max(projected_u), sum(projected_n) / len(projected_n)
 
+    @staticmethod
+    def _face_closures(records_by_id, component_ids, axis: _Point, normal: _Point, face_offsets, face_tol):
+        """Per face: (min_u, max_u, closed_at_min, closed_at_max), or None.
+
+        A face end is closed only when every component member reaching that
+        extreme ends there in an L corner: the wall run turns and cannot continue
+        along the same line. A free end, a T or any other junction proves nothing.
+        """
+        closures = []
+        for face in face_offsets:
+            members = []
+            for wall_id in component_ids:
+                record = records_by_id[wall_id]
+                projection = OpeningHostFrameProducer._record_projection(record, axis, normal)
+                if projection is None:
+                    return None
+                u_min, u_max, offset = projection
+                if abs(offset - face) <= face_tol:
+                    members.append((u_min, u_max, record))
+            if not members:
+                return None
+            face_min = min(item[0] for item in members)
+            face_max = max(item[1] for item in members)
+            closed = []
+            for target, index in ((face_min, 0), (face_max, 1)):
+                reaching = [
+                    item[2] for item in members if abs(item[index] - target) <= _COORD_TOL
+                ]
+                closed.append(
+                    bool(reaching) and all(_end_is_corner(record, axis, target) for record in reaching)
+                )
+            closures.append((face_min, face_max, closed[0], closed[1]))
+        return tuple(closures)
+
     def _shared_host_frame(self, *, binding, geometry) -> _WholeWallFrame | None:
         wall_scope = self._walls.resolve_scope(
             PhysicalWallCandidateSelector(
@@ -539,6 +610,9 @@ class OpeningHostFrameProducer:
             return None
 
         pair_lookup = _pair_lookup(wall_scope.equivalence)
+        face_closures = self._face_closures(
+            records_by_id, component_ids, axis, normal, face_offsets, face_tol
+        )
         component_set = set(component_ids)
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
@@ -547,17 +621,40 @@ class OpeningHostFrameProducer:
             projection = self._record_projection(record, axis, normal)
             if projection is None:
                 continue
-            _u_min, _u_max, offset = projection
-            if min(abs(offset - face) for face in face_offsets) > face_tol:
+            cand_u_min, cand_u_max, offset = projection
+            face_index = min(
+                range(len(face_offsets)), key=lambda index: abs(offset - face_offsets[index])
+            )
+            if abs(offset - face_offsets[face_index]) > face_tol:
                 continue
             # This is an aligned candidate on one of the selected wall faces.
-            # It may be excluded only by positive DISTINCT proof against every
-            # authenticated component member.  Missing/SAME/AMBIGUOUS evidence
-            # means whole-wall extent is not proven complete.
+            # It may be excluded only by positive proof against every
+            # authenticated component member: an explicit DISTINCT relation, or
+            # all of (a) no recorded relation because the equivalence gate itself
+            # excludes the pair, and (b) the candidate lies entirely beyond a
+            # face end that is closed by an L corner, so the wall cannot continue
+            # along this line. SAME/AMBIGUOUS relations, a pair the gate would
+            # still admit, an open end or an aligned fragment inside the extent
+            # mean whole-wall extent is not proven complete.
+            beyond_closed_end = False
+            if face_closures is not None:
+                face_min, face_max, closed_min, closed_max = face_closures[face_index]
+                beyond_closed_end = (closed_max and cand_u_min >= face_max) or (
+                    closed_min and cand_u_max <= face_min
+                )
             for member_id in component_ids:
                 classification = pair_lookup.get(tuple(sorted((wall_id, member_id))))
-                if classification is not PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
-                    return None
+                if classification is PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
+                    continue
+                if (
+                    classification is None
+                    and beyond_closed_end
+                    and _positively_non_competing(
+                        record, records_by_id[member_id], wall_scope.equivalence
+                    )
+                ):
+                    continue
+                return None
 
         host_min_u = min(axis_values)
         host_max_u = max(axis_values)
