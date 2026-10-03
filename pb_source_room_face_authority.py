@@ -8,12 +8,31 @@ topologically resolved.
 Positive publication is intentionally narrow:
 - the physical-wall scope is CORROBORATED and complete;
 - every bounded-face edge belongs to exactly one authenticated physical wall;
-- tiny/degenerate faces fail closed;
+- tiny/degenerate faces fail closed, and each one is isolated rather than
+  poisoning unrelated faces (see "Face independence" below);
 - a connected component contains at least two bounded faces and at least one
   wall shared by two faces, preventing isolated boxes/title blocks from
   becoming room authority;
 - no caller room polygon, label, benchmark value, material, finish, scale or
   expected quantity participates in the proof.
+
+Face independence. Planar faces are disjoint cells, so a degenerate cell cannot
+change another face's polygon. It can, however, mean that the walls around it are
+locally inconsistent (a stray line splitting a sliver off a room, a doubled wall,
+an overlap at a junction), and a face next to it may then be an incomplete
+fragment of a larger room. Therefore:
+
+- a degenerate face is withheld (never published) and recorded with provenance;
+- a face that shares a planarized boundary edge with a degenerate face is
+  withheld too, because its independence from the defect cannot be proven;
+- a withheld face never counts as corroboration for another face, so the
+  multi-room component gate above is evaluated over independent faces only;
+- isolation is valid only for an isolated defect: if degenerate faces are not a
+  strict minority of all bounded faces, the wall pool is dominated by non-room
+  linework (tables, dimension strings, glyph boxes) and the whole scope abstains;
+- ownership violations (duplicate or unresolved boundary-edge ownership) are
+  not a face property and still abstain the whole scope;
+- scopes without a degenerate face behave exactly as before.
 
 This authority establishes room-face geometry and lineage only. It does not
 establish ceiling finish, room use, metric area, wall finish, or commercial
@@ -38,6 +57,8 @@ SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE = "source_room_face_scope_unavailable"
 SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED = "source_room_face_boundary_unresolved"
 SOURCE_ROOM_FACE_DUPLICATE_EDGE = "source_room_face_duplicate_edge_ownership"
 SOURCE_ROOM_FACE_DEGENERATE = "source_room_face_tiny_or_degenerate"
+SOURCE_ROOM_FACE_SHARED_DEFECT = "source_room_face_edge_adjacent_to_degenerate_candidate"
+SOURCE_ROOM_FACE_CANDIDATES_WITHHELD = "source_room_face_candidates_withheld"
 SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS = "source_room_face_component_ambiguous"
 
 _AUTHORITY_SEAL = object()
@@ -85,6 +106,12 @@ def _polygon_area(points: tuple[Point, ...]) -> float:
         x2, y2 = points[(index + 1) % len(points)]
         total += x1 * y2 - x2 * y1
     return abs(total) / 2.0
+
+
+def _is_degenerate_face(area: float, largest_area: float) -> bool:
+    return area < _ABSOLUTE_DEGENERATE_AREA_PT2 or (
+        largest_area > 0.0 and area < _TINY_RELATIVE_THRESHOLD * largest_area
+    )
 
 
 def _wall_edges(record: object) -> tuple[Edge, ...]:
@@ -195,6 +222,23 @@ class SourceRoomFaceRecord:
 
 
 @dataclass(frozen=True)
+class SourceRoomFaceWithheldCandidate:
+    """A bounded face that was derived but deliberately not published.
+
+    Withheld candidates keep their full provenance so a consumer can tell that a
+    region of the sheet is unproven instead of silently missing.
+    """
+
+    candidate_id: str
+    face_id: str
+    polygon_pdf_pts: tuple[Point, ...]
+    bounding_wall_ids: tuple[str, ...]
+    area_page_pts2: float
+    reason_code: str
+    caused_by_face_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class SourceRoomFaceScopeResult:
     status: EvidenceResolutionStatus
     scope_complete: bool
@@ -207,6 +251,12 @@ class SourceRoomFaceScopeResult:
     page_id: str
     decision_scope_id: str
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
+    # ``scope_complete`` says the wall scope and the derivation were complete and
+    # authenticated. ``face_universe_complete`` additionally says no candidate face
+    # was withheld, so ``records`` is every bounded face of the arrangement that the
+    # component gate allowed. Consumers that need every room must check it.
+    face_universe_complete: bool = True
+    withheld_candidates: tuple[SourceRoomFaceWithheldCandidate, ...] = ()
 
 
 class SourceRoomFaceAuthority:
@@ -341,21 +391,47 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
     largest_area = max(face_areas.values())
-    if any(
-        area < _ABSOLUTE_DEGENERATE_AREA_PT2
-        or (
-            largest_area > 0.0
-            and area < _TINY_RELATIVE_THRESHOLD * largest_area
-        )
-        for area in face_areas.values()
-    ):
-        return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
+    degenerate_faces = {
+        face_id
+        for face_id, area in face_areas.items()
+        if _is_degenerate_face(area, largest_area)
+    }
+    # face_id -> (reason, degenerate faces it is edge-adjacent to)
+    withheld: dict[str, tuple[str, tuple[str, ...]]] = {}
+    if degenerate_faces:
+        # Isolation is only sound for an isolated defect. When degenerate cells are
+        # not a strict minority, the wall pool is mostly non-room linework and no
+        # face has independent evidence of being a room.
+        if 2 * len(degenerate_faces) >= len(face_areas):
+            return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
+        faces_by_edge: dict[Edge, set[str]] = defaultdict(set)
+        for face_id, owned_edges in face_wall_edges.items():
+            for _owner, face_edge in owned_edges:
+                faces_by_edge[face_edge].add(face_id)
+        for face_id in sorted(degenerate_faces):
+            withheld[face_id] = (SOURCE_ROOM_FACE_DEGENERATE, ())
+        causes: dict[str, set[str]] = defaultdict(set)
+        for face_id in sorted(degenerate_faces):
+            for _owner, face_edge in face_wall_edges[face_id]:
+                for neighbour in faces_by_edge[face_edge]:
+                    if neighbour not in degenerate_faces:
+                        causes[neighbour].add(face_id)
+        for neighbour, caused_by in causes.items():
+            withheld[neighbour] = (
+                SOURCE_ROOM_FACE_SHARED_DEFECT,
+                tuple(sorted(caused_by)),
+            )
+        if len(withheld) == len(polygons):
+            return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
 
     wall_faces: dict[str, set[str]] = {wall_id: set() for wall_id in wall_ids}
     wall_face_edges: dict[str, dict[Edge, set[str]]] = {
         wall_id: defaultdict(set) for wall_id in wall_ids
     }
     for face_id, owners in face_walls.items():
+        if face_id in withheld:
+            # A withheld face never corroborates another face.
+            continue
         for wall_id in owners:
             if wall_id in wall_faces:
                 wall_faces[wall_id].add(face_id)
@@ -403,7 +479,12 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
             resolved_faces.update(component_faces)
 
     if not resolved_faces:
-        return _blocked(scope, SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS)
+        return _blocked(
+            scope,
+            SOURCE_ROOM_FACE_DEGENERATE
+            if withheld
+            else SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS,
+        )
 
     output: list[SourceRoomFaceRecord] = []
     for face_id in sorted(resolved_faces):
@@ -440,17 +521,46 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
             )
         )
 
+    withheld_candidates = tuple(
+        SourceRoomFaceWithheldCandidate(
+            candidate_id=stable_contract_id(
+                "source_room_face_withheld",
+                {
+                    "face_id": face_id,
+                    "reason_code": reason,
+                    "caused_by_face_ids": caused_by,
+                    "decision_scope_id": scope.decision_scope_id,
+                    "source_sha256": scope.source_sha256,
+                },
+                digest_chars=32,
+            ),
+            face_id=face_id,
+            polygon_pdf_pts=polygons[face_id],
+            bounding_wall_ids=face_walls[face_id],
+            area_page_pts2=face_areas[face_id],
+            reason_code=reason,
+            caused_by_face_ids=caused_by,
+        )
+        for face_id, (reason, caused_by) in sorted(withheld.items())
+    )
+
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
         scope_complete=True,
         records=tuple(output),
-        reason_codes=(SOURCE_ROOM_FACE_SCOPE_RESOLVED,),
+        reason_codes=(
+            (SOURCE_ROOM_FACE_SCOPE_RESOLVED, SOURCE_ROOM_FACE_CANDIDATES_WITHHELD)
+            if withheld_candidates
+            else (SOURCE_ROOM_FACE_SCOPE_RESOLVED,)
+        ),
         document_id=scope.document_id,
         revision_id=scope.revision_id,
         source_sha256=scope.source_sha256,
         snapshot_id=scope.snapshot_id,
         page_id=scope.page_id,
         decision_scope_id=scope.decision_scope_id,
+        face_universe_complete=not withheld_candidates,
+        withheld_candidates=withheld_candidates,
     )
 
 
@@ -482,15 +592,18 @@ def build_source_room_face_authority(
 
 __all__ = [
     "SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED",
+    "SOURCE_ROOM_FACE_CANDIDATES_WITHHELD",
     "SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS",
     "SOURCE_ROOM_FACE_DEGENERATE",
     "SOURCE_ROOM_FACE_DUPLICATE_EDGE",
     "SOURCE_ROOM_FACE_SCHEMA_VERSION",
     "SOURCE_ROOM_FACE_SCOPE_RESOLVED",
     "SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE",
+    "SOURCE_ROOM_FACE_SHARED_DEFECT",
     "SourceRoomFaceAuthority",
     "SourceRoomFaceRecord",
     "SourceRoomFaceScopeResult",
     "SourceRoomFaceSelector",
+    "SourceRoomFaceWithheldCandidate",
     "build_source_room_face_authority",
 ]
