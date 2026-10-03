@@ -3553,6 +3553,18 @@ class GenericPlanReaderExtractor:
                 _wall_quantity = getattr(getattr(physical_wall_result, "publication", None), "quantity_evidence", None)
                 if _wall_quantity is not None:
                     _coverage_quantities.append(_wall_quantity)
+                for _opening_quantity in getattr(
+                    physical_wall_result,
+                    "opening_quantity_evidence",
+                    (),
+                ):
+                    _coverage_quantities.append(_opening_quantity)
+                for _opening_count_quantity in getattr(
+                    physical_wall_result,
+                    "opening_count_quantity_evidence",
+                    (),
+                ):
+                    _coverage_quantities.append(_opening_count_quantity)
                 canonical_wall_objects = [
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls
