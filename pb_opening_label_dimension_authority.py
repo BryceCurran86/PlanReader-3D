@@ -34,6 +34,7 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 
 OPENING_LABEL_DIMENSION_SCHEMA_VERSION = "1.0.0"
 OPENING_LABEL_DIMENSION_RESOLVED = "opening_label_dimension_resolved"
+OPENING_LABEL_SEMANTIC_ONLY_RESOLVED = "opening_label_semantic_only_resolved"
 OPENING_LABEL_DIMENSION_UNAVAILABLE = "opening_label_dimension_unavailable"
 OPENING_LABEL_DIMENSION_GEOMETRY_UNAVAILABLE = "opening_label_dimension_geometry_unavailable"
 OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE = "opening_label_dimension_text_unavailable"
@@ -1125,6 +1126,26 @@ class OpeningLabelDimensionProducer:
             )
 
         structural_kind = _structural_kind(opening.structural_pattern)
+        (
+            owned_label_kind,
+            owned_label_ids,
+            owned_authority_ids,
+            owned_raw_texts,
+            owned_semantic_conflict,
+        ) = _owned_label_semantics(self._source, opening, gap)
+        if owned_semantic_conflict or (
+            structural_kind is not None
+            and owned_label_kind is not None
+            and structural_kind != owned_label_kind
+        ):
+            return self._store(
+                key,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT,
+                ),
+            )
+
         candidates: dict[
             tuple[str, tuple[float, ...], Optional[str], tuple[float, float, float, float]],
             tuple[
@@ -1144,6 +1165,10 @@ class OpeningLabelDimensionProducer:
                 structural_kind is not None
                 and suffix_kind is not None
                 and structural_kind != suffix_kind
+            ) or (
+                owned_label_kind is not None
+                and suffix_kind is not None
+                and owned_label_kind != suffix_kind
             ):
                 return self._store(
                     key,
@@ -1152,7 +1177,7 @@ class OpeningLabelDimensionProducer:
                         OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT,
                     ),
                 )
-            semantic_kind = structural_kind or suffix_kind
+            semantic_kind = structural_kind or suffix_kind or owned_label_kind
             owned_values = _resolve_owned_dimension_values_mm(
                 parsed,
                 opening_record_id=opening.record_id,
@@ -1172,11 +1197,53 @@ class OpeningLabelDimensionProducer:
                 (line, parsed, semantic_kind, resolved_values_mm, compact_used),
             )
         if not candidates:
+            if owned_label_kind is None:
+                return self._store(
+                    key,
+                    _blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE,
+                    ),
+                )
+
+            semantic_ids = tuple(
+                sorted({*owned_label_ids, *owned_authority_ids})
+            )
+            raw_text = " | ".join(owned_raw_texts)
+            payload = {
+                "schema_version": OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
+                "opening_record_id": opening.record_id,
+                "page_id": opening.page_id,
+                "viewport_id": opening.viewport_id,
+                "source_text_observation_ids": semantic_ids,
+                "raw_text": raw_text,
+                "dimension_values_mm": (),
+                "compact_hundreds_used": False,
+                "semantic_kind": owned_label_kind,
+                "basis": "owned_opening_label_semantics",
+            }
+            evidence = OpeningLabelDimensionEvidence(
+                evidence_id=stable_contract_id(
+                    "opening_label_semantic_only",
+                    payload,
+                    digest_chars=32,
+                ),
+                opening_record_id=opening.record_id,
+                page_id=opening.page_id,
+                viewport_id=opening.viewport_id,
+                source_text_observation_ids=semantic_ids,
+                raw_text=raw_text,
+                dimension_values_mm=(),
+                semantic_kind=owned_label_kind,
+                area_m2=None,
+                basis="owned_opening_label_semantics",
+            )
             return self._store(
                 key,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE,
+                OpeningLabelDimensionResult(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    reason_codes=(OPENING_LABEL_SEMANTIC_ONLY_RESOLVED,),
+                    evidence=evidence,
                 ),
             )
         if len(candidates) != 1:
@@ -1195,12 +1262,17 @@ class OpeningLabelDimensionProducer:
             resolved_values_mm,
             compact_used,
         ) = next(iter(candidates.values()))
+        evidence_source_ids = set(line.observation_ids)
+        if owned_label_kind is not None and semantic_kind == owned_label_kind:
+            evidence_source_ids.update(owned_label_ids)
+            evidence_source_ids.update(owned_authority_ids)
+        source_text_observation_ids = tuple(sorted(evidence_source_ids))
         payload = {
             "schema_version": OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
             "opening_record_id": opening.record_id,
             "page_id": opening.page_id,
             "viewport_id": opening.viewport_id,
-            "source_text_observation_ids": tuple(sorted(line.observation_ids)),
+            "source_text_observation_ids": source_text_observation_ids,
             "raw_text": parsed.raw_text,
             "dimension_values_mm": resolved_values_mm,
             "compact_hundreds_used": compact_used,
@@ -1215,7 +1287,7 @@ class OpeningLabelDimensionProducer:
             opening_record_id=opening.record_id,
             page_id=opening.page_id,
             viewport_id=opening.viewport_id,
-            source_text_observation_ids=tuple(sorted(line.observation_ids)),
+            source_text_observation_ids=source_text_observation_ids,
             raw_text=parsed.raw_text,
             dimension_values_mm=resolved_values_mm,
             semantic_kind=semantic_kind,
@@ -1278,6 +1350,7 @@ __all__ = [
     "OPENING_LABEL_DIMENSION_AMBIGUOUS",
     "OPENING_LABEL_DIMENSION_GEOMETRY_UNAVAILABLE",
     "OPENING_LABEL_DIMENSION_RESOLVED",
+    "OPENING_LABEL_SEMANTIC_ONLY_RESOLVED",
     "OPENING_LABEL_DIMENSION_SCHEMA_VERSION",
     "OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT",
     "OPENING_LABEL_DIMENSION_SOURCE_SCOPE_UNAVAILABLE",
