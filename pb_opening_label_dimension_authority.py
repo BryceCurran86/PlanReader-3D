@@ -56,8 +56,14 @@ _SINGLE_RE = re.compile(
     r"^\s*(?P<a>\d{1,2}[,.]\d{3}|\d{3,4})(?P<tail>.*)$",
     re.IGNORECASE,
 )
-_WINDOW_TOKEN_RE = re.compile(r"\bWINDOWS?\b", re.IGNORECASE)
-_DOOR_TOKEN_RE = re.compile(r"\bDOORS?\b", re.IGNORECASE)
+_WINDOW_TOKEN_RE = re.compile(
+    r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|WINDOWS?)\b",
+    re.IGNORECASE,
+)
+_DOOR_TOKEN_RE = re.compile(
+    r"\b(?:ASD|ASSD|VSD|CS)\b|\b(?:PANEL\s+LIFT\s+)?DOORS?\b",
+    re.IGNORECASE,
+)
 _OPENING_MODIFIER_TOKEN_RE = re.compile(
     r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|ASD|ASSD|VSD|CS|OBS|"
     r"PANEL|LIFT|DOOR|WINDOW)\b",
@@ -177,12 +183,13 @@ def parse_opening_label_dimensions(
     *,
     structural_kind_hint: Optional[str] = None,
 ) -> Optional[ParsedOpeningLabel]:
-    """Parse source dimensions without treating raw abbreviations as type authority.
+    """Parse one source opening callout without deciding physical identity.
 
-    structural_kind_hint may be supplied only by an independently proven
-    physical opening. It permits compact hundred-millimetre notation when the
-    same fragment carries an opening-style modifier, but the modifier itself
-    does not establish door/window semantic class.
+    Exact opening-code semantics are accepted only as text evidence. This
+    parser cannot create a physical opening; the producer binds parsed text to
+    an independently proven opening before publication. A structural hint is
+    used only to permit compact hundred-millimetre notation when an opening is
+    already proven, and contradictory semantic sources still fail closed.
     """
     raw = " ".join(str(text or "").split())
     if not raw:
@@ -738,7 +745,14 @@ def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
 
     cross = _dot(center, gap.normal)
     glyph_height = max(_COORD_TOL, min(abs(x1 - x0), abs(y1 - y0)))
-    cross_allowance = max(3.0 * glyph_height, 2.0 * gap.cross_spread)
+    gap_span = max(_COORD_TOL, gap.along_max - gap.along_min)
+    # Keep text ownership local to the physical gap. Glyph size is useful for
+    # ordinary drafting offsets, but a large text box must not expand the
+    # search corridor far beyond the opening itself.
+    cross_allowance = max(
+        2.0 * gap.cross_spread,
+        min(3.0 * glyph_height, 0.5 * gap_span),
+    )
     return abs(cross - gap.cross_center) <= cross_allowance + _COORD_TOL
 
 
