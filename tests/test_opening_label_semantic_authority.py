@@ -109,6 +109,38 @@ def test_owned_label_resolves_kind_only_through_source_legend_definition() -> No
     assert resolved.structural_kind is None
 
 
+def test_owned_stacker_phrase_authenticates_door_kind_without_topology_guess() -> None:
+    source, published = _ingest(_pdf(label="2127 STACKER"))
+    selector = _opening_selector(source, published)
+    semantic = OpeningLabelSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert semantic.status is EvidenceResolutionStatus.CORROBORATED
+    assert semantic.evidence is not None
+    assert semantic.evidence.semantic_kind == "door"
+
+    resolved = resolve_opening_kind(
+        structural_pattern=JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+        label_kind=semantic.evidence.semantic_kind,
+    )
+    assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+    assert resolved.opening_kind == "door"
+    assert resolved.structural_kind is None
+
+
+def test_owned_panel_lift_phrase_authenticates_door_kind() -> None:
+    source, published = _ingest(_pdf(label="2148 PANEL LIFT"))
+    selector = _opening_selector(source, published)
+    semantic = OpeningLabelSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert semantic.status is EvidenceResolutionStatus.CORROBORATED
+    assert semantic.evidence is not None
+    assert semantic.evidence.semantic_kind == "door"
+
+
 def test_conflicting_authenticated_semantic_evidence_fails_closed() -> None:
     source, published = _ingest(_pdf(label="1218 SGW", conflict_label=True))
     selector = _opening_selector(source, published)

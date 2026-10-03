@@ -56,6 +56,12 @@ _SINGLE_RE = re.compile(
     r"^\s*(?P<a>\d{1,2}[,.]\d{3}|\d{3,4})(?P<tail>.*)$",
     re.IGNORECASE,
 )
+_COMPACT_CODE_RE = re.compile(
+    r"^\s*(?P<code>\d{4})\s+"
+    r"(?P<tail>[A-Za-z][A-Za-z0-9._/+\-]*"
+    r"(?:\s+[A-Za-z][A-Za-z0-9._/+\-]*){0,3})\s*$",
+    re.IGNORECASE,
+)
 _WINDOW_TOKEN_RE = re.compile(
     r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|WINDOWS?)\b",
     re.IGNORECASE,
@@ -210,6 +216,19 @@ def parse_opening_label_dimensions(text: str) -> Optional[ParsedOpeningLabel]:
     if not raw:
         return None
 
+    compact_code = _COMPACT_CODE_RE.fullmatch(raw)
+    if compact_code is not None:
+        code = str(compact_code.group("code"))
+        return ParsedOpeningLabel(
+            raw_text=raw,
+            dimension_tokens=(code[:2], code[2:]),
+            dimension_values_mm=(),
+            suffix_text=_normalised_suffix(compact_code.group("tail")),
+            semantic_kind=None,
+            compact_hundreds_present=True,
+            compact_hundreds_used=False,
+        )
+
     pair = _PAIR_RE.fullmatch(raw)
     if pair is not None:
         tail = str(pair.group("tail") or "")
@@ -267,6 +286,7 @@ def _resolve_owned_dimension_values_mm(
     *,
     opening_record_id: str,
     semantic_kind: Optional[str],
+    authenticated_semantic_evidence: bool = False,
 ) -> Optional[tuple[tuple[float, ...], bool]]:
     """Resolve compact units only after authenticated opening ownership exists."""
     if not parsed.compact_hundreds_present:
@@ -274,7 +294,15 @@ def _resolve_owned_dimension_values_mm(
     if (
         not str(opening_record_id or "").strip()
         or semantic_kind not in {"door", "window"}
-        or _OPENING_MODIFIER_TOKEN_RE.search(parsed.suffix_text) is None
+    ):
+        return None
+    # Historical compact forms with an established modifier remain supported.
+    # New/opaque suffixes do not gain meaning from parsing: they may unlock
+    # compact expansion only when the independent producer-owned semantic
+    # authority has authenticated the same physical opening label.
+    if (
+        _OPENING_MODIFIER_TOKEN_RE.search(parsed.suffix_text) is None
+        and not authenticated_semantic_evidence
     ):
         return None
 
@@ -869,6 +897,37 @@ class OpeningLabelDimensionProducer:
             )
 
         structural_kind = _structural_kind(opening.structural_pattern)
+        # Semantic authority is independent of syntax parsing. Import lazily to
+        # avoid a module cycle: semantic authority reuses the geometry helpers
+        # defined in this module, while this producer consumes only its
+        # producer-owned result after the physical opening is proven.
+        from pb_opening_label_semantic_authority import (
+            OpeningLabelSemanticProducer,
+        )
+
+        semantic_result = (
+            OpeningLabelSemanticProducer.from_source_visibility_producer(
+                self._source
+            ).publish_scope(selector)
+        )
+        semantic_evidence = getattr(semantic_result, "evidence", None)
+        authenticated_label_kind = (
+            getattr(semantic_evidence, "semantic_kind", None)
+            if semantic_result.status is EvidenceResolutionStatus.CORROBORATED
+            and semantic_evidence is not None
+            and getattr(semantic_evidence, "opening_record_id", None)
+            == opening.record_id
+            else None
+        )
+        if semantic_result.status is EvidenceResolutionStatus.CONFLICT:
+            return self._store(
+                key,
+                _blocked(
+                    EvidenceResolutionStatus.CONFLICT,
+                    OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT,
+                ),
+            )
+
         candidates: dict[
             tuple[str, tuple[float, ...], Optional[str], tuple[float, float, float, float]],
             tuple[
@@ -884,11 +943,16 @@ class OpeningLabelDimensionProducer:
             if parsed is None or not _label_matches_gap(line, gap):
                 continue
             suffix_kind, suffix_conflict = _semantic_kind_evidence(parsed.suffix_text)
-            if suffix_conflict or (
-                structural_kind is not None
-                and suffix_kind is not None
-                and structural_kind != suffix_kind
-            ):
+            authenticated_kinds = tuple(
+                kind
+                for kind in (
+                    structural_kind,
+                    suffix_kind,
+                    authenticated_label_kind,
+                )
+                if kind is not None
+            )
+            if suffix_conflict or len(set(authenticated_kinds)) > 1:
                 return self._store(
                     key,
                     _blocked(
@@ -896,11 +960,16 @@ class OpeningLabelDimensionProducer:
                         OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT,
                     ),
                 )
-            semantic_kind = structural_kind or suffix_kind
+            semantic_kind = (
+                authenticated_kinds[0] if authenticated_kinds else None
+            )
             owned_values = _resolve_owned_dimension_values_mm(
                 parsed,
                 opening_record_id=opening.record_id,
                 semantic_kind=semantic_kind,
+                authenticated_semantic_evidence=(
+                    authenticated_label_kind is not None
+                ),
             )
             if owned_values is None:
                 continue

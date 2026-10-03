@@ -27,6 +27,10 @@ _LEGEND_CODE_RE = re.compile(r"^[A-Z][A-Z0-9._/+\-]{1,14}$", re.I)
 _LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.I)
 _EXPLICIT_WINDOW_WORD_RE = re.compile(r"\bWINDOWS?\b", re.I)
 _EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.I)
+_EXPLICIT_DOOR_PHRASE_RE = re.compile(
+    r"\b(?:STACKER|STACKING\s+DOOR|PANEL[\s-]+LIFT(?:\s+DOOR)?)\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -50,7 +54,10 @@ class OpeningLabelSemanticResult:
 
 def _explicit_word_kind(text: str) -> tuple[Optional[str], bool]:
     has_window = _EXPLICIT_WINDOW_WORD_RE.search(text or "") is not None
-    has_door = _EXPLICIT_DOOR_WORD_RE.search(text or "") is not None
+    has_door = (
+        _EXPLICIT_DOOR_WORD_RE.search(text or "") is not None
+        or _EXPLICIT_DOOR_PHRASE_RE.search(text or "") is not None
+    )
     if has_window and has_door:
         return None, True
     if has_window:
