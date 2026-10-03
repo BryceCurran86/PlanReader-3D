@@ -41,6 +41,14 @@ OPENING_LABEL_DIMENSION_AMBIGUOUS = "opening_label_dimension_ambiguous"
 OPENING_LABEL_DIMENSION_SEMANTIC_CONFLICT = "opening_label_dimension_semantic_conflict"
 OPENING_LABEL_DIMENSION_SOURCE_SCOPE_UNAVAILABLE = "opening_label_dimension_source_scope_unavailable"
 
+OPENING_LABEL_SEMANTIC_SCHEMA_VERSION = "1.0.0"
+OPENING_LABEL_SEMANTIC_RESOLVED = "opening_label_semantic_resolved"
+OPENING_LABEL_SEMANTIC_UNAVAILABLE = "opening_label_semantic_unavailable"
+OPENING_LABEL_SEMANTIC_GEOMETRY_UNAVAILABLE = "opening_label_semantic_geometry_unavailable"
+OPENING_LABEL_SEMANTIC_TEXT_UNAVAILABLE = "opening_label_semantic_text_unavailable"
+OPENING_LABEL_SEMANTIC_CONFLICT = "opening_label_semantic_conflict"
+OPENING_LABEL_SEMANTIC_SOURCE_SCOPE_UNAVAILABLE = "opening_label_semantic_source_scope_unavailable"
+
 _MIN_OPENING_DIMENSION_MM = 400.0
 _MAX_OPENING_DIMENSION_MM = 6000.0
 _COORD_TOL = 1e-6
@@ -87,6 +95,11 @@ _FRAGMENT_EXCLUSION_TOKEN_RE = re.compile(
 _FRAGMENT_CONTINUATION_TOKEN_RE = re.compile(
     r"^(?:[-–—xX×])$",
 )
+_EXPLICIT_WINDOW_WORD_RE = re.compile(r"\bWINDOWS?\b", re.IGNORECASE)
+_EXPLICIT_DOOR_WORD_RE = re.compile(r"\bDOORS?\b", re.IGNORECASE)
+_LEGEND_HEADER_RE = re.compile(r"\b(?:LEGEND|ABBREVIATIONS?)\b", re.IGNORECASE)
+_LEGEND_CODE_RE = re.compile(r"^[A-Z][A-Z0-9._/+\-]{0,14}$", re.IGNORECASE)
+_LABEL_CODE_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9._/+\-]{1,14}\b", re.IGNORECASE)
 
 _Key = tuple[str, str, str, str, str]
 
@@ -143,6 +156,28 @@ class OpeningLabelDimensionResult:
 
 
 @dataclass(frozen=True)
+class OpeningLabelSemanticEvidence:
+    evidence_id: str
+    opening_record_id: str
+    page_id: str
+    viewport_id: Optional[str]
+    semantic_kind: str
+    source_text_observation_ids: tuple[str, ...]
+    legend_observation_ids: tuple[str, ...]
+    raw_texts: tuple[str, ...]
+    basis: str = "owned_opening_label_semantics"
+    schema_version: str = OPENING_LABEL_SEMANTIC_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class OpeningLabelSemanticResult:
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    evidence: Optional[OpeningLabelSemanticEvidence] = None
+    schema_version: str = OPENING_LABEL_SEMANTIC_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
 class _GapSpan:
     axis: tuple[float, float]
     normal: tuple[float, float]
@@ -164,6 +199,17 @@ def _blocked(status: EvidenceResolutionStatus, *reasons: str) -> OpeningLabelDim
         status=status,
         reason_codes=tuple(dict.fromkeys(reason for reason in reasons if reason))
         or (OPENING_LABEL_DIMENSION_UNAVAILABLE,),
+    )
+
+
+def _semantic_blocked(
+    status: EvidenceResolutionStatus,
+    *reasons: str,
+) -> OpeningLabelSemanticResult:
+    return OpeningLabelSemanticResult(
+        status=status,
+        reason_codes=tuple(dict.fromkeys(reason for reason in reasons if reason))
+        or (OPENING_LABEL_SEMANTIC_UNAVAILABLE,),
     )
 
 
