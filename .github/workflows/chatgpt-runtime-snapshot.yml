@@ -1,0 +1,19 @@
+name: ChatGPT Runtime Snapshot
+
+on:
+  push:
+    branches: [chatgpt/runtime-snapshot-1287]
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package repository
+        run: |
+          tar --exclude=.git -czf /tmp/planreader-runtime-snapshot.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-runtime-snapshot
+          path: /tmp/planreader-runtime-snapshot.tgz
+          retention-days: 1
