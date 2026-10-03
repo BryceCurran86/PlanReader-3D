@@ -223,6 +223,7 @@ def _canonical_opening_area(
     height_m: Optional[float],
     figured_label_evidence,
     schedule_record,
+    geometry_complete: bool,
 ) -> tuple[Optional[float], Optional[str], Optional[str]]:
     """Resolve customer-facing opening area without inventing axis order.
 
@@ -231,7 +232,7 @@ def _canonical_opening_area(
     order-invariant product. It never back-fills width_m or height_m.
     """
 
-    if width_m is not None and height_m is not None:
+    if geometry_complete and width_m is not None and height_m is not None:
         return (
             float(width_m) * float(height_m),
             "resolved_opening_geometry",
@@ -701,6 +702,7 @@ def compose_live_physical_opening_voids(
             height_m=height_m,
             figured_label_evidence=figured_label_evidence,
             schedule_record=schedule_record,
+            geometry_complete=void_record is not None,
         )
 
         if existence_record is not None:
