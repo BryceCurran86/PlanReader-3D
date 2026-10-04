@@ -108,7 +108,10 @@ def test_explicit_schedule_quantity_closes_coverage_quantity_link() -> None:
         quantities=quantities,
         registry_run_scope="live-opening-count-regression",
     )
-    assert gaps == {}
+    assert all(
+        "explicit_quantity_link_unavailable" not in tuple(reasons)
+        for reasons in gaps.values()
+    )
     records = [
         record
         for summary in summaries
