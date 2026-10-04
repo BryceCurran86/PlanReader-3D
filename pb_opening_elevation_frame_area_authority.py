@@ -120,6 +120,10 @@ class _TrustedWord:
     observation_id: str
     text: str
     bbox: tuple[float, float, float, float]
+    block_no: int
+    line_no: int
+    word_no: int
+    sequence_number: int
 
 
 def _clean(value: object) -> str:
@@ -296,34 +300,53 @@ def _match_trusted_dimension_word(
 def _page_family_and_title_ids(
     trusted_words: Sequence[_TrustedWord],
 ) -> tuple[str | None, tuple[str, ...]]:
-    windows = [
-        word for word in trusted_words
-        if _claim_norm(word.text) in {"window", "windows"}
-    ]
-    doors = [
-        word for word in trusted_words
-        if _claim_norm(word.text) in {"door", "doors"}
-    ]
-    elevations = [
-        word for word in trusted_words
-        if _claim_norm(word.text) in {"elevation", "elevations"}
-    ]
-    if not elevations:
+    by_line: dict[tuple[int, int], list[_TrustedWord]] = {}
+    for word in trusted_words:
+        by_line.setdefault((word.block_no, word.line_no), []).append(word)
+
+    matches: list[tuple[str, tuple[str, ...]]] = []
+    for words in by_line.values():
+        ordered = sorted(words, key=lambda word: (word.word_no, word.sequence_number))
+        norms = [_claim_norm(word.text) for word in ordered]
+        has_elevation = any(value in {"elevation", "elevations"} for value in norms)
+        if not has_elevation:
+            continue
+        has_window = any(value in {"window", "windows"} for value in norms)
+        has_door = any(value in {"door", "doors"} for value in norms)
+        if has_window == has_door:
+            continue
+        family = "window" if has_window else "door"
+        ids = tuple(
+            sorted(
+                word.observation_id
+                for word, norm in zip(ordered, norms)
+                if norm in {
+                    "window",
+                    "windows",
+                    "door",
+                    "doors",
+                    "elevation",
+                    "elevations",
+                }
+            )
+        )
+        matches.append((family, ids))
+
+    families = {family for family, _ids in matches}
+    if len(families) != 1:
         return None, ()
-    if bool(windows) == bool(doors):
-        return None, ()
-    family = "window" if windows else "door"
-    title = tuple(
+    family = next(iter(families))
+    title_ids = tuple(
         sorted(
             {
-                word.observation_id
-                for word in (
-                    (*(windows if family == "window" else doors), *elevations)
-                )
+                observation_id
+                for match_family, ids in matches
+                if match_family == family
+                for observation_id in ids
             }
         )
     )
-    return family, title
+    return family, title_ids
 
 
 def _opening_tags(
@@ -669,6 +692,10 @@ class OpeningElevationFrameAreaProducer:
                         observation_id=str(observation_id),
                         text=str(result.trusted_text),
                         bbox=geometry,
+                        block_no=int(getattr(receipt, "block_no", -1)),
+                        line_no=int(getattr(receipt, "line_no", -1)),
+                        word_no=int(getattr(receipt, "word_no", -1)),
+                        sequence_number=int(getattr(receipt, "sequence_number", -1)),
                     )
                 )
 
