@@ -800,6 +800,31 @@ def _source_page_segments(
     continuation is unknown -- it may simply be cropped by this sheet).
     """
 
+    observation_cache_key = (
+        None
+        if resolved_visible_observations is None
+        else tuple(str(row[0]) for row in resolved_visible_observations)
+    )
+    page_cache_key = (
+        str(published.revision.document_id),
+        str(published.revision.revision_id),
+        str(published.revision.source_sha256),
+        str(published.snapshot.snapshot_id),
+        str(page_id),
+        str(decision_scope_id),
+        observation_cache_key,
+    )
+    page_cache = source_producer._physical_wall_page_segments_cache
+    cached_page = page_cache.get(page_cache_key)
+    if cached_page is not None:
+        cached_segments, cached_observation_ids, cached_width, cached_height = cached_page
+        return (
+            [dict(segment) for segment in cached_segments],
+            cached_observation_ids,
+            cached_width,
+            cached_height,
+        )
+
     visibility = source_producer.authority()
     native_visible_by_raw_id: dict[str, tuple[str, tuple[float, ...]]] = {}
     raster_visible: list[tuple[str, str, tuple[float, ...]]] = []
@@ -950,9 +975,16 @@ def _source_page_segments(
     if native_visible_ids | {item[0] for item in raster_visible} != set(page_visible_ids):
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
+    source_observation_ids = tuple(sorted(page_visible_ids))
+    page_cache[page_cache_key] = (
+        tuple(dict(segment) for segment in segments),
+        source_observation_ids,
+        page_width,
+        page_height,
+    )
     return (
         segments,
-        tuple(sorted(page_visible_ids)),
+        source_observation_ids,
         page_width,
         page_height,
     )
