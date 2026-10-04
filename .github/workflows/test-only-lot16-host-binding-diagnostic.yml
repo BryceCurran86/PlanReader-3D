@@ -1,0 +1,21 @@
+name: TEST ONLY Lot16 Host Binding Diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lot16-host-binding-diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run Lot16 host-binding diagnostic
+        run: PYTHONPATH=. pytest -q tests/test_diagnostic_lot16_current_host_binding.py
