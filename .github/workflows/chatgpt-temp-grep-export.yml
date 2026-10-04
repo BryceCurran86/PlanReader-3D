@@ -1,0 +1,19 @@
+name: ChatGPT Temp Grep Export
+
+on:
+  push:
+    branches: [chatgpt/temp-grep-main-2efbca6]
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-grep-current-main
+          path: .
+          include-hidden-files: true
+          retention-days: 1
