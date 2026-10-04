@@ -827,6 +827,36 @@ class OpeningLabelDimensionProducer:
         self._source = source
         self._physical = source.physical_opening_authority()
         self._results: dict[_Key, OpeningLabelDimensionResult] = {}
+        # Trusted native text lines are page/snapshot facts, not opening facts.
+        # Reuse the immutable parsed line universe across openings on the same
+        # producer-owned source page instead of re-resolving every text receipt.
+        self._trusted_text_lines_by_scope: dict[
+            tuple[str, str, str, str, str], tuple[_TrustedTextLine, ...]
+        ] = {}
+
+    def _trusted_text_lines_for_opening(
+        self,
+        opening: PhysicalOpeningExistenceRecord,
+    ) -> tuple[_TrustedTextLine, ...]:
+        # Re-check current lineage before serving a cache hit. If the source
+        # producer has advanced to a different snapshot, the historical
+        # opening must fail closed exactly as the uncached helper does.
+        published = self._source.published_snapshot_for_revision(opening.revision_id)
+        if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
+            return ()
+        key = (
+            opening.document_id,
+            opening.revision_id,
+            opening.source_sha256,
+            opening.snapshot_id,
+            str(opening.page_id),
+        )
+        cached = self._trusted_text_lines_by_scope.get(key)
+        if cached is not None:
+            return cached
+        lines = _trusted_text_lines(self._source, opening)
+        self._trusted_text_lines_by_scope[key] = lines
+        return lines
 
     @classmethod
     def from_source_visibility_producer(
@@ -938,7 +968,7 @@ class OpeningLabelDimensionProducer:
                 bool,
             ],
         ] = {}
-        for line in _trusted_text_lines(self._source, opening):
+        for line in self._trusted_text_lines_for_opening(opening):
             parsed = parse_opening_label_dimensions(line.text)
             if parsed is None or not _label_matches_gap(line, gap):
                 continue
