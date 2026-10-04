@@ -191,15 +191,15 @@ def test_wall_candidate_producer_constructs_one_opening_authority_per_revision(
     monkeypatch,
 ):
     source, _published, _payload = _source(page_count=5)
-    original = module.PhysicalOpeningAuthority
+    original = source.physical_opening_authority
     constructions = 0
 
-    def counted(authority):
+    def counted():
         nonlocal constructions
         constructions += 1
-        return original(authority)
+        return original()
 
-    monkeypatch.setattr(module, "PhysicalOpeningAuthority", counted)
+    monkeypatch.setattr(source, "physical_opening_authority", counted)
 
     producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source,

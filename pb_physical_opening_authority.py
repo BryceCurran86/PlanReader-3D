@@ -538,6 +538,10 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             dict[str, tuple[CandidateSemanticOpening, ...]],
         ] = {}
+        self._visible_viewport_candidate_membership_cache: dict[
+            tuple[str, str, str, str, str],
+            dict[str, tuple[CandidateSemanticOpening, ...]],
+        ] = {}
         self._visible_existence_cache: dict[
             tuple[str, str, str, str, str],
             PhysicalOpeningExistenceResult,
@@ -1086,6 +1090,63 @@ class PhysicalOpeningAuthority:
             segments, walls, (), page_no=int(seed.page_id)
         )
 
+        # Generic opening corroboration historically rescanned every source
+        # segment twice for every wall gap to find endpoint-touching jambs.
+        # Build a conservative endpoint broad phase once. A segment is only
+        # admitted to the exact predicate below when one of its endpoints lies
+        # in the queried point's 3x3 coordinate-bin neighborhood; _touches()
+        # still owns final membership at the existing 1e-6 tolerance.
+        endpoint_cell = _COORD_EQ_ABS_TOL
+
+        def endpoint_bin(point: tuple[float, float]) -> tuple[int, int]:
+            return (
+                math.floor(float(point[0]) / endpoint_cell),
+                math.floor(float(point[1]) / endpoint_cell),
+            )
+
+        endpoint_segment_index: dict[tuple[int, int], list[int]] = {}
+        for segment_index, segment in enumerate(segments):
+            for point in (
+                (float(segment.x1), float(segment.y1)),
+                (float(segment.x2), float(segment.y2)),
+            ):
+                endpoint_segment_index.setdefault(endpoint_bin(point), []).append(
+                    segment_index
+                )
+
+        def _touches(
+            segment: LegacyPlanSegment,
+            point: tuple[float, float],
+        ) -> bool:
+            return min(
+                math.hypot(segment.x1 - point[0], segment.y1 - point[1]),
+                math.hypot(segment.x2 - point[0], segment.y2 - point[1]),
+            ) <= _COORD_EQ_ABS_TOL
+
+        def endpoint_touching_segments(
+            point: tuple[float, float],
+        ) -> tuple[LegacyPlanSegment, ...]:
+            bx, by = endpoint_bin(point)
+            indexes: set[int] = set()
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    indexes.update(
+                        endpoint_segment_index.get((bx + dx, by + dy), ())
+                    )
+            return tuple(
+                segments[index]
+                for index in sorted(indexes)
+                if _touches(segments[index], point)
+            )
+
+        door_indexes_by_wall_identity: dict[int, list[int]] = {}
+        for door_index, door in enumerate(doors):
+            if door.wall_segment is None:
+                continue
+            door_indexes_by_wall_identity.setdefault(
+                id(door.wall_segment), []
+            ).append(door_index)
+
         def record_for(segment: LegacyPlanSegment | None) -> Optional[SourceObservationRecord]:
             if segment is None:
                 return None
@@ -1202,15 +1263,6 @@ class PhysicalOpeningAuthority:
                 ),
             )
 
-            def _touches(
-                segment: LegacyPlanSegment,
-                point: tuple[float, float],
-            ) -> bool:
-                return min(
-                    math.hypot(segment.x1 - point[0], segment.y1 - point[1]),
-                    math.hypot(segment.x2 - point[0], segment.y2 - point[1]),
-                ) <= _COORD_EQ_ABS_TOL
-
             def _parallel_segments(
                 first: LegacyPlanSegment,
                 second: LegacyPlanSegment,
@@ -1224,19 +1276,17 @@ class PhysicalOpeningAuthority:
 
             left_jambs = tuple(
                 segment
-                for segment in segments
+                for segment in endpoint_touching_segments(gap_endpoint_a)
                 if segment is not gap_wall_a
                 and segment is not gap_wall_b
                 and _perpendicular_to_wall(segment)
-                and _touches(segment, gap_endpoint_a)
             )
             right_jambs = tuple(
                 segment
-                for segment in segments
+                for segment in endpoint_touching_segments(gap_endpoint_b)
                 if segment is not gap_wall_a
                 and segment is not gap_wall_b
                 and _perpendicular_to_wall(segment)
-                and _touches(segment, gap_endpoint_b)
             )
             for first in left_jambs:
                 for second in right_jambs:
@@ -1262,7 +1312,14 @@ class PhysicalOpeningAuthority:
                             )
                         )
 
-            for door in doors:
+            candidate_door_indexes = sorted(
+                {
+                    *door_indexes_by_wall_identity.get(id(gap_wall_a), ()),
+                    *door_indexes_by_wall_identity.get(id(gap_wall_b), ()),
+                }
+            )
+            for door_index in candidate_door_indexes:
+                door = doors[door_index]
                 if door.wall_segment not in gap.wall_segments or door.jamb_segment is None:
                     continue
                 door_center = midpoint(door.jamb_segment)
@@ -1303,6 +1360,74 @@ class PhysicalOpeningAuthority:
         by_id = {item.candidate_id: item for item in (*strong, *retained)}
         return tuple(by_id[key] for key in sorted(by_id))
 
+    @staticmethod
+    def _visible_page_candidate_key(
+        seed: SourceObservationRecord,
+    ) -> tuple[str, str, str, str, str]:
+        return (
+            seed.document_id,
+            seed.revision_id,
+            seed.source_sha256,
+            seed.snapshot_id,
+            seed.page_id,
+        )
+
+    @staticmethod
+    def _candidate_membership_index(
+        candidates: tuple[CandidateSemanticOpening, ...],
+    ) -> dict[str, tuple[CandidateSemanticOpening, ...]]:
+        membership: dict[str, list[CandidateSemanticOpening]] = {}
+        for candidate in candidates:
+            for observation_id in candidate.source_observation_ids:
+                membership.setdefault(str(observation_id), []).append(candidate)
+        return {
+            observation_id: tuple(rows)
+            for observation_id, rows in membership.items()
+        }
+
+    def _candidate_memberships_for_returned_candidates(
+        self,
+        seed: SourceObservationRecord,
+        raw_candidates: tuple[CandidateSemanticOpening, ...],
+        scoped_candidates: tuple[CandidateSemanticOpening, ...],
+    ) -> tuple[
+        dict[str, tuple[CandidateSemanticOpening, ...]],
+        dict[str, tuple[CandidateSemanticOpening, ...]],
+    ]:
+        """Use cached indexes only when they match the returned candidate tuples.
+
+        Normal producer execution returns the exact memoized tuples, so this is
+        an O(1) lookup. Tests and future provider overrides may replace
+        candidate discovery after a page cache already exists; in that case the
+        returned tuple is authoritative and its membership index is rebuilt
+        without changing candidate semantics.
+        """
+
+        key = self._visible_page_candidate_key(seed)
+        cached_raw = self._visible_candidate_cache.get(key)
+        if raw_candidates is cached_raw:
+            raw_membership = self._visible_candidate_membership_cache.get(key, {})
+        else:
+            raw_membership = self._candidate_membership_index(raw_candidates)
+
+        if scoped_candidates is raw_candidates or (
+            self._source_visibility_producer is None
+            and scoped_candidates == raw_candidates
+        ):
+            scoped_membership = raw_membership
+        else:
+            cached_scope = self._visible_viewport_scope_cache.get(key)
+            cached_scoped = cached_scope[0] if cached_scope is not None else None
+            if scoped_candidates is cached_scoped:
+                scoped_membership = (
+                    self._visible_viewport_candidate_membership_cache.get(key, {})
+                )
+            else:
+                scoped_membership = self._candidate_membership_index(
+                    scoped_candidates
+                )
+        return raw_membership, scoped_membership
+
     def _visible_candidates_for(
         self,
         seed: SourceObservationRecord,
@@ -1310,26 +1435,15 @@ class PhysicalOpeningAuthority:
     ) -> tuple[CandidateSemanticOpening, ...]:
         """Memoize deterministic multi-path candidate discovery per source page."""
 
-        key = (
-            seed.document_id,
-            seed.revision_id,
-            seed.source_sha256,
-            seed.snapshot_id,
-            seed.page_id,
-        )
+        key = self._visible_page_candidate_key(seed)
         cached = self._visible_candidate_cache.get(key)
         if cached is not None:
             return cached
         candidates = self._visible_all_structural_candidates(seed, records)
         self._visible_candidate_cache[key] = candidates
-        membership: dict[str, list[CandidateSemanticOpening]] = {}
-        for candidate in candidates:
-            for observation_id in candidate.source_observation_ids:
-                membership.setdefault(str(observation_id), []).append(candidate)
-        self._visible_candidate_membership_cache[key] = {
-            observation_id: tuple(rows)
-            for observation_id, rows in membership.items()
-        }
+        self._visible_candidate_membership_cache[key] = (
+            self._candidate_membership_index(candidates)
+        )
         return candidates
 
     def _viewport_scoped_visible_candidates_for(
@@ -1348,16 +1462,13 @@ class PhysicalOpeningAuthority:
         producer-owned SourceVisibilityProducer.
         """
         candidates = self._visible_candidates_for(seed, records)
+        key = self._visible_page_candidate_key(seed)
         if self._source_visibility_producer is None:
+            self._visible_viewport_candidate_membership_cache[key] = (
+                self._visible_candidate_membership_cache.get(key, {})
+            )
             return candidates, {}, ()
 
-        key = (
-            seed.document_id,
-            seed.revision_id,
-            seed.source_sha256,
-            seed.snapshot_id,
-            seed.page_id,
-        )
         cached = self._visible_viewport_scope_cache.get(key)
         if cached is not None:
             return cached
@@ -1378,15 +1489,15 @@ class PhysicalOpeningAuthority:
         if scope_result.status is not EvidenceResolutionStatus.CORROBORATED:
             result = ((), decisions, tuple(scope_result.reason_codes))
             self._visible_viewport_scope_cache[key] = result
+            self._visible_viewport_candidate_membership_cache[key] = {}
             return result
 
-        # Absence of authenticated viewport structure is not negative evidence.
-        # Preserve the existing page-scoped G17 proposition in that case. The
-        # viewport gate becomes authoritative only when the source itself
-        # supplies at least one authenticated view boundary/type.
         if not tuple(scope_result.authenticated_viewports):
             result = (candidates, decisions, tuple(scope_result.reason_codes))
             self._visible_viewport_scope_cache[key] = result
+            self._visible_viewport_candidate_membership_cache[key] = (
+                self._visible_candidate_membership_cache.get(key, {})
+            )
             return result
 
         promoted: list[CandidateSemanticOpening] = []
@@ -1401,12 +1512,16 @@ class PhysicalOpeningAuthority:
                 continue
             promoted.append(replace(candidate, viewport_id=viewport_id))
 
+        promoted_tuple = tuple(promoted)
         result = (
-            tuple(promoted),
+            promoted_tuple,
             decisions,
             tuple(scope_result.reason_codes),
         )
         self._visible_viewport_scope_cache[key] = result
+        self._visible_viewport_candidate_membership_cache[key] = (
+            self._candidate_membership_index(promoted_tuple)
+        )
         return result
 
     @staticmethod
@@ -1799,16 +1914,15 @@ class PhysicalOpeningAuthority:
         candidates, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(observation, records)
         )
-        raw_containing = tuple(
-            candidate
-            for candidate in raw_candidates
-            if observation.observation_id in candidate.source_observation_ids
+        raw_membership, scoped_membership = (
+            self._candidate_memberships_for_returned_candidates(
+                observation,
+                raw_candidates,
+                candidates,
+            )
         )
-        containing = tuple(
-            candidate
-            for candidate in candidates
-            if observation.observation_id in candidate.source_observation_ids
-        )
+        raw_containing = raw_membership.get(observation.observation_id, ())
+        containing = scoped_membership.get(observation.observation_id, ())
 
         if self._source_visibility_producer is not None and raw_containing and not containing:
             raw_scopes = {
@@ -1968,14 +2082,15 @@ class PhysicalOpeningAuthority:
         candidates, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(observation, records)
         )
-        raw_containing = tuple(
-            candidate for candidate in raw_candidates
-            if observation.observation_id in candidate.source_observation_ids
+        raw_membership, scoped_membership = (
+            self._candidate_memberships_for_returned_candidates(
+                observation,
+                raw_candidates,
+                candidates,
+            )
         )
-        containing = tuple(
-            candidate for candidate in candidates
-            if observation.observation_id in candidate.source_observation_ids
-        )
+        raw_containing = raw_membership.get(observation.observation_id, ())
+        containing = scoped_membership.get(observation.observation_id, ())
         if self._source_visibility_producer is not None and raw_containing and not containing:
             return cache_visible(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,

@@ -63,8 +63,10 @@ def build_source_page_view_class_authority(
         return producer.authority()
 
     text_authority = source_visibility_producer.text_integrity_authority()
-    words_by_page: dict[str, list[str]] = {page_id: [] for page_id in requested}
-    evidence_by_page: dict[str, list[str]] = {page_id: [] for page_id in requested}
+    words_by_page: dict[
+        str,
+        list[tuple[tuple[int, int, int, int, float, float], str, str]],
+    ] = {page_id: [] for page_id in requested}
 
     for observation_id in published.text_observation_ids:
         selector = ObservationSelector(
@@ -84,12 +86,26 @@ def build_source_page_view_class_authority(
         page_id = str(result.receipt.page_id)
         if page_id not in words_by_page:
             continue
-        words_by_page[page_id].append(str(result.trusted_text))
-        evidence_by_page[page_id].append(observation_id)
+        receipt = result.receipt
+        geometry = tuple(float(value) for value in receipt.geometry)
+        x0 = geometry[0] if len(geometry) >= 2 else 0.0
+        y0 = geometry[1] if len(geometry) >= 2 else 0.0
+        order_key = (
+            int(receipt.sequence_number),
+            int(receipt.block_no),
+            int(receipt.line_no),
+            int(receipt.word_no),
+            y0,
+            x0,
+        )
+        words_by_page[page_id].append(
+            (order_key, str(result.trusted_text), observation_id)
+        )
 
     for page_id in requested:
-        words = words_by_page[page_id]
-        evidence = tuple(sorted(set(evidence_by_page[page_id])))
+        ordered = tuple(sorted(words_by_page[page_id], key=lambda item: item[0]))
+        words = tuple(item[1] for item in ordered)
+        evidence = tuple(sorted({item[2] for item in ordered}))
         if not words or not evidence:
             continue
         text = " ".join(words)

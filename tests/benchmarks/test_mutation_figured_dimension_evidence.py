@@ -10,6 +10,7 @@ import fitz
 import pytest
 
 from pb_dimension_graph_constraint_engine import ConstraintStatus, DimensionObservation
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_figured_dimension_evidence import (
     BindingStatus,
     CoordinateSpace,
@@ -159,6 +160,106 @@ class TestVectorWitnessBinding:
         assert binding.status == BindingStatus.AMBIGUOUS.value
         bound = apply_anchor_binding(observations[0], binding)
         assert bound.conflict_state == ConstraintStatus.CONFLICT_MANUAL_REVIEW.value
+        doc.close()
+
+
+class TestYearLikeWitnessPromotion:
+    def test_year_shaped_bare_number_requires_witness_bound_drawing_geometry(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+        page.draw_line((60, 120), (240, 120))
+        page.draw_line((60, 95), (60, 145))
+        page.draw_line((240, 95), (240, 145))
+        page.insert_text((135, 116), "1900", fontsize=10)
+        doc = _reopen(doc)
+
+        assert classify_dimension_token("1900").kind == "year"
+
+        bundle = extract_dimension_evidence_bundle(
+            doc[0],
+            page_num=1,
+            view_id="ELEVATION-A",
+            view_type=DrawingViewType.ELEVATION.value,
+        )
+        assert len(bundle.observations) == 1
+        assert bundle.observations[0].value == pytest.approx(1900.0)
+        assert bundle.observations[0].unit == "mm"
+        assert bundle.bindings[0].status == BindingStatus.WITNESS_BOUND.value
+        doc.close()
+
+    def test_unbound_year_shaped_number_remains_non_dimension(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+        page.insert_text((135, 116), "2000", fontsize=10)
+        doc = _reopen(doc)
+
+        bundle = extract_dimension_evidence_bundle(
+            doc[0],
+            page_num=1,
+            view_id="ELEVATION-B",
+            view_type=DrawingViewType.ELEVATION.value,
+        )
+        assert bundle.observations == []
+        assert bundle.bindings == []
+        doc.close()
+
+    def test_date_context_is_not_promoted_even_with_dimension_like_vectors(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+        page.draw_line((60, 120), (240, 120))
+        page.draw_line((60, 95), (60, 145))
+        page.draw_line((240, 95), (240, 145))
+        page.insert_text((90, 116), "DATE", fontsize=10)
+        page.insert_text((135, 116), "2026", fontsize=10)
+        doc = _reopen(doc)
+
+        bundle = extract_dimension_evidence_bundle(
+            doc[0],
+            page_num=1,
+            view_id="ELEVATION-C",
+            view_type=DrawingViewType.ELEVATION.value,
+        )
+        assert bundle.observations == []
+        assert bundle.bindings == []
+        doc.close()
+
+
+    def test_month_year_title_block_is_not_promoted_even_with_witness_geometry(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+        page.draw_line((60, 120), (240, 120))
+        page.draw_line((60, 95), (60, 145))
+        page.draw_line((240, 95), (240, 145))
+        page.insert_text((105, 116), "APRIL 2026", fontsize=10)
+        doc = _reopen(doc)
+
+        bundle = extract_dimension_evidence_bundle(
+            doc[0],
+            page_num=1,
+            view_id="ELEVATION-D",
+            view_type=DrawingViewType.ELEVATION.value,
+        )
+        assert bundle.observations == []
+        assert bundle.bindings == []
+        doc.close()
+
+    def test_copyright_year_is_not_promoted_even_with_witness_geometry(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+        page.draw_line((60, 120), (240, 120))
+        page.draw_line((60, 95), (60, 145))
+        page.draw_line((240, 95), (240, 145))
+        page.insert_text((95, 116), "c 2011 copyright", fontsize=10)
+        doc = _reopen(doc)
+
+        bundle = extract_dimension_evidence_bundle(
+            doc[0],
+            page_num=1,
+            view_id="ELEVATION-E",
+            view_type=DrawingViewType.ELEVATION.value,
+        )
+        assert bundle.observations == []
+        assert bundle.bindings == []
         doc.close()
 
 

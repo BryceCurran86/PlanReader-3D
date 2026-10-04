@@ -10,7 +10,9 @@ from pb_live_opening_source_closed_export import (
     seal_live_opening_area_run,
 )
 from pb_live_opening_area_quantity_publication import (
+    LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY,
     LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY,
+    LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY,
     LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY,
     _opening_quantity,
     publish_live_opening_area_quantities,
@@ -186,6 +188,70 @@ def test_resolved_geometry_area_requires_physical_void_evidence() -> None:
 
     assert _opening_quantity(
         replace(opening, opening_void_record_id=None)
+    ) is None
+
+
+def test_authenticated_elevation_frame_area_is_identity_bound_commercial_evidence() -> None:
+    opening = _opening(
+        area_m2=7.2,
+        area_basis="authenticated_elevation_frame",
+        figured_area_record_id="elevation-frame-1",
+    )
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+    assert quantity.value == pytest.approx(7.2)
+    assert quantity.unit == "m2"
+    assert quantity.input_entity_ids == ("opening-1",)
+    assert quantity.authority == LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY
+    assert quantity.metadata["area_basis"] == "authenticated_elevation_frame"
+    assert quantity.metadata["measurement_record_id"] == "elevation-frame-1"
+
+    assert _opening_quantity(
+        replace(
+            opening,
+            evidence_ids=("opening-1", "source-observation-1"),
+        )
+    ) is None
+
+
+def test_authenticated_frame_schedule_area_is_commercial_only_with_frame_basis() -> None:
+    opening = replace(
+        _opening(
+            area_m2=2.16,
+            area_basis="authenticated_frame_schedule",
+            figured_area_record_id=None,
+        ),
+        schedule_binding_record_id="schedule-binding-1",
+        schedule_declared_width_mm=1200,
+        schedule_declared_height_mm=1800,
+        schedule_row_dimension_basis="frame",
+        schedule_row_basis_source="frame width",
+        evidence_ids=(
+            "opening-1",
+            "source-observation-1",
+            "schedule-binding-1",
+            "schedule-row-1",
+        ),
+    )
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+    assert quantity.value == pytest.approx(2.16)
+    assert quantity.authority == LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY
+    assert quantity.metadata["area_basis"] == "authenticated_frame_schedule"
+    assert quantity.metadata["measurement_record_id"] == "schedule-binding-1"
+    assert quantity.metadata["schedule_row_dimension_basis"] == "frame"
+
+    assert _opening_quantity(
+        replace(opening, schedule_row_dimension_basis="")
+    ) is None
+    assert _opening_quantity(
+        replace(opening, schedule_row_dimension_basis="leaf")
+    ) is None
+    assert _opening_quantity(
+        replace(
+            opening,
+            evidence_ids=("opening-1", "source-observation-1", "schedule-row-1"),
+        )
     ) is None
 
 

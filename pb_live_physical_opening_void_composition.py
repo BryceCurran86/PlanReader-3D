@@ -8,6 +8,7 @@ from the exact source-owned opening/host/completeness lineage.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 from typing import Mapping, Optional
 
@@ -26,6 +27,14 @@ from pb_opening_kind_authority import (
 from pb_opening_label_dimension_authority import (
     OpeningLabelDimensionProducer,
 )
+from pb_opening_elevation_frame_area_authority import (
+    OpeningElevationFrameAreaProducer,
+    OpeningElevationFrameAreaSelector,
+)
+from pb_opening_label_semantic_authority import (
+    OPENING_LABEL_SEMANTIC_CONFLICT,
+    OpeningLabelSemanticProducer,
+)
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_opening_vertical_placement_authority import (
     OpeningVerticalPlacementProducer,
@@ -33,6 +42,7 @@ from pb_opening_vertical_placement_authority import (
     ScheduleRowVerticalPlacementProducer,
     ScheduleRowVerticalPlacementSelector,
 )
+from pb_page_view_class_source_adapter import page_viewport_id
 from pb_physical_opening_void_authority import (
     PhysicalOpeningVoidAuthority,
     PhysicalOpeningVoidProducer,
@@ -111,6 +121,8 @@ class LiveCanonicalOpeningObject:
     tag_observation_id: Optional[str]
     evidence_ids: tuple[str, ...]
     geometry_complete: bool
+    schedule_row_dimension_basis: str = ""
+    schedule_row_basis_source: str = ""
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -162,6 +174,8 @@ class LiveCanonicalOpeningObject:
             "tag_observation_id": self.tag_observation_id,
             "evidence_ids": list(self.evidence_ids),
             "geometry_complete": self.geometry_complete,
+            "schedule_row_dimension_basis": self.schedule_row_dimension_basis,
+            "schedule_row_basis_source": self.schedule_row_basis_source,
             "schema_version": self.schema_version,
         }
 
@@ -208,48 +222,108 @@ def _reason_tuple(values) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(value) for value in values if str(value)))
 
 
+def _canonical_provenance_ids(values) -> tuple[str, ...]:
+    """Deterministic set-like provenance union for one canonical object."""
+    return tuple(
+        sorted(
+            {
+                str(value).strip()
+                for value in values
+                if value is not None and str(value).strip()
+            }
+        )
+    )
+
+
 def _canonical_opening_area(
     *,
     width_m: Optional[float],
     height_m: Optional[float],
     figured_label_evidence,
+    elevation_frame_record=None,
+    schedule_record=None,
+    geometry_complete: bool = True,
 ) -> tuple[Optional[float], Optional[str], Optional[str]]:
     """Resolve customer-facing opening area without inventing axis order.
 
-    Existing fully-resolved width+height geometry remains authoritative here.
-    Otherwise a corroborated two-axis figured label may provide only its
-    order-invariant product. It never back-fills width_m or height_m.
+    Existing fully-resolved width+height geometry remains authoritative when the
+    physical opening geometry is complete. Otherwise an explicitly based outer-
+    frame schedule may provide gross frame area. Failing that, a corroborated
+    unordered two-axis figured label may provide only its order-invariant
+    product. None of these paths back-fills width_m or height_m.
     """
 
-    if width_m is not None and height_m is not None:
+    figured_record_id = (
+        str(figured_label_evidence.evidence_id)
+        if figured_label_evidence is not None
+        else None
+    )
+
+    if geometry_complete and width_m is not None and height_m is not None:
         return (
             float(width_m) * float(height_m),
             "resolved_opening_geometry",
-            (
-                str(figured_label_evidence.evidence_id)
-                if figured_label_evidence is not None
-                else None
-            ),
+            figured_record_id,
         )
+
+    if elevation_frame_record is not None:
+        try:
+            elevation_area_m2 = float(elevation_frame_record.area_m2)
+        except (TypeError, ValueError, OverflowError):
+            elevation_area_m2 = 0.0
+        if math.isfinite(elevation_area_m2) and elevation_area_m2 > 0.0:
+            return (
+                elevation_area_m2,
+                "authenticated_elevation_frame",
+                str(elevation_frame_record.record_id),
+            )
+
+    if (
+        schedule_record is not None
+        and str(
+            getattr(schedule_record, "schedule_row_dimension_basis", "") or ""
+        ).strip().lower() == "frame"
+        and getattr(schedule_record, "schedule_row_width_mm", None) is not None
+        and getattr(schedule_record, "schedule_row_height_mm", None) is not None
+    ):
+        try:
+            frame_width_mm = float(schedule_record.schedule_row_width_mm)
+            frame_height_mm = float(schedule_record.schedule_row_height_mm)
+        except (TypeError, ValueError, OverflowError):
+            frame_width_mm = 0.0
+            frame_height_mm = 0.0
+        if (
+            math.isfinite(frame_width_mm)
+            and math.isfinite(frame_height_mm)
+            and frame_width_mm > 0.0
+            and frame_height_mm > 0.0
+        ):
+            return (
+                (frame_width_mm / 1000.0) * (frame_height_mm / 1000.0),
+                "authenticated_frame_schedule",
+                None,
+            )
+
     if (
         figured_label_evidence is not None
         and getattr(figured_label_evidence, "area_m2", None) is not None
         and getattr(figured_label_evidence, "axis_order_resolved", None) is False
     ):
-        return (
-            float(figured_label_evidence.area_m2),
-            str(getattr(figured_label_evidence, "basis", "figured_opening_label")),
-            str(figured_label_evidence.evidence_id),
-        )
-    return (
-        None,
-        None,
-        (
-            str(figured_label_evidence.evidence_id)
-            if figured_label_evidence is not None
-            else None
-        ),
-    )
+        value = float(figured_label_evidence.area_m2)
+        if math.isfinite(value) and value > 0.0:
+            return (
+                value,
+                str(
+                    getattr(
+                        figured_label_evidence,
+                        "basis",
+                        "figured_opening_label",
+                    )
+                ),
+                figured_record_id,
+            )
+
+    return None, None, figured_record_id
 
 
 def compose_live_physical_opening_voids(
@@ -452,6 +526,20 @@ def compose_live_physical_opening_voids(
         opening_id: label_dimension_producer.publish_scope(opening_selector)
         for opening_id, opening_selector in opening_selectors.items()
     }
+    label_semantic_producer = (
+        OpeningLabelSemanticProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
+    )
+    label_semantic_results = {
+        opening_id: label_semantic_producer.publish_scope(opening_selector)
+        for opening_id, opening_selector in opening_selectors.items()
+    }
+    elevation_frame_area_authority = (
+        OpeningElevationFrameAreaProducer.from_source_visibility_producer(
+            source_visibility_producer
+        ).authority()
+    )
     height_authority = height_producer.authority()
     vertical_authority = vertical_producer.authority()
     scale_authority = scale_producer.authority()
@@ -502,6 +590,8 @@ def compose_live_physical_opening_voids(
         width = dimension_authority.resolve_width(opening_selector)
         figured_label = label_dimension_results.get(opening_id)
         figured_label_evidence = getattr(figured_label, "evidence", None)
+        semantic_label = label_semantic_results.get(opening_id)
+        semantic_label_evidence = getattr(semantic_label, "evidence", None)
         schedule = schedule_results.get(opening_id)
         height = height_results.get(opening_id)
         vertical = vertical_results.get(opening_id)
@@ -529,6 +619,20 @@ def compose_live_physical_opening_voids(
             if schedule_record is not None
             else None
         )
+        normalized_plan_tag = normalize_opening_tag(
+            getattr(schedule, "authenticated_tag_mark", None)
+        )
+        plan_tag_kind = (
+            "window"
+            if normalized_plan_tag is not None
+            and normalized_plan_tag.trade_type == "windows"
+            else (
+                "door"
+                if normalized_plan_tag is not None
+                and normalized_plan_tag.trade_type == "doors"
+                else None
+            )
+        )
         schedule_trade_type = None
         opening_kind = None
         type_mark = None
@@ -537,8 +641,15 @@ def compose_live_physical_opening_voids(
         schedule_declared_height_mm = None
         schedule_declared_count = None
         schedule_count_explicit = False
+        schedule_row_dimension_basis = ""
+        schedule_row_basis_source = ""
         schedule_row_observation_ids: tuple[str, ...] = ()
-        tag_observation_id = None
+        tag_observation_id = (
+            str(getattr(schedule, "authenticated_tag_observation_id", "") or "")
+            or None
+        )
+        if normalized_plan_tag is not None:
+            type_mark = normalized_plan_tag.tag
         if schedule_record is not None and normalized_schedule_tag is not None:
             schedule_trade_type = normalized_schedule_tag.trade_type
             type_mark = normalized_schedule_tag.tag
@@ -549,10 +660,20 @@ def compose_live_physical_opening_voids(
             schedule_count_explicit = bool(
                 schedule_record.schedule_row_count_explicit
             )
+            schedule_row_dimension_basis = str(
+                schedule_record.schedule_row_dimension_basis or ""
+            )
+            schedule_row_basis_source = str(
+                schedule_record.schedule_row_basis_source or ""
+            )
             schedule_row_observation_ids = tuple(
                 schedule_record.schedule_row_observation_ids
             )
-            tag_observation_id = str(schedule_record.tag_observation_id)
+            tag_observation_id = (
+                str(schedule_record.tag_observation_id)
+                if schedule_record.tag_observation_id
+                else tag_observation_id
+            )
         height_evidence = getattr(height, "evidence", None)
         vertical_evidence = getattr(vertical, "evidence", None)
         scale_evidence = getattr(scale, "evidence", None)
@@ -575,6 +696,26 @@ def compose_live_physical_opening_voids(
             else None
         )
         existence_record = existence_by_opening[opening_id].existence_record
+        semantic_label_kind = (
+            getattr(semantic_label_evidence, "semantic_kind", None)
+            if semantic_label_evidence is not None
+            else (
+                getattr(figured_label_evidence, "semantic_kind", None)
+                if figured_label_evidence is not None
+                else None
+            )
+        )
+        label_kind_values = tuple(
+            value
+            for value in (plan_tag_kind, semantic_label_kind)
+            if value in {"door", "window"}
+        )
+        label_kind_conflict = len(set(label_kind_values)) > 1
+        combined_label_kind = (
+            label_kind_values[0]
+            if label_kind_values and not label_kind_conflict
+            else None
+        )
         kind_resolution = resolve_opening_kind(
             structural_pattern=(
                 existence_record.structural_pattern
@@ -582,15 +723,35 @@ def compose_live_physical_opening_voids(
                 else None
             ),
             schedule_trade_type=schedule_trade_type,
-            label_kind=(
-                getattr(figured_label_evidence, "semantic_kind", None)
-                if figured_label_evidence is not None
-                else None
-            ),
+            label_kind=combined_label_kind,
         )
         opening_kind = kind_resolution.opening_kind
-        if OPENING_KIND_CONFLICT in kind_resolution.reason_codes:
+        elevation_frame_record = None
+        if type_mark and opening_kind in {"door", "window"}:
+            elevation_frame_result = elevation_frame_area_authority.resolve(
+                OpeningElevationFrameAreaSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    type_mark=type_mark,
+                )
+            )
+            candidate_frame_record = elevation_frame_result.record
+            if (
+                elevation_frame_result.status is EvidenceResolutionStatus.CORROBORATED
+                and candidate_frame_record is not None
+                and candidate_frame_record.opening_kind == opening_kind
+            ):
+                elevation_frame_record = candidate_frame_record
+        if (
+            label_kind_conflict
+            or OPENING_KIND_CONFLICT in kind_resolution.reason_codes
+            or OPENING_LABEL_SEMANTIC_CONFLICT
+            in tuple(getattr(semantic_label, "reason_codes", ()))
+        ):
             kind_conflict_opening_ids.add(opening_id)
+            opening_kind = None
         void_record = void.record
         binding_trace = binding_by_opening.get(opening_id)
         frame_trace = frame_by_opening.get(opening_id)
@@ -661,46 +822,60 @@ def compose_live_physical_opening_voids(
             width_m=width_m,
             height_m=height_m,
             figured_label_evidence=figured_label_evidence,
+            elevation_frame_record=elevation_frame_record,
+            schedule_record=schedule_record,
+            geometry_complete=void_record is not None,
         )
 
         if existence_record is not None:
-            evidence_ids = tuple(
-                dict.fromkeys(
-                    str(value)
-                    for value in (
-                        existence_record.record_id,
-                        *existence_record.source_observation_ids,
-                        *existence_record.source_lineage_root_ids,
-                        host_binding_record_id,
-                        host_frame_record_id,
-                        width_record_id,
-                        height_record_id,
-                        vertical_record_id,
-                        (
-                            scale_evidence.record_id
-                            if scale_evidence is not None
-                            else None
-                        ),
-                        (
-                            schedule_record.record_id
-                            if schedule_record is not None
-                            else None
-                        ),
-                        tag_observation_id,
-                        *schedule_row_observation_ids,
-                        figured_area_record_id,
-                        *(
-                            figured_label_evidence.source_text_observation_ids
-                            if figured_label_evidence is not None
-                            else ()
-                        ),
-                        (
-                            void_record.record_id
-                            if void_record is not None
-                            else None
-                        ),
-                    )
-                    if value
+            evidence_ids = _canonical_provenance_ids(
+                (
+                    existence_record.record_id,
+                    *existence_record.source_observation_ids,
+                    *existence_record.source_lineage_root_ids,
+                    host_binding_record_id,
+                    host_frame_record_id,
+                    width_record_id,
+                    height_record_id,
+                    vertical_record_id,
+                    (
+                        scale_evidence.record_id
+                        if scale_evidence is not None
+                        else None
+                    ),
+                    (
+                        schedule_record.record_id
+                        if schedule_record is not None
+                        else None
+                    ),
+                    tag_observation_id,
+                    *schedule_row_observation_ids,
+                    figured_area_record_id,
+                    *(
+                        elevation_frame_record.source_observation_ids
+                        if elevation_frame_record is not None
+                        else ()
+                    ),
+                    *(
+                        figured_label_evidence.source_text_observation_ids
+                        if figured_label_evidence is not None
+                        else ()
+                    ),
+                    *(
+                        semantic_label_evidence.source_text_observation_ids
+                        if semantic_label_evidence is not None
+                        else ()
+                    ),
+                    *(
+                        semantic_label_evidence.legend_observation_ids
+                        if semantic_label_evidence is not None
+                        else ()
+                    ),
+                    (
+                        void_record.record_id
+                        if void_record is not None
+                        else None
+                    ),
                 )
             )
             canonical_openings.append(
@@ -712,7 +887,11 @@ def compose_live_physical_opening_voids(
                     source_sha256=existence_record.source_sha256,
                     snapshot_id=existence_record.snapshot_id,
                     page_id=existence_record.page_id,
-                    viewport_id=existence_record.viewport_id,
+                    viewport_id=(
+                        str(existence_record.viewport_id)
+                        if existence_record.viewport_id is not None
+                        else page_viewport_id(existence_record.page_id)
+                    ),
                     semantic_class=existence_record.semantic_class,
                     structural_pattern=existence_record.structural_pattern,
                     representative_observation_id=representative_by_opening[opening_id],
@@ -784,6 +963,8 @@ def compose_live_physical_opening_voids(
                     tag_observation_id=tag_observation_id,
                     evidence_ids=evidence_ids,
                     geometry_complete=void_record is not None,
+                    schedule_row_dimension_basis=schedule_row_dimension_basis,
+                    schedule_row_basis_source=schedule_row_basis_source,
                 )
             )
 

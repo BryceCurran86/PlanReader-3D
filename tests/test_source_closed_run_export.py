@@ -169,6 +169,44 @@ def test_run_is_deterministic_sorted_and_content_bound() -> None:
     assert payload["fingerprint"] == run1.fingerprint
 
 
+def test_sealed_fingerprint_is_invariant_to_provenance_collection_order() -> None:
+    q1 = quantity(
+        input_entity_ids=("canonical-floor-1", "canonical-floor-2"),
+        evidence_ids=("ev-room-1", "ev-room-2"),
+        reason_codes=("b", "a"),
+    )
+    q2 = quantity(
+        input_entity_ids=("canonical-floor-2", "canonical-floor-1"),
+        evidence_ids=("ev-room-2", "ev-room-1"),
+        reason_codes=("a", "b"),
+    )
+    t1 = trace(
+        evidence_ids=("ev-room-1", "ev-room-2"),
+        canonical_entity_ids=("canonical-floor-1", "canonical-floor-2"),
+    )
+    t2 = trace(
+        evidence_ids=("ev-room-2", "ev-room-1"),
+        canonical_entity_ids=("canonical-floor-2", "canonical-floor-1"),
+    )
+    row1 = export.seal_source_closed_quantity(q1, trace=t1)
+    row2 = export.seal_source_closed_quantity(q2, trace=t2)
+    assert row1.fingerprint == row2.fingerprint
+    assert row1.object_identity_refs == ("canonical-floor-1", "canonical-floor-2")
+    assert row1.evidence_ids == ("ev-room-1", "ev-room-2")
+
+
+def test_sealed_fingerprint_does_not_collapse_distinct_canonical_instances() -> None:
+    first = export.seal_source_closed_quantity(
+        quantity(input_entity_ids=("canonical-floor-1",)),
+        trace=trace(canonical_entity_ids=("canonical-floor-1",)),
+    )
+    second = export.seal_source_closed_quantity(
+        quantity(input_entity_ids=("canonical-floor-2",)),
+        trace=trace(canonical_entity_ids=("canonical-floor-2",)),
+    )
+    assert first.object_identity_refs != second.object_identity_refs
+    assert first.fingerprint != second.fingerprint
+
 def test_duplicate_quantity_ids_fail_closed() -> None:
     q1 = quantity(quantity_id="qty-duplicate")
     q2 = quantity(quantity_id="qty-duplicate", semantic_key="other")

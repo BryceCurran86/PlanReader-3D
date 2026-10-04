@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 from typing import Iterable, Mapping
 
@@ -99,6 +100,63 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
     return tuple(result)
 
 
+def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
+    """Return True only when a child edge is a quantized subsegment of parent.
+
+    ``extract_planar_faces`` may split an authenticated wall centerline at an
+    intersection. Those split points are rounded through the same six-decimal
+    page-space contract as wall edges, so containment is allowed only within
+    the maximum error implied by that quantization. No geometric extension,
+    nearest-edge selection, or angle-only matching is permitted.
+    """
+    (ax, ay), (bx, by) = parent
+    tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+    dx, dy = bx - ax, by - ay
+    length = math.hypot(dx, dy)
+    if length <= tolerance:
+        return False
+
+    xmin, xmax = min(ax, bx) - tolerance, max(ax, bx) + tolerance
+    ymin, ymax = min(ay, by) - tolerance, max(ay, by) + tolerance
+
+    for px, py in child:
+        if not (xmin <= px <= xmax and ymin <= py <= ymax):
+            return False
+        perpendicular_distance = abs((px - ax) * dy - (py - ay) * dx) / length
+        if perpendicular_distance > tolerance:
+            return False
+    return child[0] != child[1]
+
+
+def _unique_containing_wall_owner(
+    edge: Edge,
+    *,
+    edge_owner: Mapping[Edge, str],
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> str | None:
+    """Resolve a planarized face edge to exactly one authenticated wall.
+
+    Exact ownership remains authoritative. A fallback is used only when the
+    face edge is wholly contained by an original collinear authenticated wall
+    edge. Competing physical wall ids fail closed instead of selecting first,
+    nearest, shortest, or longest.
+    """
+    exact = edge_owner.get(edge)
+    if exact is not None:
+        return exact
+
+    owner: str | None = None
+    for wall_id in sorted(wall_edges):
+        if not any(
+            _edge_contains_edge(parent, edge) for parent in wall_edges[wall_id]
+        ):
+            continue
+        if owner is not None and owner != wall_id:
+            return None
+        owner = wall_id
+    return owner
+
+
 @dataclass(frozen=True)
 class SourceRoomFaceSelector:
     document_id: str
@@ -137,6 +195,28 @@ class SourceRoomFaceRecord:
 
 
 @dataclass(frozen=True)
+class SourceRoomFaceAbstention:
+    """A planar face withheld from publication, with its provenance.
+
+    Abstention is candidate-local: it never publishes the face and never
+    deletes it silently, and it does not by itself invalidate unrelated faces.
+    """
+
+    face_id: str
+    reason: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    decision_scope_id: str
+    polygon_pdf_pts: tuple[Point, ...]
+    bounding_wall_ids: tuple[str, ...]
+    area_page_pts2: float
+    schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
 class SourceRoomFaceScopeResult:
     status: EvidenceResolutionStatus
     scope_complete: bool
@@ -149,6 +229,7 @@ class SourceRoomFaceScopeResult:
     page_id: str
     decision_scope_id: str
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
+    abstained_faces: tuple[SourceRoomFaceAbstention, ...] = ()
 
 
 class SourceRoomFaceAuthority:
@@ -240,6 +321,7 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
 
     polygons: dict[str, tuple[Point, ...]] = {}
     face_walls: dict[str, tuple[str, ...]] = {}
+    face_wall_edges: dict[str, tuple[tuple[str, Edge], ...]] = {}
     face_areas: dict[str, float] = {}
 
     for raw_face in raw_faces:
@@ -247,12 +329,19 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         if not polygon:
             continue
         owners: list[str] = []
+        owned_edges: list[tuple[str, Edge]] = []
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
-            owner = edge_owner.get(_edge(first, second))
+            face_edge = _edge(first, second)
+            owner = _unique_containing_wall_owner(
+                face_edge,
+                edge_owner=edge_owner,
+                wall_edges=wall_edges,
+            )
             if owner is None:
                 return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
             owners.append(owner)
+            owned_edges.append((owner, face_edge))
         face_id = stable_contract_id(
             "source_room_face",
             {
@@ -268,27 +357,53 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         )
         polygons[face_id] = polygon
         face_walls[face_id] = tuple(sorted(set(owners)))
+        face_wall_edges[face_id] = tuple(owned_edges)
         face_areas[face_id] = _polygon_area(polygon)
 
     if not polygons:
         return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
+    # A tiny or degenerate face is a candidate-local abstention: it is neither
+    # published nor allowed to supply topology evidence (two-sidedness) for any
+    # other face, but an ISOLATED one does not by itself make unrelated,
+    # independently authenticated faces untrustworthy. Thresholds are unchanged.
+    # Failures that genuinely invalidate shared topology (boundary ownership,
+    # duplicate edge ownership, ambiguous components, a polluted majority) still
+    # fail the whole scope.
     largest_area = max(face_areas.values())
-    if any(
-        area < _ABSOLUTE_DEGENERATE_AREA_PT2
+    degenerate_face_ids = {
+        face_id
+        for face_id, area in face_areas.items()
+        if area < _ABSOLUTE_DEGENERATE_AREA_PT2
         or (
             largest_area > 0.0
             and area < _TINY_RELATIVE_THRESHOLD * largest_area
         )
-        for area in face_areas.values()
-    ):
+    }
+    # Isolation is sound only for an ISOLATED defect. When degenerate faces are
+    # not a strict minority of the scope, the wall-candidate pool itself is
+    # polluted by non-room linework (tile grids, hatch, fixtures, annotation)
+    # and the surviving cells carry no evidence of being rooms. Fail the whole
+    # scope exactly as before candidate-local isolation existed.
+    if degenerate_face_ids and 2 * len(degenerate_face_ids) >= len(polygons):
+        return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
+    valid_face_ids = tuple(
+        sorted(face_id for face_id in polygons if face_id not in degenerate_face_ids)
+    )
+    if not valid_face_ids:
         return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
 
     wall_faces: dict[str, set[str]] = {wall_id: set() for wall_id in wall_ids}
-    for face_id, owners in face_walls.items():
-        for wall_id in owners:
+    wall_face_edges: dict[str, dict[Edge, set[str]]] = {
+        wall_id: defaultdict(set) for wall_id in wall_ids
+    }
+    for face_id in valid_face_ids:
+        for wall_id in face_walls[face_id]:
             if wall_id in wall_faces:
                 wall_faces[wall_id].add(face_id)
+        for wall_id, face_edge in face_wall_edges[face_id]:
+            if wall_id in wall_face_edges:
+                wall_face_edges[wall_id][face_edge].add(face_id)
 
     parent = {wall_id: wall_id for wall_id in wall_ids}
 
@@ -317,8 +432,14 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         component_faces = set().union(
             *(wall_faces[wall_id] for wall_id in component)
         )
+        # A long physical wall may own disjoint subedges of several rooms on
+        # the same side. That is not a shared interior boundary. Require the
+        # exact same planarized subedge to bound two faces before treating a
+        # wall as two-sided for the anti-box/component gate.
         has_two_sided_wall = any(
-            len(wall_faces[wall_id]) == 2 for wall_id in component
+            len(face_ids) == 2
+            for wall_id in component
+            for face_ids in wall_face_edges[wall_id].values()
         )
         if len(component_faces) >= 2 and has_two_sided_wall:
             resolved_faces.update(component_faces)
@@ -361,6 +482,22 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
             )
         )
 
+    abstained = tuple(
+        SourceRoomFaceAbstention(
+            face_id=face_id,
+            reason=SOURCE_ROOM_FACE_DEGENERATE,
+            document_id=scope.document_id,
+            revision_id=scope.revision_id,
+            source_sha256=scope.source_sha256,
+            snapshot_id=scope.snapshot_id,
+            page_id=scope.page_id,
+            decision_scope_id=scope.decision_scope_id,
+            polygon_pdf_pts=polygons[face_id],
+            bounding_wall_ids=face_walls[face_id],
+            area_page_pts2=face_areas[face_id],
+        )
+        for face_id in sorted(degenerate_face_ids)
+    )
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
         scope_complete=True,
@@ -372,6 +509,7 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         snapshot_id=scope.snapshot_id,
         page_id=scope.page_id,
         decision_scope_id=scope.decision_scope_id,
+        abstained_faces=abstained,
     )
 
 
@@ -410,6 +548,7 @@ __all__ = [
     "SOURCE_ROOM_FACE_SCOPE_RESOLVED",
     "SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE",
     "SourceRoomFaceAuthority",
+    "SourceRoomFaceAbstention",
     "SourceRoomFaceRecord",
     "SourceRoomFaceScopeResult",
     "SourceRoomFaceSelector",

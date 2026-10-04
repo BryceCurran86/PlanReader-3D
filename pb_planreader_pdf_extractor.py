@@ -3171,9 +3171,9 @@ class GenericPlanReaderExtractor:
                     "reason_codes": ["source_plan_opening_callouts_resolved"],
                     "openings": [item.to_dict() for item in source_callouts],
                 }
-                # Source callouts are measurement/type observations only.
-                # They cannot enter quantity coverage until bound to an
-                # independently proven physical opening identity.
+                _coverage_quantities.extend(
+                    item.quantity_evidence for item in source_callouts
+                )
                 self.extraction_status["source_plan_opening_callouts"] = (
                     "corroborated"
                 )
@@ -3451,29 +3451,43 @@ class GenericPlanReaderExtractor:
             ]
             from pb_physical_wall_candidate_authority import (
                 MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS,
+                PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED,
                 PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED,
+                WallPageFrameUnresolved,
                 filtered_wall_topology_source_segment_count,
+                native_wall_scope_page_extent,
             )
             from pb_vector_geometry_v130 import extract_native_page
 
-            physical_net_complexity_blocked = False
+            physical_net_preflight_reason = None
             for page_index in physical_net_pages:
                 source_page = doc[page_index]
+                try:
+                    page_width, page_height = native_wall_scope_page_extent(
+                        source_page
+                    )
+                except WallPageFrameUnresolved:
+                    physical_net_preflight_reason = (
+                        PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED
+                    )
+                    break
                 native_page = extract_native_page(source_page)
                 topology_segment_count = filtered_wall_topology_source_segment_count(
                     native_page.get("segments") or (),
-                    page_width=float(source_page.rect.width),
-                    page_height=float(source_page.rect.height),
+                    page_width=page_width,
+                    page_height=page_height,
                 )
                 if topology_segment_count > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
-                    physical_net_complexity_blocked = True
+                    physical_net_preflight_reason = (
+                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                    )
                     break
 
-            if physical_net_complexity_blocked:
+            if physical_net_preflight_reason is not None:
                 self.physical_net_wall_live = {
                     "status": "abstained",
                     "reason_codes": [
-                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                        physical_net_preflight_reason
                     ],
                     "quantity_m2": None,
                     "source_pages": [],
@@ -3484,7 +3498,7 @@ class GenericPlanReaderExtractor:
                 self.canonical_walls_live = {
                     "status": "abstained",
                     "reason_codes": [
-                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                        physical_net_preflight_reason
                     ],
                     "source_pages": [],
                     "unresolved_wall_candidate_ids": [],
@@ -3493,35 +3507,35 @@ class GenericPlanReaderExtractor:
                 self.canonical_openings_live = {
                     "status": "abstained",
                     "reason_codes": [
-                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                        physical_net_preflight_reason
                     ],
                     "openings": [],
                 }
                 self.canonical_doors_live = {
                     "status": "abstained",
                     "reason_codes": [
-                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                        physical_net_preflight_reason
                     ],
                     "doors": [],
                 }
                 self.canonical_windows_live = {
                     "status": "abstained",
                     "reason_codes": [
-                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                        physical_net_preflight_reason
                     ],
                     "windows": [],
                 }
                 self.canonical_rooms_live = {
                     "status": "abstained",
                     "reason_codes": [
-                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                        physical_net_preflight_reason
                     ],
                     "rooms": [],
                 }
                 self.canonical_floors_live = {
                     "status": "abstained",
                     "reason_codes": [
-                        PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED
+                        physical_net_preflight_reason
                     ],
                     "source_pages": [],
                     "floors": [],
@@ -3539,6 +3553,16 @@ class GenericPlanReaderExtractor:
                 _wall_quantity = getattr(getattr(physical_wall_result, "publication", None), "quantity_evidence", None)
                 if _wall_quantity is not None:
                     _coverage_quantities.append(_wall_quantity)
+                _coverage_quantities.extend(
+                    getattr(physical_wall_result, "opening_quantity_evidence", ())
+                )
+                _coverage_quantities.extend(
+                    getattr(
+                        physical_wall_result,
+                        "opening_count_quantity_evidence",
+                        (),
+                    )
+                )
                 canonical_wall_objects = [
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls

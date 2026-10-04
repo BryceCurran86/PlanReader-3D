@@ -996,6 +996,134 @@ def _try_physical_net_wall_rows(
     }
     workspace_coverage[int(workspace_id)] = current_coverage
 
+    opening_rows_by_workspace = getattr(
+        app, "_live_opening_takeoff_rows_by_workspace", None
+    )
+    if not isinstance(opening_rows_by_workspace, dict):
+        opening_rows_by_workspace = {}
+        app._live_opening_takeoff_rows_by_workspace = opening_rows_by_workspace
+    opening_rows_by_workspace[int(workspace_id)] = []
+    seen_opening_quantity_ids: set[str] = set()
+
+    def opening_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
+        from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+        if type(claim) is not LivePhysicalNetWallClaim:
+            return []
+
+        openings = {
+            opening.canonical_opening_id: opening
+            for opening in claim.canonical_openings
+            if opening.canonical_opening_id
+        }
+        quantities = (
+            *getattr(claim, "opening_quantity_evidence", ()),
+            *getattr(claim, "opening_count_quantity_evidence", ()),
+        )
+        rows: List[Tuple[Any, ...]] = []
+        for quantity in quantities:
+            if (
+                quantity.quantity_id in seen_opening_quantity_ids
+                or quantity.abstained
+                or quantity.value is None
+                or str(quantity.status or "").strip().lower()
+                not in {"firm", "corroborated"}
+                or not _is_finite_number(quantity.value)
+                or float(quantity.value) <= 0.0
+            ):
+                continue
+
+            target_ids = tuple(quantity.input_entity_ids)
+            target_openings = [openings.get(entity_id) for entity_id in target_ids]
+            if (
+                not target_ids
+                or any(opening is None for opening in target_openings)
+            ):
+                continue
+            resolved_openings = [opening for opening in target_openings if opening is not None]
+            if any(
+                opening.source_sha256 != resolved_openings[0].source_sha256
+                or opening.revision_id != resolved_openings[0].revision_id
+                or opening.document_id != resolved_openings[0].document_id
+                for opening in resolved_openings[1:]
+            ):
+                continue
+
+            kinds = {
+                str(opening.opening_kind or "").strip().lower()
+                for opening in resolved_openings
+            }
+            if len(kinds) != 1 or next(iter(kinds)) not in {"door", "window"}:
+                continue
+            opening_kind = next(iter(kinds))
+            metadata = (
+                quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+            )
+
+            if quantity.family == "opening_area":
+                if metadata.get("commercial_projection_allowed") is not True:
+                    continue
+                element = str(
+                    metadata.get("element") or f"{opening_kind.title()} area"
+                )
+                location = str(
+                    metadata.get("location")
+                    or resolved_openings[0].type_mark
+                    or opening_kind.title()
+                )
+                unit = "m²"
+            elif quantity.family == "opening_count":
+                if metadata.get("schedule_corroborated") is not True:
+                    continue
+                mark = str(metadata.get("opening_mark") or "").strip().upper()
+                if not mark:
+                    continue
+                element = f"{opening_kind.title()} count"
+                location = mark
+                unit = "ea"
+            else:
+                continue
+
+            page_ids = sorted(
+                {
+                    str(opening.page_id)
+                    for opening in resolved_openings
+                    if str(opening.page_id).strip()
+                },
+                key=lambda value: (
+                    (0, int(value)) if value.isdigit() else (1, value)
+                ),
+            )
+            source_page = ", ".join(f"p{page_id}" for page_id in page_ids)
+            source_ref = (
+                f"{SOURCE_PREFIX} · opening_quantity:{quantity.quantity_id}"
+            )
+            notes = (
+                f"Source-authenticated {quantity.family}; "
+                f"formula={quantity.formula}; "
+                f"canonical_openings={','.join(target_ids)}"
+            )
+            rows.append(
+                _takeoff_row(
+                    workspace_id=workspace_id,
+                    section="Openings",
+                    element=element,
+                    location=location,
+                    substrate="Other",
+                    quantity=float(quantity.value),
+                    status="Measured",
+                    source_page=source_page or "Selected PDF pages",
+                    source_reference=source_ref,
+                    confidence="Documented",
+                    notes=notes,
+                    row_role="",
+                    unit=unit,
+                    preserve_quantity=True,
+                )
+            )
+            seen_opening_quantity_ids.add(quantity.quantity_id)
+        return rows
+
     def record_coverage(claim: Any, row: Optional[Tuple[Any, ...]] = None) -> None:
         from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 
@@ -1006,19 +1134,42 @@ def _try_physical_net_wall_rows(
             from pb_takeoff_output_authority import TakeoffOutputRow
 
             quantity = claim.publication.quantity_evidence
-            output = ()
+            quantities = [
+                item
+                for item in (
+                    quantity,
+                    *getattr(claim, "opening_quantity_evidence", ()),
+                    *getattr(claim, "opening_count_quantity_evidence", ()),
+                )
+                if item is not None
+            ]
+            output_rows = []
             if row is not None:
                 named = dict(zip(TAKEOFF_ROW_FIELDS, row))
-                output = (TakeoffOutputRow(
+                output_rows.append(TakeoffOutputRow(
                     quantity_id=claim.quantity_id, description=named["element"],
                     value=named["quantity"], unit=named["unit"],
                     source_page=named["source_page"], is_publishable=False,
-                ),)
+                ))
+            for opening_quantity in (
+                *getattr(claim, "opening_quantity_evidence", ()),
+                *getattr(claim, "opening_count_quantity_evidence", ()),
+            ):
+                output_rows.append(
+                    TakeoffOutputRow(
+                        quantity_id=opening_quantity.quantity_id,
+                        description=opening_quantity.semantic_key,
+                        value=float(opening_quantity.value),
+                        unit=opening_quantity.unit,
+                        source_page="Selected PDF pages",
+                        is_publishable=False,
+                    )
+                )
             summaries, family_gaps = collect_live_canonical_coverage(
                 objects=(*claim.canonical_walls, *claim.canonical_openings,
                          *claim.canonical_rooms, *claim.canonical_floors),
-                quantities=(quantity,) if quantity is not None else (),
-                output_rows=output,
+                quantities=tuple(quantities),
+                output_rows=tuple(output_rows),
                 registry_run_scope=f"customer_workspace:{int(workspace_id)}",
             )
             current_coverage["summaries"].extend(summaries)
@@ -1081,7 +1232,33 @@ def _try_physical_net_wall_rows(
         try:
             from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
-            claim = collect_live_physical_net_wall_claim(group["path"], pages=tuple(sorted(group["page_indices"])))
+            claim_pages = tuple(sorted(group["page_indices"]))
+            claim_kwargs: Dict[str, Any] = {"pages": claim_pages}
+            # Physical topology belongs only to positively source-classified
+            # floor-plan sheets. Other positively titled drawing sheets remain
+            # available as cross-sheet evidence, while unproven pages are never
+            # removed from topology scope.
+            try:
+                from pb_source_floor_plan_page_scope import (
+                    source_floor_plan_topology_scope,
+                )
+
+                page_scope = source_floor_plan_topology_scope(
+                    group["path"], claim_pages
+                )
+            except Exception:
+                page_scope = None
+            if page_scope is not None:
+                source_report["page_scope"] = page_scope.to_dict()
+                topology_pages = page_scope.topology_page_indices()
+                if topology_pages is not None:
+                    claim_kwargs["topology_pages"] = topology_pages
+            claim = collect_live_physical_net_wall_claim(
+                group["path"], **claim_kwargs
+            )
+            opening_rows_by_workspace[int(workspace_id)].extend(
+                opening_rows_for_claim(claim)
+            )
             status_val = getattr(claim.status, "value", str(claim.status))
             source_report.update(status=status_val, quantity_id=claim.quantity_id,
                                  reason_codes=list(getattr(claim, "reason_codes", ())))
@@ -1620,7 +1797,18 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     facade_rows, facades = _build_facade_rows(app, int(workspace_id), [dict(p) for p in pages])
     partition_rows, partitions = _build_internal_partition_rows(app, int(workspace_id), [dict(p) for p in pages], footprint)
     finish_rows, finishes = _build_bound_wall_finish_rows(app, int(workspace_id), [dict(p) for p in pages])
-    all_auto_rows = unit_rows + facade_rows + partition_rows + finish_rows
+    opening_rows = list(
+        getattr(app, "_live_opening_takeoff_rows_by_workspace", {}).get(
+            int(workspace_id), ()
+        )
+    )
+    all_auto_rows = (
+        unit_rows
+        + facade_rows
+        + opening_rows
+        + partition_rows
+        + finish_rows
+    )
 
     # AG-08: Collect identity-proven semantic conflicts from live runtime
     # evidence and annotate only the affected canonical takeoff rows. No
@@ -1651,6 +1839,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "version": VERSION, "analysed_at": app.now_stamp(), "selected_pages": len(pages),
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
             "partitions": partitions, "finishes": finishes,
+            "opening_takeoff_rows": len(opening_rows),
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "coverage_lifecycle": coverage_lifecycle,
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,

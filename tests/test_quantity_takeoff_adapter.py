@@ -304,6 +304,79 @@ def test_projection_fingerprint_binds_quantity_source_revision_and_authority() -
     )
 
 
+def test_projection_fingerprint_is_invariant_to_set_like_provenance_order() -> None:
+    q_forward = quantity(
+        input_entity_ids=("entity-1", "entity-2"),
+        evidence_ids=("ev-1", "ev-2"),
+    )
+    q_reverse = quantity(
+        input_entity_ids=("entity-2", "entity-1"),
+        evidence_ids=("ev-2", "ev-1"),
+    )
+    trace_forward = source_trace(
+        evidence_ids=("ev-1", "ev-2"),
+        canonical_entity_ids=("entity-1", "entity-2"),
+    )
+    trace_reverse = source_trace(
+        evidence_ids=("ev-2", "ev-1"),
+        canonical_entity_ids=("entity-2", "entity-1"),
+    )
+    authority_forward = figured(figured_dimension_ids=("dim-1", "dim-2"))
+    authority_reverse = figured(figured_dimension_ids=("dim-2", "dim-1"))
+
+    forward = adapter.compute_commercial_projection_fingerprint(
+        q_forward, trace=trace_forward, authority=authority_forward
+    )
+    reverse = adapter.compute_commercial_projection_fingerprint(
+        q_reverse, trace=trace_reverse, authority=authority_reverse
+    )
+    assert forward == reverse
+    assert trace_reverse.evidence_ids == ("ev-1", "ev-2")
+    assert trace_reverse.canonical_entity_ids == ("entity-1", "entity-2")
+    assert authority_reverse.figured_dimension_ids == ("dim-1", "dim-2")
+
+
+def test_projection_fingerprint_ignores_diagnostic_timestamps_but_keeps_audit_notes() -> None:
+    base_metadata = dict(quantity().metadata)
+    q1 = quantity(metadata={**base_metadata, "generated_at": "2026-01-01T00:00:00Z"})
+    q2 = quantity(metadata={**base_metadata, "generated_at": "2026-02-01T00:00:00Z"})
+    t1 = source_trace(metadata={"runtime_timestamp": "first"})
+    t2 = source_trace(metadata={"runtime_timestamp": "second"})
+    a1 = figured(metadata={"created_at": "first"})
+    a2 = figured(metadata={"created_at": "second"})
+
+    fp1 = adapter.compute_commercial_projection_fingerprint(q1, trace=t1, authority=a1)
+    fp2 = adapter.compute_commercial_projection_fingerprint(q2, trace=t2, authority=a2)
+    assert fp1 == fp2
+
+    row1 = adapter.quantity_evidence_to_takeoff_output_row(q1, trace=t1, authority=a1)
+    row2 = adapter.quantity_evidence_to_takeoff_output_row(q2, trace=t2, authority=a2)
+    assert row1 is not None and row2 is not None
+    assert row1["commercial_projection_fingerprint"] == row2["commercial_projection_fingerprint"]
+    assert row1["notes"] != row2["notes"]
+
+
+def test_projection_fingerprint_still_binds_customer_fields_and_distinct_instances() -> None:
+    base_metadata = dict(quantity().metadata)
+    q_base = quantity(metadata=base_metadata)
+    q_section = quantity(metadata={**base_metadata, "section": "External"})
+    q_other_entity = quantity(
+        input_entity_ids=("entity-2",),
+        metadata=base_metadata,
+    )
+
+    base_fp = adapter.compute_commercial_projection_fingerprint(
+        q_base, trace=source_trace(), authority=figured()
+    )
+    assert base_fp != adapter.compute_commercial_projection_fingerprint(
+        q_section, trace=source_trace(), authority=figured()
+    )
+    assert base_fp != adapter.compute_commercial_projection_fingerprint(
+        q_other_entity,
+        trace=source_trace(canonical_entity_ids=("entity-2",)),
+        authority=figured(),
+    )
+
 def test_existing_commercial_gate_wrapper_delegates_without_authority_replacement() -> None:
     row = adapter.quantity_evidence_to_takeoff_output_row(
         quantity(), trace=source_trace(), authority=figured()

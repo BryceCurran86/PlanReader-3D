@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import fitz
 
 from pb_physical_opening_authority import PhysicalOpeningAuthority
@@ -68,3 +70,60 @@ def test_visible_candidate_discovery_is_memoized_per_source_page(monkeypatch) ->
 
     assert len(published.visible_observation_ids) == 6
     assert calls["count"] == 1
+
+
+class _NoContainsTuple(tuple):
+    def __contains__(self, _item):
+        raise AssertionError(
+            "candidate membership must use the producer-owned page index"
+        )
+
+
+def test_visible_candidate_membership_lookups_do_not_rescan_candidate_tuples(
+    monkeypatch,
+) -> None:
+    """Existence/disposition preserve semantics without repeated membership scans."""
+
+    source = SourceVisibilityProducer(
+        producer_method="candidate-membership-index-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="candidate-membership-index",
+        source_bytes=_pdf(),
+        source_locator="memory://candidate-membership-index.pdf",
+    )
+    physical = PhysicalOpeningAuthority(source.authority())
+
+    original = PhysicalOpeningAuthority._visible_all_structural_candidates
+
+    def guarded(seed, records):
+        candidates = original(seed, records)
+        return tuple(
+            replace(
+                candidate,
+                source_observation_ids=_NoContainsTuple(
+                    candidate.source_observation_ids
+                ),
+            )
+            for candidate in candidates
+        )
+
+    monkeypatch.setattr(
+        PhysicalOpeningAuthority,
+        "_visible_all_structural_candidates",
+        staticmethod(guarded),
+    )
+
+    for observation_id in published.visible_observation_ids:
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        existence = physical.prove_existence(selector)
+        disposition = physical.classify_disposition(selector)
+        assert existence is not None
+        assert disposition is not None

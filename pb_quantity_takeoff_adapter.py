@@ -114,6 +114,12 @@ class CommercialTakeoffSourceTrace:
             raise CommercialTakeoffConflictError("source trace contains duplicate evidence_ids")
         if len(set(self.canonical_entity_ids)) != len(self.canonical_entity_ids):
             raise CommercialTakeoffConflictError("source trace contains duplicate canonical_entity_ids")
+        object.__setattr__(self, "evidence_ids", tuple(sorted(self.evidence_ids)))
+        object.__setattr__(
+            self,
+            "canonical_entity_ids",
+            tuple(sorted(self.canonical_entity_ids)),
+        )
 
         if self.source_bbox is not None:
             if len(self.source_bbox) != 4:
@@ -158,8 +164,16 @@ class CommercialMeasurementAuthority:
 
         if len(set(self.figured_dimension_ids)) != len(self.figured_dimension_ids):
             raise CommercialTakeoffConflictError("duplicate figured_dimension_ids are not authoritative")
-        if len(set(self.scale_conflicts)) != len(self.scale_conflicts):
-            object.__setattr__(self, "scale_conflicts", tuple(dict.fromkeys(self.scale_conflicts)))
+        object.__setattr__(
+            self,
+            "figured_dimension_ids",
+            tuple(sorted(self.figured_dimension_ids)),
+        )
+        object.__setattr__(
+            self,
+            "scale_conflicts",
+            tuple(sorted(set(self.scale_conflicts))),
+        )
 
         if method == "figured_dimension" and not self.figured_dimension_ids:
             raise MissingCommercialAuthorityError(
@@ -269,10 +283,15 @@ def _projection_provenance(
     trace: CommercialTakeoffSourceTrace,
     authority: CommercialMeasurementAuthority,
 ) -> dict[str, Any]:
+    quantity_payload = quantity.to_dict()
+    quantity_payload["input_entity_ids"] = sorted(quantity.input_entity_ids)
+    quantity_payload["evidence_ids"] = sorted(quantity.evidence_ids)
+    quantity_payload["blocking_reasons"] = sorted(quantity.blocking_reasons)
+    quantity_payload["reason_codes"] = sorted(quantity.reason_codes)
     return {
         "adapter": "commercial_takeoff",
         "adapter_version": COMMERCIAL_TAKEOFF_ADAPTER_VERSION,
-        "quantity": quantity.to_dict(),
+        "quantity": quantity_payload,
         "source_trace": {
             "workspace_id": trace.workspace_id,
             "project_id": trace.project_id,
@@ -298,6 +317,71 @@ def _projection_provenance(
     }
 
 
+def _stable_projection_fingerprint_payload(
+    quantity: QuantityEvidence,
+    trace: CommercialTakeoffSourceTrace,
+    authority: CommercialMeasurementAuthority,
+) -> dict[str, Any]:
+    """Identity payload excluding diagnostic metadata and runtime timestamps.
+
+    Full metadata remains in ``commercial_projection_provenance`` and ``notes``
+    for audit. The fingerprint binds only fields that determine the production
+    quantity/customer row plus exact source and measurement authority.
+    """
+    qmeta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    element = _clean(qmeta.get("element") or qmeta.get("description") or quantity.semantic_key)
+    return {
+        "adapter": "commercial_takeoff",
+        "adapter_version": COMMERCIAL_TAKEOFF_ADAPTER_VERSION,
+        "quantity": {
+            "quantity_id": quantity.quantity_id,
+            "family": quantity.family,
+            "semantic_key": quantity.semantic_key,
+            "value": quantity.value,
+            "unit": quantity.unit,
+            "input_entity_ids": sorted(quantity.input_entity_ids),
+            "formula": quantity.formula,
+            "formula_version": quantity.formula_version,
+            "evidence_ids": sorted(quantity.evidence_ids),
+            "authority": quantity.authority,
+            "status": quantity.status,
+            "confidence": float(quantity.confidence),
+            "abstained": bool(quantity.abstained),
+            "blocking_reasons": sorted(quantity.blocking_reasons),
+            "reason_codes": sorted(quantity.reason_codes),
+            "schema_version": quantity.schema_version,
+        },
+        "customer_fields": {
+            "section": _clean(qmeta.get("section")),
+            "element": element,
+            "location": _clean(qmeta.get("location")),
+            "substrate": _clean(qmeta.get("substrate")),
+            "finish_system": _clean(qmeta.get("finish_system")),
+            "inclusion_status": _clean(qmeta.get("inclusion_status") or "INCLUSION"),
+            "row_role": _clean(qmeta.get("row_role") or "work"),
+        },
+        "source_trace": {
+            "workspace_id": trace.workspace_id,
+            "project_id": trace.project_id,
+            "document_id": trace.document_id,
+            "source_sha256": trace.source_sha256,
+            "source_page": trace.source_page,
+            "viewport_id": trace.viewport_id,
+            "revision_id": trace.revision_id,
+            "current_revision_id": trace.current_revision_id,
+            "evidence_ids": sorted(trace.evidence_ids),
+            "canonical_entity_ids": sorted(trace.canonical_entity_ids),
+            "source_bbox": list(trace.source_bbox) if trace.source_bbox is not None else None,
+        },
+        "measurement_authority": {
+            "method": authority.method,
+            "figured_dimension_ids": sorted(authority.figured_dimension_ids),
+            "resolved_scale_id": authority.resolved_scale_id,
+            "scale_status": authority.scale_status,
+            "scale_conflicts": sorted(authority.scale_conflicts),
+        },
+    }
+
 def compute_commercial_projection_fingerprint(
     quantity: QuantityEvidence,
     *,
@@ -305,7 +389,7 @@ def compute_commercial_projection_fingerprint(
     authority: CommercialMeasurementAuthority,
 ) -> str:
     """Content-bind quantity, source identity, revision and measurement authority."""
-    payload = _projection_provenance(quantity, trace, authority)
+    payload = _stable_projection_fingerprint_payload(quantity, trace, authority)
     return hashlib.sha256(canonical_contract_json(payload).encode("utf-8")).hexdigest()
 
 
@@ -333,7 +417,11 @@ def quantity_evidence_to_takeoff_output_row(
 
     _validate_quantity_trace(quantity, trace, authority)
     provenance = _projection_provenance(quantity, trace, authority)
-    fingerprint = hashlib.sha256(canonical_contract_json(provenance).encode("utf-8")).hexdigest()
+    fingerprint = compute_commercial_projection_fingerprint(
+        quantity,
+        trace=trace,
+        authority=authority,
+    )
 
     qmeta = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     element = _clean(qmeta.get("element") or qmeta.get("description") or quantity.semantic_key)

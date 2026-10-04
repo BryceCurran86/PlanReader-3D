@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fitz
+import pb_physical_opening_authority as opening_module
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import (
@@ -147,3 +148,84 @@ def test_window_jamb_pair_without_wall_gap_does_not_mint_opening() -> None:
         )
     )
     assert _resolved_record_ids(payload) == set()
+
+
+
+def test_dense_unrelated_segments_do_not_restore_gap_times_all_segment_scans(
+    monkeypatch,
+) -> None:
+    base = (
+        ((20.0, 100.0), (250.0, 100.0)),
+        ((290.0, 100.0), (650.0, 100.0)),
+        ((250.0, 100.0), (250.0, 140.0)),
+        ((290.0, 100.0), (290.0, 140.0)),
+    )
+    noise = tuple(
+        (
+            (
+                20.0 + float(index) * 0.8,
+                180.0 + float(index % 20) * 3.0,
+            ),
+            (
+                20.0 + float(index) * 0.8,
+                182.0 + float(index % 20) * 3.0,
+            ),
+        )
+        for index in range(720)
+    )
+    payload = _pdf((*base, *noise))
+
+    source = SourceVisibilityProducer(
+        producer_method="generic-path-dense-noise-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="generic-path-dense-noise",
+        source_bytes=payload,
+        source_locator="memory://generic-path-dense-noise.pdf",
+    )
+    physical = PhysicalOpeningAuthority(source.authority())
+
+    original_angle = opening_module.LegacyPlanSegment.angle_deg
+    calls = 0
+
+    def counted_angle(self):
+        nonlocal calls
+        calls += 1
+        return original_angle.fget(self)
+
+    monkeypatch.setattr(
+        opening_module.LegacyPlanSegment,
+        "angle_deg",
+        property(counted_angle),
+    )
+
+    def selector(observation_id: str) -> ObservationSelector:
+        return ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+
+    # First proof materializes the producer-owned page candidate index even if
+    # this particular observation is unrelated to the opening.
+    physical.prove_existence(selector(published.visible_observation_ids[0]))
+    candidates = next(iter(physical._visible_candidate_cache.values()))
+    assert len(candidates) == 1
+    result = physical.prove_existence(
+        selector(candidates[0].source_observation_ids[0])
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.proposition == PHYSICAL_OPENING_EXISTS
+    assert result.existence_record is not None
+    assert (
+        result.existence_record.structural_pattern
+        == GAP_CORROBORATED_WINDOW_JAMB_PAIR
+    )
+    # A brute-force per-gap scan evaluates perpendicularity for every visible
+    # segment on both gap endpoints. The indexed path should stay well below
+    # that 2 * noise-size floor while preserving the exact opening result.
+    assert calls < len(noise) * 2

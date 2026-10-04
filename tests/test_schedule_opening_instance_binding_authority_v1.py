@@ -147,6 +147,36 @@ def test_public_selector_never_accepts_evidence_shaped_parameters() -> None:
     assert params == {"self", "opening_selector", "decision_scope_id"}
 
 
+def test_schedule_binding_reuses_source_owned_opening_authority_cache(
+    monkeypatch,
+) -> None:
+    payload = _tag_pdf()
+    src = SourceVisibilityProducer(
+        producer_method="sched-bind-cache-test",
+        producer_version="1.0",
+    )
+    published = _ingest(src, payload, "sched-cache-reuse")
+    opening_selector = _opening_selector(published, src.authority())
+
+    cached = src.physical_opening_authority()
+    assert cached is src.physical_opening_authority()
+
+    def forbidden(cls, source_visibility_producer):
+        raise AssertionError(
+            "schedule binding must reuse SourceVisibilityProducer opening cache"
+        )
+
+    monkeypatch.setattr(
+        PhysicalOpeningAuthority,
+        "from_source_visibility_producer",
+        classmethod(forbidden),
+    )
+
+    result = _bind(src, opening_selector)
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+
+
 def test_real_binding_resolves_via_contained_tag_and_matching_row() -> None:
     payload = _tag_pdf()
     src = SourceVisibilityProducer(producer_method="sched-bind-test", producer_version="1.0")
@@ -409,7 +439,7 @@ def test_attack_d_unrelated_foreign_schedule_cannot_be_borrowed() -> None:
     assert BINDING_NO_MATCHING_ROW in result.reason_codes
 
 
-def test_no_matching_schedule_row_abstains() -> None:
+def test_no_matching_schedule_row_abstains_but_preserves_authenticated_plan_tag() -> None:
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W9", "800", "2000")))
     src = SourceVisibilityProducer(producer_method="sched-bind-test", producer_version="1.0")
     published = _ingest(src, payload, "sched-norow")
@@ -417,6 +447,9 @@ def test_no_matching_schedule_row_abstains() -> None:
     result = _bind(src, opening_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert BINDING_NO_MATCHING_ROW in result.reason_codes
+    assert result.record is None
+    assert result.authenticated_tag_mark == "W1"
+    assert result.authenticated_tag_observation_id
 
 
 def test_attack_f_five_physical_instances_sharing_one_tag_get_five_independent_bindings() -> None:

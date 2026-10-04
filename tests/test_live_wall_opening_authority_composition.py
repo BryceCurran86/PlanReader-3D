@@ -8,6 +8,7 @@ from pb_live_wall_opening_authority_composition import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_universe_completeness_authority import OpeningUniverseSelector
+from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -78,6 +79,33 @@ def _ingest(data: bytes, document_id: str):
         source_locator=f"memory://{document_id}.pdf",
     )
     return source, published
+
+
+def test_composer_reuses_wall_producer_opening_authority_cache(monkeypatch) -> None:
+    source, published = _ingest(_host_fixture_pdf(), "host-composition-cache-reuse")
+
+    original = PhysicalOpeningAuthority.from_source_visibility_producer
+    constructions = 0
+
+    def counted(cls, source_visibility_producer):
+        nonlocal constructions
+        constructions += 1
+        return original(source_visibility_producer)
+
+    monkeypatch.setattr(
+        PhysicalOpeningAuthority,
+        "from_source_visibility_producer",
+        classmethod(counted),
+    )
+
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+
+    assert composition.physical_opening_authority is not None
+    assert constructions == 1
 
 
 def test_composer_resolves_source_owned_opening_host_without_caller_geometry() -> None:

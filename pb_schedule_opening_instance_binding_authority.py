@@ -98,6 +98,9 @@ class ScheduleOpeningInstanceBindingRecord:
     # reconciliation can never treat the default as evidence.
     schedule_row_count: int | None = None
     schedule_row_count_explicit: bool = False
+    # Physical meaning is parser-owned from explicit schedule headings only.
+    schedule_row_dimension_basis: str = ""
+    schedule_row_basis_source: str = ""
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -106,6 +109,11 @@ class ScheduleOpeningInstanceBindingResult:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     record: ScheduleOpeningInstanceBindingRecord | None = None
+    # A uniquely source-authenticated plan tag is established before schedule
+    # lookup. Preserve that independent evidence even when no schedule row
+    # exists; it is not itself schedule authority.
+    authenticated_tag_observation_id: str | None = None
+    authenticated_tag_mark: str | None = None
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -697,9 +705,7 @@ class ScheduleOpeningInstanceBindingProducer:
 
         visibility = self._source_visibility_producer.authority()
         text_integrity = self._source_visibility_producer.text_integrity_authority()
-        physical = PhysicalOpeningAuthority.from_source_visibility_producer(
-            self._source_visibility_producer
-        )
+        physical = self._source_visibility_producer.physical_opening_authority()
 
         existence = physical.prove_existence(opening_selector)
         opening = existence.existence_record
@@ -917,17 +923,23 @@ class ScheduleOpeningInstanceBindingProducer:
         if not matching_rows:
             return self._store(
                 key,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    BINDING_NO_MATCHING_ROW,
+                ScheduleOpeningInstanceBindingResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(BINDING_NO_MATCHING_ROW,),
+                    record=None,
+                    authenticated_tag_observation_id=tag_observation_id,
+                    authenticated_tag_mark=tag_mark,
                 ),
             )
         if len(matching_rows) != 1:
             return self._store(
                 key,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    BINDING_AMBIGUOUS_ROWS,
+                ScheduleOpeningInstanceBindingResult(
+                    status=EvidenceResolutionStatus.CONFLICT,
+                    reason_codes=(BINDING_AMBIGUOUS_ROWS,),
+                    record=None,
+                    authenticated_tag_observation_id=tag_observation_id,
+                    authenticated_tag_mark=tag_mark,
                 ),
             )
 
@@ -950,6 +962,8 @@ class ScheduleOpeningInstanceBindingProducer:
             "schedule_row_height_mm": entry.height_mm,
             "schedule_row_count": entry.count if entry.count_explicit else None,
             "schedule_row_count_explicit": bool(entry.count_explicit),
+            "schedule_row_dimension_basis": str(entry.dimension_basis or ""),
+            "schedule_row_basis_source": str(entry.basis_source or ""),
         }
         record = ScheduleOpeningInstanceBindingRecord(
             record_id=stable_contract_id(
@@ -972,6 +986,8 @@ class ScheduleOpeningInstanceBindingProducer:
             schedule_row_height_mm=entry.height_mm,
             schedule_row_count=entry.count if entry.count_explicit else None,
             schedule_row_count_explicit=bool(entry.count_explicit),
+            schedule_row_dimension_basis=str(entry.dimension_basis or ""),
+            schedule_row_basis_source=str(entry.basis_source or ""),
         )
         return self._store(
             key,
@@ -979,6 +995,8 @@ class ScheduleOpeningInstanceBindingProducer:
                 status=EvidenceResolutionStatus.CORROBORATED,
                 reason_codes=(BINDING_RESOLVED,),
                 record=record,
+                authenticated_tag_observation_id=tag_observation_id,
+                authenticated_tag_mark=tag_mark,
             ),
         )
 
