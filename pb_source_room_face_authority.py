@@ -18,11 +18,17 @@ Positive publication is intentionally narrow:
 This authority establishes room-face geometry and lineage only. It does not
 establish ceiling finish, room use, metric area, wall finish, or commercial
 quantity.
+
+Every scope result also carries a SHADOW ``ownership_evaluation`` that
+classifies, per planar face, whether each face edge has a unique authenticated
+wall owner. It is descriptive metadata only: it never changes status, reason
+codes, records, abstentions or any consumer's behaviour, and a failure to
+compute it can only yield an "unavailable" evaluation.
 """
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 import math
 from types import MappingProxyType
 from typing import Iterable, Mapping
@@ -41,10 +47,27 @@ SOURCE_ROOM_FACE_DUPLICATE_EDGE = "source_room_face_duplicate_edge_ownership"
 SOURCE_ROOM_FACE_DEGENERATE = "source_room_face_tiny_or_degenerate"
 SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS = "source_room_face_component_ambiguous"
 
+# Shadow per-face boundary-ownership evaluation (descriptive; never a decision).
+OWNERSHIP_EVALUATION_NOT_EVALUATED = "not_evaluated"
+OWNERSHIP_EVALUATION_EVALUATED = "evaluated"
+OWNERSHIP_EVALUATION_UNAVAILABLE = "unavailable"
+EDGE_OWNERSHIP_COMPETING = "competing_owners"
+EDGE_OWNERSHIP_NONE = "no_owner"
+SOURCE_ROOM_FACE_EDGE_OWNER_COMPETING = "source_room_face_edge_owner_competing"
+SOURCE_ROOM_FACE_EDGE_OWNER_MISSING = "source_room_face_edge_owner_missing"
+
 _AUTHORITY_SEAL = object()
 _ABSOLUTE_DEGENERATE_AREA_PT2 = 1.0
 _TINY_RELATIVE_THRESHOLD = 0.01
 _NDIGITS = 6
+# Spatial prefilter for the shadow ownership evaluation. It is a SUPERSET
+# prefilter in front of the exact _edge_contains_edge predicate, so no result
+# depends on these values; the pad is derived from the containment tolerance.
+_OWNERSHIP_GRID_CELL_PT = 64.0
+_OWNERSHIP_GRID_PAD_PT = 8.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+_OWNERSHIP_GRID_MAX_CELLS_PER_EDGE = 256
+# Safety valve only: shadow metadata must never be able to dominate runtime.
+_OWNERSHIP_EVALUATION_MAX_EDGES = 200_000
 
 Point = tuple[float, float]
 Edge = tuple[Point, Point]
@@ -218,6 +241,77 @@ class SourceRoomFaceAbstention:
 
 
 @dataclass(frozen=True)
+class SourceRoomFaceEdgeOwnershipFinding:
+    """One planarized face edge without a unique authenticated wall owner."""
+
+    edge: Edge
+    kind: str
+    wall_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SourceRoomFaceOwnershipFinding:
+    """A planar face with at least one edge lacking a unique wall owner."""
+
+    face_id: str
+    area_page_pts2: float
+    vertex_count: int
+    reason_codes: tuple[str, ...]
+    edge_findings: tuple[SourceRoomFaceEdgeOwnershipFinding, ...]
+    competing_wall_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SourceRoomFaceOwnershipEvaluation:
+    """SHADOW per-face boundary-ownership census of one wall scope.
+
+    Mirrors, face by face, the ownership rule that fails the whole scope with
+    ``source_room_face_boundary_unresolved`` (exact edge ownership is
+    authoritative, otherwise exactly one wall edge must contain the planarized
+    face edge). It publishes nothing and is consumed by nothing: status,
+    reason codes, records and abstentions of the scope result are decided by the
+    unchanged derivation. ``degenerate_owned_face_ids`` applies the existing
+    tiny/degenerate rule to the OWNED faces only, so reviewers can see what a
+    future candidate-local abstention would leave without changing any
+    threshold.
+    """
+
+    status: str = OWNERSHIP_EVALUATION_NOT_EVALUATED
+    reason_code: str = "ownership_evaluation_not_reached"
+    scope_complete_at_evaluation: bool = False
+    owned_face_ids: tuple[str, ...] = ()
+    unresolved_faces: tuple[SourceRoomFaceOwnershipFinding, ...] = ()
+    degenerate_owned_face_ids: tuple[str, ...] = ()
+    largest_owned_face_area_pt2: float = 0.0
+    face_edge_count: int = 0
+    competing_edge_count: int = 0
+    unowned_edge_count: int = 0
+
+    @property
+    def face_count(self) -> int:
+        return len(self.owned_face_ids) + len(self.unresolved_faces)
+
+    @property
+    def unresolved_face_ids(self) -> tuple[str, ...]:
+        return tuple(finding.face_id for finding in self.unresolved_faces)
+
+    @property
+    def competing_wall_ids(self) -> tuple[str, ...]:
+        """Walls on any competing-owner edge. Stable even when the planarizer
+        attaches a doubled collinear edge to a different adjacent face."""
+        return tuple(
+            sorted({w for f in self.unresolved_faces for w in f.competing_wall_ids})
+        )
+
+    def is_face_ownership_clean(self, face_id: str) -> bool:
+        """True only for a face evaluated as fully, uniquely wall-owned."""
+        return (
+            self.status == OWNERSHIP_EVALUATION_EVALUATED
+            and str(face_id) in self.owned_face_ids
+        )
+
+
+@dataclass(frozen=True)
 class SourceRoomFaceScopeResult:
     status: EvidenceResolutionStatus
     scope_complete: bool
@@ -231,6 +325,10 @@ class SourceRoomFaceScopeResult:
     decision_scope_id: str
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
     abstained_faces: tuple[SourceRoomFaceAbstention, ...] = ()
+    ownership_evaluation: SourceRoomFaceOwnershipEvaluation = field(
+        default_factory=SourceRoomFaceOwnershipEvaluation
+    )
+
     @property
     def face_universe_complete(self) -> bool:
         """True only when no discovered face was withheld locally."""
@@ -289,7 +387,7 @@ def _blocked(scope: object, reason: str) -> SourceRoomFaceScopeResult:
     )
 
 
-def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
+def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     if (
         getattr(scope, "status", None) is not EvidenceResolutionStatus.CORROBORATED
         or not bool(getattr(scope, "scope_complete", False))
@@ -525,6 +623,245 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
     )
 
 
+def _cell_bounds(edge: Edge) -> tuple[int, int, int, int]:
+    (ax, ay), (bx, by) = edge
+    pad = _OWNERSHIP_GRID_PAD_PT
+    cell = _OWNERSHIP_GRID_CELL_PT
+    return (
+        int(math.floor((min(ax, bx) - pad) / cell)),
+        int(math.floor((max(ax, bx) + pad) / cell)),
+        int(math.floor((min(ay, by) - pad) / cell)),
+        int(math.floor((max(ay, by) + pad) / cell)),
+    )
+
+
+def _cell_count(bounds: tuple[int, int, int, int]) -> int:
+    x0, x1, y0, y1 = bounds
+    return (x1 - x0 + 1) * (y1 - y0 + 1)
+
+
+def _ownership_edge_index(
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> tuple[
+    dict[tuple[int, int], list[tuple[str, Edge]]],
+    list[tuple[str, Edge]],
+]:
+    grid: dict[tuple[int, int], list[tuple[str, Edge]]] = defaultdict(list)
+    oversized: list[tuple[str, Edge]] = []
+    for wall_id in sorted(wall_edges):
+        for edge in wall_edges[wall_id]:
+            bounds = _cell_bounds(edge)
+            if _cell_count(bounds) > _OWNERSHIP_GRID_MAX_CELLS_PER_EDGE:
+                oversized.append((wall_id, edge))
+                continue
+            x0, x1, y0, y1 = bounds
+            for cx in range(x0, x1 + 1):
+                for cy in range(y0, y1 + 1):
+                    grid[(cx, cy)].append((wall_id, edge))
+    return grid, oversized
+
+
+def _containing_wall_ids(
+    edge: Edge,
+    *,
+    grid: Mapping[tuple[int, int], list[tuple[str, Edge]]],
+    oversized: list[tuple[str, Edge]],
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> tuple[str, ...]:
+    """Every wall with an edge that wholly contains ``edge`` (sorted, distinct)."""
+    found: set[str] = set()
+    bounds = _cell_bounds(edge)
+    if _cell_count(bounds) > _OWNERSHIP_GRID_MAX_CELLS_PER_EDGE:
+        for wall_id in sorted(wall_edges):
+            if any(_edge_contains_edge(parent, edge) for parent in wall_edges[wall_id]):
+                found.add(wall_id)
+        return tuple(sorted(found))
+    for wall_id, parent in oversized:
+        if wall_id not in found and _edge_contains_edge(parent, edge):
+            found.add(wall_id)
+    x0, x1, y0, y1 = bounds
+    for cx in range(x0, x1 + 1):
+        for cy in range(y0, y1 + 1):
+            for wall_id, parent in grid.get((cx, cy), ()):
+                if wall_id not in found and _edge_contains_edge(parent, edge):
+                    found.add(wall_id)
+    return tuple(sorted(found))
+
+
+def _evaluate_face_ownership(
+    scope: object,
+    *,
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+    edge_owner: Mapping[Edge, str],
+    raw_faces: Iterable[Iterable[Iterable[float]]],
+) -> SourceRoomFaceOwnershipEvaluation:
+    """Classify every planar face's edge ownership without deciding anything.
+
+    The per-edge rule is exactly ``_unique_containing_wall_owner``: exact edge
+    ownership is authoritative; otherwise the edge must be wholly contained by
+    exactly one wall's edge. Competing owners and missing owners are reported,
+    never resolved by first/nearest/shortest.
+    """
+    grid, oversized = _ownership_edge_index(wall_edges)
+    owned_area: dict[str, float] = {}
+    unresolved: dict[str, SourceRoomFaceOwnershipFinding] = {}
+    face_edge_count = 0
+    competing_edge_count = 0
+    unowned_edge_count = 0
+
+    for raw_face in raw_faces:
+        polygon = _canonical_polygon(raw_face)
+        if not polygon:
+            continue
+        face_id = stable_contract_id(
+            "source_room_face",
+            {
+                "document_id": scope.document_id,
+                "revision_id": scope.revision_id,
+                "source_sha256": scope.source_sha256,
+                "snapshot_id": scope.snapshot_id,
+                "page_id": scope.page_id,
+                "decision_scope_id": scope.decision_scope_id,
+                "polygon": polygon,
+            },
+            digest_chars=32,
+        )
+        if face_id in owned_area or face_id in unresolved:
+            continue
+        edge_findings: list[SourceRoomFaceEdgeOwnershipFinding] = []
+        for index, first in enumerate(polygon):
+            second = polygon[(index + 1) % len(polygon)]
+            face_edge = _edge(first, second)
+            face_edge_count += 1
+            if edge_owner.get(face_edge) is not None:
+                continue
+            walls = _containing_wall_ids(
+                face_edge, grid=grid, oversized=oversized, wall_edges=wall_edges
+            )
+            if len(walls) == 1:
+                continue
+            edge_findings.append(
+                SourceRoomFaceEdgeOwnershipFinding(
+                    edge=face_edge,
+                    kind=EDGE_OWNERSHIP_COMPETING if walls else EDGE_OWNERSHIP_NONE,
+                    wall_ids=walls,
+                )
+            )
+        area = _polygon_area(polygon)
+        if not edge_findings:
+            owned_area[face_id] = area
+            continue
+        competing = [f for f in edge_findings if f.kind == EDGE_OWNERSHIP_COMPETING]
+        competing_edge_count += len(competing)
+        unowned_edge_count += len(edge_findings) - len(competing)
+        unresolved[face_id] = SourceRoomFaceOwnershipFinding(
+            face_id=face_id,
+            area_page_pts2=area,
+            vertex_count=len(polygon),
+            reason_codes=tuple(
+                sorted(
+                    {
+                        SOURCE_ROOM_FACE_EDGE_OWNER_COMPETING
+                        if f.kind == EDGE_OWNERSHIP_COMPETING
+                        else SOURCE_ROOM_FACE_EDGE_OWNER_MISSING
+                        for f in edge_findings
+                    }
+                )
+            ),
+            edge_findings=tuple(edge_findings),
+            competing_wall_ids=tuple(
+                sorted({wall_id for f in competing for wall_id in f.wall_ids})
+            ),
+        )
+
+    largest = max(owned_area.values(), default=0.0)
+    degenerate = tuple(
+        sorted(
+            face_id
+            for face_id, area in owned_area.items()
+            if area < _ABSOLUTE_DEGENERATE_AREA_PT2
+            or (largest > 0.0 and area < _TINY_RELATIVE_THRESHOLD * largest)
+        )
+    )
+    return SourceRoomFaceOwnershipEvaluation(
+        status=OWNERSHIP_EVALUATION_EVALUATED,
+        reason_code="ownership_evaluated",
+        owned_face_ids=tuple(sorted(owned_area)),
+        unresolved_faces=tuple(unresolved[face_id] for face_id in sorted(unresolved)),
+        degenerate_owned_face_ids=degenerate,
+        largest_owned_face_area_pt2=largest,
+        face_edge_count=face_edge_count,
+        competing_edge_count=competing_edge_count,
+        unowned_edge_count=unowned_edge_count,
+    )
+
+
+def _shadow_ownership_evaluation(scope: object) -> SourceRoomFaceOwnershipEvaluation:
+    """Shadow-only: never influences the scope decision; may only be unavailable."""
+    try:
+        if getattr(scope, "status", None) is not EvidenceResolutionStatus.CORROBORATED:
+            return SourceRoomFaceOwnershipEvaluation(
+                reason_code="ownership_evaluation_scope_not_corroborated"
+            )
+        records = tuple(getattr(scope, "records", ()) or ())
+        if not records:
+            return SourceRoomFaceOwnershipEvaluation(
+                reason_code="ownership_evaluation_no_wall_records"
+            )
+        wall_edges: dict[str, tuple[Edge, ...]] = {}
+        edge_owner: dict[Edge, str] = {}
+        duplicate_edges: set[Edge] = set()
+        for record in records:
+            wall_id = _clean(getattr(record, "wall_candidate_id", ""))
+            edges = _wall_edges(record)
+            if not wall_id or not edges:
+                continue
+            wall_edges[wall_id] = edges
+            for edge in edges:
+                prior = edge_owner.get(edge)
+                if prior is not None and prior != wall_id:
+                    duplicate_edges.add(edge)
+                else:
+                    edge_owner[edge] = wall_id
+        if not wall_edges:
+            return SourceRoomFaceOwnershipEvaluation(
+                reason_code="ownership_evaluation_no_wall_edges"
+            )
+        if duplicate_edges:
+            return SourceRoomFaceOwnershipEvaluation(
+                reason_code="ownership_evaluation_duplicate_edge_ownership"
+            )
+        if sum(len(edges) for edges in wall_edges.values()) > _OWNERSHIP_EVALUATION_MAX_EDGES:
+            return SourceRoomFaceOwnershipEvaluation(
+                reason_code="ownership_evaluation_scope_too_large"
+            )
+        raw_segments = [
+            (edge[0], edge[1]) for wall_id in sorted(wall_edges) for edge in wall_edges[wall_id]
+        ]
+        raw_faces = extract_planar_faces(raw_segments, min_area=1e-6)
+        evaluation = _evaluate_face_ownership(
+            scope,
+            wall_edges=wall_edges,
+            edge_owner=edge_owner,
+            raw_faces=raw_faces,
+        )
+        return replace(
+            evaluation,
+            scope_complete_at_evaluation=bool(getattr(scope, "scope_complete", False)),
+        )
+    except Exception as exc:  # pragma: no cover - shadow metadata must never break live
+        return SourceRoomFaceOwnershipEvaluation(
+            status=OWNERSHIP_EVALUATION_UNAVAILABLE,
+            reason_code=f"ownership_evaluation_error:{type(exc).__name__}",
+        )
+
+
+def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
+    """Unchanged derivation plus the additive shadow ownership evaluation."""
+    result = _derive_scope_outcome(scope)
+    return replace(result, ownership_evaluation=_shadow_ownership_evaluation(scope))
+
+
 def build_source_room_face_authority(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
 ) -> SourceRoomFaceAuthority:
@@ -552,16 +889,26 @@ def build_source_room_face_authority(
 
 
 __all__ = [
+    "EDGE_OWNERSHIP_COMPETING",
+    "EDGE_OWNERSHIP_NONE",
+    "OWNERSHIP_EVALUATION_EVALUATED",
+    "OWNERSHIP_EVALUATION_NOT_EVALUATED",
+    "OWNERSHIP_EVALUATION_UNAVAILABLE",
     "SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED",
     "SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS",
     "SOURCE_ROOM_FACE_DEGENERATE",
     "SOURCE_ROOM_FACE_DUPLICATE_EDGE",
+    "SOURCE_ROOM_FACE_EDGE_OWNER_COMPETING",
+    "SOURCE_ROOM_FACE_EDGE_OWNER_MISSING",
     "SOURCE_ROOM_FACE_SCHEMA_VERSION",
     "SOURCE_ROOM_FACE_SCOPE_RESOLVED",
     "SOURCE_ROOM_FACE_UNIVERSE_PARTIAL",
     "SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE",
     "SourceRoomFaceAuthority",
     "SourceRoomFaceAbstention",
+    "SourceRoomFaceEdgeOwnershipFinding",
+    "SourceRoomFaceOwnershipEvaluation",
+    "SourceRoomFaceOwnershipFinding",
     "SourceRoomFaceRecord",
     "SourceRoomFaceScopeResult",
     "SourceRoomFaceSelector",
