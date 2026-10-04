@@ -25,6 +25,7 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.0.0"
 LIVE_CANONICAL_ROOM_RESOLVED = "live_canonical_room_composition_resolved"
 LIVE_CANONICAL_ROOM_PARTIAL = "live_canonical_room_composition_partial"
+LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL = "live_canonical_room_face_universe_partial"
 LIVE_CANONICAL_ROOM_UNAVAILABLE = "live_canonical_room_composition_unavailable"
 LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED = (
     "live_canonical_room_viewport_fallback_resolved"
@@ -171,6 +172,7 @@ def compose_live_canonical_rooms(
     rooms: list[LiveCanonicalRoomObject] = []
     reasons: list[str] = []
     resolved_pages: set[int] = set()
+    room_pages: set[int] = set()
     unresolved_pages: list[str] = []
     viewport_fallback_used = False
 
@@ -190,7 +192,11 @@ def compose_live_canonical_rooms(
             and result.records
         ):
             if str(page_id).isdigit():
-                resolved_pages.add(int(page_id))
+                room_pages.add(int(page_id))
+                if result.face_universe_complete:
+                    resolved_pages.add(int(page_id))
+                else:
+                    reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
             rooms.extend(
                 _room_object_from_record(
                     record,
@@ -244,6 +250,7 @@ def compose_live_canonical_rooms(
                     )
                 )
                 page_resolved = False
+                page_face_universe_complete = True
                 for wall_selector in selectors:
                     wall_scope = viewport_wall_authority.resolve_scope(wall_selector)
                     if (
@@ -282,10 +289,15 @@ def compose_live_canonical_rooms(
                         for record in room_result.records
                     )
                     page_resolved = True
+                    if not room_result.face_universe_complete:
+                        page_face_universe_complete = False
+                        reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
                     viewport_fallback_used = True
 
                 if page_resolved and str(page_id).isdigit():
-                    resolved_pages.add(int(page_id))
+                    room_pages.add(int(page_id))
+                    if page_face_universe_complete:
+                        resolved_pages.add(int(page_id))
 
     rooms.sort(key=lambda room: (room.page_id, room.canonical_room_id))
     if rooms and len(resolved_pages) == len(wall_opening_composition.page_ids):
@@ -300,7 +312,7 @@ def compose_live_canonical_rooms(
                 )
             ),
             rooms=tuple(rooms),
-            source_pages=tuple(sorted(resolved_pages)),
+            source_pages=tuple(sorted(room_pages)),
         )
     if rooms:
         return LiveCanonicalRoomComposition(
@@ -327,6 +339,7 @@ def compose_live_canonical_rooms(
 
 __all__ = [
     "LIVE_CANONICAL_ROOM_PARTIAL",
+    "LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL",
     "LIVE_CANONICAL_ROOM_RESOLVED",
     "LIVE_CANONICAL_ROOM_SCHEMA_VERSION",
     "LIVE_CANONICAL_ROOM_UNAVAILABLE",
