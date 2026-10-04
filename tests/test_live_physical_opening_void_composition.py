@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -18,7 +20,12 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes:
+def _complete_void_pdf(
+    *,
+    include_height: bool = True,
+    tag: str = "W1",
+    include_schedule: bool = True,
+) -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=760.0, height=650.0)
@@ -37,19 +44,20 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
         page.insert_text(fitz.Point(112.0, 65.0), "900")
         page.insert_text(fitz.Point(112.0, 106.0), tag)
 
-        headings = (
-            "MARK",
-            "ROWDTH-MM",
-            "ROHT-MM",
-            "ROUGH-OPENING-SILL-MM",
-            "ROUGH-OPENING-HEAD-MM",
-        )
-        values = (tag, "900", "2100" if include_height else "", "900", "3000")
-        xs = (50.0, 150.0, 250.0, 350.0, 550.0)
-        for text, x in zip(headings, xs):
-            page.insert_text(fitz.Point(x, 500.0), text)
-        for text, x in zip(values, xs):
-            page.insert_text(fitz.Point(x, 530.0), text)
+        if include_schedule:
+            headings = (
+                "MARK",
+                "ROWDTH-MM",
+                "ROHT-MM",
+                "ROUGH-OPENING-SILL-MM",
+                "ROUGH-OPENING-HEAD-MM",
+            )
+            values = (tag, "900", "2100" if include_height else "", "900", "3000")
+            xs = (50.0, 150.0, 250.0, 350.0, 550.0)
+            for text, x in zip(headings, xs):
+                page.insert_text(fitz.Point(x, 500.0), text)
+            for text, x in zip(values, xs):
+                page.insert_text(fitz.Point(x, 530.0), text)
 
         # Independent native graphic scale: 50 source points == 1000 mm.
         bar_x0 = 300.0
@@ -71,6 +79,52 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
         return bytes(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
+
+
+def test_plan_tag_survives_without_matching_schedule_row() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-plan-tag-no-schedule-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-plan-tag-no-schedule",
+        source_bytes=_complete_void_pdf(include_schedule=False),
+        source_locator="memory://live-plan-tag-no-schedule.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.type_mark == "W1"
+    assert opening.opening_kind == "window"
+    assert opening.tag_observation_id
+    assert opening.schedule_binding_record_id is None
+    assert opening.schedule_page_id is None
+
+
+def test_canonical_area_prefers_authenticated_elevation_frame_when_void_is_incomplete() -> None:
+    from pb_live_physical_opening_void_composition import _canonical_opening_area
+
+    frame = SimpleNamespace(record_id="frame-area-1", area_m2=7.2)
+    area, basis, record_id = _canonical_opening_area(
+        width_m=None,
+        height_m=None,
+        figured_label_evidence=None,
+        elevation_frame_record=frame,
+        schedule_record=None,
+        geometry_complete=False,
+    )
+    assert area == 7.2
+    assert basis == "authenticated_elevation_frame"
+    assert record_id == "frame-area-1"
 
 
 def test_canonical_opening_provenance_union_is_order_invariant_without_collapsing_ids() -> None:

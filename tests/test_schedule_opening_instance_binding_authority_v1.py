@@ -439,7 +439,7 @@ def test_attack_d_unrelated_foreign_schedule_cannot_be_borrowed() -> None:
     assert BINDING_NO_MATCHING_ROW in result.reason_codes
 
 
-def test_no_matching_schedule_row_abstains() -> None:
+def test_no_matching_schedule_row_abstains_but_preserves_authenticated_plan_tag() -> None:
     payload = _tag_pdf(schedule_rows=(("MARK", "WIDTH", "HEIGHT"), ("W9", "800", "2000")))
     src = SourceVisibilityProducer(producer_method="sched-bind-test", producer_version="1.0")
     published = _ingest(src, payload, "sched-norow")
@@ -447,6 +447,9 @@ def test_no_matching_schedule_row_abstains() -> None:
     result = _bind(src, opening_selector)
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert BINDING_NO_MATCHING_ROW in result.reason_codes
+    assert result.record is None
+    assert result.authenticated_tag_mark == "W1"
+    assert result.authenticated_tag_observation_id
 
 
 def test_attack_f_five_physical_instances_sharing_one_tag_get_five_independent_bindings() -> None:

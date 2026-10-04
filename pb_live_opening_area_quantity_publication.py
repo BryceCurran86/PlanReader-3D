@@ -28,6 +28,9 @@ LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY = (
 LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY = (
     "pb_schedule_opening_instance_binding_authority.authenticated_figured_frame_area"
 )
+LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY = (
+    "pb_opening_elevation_frame_area_authority.authenticated_elevation_frame_area"
+)
 
 
 def _opening_quantity(
@@ -87,6 +90,11 @@ def _opening_quantity(
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
         quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
+    elif basis == "authenticated_elevation_frame":
+        measurement_record_id = str(opening.figured_area_record_id or "").strip()
+        if not measurement_record_id or measurement_record_id not in evidence_ids:
+            return None
+        quantity_authority = LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY
     elif basis == "authenticated_frame_schedule":
         measurement_record_id = str(opening.schedule_binding_record_id or "").strip()
         if (
@@ -127,9 +135,13 @@ def _opening_quantity(
             "authenticated figured opening-label dimension product"
             if basis == "figured_opening_label"
             else (
-                "authenticated outer-frame schedule width * height"
-                if basis == "authenticated_frame_schedule"
-                else "authenticated physical opening width * height"
+                "authenticated figured elevation outer-frame dimension product"
+                if basis == "authenticated_elevation_frame"
+                else (
+                    "authenticated outer-frame schedule width * height"
+                    if basis == "authenticated_frame_schedule"
+                    else "authenticated physical opening width * height"
+                )
             )
         ),
         formula_version=LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION,
@@ -206,6 +218,7 @@ __all__ = [
     "LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY",
+    "LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY",
     "LIVE_OPENING_AREA_QUANTITY_RESOLVED",
     "LIVE_OPENING_AREA_QUANTITY_SCHEMA_VERSION",
     "publish_live_opening_area_quantities",
