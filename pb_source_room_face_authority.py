@@ -7,8 +7,12 @@ topologically resolved.
 
 Positive publication is intentionally narrow:
 - the physical-wall scope is CORROBORATED and complete;
-- every bounded-face edge belongs to exactly one authenticated physical wall;
-- tiny/degenerate faces fail closed;
+- every PUBLISHED bounded-face edge belongs to exactly one authenticated
+  physical wall;
+- a strict minority of faces touched by competing-owner edge spans may be
+  withheld explicitly, but a missing owner or a non-minority contaminated
+  universe still fails the whole scope;
+- tiny/degenerate faces use the same candidate-local strict-minority guard;
 - a connected component contains at least two bounded faces and at least one
   wall shared by two faces, preventing isolated boxes/title blocks from
   becoming room authority;
@@ -21,9 +25,9 @@ quantity.
 
 Every scope result also carries a SHADOW ``ownership_evaluation`` that
 classifies, per planar face, whether each face edge has a unique authenticated
-wall owner. It is descriptive metadata only: it never changes status, reason
-codes, records, abstentions or any consumer's behaviour, and a failure to
-compute it can only yield an "unavailable" evaluation.
+wall owner. The live candidate-local rule independently mirrors the same exact
+ownership predicate; the shadow remains audit metadata and a failure to compute
+it cannot alter the live decision.
 """
 from __future__ import annotations
 
@@ -150,6 +154,46 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
         if perpendicular_distance > tolerance:
             return False
     return child[0] != child[1]
+
+
+def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
+    """Return the positive-length quantized overlap of two collinear edges.
+
+    The overlap is SOURCE geometry used only to stabilize fail-closed local
+    abstention. It never selects an owner or extends either source edge.
+    """
+    (ax, ay), (bx, by) = left
+    (cx, cy), (dx, dy) = right
+    tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+    vx, vy = bx - ax, by - ay
+    length = math.hypot(vx, vy)
+    if length <= tolerance:
+        return None
+
+    for px, py in ((cx, cy), (dx, dy)):
+        perpendicular_distance = abs((px - ax) * vy - (py - ay) * vx) / length
+        if perpendicular_distance > tolerance:
+            return None
+
+    ux, uy = vx / length, vy / length
+    right_positions = (
+        (cx - ax) * ux + (cy - ay) * uy,
+        (dx - ax) * ux + (dy - ay) * uy,
+    )
+    start = max(0.0, min(right_positions))
+    end = min(length, max(right_positions))
+    if end - start <= tolerance:
+        return None
+
+    return _edge(
+        (ax + start * ux, ay + start * uy),
+        (ax + end * ux, ay + end * uy),
+    )
+
+
+def _edges_share_positive_collinear_span(left: Edge, right: Edge) -> bool:
+    """True only when two quantized edges share positive-length collinear span."""
+    return _collinear_overlap_edge(left, right) is not None
 
 
 def _unique_containing_wall_owner(
@@ -430,6 +474,11 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     face_walls: dict[str, tuple[str, ...]] = {}
     face_wall_edges: dict[str, tuple[tuple[str, Edge], ...]] = {}
     face_areas: dict[str, float] = {}
+    directly_competing_face_ids: set[str] = set()
+    competing_spans: set[Edge] = set()
+    competing_span_wall_ids: dict[Edge, set[str]] = defaultdict(set)
+    missing_owner_seen = False
+    ownership_grid, ownership_oversized = _ownership_edge_index(wall_edges)
 
     for raw_face in raw_faces:
         polygon = _canonical_polygon(raw_face)
@@ -437,18 +486,75 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             continue
         owners: list[str] = []
         owned_edges: list[tuple[str, Edge]] = []
+        face_competing = False
+        face_missing = False
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
             face_edge = _edge(first, second)
-            owner = _unique_containing_wall_owner(
+
+            # Exact source ownership stays authoritative, matching
+            # _unique_containing_wall_owner and the shadow evaluator.
+            owner = edge_owner.get(face_edge)
+            if owner is not None:
+                owners.append(owner)
+                owned_edges.append((owner, face_edge))
+                continue
+
+            containing = _containing_wall_ids(
                 face_edge,
-                edge_owner=edge_owner,
+                grid=ownership_grid,
+                oversized=ownership_oversized,
                 wall_edges=wall_edges,
             )
-            if owner is None:
-                return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
-            owners.append(owner)
-            owned_edges.append((owner, face_edge))
+            if len(containing) == 1:
+                owners.append(containing[0])
+                owned_edges.append((containing[0], face_edge))
+                continue
+            if not containing:
+                face_missing = True
+                missing_owner_seen = True
+                continue
+
+            # Multiple authenticated walls can own this same planarized span.
+            # Do not choose first/nearest/shortest. Record the competing span
+            # and all candidate owners so the abstention can be expanded to the
+            # stable geometric neighbourhood rather than whichever face the
+            # planarizer happened to attach the doubled edge to.
+            face_competing = True
+            owners.extend(containing)
+
+            # Derive the complete SOURCE overlap of the competing authenticated
+            # walls, not merely the raw face edge that exposed it. The planarizer
+            # can attach a doubled-edge spur to a different adjacent face after
+            # translation; the source-wall overlap itself is invariant.
+            source_overlap_found = False
+            for left_index, left_wall_id in enumerate(containing):
+                for right_wall_id in containing[left_index + 1 :]:
+                    for left_edge in wall_edges.get(left_wall_id, ()):
+                        if not _edge_contains_edge(left_edge, face_edge):
+                            continue
+                        for right_edge in wall_edges.get(right_wall_id, ()):
+                            if not _edge_contains_edge(right_edge, face_edge):
+                                continue
+                            overlap_edge = _collinear_overlap_edge(
+                                left_edge, right_edge
+                            )
+                            if overlap_edge is None:
+                                continue
+                            source_overlap_found = True
+                            competing_spans.add(overlap_edge)
+                            competing_span_wall_ids[overlap_edge].update(
+                                (left_wall_id, right_wall_id)
+                            )
+
+            # Defense in depth: if a future source representation proves
+            # multiple owners without exposing their parent overlap, retain the
+            # observed ambiguous face edge rather than silently shrinking the
+            # contaminated set to zero.
+            if not source_overlap_found:
+                competing_spans.add(face_edge)
+                competing_span_wall_ids[face_edge].update(containing)
+
         face_id = stable_contract_id(
             "source_room_face",
             {
@@ -466,39 +572,84 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         face_walls[face_id] = tuple(sorted(set(owners)))
         face_wall_edges[face_id] = tuple(owned_edges)
         face_areas[face_id] = _polygon_area(polygon)
+        if face_competing:
+            directly_competing_face_ids.add(face_id)
+        if face_missing:
+            # Missing ownership is not localizable to a known authenticated
+            # competing span. Preserve the legacy whole-scope fail-closed rule.
+            missing_owner_seen = True
 
-    if not polygons:
+    if not polygons or missing_owner_seen:
         return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
-    # A tiny or degenerate face is a candidate-local abstention: it is neither
-    # published nor allowed to supply topology evidence (two-sidedness) for any
-    # other face, but an ISOLATED one does not by itself make unrelated,
-    # independently authenticated faces untrustworthy. Thresholds are unchanged.
-    # Failures that genuinely invalidate shared topology (boundary ownership,
-    # duplicate edge ownership, ambiguous components, a polluted majority) still
-    # fail the whole scope.
-    largest_area = max(face_areas.values())
+    # The planarizer is not stable about WHICH adjacent face receives a doubled
+    # collinear edge. Stabilize the live decision by tainting every face whose
+    # boundary shares positive collinear span with the actual competing edge,
+    # not only the raw face that happened to carry the ambiguity this run.
+    ownership_tainted_face_ids = set(directly_competing_face_ids)
+    if competing_spans:
+        for face_id, polygon in polygons.items():
+            face_edges = tuple(
+                _edge(first, polygon[(index + 1) % len(polygon)])
+                for index, first in enumerate(polygon)
+            )
+            contaminating_wall_ids: set[str] = set()
+            for face_edge in face_edges:
+                for competing in competing_spans:
+                    if _edges_share_positive_collinear_span(face_edge, competing):
+                        contaminating_wall_ids.update(
+                            competing_span_wall_ids.get(competing, ())
+                        )
+            if contaminating_wall_ids:
+                ownership_tainted_face_ids.add(face_id)
+                face_walls[face_id] = tuple(
+                    sorted(set(face_walls[face_id]) | contaminating_wall_ids)
+                )
+
+    ownership_clean_face_ids = set(polygons) - ownership_tainted_face_ids
+    if not ownership_clean_face_ids:
+        return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+
+    # Tiny/degenerate classification is evaluated only over ownership-clean
+    # faces. An unresolved giant must never make an otherwise sound room appear
+    # tiny. This is the same rule already measured by the ownership shadow.
+    largest_area = max(face_areas[face_id] for face_id in ownership_clean_face_ids)
     degenerate_face_ids = {
         face_id
-        for face_id, area in face_areas.items()
-        if area < _ABSOLUTE_DEGENERATE_AREA_PT2
+        for face_id in ownership_clean_face_ids
+        if face_areas[face_id] < _ABSOLUTE_DEGENERATE_AREA_PT2
         or (
             largest_area > 0.0
-            and area < _TINY_RELATIVE_THRESHOLD * largest_area
+            and face_areas[face_id] < _TINY_RELATIVE_THRESHOLD * largest_area
         )
     }
-    # Isolation is sound only for an ISOLATED defect. When degenerate faces are
-    # not a strict minority of the scope, the wall-candidate pool itself is
-    # polluted by non-room linework (tile grids, hatch, fixtures, annotation)
-    # and the surviving cells carry no evidence of being rooms. Fail the whole
-    # scope exactly as before candidate-local isolation existed.
-    if degenerate_face_ids and 2 * len(degenerate_face_ids) >= len(polygons):
-        return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
+
+    # Generalized pollution guard: ALL locally withheld defects combined must
+    # remain a strict minority of the discovered face universe. Otherwise the
+    # survivors are not independently trustworthy enough to publish.
+    locally_withheld_face_ids = ownership_tainted_face_ids | degenerate_face_ids
+    if locally_withheld_face_ids and 2 * len(locally_withheld_face_ids) >= len(polygons):
+        return _blocked(
+            scope,
+            SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
+            if ownership_tainted_face_ids
+            else SOURCE_ROOM_FACE_DEGENERATE,
+        )
+
     valid_face_ids = tuple(
-        sorted(face_id for face_id in polygons if face_id not in degenerate_face_ids)
+        sorted(
+            face_id
+            for face_id in ownership_clean_face_ids
+            if face_id not in degenerate_face_ids
+        )
     )
     if not valid_face_ids:
-        return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
+        return _blocked(
+            scope,
+            SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
+            if ownership_tainted_face_ids
+            else SOURCE_ROOM_FACE_DEGENERATE,
+        )
 
     wall_faces: dict[str, set[str]] = {wall_id: set() for wall_id in wall_ids}
     wall_face_edges: dict[str, dict[Edge, set[str]]] = {
@@ -592,7 +743,11 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     abstained = tuple(
         SourceRoomFaceAbstention(
             face_id=face_id,
-            reason=SOURCE_ROOM_FACE_DEGENERATE,
+            reason=(
+                SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
+                if face_id in ownership_tainted_face_ids
+                else SOURCE_ROOM_FACE_DEGENERATE
+            ),
             document_id=scope.document_id,
             revision_id=scope.revision_id,
             source_sha256=scope.source_sha256,
@@ -603,7 +758,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             bounding_wall_ids=face_walls[face_id],
             area_page_pts2=face_areas[face_id],
         )
-        for face_id in sorted(degenerate_face_ids)
+        for face_id in sorted(locally_withheld_face_ids)
     )
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
@@ -857,7 +1012,7 @@ def _shadow_ownership_evaluation(scope: object) -> SourceRoomFaceOwnershipEvalua
 
 
 def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
-    """Unchanged derivation plus the additive shadow ownership evaluation."""
+    """Live room-face derivation plus the additive ownership audit evaluation."""
     result = _derive_scope_outcome(scope)
     return replace(result, ownership_evaluation=_shadow_ownership_evaluation(scope))
 
