@@ -235,8 +235,11 @@ def test_unresolvable_representatives_are_reported_not_hidden(adjacent_pdf):
         assert (
             "proven_opening_representative_cannot_reprove_existence" in diag.unavailable
         ) == bool(reported)
-    # The phenomenon is real for this natural layout under at least one id order.
-    assert seen_unresolved > 0
+    # Representatives are now chosen only from selectors already proven to
+    # resolve the exact existence record, so for this natural layout no proven
+    # opening's representative may itself be an ambiguous observation under ANY
+    # id order. (This used to assert the opposite while the bug existed.)
+    assert seen_unresolved == 0
 
 
 def test_clean_scope_has_no_conflict_and_is_consistent(single_pdf):
