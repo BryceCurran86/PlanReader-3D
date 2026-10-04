@@ -465,6 +465,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     face_areas: dict[str, float] = {}
     directly_competing_face_ids: set[str] = set()
     competing_spans: set[Edge] = set()
+    competing_span_wall_ids: dict[Edge, set[str]] = defaultdict(set)
     missing_owner_seen = False
     ownership_grid, ownership_oversized = _ownership_edge_index(wall_edges)
 
@@ -510,6 +511,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             # planarizer happened to attach the doubled edge to.
             face_competing = True
             competing_spans.add(face_edge)
+            competing_span_wall_ids[face_edge].update(containing)
             owners.extend(containing)
 
         face_id = stable_contract_id(
@@ -550,12 +552,18 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                 _edge(first, polygon[(index + 1) % len(polygon)])
                 for index, first in enumerate(polygon)
             )
-            if any(
-                _edges_share_positive_collinear_span(face_edge, competing)
-                for face_edge in face_edges
-                for competing in competing_spans
-            ):
+            contaminating_wall_ids: set[str] = set()
+            for face_edge in face_edges:
+                for competing in competing_spans:
+                    if _edges_share_positive_collinear_span(face_edge, competing):
+                        contaminating_wall_ids.update(
+                            competing_span_wall_ids.get(competing, ())
+                        )
+            if contaminating_wall_ids:
                 ownership_tainted_face_ids.add(face_id)
+                face_walls[face_id] = tuple(
+                    sorted(set(face_walls[face_id]) | contaminating_wall_ids)
+                )
 
     ownership_clean_face_ids = set(polygons) - ownership_tainted_face_ids
     if not ownership_clean_face_ids:
