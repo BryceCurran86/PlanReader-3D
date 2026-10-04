@@ -365,10 +365,11 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
 
     # A tiny or degenerate face is a candidate-local abstention: it is neither
     # published nor allowed to supply topology evidence (two-sidedness) for any
-    # other face, but it does not by itself make unrelated, independently
-    # authenticated faces untrustworthy. Thresholds are unchanged. Failures that
-    # genuinely invalidate shared topology (boundary ownership, duplicate edge
-    # ownership, ambiguous components) still fail the whole scope above/below.
+    # other face, but an ISOLATED one does not by itself make unrelated,
+    # independently authenticated faces untrustworthy. Thresholds are unchanged.
+    # Failures that genuinely invalidate shared topology (boundary ownership,
+    # duplicate edge ownership, ambiguous components, a polluted majority) still
+    # fail the whole scope.
     largest_area = max(face_areas.values())
     degenerate_face_ids = {
         face_id
@@ -379,6 +380,13 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
             and area < _TINY_RELATIVE_THRESHOLD * largest_area
         )
     }
+    # Isolation is sound only for an ISOLATED defect. When degenerate faces are
+    # not a strict minority of the scope, the wall-candidate pool itself is
+    # polluted by non-room linework (tile grids, hatch, fixtures, annotation)
+    # and the surviving cells carry no evidence of being rooms. Fail the whole
+    # scope exactly as before candidate-local isolation existed.
+    if degenerate_face_ids and 2 * len(degenerate_face_ids) >= len(polygons):
+        return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
     valid_face_ids = tuple(
         sorted(face_id for face_id in polygons if face_id not in degenerate_face_ids)
     )
