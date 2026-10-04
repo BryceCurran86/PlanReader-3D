@@ -61,9 +61,8 @@ _OPEN_ZONE_LABEL_MAX_LATERAL_PT = 250.0
 
 
 def _open_zone_label_bboxes(page: Any) -> List[Tuple[float, float, float, float]]:
-    try:
-        page_dict = page.get_text("dict")
-    except Exception:
+    page_dict = _page_text_dict(page)
+    if page_dict is None:
         return []
     boxes: List[Tuple[float, float, float, float]] = []
     for block in page_dict.get("blocks", []) or []:
@@ -111,11 +110,35 @@ def _edge_corroborated_by_open_zone_label(
 _PLAN_LABEL_MARGIN_ABOVE_PT = 900.0
 _PLAN_LABEL_MARGIN_SIDE_PT = 500.0
 
+_PAGE_TEXT_DICT_CACHE_ATTR = "_pb_wall_hatch_page_text_dict"
 
-def _floor_plan_viewport_bbox(page: Any) -> Optional[Tuple[float, float, float, float]]:
+
+def _page_text_dict(page: Any) -> Optional[dict]:
+    """Return one page-owned native text dictionary for repeated read-only use."""
+
+    try:
+        cached = getattr(page, _PAGE_TEXT_DICT_CACHE_ATTR, None)
+    except Exception:
+        cached = None
+    if isinstance(cached, dict):
+        return cached
     try:
         page_dict = page.get_text("dict")
     except Exception:
+        return None
+    if not isinstance(page_dict, dict):
+        return None
+    try:
+        setattr(page, _PAGE_TEXT_DICT_CACHE_ATTR, page_dict)
+    except Exception:
+        # Cache availability is never authority; replay remains valid.
+        pass
+    return page_dict
+
+
+def _floor_plan_viewport_bbox(page: Any) -> Optional[Tuple[float, float, float, float]]:
+    page_dict = _page_text_dict(page)
+    if page_dict is None:
         return None
     for block in page_dict.get("blocks", []) or []:
         for line in block.get("lines", []) or []:

@@ -20,6 +20,7 @@ fitz = pytest.importorskip("fitz")
 from pb_hatch_detection_v160 import HatchCluster, Stroke, detect_hatch_patterns
 from pb_wall_hatch_perimeter_correction import (
     _floor_plan_viewport_bbox,
+    _open_zone_label_bboxes,
     resolve_hatch_confirmed_open_length_m,
 )
 
@@ -85,15 +86,31 @@ class _FakePage:
 
     def __init__(self, lines: list) -> None:
         self._lines = lines
+        self.get_text_calls = 0
 
     def get_text(self, mode: str):
         assert mode == "dict"
+        self.get_text_calls += 1
         return {
             "blocks": [
                 {"lines": [{"bbox": bbox, "spans": [{"text": text}]}]}
                 for text, bbox in self._lines
             ]
         }
+
+
+def test_page_text_dict_is_reused_across_viewport_and_label_queries() -> None:
+    page = _FakePage(
+        lines=[
+            ("GROUND FLOOR PLAN", (400.0, 1020.0, 600.0, 1035.0)),
+            ("VERANDAH", (520.0, 1020.0, 590.0, 1035.0)),
+        ]
+    )
+
+    assert _floor_plan_viewport_bbox(page) is not None
+    assert _open_zone_label_bboxes(page)
+    assert _floor_plan_viewport_bbox(page) is not None
+    assert page.get_text_calls == 1
 
 
 def _synthetic_rectangle_clusters(west_x=100.0, east_x=1000.0, y0=100.0, y1=1000.0):
