@@ -129,6 +129,19 @@ PHYSICAL_WALL_CANDIDATE_VIEWPORT_LINEAGE_MISMATCH = (
 PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS = (
     "physical_wall_candidate_source_primitive_ownership_ambiguous"
 )
+# Shadow-only boundary evaluation (never read by scope_complete / reason_codes).
+PHYSICAL_WALL_CANDIDATE_TOUCHES_EXCLUDED_BOUNDARY_PRIMITIVE = (
+    "physical_wall_candidate_touches_excluded_boundary_primitive"
+)
+PHYSICAL_WALL_CANDIDATE_BOUNDARY_GEOMETRY_NOT_EVALUABLE = (
+    "physical_wall_candidate_boundary_geometry_not_evaluable"
+)
+BOUNDARY_PRIMITIVE_CROSSES_SCOPE_BOUNDARY = "crosses_scope_boundary"
+BOUNDARY_PRIMITIVE_LIES_ON_SCOPE_BOUNDARY_PARTIAL = "lies_on_scope_boundary_partial"
+BOUNDARY_PRIMITIVE_INSIDE_MULTIPLE_VIEWPORTS = "inside_multiple_viewports"
+PHYSICAL_WALL_SCOPE_BOUNDARY_EVALUATION_SCHEMA_VERSION = "1.0.0"
+BOUNDARY_EVALUATION_EVALUATED = "evaluated"
+BOUNDARY_EVALUATION_UNAVAILABLE = "unavailable"
 
 TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER = (
     "trusted_equivalence_override_unknown_member"
@@ -188,6 +201,65 @@ class PhysicalWallCandidateRecord:
 
 
 @dataclass(frozen=True)
+class ExcludedBoundaryPrimitive:
+    """A structural source primitive withheld from a viewport scope's wall graph
+    because it crosses, or only partially lies on, the scope boundary."""
+
+    category: str
+    source_observation_id: str
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+@dataclass(frozen=True)
+class PhysicalWallScopeBoundaryEvaluation:
+    """Shadow, per-candidate scope-boundary evaluation.
+
+    This is additive evidence only. It never changes ``scope_complete``,
+    ``reason_codes``, records, equivalence, or any consumer decision, and it is
+    not wall authority: a boundary-clean candidate is merely one whose source
+    geometry is not cut by, or in contact with, anything excluded at the scope
+    boundary. ``status == "unavailable"`` means NOTHING may be inferred.
+
+    A candidate is boundary-tainted when (a) the existing per-candidate boundary
+    rule flags a dangling end (page/viewport crop or unresolved bounds), or
+    (b) its geometry is within ``contact_tolerance_pt`` -- the wall graph's own
+    gap-snap tolerance, i.e. it would have connected had the primitive been in
+    the graph -- of a structural primitive excluded at the boundary.
+    """
+
+    status: str
+    reason_code: Optional[str]
+    evaluated_wall_candidate_ids: tuple[str, ...]
+    boundary_tainted_wall_candidate_ids: tuple[str, ...]
+    boundary_taint_reason_codes: tuple[tuple[str, tuple[str, ...]], ...]
+    excluded_boundary_primitives: tuple[ExcludedBoundaryPrimitive, ...]
+    authenticated_frame_edge_primitive_count: int
+    contact_tolerance_pt: float
+    schema_version: str = PHYSICAL_WALL_SCOPE_BOUNDARY_EVALUATION_SCHEMA_VERSION
+
+    @property
+    def boundary_clean_wall_candidate_count(self) -> int:
+        if self.status != BOUNDARY_EVALUATION_EVALUATED:
+            return 0
+        return len(self.evaluated_wall_candidate_ids) - len(
+            self.boundary_tainted_wall_candidate_ids
+        )
+
+    def is_boundary_clean(self, wall_candidate_id: str) -> bool:
+        """True only for an evaluated, untainted candidate of this scope."""
+        if self.status != BOUNDARY_EVALUATION_EVALUATED:
+            return False
+        key = str(wall_candidate_id)
+        return (
+            key in self.evaluated_wall_candidate_ids
+            and key not in self.boundary_tainted_wall_candidate_ids
+        )
+
+
+@dataclass(frozen=True)
 class PhysicalWallCandidateScopeResult:
     status: EvidenceResolutionStatus
     scope_complete: bool
@@ -213,6 +285,7 @@ class PhysicalWallCandidateScopeResult:
     scope_boundary_observation_ids: tuple[str, ...] = ()
     ambiguous_source_observation_ids: tuple[str, ...] = ()
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
+    boundary_evaluation: Optional[PhysicalWallScopeBoundaryEvaluation] = None
 
 
 @dataclass(frozen=True)
@@ -902,6 +975,156 @@ def _dangling_ends(wall: WallCandidate) -> list[Point]:
         (wall.centerline_pts[-1], wall.junction_types[1]),
     )
     return [point for point, junction_type in ends if junction_type == JunctionType.ENDPOINT]
+
+
+def _point_segment_distance(point: Point, start: Point, end: Point) -> float:
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length_sq = dx * dx + dy * dy
+    if length_sq <= 0.0:
+        return math.hypot(point[0] - start[0], point[1] - start[1])
+    t = ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_sq
+    t = max(0.0, min(1.0, t))
+    return math.hypot(
+        point[0] - (start[0] + t * dx), point[1] - (start[1] + t * dy)
+    )
+
+
+def _segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool:
+    def orient(p: Point, q: Point, r: Point) -> float:
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    def on_segment(p: Point, q: Point, r: Point) -> bool:
+        return (
+            min(p[0], r[0]) <= q[0] <= max(p[0], r[0])
+            and min(p[1], r[1]) <= q[1] <= max(p[1], r[1])
+        )
+
+    o1, o2 = orient(a, b, c), orient(a, b, d)
+    o3, o4 = orient(c, d, a), orient(c, d, b)
+    if (
+        0.0 not in (o1, o2, o3, o4)
+        and ((o1 > 0.0) != (o2 > 0.0))
+        and ((o3 > 0.0) != (o4 > 0.0))
+    ):
+        return True
+    return (
+        (o1 == 0.0 and on_segment(a, c, b))
+        or (o2 == 0.0 and on_segment(a, d, b))
+        or (o3 == 0.0 and on_segment(c, a, d))
+        or (o4 == 0.0 and on_segment(c, b, d))
+    )
+
+
+def _segment_segment_distance(a: Point, b: Point, c: Point, d: Point) -> float:
+    """Minimum distance between two segments; total (never raises).
+
+    Non-finite input is reported as distance 0.0 so that an unprovable contact is
+    treated conservatively as contact.
+    """
+    if not all(math.isfinite(v) for pt in (a, b, c, d) for v in pt):
+        return 0.0
+    if _segments_intersect(a, b, c, d):
+        return 0.0
+    return min(
+        _point_segment_distance(a, c, d),
+        _point_segment_distance(b, c, d),
+        _point_segment_distance(c, a, b),
+        _point_segment_distance(d, a, b),
+    )
+
+
+def _boundary_excluded_primitive(
+    segment: Mapping[str, object], category: str
+) -> ExcludedBoundaryPrimitive:
+    x1, y1, x2, y2 = _segment_geometry(segment)
+    return ExcludedBoundaryPrimitive(
+        category=category,
+        source_observation_id=str(segment.get("source_observation_id") or ""),
+        x1=x1,
+        y1=y1,
+        x2=x2,
+        y2=y2,
+    )
+
+
+def _evaluate_scope_boundary(
+    *,
+    ordered_walls: Sequence[WallCandidate],
+    wall_boundary_reasons: Mapping[str, str],
+    excluded_boundary_primitives: Sequence[ExcludedBoundaryPrimitive],
+    authenticated_frame_edge_primitive_count: int,
+    contact_tolerance_pt: float = DEFAULT_GAP_SNAP_TOLERANCE_PT,
+) -> PhysicalWallScopeBoundaryEvaluation:
+    """Classify each wall candidate of one scope as boundary-clean or tainted.
+
+    Pure and deterministic. Does not read or alter scope completeness.
+    """
+    primitives = tuple(
+        sorted(
+            excluded_boundary_primitives,
+            key=lambda row: (
+                row.category,
+                row.x1,
+                row.y1,
+                row.x2,
+                row.y2,
+                row.source_observation_id,
+            ),
+        )
+    )
+    evaluated = tuple(sorted(str(wall.candidate_id) for wall in ordered_walls))
+    taint: dict[str, tuple[str, ...]] = {}
+    for wall in ordered_walls:
+        wall_id = str(wall.candidate_id)
+        reasons: list[str] = []
+        existing = wall_boundary_reasons.get(wall_id)
+        if existing:
+            reasons.append(existing)
+        if primitives:
+            if wall.representation != "single_line":
+                # Source geometry of a paired/curved candidate is not its
+                # centerline; contact cannot be proven absent -> tainted.
+                reasons.append(
+                    PHYSICAL_WALL_CANDIDATE_BOUNDARY_GEOMETRY_NOT_EVALUABLE
+                )
+            else:
+                points = tuple(wall.centerline_pts)
+                touched = False
+                for start, end in zip(points, points[1:]):
+                    first = (float(start[0]), float(start[1]))
+                    second = (float(end[0]), float(end[1]))
+                    for primitive in primitives:
+                        if (
+                            _segment_segment_distance(
+                                first,
+                                second,
+                                (primitive.x1, primitive.y1),
+                                (primitive.x2, primitive.y2),
+                            )
+                            <= contact_tolerance_pt
+                        ):
+                            touched = True
+                            break
+                    if touched:
+                        break
+                if touched:
+                    reasons.append(
+                        PHYSICAL_WALL_CANDIDATE_TOUCHES_EXCLUDED_BOUNDARY_PRIMITIVE
+                    )
+        if reasons:
+            taint[wall_id] = tuple(dict.fromkeys(reasons))
+    return PhysicalWallScopeBoundaryEvaluation(
+        status=BOUNDARY_EVALUATION_EVALUATED,
+        reason_code=None,
+        evaluated_wall_candidate_ids=evaluated,
+        boundary_tainted_wall_candidate_ids=tuple(sorted(taint)),
+        boundary_taint_reason_codes=tuple(sorted(taint.items())),
+        excluded_boundary_primitives=primitives,
+        authenticated_frame_edge_primitive_count=int(
+            authenticated_frame_edge_primitive_count
+        ),
+        contact_tolerance_pt=float(contact_tolerance_pt),
+    )
 
 
 def _on_rect_boundary(
@@ -2200,6 +2423,8 @@ def _assemble_scope_result(
     points_per_mm: Optional[float] = None,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+    excluded_boundary_primitives: Sequence[ExcludedBoundaryPrimitive] = (),
+    authenticated_frame_edge_primitive_count: int = 0,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
     topology_segments = _filter_repeated_non_physical_drafting_primitives(
@@ -2289,6 +2514,7 @@ def _assemble_scope_result(
     )
 
     boundary_reasons: list[str] = list(pre_boundary_reasons)
+    wall_boundary_reasons: dict[str, str] = {}
     boundary_pdf = fitz.open(stream=source_bytes, filetype="pdf")
     try:
         boundary_page = boundary_pdf.load_page(int(page_id) - 1)
@@ -2314,8 +2540,31 @@ def _assemble_scope_result(
                 )
             if reason is not None:
                 boundary_reasons.append(reason)
+                wall_boundary_reasons[str(wall.candidate_id)] = reason
     finally:
         boundary_pdf.close()
+
+    # Shadow-only: never influences scope_complete or reason_codes below.
+    try:
+        boundary_evaluation = _evaluate_scope_boundary(
+            ordered_walls=ordered_walls,
+            wall_boundary_reasons=wall_boundary_reasons,
+            excluded_boundary_primitives=tuple(excluded_boundary_primitives),
+            authenticated_frame_edge_primitive_count=(
+                authenticated_frame_edge_primitive_count
+            ),
+        )
+    except Exception as exc:  # pragma: no cover - shadow metadata must never break live
+        boundary_evaluation = PhysicalWallScopeBoundaryEvaluation(
+            status=BOUNDARY_EVALUATION_UNAVAILABLE,
+            reason_code=f"boundary_evaluation_error:{type(exc).__name__}",
+            evaluated_wall_candidate_ids=(),
+            boundary_tainted_wall_candidate_ids=(),
+            boundary_taint_reason_codes=(),
+            excluded_boundary_primitives=(),
+            authenticated_frame_edge_primitive_count=0,
+            contact_tolerance_pt=float(DEFAULT_GAP_SNAP_TOLERANCE_PT),
+        )
 
     cropped = bool(boundary_reasons)
     reason_codes = (
@@ -2358,6 +2607,7 @@ def _assemble_scope_result(
         ambiguous_source_observation_ids=tuple(
             sorted(dict.fromkeys(ambiguous_source_observation_ids))
         ),
+        boundary_evaluation=boundary_evaluation,
     )
 
 
@@ -2508,6 +2758,8 @@ def _build_authenticated_viewport_scope_results(
         boundary_observation_ids: list[str] = []
         ambiguous_observation_ids: list[str] = []
         pre_boundary_reasons: list[str] = []
+        excluded_primitives: list[ExcludedBoundaryPrimitive] = []
+        frame_edge_count = 0
 
         for segment in page_segments:
             observation_id = str(segment.get("source_observation_id") or "")
@@ -2536,6 +2788,7 @@ def _build_authenticated_viewport_scope_results(
                 # Exact F.07 vector-frame boundary evidence is not drawing
                 # content. It is excluded by ownership provenance, not by
                 # proximity to text or a project-specific semantic rule.
+                frame_edge_count += 1
                 continue
 
             if target_owned and (
@@ -2548,6 +2801,14 @@ def _build_authenticated_viewport_scope_results(
                     )
                     if observation_id:
                         ambiguous_observation_ids.append(observation_id)
+                    excluded_primitives.append(
+                        _boundary_excluded_primitive(
+                            segment,
+                            BOUNDARY_PRIMITIVE_INSIDE_MULTIPLE_VIEWPORTS
+                            if len(owners) > 1
+                            else BOUNDARY_PRIMITIVE_LIES_ON_SCOPE_BOUNDARY_PARTIAL,
+                        )
+                    )
                 continue
 
             if _segment_intersects_bbox(segment, viewport.bounding_box) and structural:
@@ -2556,6 +2817,11 @@ def _build_authenticated_viewport_scope_results(
                 )
                 if observation_id:
                     boundary_observation_ids.append(observation_id)
+                excluded_primitives.append(
+                    _boundary_excluded_primitive(
+                        segment, BOUNDARY_PRIMITIVE_CROSSES_SCOPE_BOUNDARY
+                    )
+                )
 
         results.append(
             _assemble_scope_result(
@@ -2576,6 +2842,8 @@ def _build_authenticated_viewport_scope_results(
                 ambiguous_source_observation_ids=ambiguous_observation_ids,
                 resolved_visible_observations=resolved_visible_observations,
                 physical_opening_authority=physical_opening_authority,
+                excluded_boundary_primitives=tuple(excluded_primitives),
+                authenticated_frame_edge_primitive_count=frame_edge_count,
             )
         )
     return tuple(results)
@@ -2969,6 +3237,15 @@ __all__ = [
     "PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION",
     "PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_BOUNDS_UNRESOLVED",
+    "BOUNDARY_EVALUATION_EVALUATED",
+    "BOUNDARY_EVALUATION_UNAVAILABLE",
+    "BOUNDARY_PRIMITIVE_CROSSES_SCOPE_BOUNDARY",
+    "BOUNDARY_PRIMITIVE_INSIDE_MULTIPLE_VIEWPORTS",
+    "BOUNDARY_PRIMITIVE_LIES_ON_SCOPE_BOUNDARY_PARTIAL",
+    "ExcludedBoundaryPrimitive",
+    "PHYSICAL_WALL_CANDIDATE_BOUNDARY_GEOMETRY_NOT_EVALUABLE",
+    "PHYSICAL_WALL_CANDIDATE_TOUCHES_EXCLUDED_BOUNDARY_PRIMITIVE",
+    "PhysicalWallScopeBoundaryEvaluation",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_PAGE_BOUNDARY",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_CROPPED_AT_VIEWPORT_BOUNDARY",
     "PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED",
