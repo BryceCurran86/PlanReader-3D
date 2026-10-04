@@ -1,0 +1,17 @@
+name: ChatGPT PERF1307 Export
+
+on:
+  push:
+    branches: [chatgpt/perf1307-ab-main]
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-perf1307-main
+          path: .
+          include-hidden-files: true
+          retention-days: 1
