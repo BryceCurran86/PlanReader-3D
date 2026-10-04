@@ -298,9 +298,9 @@ def _resolve(payload: bytes, *, method: str):
         producer_version="1",
     )
     published = source.ingest_native_pdf_bytes(
-        document_id=method,
+        document_id="metadata-shadow-source",
         source_bytes=payload,
-        source_locator=f"memory://{method}.pdf",
+        source_locator="memory://metadata-shadow-source.pdf",
     )
     authority = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source,
