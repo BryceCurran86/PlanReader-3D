@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import fitz
 
@@ -315,6 +315,42 @@ class TestClustering(unittest.TestCase):
         strokes = [Stroke(x1=i*20, y1=100, x2=i*20+10, y2=100) for i in range(3)]
         clusters = _cluster_strokes(strokes)
         self.assertEqual(len(clusters), 0)
+
+
+    def test_dense_cluster_caches_immutable_stroke_features(self):
+        strokes = [
+            Stroke(
+                x1=50.0 + float(index % 8),
+                y1=100.0 + float(index),
+                x2=250.0 + float(index % 8),
+                y2=100.0 + float(index),
+            )
+            for index in range(96)
+        ]
+
+        original_angle = Stroke.angle_deg
+        original_length = Stroke.length
+        angle_calls = 0
+        length_calls = 0
+
+        def counted_angle(stroke):
+            nonlocal angle_calls
+            angle_calls += 1
+            return original_angle.fget(stroke)
+
+        def counted_length(stroke):
+            nonlocal length_calls
+            length_calls += 1
+            return original_length.fget(stroke)
+
+        with patch.object(Stroke, "angle_deg", property(counted_angle)), patch.object(
+            Stroke, "length", property(counted_length)
+        ):
+            clusters = _cluster_strokes(strokes)
+
+        self.assertTrue(clusters)
+        self.assertEqual(angle_calls, len(strokes))
+        self.assertEqual(length_calls, len(strokes))
 
 
 class TestClusterMetrics(unittest.TestCase):
