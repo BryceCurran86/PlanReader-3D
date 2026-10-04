@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -71,6 +73,23 @@ def _complete_void_pdf(*, include_height: bool = True, tag: str = "W1") -> bytes
         return bytes(doc.tobytes(garbage=4, deflate=True))
     finally:
         doc.close()
+
+
+def test_canonical_area_prefers_authenticated_elevation_frame_when_void_is_incomplete() -> None:
+    from pb_live_physical_opening_void_composition import _canonical_opening_area
+
+    frame = SimpleNamespace(record_id="frame-area-1", area_m2=7.2)
+    area, basis, record_id = _canonical_opening_area(
+        width_m=None,
+        height_m=None,
+        figured_label_evidence=None,
+        elevation_frame_record=frame,
+        schedule_record=None,
+        geometry_complete=False,
+    )
+    assert area == 7.2
+    assert basis == "authenticated_elevation_frame"
+    assert record_id == "frame-area-1"
 
 
 def test_canonical_opening_provenance_union_is_order_invariant_without_collapsing_ids() -> None:
