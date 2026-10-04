@@ -683,6 +683,18 @@ def _extract_witness_promoted_yearlike_observations(
         return [], []
 
     words = list(page.get_text("words"))
+    alphabetic_word_count_by_line: dict[tuple[int, int], int] = {}
+    for candidate in words:
+        try:
+            line_key = (int(candidate[5]), int(candidate[6]))
+            candidate_text = str(candidate[4] or "")
+        except (IndexError, TypeError, ValueError):
+            continue
+        if re.search(r"[A-Za-z]", candidate_text):
+            alphabetic_word_count_by_line[line_key] = (
+                alphabetic_word_count_by_line.get(line_key, 0) + 1
+            )
+
     promoted: list[DimensionObservation] = []
     bindings: list[DimensionAnchorBinding] = []
     for index, word in enumerate(words):
@@ -692,6 +704,18 @@ def _extract_witness_promoted_yearlike_observations(
         if token.kind != DimensionTokenKind.YEAR.value:
             continue
         if _YEARLIKE_NON_DIMENSION_CONTEXT_RE.search(preceding[-40:]):
+            continue
+
+        # A year-shaped value remains non-dimensional when its native text
+        # line carries semantic lettering (for example a month/year title
+        # block or copyright notice), even if box borders happen to resemble
+        # a dimension/witness system. Ambiguous year-shaped values are only
+        # eligible when their own text line is otherwise numeric/punctuation.
+        try:
+            block_no, line_no = int(word[5]), int(word[6])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if alphabetic_word_count_by_line.get((block_no, line_no), 0):
             continue
 
         match = _BARE_MM_RE.match(token.normalized_text)
