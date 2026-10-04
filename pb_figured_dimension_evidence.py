@@ -694,6 +694,29 @@ def _extract_witness_promoted_yearlike_observations(
         if _YEARLIKE_NON_DIMENSION_CONTEXT_RE.search(preceding[-40:]):
             continue
 
+        # A year-shaped value remains non-dimensional when its native text
+        # line carries semantic lettering (for example a month/year title
+        # block or copyright notice), even if box borders happen to resemble
+        # a dimension/witness system. Ambiguous year-shaped values are only
+        # eligible when their own text line is otherwise numeric/punctuation.
+        try:
+            block_no, line_no = int(word[5]), int(word[6])
+        except (IndexError, TypeError, ValueError):
+            continue
+        semantic_line_neighbor = False
+        for other_index, other in enumerate(words):
+            if other_index == index:
+                continue
+            try:
+                same_line = int(other[5]) == block_no and int(other[6]) == line_no
+            except (IndexError, TypeError, ValueError):
+                continue
+            if same_line and re.search(r"[A-Za-z]", str(other[4] or "")):
+                semantic_line_neighbor = True
+                break
+        if semantic_line_neighbor:
+            continue
+
         match = _BARE_MM_RE.match(token.normalized_text)
         if match is None:
             continue
