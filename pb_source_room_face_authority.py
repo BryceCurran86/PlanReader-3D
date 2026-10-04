@@ -694,7 +694,11 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     abstained = tuple(
         SourceRoomFaceAbstention(
             face_id=face_id,
-            reason=SOURCE_ROOM_FACE_DEGENERATE,
+            reason=(
+                SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
+                if face_id in ownership_tainted_face_ids
+                else SOURCE_ROOM_FACE_DEGENERATE
+            ),
             document_id=scope.document_id,
             revision_id=scope.revision_id,
             source_sha256=scope.source_sha256,
@@ -705,7 +709,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             bounding_wall_ids=face_walls[face_id],
             area_page_pts2=face_areas[face_id],
         )
-        for face_id in sorted(degenerate_face_ids)
+        for face_id in sorted(locally_withheld_face_ids)
     )
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
@@ -959,7 +963,7 @@ def _shadow_ownership_evaluation(scope: object) -> SourceRoomFaceOwnershipEvalua
 
 
 def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
-    """Unchanged derivation plus the additive shadow ownership evaluation."""
+    """Live room-face derivation plus the additive ownership audit evaluation."""
     result = _derive_scope_outcome(scope)
     return replace(result, ownership_evaluation=_shadow_ownership_evaluation(scope))
 
