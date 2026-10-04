@@ -109,6 +109,11 @@ class ScheduleOpeningInstanceBindingResult:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
     record: ScheduleOpeningInstanceBindingRecord | None = None
+    # A uniquely source-authenticated plan tag is established before schedule
+    # lookup. Preserve that independent evidence even when no schedule row
+    # exists; it is not itself schedule authority.
+    authenticated_tag_observation_id: str | None = None
+    authenticated_tag_mark: str | None = None
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -918,17 +923,23 @@ class ScheduleOpeningInstanceBindingProducer:
         if not matching_rows:
             return self._store(
                 key,
-                _blocked(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    BINDING_NO_MATCHING_ROW,
+                ScheduleOpeningInstanceBindingResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(BINDING_NO_MATCHING_ROW,),
+                    record=None,
+                    authenticated_tag_observation_id=tag_observation_id,
+                    authenticated_tag_mark=tag_mark,
                 ),
             )
         if len(matching_rows) != 1:
             return self._store(
                 key,
-                _blocked(
-                    EvidenceResolutionStatus.CONFLICT,
-                    BINDING_AMBIGUOUS_ROWS,
+                ScheduleOpeningInstanceBindingResult(
+                    status=EvidenceResolutionStatus.CONFLICT,
+                    reason_codes=(BINDING_AMBIGUOUS_ROWS,),
+                    record=None,
+                    authenticated_tag_observation_id=tag_observation_id,
+                    authenticated_tag_mark=tag_mark,
                 ),
             )
 
@@ -984,6 +995,8 @@ class ScheduleOpeningInstanceBindingProducer:
                 status=EvidenceResolutionStatus.CORROBORATED,
                 reason_codes=(BINDING_RESOLVED,),
                 record=record,
+                authenticated_tag_observation_id=tag_observation_id,
+                authenticated_tag_mark=tag_mark,
             ),
         )
 
