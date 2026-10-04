@@ -12,7 +12,7 @@ from pb_opening_elevation_frame_area_authority import (
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _elevation_pdf(*, composite: bool = False) -> bytes:
+def _elevation_pdf(*, composite: bool = False, far_width_dimension: bool = False) -> bytes:
     doc = fitz.open()
     try:
         page = doc.new_page(width=500.0, height=400.0)
@@ -26,11 +26,15 @@ def _elevation_pdf(*, composite: bool = False) -> bytes:
         if composite:
             page.insert_text((258.0, 185.0), "D1", fontsize=9.0)
 
-        # Horizontal figured dimension with two witness lines.
-        page.draw_line((150.0, 80.0), (300.0, 80.0), width=0.7)
-        page.draw_line((150.0, 70.0), (150.0, 125.0), width=0.7)
-        page.draw_line((300.0, 70.0), (300.0, 125.0), width=0.7)
-        page.insert_text((212.0, 83.0), "3000", fontsize=8.0)
+        # Horizontal figured dimension with two witness lines.  The optional
+        # far placement simulates a valid dimension chain belonging to another
+        # nearby elevation: it remains witness-bound but is not local enough to
+        # authorize this frame.
+        width_y = 45.0 if far_width_dimension else 80.0
+        page.draw_line((150.0, width_y), (300.0, width_y), width=0.7)
+        page.draw_line((150.0, width_y - 10.0), (150.0, 125.0), width=0.7)
+        page.draw_line((300.0, width_y - 10.0), (300.0, 125.0), width=0.7)
+        page.insert_text((212.0, width_y + 3.0), "3000", fontsize=8.0)
 
         # Vertical figured dimension with two witness lines.
         page.draw_line((110.0, 120.0), (110.0, 240.0), width=0.7)
@@ -88,6 +92,18 @@ def test_marked_window_elevation_proves_closed_gross_frame_area() -> None:
 
 def test_composite_window_door_outer_frame_cannot_become_single_window_area() -> None:
     published, authority = _authority(_elevation_pdf(composite=True))
+
+    result = authority.resolve(_selector(published, "W1"))
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.record is None
+    assert OPENING_ELEVATION_FRAME_AREA_UNAVAILABLE in result.reason_codes
+
+
+def test_remote_witness_bound_dimension_cannot_be_borrowed_by_frame() -> None:
+    published, authority = _authority(
+        _elevation_pdf(far_width_dimension=True)
+    )
 
     result = authority.resolve(_selector(published, "W1"))
 
