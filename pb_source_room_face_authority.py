@@ -156,12 +156,11 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
     return child[0] != child[1]
 
 
-def _edges_share_positive_collinear_span(left: Edge, right: Edge) -> bool:
-    """True only when two quantized edges share positive-length collinear span.
+def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
+    """Return the positive-length quantized overlap of two collinear edges.
 
-    This is used only to STABILIZE a local abstention around a competing-owner
-    span. It never chooses an owner. Point contact is not enough: a face merely
-    touching the end of an ambiguous span remains unrelated.
+    The overlap is SOURCE geometry used only to stabilize fail-closed local
+    abstention. It never selects an owner or extends either source edge.
     """
     (ax, ay), (bx, by) = left
     (cx, cy), (dx, dy) = right
@@ -169,20 +168,32 @@ def _edges_share_positive_collinear_span(left: Edge, right: Edge) -> bool:
     vx, vy = bx - ax, by - ay
     length = math.hypot(vx, vy)
     if length <= tolerance:
-        return False
+        return None
 
     for px, py in ((cx, cy), (dx, dy)):
         perpendicular_distance = abs((px - ax) * vy - (py - ay) * vx) / length
         if perpendicular_distance > tolerance:
-            return False
+            return None
 
     ux, uy = vx / length, vy / length
     right_positions = (
         (cx - ax) * ux + (cy - ay) * uy,
         (dx - ax) * ux + (dy - ay) * uy,
     )
-    overlap = min(length, max(right_positions)) - max(0.0, min(right_positions))
-    return overlap > tolerance
+    start = max(0.0, min(right_positions))
+    end = min(length, max(right_positions))
+    if end - start <= tolerance:
+        return None
+
+    return _edge(
+        (ax + start * ux, ay + start * uy),
+        (ax + end * ux, ay + end * uy),
+    )
+
+
+def _edges_share_positive_collinear_span(left: Edge, right: Edge) -> bool:
+    """True only when two quantized edges share positive-length collinear span."""
+    return _collinear_overlap_edge(left, right) is not None
 
 
 def _unique_containing_wall_owner(
@@ -510,9 +521,39 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             # stable geometric neighbourhood rather than whichever face the
             # planarizer happened to attach the doubled edge to.
             face_competing = True
-            competing_spans.add(face_edge)
-            competing_span_wall_ids[face_edge].update(containing)
             owners.extend(containing)
+
+            # Derive the complete SOURCE overlap of the competing authenticated
+            # walls, not merely the raw face edge that exposed it. The planarizer
+            # can attach a doubled-edge spur to a different adjacent face after
+            # translation; the source-wall overlap itself is invariant.
+            source_overlap_found = False
+            for left_index, left_wall_id in enumerate(containing):
+                for right_wall_id in containing[left_index + 1 :]:
+                    for left_edge in wall_edges.get(left_wall_id, ()):
+                        if not _edge_contains_edge(left_edge, face_edge):
+                            continue
+                        for right_edge in wall_edges.get(right_wall_id, ()):
+                            if not _edge_contains_edge(right_edge, face_edge):
+                                continue
+                            overlap_edge = _collinear_overlap_edge(
+                                left_edge, right_edge
+                            )
+                            if overlap_edge is None:
+                                continue
+                            source_overlap_found = True
+                            competing_spans.add(overlap_edge)
+                            competing_span_wall_ids[overlap_edge].update(
+                                (left_wall_id, right_wall_id)
+                            )
+
+            # Defense in depth: if a future source representation proves
+            # multiple owners without exposing their parent overlap, retain the
+            # observed ambiguous face edge rather than silently shrinking the
+            # contaminated set to zero.
+            if not source_overlap_found:
+                competing_spans.add(face_edge)
+                competing_span_wall_ids[face_edge].update(containing)
 
         face_id = stable_contract_id(
             "source_room_face",
