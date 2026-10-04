@@ -42,6 +42,45 @@ from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 import pb_page_title_authority as _title_authority
 
 
+_PAGE_PARSE_CACHE_ATTR = "_pb_viewport_segmentation_page_parse_cache"
+
+
+def _page_parse_cache(page: Any) -> Optional[dict[str, Any]]:
+    try:
+        cache = getattr(page, _PAGE_PARSE_CACHE_ATTR, None)
+    except Exception:
+        cache = None
+    if isinstance(cache, dict):
+        return cache
+    cache = {}
+    try:
+        setattr(page, _PAGE_PARSE_CACHE_ATTR, cache)
+    except Exception:
+        return None
+    return cache
+
+
+def _page_drawings(page: Any) -> tuple:
+    cache = _page_parse_cache(page)
+    if isinstance(cache, dict) and "drawings" in cache:
+        return cache["drawings"]
+    drawings = tuple(page.get_drawings() or ())
+    if isinstance(cache, dict):
+        cache["drawings"] = drawings
+    return drawings
+
+
+def _page_text(page: Any, mode: str):
+    cache = _page_parse_cache(page)
+    key = f"text:{mode}"
+    if isinstance(cache, dict) and key in cache:
+        return cache[key]
+    value = page.get_text(mode)
+    if isinstance(cache, dict):
+        cache[key] = value
+    return value
+
+
 class ViewportSegmentationStatus(str, Enum):
     RESOLVED = "resolved"
     DERIVED = "derived"
@@ -468,7 +507,7 @@ def _frame_looks_like_table(
         return False
 
     cells: list[tuple[float, float, float, float]] = []
-    for drawing in page.get_drawings() or []:
+    for drawing in _page_drawings(page):
         for item in drawing.get("items", []) or []:
             if not item or item[0] != "re" or len(item) < 2:
                 continue
@@ -595,7 +634,7 @@ def _text_fragments(page: Any) -> list[tuple[tuple[float, float, float, float], 
     """
     fragments: list[tuple[tuple[float, float, float, float], str]] = []
     try:
-        data = page.get_text("dict") or {}
+        data = _page_text(page, "dict") or {}
     except Exception:
         data = {}
     for block in data.get("blocks", []) or []:
@@ -615,7 +654,7 @@ def _text_fragments(page: Any) -> list[tuple[tuple[float, float, float, float], 
 
     # Fallback for mock/page objects exposing blocks but not dict output.
     if not fragments:
-        for block in page.get_text("blocks") or []:
+        for block in _page_text(page, "blocks") or []:
             if len(block) >= 5:
                 text = _normalise_text(block[4])
                 if text:
@@ -650,7 +689,7 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
         width = float(rect.width); height = float(rect.height)
     word_heights = [
         float(w[3]) - float(w[1])
-        for w in page.get_text("words")
+        for w in _page_text(page, "words")
         if float(w[3]) > float(w[1])
     ]
     median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
@@ -748,7 +787,7 @@ def _drawing_vector_primitive_count(
     minimum_span = max(calibration.median_word_height_pt * 2.0, 4.0)
     count = 0
     try:
-        drawings = page.get_drawings() or []
+        drawings = _page_drawings(page)
     except Exception:
         drawings = []
     for drawing in drawings:
@@ -860,7 +899,7 @@ def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float,
     dominance (larger, or bold where the run is not).
     """
     try:
-        data = page.get_text("dict") or {}
+        data = _page_text(page, "dict") or {}
     except Exception:
         return []
     tails: list[tuple[tuple[float, float, float, float], str]] = []
@@ -934,7 +973,7 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
 def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
-    for drawing in page.get_drawings() or []:
+    for drawing in _page_drawings(page):
         items = drawing.get("items", []) or []
         closed = _closed_four_line_rect(items, tol=tol)
         if closed is not None:
@@ -1421,7 +1460,7 @@ def _axis_aligned_long_source_lines(
     horizontal: list[tuple[float, float, float]] = []
     vertical: list[tuple[float, float, float]] = []
     try:
-        drawings = page.get_drawings() or []
+        drawings = _page_drawings(page)
     except Exception:
         drawings = []
     for drawing in drawings:
