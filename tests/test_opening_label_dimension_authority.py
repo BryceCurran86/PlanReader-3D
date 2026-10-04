@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fitz
 import pytest
+import pb_opening_label_dimension_authority as label_dimension_module
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_label_dimension_authority import (
@@ -12,7 +13,7 @@ from pb_opening_label_dimension_authority import (
     _parseable_opening_label_fragments,
     parse_opening_label_dimensions,
 )
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
+from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningExistenceRecord
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -538,3 +539,68 @@ def test_spatially_remote_label_cannot_bind_even_when_text_is_plausible() -> Non
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.evidence is None
     assert OPENING_LABEL_DIMENSION_TEXT_UNAVAILABLE in result.reason_codes
+
+
+
+def test_trusted_text_line_cache_reuses_page_snapshot_and_fails_closed_after_snapshot_change(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    source = SourceVisibilityProducer(
+        producer_method="dimension-text-cache",
+        producer_version="1",
+    )
+    producer = OpeningLabelDimensionProducer.from_source_visibility_producer(source)
+    opening = PhysicalOpeningExistenceRecord(
+        record_id="opening:1",
+        source_observation_ids=("source:1",),
+        source_lineage_root_ids=("source:1",),
+        document_id="doc",
+        revision_id="rev",
+        source_sha256="sha",
+        snapshot_id="snap",
+        page_id="3",
+        viewport_id="page:3",
+        semantic_class="opening",
+        status=EvidenceResolutionStatus.CORROBORATED,
+        proposition=PHYSICAL_OPENING_EXISTS,
+        structural_pattern="jamb_bounded_two_face_interruption",
+        diagnostic_confidence=1.0,
+        blocking_reasons=(),
+        structural_reason_codes=(),
+        producer_method="test",
+        producer_version="1",
+        producer_generation=1,
+    )
+
+    state = {"snapshot_id": "snap"}
+    monkeypatch.setattr(
+        source,
+        "published_snapshot_for_revision",
+        lambda _revision_id: SimpleNamespace(
+            snapshot=SimpleNamespace(snapshot_id=state["snapshot_id"])
+        ),
+    )
+
+    trusted_line = label_dimension_module._TrustedTextLine(
+        observation_ids=("text:1",),
+        text="900 - 1200 asw",
+        bbox=(10.0, 20.0, 30.0, 40.0),
+    )
+    calls = 0
+
+    def build_lines(_source, _opening):
+        nonlocal calls
+        calls += 1
+        return (trusted_line,)
+
+    monkeypatch.setattr(label_dimension_module, "_trusted_text_lines", build_lines)
+
+    assert producer._trusted_text_lines_for_opening(opening) == (trusted_line,)
+    assert producer._trusted_text_lines_for_opening(opening) == (trusted_line,)
+    assert calls == 1
+
+    # Cache hits must never bypass current source lineage. Once the producer's
+    # current snapshot changes, the historical opening fails closed.
+    state["snapshot_id"] = "new-snapshot"
+    assert producer._trusted_text_lines_for_opening(opening) == ()
+    assert calls == 1
