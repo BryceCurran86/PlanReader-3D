@@ -13,6 +13,7 @@ from pb_opening_elevation_frame_area_authority import (
     OPENING_ELEVATION_FRAME_AREA_UNAVAILABLE,
     OpeningElevationFrameAreaProducer,
     OpeningElevationFrameAreaSelector,
+    opening_elevation_claim_family,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -165,6 +166,21 @@ def _selector(published, mark: str) -> OpeningElevationFrameAreaSelector:
         source_sha256=published.revision.source_sha256,
         snapshot_id=published.snapshot.snapshot_id,
         type_mark=mark,
+    )
+
+
+def test_opening_elevation_claim_family_matches_authority_title_contract() -> None:
+    assert opening_elevation_claim_family(("WINDOW", "ELEVATIONS")) == "window"
+    assert opening_elevation_claim_family(("DOOR", "ELEVATION")) == "door"
+    assert opening_elevation_claim_family(("PROP.", "WINDOWS", "ELEVATIONS")) == "window"
+
+
+def test_opening_elevation_claim_family_rejects_nonopening_or_mixed_titles() -> None:
+    assert opening_elevation_claim_family(("BUILDING", "ELEVATIONS")) is None
+    assert opening_elevation_claim_family(("WINDOW", "SCHEDULE")) is None
+    assert (
+        opening_elevation_claim_family(("WINDOW", "DOOR", "ELEVATIONS"))
+        is None
     )
 
 

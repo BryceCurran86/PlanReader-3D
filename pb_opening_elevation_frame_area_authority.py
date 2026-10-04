@@ -302,6 +302,24 @@ def _match_trusted_dimension_word(
     return candidates[0]
 
 
+def opening_elevation_claim_family(words: Sequence[object]) -> str | None:
+    """Return the opening family claimed by one elevation-title word sequence.
+
+    This is routing/claim syntax only. It cannot authorize an opening, mark,
+    dimension, frame, or quantity; the producer independently re-proves all of
+    those source propositions before publishing a positive record.
+    """
+    norms = [_claim_norm(word) for word in words]
+    has_elevation = any(value in {"elevation", "elevations"} for value in norms)
+    if not has_elevation:
+        return None
+    has_window = any(value in {"window", "windows"} for value in norms)
+    has_door = any(value in {"door", "doors"} for value in norms)
+    if has_window == has_door:
+        return None
+    return "window" if has_window else "door"
+
+
 def _page_family_and_title_ids(
     trusted_words: Sequence[_TrustedWord],
 ) -> tuple[str | None, tuple[str, ...]]:
@@ -313,14 +331,11 @@ def _page_family_and_title_ids(
     for words in by_line.values():
         ordered = sorted(words, key=lambda word: (word.word_no, word.sequence_number))
         norms = [_claim_norm(word.text) for word in ordered]
-        has_elevation = any(value in {"elevation", "elevations"} for value in norms)
-        if not has_elevation:
+        family = opening_elevation_claim_family(
+            tuple(word.text for word in ordered)
+        )
+        if family is None:
             continue
-        has_window = any(value in {"window", "windows"} for value in norms)
-        has_door = any(value in {"door", "doors"} for value in norms)
-        if has_window == has_door:
-            continue
-        family = "window" if has_window else "door"
         ids = tuple(
             sorted(
                 word.observation_id
@@ -992,6 +1007,7 @@ __all__ = [
     "OpeningElevationFrameAreaRecord",
     "OpeningElevationFrameAreaResult",
     "OpeningElevationFrameAreaSelector",
+    "opening_elevation_claim_family",
     "_edge_support",
     "_record_candidates_for_page",
 ]

@@ -329,3 +329,88 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
         == "source_owned_physical_external_net_wall"
     ]
     assert physical_promotions == []
+
+def _opening_evidence_routing_pdf() -> bytes:
+    doc = fitz.open()
+    try:
+        for _ in range(3):
+            page = doc.new_page(width=760.0, height=650.0)
+            page.draw_rect(fitz.Rect(80.0, 80.0, 500.0, 420.0), width=1.0)
+        return bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+
+def _empty_live_physical_claim():
+    return SimpleNamespace(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=("test_no_physical_quantity",),
+        quantity_m2=None,
+        source_pages=(),
+        canonical_walls=(),
+        canonical_wall_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_wall_reason_codes=("test_no_walls",),
+        canonical_wall_source_pages=(),
+        unresolved_wall_candidate_ids=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_floor_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_floor_reason_codes=("test_no_floors",),
+        canonical_floor_source_pages=(),
+        canonical_room_status=EvidenceResolutionStatus.ABSTAINED,
+        canonical_room_reason_codes=("test_no_rooms",),
+        canonical_room_source_pages=(),
+        external_wall_ids=(),
+        evidence_ids=(),
+        quantity_id=None,
+        confidence=0.0,
+        publication=SimpleNamespace(quantity_evidence=None),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+
+
+def test_extractor_routes_marked_opening_elevation_as_evidence_only(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "plan-with-opening-evidence.pdf"
+    path.write_bytes(_opening_evidence_routing_pdf())
+    seen: dict[str, object] = {}
+
+    # Source title authority owns the page titles. The extraction request
+    # addresses only page 1; page 2 is allowed to enter the live chain solely
+    # as supporting evidence. Page 3 is an ordinary building elevation and
+    # must not be widened by this opening-specific route.
+    monkeypatch.setattr(
+        "pb_page_title_authority.resolve_document",
+        lambda _analyses: (
+            SimpleNamespace(title="GROUND FLOOR PLAN", confidence=100),
+            SimpleNamespace(title="WINDOW ELEVATIONS", confidence=100),
+            SimpleNamespace(title="BUILDING ELEVATIONS", confidence=100),
+        ),
+    )
+
+    def fake_claim(pdf_path, **kwargs):
+        seen["pdf_path"] = pdf_path
+        seen.update(kwargs)
+        return _empty_live_physical_claim()
+
+    monkeypatch.setattr(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        fake_claim,
+    )
+    _disable_unrelated_late_live_paths(monkeypatch)
+
+    extractor = GenericPlanReaderExtractor()
+    extractor.extract_from_pdf(
+        path,
+        pages=[0],
+        collect_item35_shadow=False,
+    )
+
+    assert seen["pages"] == (0, 1)
+    assert seen["topology_pages"] == (0,)
+    assert 2 not in seen["pages"]
+
