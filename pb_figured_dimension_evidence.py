@@ -245,6 +245,20 @@ _IMPERIAL_RE = re.compile(
     r"^\s*(?:(\d+)\s*(?:'|ft))?\s*[-–]?\s*(?:(\d+(?:\.\d+)?)\s*(?:\"|in))?\s*$",
     re.I,
 )
+_YEARLIKE_PROMOTION_VIEW_TYPES = frozenset(
+    {
+        DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.ROOF_PLAN.value,
+        DrawingViewType.ELEVATION.value,
+        DrawingViewType.SECTION.value,
+        DrawingViewType.DETAIL.value,
+    }
+)
+_YEARLIKE_NON_DIMENSION_CONTEXT_RE = re.compile(
+    r"\b(?:DATE|DATED|ISSUE|ISSUED|YEAR|REV|REVISION)\s*$",
+    re.I,
+)
+
 _CONTEXT_KIND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b(?:ROOM|RM)\s*$", re.I), DimensionTokenKind.ROOM_NUMBER.value),
     (re.compile(r"\bGRID\s*$", re.I), DimensionTokenKind.GRID_LABEL.value),
@@ -647,6 +661,82 @@ def extract_native_dimension_observations(
     return observations
 
 
+def _extract_witness_promoted_yearlike_observations(
+    page: Any,
+    *,
+    page_num: int,
+    segments: Sequence[ObservedGeometrySegment],
+    calibration: DimensionLayoutCalibration,
+    sheet: str = "",
+    view_id: str = "",
+    view_type: str = DrawingViewType.UNKNOWN.value,
+) -> tuple[list[DimensionObservation], list[DimensionAnchorBinding]]:
+    """Promote year-shaped bare numbers only after source geometry proves dimension semantics.
+
+    Four-digit values in the 19xx/20xx range remain typed as YEAR everywhere
+    else.  In an explicitly geometric drawing view, a candidate may become a
+    figured millimetre dimension only when the existing vector binder resolves
+    one dimension line plus two witness lines.  Immediate date/revision context
+    remains non-dimensional even if nearby linework is present.
+    """
+    if view_type not in _YEARLIKE_PROMOTION_VIEW_TYPES:
+        return [], []
+
+    words = list(page.get_text("words"))
+    promoted: list[DimensionObservation] = []
+    bindings: list[DimensionAnchorBinding] = []
+    for index, word in enumerate(words):
+        text = str(word[4]).strip()
+        preceding = " ".join(str(w[4]) for w in words[max(0, index - 2):index])
+        token = classify_dimension_token(text, preceding_context=preceding)
+        if token.kind != DimensionTokenKind.YEAR.value:
+            continue
+        if _YEARLIKE_NON_DIMENSION_CONTEXT_RE.search(preceding[-40:]):
+            continue
+
+        match = _BARE_MM_RE.match(token.normalized_text)
+        if match is None:
+            continue
+        cleaned = match.group(1).replace(",", "").replace(".", "")
+        if _YEAR_RE.match(cleaned) is None:
+            continue
+        value = float(cleaned)
+        if not math.isfinite(value) or value <= 0.0:
+            continue
+
+        bbox = (float(word[0]), float(word[1]), float(word[2]), float(word[3]))
+        provisional = DimensionObservation(
+            dimension_id=f"native_yearlike_dim_p{page_num}_{index}",
+            source_page=page_num,
+            sheet=sheet,
+            view_id=view_id,
+            view_type=view_type,
+            bbox=bbox,
+            raw_text=text,
+            value=value,
+            unit="mm",
+            authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            confidence=1.0,
+            conflict_state=ConstraintStatus.FULLY_CONSTRAINED.value,
+            extraction_method="native_text_witness_promoted",
+        )
+        binding = bind_observation_to_vector_geometry(
+            provisional,
+            segments,
+            calibration,
+        )
+        if (
+            binding.status != BindingStatus.WITNESS_BOUND.value
+            or binding.endpoints is None
+            or len(binding.witness_line_ids) < 2
+        ):
+            continue
+        promoted.append(apply_anchor_binding(provisional, binding))
+        bindings.append(binding)
+
+    return promoted, bindings
+
+
 def make_ocr_dimension_observation(
     *,
     dimension_id: str,
@@ -839,6 +929,18 @@ def extract_dimension_evidence_bundle(
         binding = bind_observation_to_vector_geometry(observation, segments, layout)
         bindings.append(binding)
         bound_native.append(apply_anchor_binding(observation, binding))
+
+    promoted_yearlike, promoted_bindings = _extract_witness_promoted_yearlike_observations(
+        page,
+        page_num=page_num,
+        segments=segments,
+        calibration=layout,
+        sheet=sheet,
+        view_id=view_id,
+        view_type=view_type,
+    )
+    bound_native.extend(promoted_yearlike)
+    bindings.extend(promoted_bindings)
 
     observations = bound_native + list(ocr_candidates)
     chains = build_chains_from_bound_observations(bound_native, calibration=layout)
