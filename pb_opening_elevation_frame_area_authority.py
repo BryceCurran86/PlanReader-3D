@@ -34,6 +34,11 @@ from pb_figured_dimension_evidence import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
+from pb_portable_raster_ocr_authority import MockOCRBackend
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -660,12 +665,21 @@ class OpeningElevationFrameAreaAuthority:
 
 
 class OpeningElevationFrameAreaProducer:
-    def __init__(self, source: SourceVisibilityProducer, *, _seal=None):
+    def __init__(
+        self,
+        source: SourceVisibilityProducer,
+        raster_producer: RasterTextCorroborationProducer,
+        *,
+        _seal=None,
+    ):
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("use from_source_visibility_producer()")
         if type(source) is not SourceVisibilityProducer:
             raise TypeError("source must be an actual SourceVisibilityProducer")
+        if type(raster_producer) is not RasterTextCorroborationProducer:
+            raise TypeError("raster_producer must be producer-owned")
         self._source = source
+        self._raster = raster_producer
         self._results: dict[tuple[str, ...], OpeningElevationFrameAreaResult] = {}
 
     @classmethod
@@ -673,9 +687,64 @@ class OpeningElevationFrameAreaProducer:
         cls,
         source: SourceVisibilityProducer,
     ) -> "OpeningElevationFrameAreaProducer":
-        producer = cls(source, _seal=_PRODUCER_SEAL)
+        if type(source) is not SourceVisibilityProducer:
+            raise TypeError("source must be an actual SourceVisibilityProducer")
+        producer = cls(
+            source,
+            RasterTextCorroborationProducer.from_source_visibility_producer(source),
+            _seal=_PRODUCER_SEAL,
+        )
         producer._build()
         return producer
+
+    @classmethod
+    def from_source_visibility_producer_for_tests(
+        cls,
+        source: SourceVisibilityProducer,
+        backend: MockOCRBackend,
+    ) -> "OpeningElevationFrameAreaProducer":
+        if type(source) is not SourceVisibilityProducer:
+            raise TypeError("source must be an actual SourceVisibilityProducer")
+        if type(backend) is not MockOCRBackend:
+            raise TypeError("backend must be exact MockOCRBackend")
+        producer = cls(
+            source,
+            RasterTextCorroborationProducer.from_source_visibility_producer_for_tests(
+                source,
+                backend,
+            ),
+            _seal=_PRODUCER_SEAL,
+        )
+        producer._build()
+        return producer
+
+    @staticmethod
+    def _word_from_receipt(
+        observation_id: str,
+        receipt,
+        text: str,
+    ) -> _TrustedWord | None:
+        try:
+            geometry = tuple(float(v) for v in receipt.geometry)
+        except (TypeError, ValueError):
+            return None
+        if (
+            len(geometry) != 4
+            or not all(math.isfinite(v) for v in geometry)
+            or geometry[2] <= geometry[0]
+            or geometry[3] <= geometry[1]
+            or not str(text or "").strip()
+        ):
+            return None
+        return _TrustedWord(
+            observation_id=str(observation_id),
+            text=str(text),
+            bbox=geometry,
+            block_no=int(getattr(receipt, "block_no", -1)),
+            line_no=int(getattr(receipt, "line_no", -1)),
+            word_no=int(getattr(receipt, "word_no", -1)),
+            sequence_number=int(getattr(receipt, "sequence_number", -1)),
+        )
 
     def _build(self) -> None:
         text_authority = self._source.text_integrity_authority()
@@ -688,46 +757,33 @@ class OpeningElevationFrameAreaProducer:
             ):
                 continue
 
-            words_by_page: dict[str, list[_TrustedWord]] = {}
+            # Raw native text may select work, but it never authorizes a
+            # commercial proposition. Positive title, mark and figured-
+            # dimension words below must independently clear native integrity
+            # or the strict two-render raster corroboration authority.
+            claim_words_by_page: dict[str, list[_TrustedWord]] = {}
+            native_results: dict[str, object] = {}
             for observation_id in published.text_observation_ids:
-                result = text_authority.resolve_text(
-                    ObservationSelector(
-                        document_id=published.revision.document_id,
-                        revision_id=published.revision.revision_id,
-                        source_sha256=published.revision.source_sha256,
-                        snapshot_id=published.snapshot.snapshot_id,
-                        observation_id=observation_id,
-                    )
+                selector = ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
                 )
+                result = text_authority.resolve_text(selector)
                 receipt = result.receipt
-                if (
-                    result.status is not EvidenceResolutionStatus.CORROBORATED
-                    or receipt is None
-                    or not result.trusted_text
-                ):
+                if receipt is None:
                     continue
-                try:
-                    geometry = tuple(float(v) for v in receipt.geometry)
-                except (TypeError, ValueError):
-                    continue
-                if (
-                    len(geometry) != 4
-                    or not all(math.isfinite(v) for v in geometry)
-                    or geometry[2] <= geometry[0]
-                    or geometry[3] <= geometry[1]
-                ):
-                    continue
-                words_by_page.setdefault(str(receipt.page_id), []).append(
-                    _TrustedWord(
-                        observation_id=str(observation_id),
-                        text=str(result.trusted_text),
-                        bbox=geometry,
-                        block_no=int(getattr(receipt, "block_no", -1)),
-                        line_no=int(getattr(receipt, "line_no", -1)),
-                        word_no=int(getattr(receipt, "word_no", -1)),
-                        sequence_number=int(getattr(receipt, "sequence_number", -1)),
-                    )
+                claim = self._word_from_receipt(
+                    str(observation_id),
+                    receipt,
+                    str(getattr(receipt, "raw_text", "") or ""),
                 )
+                if claim is None:
+                    continue
+                native_results[str(observation_id)] = result
+                claim_words_by_page.setdefault(str(receipt.page_id), []).append(claim)
 
             payload = _source_bytes(
                 self._source,
@@ -743,29 +799,125 @@ class OpeningElevationFrameAreaProducer:
 
             records_by_mark: dict[str, list[OpeningElevationFrameAreaRecord]] = {}
             try:
-                for page_id, trusted_words in sorted(
-                    words_by_page.items(),
+                for page_id, claim_words in sorted(
+                    claim_words_by_page.items(),
                     key=lambda item: int(item[0]) if item[0].isdigit() else 10**9,
                 ):
-                    # Cheap source-text gate before vector/dimension extraction.
-                    family, _title_ids = _page_family_and_title_ids(trusted_words)
-                    if family is None or not _opening_tags(trusted_words):
-                        continue
-                    if not page_id.isdigit():
+                    # Claim-only gate: a false claim can spend work, but cannot
+                    # create authority because the required words are re-proven
+                    # below before frame evaluation.
+                    family, title_ids = _page_family_and_title_ids(claim_words)
+                    claim_tags = _opening_tags(claim_words)
+                    if family is None or not claim_tags or not page_id.isdigit():
                         continue
                     page_index = int(page_id) - 1
                     if page_index < 0 or page_index >= int(document.page_count):
                         continue
+
+                    try:
+                        page = document.load_page(page_index)
+                        bundle = extract_dimension_evidence_bundle(
+                            page,
+                            page_num=int(page_id),
+                            view_id=f"page:{page_id}:opening_elevation_frame",
+                            view_type=DrawingViewType.ELEVATION.value,
+                        )
+                        layout = calibrate_dimension_layout(page)
+                    except Exception:
+                        continue
+
+                    required_ids = set(title_ids)
+                    required_ids.update(
+                        word.observation_id for word, _mark, _kind in claim_tags
+                    )
+
+                    # Raster only words whose source geometry has already
+                    # proved figured-dimension structure. This avoids broad OCR
+                    # over unrelated elevation-sheet annotations.
+                    word_tolerance = max(
+                        float(layout.median_word_height_pt) * 0.20,
+                        0.75,
+                    )
+                    witness_ids = {
+                        str(binding.observation_id)
+                        for binding in bundle.bindings
+                        if binding.status == BindingStatus.WITNESS_BOUND.value
+                        and binding.endpoints is not None
+                    }
+                    for observation in bundle.observations:
+                        if str(observation.dimension_id) not in witness_ids:
+                            continue
+                        claim = _match_trusted_dimension_word(
+                            claim_words,
+                            observation,
+                            tolerance=word_tolerance,
+                        )
+                        if claim is not None:
+                            required_ids.add(claim.observation_id)
+
+                    trusted_words: list[_TrustedWord] = []
+                    for claim in claim_words:
+                        if claim.observation_id not in required_ids:
+                            continue
+                        native = native_results.get(claim.observation_id)
+                        native_receipt = getattr(native, "receipt", None)
+                        native_text = getattr(native, "trusted_text", None)
+                        if (
+                            getattr(native, "status", None)
+                            is EvidenceResolutionStatus.CORROBORATED
+                            and native_receipt is not None
+                            and native_text
+                            and _claim_norm(native_text) == _claim_norm(claim.text)
+                        ):
+                            trusted = self._word_from_receipt(
+                                claim.observation_id,
+                                native_receipt,
+                                str(native_text),
+                            )
+                            if trusted is not None:
+                                trusted_words.append(trusted)
+                            continue
+
+                        raster = self._raster.publish(
+                            RasterTextCorroborationSelector(
+                                document_id=published.revision.document_id,
+                                revision_id=published.revision.revision_id,
+                                source_sha256=published.revision.source_sha256,
+                                snapshot_id=published.snapshot.snapshot_id,
+                                observation_id=claim.observation_id,
+                            )
+                        )
+                        if (
+                            raster.status is EvidenceResolutionStatus.CORROBORATED
+                            and raster.record is not None
+                            and raster.corroborated_text
+                            and native_receipt is not None
+                            and _claim_norm(raster.corroborated_text)
+                            == _claim_norm(claim.text)
+                        ):
+                            trusted = self._word_from_receipt(
+                                claim.observation_id,
+                                native_receipt,
+                                str(raster.corroborated_text),
+                            )
+                            if trusted is not None:
+                                trusted_words.append(trusted)
+
+                    # Raw claims never substitute for proof.
+                    trusted_family, _trusted_title_ids = _page_family_and_title_ids(
+                        trusted_words
+                    )
+                    if trusted_family is None or not _opening_tags(trusted_words):
+                        continue
+
                     try:
                         records = _record_candidates_for_page(
-                            page=document.load_page(page_index),
+                            page=page,
                             page_id=page_id,
                             published=published,
                             trusted_words=trusted_words,
                         )
                     except Exception:
-                        # Source evidence failure is an abstention, never a
-                        # reason to synthesize a commercial measurement.
                         continue
                     for record in records:
                         records_by_mark.setdefault(record.type_mark, []).append(record)
@@ -780,8 +932,6 @@ class OpeningElevationFrameAreaProducer:
                     published.snapshot.snapshot_id,
                     mark,
                 )
-                # One type mark must resolve to exactly one gross-frame
-                # proposition. Repeated/competing frames fail closed.
                 semantic = {
                     (
                         round(record.axis_x_mm, 6),
