@@ -211,9 +211,11 @@ def test_ambiguous_candidates_are_identified_with_their_relationships(adjacent_p
 
 
 def test_unresolvable_representatives_are_reported_not_hidden(adjacent_pdf):
-    """A proven opening's recorded representative is min(support ids), so whether
-    it is itself an ambiguous observation depends on observation-id order.  The
-    diagnostic must report exactly those, whatever the ids turn out to be."""
+    """Producer-selected representatives must re-prove the exact opening.
+
+    Shared support observations can remain ambiguous diagnostics, but they must
+    never be selected as semantic representatives.
+    """
     seen_unresolved = 0
     for document_id in (DOC, "x:adjacent_separate", "doc-a", "doc-b", "doc-c", "doc-d"):
         _source, result, diag = _diagnose_with(adjacent_pdf, document_id)
@@ -235,8 +237,9 @@ def test_unresolvable_representatives_are_reported_not_hidden(adjacent_pdf):
         assert (
             "proven_opening_representative_cannot_reprove_existence" in diag.unavailable
         ) == bool(reported)
-    # The phenomenon is real for this natural layout under at least one id order.
-    assert seen_unresolved > 0
+    # Representatives are selected only from selectors that already proved the
+    # exact physical opening, so no semantic representative can be unresolved.
+    assert seen_unresolved == 0
 
 
 def test_clean_scope_has_no_conflict_and_is_consistent(single_pdf):
