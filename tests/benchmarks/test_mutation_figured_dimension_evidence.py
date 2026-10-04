@@ -224,6 +224,45 @@ class TestYearLikeWitnessPromotion:
         doc.close()
 
 
+    def test_month_year_title_block_is_not_promoted_even_with_witness_geometry(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+        page.draw_line((60, 120), (240, 120))
+        page.draw_line((60, 95), (60, 145))
+        page.draw_line((240, 95), (240, 145))
+        page.insert_text((105, 116), "APRIL 2026", fontsize=10)
+        doc = _reopen(doc)
+
+        bundle = extract_dimension_evidence_bundle(
+            doc[0],
+            page_num=1,
+            view_id="ELEVATION-D",
+            view_type=DrawingViewType.ELEVATION.value,
+        )
+        assert bundle.observations == []
+        assert bundle.bindings == []
+        doc.close()
+
+    def test_copyright_year_is_not_promoted_even_with_witness_geometry(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+        page.draw_line((60, 120), (240, 120))
+        page.draw_line((60, 95), (60, 145))
+        page.draw_line((240, 95), (240, 145))
+        page.insert_text((95, 116), "c 2011 copyright", fontsize=10)
+        doc = _reopen(doc)
+
+        bundle = extract_dimension_evidence_bundle(
+            doc[0],
+            page_num=1,
+            view_id="ELEVATION-E",
+            view_type=DrawingViewType.ELEVATION.value,
+        )
+        assert bundle.observations == []
+        assert bundle.bindings == []
+        doc.close()
+
+
 class TestMetamorphicCoordinateSafety:
     def test_translation_preserves_semantic_binding_and_span(self) -> None:
         doc_a = _dimension_page()
