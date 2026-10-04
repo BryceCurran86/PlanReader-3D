@@ -27,6 +27,10 @@ from pb_opening_kind_authority import (
 from pb_opening_label_dimension_authority import (
     OpeningLabelDimensionProducer,
 )
+from pb_opening_elevation_frame_area_authority import (
+    OpeningElevationFrameAreaProducer,
+    OpeningElevationFrameAreaSelector,
+)
 from pb_opening_label_semantic_authority import (
     OPENING_LABEL_SEMANTIC_CONFLICT,
     OpeningLabelSemanticProducer,
@@ -236,6 +240,7 @@ def _canonical_opening_area(
     width_m: Optional[float],
     height_m: Optional[float],
     figured_label_evidence,
+    elevation_frame_record=None,
     schedule_record=None,
     geometry_complete: bool = True,
 ) -> tuple[Optional[float], Optional[str], Optional[str]]:
@@ -260,6 +265,18 @@ def _canonical_opening_area(
             "resolved_opening_geometry",
             figured_record_id,
         )
+
+    if elevation_frame_record is not None:
+        try:
+            elevation_area_m2 = float(elevation_frame_record.area_m2)
+        except (TypeError, ValueError, OverflowError):
+            elevation_area_m2 = 0.0
+        if math.isfinite(elevation_area_m2) and elevation_area_m2 > 0.0:
+            return (
+                elevation_area_m2,
+                "authenticated_elevation_frame",
+                str(elevation_frame_record.record_id),
+            )
 
     if (
         schedule_record is not None
@@ -518,6 +535,11 @@ def compose_live_physical_opening_voids(
         opening_id: label_semantic_producer.publish_scope(opening_selector)
         for opening_id, opening_selector in opening_selectors.items()
     }
+    elevation_frame_area_authority = (
+        OpeningElevationFrameAreaProducer.from_source_visibility_producer(
+            source_visibility_producer
+        ).authority()
+    )
     height_authority = height_producer.authority()
     vertical_authority = vertical_producer.authority()
     scale_authority = scale_producer.authority()
@@ -669,6 +691,24 @@ def compose_live_physical_opening_voids(
             ),
         )
         opening_kind = kind_resolution.opening_kind
+        elevation_frame_record = None
+        if type_mark and opening_kind in {"door", "window"}:
+            elevation_frame_result = elevation_frame_area_authority.resolve(
+                OpeningElevationFrameAreaSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    type_mark=type_mark,
+                )
+            )
+            candidate_frame_record = elevation_frame_result.record
+            if (
+                elevation_frame_result.status is EvidenceResolutionStatus.CORROBORATED
+                and candidate_frame_record is not None
+                and candidate_frame_record.opening_kind == opening_kind
+            ):
+                elevation_frame_record = candidate_frame_record
         if (
             OPENING_KIND_CONFLICT in kind_resolution.reason_codes
             or OPENING_LABEL_SEMANTIC_CONFLICT
@@ -746,6 +786,7 @@ def compose_live_physical_opening_voids(
             width_m=width_m,
             height_m=height_m,
             figured_label_evidence=figured_label_evidence,
+            elevation_frame_record=elevation_frame_record,
             schedule_record=schedule_record,
             geometry_complete=void_record is not None,
         )
@@ -774,6 +815,11 @@ def compose_live_physical_opening_voids(
                     tag_observation_id,
                     *schedule_row_observation_ids,
                     figured_area_record_id,
+                    *(
+                        elevation_frame_record.source_observation_ids
+                        if elevation_frame_record is not None
+                        else ()
+                    ),
                     *(
                         figured_label_evidence.source_text_observation_ids
                         if figured_label_evidence is not None
