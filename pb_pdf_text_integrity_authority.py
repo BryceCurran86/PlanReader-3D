@@ -34,6 +34,8 @@ from pb_source_observation_authority import (
 
 
 PDF_TEXT_INTEGRITY_SCHEMA_VERSION = "1.2.0"
+PDF_TEXT_GEOMETRY_TOLERANCE_PT = 0.5
+PDF_TEXT_MAJORITY_OVERLAP_RATIO = 0.5
 TRUSTED_PDF_TEXT = "trusted_pdf_text"
 TEXT_INTEGRITY_RECEIPT_UNAVAILABLE = "text_integrity_receipt_unavailable"
 TEXT_INTEGRITY_RECEIPT_MISMATCH = "text_integrity_receipt_mismatch"
@@ -726,7 +728,7 @@ def _owned_span_chain(
         for char_index, (_glyph, char_bbox) in enumerate(_trace_chars(span)):
             if (id(span), char_index) in matched_char_ids:
                 continue
-            if _intersection_ratio(char_bbox, bbox) >= 0.5:
+            if _intersection_ratio(char_bbox, bbox) >= PDF_TEXT_MAJORITY_OVERLAP_RATIO:
                 return None, (TEXT_TRACE_AMBIGUOUS,)
     return hits[0], ()
 
@@ -977,7 +979,7 @@ def _near_white(span: Mapping[str, object]) -> bool:
 # Anything the model cannot reconcile (malformed hierarchy levels, rotated
 # pages, clips reported without extended drawings) fails closed.
 
-_CLIP_TOLERANCE_PT = 0.5
+_CLIP_TOLERANCE_PT = PDF_TEXT_GEOMETRY_TOLERANCE_PT
 
 
 @dataclass(frozen=True)
