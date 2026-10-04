@@ -195,6 +195,28 @@ class SourceRoomFaceRecord:
 
 
 @dataclass(frozen=True)
+class SourceRoomFaceAbstention:
+    """A planar face withheld from publication, with its provenance.
+
+    Abstention is candidate-local: it never publishes the face and never
+    deletes it silently, and it does not by itself invalidate unrelated faces.
+    """
+
+    face_id: str
+    reason: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    decision_scope_id: str
+    polygon_pdf_pts: tuple[Point, ...]
+    bounding_wall_ids: tuple[str, ...]
+    area_page_pts2: float
+    schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
 class SourceRoomFaceScopeResult:
     status: EvidenceResolutionStatus
     scope_complete: bool
@@ -207,6 +229,7 @@ class SourceRoomFaceScopeResult:
     page_id: str
     decision_scope_id: str
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
+    abstained_faces: tuple[SourceRoomFaceAbstention, ...] = ()
 
 
 class SourceRoomFaceAuthority:
@@ -340,23 +363,34 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
     if not polygons:
         return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
+    # A tiny or degenerate face is a candidate-local abstention: it is neither
+    # published nor allowed to supply topology evidence (two-sidedness) for any
+    # other face, but it does not by itself make unrelated, independently
+    # authenticated faces untrustworthy. Thresholds are unchanged. Failures that
+    # genuinely invalidate shared topology (boundary ownership, duplicate edge
+    # ownership, ambiguous components) still fail the whole scope above/below.
     largest_area = max(face_areas.values())
-    if any(
-        area < _ABSOLUTE_DEGENERATE_AREA_PT2
+    degenerate_face_ids = {
+        face_id
+        for face_id, area in face_areas.items()
+        if area < _ABSOLUTE_DEGENERATE_AREA_PT2
         or (
             largest_area > 0.0
             and area < _TINY_RELATIVE_THRESHOLD * largest_area
         )
-        for area in face_areas.values()
-    ):
+    }
+    valid_face_ids = tuple(
+        sorted(face_id for face_id in polygons if face_id not in degenerate_face_ids)
+    )
+    if not valid_face_ids:
         return _blocked(scope, SOURCE_ROOM_FACE_DEGENERATE)
 
     wall_faces: dict[str, set[str]] = {wall_id: set() for wall_id in wall_ids}
     wall_face_edges: dict[str, dict[Edge, set[str]]] = {
         wall_id: defaultdict(set) for wall_id in wall_ids
     }
-    for face_id, owners in face_walls.items():
-        for wall_id in owners:
+    for face_id in valid_face_ids:
+        for wall_id in face_walls[face_id]:
             if wall_id in wall_faces:
                 wall_faces[wall_id].add(face_id)
         for wall_id, face_edge in face_wall_edges[face_id]:
@@ -440,6 +474,22 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
             )
         )
 
+    abstained = tuple(
+        SourceRoomFaceAbstention(
+            face_id=face_id,
+            reason=SOURCE_ROOM_FACE_DEGENERATE,
+            document_id=scope.document_id,
+            revision_id=scope.revision_id,
+            source_sha256=scope.source_sha256,
+            snapshot_id=scope.snapshot_id,
+            page_id=scope.page_id,
+            decision_scope_id=scope.decision_scope_id,
+            polygon_pdf_pts=polygons[face_id],
+            bounding_wall_ids=face_walls[face_id],
+            area_page_pts2=face_areas[face_id],
+        )
+        for face_id in sorted(degenerate_face_ids)
+    )
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
         scope_complete=True,
@@ -451,6 +501,7 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         snapshot_id=scope.snapshot_id,
         page_id=scope.page_id,
         decision_scope_id=scope.decision_scope_id,
+        abstained_faces=abstained,
     )
 
 
@@ -489,6 +540,7 @@ __all__ = [
     "SOURCE_ROOM_FACE_SCOPE_RESOLVED",
     "SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE",
     "SourceRoomFaceAuthority",
+    "SourceRoomFaceAbstention",
     "SourceRoomFaceRecord",
     "SourceRoomFaceScopeResult",
     "SourceRoomFaceSelector",
