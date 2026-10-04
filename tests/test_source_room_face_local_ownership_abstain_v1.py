@@ -165,6 +165,12 @@ def test_local_ownership_decision_is_similarity_invariant(fn) -> None:
         base.reason_codes,
     )
     assert len(base.records) == 3 and len(base.abstained_faces) == 2
+    # Stronger than count invariance: the same source wall-bounded physical
+    # rooms must be withheld. This catches the planarizer's historical habit
+    # of moving the doubled-edge spur to a different adjacent face.
+    assert sorted(a.bounding_wall_ids for a in moved.abstained_faces) == sorted(
+        a.bounding_wall_ids for a in base.abstained_faces
+    )
 
 
 def test_local_ownership_decision_is_input_order_invariant() -> None:
