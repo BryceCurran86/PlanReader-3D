@@ -18,12 +18,12 @@ jobs:
       - name: Record checked out SHA
         run: git rev-parse HEAD | tee CURRENT_EXPORT_SHA.txt
       - name: Package repository
-        run: tar --exclude=.git -czf planreader-current-main-export.tar.gz .
+        run: tar --exclude=.git -czf ../planreader-current-main-export.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
           name: planreader-current-main-export
           path: |
-            planreader-current-main-export.tar.gz
+            ../planreader-current-main-export.tar.gz
             CURRENT_EXPORT_SHA.txt
           if-no-files-found: error
           retention-days: 1
