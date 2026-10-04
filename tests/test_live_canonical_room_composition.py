@@ -4,6 +4,7 @@ import fitz
 
 from pb_live_canonical_room_composition import (
     LIVE_CANONICAL_ROOM_PARTIAL,
+    LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL,
     LIVE_CANONICAL_ROOM_RESOLVED,
     LIVE_CANONICAL_ROOM_UNAVAILABLE,
     LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED,
@@ -104,6 +105,61 @@ def test_two_room_source_publishes_stable_canonical_room_objects() -> None:
         assert payload["bounding_wall_ids"]
         assert payload["canonical_bounding_wall_ids"]
         assert payload["wall_relationships_complete"] is False
+
+
+def test_valid_rooms_publish_but_partial_face_universe_stays_candidate() -> None:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=400, height=250)
+        for first, second in (
+            ((50.0, 50.0), (250.0, 50.0)),
+            ((250.0, 50.0), (250.0, 150.0)),
+            ((250.0, 150.0), (50.0, 150.0)),
+            ((50.0, 150.0), (50.0, 50.0)),
+            ((150.0, 50.0), (150.0, 150.0)),
+            # A speck larger than the wall graph's 2.5pt gap-snap tolerance (a
+            # smaller one is snapped away and never becomes a face) yet far under
+            # 1% of the largest face, so it is a genuine degenerate face.
+            ((300.0, 50.0), (306.0, 50.0)),
+            ((306.0, 50.0), (306.0, 56.0)),
+            ((306.0, 56.0), (300.0, 56.0)),
+            ((300.0, 56.0), (300.0, 50.0)),
+        ):
+            page.draw_line(
+                fitz.Point(*first),
+                fitz.Point(*second),
+                color=(0, 0, 0),
+                width=1,
+            )
+        payload = doc.tobytes()
+    finally:
+        doc.close()
+
+    source = SourceVisibilityProducer(
+        producer_method="live-canonical-room-partial-universe-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-canonical-room-partial-universe-doc",
+        source_bytes=payload,
+        source_locator="memory://live-canonical-room-partial-universe.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+
+    result = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert LIVE_CANONICAL_ROOM_PARTIAL in result.reason_codes
+    assert LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL in result.reason_codes
+    assert result.source_pages == (1,)
+    assert len(result.rooms) == 2
 
 
 def test_single_box_fails_closed_without_minting_room_object() -> None:

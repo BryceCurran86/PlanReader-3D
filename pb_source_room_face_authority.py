@@ -34,6 +34,7 @@ from pb_physical_wall_candidate_authority import PhysicalWallCandidateAuthority
 
 SOURCE_ROOM_FACE_SCHEMA_VERSION = "1.0.0"
 SOURCE_ROOM_FACE_SCOPE_RESOLVED = "source_room_face_scope_resolved"
+SOURCE_ROOM_FACE_UNIVERSE_PARTIAL = "source_room_face_universe_partial"
 SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE = "source_room_face_scope_unavailable"
 SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED = "source_room_face_boundary_unresolved"
 SOURCE_ROOM_FACE_DUPLICATE_EDGE = "source_room_face_duplicate_edge_ownership"
@@ -230,6 +231,14 @@ class SourceRoomFaceScopeResult:
     decision_scope_id: str
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
     abstained_faces: tuple[SourceRoomFaceAbstention, ...] = ()
+    @property
+    def face_universe_complete(self) -> bool:
+        """True only when no discovered face was withheld locally."""
+        return (
+            self.status is EvidenceResolutionStatus.CORROBORATED
+            and bool(self.scope_complete)
+            and not self.abstained_faces
+        )
 
 
 class SourceRoomFaceAuthority:
@@ -502,7 +511,10 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
         status=EvidenceResolutionStatus.CORROBORATED,
         scope_complete=True,
         records=tuple(output),
-        reason_codes=(SOURCE_ROOM_FACE_SCOPE_RESOLVED,),
+        reason_codes=(
+            SOURCE_ROOM_FACE_SCOPE_RESOLVED,
+            *((SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,) if abstained else ()),
+        ),
         document_id=scope.document_id,
         revision_id=scope.revision_id,
         source_sha256=scope.source_sha256,
@@ -546,6 +558,7 @@ __all__ = [
     "SOURCE_ROOM_FACE_DUPLICATE_EDGE",
     "SOURCE_ROOM_FACE_SCHEMA_VERSION",
     "SOURCE_ROOM_FACE_SCOPE_RESOLVED",
+    "SOURCE_ROOM_FACE_UNIVERSE_PARTIAL",
     "SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE",
     "SourceRoomFaceAuthority",
     "SourceRoomFaceAbstention",

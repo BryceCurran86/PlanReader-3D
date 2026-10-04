@@ -11,6 +11,7 @@ from pb_source_room_face_authority import (
     SOURCE_ROOM_FACE_DEGENERATE,
     SOURCE_ROOM_FACE_DUPLICATE_EDGE,
     SOURCE_ROOM_FACE_SCOPE_RESOLVED,
+    SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,
     _derive_scope,
 )
 
@@ -66,8 +67,10 @@ def test_detached_degenerate_face_does_not_destroy_valid_rooms() -> None:
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.scope_complete is True
+    assert result.face_universe_complete is False
     assert len(result.records) == 2
     assert SOURCE_ROOM_FACE_SCOPE_RESOLVED in result.reason_codes
+    assert SOURCE_ROOM_FACE_UNIVERSE_PARTIAL in result.reason_codes
     # The abstention is explicit and carries provenance; it is not silent.
     assert len(result.abstained_faces) == 1
     abstained = result.abstained_faces[0]
@@ -90,6 +93,8 @@ def test_valid_face_ids_and_records_are_unaffected_by_the_degenerate_neighbour()
 
     assert clean.status is EvidenceResolutionStatus.CORROBORATED
     assert clean.abstained_faces == ()
+    assert clean.face_universe_complete is True
+    assert noisy.face_universe_complete is False
     assert [(r.record_id, r.face_id, r.bounding_wall_ids) for r in noisy.records] == [
         (r.record_id, r.face_id, r.bounding_wall_ids) for r in clean.records
     ]
