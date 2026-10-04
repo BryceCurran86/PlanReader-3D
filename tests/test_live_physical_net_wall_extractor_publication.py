@@ -384,10 +384,6 @@ def test_extractor_routes_marked_opening_elevation_as_evidence_only(
     # as supporting evidence. Page 3 is an ordinary building elevation and
     # must not be widened by this opening-specific route.
     monkeypatch.setattr(
-        "pb_page_title_authority.analyse_page",
-        lambda _page, page_number: page_number,
-    )
-    monkeypatch.setattr(
         "pb_page_title_authority.resolve_document",
         lambda _analyses: (
             SimpleNamespace(title="GROUND FLOOR PLAN", confidence=100),
