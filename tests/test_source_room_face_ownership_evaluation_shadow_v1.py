@@ -492,7 +492,7 @@ def test_shadow_mirrors_the_production_ownership_rule_edge_by_edge(seed) -> None
 
 
 @pytest.mark.parametrize("seed", range(60))
-def test_legacy_blocks_on_ownership_exactly_when_the_shadow_lists_unresolved_faces(seed) -> None:
+def test_live_publication_never_uses_an_unowned_shadow_face(seed) -> None:
     records = _random_arrangement(seed)
     if len(records) < 4:
         pytest.skip("degenerate random draw")
@@ -502,12 +502,22 @@ def test_legacy_blocks_on_ownership_exactly_when_the_shadow_lists_unresolved_fac
         assert evaluation.reason_code == "ownership_evaluation_duplicate_edge_ownership"
         assert result.reason_codes == (R.SOURCE_ROOM_FACE_DUPLICATE_EDGE,)
         return
-    blocked_on_ownership = R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED in result.reason_codes
-    assert blocked_on_ownership == (bool(evaluation.unresolved_faces) or evaluation.face_count == 0)
+
+    if evaluation.face_count == 0 or evaluation.unowned_edge_count:
+        assert R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED in result.reason_codes
+        assert result.records == ()
+        return
+
     if result.status is EvidenceResolutionStatus.CORROBORATED:
-        assert not evaluation.unresolved_faces
-        assert {r.face_id for r in result.records} <= set(evaluation.owned_face_ids)
-        assert {a.face_id for a in result.abstained_faces} == set(evaluation.degenerate_owned_face_ids)
+        published_ids = {r.face_id for r in result.records}
+        assert published_ids <= set(evaluation.owned_face_ids)
+        assert published_ids.isdisjoint(evaluation.unresolved_face_ids)
+        # Degenerate shadow faces remain locally withheld. Live ownership
+        # abstention may conservatively withhold additional OWNED faces that
+        # share positive-length boundary with a competing span, so equality is
+        # intentionally not required here.
+        abstained_ids = {a.face_id for a in result.abstained_faces}
+        assert set(evaluation.degenerate_owned_face_ids) <= abstained_ids
 
 
 # ------------------------------------------------------------------ invariances
