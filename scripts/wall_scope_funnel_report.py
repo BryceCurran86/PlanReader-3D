@@ -55,6 +55,8 @@ def wall_scope_funnel(
         document_id=f"funnel-{digest[:16]}",
         source_bytes=pdf_bytes,
         source_locator=f"memory://{digest[:16]}.pdf",
+        # Addressing only: decode just the requested pages (page-local authority).
+        page_ids=tuple(str(p) for p in page_ids) if page_ids else None,
     )
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
@@ -64,6 +66,14 @@ def wall_scope_funnel(
         authority = wall_candidates.PhysicalWallCandidateProducer.from_source_visibility_producer(
             producer, page_ids=pages
         ).authority()
+        # Building the authority can publish a NEW snapshot (raster-visible
+        # augmentation). Production re-reads the producer's current snapshot
+        # (see compose_live_canonical_walls); selecting with the snapshot id
+        # returned by the original ingest would falsely report
+        # scope_unavailable for every augmented page.
+        published = producer.published_snapshot_for_revision(
+            published.revision.revision_id
+        )
         mask_proof = hasattr(wall_candidates, "_annotate_producer_owned_annotation_masks")
         receipts_by_page = (
             wall_candidates._text_receipts_by_page(

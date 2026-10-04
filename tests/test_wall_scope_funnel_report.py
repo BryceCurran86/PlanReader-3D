@@ -82,3 +82,22 @@ def test_main_writes_json_output(tmp_path, capsys) -> None:
     assert funnel.main([str(pdf), "--output", str(out)]) == 0
     assert out.exists()
     assert "candidate records:" in capsys.readouterr().out
+
+
+def test_report_selects_with_the_producers_current_snapshot(monkeypatch) -> None:
+    # Raster augmentation can publish a new snapshot while the authority is
+    # built; the report must read the current one, as production does.
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    calls = []
+    original = SourceVisibilityProducer.published_snapshot_for_revision
+
+    def spy(self, revision_id):
+        calls.append(revision_id)
+        return original(self, revision_id)
+
+    monkeypatch.setattr(SourceVisibilityProducer, "published_snapshot_for_revision", spy)
+    report = funnel.wall_scope_funnel(_pdf(label=False))
+
+    assert calls
+    assert report["pages"][0]["yields_canonical_walls"] is True
