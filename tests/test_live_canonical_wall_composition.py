@@ -69,13 +69,28 @@ def test_candidate_wall_payload_exposes_resolution_state() -> None:
 def _boundary_incomplete_source():
     doc = fitz.open()
     try:
-        page = doc.new_page(width=500.0, height=300.0)
-        # Closed physical wall loop: all four walls are internally bounded.
+        page = doc.new_page(width=520.0, height=400.0)
+
+        # Positive floor-plan framing matches the already-frozen boundary
+        # evaluation fixture. The frame is ownership evidence, not a wall.
+        page.draw_rect(
+            fitz.Rect(40.0, 30.0, 420.0, 330.0),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+        page.insert_text(
+            (80.0, 310.0),
+            "GROUND FLOOR PLAN",
+            fontsize=11.0,
+        )
+
+        # Two closed physical rooms wholly inside the framed plan.
         for first, second in (
-            ((50.0, 50.0), (250.0, 50.0)),
-            ((250.0, 50.0), (250.0, 200.0)),
-            ((250.0, 200.0), (50.0, 200.0)),
-            ((50.0, 200.0), (50.0, 50.0)),
+            ((90.0, 80.0), (330.0, 80.0)),
+            ((330.0, 80.0), (330.0, 230.0)),
+            ((330.0, 230.0), (90.0, 230.0)),
+            ((90.0, 230.0), (90.0, 80.0)),
+            ((210.0, 80.0), (210.0, 230.0)),
         ):
             page.draw_line(
                 fitz.Point(*first),
@@ -84,11 +99,13 @@ def _boundary_incomplete_source():
                 width=1.0,
             )
 
-        # Detached source line: its free ends make the page wall scope
-        # incomplete, but it is geometrically unrelated to the closed loop.
+        # Reference-region line outside the authenticated plan frame. Its
+        # free ends make the page-wide wall scope incomplete, while the plan
+        # walls remain independently boundary-clean. This is the same generic
+        # condition pinned by the merged #1300 boundary-evaluation tests.
         page.draw_line(
-            fitz.Point(400.0, 100.0),
-            fitz.Point(450.0, 100.0),
+            fitz.Point(440.0, 60.0),
+            fitz.Point(480.0, 60.0),
             color=(0, 0, 0),
             width=1.0,
         )
