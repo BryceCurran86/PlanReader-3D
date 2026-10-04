@@ -346,3 +346,73 @@ def test_page_index_does_not_bypass_generic_opening_evidence(monkeypatch):
     assert result == {}
     assert calls == [oid for oid, _observation in rows]
 
+
+
+def test_source_page_segment_reconstruction_reuses_exact_snapshot_page_cache(monkeypatch):
+    source, published, payload = _source(page_count=1)
+    indexed = module._visible_observations_by_page(
+        source_producer=source,
+        published=published,
+    )
+    original_extract = module.extract_native_page
+    calls = 0
+
+    def counted_extract(page):
+        nonlocal calls
+        calls += 1
+        return original_extract(page)
+
+    monkeypatch.setattr(module, "extract_native_page", counted_extract)
+    kwargs = dict(
+        source_producer=source,
+        published=published,
+        source_bytes=payload,
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+        resolved_visible_observations=indexed.get("1", ()),
+    )
+    first = module._source_page_segments(**kwargs)
+    second = module._source_page_segments(**kwargs)
+
+    assert first == second
+    assert calls == 1
+    assert first[0] is not second[0]
+    if first[0]:
+        first[0][0]["viewport_id"] = "mutated-test-scope"
+        third = module._source_page_segments(**kwargs)
+        assert third[0][0]["viewport_id"] == "wall-source:page-1"
+        assert calls == 1
+
+
+def test_source_page_segment_cache_key_includes_visible_membership(monkeypatch):
+    source, published, payload = _source(page_count=1)
+    indexed = module._visible_observations_by_page(
+        source_producer=source,
+        published=published,
+    )
+    rows = indexed.get("1", ())
+    original_extract = module.extract_native_page
+    calls = 0
+
+    def counted_extract(page):
+        nonlocal calls
+        calls += 1
+        return original_extract(page)
+
+    monkeypatch.setattr(module, "extract_native_page", counted_extract)
+    common = dict(
+        source_producer=source,
+        published=published,
+        source_bytes=payload,
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+    )
+    module._source_page_segments(
+        **common,
+        resolved_visible_observations=rows,
+    )
+    module._source_page_segments(
+        **common,
+        resolved_visible_observations=None,
+    )
+    assert calls == 2
