@@ -327,7 +327,7 @@ def compose_live_canonical_rooms(
                 *_dedupe(reasons),
             ),
             rooms=tuple(rooms),
-            source_pages=tuple(sorted(resolved_pages)),
+            source_pages=tuple(sorted(room_pages)),
         )
     return LiveCanonicalRoomComposition(
         status=EvidenceResolutionStatus.ABSTAINED,

@@ -117,10 +117,13 @@ def test_valid_rooms_publish_but_partial_face_universe_stays_candidate() -> None
             ((250.0, 150.0), (50.0, 150.0)),
             ((50.0, 150.0), (50.0, 50.0)),
             ((150.0, 50.0), (150.0, 150.0)),
-            ((300.0, 50.0), (300.5, 50.0)),
-            ((300.5, 50.0), (300.5, 50.5)),
-            ((300.5, 50.5), (300.0, 50.5)),
-            ((300.0, 50.5), (300.0, 50.0)),
+            # A speck larger than the wall graph's 2.5pt gap-snap tolerance (a
+            # smaller one is snapped away and never becomes a face) yet far under
+            # 1% of the largest face, so it is a genuine degenerate face.
+            ((300.0, 50.0), (306.0, 50.0)),
+            ((306.0, 50.0), (306.0, 56.0)),
+            ((306.0, 56.0), (300.0, 56.0)),
+            ((300.0, 56.0), (300.0, 50.0)),
         ):
             page.draw_line(
                 fitz.Point(*first),
