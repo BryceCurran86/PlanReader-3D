@@ -111,19 +111,21 @@ def test_sliver_strip_attached_to_valid_rooms_abstains_locally() -> None:
 
 
 def test_degenerate_face_does_not_supply_two_sided_evidence_for_a_lone_box() -> None:
-    # One valid room plus a sliver strip: the sliver must not make the lone
-    # box look like it has a two-sided interior boundary.
-    records = _box("room", 0.0, 0.0, 10.0, 10.0) + [
-        _record("strip-top", (0.0, -0.04), (10.0, -0.04)),
-        _record("strip-left", (0.0, -0.04), (0.0, 0.0)),
-        _record("strip-right", (10.0, 0.0), (10.0, -0.04)),
+    # Component A: two real rooms. Component B: a lone box plus a sliver strip.
+    # The sliver must not make the lone box look like it has a two-sided
+    # interior boundary, so only component A's rooms are published.
+    lone = _box("lone", 40.0, 0.0, 50.0, 10.0) + [
+        _record("strip-top", (40.0, -0.04), (50.0, -0.04)),
+        _record("strip-left", (40.0, -0.04), (40.0, 0.0)),
+        _record("strip-right", (50.0, 0.0), (50.0, -0.04)),
     ]
-    result = _derive_scope(_scope(records))
+    result = _derive_scope(_scope(_two_rooms() + lone))
 
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert result.scope_complete is False
-    assert result.records == ()
-    assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 2
+    published_walls = {w for row in result.records for w in row.bounding_wall_ids}
+    assert not any(w.startswith("lone-") for w in published_walls)
+    assert len(result.abstained_faces) == 1
 
 
 def test_scope_with_only_degenerate_faces_still_fails_closed() -> None:
@@ -159,16 +161,17 @@ def test_face_just_above_the_relative_threshold_is_published() -> None:
 
 
 def test_face_below_the_absolute_threshold_is_abstained_not_published() -> None:
-    # 10x10 room plus a 0.05x10 strip room (0.5 pt2 < 1.0 absolute).
-    records = _box("room", 0.0, 0.0, 10.05, 10.0) + [
-        _record("partition", (10.0, 0.0), (10.0, 10.0))
+    # Two 10x10 rooms plus a 0.05x10 strip room (0.5 pt2 < 1.0 absolute).
+    records = _box("room", 0.0, 0.0, 20.05, 10.0) + [
+        _record("partition-a", (10.0, 0.0), (10.0, 10.0)),
+        _record("partition-b", (20.0, 0.0), (20.0, 10.0)),
     ]
     result = _derive_scope(_scope(records))
 
-    # Only one valid face remains and a lone box cannot mint room authority.
-    assert result.records == ()
-    assert result.status is EvidenceResolutionStatus.ABSTAINED
-    assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 2
+    assert len(result.abstained_faces) == 1
+    assert result.abstained_faces[0].area_page_pts2 < 1.0
 
 
 def test_replay_and_input_order_invariance() -> None:
