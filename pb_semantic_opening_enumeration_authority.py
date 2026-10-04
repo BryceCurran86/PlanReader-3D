@@ -411,6 +411,11 @@ class SemanticOpeningEnumerationProducer:
         allowed_pages = set(scoped_page_ids)
 
         opening_records: dict[str, PhysicalOpeningExistenceRecord] = {}
+        # Representatives are addresses back into producer-owned physical
+        # opening authority. Keep only observation selectors that independently
+        # re-proved the exact existence record; shared support observations may
+        # legitimately be ambiguous when queried directly.
+        representative_candidates: dict[str, set[str]] = {}
         representatives: dict[str, str] = {}
         support_ids: set[str] = set()
         unresolved_visible_ids: set[str] = set()
@@ -485,8 +490,8 @@ class SemanticOpeningEnumerationProducer:
                     continue
                 opening_records[record.record_id] = record
                 support_ids.update(record.source_observation_ids)
-                representatives[record.record_id] = min(
-                    record.source_observation_ids
+                representative_candidates.setdefault(record.record_id, set()).add(
+                    observation_id
                 )
             elif (
                 disposition.status is EvidenceResolutionStatus.CORROBORATED
@@ -502,6 +507,16 @@ class SemanticOpeningEnumerationProducer:
                 conflict_ids.add(observation_id)
             else:
                 unresolved_visible_ids.add(observation_id)
+
+        # Deterministically choose only among selectors already proven above
+        # to resolve the exact physical opening. This is not a heuristic tie
+        # break: every candidate in each set has already returned that record.
+        for record_id in opening_records:
+            proven = tuple(sorted(representative_candidates.get(record_id, ())))
+            if not proven:
+                lineage_mismatch = True
+                continue
+            representatives[record_id] = proven[0]
 
         visible_ids = tuple(sorted(set(scoped_visible_ids)))
         # Residual evidence means unresolved opening-candidate evidence only.
