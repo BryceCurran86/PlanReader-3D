@@ -335,9 +335,47 @@ def classify_dimension_token(text: str, *, preceding_context: str = "") -> Typed
     return TypedDimensionToken(raw, DimensionTokenKind.OTHER.value, normalized_text=normalized, reason="no dimension grammar matched")
 
 
+_PAGE_NATIVE_PARSE_CACHE_ATTR = "_pb_figured_dimension_native_parse_cache"
+
+
+def _page_native_parse_cache(page: Any) -> Optional[dict[str, Any]]:
+    try:
+        cache = getattr(page, _PAGE_NATIVE_PARSE_CACHE_ATTR, None)
+    except Exception:
+        cache = None
+    if isinstance(cache, dict):
+        return cache
+    cache = {}
+    try:
+        setattr(page, _PAGE_NATIVE_PARSE_CACHE_ATTR, cache)
+    except Exception:
+        return None
+    return cache
+
+
+def _native_words(page: Any) -> tuple:
+    cache = _page_native_parse_cache(page)
+    if isinstance(cache, dict) and "words" in cache:
+        return cache["words"]
+    words = tuple(page.get_text("words") or ())
+    if isinstance(cache, dict):
+        cache["words"] = words
+    return words
+
+
+def _native_drawings(page: Any) -> tuple:
+    cache = _page_native_parse_cache(page)
+    if isinstance(cache, dict) and "drawings" in cache:
+        return cache["drawings"]
+    drawings = tuple(page.get_drawings() or ())
+    if isinstance(cache, dict):
+        cache["drawings"] = drawings
+    return drawings
+
+
 def calibrate_dimension_layout(page: Any) -> DimensionLayoutCalibration:
     """Derive spatial association tolerances from this page's own typography."""
-    heights = [float(w[3] - w[1]) for w in page.get_text("words") if float(w[3] - w[1]) > 0]
+    heights = [float(w[3] - w[1]) for w in _native_words(page) if float(w[3] - w[1]) > 0]
     median_h = statistics.median(heights) if heights else 8.0
     # Multipliers express geometric relationships (nearby line / endpoint /
     # same-axis row) while the absolute scale comes from the document itself.
@@ -363,7 +401,7 @@ def extract_vector_segments(
 ) -> list[ObservedGeometrySegment]:
     """Extract native vector line segments without assigning construction meaning."""
     segments: list[ObservedGeometrySegment] = []
-    for path_index, path in enumerate(page.get_drawings()):
+    for path_index, path in enumerate(_native_drawings(page)):
         for item_index, item in enumerate(path.get("items", [])):
             if not item:
                 continue
@@ -632,7 +670,7 @@ def extract_native_dimension_observations(
     view_type: str = DrawingViewType.UNKNOWN.value,
 ) -> list[DimensionObservation]:
     """Extract typed native-text figured-dimension candidates from a PDF page."""
-    words = list(page.get_text("words"))
+    words = list(_native_words(page))
     observations: list[DimensionObservation] = []
     for index, word in enumerate(words):
         text = str(word[4]).strip()
@@ -682,7 +720,7 @@ def _extract_witness_promoted_yearlike_observations(
     if view_type not in _YEARLIKE_PROMOTION_VIEW_TYPES:
         return [], []
 
-    words = list(page.get_text("words"))
+    words = list(_native_words(page))
     alphabetic_word_count_by_line: dict[tuple[int, int], int] = {}
     for candidate in words:
         try:
