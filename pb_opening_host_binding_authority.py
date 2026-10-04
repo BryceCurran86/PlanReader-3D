@@ -897,6 +897,7 @@ def _resolve_gap_lineage_host_from_records(
         )
 
     ambiguous_ids = set(equivalence.ambiguous_wall_ids)
+    group_lookup = _equivalence_group_lookup(equivalence)
     role_members: list[_RoleCandidate] = []
     for raw_id in (left_raw, right_raw):
         owners = tuple(
@@ -920,7 +921,11 @@ def _resolve_gap_lineage_host_from_records(
 
         by_group: dict[tuple[str, ...], list[PhysicalWallCandidateRecord]] = {}
         for record in owners:
-            group = _equivalence_group_for(equivalence, record.wall_candidate_id)
+            group = _equivalence_group_for(
+                equivalence,
+                record.wall_candidate_id,
+                group_lookup=group_lookup,
+            )
             by_group.setdefault(group, []).append(record)
         if len(by_group) != 1:
             return _HostBandResolution(
@@ -1159,7 +1164,7 @@ def _equivalence_group_lookup(
     for group in equivalence.equivalence_groups:
         normalized = tuple(sorted(str(member) for member in group))
         for member in normalized:
-            result[member] = normalized
+            result.setdefault(member, normalized)
     return result
 
 
