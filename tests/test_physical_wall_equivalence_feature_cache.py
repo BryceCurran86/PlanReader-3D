@@ -379,3 +379,56 @@ def test_full_resolver_matches_pre_cache_pair_logic(monkeypatch):
         )
 
         assert actual == expected
+
+
+def _legacy_segments_meet_within(left, right, tolerance):
+    ax, ay, bx, by = left
+    cx, cy, dx, dy = right
+
+    def orient(x1, y1, x2, y2, x3, y3):
+        return (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
+
+    o1 = orient(ax, ay, bx, by, cx, cy)
+    o2 = orient(ax, ay, bx, by, dx, dy)
+    o3 = orient(cx, cy, dx, dy, ax, ay)
+    o4 = orient(cx, cy, dx, dy, bx, by)
+    if ((o1 > 0.0) != (o2 > 0.0)) and ((o3 > 0.0) != (o4 > 0.0)):
+        return True
+
+    return min(
+        module._point_segment_distance(cx, cy, left),
+        module._point_segment_distance(dx, dy, left),
+        module._point_segment_distance(ax, ay, right),
+        module._point_segment_distance(bx, by, right),
+    ) <= tolerance
+
+
+def test_segment_contact_bbox_prefilter_matches_historical_randomized():
+    rng = random.Random(20261004)
+    for _ in range(5000):
+        left = tuple(rng.uniform(-500.0, 500.0) for _ in range(4))
+        right = tuple(rng.uniform(-500.0, 500.0) for _ in range(4))
+        tolerance = rng.choice((0.0, 0.1, 0.5, 1.0, 2.0, 5.0))
+        assert module._segments_meet_within(
+            left, right, tolerance
+        ) == _legacy_segments_meet_within(left, right, tolerance)
+
+
+def test_segment_contact_bbox_prefilter_skips_impossible_distance_work(monkeypatch):
+    def unexpected_distance(*_args, **_kwargs):
+        raise AssertionError("distance work should be skipped for disjoint expanded bboxes")
+
+    monkeypatch.setattr(module, "_point_segment_distance", unexpected_distance)
+    assert not module._segments_meet_within(
+        (0.0, 0.0, 10.0, 0.0),
+        (100.0, 100.0, 110.0, 100.0),
+        1.0,
+    )
+
+
+def test_segment_contact_bbox_prefilter_keeps_exact_tolerance_boundary():
+    assert module._segments_meet_within(
+        (0.0, 0.0, 10.0, 0.0),
+        (11.0, 0.0, 20.0, 0.0),
+        1.0,
+    )

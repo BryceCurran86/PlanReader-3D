@@ -408,6 +408,20 @@ def _segments_meet_within(
     ax, ay, bx, by = left
     cx, cy, dx, dy = right
 
+    # Conservative broad phase: if the axis-aligned segment bounds remain
+    # disjoint even after expanding by the exact existing contact tolerance,
+    # the segments cannot cross or come within that tolerance. Non-finite
+    # inputs deliberately fall through to the historical predicate.
+    finite_values = (ax, ay, bx, by, cx, cy, dx, dy, tolerance)
+    if all(math.isfinite(value) for value in finite_values):
+        if (
+            max(ax, bx) + tolerance < min(cx, dx)
+            or max(cx, dx) + tolerance < min(ax, bx)
+            or max(ay, by) + tolerance < min(cy, dy)
+            or max(cy, dy) + tolerance < min(ay, by)
+        ):
+            return False
+
     def orient(x1, y1, x2, y2, x3, y3):
         return (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
 
