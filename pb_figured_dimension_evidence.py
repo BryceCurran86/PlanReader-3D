@@ -683,6 +683,18 @@ def _extract_witness_promoted_yearlike_observations(
         return [], []
 
     words = list(page.get_text("words"))
+    alphabetic_word_count_by_line: dict[tuple[int, int], int] = {}
+    for candidate in words:
+        try:
+            line_key = (int(candidate[5]), int(candidate[6]))
+            candidate_text = str(candidate[4] or "")
+        except (IndexError, TypeError, ValueError):
+            continue
+        if re.search(r"[A-Za-z]", candidate_text):
+            alphabetic_word_count_by_line[line_key] = (
+                alphabetic_word_count_by_line.get(line_key, 0) + 1
+            )
+
     promoted: list[DimensionObservation] = []
     bindings: list[DimensionAnchorBinding] = []
     for index, word in enumerate(words):
@@ -703,18 +715,7 @@ def _extract_witness_promoted_yearlike_observations(
             block_no, line_no = int(word[5]), int(word[6])
         except (IndexError, TypeError, ValueError):
             continue
-        semantic_line_neighbor = False
-        for other_index, other in enumerate(words):
-            if other_index == index:
-                continue
-            try:
-                same_line = int(other[5]) == block_no and int(other[6]) == line_no
-            except (IndexError, TypeError, ValueError):
-                continue
-            if same_line and re.search(r"[A-Za-z]", str(other[4] or "")):
-                semantic_line_neighbor = True
-                break
-        if semantic_line_neighbor:
+        if alphabetic_word_count_by_line.get((block_no, line_no), 0):
             continue
 
         match = _BARE_MM_RE.match(token.normalized_text)
