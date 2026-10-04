@@ -1,0 +1,35 @@
+name: TEST ONLY Runtime Repo Snapshot
+
+on:
+  push:
+    branches:
+      - diagnostic/runtime-repo-snapshot
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack repository checkout
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path(".")
+          out = Path("PlanReader-3D-runtime.zip")
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  if ".git" in path.parts:
+                      continue
+                  if path == out:
+                      continue
+                  zf.write(path, path.as_posix())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-runtime-checkout
+          path: PlanReader-3D-runtime.zip
+          retention-days: 1
