@@ -183,6 +183,21 @@ def test_local_ownership_decision_is_input_order_invariant() -> None:
         assert R._derive_scope(_scope(shuffled)) == baseline
 
 
+def test_live_decision_is_independent_of_ownership_prefilter_tuning(monkeypatch) -> None:
+    records = _rooms(5) + _two_room_top_overlap()
+    baseline = R._derive_scope(_scope(records))
+
+    for name, value in (
+        ("_OWNERSHIP_GRID_CELL_PT", 0.5),
+        ("_OWNERSHIP_GRID_CELL_PT", 1.0e9),
+        ("_OWNERSHIP_GRID_MAX_CELLS_PER_EDGE", 1),
+        ("_OWNERSHIP_GRID_MAX_CELLS_PER_EDGE", 10**9),
+    ):
+        with monkeypatch.context() as ctx:
+            ctx.setattr(R, name, value)
+            assert R._derive_scope(_scope(records)) == baseline
+
+
 def test_three_of_five_contaminated_faces_still_fail_the_whole_scope() -> None:
     result = R._derive_scope(_scope(_rooms(5) + _three_room_top_overlap()))
     _whole_scope_boundary_failure(result)
