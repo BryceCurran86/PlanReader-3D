@@ -432,3 +432,72 @@ def test_segment_contact_bbox_prefilter_keeps_exact_tolerance_boundary():
         (11.0, 0.0, 20.0, 0.0),
         1.0,
     )
+
+
+
+def test_multisegment_no_scale_reuses_cached_segment_units(monkeypatch):
+    left = _identity(
+        "left-cached-units",
+        path=((0.0, 0.0), (50.0, 0.0), (100.0, 0.0)),
+        primitives=("left-a",),
+    )
+    right = _identity(
+        "right-cached-units",
+        path=((110.0, 0.0), (160.0, 0.0), (210.0, 0.0)),
+        primitives=("right-a",),
+    )
+    left_features = module._physical_wall_pair_features(left)
+    right_features = module._physical_wall_pair_features(right)
+    expected = _legacy_candidacy(left, right, points_per_mm=None)
+
+    calls = 0
+    original = module._unit
+
+    def counted(segment):
+        nonlocal calls
+        calls += 1
+        return original(segment)
+
+    monkeypatch.setattr(module, "_unit", counted)
+    actual = module._physical_wall_pair_identity_candidacy_with_features(
+        left,
+        right,
+        left_features,
+        right_features,
+        points_per_mm=None,
+    )
+
+    assert actual == expected
+    assert calls == 0
+
+
+def test_cached_unit_angle_gate_matches_legacy_at_tolerance_boundary():
+    import math
+
+    left = _identity(
+        "left-angle-boundary",
+        path=((0.0, 0.0), (100.0, 0.0), (200.0, 0.0)),
+        primitives=("left-angle",),
+    )
+
+    for angle_deg in (
+        module._EQUIVALENCE_ANGLE_TOL_DEG - 1e-6,
+        module._EQUIVALENCE_ANGLE_TOL_DEG,
+        module._EQUIVALENCE_ANGLE_TOL_DEG + 1e-6,
+    ):
+        radians = math.radians(angle_deg)
+        direction = (math.cos(radians), math.sin(radians))
+        right = _identity(
+            f"right-angle-{angle_deg}",
+            path=(
+                (0.0, 10.0),
+                (100.0 * direction[0], 10.0 + 100.0 * direction[1]),
+                (200.0 * direction[0], 10.0 + 200.0 * direction[1]),
+            ),
+            primitives=(f"right-angle-{angle_deg}",),
+        )
+        assert physical_wall_pair_identity_candidacy(
+            left,
+            right,
+            points_per_mm=None,
+        ) == _legacy_candidacy(left, right, points_per_mm=None)
