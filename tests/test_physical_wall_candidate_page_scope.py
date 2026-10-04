@@ -187,3 +187,28 @@ def test_page_segments_reused_across_page_and_viewport_wall_producers() -> None:
         )
         assert extract.call_count == 1
 
+def test_page_viewport_segmentation_reused_for_authenticated_fallback() -> None:
+    source, _published = _source()
+    original = wall_candidate_module._all_viewports
+
+    with patch.object(
+        wall_candidate_module,
+        "_all_viewports",
+        wraps=original,
+    ) as all_viewports:
+        PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source,
+            page_ids=("2",),
+        )
+        assert all_viewports.call_count == 1
+
+        PhysicalWallCandidateProducer.from_authenticated_viewports(
+            source,
+            page_ids=("2",),
+        )
+
+        # Page-scope assembly already authenticated the page viewport census.
+        # The later room/viewport fallback must reuse that producer-owned result
+        # instead of reopening and segmenting the same immutable page again.
+        assert all_viewports.call_count == 1
+

@@ -378,8 +378,19 @@ def _viewport_decision_scope_id(
     return f"wall-source:viewport:{page_id}:{viewport.view_id}:{digest}"
 
 
-def _authenticated_viewports(page: fitz.Page, *, page_number: int) -> Optional[tuple[tuple, tuple]]:
-    all_viewports = _all_viewports(page, page_number=page_number)
+def _page_viewports_cache_key(*, published, page_id: str) -> tuple[str, str, str, str, str]:
+    return (
+        str(published.revision.document_id),
+        str(published.revision.revision_id),
+        str(published.revision.source_sha256),
+        str(published.snapshot.snapshot_id),
+        str(page_id),
+    )
+
+
+def _authenticated_viewports_from_rows(
+    all_viewports,
+) -> Optional[tuple[tuple, tuple]]:
     if all_viewports is None:
         return None
     rows = tuple(all_viewports)
@@ -403,6 +414,12 @@ def _authenticated_viewports(page: fitz.Page, *, page_number: int) -> Optional[t
         )
     )
     return rows, eligible
+
+
+def _authenticated_viewports(page: fitz.Page, *, page_number: int) -> Optional[tuple[tuple, tuple]]:
+    return _authenticated_viewports_from_rows(
+        _all_viewports(page, page_number=page_number)
+    )
 
 
 def _producer_owned_points_per_mm(
@@ -2555,6 +2572,17 @@ def _assemble_scope_result(
             if viewport is None
             else None
         )
+        if viewport is None:
+            source_producer._physical_wall_page_viewports_cache[
+                _page_viewports_cache_key(
+                    published=published,
+                    page_id=page_id,
+                )
+            ] = (
+                None
+                if page_viewports is None
+                else tuple(page_viewports)
+            )
         for wall in ordered_walls:
             if viewport is None:
                 reason = _scope_boundary_reason_from_viewports(
@@ -2744,12 +2772,27 @@ def _build_authenticated_viewport_scope_results(
         )
     except WallPageFrameUnresolved:
         return ()
-    pdf = fitz.open(stream=source_bytes, filetype="pdf")
-    try:
-        page = pdf.load_page(page_number - 1)
-        authenticated = _authenticated_viewports(page, page_number=page_number)
-    finally:
-        pdf.close()
+    viewport_cache_key = _page_viewports_cache_key(
+        published=published,
+        page_id=page_id,
+    )
+    viewport_cache = source_producer._physical_wall_page_viewports_cache
+    if viewport_cache_key in viewport_cache:
+        page_viewports = viewport_cache[viewport_cache_key]
+    else:
+        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        try:
+            page = pdf.load_page(page_number - 1)
+            page_viewports = _all_viewports(page, page_number=page_number)
+        finally:
+            pdf.close()
+        viewport_cache[viewport_cache_key] = (
+            None
+            if page_viewports is None
+            else tuple(page_viewports)
+        )
+
+    authenticated = _authenticated_viewports_from_rows(page_viewports)
     if authenticated is None:
         return ()
     all_viewports, eligible = authenticated
