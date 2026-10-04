@@ -144,3 +144,46 @@ def test_page_scope_segments_viewports_once_for_all_wall_candidates() -> None:
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.records) >= 4
     segment.assert_called_once()
+
+def test_page_segments_reused_across_page_and_viewport_wall_producers() -> None:
+    source, _published = _source()
+    original = wall_candidate_module.extract_native_page
+
+    with patch.object(
+        wall_candidate_module,
+        "extract_native_page",
+        wraps=original,
+    ) as extract:
+        first_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source,
+            page_ids=("2",),
+        )
+        current = source.published_snapshot_for_revision(
+            next(iter(source._published_by_revision))
+        )
+        assert current is not None
+        first_result = first_producer.authority().resolve_scope(_selector(current, "2"))
+        assert first_result.status is EvidenceResolutionStatus.CORROBORATED
+        assert extract.call_count == 1
+
+        second_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source,
+            page_ids=("2",),
+        )
+        current_again = source.published_snapshot_for_revision(
+            next(iter(source._published_by_revision))
+        )
+        assert current_again is not None
+        second_result = second_producer.authority().resolve_scope(
+            _selector(current_again, "2")
+        )
+
+        assert second_result == first_result
+        assert extract.call_count == 1
+
+        PhysicalWallCandidateProducer.from_authenticated_viewports(
+            source,
+            page_ids=("2",),
+        )
+        assert extract.call_count == 1
+
