@@ -300,6 +300,7 @@ def collect_physical_wall_identities(
 # - orientation: W3 junction-classifier collinear angle tolerance
 _EQUIVALENCE_LATERAL_TOL_PT = DEFAULT_GAP_SNAP_TOLERANCE_PT
 _EQUIVALENCE_ANGLE_TOL_DEG = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG
+_EQUIVALENCE_ANGLE_TOL_COS = math.cos(math.radians(_EQUIVALENCE_ANGLE_TOL_DEG))
 
 # Degenerate-length guard only. Never used as a geometric relationship test.
 _EQUIVALENCE_DEGENERATE_TOL = 1e-9
@@ -330,6 +331,7 @@ class _PhysicalWallPairFeatures:
     primitive_set: frozenset[str]
     path: tuple[tuple[float, float], ...]
     segments: tuple[tuple[float, float, float, float], ...]
+    segment_units: tuple[Optional[tuple[float, float]], ...]
     axis_interval: Optional[tuple[str, float, float]]
     level_id: str
     single_segment_unit: Optional[tuple[float, float]]
@@ -346,6 +348,7 @@ def _physical_wall_pair_features(
         primitive_set=frozenset(identity.source_primitive_ids),
         path=path,
         segments=segments,
+        segment_units=tuple(_unit(segment) for segment in segments),
         axis_interval=_axis_interval(path),
         level_id=str(identity.level_id or "").strip(),
         single_segment_unit=None if single is None else _unit(single),
@@ -626,23 +629,26 @@ def _parallel_overlap_separation(
 
 
 
-def _parallel_longitudinal_overlap(
+def _parallel_longitudinal_overlap_with_units(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
+    left_unit: Optional[tuple[float, float]],
+    right_unit: Optional[tuple[float, float]],
     *,
-    angle_tolerance_deg: float,
+    angle_tolerance_cos: float,
 ) -> Optional[float]:
-    """Return longitudinal overlap for an orientation-compatible segment pair.
+    """Cached-unit form of the no-scale parallel-overlap predicate.
 
-    This is the no-scale subset of ``_parallel_overlap_separation``.  When no
-    authoritative physical scale exists, candidacy only needs orientation and
-    longitudinal overlap; perpendicular separation cannot prove distinctness.
+    The units are immutable per-segment features already derived once by
+    _physical_wall_pair_features. Comparing the absolute dot product with
+    cos(tolerance) is equivalent to the historical acos angle gate on the
+    clamped domain, while avoiding repeated unit/trigonometric work.
     """
-    lu, ru = _unit(left), _unit(right)
+    lu, ru = left_unit, right_unit
     if lu is None or ru is None:
         return None
     dot = max(-1.0, min(1.0, abs(lu[0] * ru[0] + lu[1] * ru[1])))
-    if math.degrees(math.acos(dot)) > angle_tolerance_deg:
+    if dot < angle_tolerance_cos:
         return None
     axis = lu
     left_first = left[0] * axis[0] + left[1] * axis[1]
@@ -660,6 +666,26 @@ def _parallel_longitudinal_overlap(
         else (right_second, right_first)
     )
     return min(left_max, right_max) - max(left_min, right_min)
+
+
+def _parallel_longitudinal_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    *,
+    angle_tolerance_deg: float,
+) -> Optional[float]:
+    """Return longitudinal overlap for an orientation-compatible segment pair.
+
+    This compatibility wrapper preserves the historical standalone API. The
+    dense resolver uses the cached-unit form above.
+    """
+    return _parallel_longitudinal_overlap_with_units(
+        left,
+        right,
+        _unit(left),
+        _unit(right),
+        angle_tolerance_cos=math.cos(math.radians(angle_tolerance_deg)),
+    )
 
 
 def _single_segment_pair_identity_candidacy(
@@ -684,7 +710,7 @@ def _single_segment_pair_identity_candidacy(
         return True, None
 
     dot = max(-1.0, min(1.0, abs(lu[0] * ru[0] + lu[1] * ru[1])))
-    if math.degrees(math.acos(dot)) > _EQUIVALENCE_ANGLE_TOL_DEG:
+    if dot < _EQUIVALENCE_ANGLE_TOL_COS:
         return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
 
     axis = lu
@@ -841,10 +867,15 @@ def _physical_wall_pair_identity_candidacy_with_features(
         # exclude a pair.  Longitudinal overlap can therefore decide candidacy
         # before any point-to-segment distance work.  Near-contact remains the
         # exact fallback for parallel segments whose intervals do not overlap.
-        for a in left_features.segments:
-            for b in right_features.segments:
-                overlap = _parallel_longitudinal_overlap(
-                    a, b, angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG
+        for left_index, a in enumerate(left_features.segments):
+            left_unit = left_features.segment_units[left_index]
+            for right_index, b in enumerate(right_features.segments):
+                overlap = _parallel_longitudinal_overlap_with_units(
+                    a,
+                    b,
+                    left_unit,
+                    right_features.segment_units[right_index],
+                    angle_tolerance_cos=_EQUIVALENCE_ANGLE_TOL_COS,
                 )
                 if overlap is None:
                     continue
@@ -1420,7 +1451,7 @@ def resolve_physical_wall_equivalence(
                             ),
                         ),
                     )
-                    if math.degrees(math.acos(dot)) <= angle_tol:
+                    if dot >= _EQUIVALENCE_ANGLE_TOL_COS:
                         exact_angle_candidates.add(index)
                 candidate_indexes = exact_angle_candidates
 
