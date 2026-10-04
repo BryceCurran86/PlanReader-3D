@@ -7,8 +7,12 @@ topologically resolved.
 
 Positive publication is intentionally narrow:
 - the physical-wall scope is CORROBORATED and complete;
-- every bounded-face edge belongs to exactly one authenticated physical wall;
-- tiny/degenerate faces fail closed;
+- every PUBLISHED bounded-face edge belongs to exactly one authenticated
+  physical wall;
+- a strict minority of faces touched by competing-owner edge spans may be
+  withheld explicitly, but a missing owner or a non-minority contaminated
+  universe still fails the whole scope;
+- tiny/degenerate faces use the same candidate-local strict-minority guard;
 - a connected component contains at least two bounded faces and at least one
   wall shared by two faces, preventing isolated boxes/title blocks from
   becoming room authority;
@@ -21,9 +25,9 @@ quantity.
 
 Every scope result also carries a SHADOW ``ownership_evaluation`` that
 classifies, per planar face, whether each face edge has a unique authenticated
-wall owner. It is descriptive metadata only: it never changes status, reason
-codes, records, abstentions or any consumer's behaviour, and a failure to
-compute it can only yield an "unavailable" evaluation.
+wall owner. The live candidate-local rule independently mirrors the same exact
+ownership predicate; the shadow remains audit metadata and a failure to compute
+it cannot alter the live decision.
 """
 from __future__ import annotations
 
@@ -150,6 +154,35 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
         if perpendicular_distance > tolerance:
             return False
     return child[0] != child[1]
+
+
+def _edges_share_positive_collinear_span(left: Edge, right: Edge) -> bool:
+    """True only when two quantized edges share positive-length collinear span.
+
+    This is used only to STABILIZE a local abstention around a competing-owner
+    span. It never chooses an owner. Point contact is not enough: a face merely
+    touching the end of an ambiguous span remains unrelated.
+    """
+    (ax, ay), (bx, by) = left
+    (cx, cy), (dx, dy) = right
+    tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+    vx, vy = bx - ax, by - ay
+    length = math.hypot(vx, vy)
+    if length <= tolerance:
+        return False
+
+    for px, py in ((cx, cy), (dx, dy)):
+        perpendicular_distance = abs((px - ax) * vy - (py - ay) * vx) / length
+        if perpendicular_distance > tolerance:
+            return False
+
+    ux, uy = vx / length, vy / length
+    right_positions = (
+        (cx - ax) * ux + (cy - ay) * uy,
+        (dx - ax) * ux + (dy - ay) * uy,
+    )
+    overlap = min(length, max(right_positions)) - max(0.0, min(right_positions))
+    return overlap > tolerance
 
 
 def _unique_containing_wall_owner(
