@@ -531,6 +531,15 @@ class SourceVisibilityProducer:
         # producer so wall, opening-void, and gross-wall compositions share the
         # same immutable page/viewport analysis instead of rescanning it.
         self._physical_scale_producer_cache = None
+        # Physical-wall source-page reconstruction is deterministic for an
+        # immutable published snapshot and decision scope. Keep this cache on
+        # the source producer so page-wide wall authority and later authenticated
+        # viewport fallback can reuse the same exact decoded source page without
+        # introducing module-global state or weakening source lineage.
+        self._physical_wall_page_segments_cache: dict[
+            tuple[object, ...],
+            tuple[tuple[dict[str, object], ...], tuple[str, ...], float, float],
+        ] = {}
         # Raster extraction is deterministic for immutable source bytes, the
         # fixed render DPI, and the detector version. Cache successful render
         # attempts per revision/page so repeated downstream compositions do not
