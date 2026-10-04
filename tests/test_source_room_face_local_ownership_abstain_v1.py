@@ -59,14 +59,15 @@ def _rooms(count):
 
 
 def _two_room_top_overlap():
-    # Crosses partition-1, so the overlap is planarized into two subedges.
-    # Neither subedge is an exact source edge; both have room-top + dup-top.
-    return [_record("dup-top", (2.0, 0.0), (18.0, 0.0))]
+    # Source overlap is 5..15, spanning rooms one and two. Depending on traversal
+    # the planarizer may hang its spur on either adjacent room, so the live rule
+    # must use the full authenticated source-wall overlap rather than raw face id.
+    return [_record("dup-top", (5.0, 0.0), (15.0, 0.0))]
 
 
 def _three_room_top_overlap():
-    # Crosses partition-1 and partition-2 -> three contaminated rooms.
-    return [_record("dup-top-wide", (2.0, 0.0), (28.0, 0.0))]
+    # Source overlap is 5..25 -> rooms one, two and three are contaminated.
+    return [_record("dup-top-wide", (5.0, 0.0), (25.0, 0.0))]
 
 
 def _transform(records, fn):
@@ -240,12 +241,17 @@ def test_competing_face_cannot_supply_two_sided_topology_to_survivors() -> None:
     assert any(count == 2 for count in counts.values())
 
 
-def test_positive_collinear_span_excludes_point_contact() -> None:
+def test_source_overlap_span_is_exact_and_excludes_point_contact() -> None:
     horizontal = R._edge((0.0, 0.0), (10.0, 0.0))
     overlap = R._edge((5.0, 0.0), (15.0, 0.0))
     endpoint_only = R._edge((10.0, 0.0), (20.0, 0.0))
     offset = R._edge((5.0, 0.001), (15.0, 0.001))
 
+    assert R._collinear_overlap_edge(horizontal, overlap) == R._edge(
+        (5.0, 0.0), (10.0, 0.0)
+    )
     assert R._edges_share_positive_collinear_span(horizontal, overlap)
+    assert R._collinear_overlap_edge(horizontal, endpoint_only) is None
     assert not R._edges_share_positive_collinear_span(horizontal, endpoint_only)
+    assert R._collinear_overlap_edge(horizontal, offset) is None
     assert not R._edges_share_positive_collinear_span(horizontal, offset)
