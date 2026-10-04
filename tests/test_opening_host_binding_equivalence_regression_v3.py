@@ -251,3 +251,33 @@ def test_contradiction_monotonicity_ambiguous_extra_representation_cannot_streng
     )
     assert after.status is EvidenceResolutionStatus.CONFLICT
     assert after.bands == ()
+
+
+
+def test_host_band_resolution_builds_equivalence_lookups_once(monkeypatch) -> None:
+    records = _base_records()
+    equivalence = _equivalence(records)
+    original_pair_lookup = host._pair_lookup
+    original_group_lookup = host._equivalence_group_lookup
+    pair_calls = 0
+    group_calls = 0
+
+    def counted_pair_lookup(value):
+        nonlocal pair_calls
+        pair_calls += 1
+        return original_pair_lookup(value)
+
+    def counted_group_lookup(value):
+        nonlocal group_calls
+        group_calls += 1
+        return original_group_lookup(value)
+
+    monkeypatch.setattr(host, "_pair_lookup", counted_pair_lookup)
+    monkeypatch.setattr(host, "_equivalence_group_lookup", counted_group_lookup)
+
+    result = _resolve(records, equivalence)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.bands) == 1
+    assert pair_calls == 1
+    assert group_calls == 1
