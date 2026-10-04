@@ -330,6 +330,7 @@ class _PhysicalWallPairFeatures:
     primitive_set: frozenset[str]
     path: tuple[tuple[float, float], ...]
     segments: tuple[tuple[float, float, float, float], ...]
+    segment_units: tuple[Optional[tuple[float, float]], ...]
     axis_interval: Optional[tuple[str, float, float]]
     level_id: str
     single_segment_unit: Optional[tuple[float, float]]
@@ -341,14 +342,16 @@ def _physical_wall_pair_features(
 ) -> _PhysicalWallPairFeatures:
     path = tuple(identity.path_fingerprint or ())
     segments = _segments(path)
+    segment_units = tuple(_unit(segment) for segment in segments)
     single = segments[0] if len(segments) == 1 else None
     return _PhysicalWallPairFeatures(
         primitive_set=frozenset(identity.source_primitive_ids),
         path=path,
         segments=segments,
+        segment_units=segment_units,
         axis_interval=_axis_interval(path),
         level_id=str(identity.level_id or "").strip(),
-        single_segment_unit=None if single is None else _unit(single),
+        single_segment_unit=None if single is None else segment_units[0],
         single_segment_bbox=(
             None
             if single is None
@@ -640,19 +643,21 @@ def _parallel_overlap_separation(
 
 
 
-def _parallel_longitudinal_overlap(
+def _parallel_longitudinal_overlap_with_units(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
+    left_unit: Optional[tuple[float, float]],
+    right_unit: Optional[tuple[float, float]],
     *,
     angle_tolerance_deg: float,
 ) -> Optional[float]:
-    """Return longitudinal overlap for an orientation-compatible segment pair.
+    """Cached-unit form of the no-scale parallel-overlap predicate.
 
-    This is the no-scale subset of ``_parallel_overlap_separation``.  When no
-    authoritative physical scale exists, candidacy only needs orientation and
-    longitudinal overlap; perpendicular separation cannot prove distinctness.
+    The resolver derives immutable segment units once per wall identity and
+    reuses them across pair comparisons.  The historical acos angle decision
+    is intentionally preserved exactly, including tolerance-boundary behavior.
     """
-    lu, ru = _unit(left), _unit(right)
+    lu, ru = left_unit, right_unit
     if lu is None or ru is None:
         return None
     dot = max(-1.0, min(1.0, abs(lu[0] * ru[0] + lu[1] * ru[1])))
@@ -674,6 +679,26 @@ def _parallel_longitudinal_overlap(
         else (right_second, right_first)
     )
     return min(left_max, right_max) - max(left_min, right_min)
+
+
+def _parallel_longitudinal_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    *,
+    angle_tolerance_deg: float,
+) -> Optional[float]:
+    """Return longitudinal overlap for an orientation-compatible segment pair.
+
+    This compatibility wrapper preserves the historical standalone API.  Dense
+    resolver paths use the cached-unit form above.
+    """
+    return _parallel_longitudinal_overlap_with_units(
+        left,
+        right,
+        _unit(left),
+        _unit(right),
+        angle_tolerance_deg=angle_tolerance_deg,
+    )
 
 
 def _single_segment_pair_identity_candidacy(
@@ -855,10 +880,15 @@ def _physical_wall_pair_identity_candidacy_with_features(
         # exclude a pair.  Longitudinal overlap can therefore decide candidacy
         # before any point-to-segment distance work.  Near-contact remains the
         # exact fallback for parallel segments whose intervals do not overlap.
-        for a in left_features.segments:
-            for b in right_features.segments:
-                overlap = _parallel_longitudinal_overlap(
-                    a, b, angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG
+        for left_index, a in enumerate(left_features.segments):
+            left_unit = left_features.segment_units[left_index]
+            for right_index, b in enumerate(right_features.segments):
+                overlap = _parallel_longitudinal_overlap_with_units(
+                    a,
+                    b,
+                    left_unit,
+                    right_features.segment_units[right_index],
+                    angle_tolerance_deg=_EQUIVALENCE_ANGLE_TOL_DEG,
                 )
                 if overlap is None:
                     continue
