@@ -20,7 +20,10 @@ from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
+from pb_physical_wall_candidate_authority import (
+    BOUNDARY_EVALUATION_EVALUATED,
+    PhysicalWallCandidateSelector,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 LIVE_CANONICAL_WALL_SCHEMA_VERSION = "1.1.0"
@@ -34,6 +37,9 @@ LIVE_CANONICAL_WALL_IDENTITY_CANDIDATE = (
     "live_canonical_wall_physical_identity_unresolved"
 )
 LIVE_CANONICAL_WALL_FRAME_CONFLICT = "live_canonical_wall_frame_conflict"
+LIVE_CANONICAL_WALL_BOUNDARY_CLEAN_PARTIAL = (
+    "live_canonical_wall_boundary_clean_partial"
+)
 
 
 @dataclass(frozen=True)
@@ -262,6 +268,71 @@ def compose_live_canonical_walls(
             decision_scope_id=f"wall-source:page-{page_id}",
         )
         scope = authority.resolve_scope(selector)
+
+        # An incomplete scope may still carry producer-owned per-candidate
+        # boundary evaluation. Preserve only independently boundary-clean wall
+        # candidates as candidate canonical objects. This does not promote the
+        # scope to complete, does not use incomplete equivalence/host-frame
+        # relationships, and never publishes tainted candidates.
+        if (
+            scope.status is EvidenceResolutionStatus.CORROBORATED
+            and not scope.scope_complete
+            and scope.records
+            and scope.boundary_evaluation is not None
+            and scope.boundary_evaluation.status == BOUNDARY_EVALUATION_EVALUATED
+        ):
+            evaluated_ids = set(
+                _clean(value)
+                for value in scope.boundary_evaluation.evaluated_wall_candidate_ids
+                if _clean(value)
+            )
+            tainted_ids = set(
+                _clean(value)
+                for value in scope.boundary_evaluation.boundary_tainted_wall_candidate_ids
+                if _clean(value)
+            )
+            records_by_id = {
+                _clean(record.wall_candidate_id): record for record in scope.records
+            }
+            clean_ids = tuple(
+                sorted((evaluated_ids - tainted_ids) & set(records_by_id))
+            )
+            if clean_ids:
+                if str(page_id).isdigit():
+                    source_pages.add(int(page_id))
+                all_pages_resolved = False
+                reasons.extend(scope.reason_codes)
+                reasons.append(LIVE_CANONICAL_WALL_BOUNDARY_CLEAN_PARTIAL)
+
+                # Every candidate from an incomplete scope remains unresolved
+                # as a physical wall identity even when its own boundary is
+                # clean. Tainted candidates stay withheld entirely.
+                unresolved.update(records_by_id)
+                for member_id in clean_ids:
+                    record = records_by_id[member_id]
+                    identity = record.physical_identity
+                    canonical_id = (
+                        _clean(identity.candidate_identity_id)
+                        if identity.candidate_identity_id
+                        else member_id
+                    )
+                    walls.append(
+                        _make_wall(
+                            canonical_wall_id=canonical_id,
+                            records=(record,),
+                            scope=scope,
+                            frame_id=None,
+                            opening_ids_by_frame=opening_ids_by_frame,
+                            frame_record_ids=frame_record_ids,
+                            physical_identity_resolved=False,
+                            identity_status=(
+                                "candidate_boundary_clean_scope_incomplete"
+                            ),
+                        )
+                    )
+                    mapping[member_id] = canonical_id
+                continue
+
         if (
             scope.status is not EvidenceResolutionStatus.CORROBORATED
             or not scope.scope_complete
@@ -428,6 +499,7 @@ def compose_live_canonical_walls(
 
 
 __all__ = [
+    "LIVE_CANONICAL_WALL_BOUNDARY_CLEAN_PARTIAL",
     "LIVE_CANONICAL_WALL_EQUIVALENCE_UNAVAILABLE",
     "LIVE_CANONICAL_WALL_FRAME_CONFLICT",
     "LIVE_CANONICAL_WALL_IDENTITY_CANDIDATE",
