@@ -1,0 +1,17 @@
+name: ChatGPT PERF03 Current Main Export
+
+on:
+  push:
+    branches: [chatgpt/temp-perf03-main-7002ce]
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-perf03-current-main
+          path: .
+          include-hidden-files: true
+          retention-days: 1
