@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import fitz
 
