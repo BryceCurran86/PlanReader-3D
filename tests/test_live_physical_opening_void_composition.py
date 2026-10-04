@@ -24,6 +24,7 @@ def _complete_void_pdf(
     *,
     include_height: bool = True,
     tag: str = "W1",
+    include_joinery_note: bool = False,
     include_schedule: bool = True,
 ) -> bytes:
     doc = fitz.open()
@@ -43,6 +44,11 @@ def _complete_void_pdf(
             page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1.0)
         page.insert_text(fitz.Point(112.0, 65.0), "900")
         page.insert_text(fitz.Point(112.0, 106.0), tag)
+        if include_joinery_note:
+            page.insert_text(
+                fitz.Point(60.0, 350.0),
+                "JOINERY HEIGHTS TO BE 2100 AFL U.N.O.",
+            )
 
         if include_schedule:
             headings = (
@@ -298,6 +304,47 @@ def test_live_void_composition_never_uses_default_height_when_source_height_is_m
     assert opening.area_m2 is None
     assert opening.opening_void_record_id is None
     assert opening.geometry_complete is False
+
+
+def test_joinery_head_note_does_not_become_opening_height_without_base_proof() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-opening-no-head-height-shortcut-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-opening-no-head-height-shortcut",
+        source_bytes=_complete_void_pdf(
+            include_height=False,
+            tag="D1",
+            include_joinery_note=True,
+        ),
+        source_locator="memory://live-opening-no-head-height-shortcut.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.opening_kind == "door"
+    assert opening.height_m is None
+    assert opening.area_m2 is None
+    assert opening.geometry_complete is False
+
+    # The document note is a head elevation above AFL, not proof that this
+    # exact physical opening starts at AFL. Without independently proven base
+    # or vertical placement there is no source-closed door area.
+    from pb_live_opening_area_quantity_publication import (
+        publish_live_opening_area_quantities,
+    )
+
+    assert publish_live_opening_area_quantities(composition) == ()
 
 
 def test_live_void_composition_cannot_resolve_a_narrowed_opening_subset() -> None:
