@@ -11,6 +11,7 @@ import fitz
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_pdf_text_integrity_authority import _valid_tounicode_cmap
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -110,6 +111,43 @@ def _malformed_cmap_pdf() -> bytes:
             6: f"<< /Length {len(cmap)} >>\nstream\n{cmap}\nendstream",
         }
     )
+
+
+
+def test_compact_tounicode_mapping_tokens_are_valid_pdf_cmap_syntax() -> None:
+    cmap = b"""\/CIDInit \/ProcSet findresource begin
+12 dict begin
+begincmap
+\/CMapType 2 def
+\/CMapName\/R24 def
+1 begincodespacerange
+<00><ff>
+endcodespacerange
+3 beginbfrange
+<01><01><0031>
+<02><02><0032>
+<03><03><0033>
+endbfrange
+endcmap
+CMapName currentdict \/CMap defineresource pop
+end end
+"""
+    assert _valid_tounicode_cmap(cmap) is True
+
+
+def test_compact_bfchar_mapping_tokens_are_valid_pdf_cmap_syntax() -> None:
+    cmap = b"""begincmap
+\/CMapType 2 def
+1 begincodespacerange
+<00><ff>
+endcodespacerange
+2 beginbfchar
+<31><0031>
+<32><0032>
+endbfchar
+endcmap
+"""
+    assert _valid_tounicode_cmap(cmap) is True
 
 
 def _control_text_pdf() -> bytes:

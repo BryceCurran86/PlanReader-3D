@@ -253,12 +253,12 @@ def _valid_tounicode_cmap(stream: bytes | bytearray | memoryview | None) -> bool
         (
             "beginbfchar",
             "endbfchar",
-            r"<[0-9A-Fa-f]+>\s+<[0-9A-Fa-f]+>",
+            r"<[0-9A-Fa-f]+>\s*<[0-9A-Fa-f]+>",
         ),
         (
             "beginbfrange",
             "endbfrange",
-            r"<[0-9A-Fa-f]+>\s+<[0-9A-Fa-f]+>\s+(?:<[0-9A-Fa-f]+>|\[)",
+            r"<[0-9A-Fa-f]+>\s*<[0-9A-Fa-f]+>\s*(?:<[0-9A-Fa-f]+>|\[)",
         ),
     )
     for begin, end, mapping_pattern in block_specs:
