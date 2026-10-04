@@ -358,21 +358,69 @@ def _cluster_strokes(
     n = len(strokes)
     uf = _UnionFind(n)
 
-    # Pre-compute average stroke length for gap threshold
-    avg_len = sum(s.length for s in strokes) / max(n, 1)
+    # These geometric features are immutable for the duration of clustering.
+    # Dense CAD pages can evaluate hundreds of thousands of neighboring-angle
+    # pairs, so recomputing atan2/hypot/midpoints inside the pair loop dominates
+    # runtime without adding authority. Cache the exact historical values once.
+    stroke_lengths = [stroke.length for stroke in strokes]
+    stroke_angles = [stroke.angle_deg for stroke in strokes]
+    stroke_centres = [(stroke.cx, stroke.cy) for stroke in strokes]
 
-    # Angle-bucket acceleration: group strokes into angle buckets
+    # Pre-compute average stroke length for gap threshold.
+    avg_len = sum(stroke_lengths) / max(n, 1)
+
+    # Angle-bucket acceleration: group strokes into angle buckets.
     bucket_size = angle_tol * 2
     angle_buckets: Dict[int, List[int]] = {}
-    for i, s in enumerate(strokes):
-        bucket = int(s.angle_deg / bucket_size)
+    for i, angle in enumerate(stroke_angles):
+        bucket = int(angle / bucket_size)
         if bucket not in angle_buckets:
             angle_buckets[bucket] = []
         angle_buckets[bucket].append(i)
 
-    # Within each bucket (and neighbours), check proximity
+    def cached_midpoint_distance(i: int, j: int) -> float:
+        """Historical midpoint-to-line distance using cached immutable features."""
+
+        first = strokes[i]
+        second = strokes[j]
+        first_centre = stroke_centres[i]
+        second_centre = stroke_centres[j]
+
+        second_length = stroke_lengths[j]
+        if second_length < 1e-9:
+            first_to_second = math.hypot(
+                first_centre[0] - second.x1,
+                first_centre[1] - second.y1,
+            )
+        else:
+            first_to_second = abs(
+                (second.y2 - second.y1) * first_centre[0]
+                - (second.x2 - second.x1) * first_centre[1]
+                + second.x2 * second.y1
+                - second.y2 * second.x1
+            ) / second_length
+
+        first_length = stroke_lengths[i]
+        if first_length < 1e-9:
+            second_to_first = math.hypot(
+                second_centre[0] - first.x1,
+                second_centre[1] - first.y1,
+            )
+        else:
+            second_to_first = abs(
+                (first.y2 - first.y1) * second_centre[0]
+                - (first.x2 - first.x1) * second_centre[1]
+                + first.x2 * first.y1
+                - first.y2 * first.x1
+            ) / first_length
+
+        return (first_to_second + second_to_first) * 0.5
+
+    # Within each bucket (and neighbours), check proximity. Each stroke belongs
+    # to exactly one angle bucket, and the existing j <= i guard admits each
+    # unordered pair at most once. The old checked-pair set was therefore
+    # redundant bookkeeping on the hottest dense-page loop.
     merge_count = 0
-    checked: set = set()
     for bucket, indices in angle_buckets.items():
         # Check this bucket and the next (for angles near bucket boundary)
         neighbor_indices = list(indices)
@@ -381,19 +429,15 @@ def _cluster_strokes(
         if (bucket - 1) in angle_buckets:
             neighbor_indices.extend(angle_buckets[bucket - 1])
 
-        for ii, i in enumerate(indices):
+        for i in indices:
             for j in neighbor_indices:
                 if j <= i:
                     continue
-                pair_key = (i, j)
-                if pair_key in checked:
-                    continue
-                checked.add(pair_key)
 
                 si, sj = strokes[i], strokes[j]
-                if _angle_delta(si.angle_deg, sj.angle_deg) > angle_tol:
+                if _angle_delta(stroke_angles[i], stroke_angles[j]) > angle_tol:
                     continue
-                dist = _strokes_midpoint_distance(si, sj)
+                dist = cached_midpoint_distance(i, j)
                 if dist > max_dist:
                     continue
 
@@ -404,7 +448,7 @@ def _cluster_strokes(
                 # perpendicular to the lines for parallel strokes offset
                 # in the perpendicular direction.
                 mean_angle_rad = math.radians(
-                    _circular_mean([si.angle_deg, sj.angle_deg])
+                    _circular_mean([stroke_angles[i], stroke_angles[j]])
                 )
                 dir_x = math.cos(mean_angle_rad)
                 dir_y = math.sin(mean_angle_rad)
