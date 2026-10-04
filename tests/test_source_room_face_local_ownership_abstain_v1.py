@@ -102,8 +102,8 @@ def test_two_of_five_competing_faces_abstain_locally() -> None:
         R.SOURCE_ROOM_FACE_SCOPE_RESOLVED,
         R.SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,
     )
-    assert len(result.records) == 4
-    assert len(result.abstained_faces) == 3
+    assert len(result.records) == 3
+    assert len(result.abstained_faces) == 2
 
     assert all(
         row.reason == R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
@@ -167,7 +167,7 @@ def test_local_ownership_decision_is_similarity_invariant(fn) -> None:
 
 
 def test_local_ownership_decision_is_input_order_invariant() -> None:
-    records = _three_rooms() + _one_room_top_overlap()
+    records = _rooms(5) + _two_room_top_overlap()
     baseline = R._derive_scope(_scope(records))
 
     for seed in range(10):
@@ -214,8 +214,8 @@ def test_strict_minority_combined_defects_can_still_publish_independent_rooms() 
     result = R._derive_scope(_scope(records))
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
-    assert len(result.records) == 3
-    assert len(result.abstained_faces) == 2
+    assert len(result.records) == 4
+    assert len(result.abstained_faces) == 3
     assert {a.reason for a in result.abstained_faces} == {
         R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED,
         R.SOURCE_ROOM_FACE_DEGENERATE,
