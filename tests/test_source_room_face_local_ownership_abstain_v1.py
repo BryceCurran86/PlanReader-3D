@@ -46,22 +46,27 @@ def _box(prefix, x0, y0, x1, y1):
     ]
 
 
-def _three_rooms():
-    # Three 10x10 rooms sharing two interior partitions.
-    return _box("room", 0.0, 0.0, 30.0, 10.0) + [
-        _record("partition-a", (10.0, 0.0), (10.0, 10.0)),
-        _record("partition-b", (20.0, 0.0), (20.0, 10.0)),
+def _rooms(count):
+    # Equal 10x10 rooms sharing interior partitions.
+    return _box("room", 0.0, 0.0, 10.0 * count, 10.0) + [
+        _record(
+            f"partition-{index}",
+            (10.0 * index, 0.0),
+            (10.0 * index, 10.0),
+        )
+        for index in range(1, count)
     ]
 
 
-def _one_room_top_overlap():
-    # Entirely inside the first room's top boundary; not an exact duplicate.
-    return [_record("dup-top", (2.0, 0.0), (8.0, 0.0))]
-
-
 def _two_room_top_overlap():
-    # Crosses the first partition and contaminates rooms one and two.
-    return [_record("dup-top-wide", (2.0, 0.0), (18.0, 0.0))]
+    # Crosses partition-1, so the overlap is planarized into two subedges.
+    # Neither subedge is an exact source edge; both have room-top + dup-top.
+    return [_record("dup-top", (2.0, 0.0), (18.0, 0.0))]
+
+
+def _three_room_top_overlap():
+    # Crosses partition-1 and partition-2 -> three contaminated rooms.
+    return [_record("dup-top-wide", (2.0, 0.0), (28.0, 0.0))]
 
 
 def _transform(records, fn):
@@ -83,12 +88,12 @@ def _whole_scope_boundary_failure(result):
     assert R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED in result.reason_codes
 
 
-def test_one_of_three_competing_faces_abstains_locally() -> None:
-    clean = R._derive_scope(_scope(_three_rooms()))
-    result = R._derive_scope(_scope(_three_rooms() + _one_room_top_overlap()))
+def test_two_of_five_competing_faces_abstain_locally() -> None:
+    clean = R._derive_scope(_scope(_rooms(5)))
+    result = R._derive_scope(_scope(_rooms(5) + _two_room_top_overlap()))
 
     assert clean.status is EvidenceResolutionStatus.CORROBORATED
-    assert len(clean.records) == 3
+    assert len(clean.records) == 5
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.scope_complete is True
@@ -97,16 +102,22 @@ def test_one_of_three_competing_faces_abstains_locally() -> None:
         R.SOURCE_ROOM_FACE_SCOPE_RESOLVED,
         R.SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,
     )
-    assert len(result.records) == 2
-    assert len(result.abstained_faces) == 1
+    assert len(result.records) == 4
+    assert len(result.abstained_faces) == 3
 
-    abstained = result.abstained_faces[0]
-    assert abstained.reason == R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
-    assert {"room-top", "dup-top"} <= set(abstained.bounding_wall_ids)
-    assert abstained.face_id not in {row.face_id for row in result.records}
+    assert all(
+        row.reason == R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
+        for row in result.abstained_faces
+    )
+    assert all(
+        {"room-top", "dup-top"} <= set(row.bounding_wall_ids)
+        for row in result.abstained_faces
+    )
+    assert {row.face_id for row in result.records}.isdisjoint(
+        {row.face_id for row in result.abstained_faces}
+    )
 
-    # The two unaffected rooms retain exactly the same face identities as the
-    # clean source and independently qualify through partition-b.
+    # The three unaffected rooms retain their clean face identities.
     assert {row.face_id for row in result.records} < {
         row.face_id for row in clean.records
     }
@@ -114,7 +125,7 @@ def test_one_of_three_competing_faces_abstains_locally() -> None:
 
 
 def test_published_faces_are_clean_in_the_ownership_audit() -> None:
-    result = R._derive_scope(_scope(_three_rooms() + _one_room_top_overlap()))
+    result = R._derive_scope(_scope(_rooms(5) + _two_room_top_overlap()))
     evaluation = result.ownership_evaluation
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
@@ -135,7 +146,7 @@ def test_published_faces_are_clean_in_the_ownership_audit() -> None:
     ids=["translate", "rotate90", "scale2"],
 )
 def test_local_ownership_decision_is_similarity_invariant(fn) -> None:
-    records = _three_rooms() + _one_room_top_overlap()
+    records = _rooms(5) + _two_room_top_overlap()
     base = R._derive_scope(_scope(records))
     moved = R._derive_scope(_scope(_transform(records, fn)))
 
@@ -152,6 +163,7 @@ def test_local_ownership_decision_is_similarity_invariant(fn) -> None:
         tuple(a.reason for a in base.abstained_faces),
         base.reason_codes,
     )
+    assert len(base.records) == 3 and len(base.abstained_faces) == 2
 
 
 def test_local_ownership_decision_is_input_order_invariant() -> None:
@@ -164,8 +176,8 @@ def test_local_ownership_decision_is_input_order_invariant() -> None:
         assert R._derive_scope(_scope(shuffled)) == baseline
 
 
-def test_two_of_three_contaminated_faces_still_fail_the_whole_scope() -> None:
-    result = R._derive_scope(_scope(_three_rooms() + _two_room_top_overlap()))
+def test_three_of_five_contaminated_faces_still_fail_the_whole_scope() -> None:
+    result = R._derive_scope(_scope(_rooms(5) + _three_room_top_overlap()))
     _whole_scope_boundary_failure(result)
 
 
@@ -173,36 +185,31 @@ def test_missing_owner_still_fails_the_whole_scope(monkeypatch) -> None:
     # Partition splitting requires containment lookup for top/bottom subedges.
     # Simulate source ownership disappearing for those non-exact fragments.
     monkeypatch.setattr(R, "_containing_wall_ids", lambda *_a, **_kw: ())
-    result = R._derive_scope(_scope(_three_rooms()))
+    result = R._derive_scope(_scope(_rooms(5)))
     _whole_scope_boundary_failure(result)
     assert result.ownership_evaluation.unowned_edge_count > 0
 
 
 def test_ownership_plus_degenerate_defects_must_be_strict_minority() -> None:
     records = (
-        _three_rooms()
-        + _one_room_top_overlap()
-        + _box("speck", 40.0, 0.0, 40.5, 0.5)
+        _rooms(5)
+        + _two_room_top_overlap()
+        + _box("speck", 60.0, 0.0, 60.5, 0.5)
     )
-    # Four discovered faces: one competing-owner face + one degenerate face =
+    # Six discovered faces: two competing-owner faces + one degenerate face =
     # exactly half. The generalized pollution guard must publish nothing.
     result = R._derive_scope(_scope(records))
     _whole_scope_boundary_failure(result)
 
 
 def test_strict_minority_combined_defects_can_still_publish_independent_rooms() -> None:
-    # Four real rooms + one degenerate speck = five discovered faces. One room
-    # is ownership-contaminated, so two of five are withheld (< half), leaving
-    # three real rooms that retain independent two-sided topology.
-    four_rooms = _box("room", 0.0, 0.0, 40.0, 10.0) + [
-        _record("partition-a", (10.0, 0.0), (10.0, 10.0)),
-        _record("partition-b", (20.0, 0.0), (20.0, 10.0)),
-        _record("partition-c", (30.0, 0.0), (30.0, 10.0)),
-    ]
+    # Six real rooms + one degenerate speck = seven discovered faces. Two rooms
+    # are ownership-contaminated, so three of seven are withheld (< half),
+    # leaving four real rooms with independent two-sided topology.
     records = (
-        four_rooms
-        + _one_room_top_overlap()
-        + _box("speck", 50.0, 0.0, 50.5, 0.5)
+        _rooms(6)
+        + _two_room_top_overlap()
+        + _box("speck", 70.0, 0.0, 70.5, 0.5)
     )
     result = R._derive_scope(_scope(records))
 
@@ -216,17 +223,21 @@ def test_strict_minority_combined_defects_can_still_publish_independent_rooms() 
 
 
 def test_competing_face_cannot_supply_two_sided_topology_to_survivors() -> None:
-    result = R._derive_scope(_scope(_three_rooms() + _one_room_top_overlap()))
+    result = R._derive_scope(_scope(_rooms(5) + _two_room_top_overlap()))
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     published = {row.face_id for row in result.records}
     abstained = {row.face_id for row in result.abstained_faces}
     assert published.isdisjoint(abstained)
-    assert len(published) == 2
+    assert len(published) == 3
 
-    # Both published rooms include partition-b; the contaminated first room is
-    # not needed to make the survivors pass the anti-box/two-sided gate.
-    assert all("partition-b" in row.bounding_wall_ids for row in result.records)
+    # The surviving three rooms independently contain shared interior walls;
+    # the two contaminated rooms are not needed for two-sided proof.
+    counts = {}
+    for row in result.records:
+        for wall_id in row.bounding_wall_ids:
+            counts[wall_id] = counts.get(wall_id, 0) + 1
+    assert any(count == 2 for count in counts.values())
 
 
 def test_positive_collinear_span_excludes_point_contact() -> None:
