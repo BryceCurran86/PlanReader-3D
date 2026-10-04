@@ -349,7 +349,7 @@ def _legacy_surface(result):
 
 def test_shadow_failure_cannot_change_legacy_wall_scope_surface(monkeypatch) -> None:
     payload = _pdf_bytes()
-    baseline = _resolve(payload, method="metadata-shadow-baseline")
+    baseline = _resolve(payload, method="metadata-shadow-failure-containment")
     assert baseline.status is EvidenceResolutionStatus.CORROBORATED
     assert baseline.source_metadata_table is not None
     assert baseline.source_metadata_table.status == SOURCE_METADATA_DESCRIBED
@@ -362,7 +362,7 @@ def test_shadow_failure_cannot_change_legacy_wall_scope_surface(monkeypatch) -> 
         "build_physical_wall_source_metadata_scope_table",
         boom,
     )
-    degraded = _resolve(payload, method="metadata-shadow-degraded")
+    degraded = _resolve(payload, method="metadata-shadow-failure-containment")
 
     assert degraded.source_metadata_table is not None
     assert degraded.source_metadata_table.status == SOURCE_METADATA_UNAVAILABLE
