@@ -1152,10 +1152,25 @@ def _pair_lookup(
     return result
 
 
+def _equivalence_group_lookup(
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> dict[str, tuple[str, ...]]:
+    result: dict[str, tuple[str, ...]] = {}
+    for group in equivalence.equivalence_groups:
+        normalized = tuple(sorted(str(member) for member in group))
+        for member in normalized:
+            result[member] = normalized
+    return result
+
+
 def _equivalence_group_for(
     equivalence: PhysicalWallEquivalenceResolution,
     wall_id: str,
+    *,
+    group_lookup: Optional[Mapping[str, tuple[str, ...]]] = None,
 ) -> tuple[str, ...]:
+    if group_lookup is not None:
+        return group_lookup.get(wall_id, (wall_id,))
     for group in equivalence.equivalence_groups:
         if wall_id in group:
             return tuple(sorted(str(member) for member in group))
@@ -1180,6 +1195,9 @@ def _normalize_role_candidates(
     candidates: Sequence[tuple[float, PhysicalWallCandidateRecord]],
     equivalence: PhysicalWallEquivalenceResolution,
     axis_tol: float,
+    *,
+    pair_lookup: Optional[Mapping[tuple[str, str], PhysicalEquivalenceClass]] = None,
+    group_lookup: Optional[Mapping[str, tuple[str, ...]]] = None,
 ) -> tuple[EvidenceResolutionStatus, tuple[_RoleCandidate, ...], tuple[str, ...]]:
     """Normalize alternatives competing for one geometric host role.
 
@@ -1193,7 +1211,12 @@ def _normalize_role_candidates(
     the same positively proven SAME group may be reduced to one deterministic
     local representation. Geometry never establishes sameness by itself.
     """
-    pair_lookup = _pair_lookup(equivalence)
+    pair_lookup = _pair_lookup(equivalence) if pair_lookup is None else pair_lookup
+    group_lookup = (
+        _equivalence_group_lookup(equivalence)
+        if group_lookup is None
+        else group_lookup
+    )
     normalized: list[_RoleCandidate] = []
 
     for cluster in _clusters_by_offset(candidates, axis_tol):
@@ -1217,7 +1240,11 @@ def _normalize_role_candidates(
 
         by_group: dict[tuple[str, ...], list[tuple[float, PhysicalWallCandidateRecord]]] = {}
         for offset, record in cluster:
-            group = _equivalence_group_for(equivalence, record.wall_candidate_id)
+            group = _equivalence_group_for(
+                equivalence,
+                record.wall_candidate_id,
+                group_lookup=group_lookup,
+            )
             by_group.setdefault(group, []).append((offset, record))
 
         for group, members in sorted(by_group.items()):
@@ -1257,34 +1284,44 @@ def _resolve_host_bands(
         if along_max > opening.length + edge_tol and abs(along_min - opening.length) <= edge_tol:
             right_raw.append((offset, record))
 
+    pair_lookup = _pair_lookup(equivalence)
+    group_lookup = _equivalence_group_lookup(equivalence)
+
     relevant_wall_ids = {
         record.wall_candidate_id for _offset, record in (*left_raw, *right_raw)
     }
     ambiguous_relevant_ids = relevant_wall_ids & set(equivalence.ambiguous_wall_ids)
     if ambiguous_relevant_ids:
-        pair_lookup = _pair_lookup(equivalence)
-        for wall_id in ambiguous_relevant_ids:
-            explained = any(
-                wall_id in pair
-                and classification
-                is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
-                for pair, classification in pair_lookup.items()
+        explained_ambiguous_wall_ids = {
+            wall_id
+            for pair, classification in pair_lookup.items()
+            if classification
+            is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+            for wall_id in pair
+        }
+        if not ambiguous_relevant_ids <= explained_ambiguous_wall_ids:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT,
+                (),
+                (HOST_EQUIVALENCE_AMBIGUOUS,),
             )
-            if not explained:
-                return _HostBandResolution(
-                    EvidenceResolutionStatus.CONFLICT,
-                    (),
-                    (HOST_EQUIVALENCE_AMBIGUOUS,),
-                )
 
     axis_tol = max(0.5, opening.thickness * 0.05)
     left_status, left_candidates, left_reasons = _normalize_role_candidates(
-        left_raw, equivalence, axis_tol
+        left_raw,
+        equivalence,
+        axis_tol,
+        pair_lookup=pair_lookup,
+        group_lookup=group_lookup,
     )
     if left_status is not EvidenceResolutionStatus.CORROBORATED:
         return _HostBandResolution(left_status, (), left_reasons)
     right_status, right_candidates, right_reasons = _normalize_role_candidates(
-        right_raw, equivalence, axis_tol
+        right_raw,
+        equivalence,
+        axis_tol,
+        pair_lookup=pair_lookup,
+        group_lookup=group_lookup,
     )
     if right_status is not EvidenceResolutionStatus.CORROBORATED:
         return _HostBandResolution(right_status, (), right_reasons)
