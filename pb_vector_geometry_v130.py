@@ -431,6 +431,7 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
                     list(clip_exact_rect) if clip_exact_rect is not None else None
                 ),
                 "path_index": int(draw_index),
+                "sequence_number": seq_key,
             }
 
         for item_index, item in enumerate(drawing.get("items", []) if isinstance(drawing, dict) else []):
