@@ -76,6 +76,33 @@ _FLOOR_PLAN_TEXT_RE = re.compile(
     re.I,
 )
 
+_PAGE_TEXT_CACHE_ATTR = "_pb_raster_schedule_page_text_cache"
+
+
+def _cached_page_text(page: fitz.Page, mode: str):
+    """Reuse successful native PyMuPDF text parses on one live page object."""
+
+    try:
+        cache = getattr(page, _PAGE_TEXT_CACHE_ATTR, None)
+    except Exception:
+        cache = None
+    if not isinstance(cache, dict):
+        cache = {}
+        try:
+            setattr(page, _PAGE_TEXT_CACHE_ATTR, cache)
+        except Exception:
+            # Cache availability is not authority. The successful value from
+            # this call is still returned; later calls may simply reparse.
+            cache = None
+
+    if isinstance(cache, dict) and mode in cache:
+        return cache[mode]
+
+    value = page.get_text(mode)
+    if isinstance(cache, dict):
+        cache[mode] = value
+    return value
+
 
 def _chain_values_close(left: float, right: float, tol: float = _CHAIN_VALUE_TOL_MM) -> bool:
     return abs(float(left) - float(right)) <= tol
@@ -333,7 +360,7 @@ class GenericScheduleTableExtractor:
         one door-leaf width per bay become D1. Mixed widths never mint W2/D2.
         Dimension callout pairs (width × height in one note) are not chains.
         """
-        page_text = page.get_text("text") or ""
+        page_text = _cached_page_text(page, "text") or ""
         plan_regions = self._plan_chain_regions(page, page_num)
         if not plan_regions and not _FLOOR_PLAN_TEXT_RE.search(page_text):
             return []
@@ -444,7 +471,7 @@ class GenericScheduleTableExtractor:
         any single documented opening type via ``normalize_opening_tag``
         and is safely skipped rather than guessed at.
         """
-        words = page.get_text("words")
+        words = _cached_page_text(page, "words")
         blocks: Dict[int, List[tuple]] = {}
         for w in words:
             blocks.setdefault(int(w[5]), []).append(w)
@@ -620,7 +647,7 @@ class GenericScheduleTableExtractor:
         """
         rows: List[ScheduleRow] = []
         try:
-            page_text = page.get_text("text") or ""
+            page_text = _cached_page_text(page, "text") or ""
             normalized_page = re.sub(r"\s+", " ", page_text.lower())
             has_schedule_context = (
                 bool(re.search(r"\bschedules?\b", normalized_page))
@@ -629,7 +656,7 @@ class GenericScheduleTableExtractor:
             if not has_schedule_context:
                 return rows
 
-            words = page.get_text("words") or []
+            words = _cached_page_text(page, "words") or []
             if not words:
                 return rows
 
@@ -696,7 +723,7 @@ class GenericScheduleTableExtractor:
         """Extract multi-column CAD schedules (common in architectural schedule sheets)."""
         rows: List[ScheduleRow] = []
         try:
-            words = page.get_text("words")
+            words = _cached_page_text(page, "words")
             if not words or len(words) < 20:
                 return rows
 
@@ -819,7 +846,7 @@ class GenericScheduleTableExtractor:
     def _extract_callouts_from_page(self, page: fitz.Page, page_num: int) -> List[ScheduleRow]:
         """Extract explicit drawing callouts (vents, pillars, piers, trusses, windows, doors)."""
         rows: List[ScheduleRow] = []
-        blocks = page.get_text("blocks")
+        blocks = _cached_page_text(page, "blocks")
 
         for b in blocks:
             x0, y0, x1, y1, b_text, _, _ = b
