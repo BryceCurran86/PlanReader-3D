@@ -664,6 +664,12 @@ class OpeningElevationFrameAreaAuthority:
         )
 
 
+def _receipt_ordinal(receipt: object, name: str) -> int | None:
+    """Receipt ordinal as int, or None when the receipt left it unresolved."""
+    value = getattr(receipt, name, None)
+    return None if value is None else int(value)
+
+
 class OpeningElevationFrameAreaProducer:
     def __init__(
         self,
@@ -736,14 +742,25 @@ class OpeningElevationFrameAreaProducer:
             or not str(text or "").strip()
         ):
             return None
+        block_no = _receipt_ordinal(receipt, "block_no")
+        line_no = _receipt_ordinal(receipt, "line_no")
+        word_no = _receipt_ordinal(receipt, "word_no")
+        sequence_number = _receipt_ordinal(receipt, "sequence_number")
+        # Line identity and in-line order are required to assemble a title
+        # line. An unresolved value must not collapse onto a shared sentinel
+        # (that would merge unrelated words into one pseudo-line), so the
+        # word is simply unusable. sequence_number is only a tie-break after
+        # word_no, so an unresolved paint sequence sorts first instead.
+        if block_no is None or line_no is None or word_no is None:
+            return None
         return _TrustedWord(
             observation_id=str(observation_id),
             text=str(text),
             bbox=geometry,
-            block_no=int(getattr(receipt, "block_no", -1)),
-            line_no=int(getattr(receipt, "line_no", -1)),
-            word_no=int(getattr(receipt, "word_no", -1)),
-            sequence_number=int(getattr(receipt, "sequence_number", -1)),
+            block_no=block_no,
+            line_no=line_no,
+            word_no=word_no,
+            sequence_number=-1 if sequence_number is None else sequence_number,
         )
 
     def _build(self) -> None:
