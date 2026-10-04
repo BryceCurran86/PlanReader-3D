@@ -540,6 +540,14 @@ class SourceVisibilityProducer:
             tuple[object, ...],
             tuple[tuple[dict[str, object], ...], tuple[str, ...], float, float],
         ] = {}
+        # Page-scope wall assembly already segments the immutable native page to
+        # evaluate scope boundaries. Reuse that exact producer-owned viewport
+        # census if a later room fallback asks for authenticated viewport wall
+        # scopes, rather than reopening and segmenting the same page again.
+        self._physical_wall_page_viewports_cache: dict[
+            tuple[str, str, str, str, str],
+            object,
+        ] = {}
         # Raster extraction is deterministic for immutable source bytes, the
         # fixed render DPI, and the detector version. Cache successful render
         # attempts per revision/page so repeated downstream compositions do not
