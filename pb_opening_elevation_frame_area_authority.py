@@ -439,6 +439,36 @@ def _record_candidates_for_page(
                     continue
 
                 frame_bbox = (x_lo, y_lo, x_hi, y_hi)
+
+                # Both dimension lines must belong locally to this same frame,
+                # not merely contribute compatible spans elsewhere on the page.
+                # The threshold is page-typography-derived, not a drawing-unit
+                # or project constant.
+                locality_limit = max(
+                    float(layout.line_search_distance_pt) * 2.5,
+                    geometry_tolerance,
+                )
+                x_endpoints = x_binding.endpoints
+                y_endpoints = y_binding.endpoints
+                if x_endpoints is None or y_endpoints is None:
+                    continue
+                x_dimension_line_y = (
+                    float(x_endpoints[0][1]) + float(x_endpoints[1][1])
+                ) / 2.0
+                y_dimension_line_x = (
+                    float(y_endpoints[0][0]) + float(y_endpoints[1][0])
+                ) / 2.0
+                if min(
+                    abs(x_dimension_line_y - y_lo),
+                    abs(x_dimension_line_y - y_hi),
+                ) > locality_limit:
+                    continue
+                if min(
+                    abs(y_dimension_line_x - x_lo),
+                    abs(y_dimension_line_x - x_hi),
+                ) > locality_limit:
+                    continue
+
                 contained = {
                     contained_mark
                     for contained_word, contained_mark, _kind in all_tags
