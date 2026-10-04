@@ -3449,6 +3449,55 @@ class GenericPlanReaderExtractor:
                     and _is_physical_floor_plan_page(page_index)
                 )
             ]
+
+            # Opening frame-area authority may need a same-document marked
+            # WINDOW/DOOR ELEVATIONS sheet even when that sheet is not one of
+            # the caller's extraction targets. Route only positively
+            # source-titled opening-elevation sheets into the decoded evidence
+            # universe. They never enter topology: title routing can spend
+            # work, but the downstream producer must independently re-prove
+            # title words, opening mark, figured dimensions, witness binding
+            # and closed frame geometry before any quantity can publish.
+            physical_opening_evidence_pages: list[int] = []
+            if physical_net_pages:
+                try:
+                    from pb_opening_elevation_frame_area_authority import (
+                        opening_elevation_claim_family,
+                    )
+
+                    topology_page_set = set(physical_net_pages)
+                    for page_index, (
+                        source_title,
+                        source_title_confidence,
+                    ) in sorted(_resolved_page_title_map().items()):
+                        if (
+                            page_index in topology_page_set
+                            or not source_title
+                            or source_title_confidence <= 0
+                        ):
+                            continue
+                        title_words = tuple(
+                            token
+                            for token in re.findall(
+                                r"[A-Za-z0-9]+",
+                                source_title,
+                            )
+                            if token
+                        )
+                        if opening_elevation_claim_family(title_words) is not None:
+                            physical_opening_evidence_pages.append(page_index)
+                except Exception:
+                    # Evidence expansion is additive only. Failure to classify
+                    # support pages preserves the historical floor-plan-only
+                    # path rather than widening by guess.
+                    physical_opening_evidence_pages = []
+
+            physical_claim_pages = tuple(
+                sorted(
+                    set(physical_net_pages)
+                    | set(physical_opening_evidence_pages)
+                )
+            )
             from pb_physical_wall_candidate_authority import (
                 MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS,
                 PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED,
@@ -3542,9 +3591,16 @@ class GenericPlanReaderExtractor:
                 }
                 self.extraction_status["physical_net_wall_live"] = "abstained"
             elif physical_net_pages:
+                physical_claim_kwargs: dict[str, object] = {
+                    "pages": physical_claim_pages,
+                }
+                if physical_opening_evidence_pages:
+                    physical_claim_kwargs["topology_pages"] = tuple(
+                        physical_net_pages
+                    )
                 physical_wall_result = collect_live_physical_net_wall_claim(
                     p_path,
-                    pages=physical_net_pages,
+                    **physical_claim_kwargs,
                 )
                 _coverage_objects.extend(physical_wall_result.canonical_walls)
                 _coverage_objects.extend(physical_wall_result.canonical_openings)
