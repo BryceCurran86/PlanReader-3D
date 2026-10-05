@@ -58,6 +58,8 @@ from pb_portable_raster_ocr_authority import (
 )
 from pb_raster_text_corroboration_authority import (
     RASTER_TEXT_CORROBORATION_DPIS,
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
     _lossless_rotate,
     _producer_owned_ocr_target,
     normalize_reading,
