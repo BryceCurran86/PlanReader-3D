@@ -164,7 +164,9 @@ def test_page_segments_reused_across_page_and_viewport_wall_producers() -> None:
         assert current is not None
         first_result = first_producer.authority().resolve_scope(_selector(current, "2"))
         assert first_result.status is EvidenceResolutionStatus.CORROBORATED
-        assert extract.call_count == 1
+        # Source visibility already decoded this exact immutable page during
+        # ingest, so wall reconstruction must reuse that producer-owned parse.
+        assert extract.call_count == 0
 
         second_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
             source,
@@ -179,13 +181,38 @@ def test_page_segments_reused_across_page_and_viewport_wall_producers() -> None:
         )
 
         assert second_result == first_result
-        assert extract.call_count == 1
+        assert extract.call_count == 0
 
         PhysicalWallCandidateProducer.from_authenticated_viewports(
             source,
             page_ids=("2",),
         )
-        assert extract.call_count == 1
+        assert extract.call_count == 0
+
+
+def test_page_segments_fall_back_to_native_decode_when_producer_cache_is_missing() -> None:
+    source, _published = _source()
+    source._producer._native_page_decode_cache.clear()
+    original = wall_candidate_module.extract_native_page
+
+    with patch.object(
+        wall_candidate_module,
+        "extract_native_page",
+        wraps=original,
+    ) as extract:
+        producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source,
+            page_ids=("2",),
+        )
+        current = source.published_snapshot_for_revision(
+            next(iter(source._published_by_revision))
+        )
+        assert current is not None
+        result = producer.authority().resolve_scope(_selector(current, "2"))
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert extract.call_count == 1
+
 
 def test_page_viewport_segmentation_reused_for_authenticated_fallback() -> None:
     source, _published = _source()
