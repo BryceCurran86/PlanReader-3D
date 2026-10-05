@@ -3674,6 +3674,10 @@ class GenericPlanReaderExtractor:
             elif physical_net_pages:
                 physical_claim_kwargs: dict[str, object] = {
                     "pages": physical_claim_pages,
+                    # Decode the caller's existing extraction universe for
+                    # cross-view room-area evidence, but do not add these pages
+                    # to wall topology or opening evidence authority.
+                    "room_area_support_pages": tuple(target_pages),
                 }
                 if physical_opening_evidence_pages:
                     physical_claim_kwargs["topology_pages"] = tuple(
@@ -3721,6 +3725,13 @@ class GenericPlanReaderExtractor:
                     getattr(
                         physical_wall_result,
                         "opening_count_quantity_evidence",
+                        (),
+                    )
+                )
+                _coverage_quantities.extend(
+                    getattr(
+                        physical_wall_result,
+                        "room_area_quantity_evidence",
                         (),
                     )
                 )
