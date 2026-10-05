@@ -1,0 +1,119 @@
+name: TEST ONLY GPT3 Maryborough Stage Timings
+
+on:
+  pull_request:
+    branches:
+      - gpt3/maryborough-stage-timing-base
+
+jobs:
+  core_claim:
+    name: Maryborough core claim
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run core claim
+        shell: bash
+        run: |
+          mkdir -p artifacts/core
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/core/run.log
+          import json, time
+          from pathlib import Path
+          import fitz
+          from tools.run_source_closed_project_handoff import _source_topology_pages
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          topology, page_count = _source_topology_pages(path)
+          all_pages = tuple(range(page_count))
+          print(json.dumps({"stage":"topology","topology_pages":[p+1 for p in topology],"page_count":page_count}), flush=True)
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=all_pages,
+              topology_pages=(topology if topology else None),
+              room_area_support_pages=None,
+          )
+          elapsed=time.perf_counter()-started
+          print(json.dumps({
+              "stage":"core_claim",
+              "elapsed_seconds":elapsed,
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+              "canonical_walls":len(claim.canonical_walls),
+              "canonical_openings":len(claim.canonical_openings),
+              "canonical_rooms":len(claim.canonical_rooms),
+              "canonical_floors":len(claim.canonical_floors),
+              "opening_area_quantities":len([q for q in claim.opening_quantity_evidence if not q.abstained]),
+              "opening_count_quantities":len([q for q in claim.opening_count_quantity_evidence if not q.abstained]),
+              "room_area_quantities":len([q for q in claim.room_area_quantity_evidence if not q.abstained]),
+          }, sort_keys=True), flush=True)
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-maryborough-core-claim
+          path: artifacts/core
+          retention-days: 1
+
+  room_claim:
+    name: Maryborough room-area claim
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run room-area claim
+        shell: bash
+        run: |
+          mkdir -p artifacts/room
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/room/run.log
+          import json, time
+          from pathlib import Path
+          from tools.run_source_closed_project_handoff import _source_topology_pages
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          topology, page_count = _source_topology_pages(path)
+          all_pages = tuple(range(page_count))
+          print(json.dumps({"stage":"topology","topology_pages":[p+1 for p in topology],"page_count":page_count}), flush=True)
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=all_pages,
+              topology_pages=(topology if topology else None),
+              room_area_support_pages=all_pages,
+          )
+          elapsed=time.perf_counter()-started
+          print(json.dumps({
+              "stage":"room_claim",
+              "elapsed_seconds":elapsed,
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+              "canonical_rooms":len(claim.canonical_rooms),
+              "canonical_floors":len(claim.canonical_floors),
+              "room_area_quantities":len([q for q in claim.room_area_quantity_evidence if not q.abstained]),
+              "room_area_quantity_ids":[q.quantity_id for q in claim.room_area_quantity_evidence if not q.abstained],
+          }, sort_keys=True), flush=True)
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-maryborough-room-claim
+          path: artifacts/room
+          retention-days: 1
