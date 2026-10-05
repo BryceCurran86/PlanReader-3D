@@ -264,7 +264,7 @@ def _image_only_dimension_pdf() -> bytes:
     return payload
 
 
-def _vector_only_dimension_pdf() -> bytes:
+def _vector_only_dimension_pdf(*, rotation: int = 0) -> bytes:
     doc = fitz.open()
     page = doc.new_page(width=360, height=200)
 
@@ -306,9 +306,25 @@ def _vector_only_dimension_pdf() -> bytes:
     h(324, 80, 336)
     h(324, 130, 336)
 
+    if rotation:
+        page.set_rotation(rotation)
     payload = doc.tobytes()
     doc.close()
     return payload
+
+
+def _display_bbox_90(
+    native_bbox: tuple[float, float, float, float],
+    *,
+    native_height: float = 200.0,
+) -> tuple[float, float, float, float]:
+    x0, y0, x1, y1 = native_bbox
+    return (
+        native_height - y1,
+        x0,
+        native_height - y0,
+        x1,
+    )
 
 
 def _ocr(text: str, bbox: tuple[float, float, float, float]) -> OCRLine:
@@ -361,6 +377,50 @@ def test_end_to_end_producer_can_bind_ocr_to_native_visible_dimension_geometry()
         and dimension.witness_observation_ids
         for dimension in result.bound_dimensions
     )
+
+
+def test_rotated_page_ocr_bounds_are_derotated_before_native_vector_binding():
+    source = SourceVisibilityProducer(
+        producer_method="rotated-native-vector-raster-dimension-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="synthetic-rotated-native-vector-dims",
+        source_bytes=_vector_only_dimension_pdf(rotation=90),
+        source_locator="memory://synthetic-rotated-native-vector-dims.pdf",
+    )
+
+    native_boxes = (
+        ("10000", (125.0, 26.0, 155.0, 34.0)),
+        ("5000", (75.0, 56.0, 105.0, 64.0)),
+        ("5000", (175.0, 76.0, 205.0, 84.0)),
+        ("5000", (276.0, 68.0, 284.0, 92.0)),
+        ("2500", (306.0, 44.0, 314.0, 66.0)),
+        ("2500", (326.0, 94.0, 334.0, 116.0)),
+    )
+    backend = MockOCRBackend(
+        tuple(
+            _ocr(text, _display_bbox_90(bbox))
+            for text, bbox in native_boxes
+        )
+    )
+
+    result = RasterPlanDimensionProducer.create_for_tests(
+        source_visibility=source,
+        backend=backend,
+    ).publish(
+        revision_id=published.revision.revision_id,
+        page_id="1",
+    )
+
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.length_m == 10.0
+    assert result.width_m == 5.0
+    assert result.horizontal is not None
+    assert result.vertical is not None
+    assert result.horizontal.child_values_mm == (5000, 5000)
+    assert result.vertical.child_values_mm == (2500, 2500)
+    assert result.quantity_m2 is None
 
 
 def test_end_to_end_producer_resolves_only_source_owned_orthogonal_chains():
