@@ -159,6 +159,7 @@ class RasterPlanDimensionResult:
     scale_status: Optional[str] = None
     scale_px_per_m: Optional[float] = None
     bound_dimensions: tuple[BoundRasterDimension, ...] = ()
+    text_observations: tuple[RasterDimensionTextObservation, ...] = ()
     quantity_m2: None = None
     schema_version: str = RASTER_PLAN_DIMENSION_SCHEMA_VERSION
 
@@ -1050,6 +1051,7 @@ class RasterPlanDimensionProducer:
                     horizontal=horizontal,
                     vertical=vertical,
                     bound_dimensions=bound,
+                    text_observations=tuple(text_observations),
                 ),
             )
 
@@ -1090,6 +1092,7 @@ class RasterPlanDimensionProducer:
                     vertical=vertical,
                     scale_status=calibration.status,
                     bound_dimensions=bound,
+                    text_observations=tuple(text_observations),
                 ),
             )
         if calibration.status not in (
@@ -1111,6 +1114,7 @@ class RasterPlanDimensionProducer:
                     vertical=vertical,
                     scale_status=calibration.status,
                     bound_dimensions=bound,
+                    text_observations=tuple(text_observations),
                 ),
             )
 
@@ -1132,6 +1136,7 @@ class RasterPlanDimensionProducer:
                 scale_status=calibration.status,
                 scale_px_per_m=calibration.px_per_m,
                 bound_dimensions=bound,
+                text_observations=tuple(text_observations),
             ),
         )
 
@@ -1142,5 +1147,6 @@ __all__ = [
     "RasterOverallDimension",
     "RasterPlanDimensionAuthority",
     "RasterPlanDimensionProducer",
+    "RasterDimensionTextObservation",
     "RasterPlanDimensionResult",
 ]
