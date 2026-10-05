@@ -238,6 +238,7 @@ def reconcile_sealed_run_v2(
     items = _validate_identity_map(manifest, identity_map)
     rows = _validate_sealed_run(manifest, sealed_run)
     produced: list[ProducedTakeoffItemV2] = []
+    matched_quantity_by_item_id: dict[str, str] = {}
 
     for row in rows:
         matches = tuple(
@@ -256,7 +257,21 @@ def reconcile_sealed_run_v2(
         unit = _required(row.get("unit"), "unit")
 
         if len(matches) == 1:
-            item = items[matches[0].benchmark_item_id]
+            binding = matches[0]
+            prior_quantity_id = matched_quantity_by_item_id.get(
+                binding.benchmark_item_id
+            )
+            if prior_quantity_id is not None:
+                raise ValueError(
+                    "multiple sealed quantities map to one V2 binding "
+                    f"{binding.benchmark_item_id}: "
+                    f"{prior_quantity_id} and {row['quantity_id']}"
+                )
+            matched_quantity_by_item_id[binding.benchmark_item_id] = _required(
+                row.get("quantity_id"),
+                "quantity_id",
+            )
+            item = items[binding.benchmark_item_id]
             produced.append(
                 ProducedTakeoffItemV2(
                     quantity_id=_required(row.get("quantity_id"), "quantity_id"),
