@@ -85,28 +85,30 @@ After #1359 + #1360:
 
 ## Current work / next blocker
 
-PR #1368 — `fix(dimensions): use native text direction and graphic-state tie-break`
+Stale PR #1368 was closed without merge after its first CI attempt exposed two F23 left-edge regressions.
 
-Real Maryborough A140 validation reported:
+Replacement PR #1372 — `fix(dimensions): use native text direction only as graphic-state tie-break`
 
-- FOOD PREP 4025 -> WITNESS_BOUND
-- FOOD PREP 3297 -> WITNESS_BOUND
+The corrected rule keeps native text direction as a binder-only hint. It can narrow a candidate universe only when at least two same-orientation candidates remain tied and source graphic state independently proves one strict darker+thicker winner. A single hint cannot manufacture a binding by suppressing one perpendicular nearby primitive.
+
+Validation completed before opening #1372:
+
+- F23 all-four-edges + input-order invariance: 5 / 5 PASS
+- broader local figured-dimension regression set: 87 / 87 PASS
+- exact frozen Maryborough A140 source:
+  - FOOD PREP 4025 -> WITNESS_BOUND with two witnesses
+  - FOOD PREP 3297 -> WITNESS_BOUND with two witnesses
 - no scale, benchmark values, Maryborough constants or project-specific coordinates used
 
-However #1368 is **not merge-safe yet**.
-
-Full CI currently has 2 failures out of 7,974 tests:
-
-- `tests/benchmarks/test_mutation_f23_orthogonal_depth.py::test_all_four_edges_resolve_orthogonal_depth[left]`
-- `tests/benchmarks/test_mutation_f23_orthogonal_depth.py::test_input_order_invariance_of_identical_depths`
-
-Performance Fastpath and Wall Equivalence Grid Shadow are green.
-
-Do not merge #1368 until those two regressions are fixed while preserving the A140 4025/3297 WITNESS_BOUND result.
+At the time of this note refresh:
+- #1372 Performance Fastpath CI: GREEN
+- #1372 Wall Equivalence Grid Shadow: GREEN
+- #1372 full CI: still running
+- do not merge #1372 until full CI is green
 
 ## Intended next authority chain
 
-Once #1368 is regression-clean:
+Once #1372 is fully green and merged:
 
 1. proven A110 physical room / stable CanonicalSpace identity
 2. authenticated cross-view room label binding to A140
