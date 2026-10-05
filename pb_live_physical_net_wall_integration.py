@@ -399,7 +399,7 @@ def collect_live_physical_net_wall_claim(
                     bbox=viewport_bbox,
                     view_type=DrawingViewType.FLOOR_PLAN.value,
                     status=viewport_status,
-                    evidence_ids=tuple(room_scope.source_observation_ids),
+                    evidence_ids=(),
                     confidence=1.0,
                     reason_codes=viewport_reason_codes,
                 )
