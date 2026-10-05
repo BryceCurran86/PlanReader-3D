@@ -3,8 +3,8 @@
 This module composes the existing producer-owned source boundaries:
 - SourceVisibilityProducer owns immutable PDF bytes and raster-visible segments.
 - A built-in OCR backend reads only a producer-rendered page.
-- Numeric OCR is accepted only when raster line/witness geometry binds it to a
-  physical dimension-line system.
+- Numeric OCR is accepted only when producer-authenticated visible line/witness
+  geometry (native vector or raster) binds it to a physical dimension-line system.
 - An overall span resolves only when one contiguous child chain spans the same
   endpoints and the child values sum exactly to the overall figured value.
 - Orthogonal overall spans must reconcile through the canonical page-scale
@@ -26,6 +26,7 @@ from typing import Mapping, Optional, Sequence
 from PIL import Image
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_native_page_frame import NativePageFrame
 from pb_page_scale_calibration_authority import (
     POINTS_PER_METRE_AT_1_1,
     ScaleCalibrationStatus,
@@ -44,6 +45,7 @@ from pb_portable_raster_ocr_authority import (
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
+    NATIVE_PDF_VISIBLE_SEGMENT,
     RASTER_PDF_VISIBLE_SEGMENT,
     RASTER_RENDER_DPI,
     SourceVisibilityProducer,
@@ -187,6 +189,61 @@ def _parse_dimension_value_mm(text: str) -> Optional[int]:
         return None
     value = int(match.group("value"))
     return value if 0 < value <= 1_000_000 else None
+
+
+def _display_bbox_to_native_bbox(
+    bbox_pt: Sequence[float],
+    frame: NativePageFrame,
+) -> Optional[tuple[float, float, float, float]]:
+    """Map rendered/display OCR bounds into native source user space.
+
+    Native vector/text observations are unrotated PDF coordinates. Whole-page
+    renders are display-rotated by PyMuPDF. The authenticated NativePageFrame
+    supports only source-promoted rotations, so unsupported rotations fail
+    before this helper is called.
+    """
+    if len(bbox_pt) != 4:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(value) for value in bbox_pt)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not all(math.isfinite(value) for value in (x0, y0, x1, y1))
+        or x1 <= x0
+        or y1 <= y0
+    ):
+        return None
+
+    if frame.rotation == 0:
+        native = (x0, y0, x1, y1)
+    elif frame.rotation == 90:
+        native = (
+            y0,
+            float(frame.native_height) - x1,
+            y1,
+            float(frame.native_height) - x0,
+        )
+    else:
+        return None
+
+    nx0, ny0, nx1, ny1 = native
+    tolerance = 1e-6
+    if (
+        nx0 < -tolerance
+        or ny0 < -tolerance
+        or nx1 > float(frame.native_width) + tolerance
+        or ny1 > float(frame.native_height) + tolerance
+        or nx1 <= nx0
+        or ny1 <= ny0
+    ):
+        return None
+    return (
+        max(0.0, nx0),
+        max(0.0, ny0),
+        min(float(frame.native_width), nx1),
+        min(float(frame.native_height), ny1),
+    )
 
 
 def _segment_orientation(
@@ -643,7 +700,10 @@ class RasterPlanDimensionProducer:
                 result.status is not EvidenceResolutionStatus.CORROBORATED
                 or observation is None
                 or observation.page_id != page_id
-                or observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
+                or observation.observation_kind not in {
+                    NATIVE_PDF_VISIBLE_SEGMENT,
+                    RASTER_PDF_VISIBLE_SEGMENT,
+                }
             ):
                 continue
             orientation = _segment_orientation(observation.geometry)
@@ -676,13 +736,14 @@ class RasterPlanDimensionProducer:
         # pixels, OCR backend inputs, parent observation id, or partition id.
         source_writer = self._source_visibility._producer
         try:
-            png_bytes, page_parent = source_writer.render_native_page_png(
+            png_bytes, page_parent, native_frame = source_writer.render_native_page_png(
                 document_id=published.revision.document_id,
                 revision_id=revision_id,
                 source_sha256=published.revision.source_sha256,
                 snapshot_id=published.snapshot.snapshot_id,
                 page_id=page_id,
                 dpi=float(RASTER_DIMENSION_OCR_DPI),
+                include_native_frame=True,
             )
             image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
             raw_lines = self._backend.extract_lines(
@@ -692,8 +753,11 @@ class RasterPlanDimensionProducer:
             raw_lines = ()
 
         text_observations: list[RasterDimensionTextObservation] = []
-        page_width = float(page_parent.geometry[0]) if len(page_parent.geometry) >= 2 else 0.0
-        page_height = float(page_parent.geometry[1]) if len(page_parent.geometry) >= 2 else 0.0
+        # OCR boxes are normalized into native source user space above, so
+        # bounds validation must use the authenticated native frame too. The
+        # native page observation's width/height may reflect display rotation.
+        page_width = float(native_frame.native_width)
+        page_height = float(native_frame.native_height)
         px_to_pt = 72.0 / float(RASTER_DIMENSION_OCR_DPI)
         for line in raw_lines:
             value_mm = _parse_dimension_value_mm(line.text)
@@ -705,16 +769,12 @@ class RasterPlanDimensionProducer:
                     bbox = tuple(float(v) * px_to_pt for v in line.bbox_px)
                 except Exception:
                     continue
-            if len(bbox) != 4:
+            native_bbox = _display_bbox_to_native_bbox(bbox, native_frame)
+            if native_bbox is None:
                 continue
-            x0, y0, x1, y1 = (float(v) for v in bbox)
+            x0, y0, x1, y1 = native_bbox
             if (
-                not all(math.isfinite(v) for v in (x0, y0, x1, y1))
-                or x1 <= x0
-                or y1 <= y0
-                or x0 < 0.0
-                or y0 < 0.0
-                or x1 > page_width
+                x1 > page_width
                 or y1 > page_height
             ):
                 continue
