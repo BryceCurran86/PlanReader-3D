@@ -1241,6 +1241,9 @@ def _try_physical_net_wall_rows(
 
     def room_area_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
         """Project only source-closed room areas into AI review rows."""
+        from pb_live_floor_area_quantity_publication import (
+            publish_live_floor_area_quantities,
+        )
         from pb_live_room_area_customer_projection import (
             project_live_room_area_customer_rows,
         )
@@ -1250,6 +1253,12 @@ def _try_physical_net_wall_rows(
             workspace_id=int(workspace_id),
             project_id=f"customer-workspace:{int(workspace_id)}",
         )
+        floor_quantities = {
+            str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
+            quantity
+            for quantity in publish_live_floor_area_quantities(claim)
+            if isinstance(quantity.metadata, Mapping)
+        }
         rows: List[Tuple[Any, ...]] = []
         for item in projected:
             if (
@@ -1270,6 +1279,12 @@ def _try_physical_net_wall_rows(
             unit = str(item.get("unit") or "").strip().lower()
             if unit == "m2":
                 unit = "m²"
+            floor_quantity = floor_quantities.get(quantity_id)
+            floor_quantity_suffix = (
+                f" · floor_quantity:{floor_quantity.quantity_id}"
+                if floor_quantity is not None
+                else ""
+            )
             rows.append(
                 _takeoff_row(
                     workspace_id=int(workspace_id),
@@ -1282,6 +1297,7 @@ def _try_physical_net_wall_rows(
                     source_page=str(item.get("source_page") or "Selected PDF pages"),
                     source_reference=(
                         f"{SOURCE_PREFIX} · room_area_quantity:{quantity_id}"
+                        f"{floor_quantity_suffix}"
                     ),
                     confidence="Documented",
                     notes=str(item.get("notes") or ""),
@@ -1326,6 +1342,10 @@ def _try_physical_net_wall_rows(
             from pb_takeoff_output_authority import TakeoffOutputRow
 
             quantity = claim.publication.quantity_evidence
+            from pb_live_floor_area_quantity_publication import (
+                publish_live_floor_area_quantities,
+            )
+
             quantities = [
                 item
                 for item in (
@@ -1333,6 +1353,7 @@ def _try_physical_net_wall_rows(
                     *getattr(claim, "opening_quantity_evidence", ()),
                     *getattr(claim, "opening_count_quantity_evidence", ()),
                     *getattr(claim, "room_area_quantity_evidence", ()),
+                    *publish_live_floor_area_quantities(claim),
                 )
                 if item is not None
             ]
