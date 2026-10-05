@@ -490,6 +490,40 @@ def _canonical_line(record: SourceObservationRecord) -> tuple[tuple[float, float
     return tuple(sorted((first, second)))  # type: ignore[return-value]
 
 
+def _physical_opening_geometry_identity(
+    candidate: CandidateSemanticOpening,
+    records: Sequence[SourceObservationRecord],
+) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...]:
+    """Return the producer-independent physical geometry key for one opening.
+
+    Evidence/snapshot identifiers remain provenance, not physical identity.
+    Positive physical-opening candidates are supported by source-visible line
+    geometry; every declared support observation must therefore resolve to one
+    finite line before a stable physical identity can be published.
+    """
+
+    support_ids = {str(value) for value in candidate.source_observation_ids}
+    support_records = tuple(
+        record
+        for record in records
+        if str(record.observation_id) in support_ids
+    )
+    if {str(record.observation_id) for record in support_records} != support_ids:
+        return ()
+    geometry = tuple(
+        sorted({_canonical_line(record) for record in support_records})
+    )
+    if (
+        not geometry
+        or any(
+            first == second == (0.0, 0.0)
+            for first, second in geometry
+        )
+    ):
+        return ()
+    return geometry
+
+
 class PhysicalOpeningAuthority:
     """Read-only authority over source-proven opening existence and local identity."""
 
@@ -2171,17 +2205,28 @@ class PhysicalOpeningAuthority:
             ))
 
         candidate = containing[0]
+        physical_geometry = _physical_opening_geometry_identity(candidate, records)
+        if not physical_geometry:
+            return cache_visible(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(PHYSICAL_OPENING_IDENTITY_UNRESOLVED,),
+                source_observation=source_result,
+                candidate=candidate,
+                missing_upstream_capability=AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE,
+            ))
+        # Physical identity is source geometry, not evidence implementation.
+        # snapshot_id, observation ids, lineage ids and producer version remain
+        # on the record below as provenance and integrity evidence, but cannot
+        # rename unchanged physical geometry across producer revisions.
         record_payload = {
             "document_id": candidate.document_id,
             "revision_id": candidate.revision_id,
             "source_sha256": candidate.source_sha256,
-            "snapshot_id": candidate.snapshot_id,
             "page_id": candidate.page_id,
-            "viewport_id": candidate.viewport_id,
             "semantic_class": "opening",
-            "structural_pattern": candidate.structural_pattern,
-            "source_observation_ids": candidate.source_observation_ids,
-            "source_lineage_root_ids": candidate.source_lineage_root_ids,
+            "source_geometry": physical_geometry,
         }
         existence = PhysicalOpeningExistenceRecord(
             record_id=stable_contract_id("physical_opening_existence", record_payload, digest_chars=32),
