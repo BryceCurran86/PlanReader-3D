@@ -954,7 +954,7 @@ def _extract_witness_promoted_yearlike_observations(
     bindings: list[DimensionAnchorBinding] = []
     for index, word in enumerate(words):
         text = str(word[4]).strip()
-        preceding = _same_line_preceding_context(words, index)
+        preceding = " ".join(str(w[4]) for w in words[max(0, index - 2):index])
         token = classify_dimension_token(text, preceding_context=preceding)
         if token.kind != DimensionTokenKind.YEAR.value:
             continue
