@@ -4,11 +4,16 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
+import fitz
 import pytest
 
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_floor_plan_page_scope import (
+    SourceFloorPlanPageDecision,
+    SourceFloorPlanPageScope,
+)
 from tools import run_source_closed_project_handoff as handoff
 
 
@@ -58,6 +63,105 @@ def _run(
         project_id=project_id,
         traces_by_quantity_id={quantity.quantity_id: trace},
     )
+
+
+def _three_page_pdf(path) -> None:
+    doc = fitz.open()
+    try:
+        for _ in range(3):
+            doc.new_page(width=200.0, height=100.0)
+        doc.save(path)
+    finally:
+        doc.close()
+
+
+def test_source_topology_pages_reuses_production_bound_title_scope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    _three_page_pdf(pdf)
+    scope = SourceFloorPlanPageScope(
+        decisions=(
+            SourceFloorPlanPageDecision(
+                0,
+                "not_floor_plan",
+                "not_floor_plan_bound_title",
+                "COVER SHEET",
+                (),
+            ),
+            SourceFloorPlanPageDecision(
+                1,
+                "floor_plan",
+                "floor_plan_bound_title",
+                "FLOOR PLAN",
+                ("floor_plan",),
+            ),
+            SourceFloorPlanPageDecision(
+                2,
+                "not_floor_plan",
+                "not_floor_plan_bound_title",
+                "ELEVATIONS",
+                ("elevation",),
+            ),
+        ),
+        selected_page_indices=(0, 1, 2),
+        floor_plan_page_indices=(1,),
+        other_drawing_page_indices=(0, 2),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "source_floor_plan_topology_scope",
+        lambda path, selected: scope,
+    )
+
+    topology, page_count = handoff._source_topology_pages(pdf)
+
+    assert page_count == 3
+    assert topology == (1,)
+
+
+def test_source_topology_pages_preserves_full_scope_when_not_restricted(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    _three_page_pdf(pdf)
+    scope = SourceFloorPlanPageScope(
+        decisions=(
+            SourceFloorPlanPageDecision(
+                0,
+                "unproven",
+                "floor_plan_page_unproven",
+            ),
+            SourceFloorPlanPageDecision(
+                1,
+                "floor_plan",
+                "floor_plan_bound_title",
+                "FLOOR PLAN",
+                ("floor_plan",),
+            ),
+            SourceFloorPlanPageDecision(
+                2,
+                "unproven",
+                "floor_plan_page_unproven",
+            ),
+        ),
+        selected_page_indices=(0, 1, 2),
+        floor_plan_page_indices=(1,),
+        other_drawing_page_indices=(),
+    )
+    assert scope.topology_page_indices() is None
+    monkeypatch.setattr(
+        handoff,
+        "source_floor_plan_topology_scope",
+        lambda path, selected: scope,
+    )
+
+    topology, page_count = handoff._source_topology_pages(pdf)
+
+    assert page_count == 3
+    assert topology == (0, 1, 2)
 
 
 def test_project_handoff_combines_only_available_source_closed_families(
