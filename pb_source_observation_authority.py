@@ -457,6 +457,7 @@ class SourceObservationProducer:
         dpi: float = 300.0,
         clip_pt: Optional[Sequence[float]] = None,
         include_native_frame: bool = False,
+        images_only: bool = False,
     ):
         """Render one page from the exact immutable PDF bytes this producer ingested.
 
@@ -472,11 +473,16 @@ class SourceObservationProducer:
         rendering request, not an authority claim: page-parent lineage and every
         lineage check are unchanged.
 
-        This is the producer-owned raster boundary for downstream OCR. Callers
-        address the page by immutable lineage only; they cannot supply page pixels,
-        a page-parent observation id, or a source partition id. The native page
-        parent and partition are resolved internally from snapshot_id and the
-        producer's own observation store.
+        This is the producer-owned raster boundary for downstream OCR and
+        source-only raster perception. Callers address the page by immutable lineage
+        only; they cannot supply page pixels, a page-parent observation id, or a
+        source partition id. The native page parent and partition are resolved
+        internally from snapshot_id and the producer's own observation store.
+
+        images_only=True removes text, vector line art and annotations from an
+        in-memory page copy while retaining embedded raster images. It is intended
+        only for source-owned raster primitive extraction. It cannot be combined
+        with clip_pt because the redaction copy is page-scoped.
 
         By default returns (png_bytes, native_pdf_page_observation). When
         include_native_frame=True it also returns the producer-derived
@@ -494,6 +500,8 @@ class SourceObservationProducer:
         if not math.isfinite(dpi_value) or dpi_value <= 0.0:
             raise ValueError("dpi must be a positive finite number")
         clip_rect = _validated_clip_pt(clip_pt)
+        if images_only and clip_rect is not None:
+            raise ValueError("images_only render cannot be combined with clip_pt")
 
         current = self._store.current_revision_by_document.get(document_id)
         if current is None:
@@ -572,8 +580,28 @@ class SourceObservationProducer:
             page = pdf.load_page(page_number - 1)
             native_frame = native_page_frame(page) if include_native_frame else None
             scale = dpi_value / 72.0
+            scratch = None
+            render_page = page
+            if images_only:
+                scratch = fitz.open()
+                scratch.insert_pdf(
+                    pdf,
+                    from_page=page_number - 1,
+                    to_page=page_number - 1,
+                )
+                render_page = scratch.load_page(0)
+                render_page.add_redact_annot(render_page.rect, fill=False)
+                render_page.apply_redactions(
+                    images=fitz.PDF_REDACT_IMAGE_NONE,
+                    graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+                    text=fitz.PDF_REDACT_TEXT_REMOVE,
+                )
             if clip_rect is None:
-                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                pix = render_page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale),
+                    alpha=False,
+                    annots=False,
+                )
             else:
                 try:
                     frame = native_page_frame(page)
@@ -617,7 +645,11 @@ class SourceObservationProducer:
                 )
             png_bytes = pix.tobytes("png")
         finally:
-            pdf.close()
+            try:
+                if "scratch" in locals() and scratch is not None:
+                    scratch.close()
+            finally:
+                pdf.close()
 
         if include_native_frame:
             assert native_frame is not None
