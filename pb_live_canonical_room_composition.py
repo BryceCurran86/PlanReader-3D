@@ -601,7 +601,7 @@ def compose_live_canonical_rooms(
                             if wall_scope.viewport_id is None
                             else str(wall_scope.viewport_id)
                         ),
-                        viewport_bbox=wall_scope.viewport_bbox,
+                        viewport_bbox=getattr(wall_scope, "viewport_bbox", None),
                     )
                     if binding is not None:
                         authority_bindings.append(binding)
