@@ -33,6 +33,9 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_source_room_cross_view_area_authority import (
+    SOURCE_ROOM_CROSS_VIEW_AREA_METHOD,
+)
 from pb_wall_room_topology_contracts import RoomCandidate
 
 ROOM_AREA_FAMILY = "room_area"
@@ -161,6 +164,7 @@ def _validate_common(
 def _validate_explicit_area(
     evidence: EvidenceAtom,
     *,
+    room: RoomCandidate,
     document: DocumentEvidence,
     viewport: ViewportEvidence,
     entity: EntityEvidence,
@@ -172,10 +176,94 @@ def _validate_explicit_area(
         blockers.append("explicit_area_evidence_not_owned_by_entity")
     if evidence.document_id != document.document_id:
         blockers.append("explicit_area_document_mismatch")
-    if evidence.page_id != viewport.page_id:
-        blockers.append("explicit_area_page_mismatch")
-    if evidence.viewport_id not in (None, viewport.viewport_id):
-        blockers.append("explicit_area_viewport_mismatch")
+
+    if evidence.method == SOURCE_ROOM_CROSS_VIEW_AREA_METHOD:
+        metadata = evidence.metadata if isinstance(evidence.metadata, dict) else {}
+        bound_room_ref = str(metadata.get("bound_room_ref") or "").strip()
+        source_room_face_record_id = str(
+            metadata.get("source_room_face_record_id") or ""
+        ).strip()
+        topology_page_id = str(metadata.get("topology_page_id") or "").strip()
+        dimension_page_id = str(metadata.get("dimension_page_id") or "").strip()
+        dimension_viewport_id = str(
+            metadata.get("dimension_viewport_id") or ""
+        ).strip()
+        binding_record_id = str(
+            metadata.get("cross_view_binding_record_id") or ""
+        ).strip()
+        horizontal_id = str(
+            metadata.get("horizontal_dimension_id") or ""
+        ).strip()
+        vertical_id = str(
+            metadata.get("vertical_dimension_id") or ""
+        ).strip()
+        dimension_text_ids = tuple(
+            str(value).strip()
+            for value in (metadata.get("dimension_text_observation_ids") or ())
+            if str(value).strip()
+        )
+        room_label_receipt_ids = tuple(
+            str(value).strip()
+            for value in (metadata.get("room_label_receipt_ids") or ())
+            if str(value).strip()
+        )
+        witness_ids = tuple(
+            str(value).strip()
+            for value in (metadata.get("witness_observation_ids") or ())
+            if str(value).strip()
+        )
+
+        if (
+            not bound_room_ref
+            or bound_room_ref != room.room_ref
+            or bound_room_ref != entity.candidate_entity_id
+        ):
+            blockers.append("cross_view_area_room_identity_mismatch")
+        if (
+            not source_room_face_record_id
+            or source_room_face_record_id not in tuple(room.evidence or ())
+        ):
+            blockers.append("cross_view_area_source_room_face_unproven")
+        if (
+            not topology_page_id
+            or not room.source_page
+            or topology_page_id != str(int(room.source_page))
+        ):
+            blockers.append("cross_view_area_topology_page_mismatch")
+        if (
+            not dimension_page_id
+            or evidence.page_id != dimension_page_id
+            or dimension_page_id == topology_page_id
+            or (
+                document.page_ids
+                and dimension_page_id not in set(document.page_ids)
+            )
+        ):
+            blockers.append("cross_view_area_dimension_page_unowned")
+        if (
+            not dimension_viewport_id
+            or evidence.viewport_id != dimension_viewport_id
+        ):
+            blockers.append("cross_view_area_dimension_viewport_mismatch")
+        if (
+            not binding_record_id
+            or not horizontal_id
+            or not vertical_id
+            or horizontal_id == vertical_id
+        ):
+            blockers.append("cross_view_area_binding_incomplete")
+        if len(set(dimension_text_ids)) != 2:
+            blockers.append("cross_view_area_dimension_text_unproven")
+        if not room_label_receipt_ids:
+            blockers.append("cross_view_area_room_label_unproven")
+        if not witness_ids:
+            blockers.append("cross_view_area_witness_unproven")
+    else:
+        if evidence.page_id != viewport.page_id:
+            blockers.append("explicit_area_page_mismatch")
+        if evidence.viewport_id not in (None, viewport.viewport_id):
+            blockers.append("explicit_area_viewport_mismatch")
+
     if evidence.status != EvidenceResolutionStatus.CORROBORATED:
         blockers.append("explicit_area_not_corroborated")
     if evidence.normalized_value is None:
@@ -227,6 +315,7 @@ def build_room_area_quantity(
     if explicit_area_evidence is not None:
         explicit_blockers = _validate_explicit_area(
             explicit_area_evidence,
+            room=room,
             document=document,
             viewport=viewport,
             entity=entity,
