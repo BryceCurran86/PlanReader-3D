@@ -207,3 +207,72 @@ def test_stale_entry_snapshot_is_rejected_before_composition() -> None:
             viewport=viewport,
             page_no=1,
         )
+
+def test_documented_dimension_room_area_drives_ceiling_without_scale() -> None:
+    """Figured dimensions remain valid numeric authority when page scale is absent."""
+    from pb_geometry_takeoff_model import MeasurementAuthorityType
+    from pb_migration_contracts import QuantityEvidence
+
+    source, published, context, viewport = _setup(include_scale_bar=False)
+
+    baseline = run_source_owned_ceiling_lining_shadow(
+        source_visibility_producer=source,
+        context=context,
+        viewport=viewport,
+        page_no=1,
+    )
+    assert baseline.scale_bridge.status is EvidenceResolutionStatus.ABSTAINED
+    target = next(
+        quantity
+        for quantity in baseline.ceiling_quantities
+        if "missing_explicit_ceiling_finish" not in quantity.blocking_reasons
+    )
+    assert len(target.input_entity_ids) == 1
+    scope = target.input_entity_ids[0]
+
+    documented_area = QuantityEvidence(
+        quantity_id="qty-documented-room-area",
+        family="room_area",
+        semantic_key=f"room_area:{scope}",
+        value=8.64,
+        unit="m2",
+        input_entity_ids=(scope,),
+        formula="authoritative_explicit_area",
+        formula_version="test",
+        evidence_ids=("dim-horizontal", "dim-vertical"),
+        authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+        status=AuthorityStatus.FIRM.value,
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        metadata={
+            "source_sha256": published.revision.source_sha256,
+            "revision_id": published.revision.revision_id,
+            "page_no": 1,
+            "viewport_id": viewport.viewport_id,
+            "figured_dimension_ids": ["dim-horizontal", "dim-vertical"],
+        },
+    )
+
+    result = run_source_owned_ceiling_lining_shadow(
+        source_visibility_producer=source,
+        context=context,
+        viewport=viewport,
+        page_no=1,
+        authoritative_area_quantities=(documented_area,),
+    )
+
+    assert result.scale_bridge.status is EvidenceResolutionStatus.ABSTAINED
+    assert documented_area in result.room_area_quantities
+    resolved = [
+        quantity
+        for quantity in result.ceiling_quantities
+        if not quantity.abstained and quantity.input_entity_ids == (scope,)
+    ]
+    assert len(resolved) == 1
+    assert resolved[0].value == 8.64
+    assert resolved[0].metadata["upstream_area_quantity_id"] == documented_area.quantity_id
+    assert resolved[0].metadata["upstream_area_authority"] == (
+        MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    )
+
