@@ -24,16 +24,22 @@ JobHub gates remain unchanged and therefore block the row until explicit review.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+import hashlib
+from pathlib import Path
+from typing import Mapping, Optional, Sequence
+
+import fitz
 
 from pb_geometry_takeoff_model import (
     AuthorityStatus,
     MeasurementAuthorityType,
 )
+from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
     QuantityEvidence,
     ViewportEvidence,
+    ViewportResolutionStatus,
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
@@ -349,6 +355,164 @@ def _promotion_candidate(
     )
 
 
+def _selected_page_indices(
+    page_count: int,
+    pages: Optional[Sequence[int]],
+) -> tuple[int, ...]:
+    if pages is None:
+        return tuple(range(page_count))
+    selected: set[int] = set()
+    for value in pages:
+        if isinstance(value, bool):
+            continue
+        try:
+            index = int(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if 0 <= index < page_count:
+            selected.add(index)
+    return tuple(sorted(selected))
+
+
+def collect_ceiling_lining_review_candidates(
+    pdf_path: Path | str,
+    *,
+    pages: Optional[Sequence[int]] = None,
+    workspace_id: int,
+    project_id: str,
+    authoritative_area_quantities: Optional[Sequence[QuantityEvidence]] = None,
+) -> tuple[CeilingLiningReviewCandidate, ...]:
+    """Collect review candidates from normal source-owned floor-plan viewports.
+
+    The caller supplies only the PDF execution scope and already-authenticated
+    room-area quantities. This function re-establishes source/document/revision/
+    viewport ownership through SourceVisibility before invoking the explicit
+    promotion boundary. Raw shadow ceiling quantities are never returned.
+    """
+    if isinstance(workspace_id, bool):
+        raise ValueError("workspace_id must be a positive integer")
+    try:
+        clean_workspace_id = int(workspace_id)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("workspace_id must be a positive integer") from exc
+    if clean_workspace_id <= 0:
+        raise ValueError("workspace_id must be a positive integer")
+    clean_project_id = str(project_id or "").strip()
+    if not clean_project_id:
+        raise ValueError("project_id must be non-empty")
+
+    path = Path(pdf_path)
+    payload = path.read_bytes()
+    source_sha = hashlib.sha256(payload).hexdigest()
+    document_id = f"live-source:{source_sha[:32]}"
+    upstream_room_areas = tuple(authoritative_area_quantities or ())
+
+    doc = fitz.open(stream=payload, filetype="pdf")
+    try:
+        selected = _selected_page_indices(len(doc), pages)
+        if not selected:
+            return ()
+        page_ids = tuple(str(index + 1) for index in selected)
+        source = SourceVisibilityProducer(
+            producer_method="live-ceiling-review",
+            producer_version=CEILING_REVIEW_PROMOTION_SCHEMA_VERSION,
+        )
+        published = source.ingest_native_pdf_bytes(
+            document_id=document_id,
+            source_bytes=payload,
+            source_locator="memory://live-ceiling-review.pdf",
+            page_ids=page_ids,
+        )
+
+        by_quantity_id: dict[str, CeilingLiningReviewCandidate] = {}
+        for page_index in selected:
+            page_no = page_index + 1
+            page = doc[page_index]
+            for segmented in authoritative_floor_plan_viewports(
+                page,
+                page_number=page_no,
+            ):
+                if segmented.bounding_box is None:
+                    continue
+                viewport_id = str(segmented.view_id or "").strip()
+                if not viewport_id:
+                    continue
+                viewport = ViewportEvidence(
+                    viewport_id=viewport_id,
+                    document_id=published.revision.document_id,
+                    page_id=str(page_no),
+                    bbox=tuple(float(value) for value in segmented.bounding_box),
+                    view_type="floor_plan",
+                    status=ViewportResolutionStatus.RESOLVED,
+                    evidence_ids=(),
+                    confidence=float(segmented.confidence),
+                )
+                current = source.published_snapshot_for_revision(
+                    published.revision.revision_id
+                )
+                if current is None:
+                    continue
+                context = ProviderContext(
+                    run_id=(
+                        f"live-ceiling-review:{current.snapshot.snapshot_id}:"
+                        f"{viewport_id}"
+                    ),
+                    workspace_id=str(clean_workspace_id),
+                    project_id=clean_project_id,
+                    document_id=current.revision.document_id,
+                    source_sha256=current.revision.source_sha256,
+                    revision_id=current.revision.revision_id,
+                    current_revision_id=current.revision.revision_id,
+                    selected_pages=(page_index,),
+                    owned_viewport_ids=(viewport_id,),
+                    evidence_snapshot_id=current.snapshot.snapshot_id,
+                    workspace_record_id=clean_workspace_id,
+                    owned_page_numbers=(page_no,),
+                    viewport_page_ownership=((viewport_id, page_no),),
+                )
+                scoped_room_areas = tuple(
+                    area
+                    for area in upstream_room_areas
+                    if (
+                        isinstance(area, QuantityEvidence)
+                        and isinstance(area.metadata, Mapping)
+                        and str(area.metadata.get("source_sha256") or "").strip().lower()
+                        == current.revision.source_sha256.lower()
+                        and str(area.metadata.get("revision_id") or "").strip()
+                        == current.revision.revision_id
+                        and str(area.metadata.get("viewport_id") or "").strip()
+                        == viewport_id
+                        and str(area.metadata.get("page_no") or "").strip()
+                        == str(page_no)
+                    )
+                )
+                result = build_ceiling_lining_review_promotions(
+                    source_visibility_producer=source,
+                    context=context,
+                    viewport=viewport,
+                    page_no=page_no,
+                    authoritative_area_quantities=(
+                        scoped_room_areas if scoped_room_areas else None
+                    ),
+                )
+                for candidate in result.candidates:
+                    quantity_id = candidate.promoted_quantity.quantity_id
+                    prior = by_quantity_id.get(quantity_id)
+                    if prior is not None and prior != candidate:
+                        raise RuntimeError(
+                            "conflicting ceiling review candidates share quantity id "
+                            f"{quantity_id}"
+                        )
+                    by_quantity_id[quantity_id] = candidate
+
+        return tuple(
+            by_quantity_id[quantity_id]
+            for quantity_id in sorted(by_quantity_id)
+        )
+    finally:
+        doc.close()
+
+
 def build_ceiling_lining_review_promotions(
     *,
     source_visibility_producer: SourceVisibilityProducer,
@@ -402,4 +566,5 @@ __all__ = [
     "CeilingLiningReviewCandidate",
     "CeilingLiningReviewPromotionResult",
     "build_ceiling_lining_review_promotions",
+    "collect_ceiling_lining_review_candidates",
 ]
