@@ -332,6 +332,26 @@ def _pages(*page_numbers: int):
     ]
 
 
+def test_customer_bridge_forwards_only_source_classified_evidence_pages_for_room_area_support(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    fake = SimpleNamespace(
+        topology_page_indices=lambda: (0, 1),
+        evidence_page_indices=(2,),
+        to_dict=lambda: {
+            "floor_plan_page_indices": [0, 1],
+            "evidence_page_indices": [2],
+            "restricts": True,
+        },
+    )
+    with patch(SCOPE_TOOL, return_value=fake), patch(CLAIM_TOOL, return_value=_abstained()) as collect:
+        auto._try_physical_net_wall_rows(app, 1, _pages(1, 2, 3), [])
+    assert collect.call_args.kwargs == {
+        "pages": (0, 1, 2),
+        "topology_pages": (0, 1),
+        "room_area_support_pages": (2,),
+    }
+
+
 def test_customer_bridge_passes_only_proven_floor_plan_pages_as_topology(tmp_path: Path) -> None:
     app = _app(tmp_path)
     fake = SimpleNamespace(
