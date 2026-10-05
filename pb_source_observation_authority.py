@@ -1348,7 +1348,10 @@ class SourceObservationProducer:
                 reason_codes=("producer_owned_source_observation_resolved",),
                 source_revision=cached_revision,
                 snapshot=cached_snapshot,
-                observation=replace(record),
+                # Internal verified-cache state may retain the producer-owned
+                # frozen record directly. SourceObservationAuthority.resolve()
+                # always returns a fresh defensive copy at the public boundary.
+                observation=record,
                 semantic_enumeration_complete=None,
                 decision_scope_complete=None,
             )
