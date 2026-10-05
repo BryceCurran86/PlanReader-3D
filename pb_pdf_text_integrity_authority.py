@@ -1626,6 +1626,116 @@ def _exact_fill_path_coverage(
         return None
     return float(result.coverage_ratio)
 
+def _axis_aligned_rectangle_union_area(
+    rectangles: Sequence[tuple[float, float, float, float]],
+) -> float:
+    """Exact union area for a small set of axis-aligned rectangles."""
+
+    valid = [
+        (float(x0), float(y0), float(x1), float(y1))
+        for x0, y0, x1, y1 in rectangles
+        if (
+            math.isfinite(float(x0))
+            and math.isfinite(float(y0))
+            and math.isfinite(float(x1))
+            and math.isfinite(float(y1))
+            and float(x1) > float(x0)
+            and float(y1) > float(y0)
+        )
+    ]
+    if not valid:
+        return 0.0
+
+    x_edges = sorted({value for rect in valid for value in (rect[0], rect[2])})
+    area = 0.0
+    for left, right in zip(x_edges, x_edges[1:]):
+        if right <= left:
+            continue
+        intervals = sorted(
+            (y0, y1)
+            for x0, y0, x1, y1 in valid
+            if x0 < right and x1 > left
+        )
+        if not intervals:
+            continue
+        covered = 0.0
+        cur_lo, cur_hi = intervals[0]
+        for lo, hi in intervals[1:]:
+            if lo <= cur_hi:
+                cur_hi = max(cur_hi, hi)
+            else:
+                covered += cur_hi - cur_lo
+                cur_lo, cur_hi = lo, hi
+        covered += cur_hi - cur_lo
+        area += (right - left) * covered
+    return area
+
+
+def _fill_text_char_bbox_coverage_upper_bound(
+    page: object,
+    subject_bbox: Sequence[object],
+    paint_sequence_number: int,
+) -> Optional[float]:
+    """Upper-bound later fill-text coverage using source texttrace characters.
+
+    Bboxlog may collapse several disjoint text spans sharing one sequence
+    number into a single coarse bounding box. Character bounding boxes are
+    conservative because rendered glyph pixels cannot extend beyond them.
+    A character-box union below the occlusion threshold therefore proves the
+    actual later text cannot cover enough of the subject.
+
+    Missing, malformed or mixed trace data returns None so callers preserve
+    the historical fail-closed occlusion.
+    """
+
+    try:
+        subject = _rect_tuple(subject_bbox)
+    except (TypeError, ValueError):
+        return None
+    sx0, sy0, sx1, sy1 = subject
+    subject_area = (sx1 - sx0) * (sy1 - sy0)
+    if subject_area <= 0.0:
+        return None
+
+    spans = _texttrace_spans(page)
+    if spans is None:
+        return None
+    owned = [
+        span
+        for span in spans
+        if (
+            isinstance(span, Mapping)
+            and _span_seqno(span) == int(paint_sequence_number)
+        )
+    ]
+    if not owned:
+        return None
+
+    clipped: list[tuple[float, float, float, float]] = []
+    for span in owned:
+        try:
+            render_type = int(span.get("type", -1))
+        except (TypeError, ValueError):
+            return None
+        # PyMuPDF texttrace type 0 is fill-text. Mixed or unknown paint at
+        # the same sequence number is not safe to clear.
+        if render_type != 0:
+            return None
+        chars = span.get("chars") or ()
+        if not chars:
+            return None
+        for char in chars:
+            try:
+                cx0, cy0, cx1, cy1 = _rect_tuple(char[3])
+            except (IndexError, TypeError, ValueError):
+                return None
+            ix0, iy0 = max(sx0, cx0), max(sy0, cy0)
+            ix1, iy1 = min(sx1, cx1), min(sy1, cy1)
+            if ix1 > ix0 and iy1 > iy0:
+                clipped.append((ix0, iy0, ix1, iy1))
+
+    return _axis_aligned_rectangle_union_area(clipped) / subject_area
+
 
 _LATER_PAINT_KINDS = frozenset({
     "fill-path",
@@ -1756,6 +1866,17 @@ def _later_paint_occlusion_reasons(
             if (
                 exact_coverage is not None
                 and exact_coverage < threshold
+            ):
+                continue
+        elif paint_kind == "fill-text":
+            text_coverage_upper_bound = _fill_text_char_bbox_coverage_upper_bound(
+                page,
+                subject_bbox,
+                paint_seqno,
+            )
+            if (
+                text_coverage_upper_bound is not None
+                and text_coverage_upper_bound < threshold
             ):
                 continue
 
