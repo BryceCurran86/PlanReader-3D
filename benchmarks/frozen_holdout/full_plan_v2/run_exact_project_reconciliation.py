@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+import importlib
+import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -23,16 +25,38 @@ else:
     repo_root = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(repo_root))
     from pb_source_closed_run_export import sealed_source_closed_run_from_dict
-    from benchmarks.frozen_holdout.full_plan_v2.development_scoreboard import (
-        evaluate_development_project_v2,
+
+    # tests/benchmarks is itself a package named "benchmarks", so direct/spec
+    # loading must not depend on that top-level package name. Load the actual
+    # full_plan_v2 package under a private alias so its relative imports remain
+    # correct in both pytest collection and direct CLI execution.
+    package_dir = Path(__file__).resolve().parent
+    package_name = "_planreader_full_plan_v2_exact_report"
+    package_spec = importlib.util.spec_from_file_location(
+        package_name,
+        package_dir / "__init__.py",
+        submodule_search_locations=[str(package_dir)],
     )
-    from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
-        load_project_manifest,
+    assert package_spec is not None and package_spec.loader is not None
+    package_module = sys.modules.get(package_name)
+    if package_module is None:
+        package_module = importlib.util.module_from_spec(package_spec)
+        sys.modules[package_name] = package_module
+        package_spec.loader.exec_module(package_module)
+
+    development = importlib.import_module(
+        f"{package_name}.development_scoreboard"
     )
-    from benchmarks.frozen_holdout.full_plan_v2.sealed_reconciliation import (
-        identity_map_from_dict,
-        reconcile_sealed_run_v2,
+    manifest_io = importlib.import_module(f"{package_name}.manifest_io")
+    reconciliation = importlib.import_module(
+        f"{package_name}.sealed_reconciliation"
     )
+    evaluate_development_project_v2 = (
+        development.evaluate_development_project_v2
+    )
+    load_project_manifest = manifest_io.load_project_manifest
+    identity_map_from_dict = reconciliation.identity_map_from_dict
+    reconcile_sealed_run_v2 = reconciliation.reconcile_sealed_run_v2
 
 
 def _json_object(path: Path) -> dict:
