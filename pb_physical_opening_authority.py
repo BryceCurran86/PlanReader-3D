@@ -2516,14 +2516,57 @@ class PhysicalOpeningAuthority:
             primitive_result.status is EvidenceResolutionStatus.CORROBORATED
             and primitive_result.observation is not None
         ):
-            return self._prove_raster_framed_existence(selector, primitive_result)
+            existence = self._prove_raster_framed_existence(
+                selector,
+                primitive_result,
+            )
+            candidate_ids = (
+                ()
+                if existence.candidate is None
+                else (existence.candidate.candidate_id,)
+            )
+            if (
+                existence.status is EvidenceResolutionStatus.CORROBORATED
+                and existence.existence_record is not None
+            ):
+                return PhysicalOpeningDispositionResult(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    disposition=PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT,
+                    reason_codes=existence.reason_codes,
+                    candidate_ids=candidate_ids,
+                    existence_record=existence.existence_record,
+                )
+            if existence.status is EvidenceResolutionStatus.CONFLICT:
+                return PhysicalOpeningDispositionResult(
+                    status=EvidenceResolutionStatus.CONFLICT,
+                    disposition=PHYSICAL_OPENING_DISPOSITION_CONFLICT,
+                    reason_codes=existence.reason_codes,
+                    candidate_ids=candidate_ids,
+                )
+            return PhysicalOpeningDispositionResult(
+                status=(
+                    EvidenceResolutionStatus.CANDIDATE
+                    if existence.candidate is not None
+                    else EvidenceResolutionStatus.ABSTAINED
+                ),
+                disposition=(
+                    PHYSICAL_OPENING_DISPOSITION_CANDIDATE
+                    if existence.candidate is not None
+                    else PHYSICAL_OPENING_DISPOSITION_UNRESOLVED
+                ),
+                reason_codes=existence.reason_codes,
+                candidate_ids=candidate_ids,
+            )
         if VISIBILITY_RECEIPT_UNAVAILABLE not in primitive_result.reason_codes:
-            return PhysicalOpeningExistenceResult(
-                status=_source_failure_status(primitive_result),
-                proposition=None,
-                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+            status = _source_failure_status(primitive_result)
+            return PhysicalOpeningDispositionResult(
+                status=status,
+                disposition=(
+                    PHYSICAL_OPENING_DISPOSITION_CONFLICT
+                    if status is EvidenceResolutionStatus.CONFLICT
+                    else PHYSICAL_OPENING_DISPOSITION_UNRESOLVED
+                ),
                 reason_codes=_dedupe_reason_codes(primitive_result.reason_codes),
-                source_observation=primitive_result,
             )
 
         visible_cache_key = (
@@ -2708,6 +2751,24 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
+        primitive_result = visibility.resolve_raster_opening_primitive(selector)
+        if (
+            primitive_result.status is EvidenceResolutionStatus.CORROBORATED
+            and primitive_result.observation is not None
+        ):
+            return self._prove_raster_framed_existence(
+                selector,
+                primitive_result,
+            )
+        if VISIBILITY_RECEIPT_UNAVAILABLE not in primitive_result.reason_codes:
+            return PhysicalOpeningExistenceResult(
+                status=_source_failure_status(primitive_result),
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=_dedupe_reason_codes(primitive_result.reason_codes),
+                source_observation=primitive_result,
+            )
+
         visible_cache_key = (
             str(selector.document_id),
             str(selector.revision_id),
