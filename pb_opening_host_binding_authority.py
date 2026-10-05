@@ -443,6 +443,10 @@ class OpeningHostBindingProducer:
                 universe.records,
                 geometry,
                 universe.equivalence,
+                allow_spanning_face_band=(
+                    opening.structural_pattern
+                    == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                ),
             )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
@@ -1316,9 +1320,12 @@ def _resolve_host_bands(
     records: Sequence[PhysicalWallCandidateRecord],
     opening: _OpeningGeometry,
     equivalence: PhysicalWallEquivalenceResolution,
+    *,
+    allow_spanning_face_band: bool = False,
 ) -> _HostBandResolution:
     left_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
     right_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
+    spanning_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
     edge_tol = max(0.5, min(2.0, opening.length * 0.02))
 
     for record in records:
@@ -1328,14 +1335,24 @@ def _resolve_host_bands(
         along_min, along_max, offset = data
         if along_min < -edge_tol and abs(along_max) <= edge_tol:
             left_raw.append((offset, record))
-        if along_max > opening.length + edge_tol and abs(along_min - opening.length) <= edge_tol:
+        if (
+            along_max > opening.length + edge_tol
+            and abs(along_min - opening.length) <= edge_tol
+        ):
             right_raw.append((offset, record))
+        if (
+            allow_spanning_face_band
+            and along_min < -edge_tol
+            and along_max > opening.length + edge_tol
+        ):
+            spanning_raw.append((offset, record))
 
     pair_lookup = _pair_lookup(equivalence)
     group_lookup = _equivalence_group_lookup(equivalence)
 
     relevant_wall_ids = {
-        record.wall_candidate_id for _offset, record in (*left_raw, *right_raw)
+        record.wall_candidate_id
+        for _offset, record in (*left_raw, *right_raw, *spanning_raw)
     }
     ambiguous_relevant_ids = relevant_wall_ids & set(equivalence.ambiguous_wall_ids)
     if ambiguous_relevant_ids:
@@ -1372,6 +1389,26 @@ def _resolve_host_bands(
     )
     if right_status is not EvidenceResolutionStatus.CORROBORATED:
         return _HostBandResolution(right_status, (), right_reasons)
+
+    spanning_candidates: tuple[_RoleCandidate, ...] = ()
+    if allow_spanning_face_band:
+        (
+            spanning_status,
+            spanning_candidates,
+            spanning_reasons,
+        ) = _normalize_role_candidates(
+            spanning_raw,
+            equivalence,
+            axis_tol,
+            pair_lookup=pair_lookup,
+            group_lookup=group_lookup,
+        )
+        if spanning_status is not EvidenceResolutionStatus.CORROBORATED:
+            return _HostBandResolution(
+                spanning_status,
+                (),
+                spanning_reasons,
+            )
 
     face_breaks: list[_FaceBreak] = []
     for left in left_candidates:
@@ -1417,6 +1454,56 @@ def _resolve_host_bands(
                     center_offset=center_offset,
                 )
             )
+
+    if allow_spanning_face_band:
+        for index, first in enumerate(spanning_candidates):
+            for second in spanning_candidates[index + 1 :]:
+                separation = abs(second.offset - first.offset)
+                if abs(separation - opening.thickness) > thickness_tol:
+                    continue
+                center_offset = (first.offset + second.offset) / 2.0
+                if abs(center_offset) > proximity_limit:
+                    continue
+
+                role_members = (first, second)
+                member_ids = tuple(
+                    sorted(
+                        member.record.wall_candidate_id
+                        for member in role_members
+                    )
+                )
+                if len(set(member_ids)) != 2:
+                    continue
+
+                candidate_identity_ids: list[str] = []
+                groups: list[tuple[str, ...]] = []
+                valid = True
+                for member in role_members:
+                    identity = member.record.physical_identity
+                    if not identity.usable or not identity.candidate_identity_id:
+                        valid = False
+                        break
+                    candidate_identity_ids.append(
+                        str(identity.candidate_identity_id)
+                    )
+                    groups.append(
+                        tuple(sorted(member.candidate_group))
+                    )
+                if not valid:
+                    continue
+
+                bands.append(
+                    _HostBand(
+                        member_ids=member_ids,
+                        member_candidate_identity_ids=tuple(
+                            sorted(candidate_identity_ids)
+                        ),
+                        member_equivalence_groups=tuple(
+                            sorted(set(groups))
+                        ),
+                        center_offset=center_offset,
+                    )
+                )
 
     unique: dict[
         tuple[tuple[str, ...], tuple[tuple[str, ...], ...]], _HostBand
