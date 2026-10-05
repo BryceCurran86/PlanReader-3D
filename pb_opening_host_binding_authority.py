@@ -28,6 +28,7 @@ from typing import Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     PHYSICAL_OPENING_EXISTS,
@@ -1025,6 +1026,42 @@ def _opening_geometry(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
 ) -> Optional[_OpeningGeometry]:
+    if opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION:
+        bbox = opening.aperture_bbox_pt
+        if bbox is None or len(bbox) != 4:
+            return None
+        try:
+            x0, y0, x1, y1 = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+            return None
+        width = x1 - x0
+        height = y1 - y0
+        if width <= _COORD_TOL or height <= _COORD_TOL:
+            return None
+        if abs(width - height) <= _COORD_TOL:
+            return None
+        if width > height:
+            axis = (1.0, 0.0)
+            normal = (0.0, 1.0)
+            origin = (x0, (y0 + y1) / 2.0)
+            length = width
+            thickness = height
+        else:
+            axis = (0.0, 1.0)
+            normal = (-1.0, 0.0)
+            origin = ((x0 + x1) / 2.0, y0)
+            length = height
+            thickness = width
+        return _OpeningGeometry(
+            origin=origin,
+            axis=axis,
+            normal=normal,
+            length=length,
+            thickness=thickness,
+        )
+
     visibility = authority.source_visibility_authority()
     if type(visibility) is not SourceVisibilityAuthority:
         return None
