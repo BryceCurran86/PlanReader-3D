@@ -21,7 +21,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_wall_finish_face_binding_authority import WallFinishFaceBindingRecord
 
 
-LIVE_CANONICAL_WALL_FINISH_SURFACE_SCHEMA_VERSION = "1.1.0"
+LIVE_CANONICAL_WALL_FINISH_SURFACE_SCHEMA_VERSION = "1.2.0"
 LIVE_CANONICAL_WALL_FINISH_SURFACE_RESOLVED = (
     "live_canonical_wall_finish_surface_resolved"
 )
@@ -175,6 +175,7 @@ def project_wall_finish_bindings(
     *,
     canonical_walls: Sequence[Mapping[str, object]],
     bindings: Sequence[WallFinishFaceBindingRecord],
+    canonical_wall_ids_by_candidate: Optional[Mapping[str, str]] = None,
 ) -> LiveCanonicalWallFinishSurfaceProjection:
     """Project exact producer-owned finish/face bindings onto canonical walls."""
 
@@ -192,6 +193,14 @@ def project_wall_finish_bindings(
                 "bindings must contain producer-owned WallFinishFaceBindingRecord values"
             )
 
+    candidate_map = {
+        _clean(candidate_id): _clean(canonical_id)
+        for candidate_id, canonical_id in (
+            dict(canonical_wall_ids_by_candidate or {}).items()
+        )
+        if _clean(candidate_id) and _clean(canonical_id)
+    }
+
     walls_by_physical_id, wall_map_valid = _resolved_wall_map(canonical_walls)
     if not wall_map_valid:
         return LiveCanonicalWallFinishSurfaceProjection(
@@ -205,9 +214,11 @@ def project_wall_finish_bindings(
 
     groups: dict[tuple[str, str, str], list[WallFinishFaceBindingRecord]] = {}
     for binding in bindings:
+        source_wall_id = _clean(binding.physical_wall_id)
+        resolved_wall_id = candidate_map.get(source_wall_id, source_wall_id)
         key = (
-            _clean(binding.physical_wall_id),
-            _clean(binding.physical_face_id),
+            resolved_wall_id,
+            _enum_value(binding.physical_face_role),
             _clean(binding.trade_scope_id),
         )
         groups.setdefault(key, []).append(binding)
@@ -217,19 +228,18 @@ def project_wall_finish_bindings(
     host_missing = False
     lineage_mismatch = False
 
-    for (physical_wall_id, physical_face_id, trade_scope_id), group in sorted(
+    for (physical_wall_id, physical_face_role, trade_scope_id), group in sorted(
         groups.items()
     ):
         materials = {_clean(binding.finish_material) for binding in group}
-        roles = {_enum_value(binding.physical_face_role) for binding in group}
+        source_face_ids = {_clean(binding.physical_face_id) for binding in group}
         if (
             not physical_wall_id
-            or not physical_face_id
+            or not physical_face_role
             or not trade_scope_id
             or "" in materials
-            or "" in roles
+            or "" in source_face_ids
             or len(materials) != 1
-            or len(roles) != 1
         ):
             return LiveCanonicalWallFinishSurfaceProjection(
                 status=EvidenceResolutionStatus.CONFLICT,
@@ -251,15 +261,23 @@ def project_wall_finish_bindings(
             continue
 
         finish_material = next(iter(materials))
-        physical_face_role = next(iter(roles))
         canonical_wall_id = _clean(wall.get("canonical_wall_id"))
+        physical_face_id = stable_contract_id(
+            "live_canonical_physical_wall_face",
+            {
+                "document_id": _clean(wall.get("document_id")),
+                "physical_wall_id": physical_wall_id,
+                "physical_face_role": physical_face_role,
+            },
+            digest_chars=32,
+        )
         canonical_surface_id = stable_contract_id(
             "live_canonical_wall_finish_surface",
             {
-                # Physical surface identity must survive revision/evidence and
-                # material-state churn. Source SHA, revision, snapshot,
-                # detector version and finish material are evidence/semantic
-                # state, not physical identity.
+                # Canonical surface identity is based only on the resolved
+                # physical wall/face plus trade scope. Raw wall-candidate ids,
+                # producer face ids, revision/SHA/snapshot and finish material
+                # remain evidence/semantic state.
                 "document_id": _clean(wall.get("document_id")),
                 "physical_wall_id": physical_wall_id,
                 "physical_face_id": physical_face_id,
