@@ -97,7 +97,7 @@ def publish_live_slab_area_quantity(
             "physical_slab_id": slab.physical_slab_id,
             "boundary_id": slab.boundary_id,
             "slab_type": slab.slab_type,
-            "commercial_projection_allowed": True,
+            "commercial_projection_allowed": False,
         },
     )
 
