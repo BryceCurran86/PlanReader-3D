@@ -70,6 +70,8 @@ def blocked_commercial_claim_key(
 
 def _commercial_projection_key_from_provenance(
     row: Mapping[str, Any],
+    *,
+    require_projection_value_match: bool = True,
 ) -> BlockedCommercialClaimKey | None:
     """Read exact source/physical identity from commercial projection provenance."""
     if not isinstance(row, Mapping):
@@ -109,14 +111,17 @@ def _commercial_projection_key_from_provenance(
     if not sha or not family or not semantic_key or not ids:
         return None
 
-    # The customer row must still describe the same sealed quantity.
-    try:
-        row_value = float(row.get("quantity"))
-        provenance_value = float(q.get("value"))
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if row_value != provenance_value:
-        return None
+    # Unreviewed drafts must still carry the exact projected value. Reviewed
+    # rows may contain an estimator correction; their review state is validated
+    # separately and physical/source identity remains the supersedence key.
+    if require_projection_value_match:
+        try:
+            row_value = float(row.get("quantity"))
+            provenance_value = float(q.get("value"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if row_value != provenance_value:
+            return None
 
     return BlockedCommercialClaimKey(
         source_sha256=sha,
@@ -139,7 +144,12 @@ def prior_reviewed_commercial_projection_key(
     row: Mapping[str, Any],
 ) -> BlockedCommercialClaimKey | None:
     """Return exact provenance only for estimator-reviewed AI output."""
-    key = _commercial_projection_key_from_provenance(row)
+    if _norm_status(row.get("origin")) != "ai_reviewed":
+        return None
+    key = _commercial_projection_key_from_provenance(
+        row,
+        require_projection_value_match=False,
+    )
     if key is None:
         return None
     try:
