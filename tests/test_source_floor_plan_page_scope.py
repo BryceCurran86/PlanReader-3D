@@ -33,6 +33,7 @@ from pb_source_floor_plan_page_scope import (
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
+from tests.test_live_room_area_source_closed_export import _cross_view_room_area_pdf
 
 LABELS = ("DRAWING TITLE", "DRAWING NO", "SCALE", "DRAWN BY", "DATE")
 
@@ -330,6 +331,38 @@ def _pages(*page_numbers: int):
              extracted_text="", selected=1)
         for n in page_numbers
     ]
+
+
+def test_customer_bridge_support_page_routing_activates_real_cross_view_room_area(tmp_path: Path) -> None:
+    path = tmp_path / "cross-view-room-area.pdf"
+    path.write_bytes(_cross_view_room_area_pdf())
+    app = SimpleNamespace(
+        lquery=lambda *_args, **_kwargs: [{"id": 1, "path": str(path)}]
+    )
+    scope = SimpleNamespace(
+        topology_page_indices=lambda: (0,),
+        evidence_page_indices=(1,),
+        to_dict=lambda: {
+            "floor_plan_page_indices": [0],
+            "evidence_page_indices": [1],
+            "restricts": True,
+        },
+    )
+    with patch(SCOPE_TOOL, return_value=scope):
+        auto._try_physical_net_wall_rows(
+            app,
+            1,
+            _pages(1, 2),
+            [],
+        )
+
+    rows = app._live_room_area_takeoff_rows_by_workspace[1]
+    assert len(rows) == 1
+    named = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+    assert named["quantity"] == pytest.approx(8.64)
+    assert named["unit"] == "m²"
+    assert named["row_role"] == "floor_area"
+    assert "room_area_quantity:" in named["source_reference"]
 
 
 def test_customer_bridge_forwards_only_source_classified_evidence_pages_for_room_area_support(tmp_path: Path) -> None:
