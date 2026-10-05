@@ -1,0 +1,154 @@
+"""Fail-closed live room-area -> customer draft projection.
+
+This bridge consumes only already-FIRM room-area QuantityEvidence plus the exact
+source/canonical trace produced by the live room-area source-closed exporter.
+It does not create room geometry, measurement authority, estimator approval, or
+benchmark identity.
+
+Only figured/documented room areas with explicit figured-dimension evidence are
+currently admitted. Scaled-geometry room areas remain unprojected until a
+separate current commercial scale authority is supplied. Every emitted row is
+therefore the existing commercial adapter unreviewed AI draft ("To review").
+"""
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+from pb_live_room_area_source_closed_export import (
+    build_live_room_area_source_traces,
+)
+from pb_migration_contracts import QuantityEvidence
+from pb_quantity_takeoff_adapter import (
+    CommercialMeasurementAuthority,
+    quantity_evidence_to_takeoff_output_row,
+)
+
+
+LIVE_ROOM_AREA_CUSTOMER_PROJECTION_SCHEMA_VERSION = "1.0.0"
+
+
+def _clean(value: Any) -> str:
+    return str(value if value is not None else "").strip()
+
+
+def _firm_room_area_quantities(
+    claim: LivePhysicalNetWallClaim,
+) -> tuple[QuantityEvidence, ...]:
+    quantities: list[QuantityEvidence] = []
+    seen: set[str] = set()
+    for quantity in claim.room_area_quantity_evidence:
+        if not isinstance(quantity, QuantityEvidence):
+            raise TypeError(
+                "room_area_quantity_evidence must contain QuantityEvidence"
+            )
+        if quantity.family != "room_area":
+            continue
+        if (
+            quantity.abstained
+            or quantity.value is None
+            or _clean(quantity.status).lower() != "firm"
+        ):
+            continue
+        quantity_id = _clean(quantity.quantity_id)
+        if not quantity_id:
+            continue
+        if quantity_id in seen:
+            raise ValueError(
+                f"duplicate firm room-area quantity id: {quantity_id}"
+            )
+        seen.add(quantity_id)
+        quantities.append(quantity)
+    return tuple(sorted(quantities, key=lambda item: item.quantity_id))
+
+
+def _figured_measurement_authority(
+    quantity: QuantityEvidence,
+) -> CommercialMeasurementAuthority | None:
+    """Return explicit figured authority, never inferred scale authority."""
+    authority = (
+        _clean(quantity.authority)
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    if authority not in {
+        "documented_dimension",
+        "figured_dimension",
+        "documented/figured",
+    } and "figured" not in authority:
+        return None
+
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    raw_ids = metadata.get("figured_dimension_ids")
+    if isinstance(raw_ids, (str, bytes)):
+        raw_ids = (raw_ids,)
+    elif not isinstance(raw_ids, (list, tuple)):
+        raw_ids = ()
+    figured_ids = tuple(
+        sorted({_clean(value) for value in raw_ids if _clean(value)})
+    )
+    if not figured_ids:
+        return None
+
+    return CommercialMeasurementAuthority(
+        method="figured_dimension",
+        figured_dimension_ids=figured_ids,
+        metadata={
+            "source": "live_room_area_customer_projection",
+            "quantity_id": quantity.quantity_id,
+        },
+    )
+
+
+def project_live_room_area_customer_rows(
+    claim: LivePhysicalNetWallClaim,
+    *,
+    workspace_id: int,
+    project_id: str,
+) -> tuple[dict[str, Any], ...]:
+    """Project source-closed figured room areas into unreviewed customer rows.
+
+    Source/canonical lineage is revalidated by
+    build_live_room_area_source_traces. Missing or ambiguous floor mapping
+    fails closed there. ABSTAIN/BLOCKED quantities are omitted. Scaled geometry
+    is also omitted here because this bridge does not own a commercial scale
+    authority.
+    """
+    if type(claim) is not LivePhysicalNetWallClaim:
+        raise TypeError("claim must be LivePhysicalNetWallClaim")
+
+    quantities = _firm_room_area_quantities(claim)
+    if not quantities:
+        return ()
+
+    traces = build_live_room_area_source_traces(
+        claim,
+        workspace_id=workspace_id,
+        project_id=project_id,
+    )
+
+    rows: list[dict[str, Any]] = []
+    for quantity in quantities:
+        trace = traces.get(quantity.quantity_id)
+        if trace is None:
+            raise ValueError(
+                f"missing live room-area source trace: {quantity.quantity_id}"
+            )
+        authority = _figured_measurement_authority(quantity)
+        if authority is None:
+            continue
+        row = quantity_evidence_to_takeoff_output_row(
+            quantity,
+            trace=trace,
+            authority=authority,
+        )
+        if row is not None:
+            rows.append(row)
+    return tuple(rows)
+
+
+__all__ = [
+    "LIVE_ROOM_AREA_CUSTOMER_PROJECTION_SCHEMA_VERSION",
+    "project_live_room_area_customer_rows",
+]

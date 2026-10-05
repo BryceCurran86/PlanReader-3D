@@ -6,11 +6,13 @@ import inspect
 import fitz
 import pytest
 
+import pb_live_room_area_customer_projection as customer_projection
 import pb_live_room_area_source_closed_export as export
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
 from pb_source_closed_run_export import SourceClosedRunConflictError
+from pb_quantity_takeoff_adapter import existing_commercial_gate_results
 
 
 def _cross_view_room_area_pdf() -> bytes:
@@ -234,6 +236,69 @@ def test_room_area_export_fails_closed_without_unique_enriched_floor(
 
 def test_live_room_area_export_has_no_truth_or_scoring_dependency() -> None:
     source = inspect.getsource(export)
+    forbidden = (
+        "benchmarks.",
+        "full_plan_v2",
+        "reference_takeoff",
+        "expected_quantity",
+        "golden",
+    )
+    for value in forbidden:
+        assert value not in source
+
+
+def test_live_room_area_figured_quantity_projects_to_unreviewed_customer_row(
+    live_claim,
+) -> None:
+    quantity = _firm_quantity(live_claim)
+    figured_ids = tuple(quantity.metadata.get("figured_dimension_ids") or ())
+    assert figured_ids
+
+    rows = customer_projection.project_live_room_area_customer_rows(
+        live_claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["quantity_id"] == quantity.quantity_id
+    assert row["quantity"] == pytest.approx(8.64)
+    assert row["unit"] == "m2"
+    assert row["quantity_status"] == "To review"
+    assert row["origin"] == "AI"
+    assert row["row_role"] == "floor_area"
+    assert row["inclusion_status"] == "INCLUSION"
+    assert row["measurement_method"] == "figured_dimension"
+    assert set(row["figured_dimension_ids"]) == set(figured_ids)
+    assert row["source_sha256"] == _resolved_floor(live_claim).source_sha256
+
+    gates = existing_commercial_gate_results(row)
+    assert all(result[0] is False for result in gates.values())
+
+
+def test_room_area_customer_projection_omits_abstention_instead_of_zero(
+    live_claim,
+) -> None:
+    abstained = tuple(
+        quantity
+        for quantity in live_claim.room_area_quantity_evidence
+        if quantity.abstained
+    )
+    assert abstained
+    claim = replace(live_claim, room_area_quantity_evidence=abstained)
+
+    rows = customer_projection.project_live_room_area_customer_rows(
+        claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert rows == ()
+
+
+def test_live_room_area_customer_projection_has_no_truth_or_scoring_dependency() -> None:
+    source = inspect.getsource(customer_projection)
     forbidden = (
         "benchmarks.",
         "full_plan_v2",
