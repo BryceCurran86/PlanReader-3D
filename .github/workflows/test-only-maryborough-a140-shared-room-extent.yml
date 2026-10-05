@@ -1,0 +1,93 @@
+name: TEST ONLY Maryborough A140 Shared Room Extent
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  a140_rooms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run A140 topology-only room diagnostic
+        shell: bash
+        run: |
+          mkdir -p artifacts/a140
+          git rev-parse HEAD > artifacts/a140/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/a140/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/a140/run.log
+          import json, math, time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started = time.perf_counter()
+          claim = collect_live_physical_net_wall_claim(
+              path,
+              pages=(10,),
+              topology_pages=(10,),
+              room_area_support_pages=None,
+          )
+          print(json.dumps({
+              "stage":"claim",
+              "elapsed_seconds":time.perf_counter()-started,
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "room_count":len(claim.canonical_rooms),
+              "floor_count":len(claim.canonical_floors),
+          }, sort_keys=True), flush=True)
+
+          wanted = {"freezer", "cold room"}
+          rows=[]
+          for room in claim.canonical_rooms:
+              label=" ".join(str(room.room_label or "").strip().casefold().split())
+              if label not in wanted:
+                  continue
+              pts=tuple((float(x),float(y)) for x,y in room.polygon_pdf_pts)
+              xs=[p[0] for p in pts]
+              ys=[p[1] for p in pts]
+              rows.append({
+                  "label":label,
+                  "physical_room_id":room.physical_room_id,
+                  "canonical_room_id":room.canonical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "page_id":room.page_id,
+                  "viewport_id":room.viewport_id,
+                  "bbox":[min(xs),min(ys),max(xs),max(ys)] if pts else None,
+                  "polygon":pts,
+                  "geometry_complete":room.geometry_complete,
+                  "evidence_ids":list(room.evidence_ids),
+              })
+          print(json.dumps({"stage":"target_rooms","rows":rows}, sort_keys=True), flush=True)
+
+          if len(rows)==2:
+              by={row["label"]:row for row in rows}
+              f=by.get("freezer")
+              c=by.get("cold room")
+              if f and c and f["bbox"] and c["bbox"]:
+                  fb=f["bbox"]; cb=c["bbox"]
+                  same_x=abs(fb[0]-cb[0])<=1e-6 and abs(fb[2]-cb[2])<=1e-6
+                  same_y=abs(fb[1]-cb[1])<=1e-6 and abs(fb[3]-cb[3])<=1e-6
+                  print(json.dumps({
+                      "stage":"shared_extent",
+                      "same_x_extent":same_x,
+                      "same_y_extent":same_y,
+                      "freezer_bbox":fb,
+                      "cold_room_bbox":cb,
+                  }, sort_keys=True), flush=True)
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maryborough-a140-shared-room-extent
+          path: artifacts/a140
+          retention-days: 1
