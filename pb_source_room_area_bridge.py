@@ -39,6 +39,9 @@ from pb_migration_contracts import (
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_room_area_quantity import build_room_area_quantities
+from pb_source_room_cross_view_area_authority import (
+    SourceRoomCrossViewAreaRecord,
+)
 from pb_source_room_face_authority import (
     SourceRoomFaceAuthority,
     SourceRoomFaceSelector,
@@ -49,6 +52,12 @@ SOURCE_ROOM_AREA_BRIDGE_SCHEMA_VERSION = "1.0.0"
 SOURCE_ROOM_AREA_BRIDGE_RESOLVED = "source_room_area_bridge_resolved"
 SOURCE_ROOM_AREA_BRIDGE_INDEX_UNAVAILABLE = "source_room_area_bridge_index_unavailable"
 SOURCE_ROOM_AREA_BRIDGE_CONTEXT_MISMATCH = "source_room_area_bridge_context_mismatch"
+SOURCE_ROOM_AREA_BRIDGE_CROSS_VIEW_RECORD_CONFLICT = (
+    "source_room_area_bridge_cross_view_record_conflict"
+)
+SOURCE_ROOM_AREA_BRIDGE_EXPLICIT_AREA_CONFLICT = (
+    "source_room_area_bridge_explicit_area_conflict"
+)
 SOURCE_ROOM_AREA_ENTITY_BOUND = "source_room_face_entity_bound"
 
 
@@ -80,10 +89,16 @@ def _derived_document(
     document: DocumentEvidence,
     *,
     room_index: OwnedTopologyRoomIndex,
+    additional_evidence_ids: tuple[str, ...] = (),
 ) -> DocumentEvidence:
     evidence_ids = set(document.evidence_ids)
     for room in room_index.rooms():
         evidence_ids.update(room.evidence)
+    evidence_ids.update(
+        str(value)
+        for value in additional_evidence_ids
+        if str(value)
+    )
     metadata = dict(document.metadata or {})
     metadata.update(
         {
@@ -141,6 +156,9 @@ def build_source_room_area_bridge(
     page_no: int,
     scale_calibration: Optional[ScaleCalibration] = None,
     explicit_area_evidence_by_room_id: Optional[Mapping[str, EvidenceAtom]] = None,
+    cross_view_area_records_by_room_id: Optional[
+        Mapping[str, SourceRoomCrossViewAreaRecord]
+    ] = None,
 ) -> SourceRoomAreaBridgeResult:
     """Compose sealed room faces into existing room-area QuantityEvidence.
 
@@ -196,12 +214,87 @@ def build_source_room_area_bridge(
             quantities=(),
         )
 
-    owned_document = _derived_document(document, room_index=room_index)
+    rooms_by_ref = {room.room_ref: room for room in rooms}
+    cross_view_records: dict[str, SourceRoomCrossViewAreaRecord] = {}
+    for key, record in dict(cross_view_area_records_by_room_id or {}).items():
+        if type(record) is not SourceRoomCrossViewAreaRecord:
+            raise TypeError(
+                "cross_view_area_records_by_room_id must contain "
+                "SourceRoomCrossViewAreaRecord"
+            )
+        room_ref = str(key or "").strip()
+        if (
+            not room_ref
+            or room_ref != record.room_ref
+            or room_ref not in rooms_by_ref
+            or record.document_id != room_index.document_id
+            or record.revision_id != room_index.revision_id
+            or record.source_sha256.lower() != room_index.source_sha256.lower()
+            or record.snapshot_id != selector.snapshot_id
+            or record.topology_page_id != selector.page_id
+            or record.evidence.document_id != document.document_id
+            or record.evidence.evidence_id == ""
+        ):
+            return SourceRoomAreaBridgeResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason_codes=(SOURCE_ROOM_AREA_BRIDGE_CROSS_VIEW_RECORD_CONFLICT,),
+                room_index=room_index,
+                document=document,
+                entities=(),
+                quantities=(),
+            )
+        cross_view_records[room_ref] = record
+
+    supplied_explicit = dict(explicit_area_evidence_by_room_id or {})
+    for room_ref, record in cross_view_records.items():
+        supplied = supplied_explicit.get(room_ref)
+        if supplied is None:
+            continue
+        if (
+            type(supplied) is not EvidenceAtom
+            or supplied.evidence_id != record.evidence.evidence_id
+            or supplied.to_dict() != record.evidence.to_dict()
+        ):
+            return SourceRoomAreaBridgeResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason_codes=(SOURCE_ROOM_AREA_BRIDGE_EXPLICIT_AREA_CONFLICT,),
+                room_index=room_index,
+                document=document,
+                entities=(),
+                quantities=(),
+            )
+
+    effective_explicit = dict(supplied_explicit)
+    effective_explicit.update(
+        {
+            room_ref: record.evidence
+            for room_ref, record in cross_view_records.items()
+        }
+    )
+    cross_view_evidence_ids = tuple(
+        sorted(record.evidence.evidence_id for record in cross_view_records.values())
+    )
+    owned_document = _derived_document(
+        document,
+        room_index=room_index,
+        additional_evidence_ids=cross_view_evidence_ids,
+    )
     entities = tuple(
         EntityEvidence(
             candidate_entity_id=room.room_ref,
             candidate_type="room",
-            evidence_ids=tuple(room.evidence),
+            evidence_ids=tuple(
+                dict.fromkeys(
+                    (
+                        *tuple(room.evidence),
+                        *(
+                            (cross_view_records[room.room_ref].evidence.evidence_id,)
+                            if room.room_ref in cross_view_records
+                            else ()
+                        ),
+                    )
+                )
+            ),
             status=EvidenceResolutionStatus.CORROBORATED,
             confidence=float(room.geometry_confidence),
             reason_codes=(SOURCE_ROOM_AREA_ENTITY_BOUND,),
@@ -213,6 +306,11 @@ def build_source_room_area_bridge(
                 "page_no": room_index.page_no,
                 "page_id": room_index.page_id,
                 "viewport_id": room_index.viewport_id,
+                "cross_view_area_record_id": (
+                    cross_view_records[room.room_ref].record_id
+                    if room.room_ref in cross_view_records
+                    else None
+                ),
             },
         )
         for room in rooms
@@ -230,9 +328,7 @@ def build_source_room_area_bridge(
         page_no=page_no,
         scale_calibration=scale_calibration,
         explicit_area_evidence_by_room_id=(
-            None
-            if explicit_area_evidence_by_room_id is None
-            else dict(explicit_area_evidence_by_room_id)
+            None if not effective_explicit else effective_explicit
         ),
     )
 
@@ -248,6 +344,8 @@ def build_source_room_area_bridge(
 
 __all__ = [
     "SOURCE_ROOM_AREA_BRIDGE_CONTEXT_MISMATCH",
+    "SOURCE_ROOM_AREA_BRIDGE_CROSS_VIEW_RECORD_CONFLICT",
+    "SOURCE_ROOM_AREA_BRIDGE_EXPLICIT_AREA_CONFLICT",
     "SOURCE_ROOM_AREA_BRIDGE_INDEX_UNAVAILABLE",
     "SOURCE_ROOM_AREA_BRIDGE_RESOLVED",
     "SOURCE_ROOM_AREA_BRIDGE_SCHEMA_VERSION",
