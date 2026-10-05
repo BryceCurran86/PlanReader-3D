@@ -501,3 +501,67 @@ def test_cached_unit_angle_gate_matches_legacy_at_tolerance_boundary():
             right,
             points_per_mm=None,
         ) == _legacy_candidacy(left, right, points_per_mm=None)
+
+
+
+def test_component_edge_membership_preserves_same_and_ambiguous_chain_semantics(
+    monkeypatch,
+):
+    identities = (
+        _identity("a", path=((0.0, 0.0), (100.0, 0.0)), primitives=("pa",)),
+        _identity("b", path=((0.0, 1.0), (100.0, 1.0)), primitives=("pb",)),
+        _identity("c", path=((0.0, 2.0), (100.0, 2.0)), primitives=("pc",)),
+        _identity("d", path=((0.0, 20.0), (100.0, 20.0)), primitives=("pd",)),
+        _identity("e", path=((0.0, 21.0), (100.0, 21.0)), primitives=("pe",)),
+    )
+    relations = {
+        ("a", "b"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+        ("b", "c"): PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        ("d", "e"): PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+    }
+
+    def pair_key(left, right):
+        return tuple(sorted((left.wall_candidate_id, right.wall_candidate_id)))
+
+    def controlled_candidacy(
+        left,
+        right,
+        _left_features,
+        _right_features,
+        *,
+        points_per_mm=None,
+    ):
+        del points_per_mm
+        key = pair_key(left, right)
+        if key in relations:
+            return True, None
+        return False, PAIR_EXCLUDED_ORIENTATION_INCOMPATIBLE
+
+    def controlled_classification(left, right, _left_features, _right_features):
+        return relations[pair_key(left, right)]
+
+    monkeypatch.setattr(
+        module,
+        "_physical_wall_pair_identity_candidacy_with_features",
+        controlled_candidacy,
+    )
+    monkeypatch.setattr(
+        module,
+        "_classify_physical_wall_pair_with_features",
+        controlled_classification,
+    )
+
+    result = resolve_physical_wall_equivalence(identities)
+
+    assert set(result.ambiguous_wall_ids) == {"a", "b", "c"}
+    assert {"a", "b", "c"} <= set(result.abstained_wall_ids)
+    assert result.equivalence_groups == (("d", "e"),)
+    assert len(result.representative_wall_ids) == 1
+    representative = result.representative_wall_ids[0]
+    assert representative in {"d", "e"}
+    covered = ({"d", "e"} - {representative}).pop()
+    assert covered in result.abstained_wall_ids
+    assert result.blockers_for(covered) == (
+        f"equivalent_physical_wall_represented_by:{representative}",
+    )
+    assert set(result.same_wall_ids) == {"d", "e"}
