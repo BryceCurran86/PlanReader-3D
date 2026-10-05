@@ -57,6 +57,7 @@ def _publish(
     producer_method: str = "raster-opening-primitive-publication",
     producer_version: str = "1",
     overlay: bool = False,
+    source_bytes: bytes | None = None,
 ):
     producer = SourceVisibilityProducer(
         producer_method=producer_method,
@@ -64,7 +65,11 @@ def _publish(
     )
     base = producer.ingest_native_pdf_bytes(
         document_id="raster-opening-primitive-publication",
-        source_bytes=_raster_pdf(overlay=overlay),
+        source_bytes=(
+            source_bytes
+            if source_bytes is not None
+            else _raster_pdf(overlay=overlay)
+        ),
         source_locator="memory://raster-opening-primitive-publication.pdf",
         page_ids=("1",),
     )
@@ -102,11 +107,14 @@ def test_primitive_publication_is_isolated_from_visible_universe() -> None:
 
 
 def test_primitive_ids_ignore_producer_method_and_version() -> None:
+    source_bytes = _raster_pdf(overlay=False)
     first_producer, _first_base, first = _publish(
+        source_bytes=source_bytes,
         producer_method="raster-opening-primitive-a",
         producer_version="1.0.0",
     )
     second_producer, _second_base, second = _publish(
+        source_bytes=source_bytes,
         producer_method="raster-opening-primitive-b",
         producer_version="9.9.9",
     )
