@@ -1,6 +1,7 @@
 """Production regressions for benchmark-neutral source-closed run export."""
 from __future__ import annotations
 
+from dataclasses import replace
 import inspect
 import json
 
@@ -206,6 +207,128 @@ def test_sealed_fingerprint_does_not_collapse_distinct_canonical_instances() -> 
     )
     assert first.object_identity_refs != second.object_identity_refs
     assert first.fingerprint != second.fingerprint
+
+def test_combines_independent_family_runs_into_one_deterministic_project_run() -> None:
+    room_quantity = quantity(
+        quantity_id="qty-room",
+        family="room_area",
+        semantic_key="room:food-prep:area",
+    )
+    opening_quantity = quantity(
+        quantity_id="qty-opening",
+        family="opening_area",
+        semantic_key="opening:window-1:area",
+        value=2.4,
+        input_entity_ids=("canonical-opening-1",),
+        evidence_ids=("ev-opening-1",),
+        metadata={
+            "project_id": "project-a",
+            "document_id": "doc-b",
+            "source_sha256": SHA_B,
+            "revision_id": "rev-b",
+        },
+    )
+    room_run = export.seal_source_closed_run(
+        [room_quantity],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-room": trace()},
+    )
+    opening_run = export.seal_source_closed_run(
+        [opening_quantity],
+        project_id="project-a",
+        traces_by_quantity_id={
+            "qty-opening": trace(
+                document_id="doc-b",
+                source_sha256=SHA_B,
+                revision_id="rev-b",
+                current_revision_id="rev-b",
+                evidence_ids=("ev-opening-1",),
+                canonical_entity_ids=("canonical-opening-1",),
+            )
+        },
+    )
+
+    combined_a = export.combine_source_closed_runs(
+        [room_run, opening_run],
+        project_id="project-a",
+    )
+    combined_b = export.combine_source_closed_runs(
+        [opening_run, room_run],
+        project_id="project-a",
+    )
+
+    assert [row.quantity_id for row in combined_a.quantities] == [
+        "qty-opening",
+        "qty-room",
+    ]
+    assert combined_a.source_sha256s == (SHA_A, SHA_B)
+    assert combined_a.revision_ids == ("rev-a", "rev-b")
+    assert combined_a.run_id == combined_b.run_id
+    assert combined_a.fingerprint == combined_b.fingerprint
+
+
+def test_combined_run_rejects_duplicate_quantity_identity_across_families() -> None:
+    first = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-shared")],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-shared": trace()},
+    )
+    second = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-shared", semantic_key="other")],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-shared": trace()},
+    )
+
+    with pytest.raises(export.SourceClosedRunConflictError, match="duplicate sealed quantity id"):
+        export.combine_source_closed_runs([first, second])
+
+
+def test_combined_run_rejects_cross_project_family_run() -> None:
+    first = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-a")],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-a": trace()},
+    )
+    second_quantity = quantity(
+        quantity_id="qty-b",
+        metadata={
+            "project_id": "project-b",
+            "document_id": "doc-a",
+            "source_sha256": SHA_A,
+            "revision_id": "rev-a",
+        },
+    )
+    second = export.seal_source_closed_run(
+        [second_quantity],
+        project_id="project-b",
+        traces_by_quantity_id={
+            "qty-b": trace(project_id="project-b"),
+        },
+    )
+
+    with pytest.raises(export.SourceClosedRunConflictError, match="project-b"):
+        export.combine_source_closed_runs([first, second])
+
+
+def test_combined_run_rejects_tampered_family_envelope() -> None:
+    run = export.seal_source_closed_run(
+        [quantity()],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    tampered = replace(run, source_sha256s=(SHA_B,))
+
+    with pytest.raises(
+        export.SourceClosedRunConflictError,
+        match="source envelope is inconsistent",
+    ):
+        export.combine_source_closed_runs([tampered])
+
+
+def test_combined_run_requires_at_least_one_input_run() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        export.combine_source_closed_runs([], project_id="project-a")
+
 
 def test_duplicate_quantity_ids_fail_closed() -> None:
     q1 = quantity(quantity_id="qty-duplicate")
