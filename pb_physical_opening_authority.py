@@ -1051,6 +1051,9 @@ class PhysicalOpeningAuthority:
         self._raster_candidate_gap_box_cache: dict[
             str, tuple[float, float, float, float]
         ] = {}
+        self._raster_swing_ambiguous_support_cache: dict[
+            tuple[str, str, str, str, str], frozenset[str]
+        ] = {}
         self._raster_existence_cache: dict[
             tuple[str, str, str, str, str],
             PhysicalOpeningExistenceResult,
@@ -1321,6 +1324,7 @@ class PhysicalOpeningAuthority:
             cv2.MORPH_OPEN,
             cv2.getStructuringElement(cv2.MORPH_RECT, (solid, solid)),
         )
+        thin_mask = _raster_hairline_mask(line_mask, thick)
 
         scoped = tuple(
             record
@@ -1337,6 +1341,7 @@ class PhysicalOpeningAuthority:
             SourceObservationRecord,
         ] = {}
         line_runs: list[SourceObservationRecord] = []
+        thin_runs: list[SourceObservationRecord] = []
         for record in scoped:
             geometry = tuple(round(float(value), 6) for value in record.geometry)
             if len(geometry) != 4:
@@ -1344,6 +1349,8 @@ class PhysicalOpeningAuthority:
             by_kind_geometry[(record.observation_kind, geometry)] = record
             if record.observation_kind == RASTER_LINE_RUN:
                 line_runs.append(record)
+            if record.observation_kind == RASTER_THIN_INK_RUN:
+                thin_runs.append(record)
 
         def primitive_record(
             kind: str,
@@ -1436,7 +1443,66 @@ class PhysicalOpeningAuthority:
                 for observation_id in sorted(selected)
             )
 
+        def swing_leaf_support(
+            solution: _RasterDoorSwingSolution,
+            axis: str,
+        ) -> tuple[SourceObservationRecord, ...]:
+            pad = _raster_px(_RASTER_SWING_LEAF_JAMB_PAD_PT, dpi)
+            expected_start = (
+                solution.face_y - solution.radius_px
+                if solution.side == -1
+                else solution.face_y + 1
+            )
+            expected_end = (
+                solution.face_y - 1
+                if solution.side == -1
+                else solution.face_y + solution.radius_px
+            )
+            expected_start, expected_end = sorted(
+                (float(expected_start), float(expected_end))
+            )
+            expected_length = max(expected_end - expected_start + 1.0, 1.0)
+            matched: dict[str, SourceObservationRecord] = {}
+            for record in thin_runs:
+                line = tuple(
+                    float(value) * float(dpi) / 72.0
+                    for value in record.geometry
+                )
+                if axis == "vertical":
+                    line = (line[1], line[0], line[3], line[2])
+                if abs(line[0] - line[2]) > 0.51:
+                    continue
+                leaf_x = (line[0] + line[2]) / 2.0
+                if abs(leaf_x - float(solution.hinge_x)) > float(pad) + 0.51:
+                    continue
+                run_start, run_end = sorted((line[1], line[3]))
+                overlap = max(
+                    0.0,
+                    min(run_end, expected_end)
+                    - max(run_start, expected_start)
+                    + 1.0,
+                )
+                if (
+                    overlap / expected_length + 1e-12
+                    < _RASTER_SWING_LEAF_MIN_COVERAGE
+                ):
+                    continue
+                if solution.side == -1:
+                    if abs(run_end - float(solution.face_y)) > float(pad) + 1.0:
+                        continue
+                else:
+                    if abs(run_start - float(solution.face_y)) > float(pad) + 1.0:
+                        continue
+                matched[record.observation_id] = record
+            if len(matched) != 1:
+                return ()
+            observation_id = next(iter(sorted(matched)))
+            return (matched[observation_id],)
+
         discovered: dict[str, dict[str, SourceObservationRecord]] = {}
+        candidate_patterns: dict[str, str] = {}
+        ambiguous_support_ids: set[str] = set()
+        framed_gap_boxes: set[tuple[float, float, float, float]] = set()
         for axis in ("horizontal", "vertical"):
             page_boxes = _raster_band_boxes(thick, dpi=dpi, axis=axis)
             analysis_boxes = tuple(
@@ -1453,6 +1519,11 @@ class PhysicalOpeningAuthority:
                 if axis == "horizontal"
                 else np.ascontiguousarray(line_mask.T)
             )
+            work_thin = (
+                thin_mask
+                if axis == "horizontal"
+                else np.ascontiguousarray(thin_mask.T)
+            )
             for pair in _raster_pair_flanks(
                 work_thick,
                 analysis_boxes,
@@ -1460,37 +1531,92 @@ class PhysicalOpeningAuthority:
             ):
                 if pair.reasons:
                     continue
+                page_a = _raster_to_page_box(pair.a, axis)
+                page_b = _raster_to_page_box(pair.b, axis)
+                support_a = band_support(page_a, axis, high_end=True)
+                support_b = band_support(page_b, axis, high_end=False)
+                if not support_a or not support_b:
+                    continue
+
+                gap_box_px = _raster_gap_box_page_px(pair, axis)
+                gap_box_pt = tuple(
+                    round(value, 6)
+                    for value in _raster_box_pt(gap_box_px, dpi)
+                )
+
                 groups = _raster_frame_line_groups(
                     work_line,
                     pair,
                     dpi=dpi,
                 )
-                if not groups or _raster_wall_face_continues(work_line, pair):
-                    continue
+                face_continues = (
+                    bool(groups)
+                    and _raster_wall_face_continues(work_line, pair)
+                )
+                frames = (
+                    frame_support(pair, axis, groups)
+                    if groups and not face_continues
+                    else ()
+                )
+                if frames:
+                    support = (*support_a, *support_b, *frames)
+                    support_by_id = {
+                        record.observation_id: record for record in support
+                    }
+                    if len(support_by_id) >= 8:
+                        payload = {
+                            "document_id": seed.document_id,
+                            "revision_id": seed.revision_id,
+                            "source_sha256": seed.source_sha256,
+                            "page_id": seed.page_id,
+                            "structural_pattern":
+                                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                            "gap_box_pt": gap_box_pt,
+                        }
+                        candidate_id = stable_contract_id(
+                            "physical_opening_candidate",
+                            payload,
+                            digest_chars=32,
+                        )
+                        evidence = discovered.setdefault(candidate_id, {})
+                        evidence.update(support_by_id)
+                        candidate_patterns[candidate_id] = (
+                            RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                        )
+                        self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
+                        framed_gap_boxes.add(gap_box_pt)
+                        continue
 
-                page_a = _raster_to_page_box(pair.a, axis)
-                page_b = _raster_to_page_box(pair.b, axis)
-                support_a = band_support(page_a, axis, high_end=True)
-                support_b = band_support(page_b, axis, high_end=False)
-                frames = frame_support(pair, axis, groups)
-                if not support_a or not support_b or not frames:
+                solutions = _raster_door_swing_solutions(
+                    work_thin,
+                    pair,
+                    dpi=dpi,
+                )
+                if len(solutions) > 1:
+                    ambiguous_support_ids.update(
+                        record.observation_id
+                        for record in (*support_a, *support_b)
+                    )
                     continue
-                support = (*support_a, *support_b, *frames)
+                if len(solutions) != 1 or gap_box_pt in framed_gap_boxes:
+                    continue
+                leaf = swing_leaf_support(solutions[0], axis)
+                if not leaf:
+                    continue
+                support = (*support_a, *support_b, *leaf)
                 support_by_id = {
                     record.observation_id: record for record in support
                 }
-                if len(support_by_id) < 8:
+                if len(support_by_id) < 7:
                     continue
-
-                gap_box_px = _raster_gap_box_page_px(pair, axis)
-                gap_box_pt = _raster_box_pt(gap_box_px, dpi)
                 payload = {
                     "document_id": seed.document_id,
                     "revision_id": seed.revision_id,
                     "source_sha256": seed.source_sha256,
                     "page_id": seed.page_id,
-                    "structural_pattern": RASTER_FRAMED_WALL_BAND_INTERRUPTION,
-                    "gap_box_pt": tuple(round(value, 6) for value in gap_box_pt),
+                    "structural_pattern":
+                        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+                    "gap_box_pt": gap_box_pt,
                 }
                 candidate_id = stable_contract_id(
                     "physical_opening_candidate",
@@ -1499,9 +1625,10 @@ class PhysicalOpeningAuthority:
                 )
                 evidence = discovered.setdefault(candidate_id, {})
                 evidence.update(support_by_id)
-                self._raster_candidate_gap_box_cache[candidate_id] = tuple(
-                    round(value, 6) for value in gap_box_pt
+                candidate_patterns[candidate_id] = (
+                    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
                 )
+                self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
 
         candidates: list[CandidateSemanticOpening] = []
         for candidate_id in sorted(discovered):
@@ -1529,15 +1656,18 @@ class PhysicalOpeningAuthority:
                 snapshot_id=seed.snapshot_id,
                 page_id=seed.page_id,
                 viewport_id=None,
-                structural_pattern=RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                structural_pattern=candidate_patterns[candidate_id],
                 status=EvidenceResolutionStatus.CANDIDATE,
                 reason_codes=(
-                    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                    candidate_patterns[candidate_id],
                     VISIBLE_WALL_CONTINUATION_REQUIRED,
                 ),
             ))
 
         result = tuple(candidates)
+        self._raster_swing_ambiguous_support_cache[cache_key] = frozenset(
+            ambiguous_support_ids
+        )
         self._raster_framed_candidate_cache[cache_key] = result
         return result
 
