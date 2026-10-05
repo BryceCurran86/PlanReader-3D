@@ -147,6 +147,39 @@ def _predictions_are_proven_same_type_claim(
     return existing_ref == incoming_ref and existing_bbox == incoming_bbox
 
 
+def _predictions_have_proven_distinct_source_scope(
+    existing: ExtractedPrediction,
+    incoming: ExtractedPrediction,
+) -> bool:
+    """Return True only when source evidence proves distinct claim scope."""
+    if (
+        existing.source_page is not None
+        and incoming.source_page is not None
+        and existing.source_page != incoming.source_page
+    ):
+        return True
+    if (
+        existing.sheet_number
+        and incoming.sheet_number
+        and existing.sheet_number != incoming.sheet_number
+    ):
+        return True
+
+    existing_meta = existing.metadata or {}
+    incoming_meta = incoming.metadata or {}
+    for key in ("raw_evidence_ref", "decision_scope_id", "scope_id", "source_scope_id"):
+        left = str(existing_meta.get(key) or "").strip()
+        right = str(incoming_meta.get(key) or "").strip()
+        if left and right and left != right:
+            return True
+
+    left_bbox = _bbox_tuple(existing.bounding_box)
+    right_bbox = _bbox_tuple(incoming.bounding_box)
+    if left_bbox is not None and right_bbox is not None and left_bbox != right_bbox:
+        return True
+    return False
+
+
 def _scoped_claims_have_measurable_conflict(
     claims: Sequence[Dict[str, Any]],
 ) -> bool:
@@ -288,6 +321,21 @@ def merge_extracted_prediction(
             scoped_claims=[existing, incoming],
             merge_source=merge_source,
             blocking_reason="conflicting_measurable_fields",
+        )
+        return
+
+    if _predictions_have_proven_distinct_source_scope(existing, incoming):
+        pred_dict[incoming.tag] = _blocked_extracted_prediction(
+            tag=existing.tag,
+            trade_type=existing.trade_type,
+            description=(
+                f"{existing.description} [distinct source scopes unresolved; publication blocked]"
+            ),
+            unit=existing.unit,
+            reconciliation_status="ambiguous_unresolved",
+            scoped_claims=[existing, incoming],
+            merge_source=merge_source,
+            blocking_reason="distinct_source_scope_unresolved",
         )
         return
 
@@ -1112,6 +1160,17 @@ class GenericPlanReaderExtractor:
         # PyMuPDF to reparse the same content stream repeatedly.
         native_page_text: Dict[int, str] = {}
         drawing_page_flags: Dict[int, bool] = {}
+        source_sha256_cache: Optional[str] = None
+
+        def _source_sha256() -> str:
+            nonlocal source_sha256_cache
+            if source_sha256_cache is None:
+                digest = hashlib.sha256()
+                with p_path.open("rb") as source_file:
+                    for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                source_sha256_cache = digest.hexdigest()
+            return source_sha256_cache
 
         def _native_text(page_index: int) -> str:
             cached = native_page_text.get(page_index)
@@ -2054,9 +2113,14 @@ class GenericPlanReaderExtractor:
                                     project_resolved_slab_entity,
                                 )
 
+                                slab_source_sha256 = _source_sha256()
                                 slab_projection = project_resolved_slab_entity(
                                     slab=slab,
                                     boundary=slab_boundary,
+                                    document_id=f"pdf-sha256:{slab_source_sha256}",
+                                    revision_id=f"source:{slab_source_sha256}",
+                                    source_sha256=slab_source_sha256,
+                                    snapshot_id=f"source:{slab_source_sha256}",
                                 )
                                 canonical_slab_payload = None
                                 if slab_projection.object is not None:
@@ -3164,7 +3228,7 @@ class GenericPlanReaderExtractor:
                 extract_source_plan_opening_callouts,
             )
 
-            source_sha256 = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            source_sha256 = _source_sha256()
             source_callouts = []
             for page_index in target_pages:
                 if 0 <= page_index < len(doc):
@@ -3391,7 +3455,7 @@ class GenericPlanReaderExtractor:
                 collect_source_owned_floor_plan_levels,
             )
 
-            _level_source_sha = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            _level_source_sha = _source_sha256()
             _level_pages = [
                 page_index
                 for page_index in target_pages
@@ -4186,6 +4250,11 @@ class GenericPlanReaderExtractor:
                 resolve_document_gable_roof_covering,
             )
 
+            _roof_source_sha256 = _source_sha256()
+            _roof_document_id = f"extractor:{p_path.name}"
+            _roof_revision_id = f"source:{_roof_source_sha256}"
+            _roof_snapshot_id = f"source:{_roof_source_sha256}"
+
             # Discover actual building footprint axes. A wall-area prediction's
             # dimensions are [wall perimeter, wall height], not plan length/width,
             # so they must never be reused as roof/gable footprint axes.
@@ -4229,8 +4298,11 @@ class GenericPlanReaderExtractor:
                     doc,
                     building_length_m=_b_len_m,
                     building_width_m=_b_wid_m,
-                    source_sha256=getattr(self, "source_sha256", "") or ("0" * 64),
+                    source_sha256=_roof_source_sha256,
                     target_pages=target_pages,
+                    document_id=_roof_document_id,
+                    revision_id=_roof_revision_id,
+                    snapshot_id=_roof_snapshot_id,
                 )
 
                 # A source-scaled structural gable span can legitimately align
@@ -4276,11 +4348,11 @@ class GenericPlanReaderExtractor:
                                     doc,
                                     building_length_m=_trial_len,
                                     building_width_m=_trial_wid,
-                                    source_sha256=(
-                                        getattr(self, "source_sha256", "")
-                                        or ("0" * 64)
-                                    ),
+                                    source_sha256=_roof_source_sha256,
                                     target_pages=target_pages,
+                                    document_id=_roof_document_id,
+                                    revision_id=_roof_revision_id,
+                                    snapshot_id=_roof_snapshot_id,
                                 )
                                 if (
                                     _trial.status.value == "corroborated"
@@ -4449,7 +4521,7 @@ class GenericPlanReaderExtractor:
             )
 
             _building_core = assemble_live_canonical_building_core(
-                source_sha256=hashlib.sha256(p_path.read_bytes()).hexdigest(),
+                source_sha256=_source_sha256(),
                 levels=self.canonical_levels_live.get("levels", ()),
                 walls=self.canonical_walls_live.get("walls", ()),
                 openings=self.canonical_openings_live.get("openings", ()),

@@ -100,6 +100,11 @@ def test_valid_symmetric_gable_resolves_accurately() -> None:
     assert result.roof_covering_area_m2 == expected_area
     assert result.quantity_evidence is not None
     assert result.quantity_evidence.value == expected_area
+    assert result.physical_roof_id
+    assert result.quantity_evidence.input_entity_ids == (result.physical_roof_id,)
+    assert result.document_id == "doc_source"
+    assert result.revision_id == "source:" + ("0" * 64)
+    assert result.snapshot_id == "source:" + ("0" * 64)
 
 
 def test_valid_asymmetric_verandah_extension_picks_farthest_post() -> None:
@@ -679,8 +684,17 @@ def test_extractor_roof_footprint_prefers_floor_axes_over_wall_area_dimensions(
         building_width_m,
         source_sha256,
         target_pages=None,
+        document_id="doc_source",
+        revision_id=None,
+        snapshot_id=None,
     ):
         seen["dims"] = (building_length_m, building_width_m)
+        seen["lineage"] = (
+            document_id,
+            revision_id,
+            source_sha256,
+            snapshot_id,
+        )
         return SourceRoofCoveringMeasurement(
             status=EvidenceResolutionStatus.ABSTAINED,
             pitch_deg=None,
@@ -704,3 +718,6 @@ def test_extractor_roof_footprint_prefers_floor_axes_over_wall_area_dimensions(
     )
 
     assert seen["dims"] == pytest.approx((10.15, 8.35))
+    assert seen["lineage"][0] == f"extractor:{pdf.name}"
+    assert seen["lineage"][1] == f"source:{seen['lineage'][2]}"
+    assert seen["lineage"][3] == f"source:{seen['lineage'][2]}"

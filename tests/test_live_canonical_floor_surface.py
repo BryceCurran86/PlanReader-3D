@@ -53,7 +53,7 @@ def test_two_authenticated_rooms_create_two_floor_surface_objects() -> None:
         assert floor.metric_area_authority is None
         assert floor.finish_descriptor is None
         assert floor.structural_slab_id is None
-        assert floor.physical_floor_surface_identity_resolved is False
+        assert floor.physical_floor_surface_identity_resolved is True
         assert floor.commercial_quantity_authority is False
         assert floor.polygon_pdf_pts
         assert floor.area_page_pts2 > 0.0
@@ -61,8 +61,43 @@ def test_two_authenticated_rooms_create_two_floor_surface_objects() -> None:
         assert floor.evidence_ids == (floor.source_room_face_record_id,)
         payload = floor.to_dict()
         assert payload["canonical_floor_id"] == floor.canonical_floor_id
+        assert payload["physical_floor_surface_id"] == floor.physical_floor_surface_id
+        assert floor.canonical_floor_id == floor.physical_floor_surface_id
         assert payload["room_entity_id"] == floor.room_entity_id
         assert payload["coordinate_space"] == "source_page_points"
+
+
+def test_floor_identity_is_stable_across_room_evidence_revision_churn() -> None:
+    source, wall_opening = _source(page_partitions=(True,))
+    rooms = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+    first = compose_live_canonical_floor_surfaces(rooms)
+
+    changed_rooms = replace(
+        rooms,
+        rooms=tuple(
+            replace(
+                room,
+                canonical_room_id=f"changed-canonical:{room.canonical_room_id}",
+                revision_id="revision-2",
+                source_sha256="f" * 64,
+                snapshot_id="snapshot-2",
+                source_room_face_record_id=f"changed-face:{room.source_room_face_record_id}",
+                evidence_ids=(f"changed-evidence:{room.source_room_face_record_id}",),
+            )
+            for room in rooms.rooms
+        ),
+    )
+    second = compose_live_canonical_floor_surfaces(changed_rooms)
+
+    assert [floor.physical_floor_surface_id for floor in first.floors] == [
+        floor.physical_floor_surface_id for floor in second.floors
+    ]
+    assert [floor.canonical_floor_id for floor in first.floors] == [
+        floor.canonical_floor_id for floor in second.floors
+    ]
 
 
 def test_unresolved_room_scope_does_not_create_floor_surface() -> None:
@@ -104,6 +139,7 @@ def _floor_composition_from_bridge(published, bridge):
         floors.append(
             LiveCanonicalFloorSurfaceObject(
                 canonical_floor_id=f"floor:{room.room_ref}",
+                physical_floor_surface_id=f"floor:{room.room_ref}",
                 room_entity_id=room.room_ref,
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,

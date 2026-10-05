@@ -187,6 +187,11 @@ class SourceRoofCoveringMeasurement:
     quantity_evidence: QuantityEvidence | None
     reason_codes: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    document_id: str = ""
+    revision_id: str = ""
+    source_sha256: str = ""
+    snapshot_id: str = ""
+    physical_roof_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +490,28 @@ def resolve_gable_apex_in_viewport(
     return evidence, tuple(dict.fromkeys(("authenticated_gable_roofline", endpoint_reason)))
 
 
+def physical_gable_roof_id(document_id: str) -> str:
+    """Stable identity for this document-level single-gable-roof authority.
+
+    The document resolver publishes at most one physical gable roof proposition:
+    conflicting candidates fail closed, while duplicate compatible elevations
+    are treated as redundant evidence for the same roof. Evidence ids, source
+    revision hashes, detector versions and selected viewport are therefore not
+    physical identity inputs.
+    """
+    document = str(document_id or "").strip()
+    if not document:
+        raise ValueError("document_id is required for physical roof identity")
+    return stable_contract_id(
+        "physical_gable_roof",
+        {
+            "document_id": document,
+            "semantic_key": "source_owned_gable_roof_covering",
+        },
+        digest_chars=32,
+    )
+
+
 def measure_source_roof_covering(
     gable_evidence: GableRoofApexEvidence,
     *,
@@ -492,6 +519,8 @@ def measure_source_roof_covering(
     building_width_m: float,
     source_sha256: str,
     document_id: str = "doc_source",
+    revision_id: str | None = None,
+    snapshot_id: str | None = None,
 ) -> SourceRoofCoveringMeasurement:
     """Compute physical 3D roof covering area from authenticated gable and footprint.
 
@@ -592,6 +621,10 @@ def measure_source_roof_covering(
         },
     )
 
+    physical_roof_id = physical_gable_roof_id(document_id)
+    resolved_revision_id = str(revision_id or f"source:{source_sha256}")
+    resolved_snapshot_id = str(snapshot_id or f"source:{source_sha256}")
+
     qty_payload = {
         "family": "roof_covering",
         "semantic_key": "source_owned_gable_roof_covering",
@@ -612,6 +645,7 @@ def measure_source_roof_covering(
         value=roof_covering_area_m2,
         unit="SM",
         evidence_ids=(ev_atom_id,),
+        input_entity_ids=(physical_roof_id,),
         formula="ridge_length_m * (cross_ridge_span_m / cos(radians(pitch_deg)))",
         formula_version="1.0.0",
         authority="source_native_elevation_vector_pitch",
@@ -634,6 +668,11 @@ def measure_source_roof_covering(
             "matched_footprint_axis": matched_axis,
             "material_annotations": list(gable_evidence.material_annotations),
             "evidence_atom": ev_atom.to_dict(),
+            "physical_roof_id": physical_roof_id,
+            "document_id": document_id,
+            "revision_id": resolved_revision_id,
+            "source_sha256": source_sha256,
+            "snapshot_id": resolved_snapshot_id,
         },
     )
 
@@ -648,6 +687,11 @@ def measure_source_roof_covering(
         quantity_evidence=qty_evidence,
         reason_codes=("authenticated_gable_roof_covering",),
         metadata=dict(qty_evidence.metadata),
+        document_id=str(document_id),
+        revision_id=resolved_revision_id,
+        source_sha256=str(source_sha256),
+        snapshot_id=resolved_snapshot_id,
+        physical_roof_id=physical_roof_id,
     )
 
 
@@ -801,6 +845,9 @@ def resolve_document_gable_roof_covering(
     building_width_m: float,
     source_sha256: str,
     target_pages: Sequence[int] | None = None,
+    document_id: str = "doc_source",
+    revision_id: str | None = None,
+    snapshot_id: str | None = None,
 ) -> SourceRoofCoveringMeasurement:
     """Scan document for segmented elevation viewports and resolve gable roof covering.
 
@@ -878,4 +925,7 @@ def resolve_document_gable_roof_covering(
         building_length_m=building_length_m,
         building_width_m=building_width_m,
         source_sha256=source_sha256,
+        document_id=document_id,
+        revision_id=revision_id,
+        snapshot_id=snapshot_id,
     )

@@ -24,7 +24,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
 
 
-LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION = "1.1.0"
 LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED = (
     "live_canonical_floor_surface_projection_resolved"
 )
@@ -51,6 +51,7 @@ LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT = (
 @dataclass(frozen=True)
 class LiveCanonicalFloorSurfaceObject:
     canonical_floor_id: str
+    physical_floor_surface_id: str
     room_entity_id: str
     document_id: str
     revision_id: str
@@ -79,6 +80,7 @@ class LiveCanonicalFloorSurfaceObject:
     def to_dict(self) -> dict:
         return {
             "canonical_floor_id": self.canonical_floor_id,
+            "physical_floor_surface_id": self.physical_floor_surface_id,
             "room_entity_id": self.room_entity_id,
             "document_id": self.document_id,
             "revision_id": self.revision_id,
@@ -120,18 +122,21 @@ class LiveCanonicalFloorSurfaceComposition:
 
 
 def _floor_from_room(room: LiveCanonicalRoomObject) -> LiveCanonicalFloorSurfaceObject:
+    physical_room_id = str(room.physical_room_id or "").strip()
+    if not physical_room_id:
+        raise ValueError("canonical room physical identity is required for floor projection")
     floor_id = stable_contract_id(
-        "live_canonical_room_floor_surface",
+        "physical_room_floor_surface",
         {
-            "source_sha256": room.source_sha256,
-            "revision_id": room.revision_id,
-            "room_entity_id": room.canonical_room_id,
-            "source_room_face_record_id": room.source_room_face_record_id,
+            "document_id": room.document_id,
+            "physical_room_id": physical_room_id,
+            "surface_role": "floor",
         },
         digest_chars=32,
     )
     return LiveCanonicalFloorSurfaceObject(
         canonical_floor_id=floor_id,
+        physical_floor_surface_id=floor_id,
         room_entity_id=room.canonical_room_id,
         document_id=room.document_id,
         revision_id=room.revision_id,
@@ -152,7 +157,7 @@ def _floor_from_room(room: LiveCanonicalRoomObject) -> LiveCanonicalFloorSurface
         metric_area_authority=None,
         finish_descriptor=None,
         structural_slab_id=None,
-        physical_floor_surface_identity_resolved=False,
+        physical_floor_surface_identity_resolved=True,
         commercial_quantity_authority=False,
     )
 
