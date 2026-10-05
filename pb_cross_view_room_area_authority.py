@@ -112,6 +112,9 @@ class _TrustedBoundDimension:
     endpoints_pt: tuple[tuple[float, float], tuple[float, float]]
     dimension_line_observation_ids: tuple[str, ...]
     witness_observation_ids: tuple[str, ...]
+    witness_geometries: tuple[
+        tuple[float, float, float, float], ...
+    ]
 
 
 @dataclass(frozen=True)
@@ -409,6 +412,10 @@ def _trusted_native_dimensions_for_page(
         tuple[float, float, float, float],
         list[str],
     ] = {}
+    source_geometry_by_id: dict[
+        str,
+        tuple[float, float, float, float],
+    ] = {}
     for observation_id in published.visible_observation_ids:
         resolved = visibility.resolve_visible(
             ObservationSelector(
@@ -430,9 +437,11 @@ def _trusted_native_dimensions_for_page(
         geometry = _canonical_segment_geometry(observation.geometry)
         if geometry is None:
             continue
+        source_observation_id = str(observation.observation_id)
         source_ids_by_geometry.setdefault(geometry, []).append(
-            str(observation.observation_id)
+            source_observation_id
         )
+        source_geometry_by_id[source_observation_id] = geometry
 
     geometry_by_segment_id = {
         segment.segment_id: _canonical_segment_geometry(
@@ -513,8 +522,20 @@ def _trusted_native_dimensions_for_page(
                 failed = True
                 break
             witness_ids.extend(mapped)
-        if failed or len(set(witness_ids)) < 2:
+        witness_ids = list(dict.fromkeys(witness_ids))
+        if failed or len(witness_ids) < 2:
             continue
+        witness_geometries = tuple(
+            source_geometry_by_id.get(observation_id)
+            for observation_id in witness_ids
+        )
+        if any(geometry is None for geometry in witness_geometries):
+            continue
+        concrete_witness_geometries = tuple(
+            geometry
+            for geometry in witness_geometries
+            if geometry is not None
+        )
 
         endpoints = (
             (
@@ -546,7 +567,7 @@ def _trusted_native_dimensions_for_page(
                 "orientation": observation.orientation,
                 "endpoints_pt": endpoints,
                 "dimension_line_observation_ids": dimension_line_ids,
-                "witness_observation_ids": tuple(sorted(set(witness_ids))),
+                "witness_observation_ids": tuple(sorted(witness_ids)),
             },
             digest_chars=32,
         )
@@ -559,7 +580,8 @@ def _trusted_native_dimensions_for_page(
                 orientation=str(observation.orientation),
                 endpoints_pt=endpoints,
                 dimension_line_observation_ids=dimension_line_ids,
-                witness_observation_ids=tuple(sorted(set(witness_ids))),
+                witness_observation_ids=tuple(sorted(witness_ids)),
+                witness_geometries=concrete_witness_geometries,
             )
         )
 
@@ -574,6 +596,74 @@ def _trusted_native_dimensions_for_page(
             ),
         )
     )
+
+def _segment_orientation_value(
+    first: tuple[float, float],
+    second: tuple[float, float],
+    third: tuple[float, float],
+) -> float:
+    return (
+        (second[0] - first[0]) * (third[1] - first[1])
+        - (second[1] - first[1]) * (third[0] - first[0])
+    )
+
+
+def _point_on_segment(
+    point: tuple[float, float],
+    first: tuple[float, float],
+    second: tuple[float, float],
+    *,
+    tolerance: float = 1e-6,
+) -> bool:
+    return (
+        min(first[0], second[0]) - tolerance
+        <= point[0]
+        <= max(first[0], second[0]) + tolerance
+        and min(first[1], second[1]) - tolerance
+        <= point[1]
+        <= max(first[1], second[1]) + tolerance
+        and abs(_segment_orientation_value(first, second, point))
+        <= tolerance
+    )
+
+
+def _source_segments_intersect(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> bool:
+    a = (left[0], left[1])
+    b = (left[2], left[3])
+    c = (right[0], right[1])
+    d = (right[2], right[3])
+    o1 = _segment_orientation_value(a, b, c)
+    o2 = _segment_orientation_value(a, b, d)
+    o3 = _segment_orientation_value(c, d, a)
+    o4 = _segment_orientation_value(c, d, b)
+    tolerance = 1e-6
+    if (
+        ((o1 > tolerance and o2 < -tolerance) or (o1 < -tolerance and o2 > tolerance))
+        and ((o3 > tolerance and o4 < -tolerance) or (o3 < -tolerance and o4 > tolerance))
+    ):
+        return True
+    return (
+        (abs(o1) <= tolerance and _point_on_segment(c, a, b))
+        or (abs(o2) <= tolerance and _point_on_segment(d, a, b))
+        or (abs(o3) <= tolerance and _point_on_segment(a, c, d))
+        or (abs(o4) <= tolerance and _point_on_segment(b, c, d))
+    )
+
+
+def _witness_systems_intersect(
+    horizontal: _TrustedBoundDimension,
+    vertical: _TrustedBoundDimension,
+) -> bool:
+    """Require one physical junction between the two witness systems."""
+    return any(
+        _source_segments_intersect(left, right)
+        for left in horizontal.witness_geometries
+        for right in vertical.witness_geometries
+    )
+
 
 def _dimension_span_pt(dimension: _TrustedBoundDimension) -> float:
     first, second = dimension.endpoints_pt
@@ -859,6 +949,10 @@ class CrossViewRoomAreaProducer:
                                     page_id=page_id,
                                     horizontal=horizontal,
                                     vertical=vertical,
+                                )
+                                and _witness_systems_intersect(
+                                    horizontal,
+                                    vertical,
                                 )
                             ):
                                 matches.append(
