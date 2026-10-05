@@ -21,7 +21,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_wall_finish_face_binding_authority import WallFinishFaceBindingRecord
 
 
-LIVE_CANONICAL_WALL_FINISH_SURFACE_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_WALL_FINISH_SURFACE_SCHEMA_VERSION = "1.1.0"
 LIVE_CANONICAL_WALL_FINISH_SURFACE_RESOLVED = (
     "live_canonical_wall_finish_surface_resolved"
 )
@@ -256,11 +256,14 @@ def project_wall_finish_bindings(
         canonical_surface_id = stable_contract_id(
             "live_canonical_wall_finish_surface",
             {
-                "source_sha256": _clean(wall.get("source_sha256")),
-                "canonical_wall_id": canonical_wall_id,
+                # Physical surface identity must survive revision/evidence and
+                # material-state churn. Source SHA, revision, snapshot,
+                # detector version and finish material are evidence/semantic
+                # state, not physical identity.
+                "document_id": _clean(wall.get("document_id")),
+                "physical_wall_id": physical_wall_id,
                 "physical_face_id": physical_face_id,
                 "trade_scope_id": trade_scope_id,
-                "finish_material": finish_material,
             },
             digest_chars=32,
         )
