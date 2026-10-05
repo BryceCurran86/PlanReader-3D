@@ -20,9 +20,14 @@ from pb_source_room_face_authority import (
     build_source_room_face_authority,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_room_label_authority import (
+    SourceRoomLabelProducer,
+    SourceRoomLabelRecord,
+    SourceRoomLabelSelector,
+)
 
 
-LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.1.0"
+LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.2.0"
 LIVE_PHYSICAL_ROOM_IDENTITY_SCHEMA_VERSION = "1.0.0"
 LIVE_CANONICAL_ROOM_RESOLVED = "live_canonical_room_composition_resolved"
 LIVE_CANONICAL_ROOM_PARTIAL = "live_canonical_room_composition_partial"
@@ -54,6 +59,10 @@ class LiveCanonicalRoomObject:
     evidence_ids: tuple[str, ...]
     geometry_complete: bool
     metric_geometry_complete: bool
+    room_label: Optional[str] = None
+    room_label_binding_record_id: Optional[str] = None
+    room_label_evidence_ids: tuple[str, ...] = ()
+    room_label_reason_codes: tuple[str, ...] = ()
     coordinate_unit: str = "pdf_pt"
     schema_version: str = LIVE_CANONICAL_ROOM_SCHEMA_VERSION
 
@@ -77,6 +86,10 @@ class LiveCanonicalRoomObject:
             "evidence_ids": list(self.evidence_ids),
             "geometry_complete": self.geometry_complete,
             "metric_geometry_complete": self.metric_geometry_complete,
+            "room_label": self.room_label,
+            "room_label_binding_record_id": self.room_label_binding_record_id,
+            "room_label_evidence_ids": list(self.room_label_evidence_ids),
+            "room_label_reason_codes": list(self.room_label_reason_codes),
             "coordinate_unit": self.coordinate_unit,
             "schema_version": self.schema_version,
         }
@@ -127,6 +140,7 @@ def _room_object_from_record(
     viewport_id: Optional[str],
     canonical_wall_ids_by_candidate: Optional[Mapping[str, str]],
     unresolved_wall_candidate_ids: Optional[Collection[str]],
+    room_label_record: Optional[SourceRoomLabelRecord] = None,
 ) -> LiveCanonicalRoomObject:
     canonical_boundary_ids: tuple[str, ...] = ()
     wall_relationships_complete = False
@@ -147,6 +161,20 @@ def _room_object_from_record(
             )
 
     physical_room_id = _physical_room_id(record, viewport_id=viewport_id)
+    label_evidence_ids: tuple[str, ...] = ()
+    label_reason_codes: tuple[str, ...] = ()
+    if room_label_record is not None:
+        label_evidence_ids = _dedupe(
+            [
+                *[str(value) for value in room_label_record.observation_ids],
+                *[
+                    str(word.authority_record_id)
+                    for word in room_label_record.word_evidence
+                ],
+            ]
+        )
+        label_reason_codes = tuple(room_label_record.reason_codes)
+
     return LiveCanonicalRoomObject(
         canonical_room_id=physical_room_id,
         physical_room_id=physical_room_id,
@@ -166,6 +194,18 @@ def _room_object_from_record(
         evidence_ids=(record.record_id,),
         geometry_complete=True,
         metric_geometry_complete=False,
+        room_label=(
+            str(room_label_record.label)
+            if room_label_record is not None
+            else None
+        ),
+        room_label_binding_record_id=(
+            str(room_label_record.record_id)
+            if room_label_record is not None
+            else None
+        ),
+        room_label_evidence_ids=label_evidence_ids,
+        room_label_reason_codes=label_reason_codes,
     )
 
 
