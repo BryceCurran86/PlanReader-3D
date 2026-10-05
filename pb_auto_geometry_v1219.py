@@ -753,17 +753,50 @@ class _TransactionApp:
 
 
 @contextmanager
-def _auto_publication(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...]]):
-    """Replace the automatic take-off rows; yield an app writing in the same transaction.
-
-    The rows and everything written through the yielded app commit together or
-    not at all, so a failed envelope/report write cannot leave new take-off rows
-    beside a stale 3D mass and report.
-    """
+def _auto_publication(
+    app: Any,
+    workspace_id: int,
+    rows: Sequence[Tuple[Any, ...]],
+    *,
+    preserve_row_ids: Sequence[int] = (),
+):
+    """Replace automatic rows while retaining protected reviewed rows."""
     _validate_auto_rows(rows, int(workspace_id))
+    preserved_ids: List[int] = []
+    for raw_id in preserve_row_ids:
+        if isinstance(raw_id, bool):
+            raise TakeoffRowContractError(
+                "preserved take-off row ids must be positive integers"
+            )
+        try:
+            row_id = int(raw_id)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TakeoffRowContractError(
+                "preserved take-off row ids must be positive integers"
+            ) from exc
+        if row_id <= 0:
+            raise TakeoffRowContractError(
+                "preserved take-off row ids must be positive integers"
+            )
+        preserved_ids.append(row_id)
+    if len(preserved_ids) != len(set(preserved_ids)):
+        raise TakeoffRowContractError("preserved take-off row ids must be unique")
+
     conn = app.local_connect()
     try:
-        conn.execute("DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?", (workspace_id, SOURCE_PREFIX + "%"))
+        if preserved_ids:
+            placeholders = ",".join("?" for _ in preserved_ids)
+            conn.execute(
+                f"""DELETE FROM takeoff_rows
+                    WHERE workspace_id=? AND source_reference LIKE ?
+                    AND id NOT IN ({placeholders})""",
+                (workspace_id, SOURCE_PREFIX + "%", *preserved_ids),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?",
+                (workspace_id, SOURCE_PREFIX + "%"),
+            )
         stamp = app.now_stamp()
         values = [tuple(list(row[:-2]) + [stamp, stamp]) for row in rows]
         conn.executemany(_TAKEOFF_INSERT, values)
