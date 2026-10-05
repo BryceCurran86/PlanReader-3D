@@ -1,0 +1,17 @@
+name: ChatGPT Wall Perf Current Main Export
+
+on:
+  push:
+    branches: [chatgpt/temp-perf-wall-88d454]
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tar --exclude=.git -czf /tmp/planreader-current-main.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-wall-perf-current-main
+          path: /tmp/planreader-current-main.tgz
+          retention-days: 1
