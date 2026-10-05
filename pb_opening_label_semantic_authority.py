@@ -10,7 +10,7 @@ from pb_opening_label_dimension_authority import (
     _TrustedTextLine,
     _bbox_overlap_fraction,
     _bbox_union,
-    _gap_span,
+    _gap_span_for_opening,
     _label_matches_gap,
 )
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
@@ -231,20 +231,7 @@ class OpeningLabelSemanticProducer:
                 EvidenceResolutionStatus.ABSTAINED,
                 (OPENING_LABEL_SEMANTIC_UNAVAILABLE,),
             )
-        visibility = self._source.authority()
-        source_records = []
-        for observation_id in opening.source_observation_ids:
-            result = visibility.resolve_visible(ObservationSelector(
-                document_id=opening.document_id,
-                revision_id=opening.revision_id,
-                source_sha256=opening.source_sha256,
-                snapshot_id=opening.snapshot_id,
-                observation_id=observation_id,
-            ))
-            if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
-                return OpeningLabelSemanticResult(EvidenceResolutionStatus.ABSTAINED, (OPENING_LABEL_SEMANTIC_UNAVAILABLE,))
-            source_records.append(result.observation)
-        gap = _gap_span(source_records)
+        gap = _gap_span_for_opening(self._source, opening)
         if gap is None:
             return OpeningLabelSemanticResult(EvidenceResolutionStatus.ABSTAINED, (OPENING_LABEL_SEMANTIC_UNAVAILABLE,))
 
