@@ -11,8 +11,8 @@ from pb_figured_dimension_evidence import (
     BindingStatus,
     DimensionLayoutCalibration,
     ObservedGeometrySegment,
+    _native_word_orientations,
     bind_observation_to_vector_geometry,
-    extract_native_dimension_observations,
 )
 
 
@@ -58,7 +58,7 @@ def _calibration() -> DimensionLayoutCalibration:
     )
 
 
-def test_native_text_line_direction_is_preserved_for_dimension_orientation() -> None:
+def test_native_text_line_direction_is_available_as_binder_hint() -> None:
     doc = fitz.open()
     page = doc.new_page(width=300, height=300)
     page.insert_text((80, 120), "3100", fontsize=10)
@@ -68,18 +68,49 @@ def test_native_text_line_direction_is_preserved_for_dimension_orientation() -> 
 
     reopened = fitz.open(stream=payload, filetype="pdf")
     try:
-        observations = extract_native_dimension_observations(
-            reopened[0],
-            page_num=1,
-            view_id="V",
-            view_type=DrawingViewType.FLOOR_PLAN.value,
-        )
+        page = reopened[0]
+        words = list(page.get_text("words") or ())
+        orientations = _native_word_orientations(page)
+        by_text = {
+            str(word[4]): orientations.get((int(word[5]), int(word[6])))
+            for word in words
+            if str(word[4]) in {"3100", "4200"}
+        }
     finally:
         reopened.close()
 
-    by_text = {item.raw_text: item for item in observations}
-    assert by_text["3100"].orientation == DimensionOrientation.HORIZONTAL.value
-    assert by_text["4200"].orientation == DimensionOrientation.VERTICAL.value
+    assert by_text["3100"] == DimensionOrientation.HORIZONTAL.value
+    assert by_text["4200"] == DimensionOrientation.VERTICAL.value
+
+
+def test_single_orientation_hint_cannot_hide_perpendicular_competitor() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "horizontal",
+            (80.0, 100.0),
+            (132.0, 100.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "vertical",
+            (106.0, 70.0),
+            (106.0, 130.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.AMBIGUOUS.value
+    assert result.endpoints is None
 
 
 def test_darker_thicker_source_line_breaks_only_a_near_tie() -> None:
