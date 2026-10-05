@@ -1,0 +1,83 @@
+name: TEST ONLY GPT3 V2 Handoff Current Main
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  handoff:
+    name: handoff ${{ matrix.project_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project_id: au_qld_maryborough_service_station
+            pdf: documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+          - project_id: au_qld_lot16_power
+            pdf: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Record execution base
+        shell: bash
+        run: |
+          mkdir -p "artifacts/${{ matrix.project_id }}"
+          git rev-parse HEAD > "artifacts/${{ matrix.project_id }}/head_sha.txt"
+          sha256sum "${{ matrix.pdf }}" > "artifacts/${{ matrix.project_id }}/source_sha256.txt"
+
+      - name: Run source-closed production handoff
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "$started" > "artifacts/${{ matrix.project_id }}/started_at.txt"
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "${{ matrix.pdf }}" \
+            --project-id "${{ matrix.project_id }}" \
+            --workspace-id 1 \
+            --output-dir "artifacts/${{ matrix.project_id }}" \
+            > "artifacts/${{ matrix.project_id }}/run.log" 2>&1
+          code=$?
+          echo "$code" > "artifacts/${{ matrix.project_id }}/exit_code.txt"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "artifacts/${{ matrix.project_id }}/finished_at.txt"
+          cat "artifacts/${{ matrix.project_id }}/run.log"
+          exit 0
+
+      - name: Show handoff summary
+        if: always()
+        shell: bash
+        run: |
+          echo "=== files ==="
+          find "artifacts/${{ matrix.project_id }}" -maxdepth 3 -type f -print || true
+          echo "=== exit ==="
+          cat "artifacts/${{ matrix.project_id }}/exit_code.txt" 2>/dev/null || true
+          echo "=== summary ==="
+          cat "artifacts/${{ matrix.project_id }}/production_summary.json" 2>/dev/null || true
+          echo "=== tail ==="
+          tail -n 120 "artifacts/${{ matrix.project_id }}/run.log" 2>/dev/null || true
+
+      - name: Upload production handoff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-current-main-${{ matrix.project_id }}
+          path: artifacts/${{ matrix.project_id }}
+          if-no-files-found: warn
+          retention-days: 1
