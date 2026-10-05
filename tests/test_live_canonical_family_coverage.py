@@ -539,6 +539,7 @@ def test_runtime_bridges_source_closed_room_area_to_customer_review_row(tmp_path
     assert named["inclusion_status"] == "INCLUSION"
     assert f"room_area_quantity:{firm[0].quantity_id}" in named["source_reference"]
     assert "floor_quantity:" in named["source_reference"]
+    assert "canonical_room_quantity:" in named["source_reference"]
     assert firm[0].quantity_id in named["notes"]
 
     summaries = auto._runtime_coverage_registry_summaries(app, 1)
@@ -549,6 +550,8 @@ def test_runtime_bridges_source_closed_room_area_to_customer_review_row(tmp_path
     )
     assert pre["family_reports"]["floor_slab"]["stage_counts"]["QUANTIFIED"] == 1
     assert pre["family_reports"]["floor_slab"]["stage_counts"]["PUBLISHED"] == 0
+    assert pre["family_reports"]["room"]["stage_counts"]["QUANTIFIED"] == 1
+    assert pre["family_reports"]["room"]["stage_counts"]["PUBLISHED"] == 0
 
     published = build_runtime_coverage_publication(
         summaries,
@@ -556,6 +559,7 @@ def test_runtime_bridges_source_closed_room_area_to_customer_review_row(tmp_path
         published_takeoff_rows=(named,),
     )
     assert published["family_reports"]["floor_slab"]["stage_counts"]["PUBLISHED"] == 1
+    assert published["family_reports"]["room"]["stage_counts"]["PUBLISHED"] == 1
 
 
 def test_runtime_coverage_does_not_invent_opening_rows_for_abstentions(tmp_path):
