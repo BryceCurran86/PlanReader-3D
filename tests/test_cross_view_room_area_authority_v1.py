@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import fitz
 
+import pb_cross_view_room_area_authority as cross_view
 from pb_cross_view_room_area_authority import (
     CROSS_VIEW_ROOM_AREA_CONFLICT,
     CROSS_VIEW_ROOM_AREA_RESOLVED,
@@ -14,11 +17,16 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_portable_raster_ocr_authority import MockOCRBackend
+from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
+def _payload(
+    *,
+    duplicate_dimension_box: bool = False,
+    duplicate_source_witness: bool = False,
+) -> bytes:
     doc = fitz.open()
     try:
         plan = doc.new_page(width=400.0, height=300.0)
@@ -30,6 +38,16 @@ def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
         detail.draw_line((100.0, 80.0), (250.0, 80.0), color=(0, 0, 0), width=1.0)
         detail.draw_line((100.0, 68.0), (100.0, 92.0), color=(0, 0, 0), width=1.0)
         detail.draw_line((250.0, 68.0), (250.0, 92.0), color=(0, 0, 0), width=1.0)
+        if duplicate_source_witness:
+            # Multiple native primitives may paint the exact same physical
+            # witness. The authority must preserve both source IDs without
+            # inventing an ambiguity in the already-identical geometry.
+            detail.draw_line(
+                (250.0, 68.0),
+                (250.0, 92.0),
+                color=(0, 0, 0),
+                width=1.0,
+            )
         detail.insert_text((164.0, 77.0), "3600", fontsize=9.0)
 
         # 2.4m vertical span: 100 source points, same figured scale ratio.
@@ -69,6 +87,7 @@ def _source_and_room(
     *,
     duplicate_room_label: bool = False,
     duplicate_dimension_box: bool = False,
+    duplicate_source_witness: bool = False,
     page_ids: tuple[str, ...] | None = None,
     room_page_id: str = "1",
 ):
@@ -78,7 +97,10 @@ def _source_and_room(
     )
     published = source.ingest_native_pdf_bytes(
         document_id="cross-view-room-area-doc",
-        source_bytes=_payload(duplicate_dimension_box=duplicate_dimension_box),
+        source_bytes=_payload(
+            duplicate_dimension_box=duplicate_dimension_box,
+            duplicate_source_witness=duplicate_source_witness,
+        ),
         source_locator="memory://cross-view-room-area.pdf",
         page_ids=page_ids,
     )
@@ -119,6 +141,176 @@ def _source_and_room(
         rooms=tuple(rooms),
         source_pages=(int(room_page_id),),
     )
+
+
+def _force_dimension_words_to_isolated_authority(
+    monkeypatch,
+    source: SourceVisibilityProducer,
+    revision_id: str,
+    *,
+    readings_by_word: dict[str, tuple[str | None, str | None]] | None = None,
+    integrity_reason_codes: tuple[str, ...] = (
+        "text_glyph_mapping_unverified",
+    ),
+) -> None:
+    published = source.published_snapshot_for_revision(revision_id)
+    assert published is not None
+    authority = source.text_integrity_authority()
+    authority_type = type(authority)
+    original_resolve = authority_type.resolve_text
+
+    dimension_words: dict[str, str] = {}
+    for observation_id in published.text_observation_ids:
+        result = original_resolve(
+            authority,
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            ),
+        )
+        receipt = result.receipt
+        if (
+            receipt is not None
+            and str(receipt.page_id) == "2"
+            and str(receipt.raw_text).strip() in {"3600", "2400"}
+        ):
+            dimension_words[str(observation_id)] = str(receipt.raw_text).strip()
+    assert set(dimension_words.values()) == {"3600", "2400"}
+
+    def forced_resolve(self, selector):
+        result = original_resolve(self, selector)
+        if str(selector.observation_id) in dimension_words:
+            forced_receipt = replace(
+                result.receipt,
+                trusted=False,
+                reason_codes=integrity_reason_codes,
+            )
+            return replace(
+                result,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                trusted_text=None,
+                receipt=forced_receipt,
+                reason_codes=integrity_reason_codes,
+            )
+        return result
+
+    monkeypatch.setattr(authority_type, "resolve_text", forced_resolve)
+
+    scripted = readings_by_word or {}
+    sequence: list[str | None] = []
+    for value in dimension_words.values():
+        sequence.extend(scripted.get(value, (value, value)))
+    iterator = iter(sequence)
+
+    def responder(image, dpi):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            return ()
+        if value is None:
+            return ()
+        return (
+            OCRLine(
+                text=value,
+                confidence=1.0,
+                bbox_px=(1.0, 1.0, 10.0, 10.0),
+                bbox_pt=(1.0, 1.0, 10.0, 10.0),
+            ),
+        )
+
+    backend = MockOCRBackend(responder=responder)
+    monkeypatch.setattr(
+        cross_view,
+        "select_production_ocr_backend",
+        lambda: (backend, "test_isolated_dimension_backend"),
+    )
+
+
+def test_cross_view_dimension_text_accepts_isolated_two_render_corroboration(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    _force_dimension_words_to_isolated_authority(
+        monkeypatch,
+        source,
+        rooms.rooms[0].revision_id,
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_evidence.normalized_value == 8.64
+
+
+def test_cross_view_dimension_isolated_corroboration_must_match_native_value(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    _force_dimension_words_to_isolated_authority(
+        monkeypatch,
+        source,
+        rooms.rooms[0].revision_id,
+        readings_by_word={"3600": ("3601", "3601")},
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.records == ()
+    assert result.status in {
+        EvidenceResolutionStatus.ABSTAINED,
+        EvidenceResolutionStatus.CONFLICT,
+    }
+
+
+def test_cross_view_dimension_isolated_corroboration_requires_view_agreement(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    _force_dimension_words_to_isolated_authority(
+        monkeypatch,
+        source,
+        rooms.rooms[0].revision_id,
+        readings_by_word={"3600": ("3600", "3601")},
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.records == ()
+
+
+def test_cross_view_dimension_isolated_corroboration_keeps_other_text_vetoes(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    _force_dimension_words_to_isolated_authority(
+        monkeypatch,
+        source,
+        rooms.rooms[0].revision_id,
+        integrity_reason_codes=(
+            "text_glyph_mapping_unverified",
+            "text_occluded_by_later_paint",
+        ),
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.records == ()
 
 
 def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_owned_area():
@@ -162,6 +354,18 @@ def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_ow
     }
     assert evidence.metadata["horizontal_witness_observation_ids"]
     assert evidence.metadata["vertical_witness_observation_ids"]
+
+
+def test_exact_coincident_source_witnesses_preserve_all_provenance_without_ambiguity():
+    source, rooms = _source_and_room(duplicate_source_witness=True)
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_evidence.normalized_value == 8.64
 
 
 def test_scoped_ingest_preserves_one_based_measurement_page_identity():
