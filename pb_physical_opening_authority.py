@@ -82,6 +82,10 @@ MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY = (
 
 JAMB_BOUNDED_TWO_FACE_INTERRUPTION = "jamb_bounded_two_face_interruption"
 RASTER_FRAMED_WALL_BAND_INTERRUPTION = "raster_framed_wall_band_interruption"
+RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION = (
+    "raster_door_swing_wall_band_interruption"
+)
+RASTER_DOOR_SWING_AMBIGUOUS = "raster_door_swing_ambiguous"
 
 # Reviewed raster framed-opening authority constants. These are generic paper
 # units / relative geometry tests from the independently validated #1276
@@ -97,6 +101,11 @@ _RASTER_MIN_GAP_THICKNESS_RATIO = 2.0
 _RASTER_LINE_COVERAGE = 0.8
 _RASTER_MIN_FRAME_LINES = 2
 _RASTER_LINE_ROW_PAD_PT = 0.5
+_RASTER_SWING_ARC_RADIUS_TOLERANCE = 0.15
+_RASTER_SWING_ARC_MIN_COVERAGE = 0.8
+_RASTER_SWING_ARC_SAMPLE_STEP_DEG = 2
+_RASTER_SWING_LEAF_MIN_COVERAGE = 0.9
+_RASTER_SWING_LEAF_JAMB_PAD_PT = 1.5
 GAP_CORROBORATED_DOOR_JAMB_LEAF = "gap_corroborated_door_jamb_leaf"
 GAP_CORROBORATED_WINDOW_JAMB_PAIR = "gap_corroborated_window_jamb_pair"
 WALL_FACE_INTERRUPTION_KIND = "wall_face_interruption"
@@ -258,6 +267,18 @@ class _RasterBandPair:
     thickness_a: int
     thickness_b: int
     reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _RasterDoorSwingSolution:
+    hinge_end: str
+    hinge_x: int
+    side: int
+    face_y: int
+    direction: int
+    radius_px: int
+    arc_coverage: float
+    leaf_coverage: float
 
 
 @dataclass(frozen=True)
@@ -815,6 +836,120 @@ def _raster_wall_face_continues(
         ):
             return True
     return False
+
+
+def _raster_hairline_mask(
+    line_mask: np.ndarray,
+    thick: np.ndarray,
+) -> np.ndarray:
+    """Source ink that is neither solid wall poche nor touching it."""
+
+    halo = cv2.dilate(thick, np.ones((3, 3), np.uint8))
+    return (line_mask & (halo == 0)).astype(np.uint8)
+
+
+def _raster_swing_arc_coverage(
+    thin_mask: np.ndarray,
+    center: tuple[float, float],
+    radius: float,
+    *,
+    side: int,
+    direction: int,
+) -> float:
+    """Reviewed quarter-arc coverage over producer-owned raster evidence."""
+
+    height, width = thin_mask.shape
+    hits = 0
+    total = 0
+    cx, cy = center
+    for degrees in range(0, 91, _RASTER_SWING_ARC_SAMPLE_STEP_DEG):
+        theta = math.radians(degrees)
+        x = cx + direction * radius * math.cos(theta)
+        y = cy + side * radius * math.sin(theta)
+        xi, yi = int(round(x)), int(round(y))
+        total += 1
+        if (
+            1 <= xi < width - 1
+            and 1 <= yi < height - 1
+            and thin_mask[yi - 1 : yi + 2, xi - 1 : xi + 2].any()
+        ):
+            hits += 1
+    return hits / total if total else 0.0
+
+
+def _raster_door_swing_solutions(
+    thin_mask: np.ndarray,
+    pair: _RasterBandPair,
+    *,
+    dpi: int,
+) -> tuple[_RasterDoorSwingSolution, ...]:
+    """Return every reviewed leaf + quarter-arc configuration for one clean gap.
+
+    Multiple valid configurations are intentionally retained so G17 can report
+    ambiguity instead of selecting a nearest/first hinge.
+    """
+
+    gap = pair.gap_x1 - pair.gap_x0 + 1
+    pad = _raster_px(_RASTER_SWING_LEAF_JAMB_PAD_PT, dpi)
+    found: list[_RasterDoorSwingSolution] = []
+    for hinge_end, hinge_x, direction in (
+        ("low", pair.gap_x0, 1),
+        ("high", pair.gap_x1, -1),
+    ):
+        for side, face_y in ((-1, pair.row0), (1, pair.row1)):
+            best: Optional[tuple[float, int]] = None
+            low_radius = max(
+                int(math.ceil(
+                    gap * (1.0 - _RASTER_SWING_ARC_RADIUS_TOLERANCE)
+                )),
+                2,
+            )
+            high_radius = int(math.floor(
+                gap * (1.0 + _RASTER_SWING_ARC_RADIUS_TOLERANCE)
+            ))
+            for radius in range(low_radius, high_radius + 1):
+                coverage = _raster_swing_arc_coverage(
+                    thin_mask,
+                    (float(hinge_x), float(face_y)),
+                    float(radius),
+                    side=side,
+                    direction=direction,
+                )
+                if best is None or coverage > best[0]:
+                    best = (coverage, radius)
+            if best is None or best[0] < _RASTER_SWING_ARC_MIN_COVERAGE:
+                continue
+
+            coverage, radius = best
+            leaf_x0 = hinge_x - pad
+            leaf_x1 = hinge_x + pad
+            if side == -1:
+                rows = slice(max(face_y - radius, 0), face_y)
+            else:
+                rows = slice(
+                    face_y + 1,
+                    min(face_y + 1 + radius, thin_mask.shape[0]),
+                )
+            strip = thin_mask[
+                rows,
+                max(leaf_x0, 0) : min(leaf_x1 + 1, thin_mask.shape[1]),
+            ]
+            if strip.size == 0:
+                continue
+            leaf_coverage = float(strip.any(axis=1).mean())
+            if leaf_coverage < _RASTER_SWING_LEAF_MIN_COVERAGE:
+                continue
+            found.append(_RasterDoorSwingSolution(
+                hinge_end=hinge_end,
+                hinge_x=int(hinge_x),
+                side=int(side),
+                face_y=int(face_y),
+                direction=int(direction),
+                radius_px=int(radius),
+                arc_coverage=float(coverage),
+                leaf_coverage=float(leaf_coverage),
+            ))
+    return tuple(found)
 
 
 def _raster_gap_box_page_px(
