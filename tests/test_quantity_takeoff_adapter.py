@@ -6,6 +6,7 @@ import inspect
 import pytest
 
 import pb_quantity_takeoff_adapter as adapter
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_migration_contracts import QuantityEvidence
 from pb_takeoff_authority_v164 import (
     prepare_ai_takeoff_editor_save,
@@ -102,6 +103,17 @@ def test_source_document_page_viewport_entity_and_evidence_trace_is_preserved() 
     assert row["canonical_entity_ids"] == ["entity-1"]
     assert SHA_A in row["source_reference"]
     assert '"canonical_entity_ids":["entity-1"]' in row["notes"]
+
+
+def test_canonical_documented_dimension_quantity_accepts_figured_commercial_authority() -> None:
+    row = adapter.quantity_evidence_to_takeoff_output_row(
+        quantity(authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value),
+        trace=source_trace(),
+        authority=figured(figured_dimension_ids=("dim-length", "dim-width")),
+    )
+    assert row is not None
+    assert row["measurement_method"] == "figured_dimension"
+    assert row["figured_dimension_ids"] == ["dim-length", "dim-width"]
 
 
 def test_figured_dimension_authority_survives_unrelated_scale_conflict() -> None:
