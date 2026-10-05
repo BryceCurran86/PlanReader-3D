@@ -727,12 +727,19 @@ def bind_observation_to_vector_geometry(
             for segment in candidates
             if segment.orientation == observation.orientation
         ]
-        # Native text direction is positive orientation evidence when source
-        # geometry supports it. Some drafting standards keep vertical figured
-        # text horizontal; when no same-orientation dimension line is present,
-        # preserve the historical geometry-only fallback.
-        if preferred_orientation:
-            candidates = preferred_orientation
+        # Native text direction is positive orientation evidence only when
+        # same-orientation geometry is itself at least as spatially plausible
+        # as the best source line. Perpendicular witness ticks can sit close to
+        # the text on legitimate orthogonal-depth dimensions; they must not
+        # suppress a clearly nearer perpendicular dimension line.
+        if preferred_orientation and candidates:
+            best_any_distance = min(_axis_distance(center, s) for s in candidates)
+            best_preferred_distance = min(
+                _axis_distance(center, s) for s in preferred_orientation
+            )
+            orientation_slack = calibration.median_word_height_pt * 0.05
+            if best_preferred_distance <= best_any_distance + orientation_slack:
+                candidates = preferred_orientation
     if not candidates:
         return DimensionAnchorBinding(observation.dimension_id, BindingStatus.UNSUPPORTED.value, notes=["no nearby axis-aligned vector dimension line"])
 
