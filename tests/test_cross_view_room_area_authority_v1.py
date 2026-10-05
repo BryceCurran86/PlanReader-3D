@@ -129,12 +129,11 @@ def _source_and_room(
 def _force_dimension_words_to_raster_authority(
     monkeypatch,
     source: SourceVisibilityProducer,
+    revision_id: str,
     *,
     raster_override: dict[str, str] | None = None,
 ) -> None:
-    published = source.published_snapshot_for_revision(
-        next(iter(source._producer._store.revisions_by_id))
-    )
+    published = source.published_snapshot_for_revision(revision_id)
     assert published is not None
     authority = source.text_integrity_authority()
     authority_type = type(authority)
@@ -204,7 +203,11 @@ def test_cross_view_dimension_text_accepts_independent_raster_corroboration(
     monkeypatch,
 ) -> None:
     source, rooms = _source_and_room()
-    _force_dimension_words_to_raster_authority(monkeypatch, source)
+    _force_dimension_words_to_raster_authority(
+        monkeypatch,
+        source,
+        rooms.rooms[0].revision_id,
+    )
 
     result = CrossViewRoomAreaProducer.from_source(
         source=source,
@@ -222,7 +225,7 @@ def test_cross_view_dimension_raster_corroboration_must_match_figured_value(
     source, rooms = _source_and_room()
 
     published = source.published_snapshot_for_revision(
-        next(iter(source._producer._store.revisions_by_id))
+        rooms.rooms[0].revision_id
     )
     assert published is not None
     authority = source.text_integrity_authority()
@@ -249,6 +252,7 @@ def test_cross_view_dimension_raster_corroboration_must_match_figured_value(
     _force_dimension_words_to_raster_authority(
         monkeypatch,
         source,
+        rooms.rooms[0].revision_id,
         raster_override={wrong_observation_id: "3601"},
     )
 
