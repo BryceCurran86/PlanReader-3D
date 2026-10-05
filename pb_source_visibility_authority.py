@@ -24,7 +24,6 @@ from collections import OrderedDict
 from dataclasses import dataclass, replace
 import hashlib
 import math
-from threading import RLock
 from typing import Any, Mapping, Optional, Sequence
 
 import fitz
@@ -53,7 +52,6 @@ from pb_source_observation_authority import (
     SourceObservationAuthorityResult,
     SourceObservationProducer,
     SourceRevisionRecord,
-    _cached_native_page,
 )
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
@@ -70,6 +68,14 @@ RASTER_SEGMENT_ORIGIN_KIND = "producer_raster_page_render_segment"
 RASTER_VISIBLE_SEGMENT_ORIGIN_KIND = "producer_raster_visibility"
 VISIBLE_SOURCE_OBSERVATION_EXISTS = "visible_source_observation_exists"
 RASTER_RENDER_DPI = 144
+# Frozen source-identity schema for raster primitives. Detector implementation
+# version is provenance only; changing it must not churn physical/source ids
+# when the producer-owned detected geometry is unchanged. Keep this value
+# stable unless the physical identity contract itself is intentionally migrated.
+RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION = "1.0.0"
+# Raster detector and native image-region geometry are emitted to four decimal
+# page-point precision. One least-significant unit is the only ownership slack.
+_RASTER_GEOMETRY_QUANTIZATION_TOLERANCE_PT = 1e-4
 
 VISIBILITY_CLIP_ASSOCIATION_UNKNOWN = "visibility_clip_association_unknown"
 VISIBILITY_ACTIVE_CLIP_UNRESOLVED = "visibility_active_clip_unresolved"
@@ -86,12 +92,10 @@ VISIBILITY_RECEIPT_UNAVAILABLE = "visibility_receipt_unavailable"
 VISIBILITY_PARENT_MISMATCH = "visibility_parent_mismatch"
 
 
-# Producer-neutral visibility derivation cache.  The cached content contains
-# only immutable decisions derived from exact source bytes; producer-specific
-# observation ids, snapshot ids, receipts, and authority records are minted
-# fresh by each SourceVisibilityProducer.
+# Per-producer visibility derivation cache bound to one immutable source snapshot.
+# Cached values contain only source-derived decisions and never outlive the
+# SourceVisibilityProducer run that owns their snapshot/provenance state.
 _VISIBILITY_PAGE_CACHE_MAX_PAGES = 24
-_VISIBILITY_PAGE_CACHE_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -116,33 +120,6 @@ class _CachedVisibleSegment:
 class _CachedVisibilityPage:
     words: tuple[_CachedVisibilityWord, ...]
     visible_segments: tuple[_CachedVisibleSegment, ...]
-
-
-_VISIBILITY_PAGE_CACHE: "OrderedDict[tuple[str, int], _CachedVisibilityPage]" = OrderedDict()
-
-
-def _cached_visibility_page(
-    source_sha256: str, page_number: int
-) -> Optional[_CachedVisibilityPage]:
-    key = (str(source_sha256), int(page_number))
-    with _VISIBILITY_PAGE_CACHE_LOCK:
-        value = _VISIBILITY_PAGE_CACHE.get(key)
-        if value is not None:
-            _VISIBILITY_PAGE_CACHE.move_to_end(key)
-        return value
-
-
-def _remember_visibility_page(
-    source_sha256: str,
-    page_number: int,
-    value: _CachedVisibilityPage,
-) -> None:
-    key = (str(source_sha256), int(page_number))
-    with _VISIBILITY_PAGE_CACHE_LOCK:
-        _VISIBILITY_PAGE_CACHE[key] = value
-        _VISIBILITY_PAGE_CACHE.move_to_end(key)
-        while len(_VISIBILITY_PAGE_CACHE) > _VISIBILITY_PAGE_CACHE_MAX_PAGES:
-            _VISIBILITY_PAGE_CACHE.popitem(last=False)
 
 
 def _derive_visibility_page(
@@ -457,6 +434,23 @@ def _visible_observation_id(
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
+def _canonical_raster_geometry(
+    geometry: Sequence[float],
+) -> tuple[float, float, float, float]:
+    if len(geometry) != 4:
+        raise ValueError(VISIBILITY_GEOMETRY_INVALID)
+    values = tuple(round(float(value), 6) for value in geometry)
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError(VISIBILITY_GEOMETRY_INVALID)
+    first = (values[0], values[1])
+    second = (values[2], values[3])
+    if second < first:
+        first, second = second, first
+    if first == second:
+        raise ValueError(VISIBILITY_GEOMETRY_INVALID)
+    return (first[0], first[1], second[0], second[1])
+
+
 def _raster_segment_observation_id(
     *,
     document_id: str,
@@ -464,11 +458,19 @@ def _raster_segment_observation_id(
     page_id: str,
     partition_id: str,
     image_sha256: str,
-    detector_version: str,
+    identity_version: str,
     pixel_geometry: Sequence[float],
     geometry: Sequence[float],
     index: int,
 ) -> str:
+    """Stable raster source identity with detector version kept as provenance.
+
+    The payload deliberately preserves the historical v1 identity shape so
+    current source ids do not migrate. ``identity_version`` is frozen by this
+    module; the live detector version is retained separately in the visibility
+    receipt. Canonical producer ordering below keeps ``index`` stable whenever
+    the detected geometry set is unchanged.
+    """
     payload = {
         "document_id": document_id,
         "revision_id": revision_id,
@@ -476,12 +478,65 @@ def _raster_segment_observation_id(
         "partition_id": partition_id,
         "kind": RASTER_PDF_SEGMENT,
         "image_sha256": image_sha256,
-        "detector_version": detector_version,
+        "detector_version": str(identity_version),
         "pixel_geometry": tuple(float(v) for v in pixel_geometry),
         "geometry": tuple(float(v) for v in geometry),
         "index": int(index),
     }
     return stable_contract_id("source_observation", payload, digest_chars=32)
+
+
+def _axis_aligned_geometry_fully_covered_by_rect_union(
+    geometry: Sequence[float],
+    rects: Sequence[Sequence[float]],
+    *,
+    tolerance: float = _RASTER_GEOMETRY_QUANTIZATION_TOLERANCE_PT,
+) -> bool:
+    """Prove an axis-aligned segment is fully covered by source image regions.
+
+    A midpoint hit is not source ownership: rendered vector annotation can cross
+    a raster image and share its midpoint. Coverage may span multiple adjacent
+    image tiles, which is common for tiled raster plan sheets.
+    """
+    x0, y0, x1, y1 = _canonical_raster_geometry(geometry)
+    horizontal = abs(y1 - y0) <= tolerance
+    vertical = abs(x1 - x0) <= tolerance
+    if not horizontal and not vertical:
+        return False
+
+    if horizontal:
+        start, end, fixed = x0, x1, (y0 + y1) / 2.0
+    else:
+        start, end, fixed = y0, y1, (x0 + x1) / 2.0
+
+    covered: list[tuple[float, float]] = []
+    for raw_rect in rects:
+        rect = _finite_rect(raw_rect)
+        if rect is None:
+            continue
+        rx0, ry0, rx1, ry1 = rect
+        if horizontal:
+            if not (ry0 - tolerance <= fixed <= ry1 + tolerance):
+                continue
+            first, second = max(start, rx0), min(end, rx1)
+        else:
+            if not (rx0 - tolerance <= fixed <= rx1 + tolerance):
+                continue
+            first, second = max(start, ry0), min(end, ry1)
+        if second + tolerance >= first:
+            covered.append((first, second))
+
+    if not covered:
+        return False
+    covered.sort()
+    cursor = start
+    for first, second in covered:
+        if first > cursor + tolerance:
+            return False
+        cursor = max(cursor, second)
+        if cursor >= end - tolerance:
+            return True
+    return cursor >= end - tolerance
 
 
 def _raster_visible_observation_id(
@@ -522,6 +577,9 @@ class SourceVisibilityProducer:
         self._raster_visibility_receipts: dict[
             tuple[str, str], RasterSegmentVisibilityReceipt
         ] = {}
+        self._visibility_page_cache: (
+            "OrderedDict[tuple[str, str, int], _CachedVisibilityPage]"
+        ) = OrderedDict()
         # One source-bound physical-opening authority per producer.  The
         # visibility authority it wraps is a live read-only view over this
         # producer's store/receipt maps, so later producer-owned augmentation is
@@ -953,14 +1011,19 @@ class SourceVisibilityProducer:
                 page_index = int(page_number) - 1
                 page_id = str(page_number)
                 partition_id = f"page:{page_number}"
-                derived = _cached_visibility_page(
-                    base.revision.source_sha256, int(page_number)
+                visibility_cache_key = (
+                    base.revision.source_sha256,
+                    base.snapshot.snapshot_id,
+                    int(page_number),
                 )
+                derived = self._visibility_page_cache.get(visibility_cache_key)
+                if derived is not None:
+                    self._visibility_page_cache.move_to_end(visibility_cache_key)
                 if derived is None:
                     if pdf is None:
                         pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
                     page = pdf.load_page(page_index)
-                    native_cached = _cached_native_page(
+                    native_cached = self._producer._cached_native_page(
                         base.revision.source_sha256, int(page_number)
                     )
                     derived = _derive_visibility_page(
@@ -971,9 +1034,13 @@ class SourceVisibilityProducer:
                             else native_cached.native_page
                         ),
                     )
-                    _remember_visibility_page(
-                        base.revision.source_sha256, int(page_number), derived
-                    )
+                    self._visibility_page_cache[visibility_cache_key] = derived
+                    self._visibility_page_cache.move_to_end(visibility_cache_key)
+                    while (
+                        len(self._visibility_page_cache)
+                        > _VISIBILITY_PAGE_CACHE_MAX_PAGES
+                    ):
+                        self._visibility_page_cache.popitem(last=False)
 
                 for word in derived.words:
                     parent_id = _native_word_observation_id(
@@ -1212,23 +1279,31 @@ class SourceVisibilityProducer:
             self._raster_visibility_attempted_pages.add(raster_attempt_key)
 
             if page_id in pages_with_visible and image_regions:
-                def _inside_image_region(segment) -> bool:
-                    x0, y0, x1, y1 = segment.geometry_pt
-                    midpoint_x = (x0 + x1) / 2.0
-                    midpoint_y = (y0 + y1) / 2.0
-                    for rx0, ry0, rx1, ry1 in image_regions:
-                        if (
-                            rx0 <= midpoint_x <= rx1
-                            and ry0 <= midpoint_y <= ry1
-                        ):
-                            return True
-                    return False
-
                 segments = tuple(
-                    segment for segment in segments if _inside_image_region(segment)
+                    segment
+                    for segment in segments
+                    if _axis_aligned_geometry_fully_covered_by_rect_union(
+                        segment.geometry_pt, image_regions
+                    )
                 )
-            if len(segments) < 6:
+            if not segments:
                 continue
+
+            # Visibility publishes each proven source-owned primitive regardless
+            # of whether enough neighbouring primitives exist to prove a wall or
+            # opening. Object-completeness gates belong downstream. Re-sort using
+            # the detector's historical v1 canonical ordering so detector output
+            # iteration order cannot affect the frozen raster identity index.
+            segments = tuple(
+                sorted(
+                    segments,
+                    key=lambda segment: (
+                        str(segment.orientation),
+                        tuple(float(value) for value in segment.geometry_pt),
+                        tuple(float(value) for value in segment.pixel_geometry),
+                    ),
+                )
+            )
 
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
@@ -1243,14 +1318,14 @@ class SourceVisibilityProducer:
                     page_id=page_id,
                     partition_id=page_parent.source_partition_id,
                     image_sha256=image_sha256,
-                    detector_version=RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
+                    identity_version=RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
                     pixel_geometry=segment.pixel_geometry,
                     geometry=segment.geometry_pt,
                     index=index,
                 )
                 segment_ref = (
                     f"raster_segment:{image_sha256}:"
-                    f"{RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION}:{index}"
+                    f"{RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION}:{index}"
                 )
                 segment_specs.append(
                     {
@@ -1307,6 +1382,7 @@ class SourceVisibilityProducer:
                             dpi=RASTER_RENDER_DPI,
                             pixel_geometry=tuple(segment.pixel_geometry),
                             geometry=tuple(segment.geometry_pt),
+                            detector_version=RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
                         ),
                     )
                 )
