@@ -315,15 +315,16 @@ def collect_live_physical_net_wall_claim(
                 if extent is None:
                     continue
 
-                room_face_authority = canonical_rooms.room_face_authority_for(
+                room_binding = canonical_rooms.room_face_authority_binding_for(
                     scope_rooms[0]
                 )
-                if room_face_authority is None or any(
-                    canonical_rooms.room_face_authority_for(room)
-                    is not room_face_authority
+                if room_binding is None or any(
+                    canonical_rooms.room_face_authority_binding_for(room)
+                    is not room_binding
                     for room in scope_rooms[1:]
                 ):
                     continue
+                room_face_authority = room_binding.authority
 
                 selector = SourceRoomFaceSelector(
                     document_id=scope_rooms[0].document_id,
@@ -351,35 +352,18 @@ def collect_live_physical_net_wall_claim(
                 if not explicit_by_face_id:
                     continue
 
-                wall_selector = (
-                    wall_opening.physical_wall_candidate_authority
-                    .selector_for_decision_scope(
-                        document_id=scope_rooms[0].document_id,
-                        revision_id=scope_rooms[0].revision_id,
-                        source_sha256=scope_rooms[0].source_sha256,
-                        snapshot_id=snapshot_id,
-                        page_id=page_id,
-                        decision_scope_id=decision_scope_id,
-                    )
-                )
-                wall_scope = (
-                    None
-                    if wall_selector is None
-                    else wall_opening.physical_wall_candidate_authority
-                    .resolve_scope(wall_selector)
-                )
                 if (
-                    wall_scope is not None
-                    and wall_scope.scope_kind == "viewport"
-                    and wall_scope.viewport_id
-                    and wall_scope.viewport_bbox is not None
+                    room_binding.viewport_id is not None
+                    and room_binding.viewport_bbox is not None
                 ):
-                    viewport_id = str(wall_scope.viewport_id)
+                    viewport_id = str(room_binding.viewport_id)
                     viewport_bbox = tuple(
-                        float(value) for value in wall_scope.viewport_bbox
+                        float(value) for value in room_binding.viewport_bbox
                     )
                     viewport_status = ViewportResolutionStatus.RESOLVED
-                    viewport_reason_codes = tuple(wall_scope.reason_codes)
+                    viewport_reason_codes = (
+                        "producer_owned_room_face_viewport_scope",
+                    )
                 else:
                     viewport_id = stable_contract_id(
                         "room_area_page_scope",
