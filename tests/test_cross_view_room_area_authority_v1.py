@@ -14,6 +14,7 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_portable_raster_ocr_authority import MockOCRBackend
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
