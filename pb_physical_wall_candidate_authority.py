@@ -2145,19 +2145,43 @@ def _producer_opening_relation_overrides(
                 valid = False
                 break
             candidate_for_raw[raw_id] = matches[0].wall_candidate_id
-        if not valid or len(set(candidate_for_raw.values())) != 6:
+
+        if valid and len(set(candidate_for_raw.values())) == 6:
+            # Historical complete translation: when every opening primitive is
+            # itself represented by one W4 candidate, retain the full SAME /
+            # DISTINCT relation set exactly as before.
+            for (left_raw, right_raw), classifications in raw_relations.items():
+                left_id = candidate_for_raw[left_raw]
+                right_id = candidate_for_raw[right_raw]
+                if left_id == right_id:
+                    valid = False
+                    break
+                pair = tuple(sorted((left_id, right_id)))
+                candidate_relation_sets.setdefault(pair, set()).update(classifications)
+            if not valid:
+                continue
             continue
 
+        # A complete authenticated G17 opening proves two SAME wall-face pairs
+        # independently of whether its jamb / frame primitives become W4 wall
+        # candidates. Do not discard that positive wall identity evidence just
+        # because non-wall opening geometry is absent downstream. Partial
+        # translation is intentionally SAME-only: each face primitive must have
+        # exactly one W4 owner, and no DISTINCT relation is inferred unless the
+        # historical all-six mapping above is complete.
         for (left_raw, right_raw), classifications in raw_relations.items():
-            left_id = candidate_for_raw[left_raw]
-            right_id = candidate_for_raw[right_raw]
+            if classifications != {PhysicalEquivalenceClass.SAME_PHYSICAL_WALL}:
+                continue
+            left_matches = by_raw_id.get(left_raw, [])
+            right_matches = by_raw_id.get(right_raw, [])
+            if len(left_matches) != 1 or len(right_matches) != 1:
+                continue
+            left_id = left_matches[0].wall_candidate_id
+            right_id = right_matches[0].wall_candidate_id
             if left_id == right_id:
-                valid = False
-                break
+                continue
             pair = tuple(sorted((left_id, right_id)))
             candidate_relation_sets.setdefault(pair, set()).update(classifications)
-        if not valid:
-            continue
 
     return {
         pair: next(iter(classifications))
