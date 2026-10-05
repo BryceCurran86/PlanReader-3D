@@ -233,3 +233,124 @@ def test_ratio_text_without_graphic_bar_never_becomes_review_candidate() -> None
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.reason_codes == (CEILING_REVIEW_PROMOTION_UNAVAILABLE,)
     assert result.candidates == ()
+
+
+
+def _documented_area_for_shadow(
+    result,
+    *,
+    context: ProviderContext,
+    viewport: ViewportEvidence,
+    figured_dimension_ids: tuple[str, ...] = ("dim-horizontal", "dim-vertical"),
+) -> QuantityEvidence:
+    target = next(
+        quantity
+        for quantity in result.source_result.ceiling_quantities
+        if (
+            len(quantity.input_entity_ids) == 1
+            and "missing_explicit_ceiling_finish" not in quantity.blocking_reasons
+        )
+    )
+    scope = target.input_entity_ids[0]
+    return QuantityEvidence(
+        quantity_id="qty-documented-room-area",
+        family="room_area",
+        semantic_key=f"room_area:{scope}",
+        value=8.64,
+        unit="m2",
+        input_entity_ids=(scope,),
+        formula="authoritative_explicit_area",
+        formula_version="test",
+        evidence_ids=("ev-dim-horizontal", "ev-dim-vertical"),
+        authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+        status=AuthorityStatus.FIRM.value,
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        metadata={
+            "source_sha256": context.source_sha256,
+            "revision_id": context.current_revision_id,
+            "page_no": 1,
+            "viewport_id": viewport.viewport_id,
+            "figured_dimension_ids": list(figured_dimension_ids),
+        },
+    )
+
+
+def test_documented_dimension_ceiling_becomes_review_draft_without_scale() -> None:
+    source, context, viewport = _setup(include_scale_bar=False)
+    baseline = build_ceiling_lining_review_promotions(
+        source_visibility_producer=source,
+        context=context,
+        viewport=viewport,
+        page_no=1,
+    )
+    assert baseline.status is EvidenceResolutionStatus.ABSTAINED
+
+    documented_area = _documented_area_for_shadow(
+        baseline,
+        context=context,
+        viewport=viewport,
+    )
+    result = build_ceiling_lining_review_promotions(
+        source_visibility_producer=source,
+        context=context,
+        viewport=viewport,
+        page_no=1,
+        authoritative_area_quantities=(documented_area,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.candidates) == 1
+    candidate = result.candidates[0]
+    promoted = candidate.promoted_quantity
+    assert promoted.status == AuthorityStatus.REVIEW_REQUIRED.value
+    assert promoted.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert promoted.metadata["figured_dimension_ids"] == (
+        "dim-horizontal",
+        "dim-vertical",
+    )
+    assert "physical_scale_record_id" not in promoted.metadata
+
+    row = dict(candidate.review_row)
+    assert row["origin"] == "AI"
+    assert row["quantity_status"] == "To review"
+    assert row["row_role"] == "ceiling_area"
+    assert row["section"] == "Internal"
+    assert row["location"] == "Ceiling"
+    assert row["substrate"] == "Other"
+    assert row["measurement_method"] == "figured_dimension"
+    assert row["figured_dimension_ids"] == ["dim-horizontal", "dim-vertical"]
+    assert row["resolved_scale_id"] is None
+    gates = existing_commercial_gate_results(row)
+    assert gates["publishability"][0] is False
+    assert gates["pricing"][0] is False
+    assert gates["jobhub"][0] is False
+
+
+def test_documented_dimension_ceiling_requires_figured_lineage() -> None:
+    source, context, viewport = _setup(include_scale_bar=False)
+    baseline = build_ceiling_lining_review_promotions(
+        source_visibility_producer=source,
+        context=context,
+        viewport=viewport,
+        page_no=1,
+    )
+    documented_area = _documented_area_for_shadow(
+        baseline,
+        context=context,
+        viewport=viewport,
+        figured_dimension_ids=(),
+    )
+
+    result = build_ceiling_lining_review_promotions(
+        source_visibility_producer=source,
+        context=context,
+        viewport=viewport,
+        page_no=1,
+        authoritative_area_quantities=(documented_area,),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (CEILING_REVIEW_PROMOTION_UNAVAILABLE,)
+    assert result.candidates == ()
