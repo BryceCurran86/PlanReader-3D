@@ -48,10 +48,7 @@ from pb_physical_opening_void_authority import (
     PhysicalOpeningVoidProducer,
     PhysicalOpeningVoidSelector,
 )
-from pb_physical_scale_authority import (
-    PhysicalScaleProducer,
-    PhysicalScaleSelector,
-)
+from pb_physical_scale_authority import PhysicalScaleSelector
 from pb_schedule_opening_instance_binding_authority import (
     ScheduleOpeningInstanceBindingProducer,
 )
