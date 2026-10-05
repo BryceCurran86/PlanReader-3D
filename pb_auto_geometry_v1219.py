@@ -2035,6 +2035,9 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "opening_takeoff_rows": len(opening_rows),
             "room_area_takeoff_rows": len(room_area_rows),
             "preserved_source_closed_rows": len(preserved_source_closed_rows),
+            "retained_reviewed_source_closed_rows": len(
+                retained_reviewed_source_closed_row_ids
+            ),
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "coverage_lifecycle": coverage_lifecycle,
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
