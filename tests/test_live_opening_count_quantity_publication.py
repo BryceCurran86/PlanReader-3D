@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import fitz
+import pytest
 
 import pb_auto_geometry_v1219 as auto
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
+from pb_live_opening_count_source_closed_export import (
+    build_live_opening_count_source_traces,
+    seal_live_opening_count_run,
+)
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
+from pb_source_closed_run_export import SourceClosedRunConflictError
 from pb_takeoff_coverage_audit_adapter import build_runtime_coverage_publication
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
 
@@ -149,3 +156,122 @@ def test_implicit_schedule_default_never_becomes_live_commercial_count(
 
     assert claim.canonical_openings
     assert claim.opening_count_quantity_evidence == ()
+
+
+
+def test_authenticated_opening_count_seals_exact_member_lineage(tmp_path) -> None:
+    path = tmp_path / "counted-opening-sealed.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert len(claim.opening_count_quantity_evidence) == 1
+    assert len(claim.canonical_openings) == 1
+    quantity = claim.opening_count_quantity_evidence[0]
+    opening = claim.canonical_openings[0]
+
+    traces = build_live_opening_count_source_traces(
+        claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    trace = traces[quantity.quantity_id]
+    assert trace.project_id == "source-project"
+    assert trace.canonical_entity_ids == quantity.input_entity_ids
+    assert set(quantity.evidence_ids).issubset(set(trace.evidence_ids))
+    assert trace.metadata["aggregate_source_trace"] is False
+    assert tuple(trace.metadata["member_opening_ids"]) == tuple(
+        sorted(quantity.input_entity_ids)
+    )
+    assert trace.metadata["opening_mark"] == "W1"
+    assert trace.source_page == opening.page_id
+    assert trace.viewport_id == opening.viewport_id
+
+    sealed = seal_live_opening_count_run(
+        claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    assert len(sealed.quantities) == 1
+    row = sealed.quantities[0]
+    assert row.quantity_id == quantity.quantity_id
+    assert row.object_identity_refs == quantity.input_entity_ids
+    assert row.value == 1.0
+    assert row.unit == "ea"
+    assert row.lineage_ok is True
+
+
+def test_authenticated_opening_count_sealed_run_is_deterministic(tmp_path) -> None:
+    path = tmp_path / "counted-opening-deterministic.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+
+    first = seal_live_opening_count_run(
+        claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    second = seal_live_opening_count_run(
+        claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert first.run_id == second.run_id
+    assert first.fingerprint == second.fingerprint
+    assert first.to_json() == second.to_json()
+
+
+def test_opening_count_sealing_rejects_unknown_physical_member(tmp_path) -> None:
+    path = tmp_path / "counted-opening-unknown-member.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    quantity = claim.opening_count_quantity_evidence[0]
+    damaged = replace(
+        quantity,
+        input_entity_ids=("unknown-physical-opening",),
+    )
+    damaged_claim = replace(
+        claim,
+        opening_count_quantity_evidence=(damaged,),
+    )
+
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="unknown physical identity",
+    ):
+        seal_live_opening_count_run(
+            damaged_claim,
+            workspace_id=7,
+            project_id="source-project",
+        )
+
+
+def test_opening_count_sealing_rejects_missing_member_evidence(tmp_path) -> None:
+    path = tmp_path / "counted-opening-missing-evidence.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    quantity = claim.opening_count_quantity_evidence[0]
+    opening = claim.canonical_openings[0]
+    physical_ids = set(opening.source_observation_ids)
+    assert physical_ids
+    damaged = replace(
+        quantity,
+        evidence_ids=tuple(
+            value
+            for value in quantity.evidence_ids
+            if value not in physical_ids
+        ),
+    )
+    damaged_claim = replace(
+        claim,
+        opening_count_quantity_evidence=(damaged,),
+    )
+
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="omits physical member evidence",
+    ):
+        seal_live_opening_count_run(
+            damaged_claim,
+            workspace_id=7,
+            project_id="source-project",
+        )
