@@ -487,6 +487,8 @@ def _ocr(text: str, bbox: tuple[float, float, float, float]) -> OCRLine:
     return OCRLine(text=text, confidence=1.0, bbox_px=bbox, bbox_pt=bbox)
 
 
+# This exercises style recovery from the producer-owned native page cache,
+# not caller-supplied _VisibleSegment metadata.
 def test_end_to_end_producer_uses_verified_native_style_to_break_line_tie():
     source = SourceVisibilityProducer(
         producer_method="native-style-dimension-test",
