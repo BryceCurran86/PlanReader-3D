@@ -116,6 +116,29 @@ def _glyph_unverified_pdf(
     )
 
 
+def _vertical_glyph_unverified_pdf(text: str = "1900") -> bytes:
+    codes = sorted(set(map(ord, text)))
+    cmap = _cmap(
+        sysinfo=_SYSINFO_DUP,
+        mappings="\n".join(f"<{c:02X}> <{c:04X}>" for c in codes),
+        count=len(codes),
+    )
+    # Native direction (0, -1): source text reads bottom-to-top. The raster
+    # corroboration producer must derive one unique texttrace glyph target and
+    # normalize it losslessly to left-to-right before OCR.
+    stream = f"BT /F1 14 Tf 0 1 -1 0 100 120 Tm ({text}) Tj ET"
+    return _pdf(
+        stream,
+        fonts={
+            "F1": (
+                5,
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Arial /FirstChar 32 /LastChar 126 /ToUnicode 6 0 R >>",
+            )
+        },
+        extra={6: _stream_obj(cmap)},
+    )
+
+
 class _Setup:
     def __init__(self, pdf: bytes, backend: MockOCRBackend, *, document_id: str = DOC) -> None:
         self.svp = SourceVisibilityProducer(producer_method="raster-corroboration-test", producer_version="1")
@@ -624,6 +647,45 @@ def test_each_pages_word_is_rendered_from_its_own_page() -> None:
     assert len(parents) == 2
 
 
+def test_vertical_source_word_uses_unique_trace_glyph_target_and_one_lossless_rotation(
+    monkeypatch,
+) -> None:
+    seen: list[tuple[int, Image.Image]] = []
+
+    def responder(image, dpi):
+        seen.append((int(dpi), image.copy()))
+        assert image.width > image.height
+        return (_line(image, "1900"),)
+
+    setup = _Setup(
+        _vertical_glyph_unverified_pdf("1900"),
+        MockOCRBackend(responder=responder),
+    )
+    oid = setup.oid_of("1900")
+    receipt = setup._receipts[oid]
+    calls: list[dict] = []
+    original = SourceObservationProducer.render_native_page_png
+
+    def spy(self, **kwargs):
+        calls.append(dict(kwargs))
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(SourceObservationProducer, "render_native_page_png", spy)
+    result = setup.publish("1900")
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert result.record.source_bbox == tuple(receipt.geometry)
+    assert [call["dpi"] for call in calls] == [300.0, 450.0]
+    assert len(seen) == 2
+    assert all(view.ocr_rotation_degrees == -90 for view in result.record.views)
+    assert all(view.clip_pt != result.record.source_bbox for view in result.record.views)
+    assert [tuple(call["clip_pt"]) for call in calls] == [
+        view.clip_pt for view in result.record.views
+    ]
+    assert [view.ocr_reading for view in result.record.views] == ["1900", "1900"]
+
+
 # ---------------------------------------------------------------------------
 # What actually reaches the OCR backend
 # ---------------------------------------------------------------------------
@@ -654,6 +716,7 @@ def test_ocr_sees_exactly_the_clip_render_with_no_padding_and_no_fallback_pipeli
     assert all(tuple(c["clip_pt"]) == bbox for c in calls)
     assert all(c["page_id"] == "1" for c in calls)
     assert [d for d, _img in seen] == [300, 450]
+    assert all(view.ocr_rotation_degrees == 0 for view in result.record.views)
 
     import io
 
