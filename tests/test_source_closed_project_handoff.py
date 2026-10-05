@@ -157,7 +157,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
         "ceiling_lining": 1,
     }
     assert summary["combined_quantity_count"] == 4
-    assert (output / f"{project_id}.sealed.json").is_file()
+    assert (output / f"{project_id}.json").is_file()
     assert (output / "production_summary.json").is_file()
     assert sorted((output / "family_runs").glob("*.sealed.json"))
 
@@ -268,3 +268,60 @@ def test_project_handoff_rejects_family_run_from_different_source(
             workspace_id=1,
             output_dir=tmp_path / "out",
         )
+
+
+def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    source_sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    project_id = "project-a"
+    room_q = _quantity("q-room", "room_area")
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="corroborated"),
+        reason_codes=(),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(1,),
+        canonical_floors=(1,),
+        canonical_spaces=(1,),
+        room_area_quantity_evidence=(room_q,),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+
+    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((0,), 1))
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        lambda *args, **kwargs: claim,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_ceiling_lining_review_candidates",
+        lambda *args, **kwargs: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_room_area_run",
+        lambda *args, **kwargs: _run(
+            project_id=project_id,
+            source_sha256=source_sha,
+            family="room_area",
+            quantity_id="sealed-room",
+        ),
+    )
+
+    output = tmp_path / "sealed"
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id=project_id,
+        workspace_id=1,
+        output_dir=output,
+    )
+
+    assert summary["combined_run_file"] == str(output / f"{project_id}.json")
+    assert (output / f"{project_id}.json").is_file()
+    assert not (output / f"{project_id}.sealed.json").exists()
