@@ -61,10 +61,7 @@ from pb_migration_contracts import (
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_source_room_area_bridge import build_source_room_area_bridge
-from pb_source_room_face_authority import (
-    SourceRoomFaceSelector,
-    build_source_room_face_authority,
-)
+from pb_source_room_face_authority import SourceRoomFaceSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -284,9 +281,6 @@ def collect_live_physical_net_wall_claim(
             rooms=canonical_rooms,
         ).publish()
         if cross_view_area.records:
-            room_face_authority = build_source_room_face_authority(
-                wall_opening.physical_wall_candidate_authority
-            )
             evidence_by_record = (
                 cross_view_area.evidence_by_source_room_face_record_id
             )
@@ -319,6 +313,16 @@ def collect_live_physical_net_wall_claim(
                     continue
                 extent = page_extents.get(page_id)
                 if extent is None:
+                    continue
+
+                room_face_authority = canonical_rooms.room_face_authority_for(
+                    scope_rooms[0]
+                )
+                if room_face_authority is None or any(
+                    canonical_rooms.room_face_authority_for(room)
+                    is not room_face_authority
+                    for room in scope_rooms[1:]
+                ):
                     continue
 
                 selector = SourceRoomFaceSelector(
