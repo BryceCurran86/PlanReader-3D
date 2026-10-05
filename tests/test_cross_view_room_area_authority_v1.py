@@ -57,7 +57,13 @@ def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
         doc.close()
 
 
-def _source_and_room(*, duplicate_room_label: bool = False, duplicate_dimension_box: bool = False):
+def _source_and_room(
+    *,
+    duplicate_room_label: bool = False,
+    duplicate_dimension_box: bool = False,
+    page_ids: tuple[str, ...] | None = None,
+    room_page_id: str = "1",
+):
     source = SourceVisibilityProducer(
         producer_method="cross-view-room-area-test",
         producer_version="1.0",
@@ -66,6 +72,7 @@ def _source_and_room(*, duplicate_room_label: bool = False, duplicate_dimension_
         document_id="cross-view-room-area-doc",
         source_bytes=_payload(duplicate_dimension_box=duplicate_dimension_box),
         source_locator="memory://cross-view-room-area.pdf",
+        page_ids=page_ids,
     )
 
     def room(identity: str, face_record: str) -> LiveCanonicalRoomObject:
@@ -76,7 +83,7 @@ def _source_and_room(*, duplicate_room_label: bool = False, duplicate_dimension_
             revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256,
             snapshot_id=published.snapshot.snapshot_id,
-            page_id="1",
+            page_id=room_page_id,
             viewport_id="plan-vp",
             decision_scope_id="wall-source:viewport:1:plan-vp",
             polygon_pdf_pts=((100.0, 100.0), (250.0, 100.0), (250.0, 200.0), (100.0, 200.0)),
@@ -102,7 +109,7 @@ def _source_and_room(*, duplicate_room_label: bool = False, duplicate_dimension_
         status=EvidenceResolutionStatus.CORROBORATED,
         reason_codes=(LIVE_CANONICAL_ROOM_RESOLVED,),
         rooms=tuple(rooms),
-        source_pages=(1,),
+        source_pages=(int(room_page_id),),
     )
 
 
@@ -144,6 +151,39 @@ def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_ow
     assert evidence.metadata["vertical_value_mm"] == 2400
     assert evidence.metadata["horizontal_witness_observation_ids"]
     assert evidence.metadata["vertical_witness_observation_ids"]
+
+
+def test_scoped_ingest_preserves_one_based_measurement_page_identity():
+    source, rooms = _source_and_room(page_ids=("2",))
+    result = CrossViewRoomAreaProducer.from_source_for_tests(
+        source=source,
+        rooms=rooms,
+        backend=MockOCRBackend(()),
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].source_dimension_page_id == "2"
+    assert result.records[0].area_evidence.metadata["source_dimension_page_id"] == "2"
+
+
+def test_same_page_dimensions_cannot_mint_cross_view_room_area():
+    source, rooms = _source_and_room(
+        page_ids=("2",),
+        room_page_id="2",
+    )
+    result = CrossViewRoomAreaProducer.from_source_for_tests(
+        source=source,
+        rooms=rooms,
+        backend=MockOCRBackend(()),
+    ).publish()
+
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+    assert result.status in {
+        EvidenceResolutionStatus.ABSTAINED,
+        EvidenceResolutionStatus.CONFLICT,
+    }
 
 
 def test_duplicate_canonical_room_label_fails_closed_before_cross_view_binding():
