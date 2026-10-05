@@ -218,6 +218,54 @@ class SealedSourceClosedRun:
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
 
+def _build_sealed_run(
+    rows: Sequence[SealedSourceClosedQuantity],
+    *,
+    project_id: str,
+) -> SealedSourceClosedRun:
+    """Build one deterministic run envelope from already-sealed quantities."""
+    clean_project_id = _clean(project_id)
+    if not clean_project_id:
+        raise ValueError("project_id must be non-empty")
+
+    normalized: list[SealedSourceClosedQuantity] = []
+    quantity_ids: set[str] = set()
+    for row in rows:
+        if not isinstance(row, SealedSourceClosedQuantity):
+            raise TypeError(
+                "sealed rows must contain only SealedSourceClosedQuantity records"
+            )
+        if row.project_id != clean_project_id:
+            raise SourceClosedRunConflictError(
+                f"quantity {row.quantity_id} belongs to project {row.project_id}"
+            )
+        if row.quantity_id in quantity_ids:
+            raise SourceClosedRunConflictError(
+                f"duplicate sealed quantity id: {row.quantity_id}"
+            )
+        quantity_ids.add(row.quantity_id)
+        normalized.append(row)
+
+    normalized.sort(key=lambda row: row.quantity_id)
+    source_sha256s = tuple(sorted({row.source_sha256 for row in normalized}))
+    revision_ids = tuple(sorted({row.revision_id for row in normalized}))
+    run_payload = {
+        "schema_version": SOURCE_CLOSED_RUN_EXPORT_SCHEMA_VERSION,
+        "project_id": clean_project_id,
+        "source_sha256s": source_sha256s,
+        "revision_ids": revision_ids,
+        "quantity_fingerprints": tuple(row.fingerprint for row in normalized),
+    }
+    run_id = stable_contract_id("source_closed_run", run_payload, digest_chars=32)
+    return SealedSourceClosedRun(
+        run_id=run_id,
+        project_id=clean_project_id,
+        source_sha256s=source_sha256s,
+        revision_ids=revision_ids,
+        quantities=tuple(normalized),
+    )
+
+
 def seal_source_closed_run(
     quantities: Sequence[QuantityEvidence],
     *,
@@ -247,24 +295,64 @@ def seal_source_closed_run(
             )
         rows.append(seal_source_closed_quantity(quantity, trace=trace))
 
-    rows.sort(key=lambda row: row.quantity_id)
-    source_sha256s = tuple(sorted({row.source_sha256 for row in rows}))
-    revision_ids = tuple(sorted({row.revision_id for row in rows}))
-    run_payload = {
-        "schema_version": SOURCE_CLOSED_RUN_EXPORT_SCHEMA_VERSION,
-        "project_id": clean_project_id,
-        "source_sha256s": source_sha256s,
-        "revision_ids": revision_ids,
-        "quantity_fingerprints": tuple(row.fingerprint for row in rows),
-    }
-    run_id = stable_contract_id("source_closed_run", run_payload, digest_chars=32)
-    return SealedSourceClosedRun(
-        run_id=run_id,
-        project_id=clean_project_id,
-        source_sha256s=source_sha256s,
-        revision_ids=revision_ids,
-        quantities=tuple(rows),
-    )
+    return _build_sealed_run(rows, project_id=clean_project_id)
+
+
+def combine_source_closed_runs(
+    runs: Sequence[SealedSourceClosedRun],
+    *,
+    project_id: str | None = None,
+) -> SealedSourceClosedRun:
+    """Combine independently sealed production families into one project run.
+
+    This is a benchmark-neutral composition operation. It does not map physical
+    identities to benchmark objects, choose expected quantities, or score
+    anything. Every input run must already be internally consistent, belong to
+    exactly the same project, and contribute unique quantity identities.
+    """
+    if not runs:
+        raise ValueError("at least one sealed source-closed run is required")
+
+    for run in runs:
+        if not isinstance(run, SealedSourceClosedRun):
+            raise TypeError(
+                "runs must contain only SealedSourceClosedRun records"
+            )
+
+    clean_project_id = _clean(project_id or runs[0].project_id)
+    if not clean_project_id:
+        raise ValueError("project_id must be non-empty")
+
+    combined_rows: list[SealedSourceClosedQuantity] = []
+    for run in runs:
+        if run.project_id != clean_project_id:
+            raise SourceClosedRunConflictError(
+                f"sealed run {run.run_id} belongs to project {run.project_id}"
+            )
+
+        actual_source_sha256s = tuple(
+            sorted({row.source_sha256 for row in run.quantities})
+        )
+        actual_revision_ids = tuple(
+            sorted({row.revision_id for row in run.quantities})
+        )
+        if actual_source_sha256s != tuple(run.source_sha256s):
+            raise SourceClosedRunConflictError(
+                f"sealed run {run.run_id} source envelope is inconsistent"
+            )
+        if actual_revision_ids != tuple(run.revision_ids):
+            raise SourceClosedRunConflictError(
+                f"sealed run {run.run_id} revision envelope is inconsistent"
+            )
+
+        expected = _build_sealed_run(run.quantities, project_id=clean_project_id)
+        if expected.run_id != run.run_id or expected.fingerprint != run.fingerprint:
+            raise SourceClosedRunConflictError(
+                f"sealed run {run.run_id} fingerprint is inconsistent"
+            )
+        combined_rows.extend(run.quantities)
+
+    return _build_sealed_run(combined_rows, project_id=clean_project_id)
 
 
 __all__ = [
@@ -274,6 +362,7 @@ __all__ = [
     "SealedSourceClosedRun",
     "SourceClosedRunConflictError",
     "SourceClosedRunExportError",
+    "combine_source_closed_runs",
     "seal_source_closed_quantity",
     "seal_source_closed_run",
 ]
