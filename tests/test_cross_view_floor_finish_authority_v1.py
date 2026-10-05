@@ -1,0 +1,334 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+import fitz
+
+import pb_source_material_semantic_authority as material_semantic
+from pb_cross_view_floor_finish_authority import (
+    CROSS_VIEW_FLOOR_FINISH_CONFLICT,
+    CROSS_VIEW_FLOOR_FINISH_RESOLVED,
+    CrossViewFloorFinishProducer,
+    enrich_live_canonical_floor_finishes,
+)
+from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+from pb_geometry_takeoff_model import MeasurementAuthorityType
+from pb_live_canonical_floor_surface import (
+    LiveCanonicalFloorSurfaceComposition,
+    compose_live_canonical_floor_surfaces,
+)
+from pb_live_canonical_room_composition import (
+    LIVE_CANONICAL_ROOM_RESOLVED,
+    LiveCanonicalRoomComposition,
+    LiveCanonicalRoomObject,
+)
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_viewport_segmentation import (
+    SegmentedViewport,
+    ViewportBoundarySource,
+    ViewportSegmentationStatus,
+    _stamp_segment_page_viewports_product,
+)
+
+
+def _payload(
+    *,
+    detail_codes: tuple[str, ...] = ("FT1",),
+    schedule_lines: tuple[str, ...] = ("FT1 Porcelain floor tile",),
+) -> bytes:
+    doc = fitz.open()
+    try:
+        plan = doc.new_page(width=400.0, height=300.0)
+        plan.insert_text((80.0, 60.0), "GROUND FLOOR PLAN", fontsize=10.0)
+
+        detail = doc.new_page(width=400.0, height=300.0)
+
+        # 3.6m horizontal figured dimension.
+        detail.draw_line(
+            (100.0, 80.0), (250.0, 80.0),
+            color=(0, 0, 0), width=1.0,
+        )
+        detail.draw_line(
+            (100.0, 68.0), (100.0, 92.0),
+            color=(0, 0, 0), width=1.0,
+        )
+        detail.draw_line(
+            (250.0, 68.0), (250.0, 92.0),
+            color=(0, 0, 0), width=1.0,
+        )
+        detail.insert_text((164.0, 77.0), "3600", fontsize=9.0)
+
+        # 2.4m vertical figured dimension sharing one real witness junction at
+        # (250, 80) with the horizontal system.
+        detail.draw_line(
+            (280.0, 80.0), (280.0, 180.0),
+            color=(0, 0, 0), width=1.0,
+        )
+        detail.draw_line(
+            (250.0, 80.0), (292.0, 80.0),
+            color=(0, 0, 0), width=1.0,
+        )
+        detail.draw_line(
+            (268.0, 180.0), (292.0, 180.0),
+            color=(0, 0, 0), width=1.0,
+        )
+        detail.insert_text(
+            (277.0, 147.0), "2400", fontsize=9.0, rotate=90,
+        )
+
+        # Insert room/material semantics after figured dimensions so dimension
+        # token classification cannot be biased by preceding room-label text.
+        detail.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
+
+        # Material codes are source text inside the proven dimension box.
+        for index, code in enumerate(detail_codes):
+            detail.insert_text(
+                (165.0, 165.0 + index * 12.0),
+                code,
+                fontsize=9.0,
+            )
+
+        schedule = doc.new_page(width=400.0, height=300.0)
+        schedule.insert_text((40.0, 40.0), "FINISH SCHEDULE", fontsize=10.0)
+        for index, line in enumerate(schedule_lines):
+            schedule.insert_text(
+                (40.0, 70.0 + index * 20.0),
+                line,
+                fontsize=10.0,
+            )
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+def _viewport(
+    page_number: int,
+    view_type: str,
+    view_id: str,
+) -> SegmentedViewport:
+    return SegmentedViewport(
+        view_id=view_id,
+        page_number=page_number,
+        view_type=view_type,
+        label=view_type.upper(),
+        title_bbox=(20.0, 10.0, 160.0, 25.0),
+        bounding_box=(10.0, 10.0, 390.0, 290.0),
+        status=ViewportSegmentationStatus.RESOLVED.value,
+        boundary_source=ViewportBoundarySource.VECTOR_FRAME.value,
+        confidence=1.0,
+    )
+
+
+def _patch_material_viewports(monkeypatch) -> None:
+    types = {1: "floor_plan", 2: "floor_plan", 3: "schedule"}
+
+    def segment(_page, *, page_number):
+        return tuple(
+            _stamp_segment_page_viewports_product(
+                [
+                    _viewport(
+                        page_number,
+                        types[page_number],
+                        f"vp-{page_number}",
+                    )
+                ]
+            )
+        )
+
+    monkeypatch.setattr(
+        material_semantic,
+        "segment_page_viewports",
+        segment,
+    )
+
+
+def _source_room_area_and_floor(
+    payload: bytes,
+):
+    source = SourceVisibilityProducer(
+        producer_method="cross-view-floor-finish-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="cross-view-floor-finish-doc",
+        source_bytes=payload,
+        source_locator="memory://cross-view-floor-finish.pdf",
+    )
+    room = LiveCanonicalRoomObject(
+        canonical_room_id="physical-room-1",
+        physical_room_id="physical-room-1",
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+        viewport_id="plan-vp",
+        decision_scope_id="wall-source:viewport:1:plan-vp",
+        polygon_pdf_pts=(
+            (100.0, 100.0),
+            (250.0, 100.0),
+            (250.0, 200.0),
+            (100.0, 200.0),
+        ),
+        bounding_wall_ids=("w1", "w2", "w3", "w4"),
+        canonical_bounding_wall_ids=(),
+        wall_relationships_complete=False,
+        area_page_pts2=15000.0,
+        source_room_face_record_id="source-face-record-1",
+        evidence_ids=("source-face-record-1",),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        room_label="TEST ROOM",
+        room_label_binding_record_id="label-binding:physical-room-1",
+        room_label_evidence_ids=("label-evidence:physical-room-1",),
+        room_label_reason_codes=("source_room_label_resolved",),
+    )
+    rooms = LiveCanonicalRoomComposition(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(LIVE_CANONICAL_ROOM_RESOLVED,),
+        rooms=(room,),
+        source_pages=(1,),
+    )
+    room_areas = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+    assert room_areas.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(room_areas.records) == 1
+    assert room_areas.records[0].area_evidence.normalized_value == 8.64
+
+    base_floors = compose_live_canonical_floor_surfaces(rooms)
+    floor = base_floors.floors[0]
+    floor = replace(
+        floor,
+        evidence_ids=tuple(
+            dict.fromkeys(
+                (
+                    *floor.evidence_ids,
+                    room_areas.records[0].area_evidence.evidence_id,
+                )
+            )
+        ),
+        metric_area_m2=8.64,
+        metric_area_quantity_id="room-area-quantity-1",
+        metric_area_authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+    )
+    floors = LiveCanonicalFloorSurfaceComposition(
+        status=base_floors.status,
+        reason_codes=base_floors.reason_codes,
+        floors=(floor,),
+        source_pages=base_floors.source_pages,
+    )
+    return source, room_areas, floors
+
+
+def test_confirmed_floor_tile_occurrence_binds_same_canonical_floor(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+
+    area_metadata = room_areas.records[0].area_evidence.metadata
+    assert area_metadata["source_dimension_box_pdf_pts"]
+    assert area_metadata["source_label_bbox_pdf_pts"]
+    assert area_metadata["horizontal_endpoints_pt"]
+    assert area_metadata["vertical_endpoints_pt"]
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.reason_codes == (CROSS_VIEW_FLOOR_FINISH_RESOLVED,)
+    assert result.unresolved_canonical_floor_ids == ()
+    assert len(result.records) == 1
+
+    record = result.records[0]
+    assert record.finish_code == "FT1"
+    assert record.semantic_finish == "tile"
+    assert record.canonical_floor_id == floors.floors[0].canonical_floor_id
+    assert record.occurrence_evidence_id
+
+    quantity = record.quantity
+    assert quantity.family == "floor_finish_area"
+    assert quantity.value == 8.64
+    assert quantity.unit == "m2"
+    assert quantity.status == "firm"
+    assert quantity.input_entity_ids == (floors.floors[0].canonical_floor_id,)
+    assert quantity.metadata["finish_code"] == "FT1"
+    assert quantity.metadata["semantic_finish"] == "tile"
+    assert len(quantity.metadata["figured_dimension_ids"]) == 2
+
+    enriched = enrich_live_canonical_floor_finishes(floors, result)
+    assert enriched.floors[0].canonical_floor_id == floors.floors[0].canonical_floor_id
+    assert enriched.floors[0].finish_descriptor == "tile"
+    assert enriched.floors[0].commercial_quantity_authority is False
+    assert set(quantity.evidence_ids).issubset(enriched.floors[0].evidence_ids)
+
+
+def test_raw_material_code_without_authenticated_schedule_cannot_bind(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _payload(schedule_lines=("PT1 Dulux low sheen paint",))
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.records == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
+def test_confirmed_wall_tile_semantic_cannot_become_floor_finish(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _payload(schedule_lines=("FT1 Porcelain wall tile",))
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.records == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
+def test_two_valid_floor_finish_occurrences_inside_same_floor_fail_closed(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _payload(
+            detail_codes=("FT1", "FT2"),
+            schedule_lines=(
+                "FT1 Porcelain floor tile",
+                "FT2 Commercial vinyl flooring",
+            ),
+        )
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.reason_codes == (CROSS_VIEW_FLOOR_FINISH_CONFLICT,)
+    assert result.records == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
