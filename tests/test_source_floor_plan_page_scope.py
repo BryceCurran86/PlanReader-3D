@@ -284,6 +284,66 @@ def test_evidence_pages_keep_wall_scopes_but_receive_no_openings_or_obligations(
     assert evidence_scope.records
 
 
+
+def test_evidence_page_wall_scope_materializes_only_when_addressed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import pb_physical_wall_candidate_authority as wall_module
+
+    path = _two_plan_like_pages(tmp_path)
+    source = SourceVisibilityProducer(
+        producer_method="topology-scope-lazy-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="topology-scope-lazy",
+        source_bytes=path.read_bytes(),
+        source_locator="memory://topology-scope-lazy.pdf",
+        page_ids=("1", "2"),
+    )
+
+    original = wall_module._build_scope_result
+    built_pages: list[str] = []
+
+    def counted_build_scope_result(*args, **kwargs):
+        built_pages.append(str(kwargs["page_id"]))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        wall_module,
+        "_build_scope_result",
+        counted_build_scope_result,
+    )
+
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+        evidence_page_ids=("2",),
+    )
+    assert "1" in built_pages
+    assert "2" not in built_pages
+
+    snapshot = source.published_snapshot_for_revision(
+        published.revision.revision_id
+    )
+    selector = PhysicalWallCandidateSelector(
+        document_id=snapshot.revision.document_id,
+        revision_id=snapshot.revision.revision_id,
+        source_sha256=snapshot.revision.source_sha256,
+        snapshot_id=snapshot.snapshot.snapshot_id,
+        page_id="2",
+        decision_scope_id="wall-source:page-2",
+    )
+    first = composition.physical_wall_candidate_authority.resolve_scope(selector)
+    second = composition.physical_wall_candidate_authority.resolve_scope(selector)
+
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert first.records
+    assert second == first
+    assert built_pages.count("2") == 1
+
 def test_evidence_page_ids_that_overlap_topology_pages_are_ignored(tmp_path: Path) -> None:
     path = _two_plan_like_pages(tmp_path)
     source = SourceVisibilityProducer(producer_method="topology-scope-test", producer_version="1")
