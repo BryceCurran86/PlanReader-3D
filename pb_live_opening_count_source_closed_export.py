@@ -175,26 +175,33 @@ def build_live_opening_count_source_traces(
                 "opening-count aggregate trace requires member pages and viewports"
             )
 
-        aggregate_viewport_id = stable_contract_id(
-            "opening_count_spatial_scope",
-            {
-                "document_id": first.document_id,
-                "revision_id": first.revision_id,
-                "source_sha256": first.source_sha256,
-                "snapshot_id": first.snapshot_id,
-                "pages": pages,
-                "viewport_ids": viewports,
-                "physical_opening_ids": tuple(sorted(identities)),
-            },
-            digest_chars=24,
-        )
+        aggregate_scope = len(pages) > 1 or len(viewports) > 1
+        if aggregate_scope:
+            trace_viewport_id = stable_contract_id(
+                "opening_count_spatial_scope",
+                {
+                    "document_id": first.document_id,
+                    "revision_id": first.revision_id,
+                    "source_sha256": first.source_sha256,
+                    "snapshot_id": first.snapshot_id,
+                    "pages": pages,
+                    "viewport_ids": viewports,
+                    "physical_opening_ids": tuple(sorted(identities)),
+                },
+                digest_chars=24,
+            )
+            trace_source_page = "aggregate:" + ",".join(pages)
+        else:
+            trace_viewport_id = viewports[0]
+            trace_source_page = pages[0]
+
         trace = CommercialTakeoffSourceTrace(
             workspace_id=workspace_id,
             project_id=project_id,
             document_id=first.document_id,
             source_sha256=first.source_sha256,
-            source_page="aggregate:" + ",".join(pages),
-            viewport_id=aggregate_viewport_id,
+            source_page=trace_source_page,
+            viewport_id=trace_viewport_id,
             revision_id=first.revision_id,
             current_revision_id=first.revision_id,
             evidence_ids=tuple(quantity.evidence_ids),
@@ -203,7 +210,7 @@ def build_live_opening_count_source_traces(
                 "family": quantity.family,
                 "opening_mark": normalized_mark.tag,
                 "opening_family": metadata.get("opening_family"),
-                "aggregate_source_trace": True,
+                "aggregate_source_trace": aggregate_scope,
                 "member_pages": pages,
                 "member_viewport_ids": viewports,
                 "member_opening_ids": tuple(sorted(identities)),
