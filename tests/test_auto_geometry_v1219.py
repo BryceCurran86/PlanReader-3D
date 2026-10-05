@@ -9,6 +9,10 @@ from types import SimpleNamespace
 
 import pb_auto_geometry_v1219 as auto
 import pb_auto_geometry_guard_v1219 as guard
+from pb_takeoff_authority_v164 import (
+    ai_takeoff_authority,
+    takeoff_row_publishability,
+)
 
 
 class _DBApp:
@@ -285,11 +289,20 @@ class AutoGeometryV1219Tests(unittest.TestCase):
         self.assertEqual(named["unit"], "m²")
         self.assertEqual(named["quantity"], 13.270425)
         self.assertEqual(named["inclusion_status"], "PROVISIONAL")
+        self.assertIn("AI draft", named["notes"])
         self.assertTrue(
             named["source_reference"].startswith(
                 auto.SOURCE_PREFIX + " · ceiling_quantity:"
             )
         )
+        self.assertEqual(
+            ai_takeoff_authority(named),
+            (
+                False,
+                "AI draft has not been explicitly reviewed by an estimator",
+            ),
+        )
+        self.assertFalse(takeoff_row_publishability(named)[0])
         auto._validate_auto_rows(rows, 7)
 
     def test_ceiling_review_candidate_rejects_reviewed_or_wrong_workspace_rows(self):
