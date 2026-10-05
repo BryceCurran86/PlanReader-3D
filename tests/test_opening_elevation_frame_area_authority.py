@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from types import SimpleNamespace
 
 import fitz
 import pytest
@@ -16,6 +17,7 @@ from pb_opening_elevation_frame_area_authority import (
     OPENING_ELEVATION_FRAME_AREA_UNAVAILABLE,
     OpeningElevationFrameAreaProducer,
     OpeningElevationFrameAreaSelector,
+    _dimension_is_mixed_opening_assembly_span,
     opening_elevation_claim_family,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -195,6 +197,146 @@ def test_opening_elevation_claim_family_rejects_nonopening_or_mixed_titles() -> 
     assert (
         opening_elevation_claim_family(("WINDOW", "DOOR", "ELEVATIONS"))
         is None
+    )
+
+
+def _dim_item(
+    dimension_id: str,
+    axis_name: str,
+    lo: float,
+    hi: float,
+    line: float,
+):
+    endpoints = (
+        ((lo, line), (hi, line))
+        if axis_name == "x"
+        else ((line, lo), (line, hi))
+    )
+    return (
+        SimpleNamespace(dimension_id=dimension_id),
+        SimpleNamespace(endpoints=endpoints),
+        1000.0,
+        (axis_name, lo, hi),
+        SimpleNamespace(),
+    )
+
+
+def _tag(mark: str, kind: str, x: float, y: float):
+    return (
+        SimpleNamespace(bbox=(x - 1.0, y - 1.0, x + 1.0, y + 1.0)),
+        mark,
+        kind,
+    )
+
+
+def test_partitioned_overall_dimension_with_adjacent_other_kind_is_composite() -> None:
+    overall = _dim_item("overall", "x", 0.0, 100.0, -10.0)
+    dimensions = (
+        overall,
+        _dim_item("part-a", "x", 0.0, 30.0, -20.0),
+        _dim_item("part-b", "x", 30.0, 70.0, -20.0),
+        _dim_item("part-c", "x", 70.0, 100.0, -20.0),
+    )
+
+    assert _dimension_is_mixed_opening_assembly_span(
+        selected_item=overall,
+        dimensions=dimensions,
+        all_tags=(
+            _tag("W1", "window", 50.0, 5.0),
+            _tag("D1", "door", 50.0, 30.0),
+        ),
+        mark="W1",
+        mark_kind="window",
+        frame_bbox=(0.0, 0.0, 100.0, 10.0),
+        locality_limit=20.0,
+        tolerance=1.0,
+    )
+
+
+def test_shared_height_with_adjacent_door_is_not_composite_without_partition() -> None:
+    overall = _dim_item("height", "x", 0.0, 100.0, -10.0)
+
+    assert not _dimension_is_mixed_opening_assembly_span(
+        selected_item=overall,
+        dimensions=(overall,),
+        all_tags=(
+            _tag("W1", "window", 50.0, 5.0),
+            _tag("D1", "door", 50.0, 30.0),
+        ),
+        mark="W1",
+        mark_kind="window",
+        frame_bbox=(0.0, 0.0, 100.0, 10.0),
+        locality_limit=20.0,
+        tolerance=1.0,
+    )
+
+
+def test_same_kind_panel_partition_does_not_become_mixed_opening_assembly() -> None:
+    overall = _dim_item("overall", "x", 0.0, 100.0, -10.0)
+    dimensions = (
+        overall,
+        _dim_item("part-a", "x", 0.0, 50.0, -20.0),
+        _dim_item("part-b", "x", 50.0, 100.0, -20.0),
+    )
+
+    assert not _dimension_is_mixed_opening_assembly_span(
+        selected_item=overall,
+        dimensions=dimensions,
+        all_tags=(
+            _tag("W1", "window", 25.0, 5.0),
+            _tag("W2", "window", 75.0, 30.0),
+        ),
+        mark="W1",
+        mark_kind="window",
+        frame_bbox=(0.0, 0.0, 100.0, 10.0),
+        locality_limit=20.0,
+        tolerance=1.0,
+    )
+
+
+def test_incomplete_subdimension_chain_cannot_reject_opening() -> None:
+    overall = _dim_item("overall", "x", 0.0, 100.0, -10.0)
+    dimensions = (
+        overall,
+        _dim_item("part-a", "x", 0.0, 30.0, -20.0),
+        _dim_item("part-b", "x", 30.0, 60.0, -20.0),
+    )
+
+    assert not _dimension_is_mixed_opening_assembly_span(
+        selected_item=overall,
+        dimensions=dimensions,
+        all_tags=(
+            _tag("W1", "window", 50.0, 5.0),
+            _tag("D1", "door", 50.0, 30.0),
+        ),
+        mark="W1",
+        mark_kind="window",
+        frame_bbox=(0.0, 0.0, 100.0, 10.0),
+        locality_limit=20.0,
+        tolerance=1.0,
+    )
+
+
+def test_partitioned_span_with_far_other_kind_is_not_local_composite() -> None:
+    overall = _dim_item("overall", "x", 0.0, 100.0, -10.0)
+    dimensions = (
+        overall,
+        _dim_item("part-a", "x", 0.0, 50.0, -20.0),
+        _dim_item("part-b", "x", 50.0, 100.0, -20.0),
+    )
+
+    assert not _dimension_is_mixed_opening_assembly_span(
+        selected_item=overall,
+        dimensions=dimensions,
+        all_tags=(
+            _tag("W1", "window", 50.0, 5.0),
+            _tag("D1", "door", 50.0, 100.0),
+        ),
+        mark="W1",
+        mark_kind="window",
+        frame_bbox=(0.0, 0.0, 100.0, 10.0),
+        locality_limit=20.0,
+        tolerance=1.0,
     )
 
 
