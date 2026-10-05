@@ -8,7 +8,10 @@ from pathlib import Path
 import sys
 
 if __package__:
-    from .development_scoreboard import evaluate_development_suite_v2
+    from .development_scoreboard import (
+        build_development_failure_ledger_v2,
+        evaluate_development_suite_v2,
+    )
     from .manifest_io import load_produced_items, load_suite_manifests
     from .sealed_reconciliation import (
         identity_map_from_dict,
@@ -18,6 +21,7 @@ else:
     repo_root = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(repo_root))
     from benchmarks.frozen_holdout.full_plan_v2.development_scoreboard import (
+        build_development_failure_ledger_v2,
         evaluate_development_suite_v2,
     )
     from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
@@ -69,6 +73,15 @@ def main() -> int:
         ),
     )
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--failure-ledger-output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional JSON path for exact per-object failure states and "
+            "unsupported outputs. This is reporting only and does not change scoring."
+        ),
+    )
     args = parser.parse_args()
 
     if args.sealed_dir is not None and args.identity_map_dir is None:
@@ -113,6 +126,13 @@ def main() -> int:
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
+
+    if args.failure_ledger_output is not None:
+        ledger = build_development_failure_ledger_v2(manifests, produced)
+        ledger_text = json.dumps(asdict(ledger), indent=2, sort_keys=True) + "\n"
+        args.failure_ledger_output.parent.mkdir(parents=True, exist_ok=True)
+        args.failure_ledger_output.write_text(ledger_text, encoding="utf-8")
+
     print(text, end="")
     return 0 if result.development_accuracy is not None else 2
 
