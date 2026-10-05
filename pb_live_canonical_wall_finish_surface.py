@@ -21,7 +21,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_wall_finish_face_binding_authority import WallFinishFaceBindingRecord
 
 
-LIVE_CANONICAL_WALL_FINISH_SURFACE_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_WALL_FINISH_SURFACE_SCHEMA_VERSION = "1.1.0"
 LIVE_CANONICAL_WALL_FINISH_SURFACE_RESOLVED = (
     "live_canonical_wall_finish_surface_resolved"
 )
@@ -67,6 +67,7 @@ def _positive(value: object) -> Optional[float]:
 @dataclass(frozen=True)
 class LiveCanonicalWallFinishSurfaceObject:
     canonical_surface_id: str
+    physical_surface_id: str
     canonical_wall_id: str
     physical_wall_id: str
     physical_face_id: str
@@ -97,6 +98,7 @@ class LiveCanonicalWallFinishSurfaceObject:
     def to_dict(self) -> dict:
         return {
             "canonical_surface_id": self.canonical_surface_id,
+            "physical_surface_id": self.physical_surface_id,
             "canonical_wall_id": self.canonical_wall_id,
             "physical_wall_id": self.physical_wall_id,
             "physical_face_id": self.physical_face_id,
@@ -253,17 +255,20 @@ def project_wall_finish_bindings(
         finish_material = next(iter(materials))
         physical_face_role = next(iter(roles))
         canonical_wall_id = _clean(wall.get("canonical_wall_id"))
-        canonical_surface_id = stable_contract_id(
-            "live_canonical_wall_finish_surface",
+        physical_surface_id = stable_contract_id(
+            "physical_wall_finish_surface",
             {
-                "source_sha256": _clean(wall.get("source_sha256")),
-                "canonical_wall_id": canonical_wall_id,
+                "document_id": _clean(group[0].document_id),
+                "physical_wall_id": physical_wall_id,
                 "physical_face_id": physical_face_id,
                 "trade_scope_id": trade_scope_id,
-                "finish_material": finish_material,
             },
             digest_chars=32,
         )
+        # Canonical identity follows the physical finish-surface identity.
+        # Revision/SHA/evidence/material are mutable semantic state, not the
+        # identity of the already-proven wall face/trade surface.
+        canonical_surface_id = physical_surface_id
         host_quantity_complete = wall.get("quantity_complete") is True
         host_net_area_m2 = (
             _positive(wall.get("net_area_m2"))
@@ -284,6 +289,7 @@ def project_wall_finish_bindings(
         output.append(
             LiveCanonicalWallFinishSurfaceObject(
                 canonical_surface_id=canonical_surface_id,
+                physical_surface_id=physical_surface_id,
                 canonical_wall_id=canonical_wall_id,
                 physical_wall_id=physical_wall_id,
                 physical_face_id=physical_face_id,
