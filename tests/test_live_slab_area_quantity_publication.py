@@ -31,6 +31,7 @@ def test_resolved_canonical_slab_publishes_identity_bound_area_quantity():
     assert quantity.input_entity_ids == (result.object.physical_slab_id,)
     assert quantity.authority == LIVE_SLAB_AREA_QUANTITY_AUTHORITY
     assert quantity.status == "corroborated"
+    assert quantity.metadata["commercial_projection_allowed"] is False
     assert result.object.boundary_id in quantity.evidence_ids
 
 
