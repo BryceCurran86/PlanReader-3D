@@ -1,0 +1,29 @@
+name: Temporary Current Main Export 2
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/temp-current-main-export-2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Record checked out SHA
+        run: git rev-parse HEAD | tee CURRENT_EXPORT_SHA.txt
+      - name: Package repository
+        run: git archive --format=tar.gz -o planreader-current-main-export.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-current-main-export-2
+          path: |
+            planreader-current-main-export.tar.gz
+            CURRENT_EXPORT_SHA.txt
+          if-no-files-found: error
+          retention-days: 1
