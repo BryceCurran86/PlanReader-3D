@@ -208,6 +208,8 @@ def compose_live_canonical_floor_surfaces(
 def _valid_metric_area_quantity(
     floor: LiveCanonicalFloorSurfaceObject,
     quantity,
+    *,
+    source_room_entity,
 ) -> bool:
     if quantity.abstained:
         return False
@@ -217,7 +219,21 @@ def _valid_metric_area_quantity(
         return False
     if str(quantity.unit or "").lower() not in {"m2", "m²"}:
         return False
-    if tuple(quantity.input_entity_ids or ()) != (floor.room_entity_id,):
+    source_room_id = str(source_room_entity.candidate_entity_id or "").strip()
+    if not source_room_id:
+        return False
+    if tuple(quantity.input_entity_ids or ()) != (source_room_id,):
+        return False
+    if floor.source_room_face_record_id not in tuple(
+        str(value) for value in (source_room_entity.evidence_ids or ())
+    ):
+        return False
+    source_metadata = dict(source_room_entity.metadata or {})
+    if str(source_metadata.get("source_sha256") or "").lower() != floor.source_sha256.lower():
+        return False
+    if str(source_metadata.get("revision_id") or "") != floor.revision_id:
+        return False
+    if str(source_metadata.get("page_id") or "") != str(floor.page_id):
         return False
     if not str(quantity.quantity_id or "").strip():
         return False
@@ -239,7 +255,9 @@ def _valid_metric_area_quantity(
     quantity_evidence_ids = tuple(str(value) for value in (quantity.evidence_ids or ()))
     if not quantity_evidence_ids:
         return False
-    if not set(quantity_evidence_ids).issubset(set(floor.evidence_ids)):
+    if not set(quantity_evidence_ids).issubset(
+        {str(value) for value in (source_room_entity.evidence_ids or ())}
+    ):
         return False
     return True
 
@@ -270,14 +288,32 @@ def enrich_live_canonical_floor_metric_areas(
         if len(room_ids) == 1:
             quantities_by_room.setdefault(room_ids[0], []).append(quantity)
 
+    source_entities_by_face_record: dict[str, list] = {}
+    for entity in room_area_bridge.entities:
+        for evidence_id in tuple(str(value) for value in (entity.evidence_ids or ())):
+            source_entities_by_face_record.setdefault(evidence_id, []).append(entity)
+
     enriched: list[LiveCanonicalFloorSurfaceObject] = []
     resolved_count = 0
     conflict = False
     for floor in floor_composition.floors:
+        source_entities = source_entities_by_face_record.get(
+            floor.source_room_face_record_id,
+            (),
+        )
+        if len(source_entities) != 1:
+            enriched.append(floor)
+            continue
+        source_room_entity = source_entities[0]
+        source_room_id = str(source_room_entity.candidate_entity_id or "").strip()
         candidates = [
             quantity
-            for quantity in quantities_by_room.get(floor.room_entity_id, ())
-            if _valid_metric_area_quantity(floor, quantity)
+            for quantity in quantities_by_room.get(source_room_id, ())
+            if _valid_metric_area_quantity(
+                floor,
+                quantity,
+                source_room_entity=source_room_entity,
+            )
         ]
         if len(candidates) > 1:
             conflict = True

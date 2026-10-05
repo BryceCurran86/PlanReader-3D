@@ -80,10 +80,17 @@ def _derived_document(
     document: DocumentEvidence,
     *,
     room_index: OwnedTopologyRoomIndex,
+    explicit_area_evidence_by_room_id: Optional[Mapping[str, EvidenceAtom]] = None,
 ) -> DocumentEvidence:
     evidence_ids = set(document.evidence_ids)
     for room in room_index.rooms():
         evidence_ids.update(room.evidence)
+        explicit = (explicit_area_evidence_by_room_id or {}).get(room.room_ref)
+        if (
+            type(explicit) is EvidenceAtom
+            and explicit.document_id == document.document_id
+        ):
+            evidence_ids.add(explicit.evidence_id)
     metadata = dict(document.metadata or {})
     metadata.update(
         {
@@ -196,12 +203,36 @@ def build_source_room_area_bridge(
             quantities=(),
         )
 
-    owned_document = _derived_document(document, room_index=room_index)
+    explicit_area_evidence = dict(explicit_area_evidence_by_room_id or {})
+    owned_document = _derived_document(
+        document,
+        room_index=room_index,
+        explicit_area_evidence_by_room_id=explicit_area_evidence,
+    )
     entities = tuple(
         EntityEvidence(
             candidate_entity_id=room.room_ref,
             candidate_type="room",
-            evidence_ids=tuple(room.evidence),
+            evidence_ids=tuple(
+                dict.fromkeys(
+                    (
+                        *tuple(room.evidence),
+                        *(
+                            (
+                                explicit_area_evidence[room.room_ref].evidence_id,
+                            )
+                            if (
+                                room.room_ref in explicit_area_evidence
+                                and type(explicit_area_evidence[room.room_ref])
+                                is EvidenceAtom
+                                and explicit_area_evidence[room.room_ref].document_id
+                                == document.document_id
+                            )
+                            else ()
+                        ),
+                    )
+                )
+            ),
             status=EvidenceResolutionStatus.CORROBORATED,
             confidence=float(room.geometry_confidence),
             reason_codes=(SOURCE_ROOM_AREA_ENTITY_BOUND,),
@@ -230,9 +261,7 @@ def build_source_room_area_bridge(
         page_no=page_no,
         scale_calibration=scale_calibration,
         explicit_area_evidence_by_room_id=(
-            None
-            if explicit_area_evidence_by_room_id is None
-            else dict(explicit_area_evidence_by_room_id)
+            None if not explicit_area_evidence else explicit_area_evidence
         ),
     )
 

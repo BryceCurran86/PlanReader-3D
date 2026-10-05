@@ -9,6 +9,7 @@ import fitz
 from pb_geometry_takeoff_model import AuthorityStatus
 from pb_migration_contracts import (
     DocumentEvidence,
+    EvidenceAtom,
     EvidenceResolutionStatus,
     ViewportEvidence,
     ViewportResolutionStatus,
@@ -232,6 +233,119 @@ def test_missing_scale_keeps_room_identity_but_blocks_metric_area(tmp_path: Path
         "no_authoritative_area_input" in quantity.blocking_reasons
         for quantity in result.quantities
     )
+
+
+def _explicit_area(published, *, evidence_id: str, value: float, document_id: str | None = None) -> EvidenceAtom:
+    return EvidenceAtom(
+        evidence_id=evidence_id,
+        document_id=document_id or published.revision.document_id,
+        page_id="1",
+        viewport_id="vp-source-room-area",
+        kind="explicit_room_area",
+        method="authenticated_cross_view_figured_dimensions",
+        raw_text="derived from authenticated orthogonal dimensions",
+        normalized_value=value,
+        unit="m2",
+        confidence=1.0,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("authenticated_cross_view_room_area",),
+    )
+
+
+def test_explicit_area_evidence_resolves_without_scale_and_is_owned_by_one_room(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "two-room-explicit-area.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+
+    baseline = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=None,
+    )
+    assert baseline.room_index is not None
+    room_ids = [room.room_ref for room in baseline.room_index.rooms()]
+    assert len(room_ids) == 2
+
+    target_room = room_ids[0]
+    evidence = _explicit_area(
+        published,
+        evidence_id="area-cross-view-1",
+        value=13.25,
+    )
+    result = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=None,
+        explicit_area_evidence_by_room_id={target_room: evidence},
+    )
+
+    quantities = {q.input_entity_ids[0]: q for q in result.quantities}
+    assert quantities[target_room].abstained is False
+    assert quantities[target_room].value == 13.25
+    assert quantities[target_room].formula == "authoritative_explicit_area"
+    assert evidence.evidence_id in quantities[target_room].evidence_ids
+
+    other_room = next(room_id for room_id in room_ids if room_id != target_room)
+    assert quantities[other_room].abstained is True
+    assert "no_authoritative_area_input" in quantities[other_room].blocking_reasons
+
+    entities = {entity.candidate_entity_id: entity for entity in result.entities}
+    assert evidence.evidence_id in entities[target_room].evidence_ids
+    assert evidence.evidence_id not in entities[other_room].evidence_ids
+    assert evidence.evidence_id in result.document.evidence_ids
+
+
+def test_wrong_document_explicit_area_stays_unowned_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "two-room-explicit-area-wrong-doc.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+
+    baseline = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+    )
+    assert baseline.room_index is not None
+    target_room = baseline.room_index.rooms()[0].room_ref
+    evidence = _explicit_area(
+        published,
+        evidence_id="area-cross-view-wrong-doc",
+        value=11.0,
+        document_id="other-document",
+    )
+
+    result = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        explicit_area_evidence_by_room_id={target_room: evidence},
+    )
+
+    quantity = next(q for q in result.quantities if q.input_entity_ids == (target_room,))
+    assert quantity.abstained is True
+    assert "explicit_area_evidence_not_owned_by_document" in quantity.blocking_reasons
+    assert "explicit_area_evidence_not_owned_by_entity" in quantity.blocking_reasons
+    assert evidence.evidence_id not in result.document.evidence_ids
+    entity = next(e for e in result.entities if e.candidate_entity_id == target_room)
+    assert evidence.evidence_id not in entity.evidence_ids
 
 
 def test_document_identity_mismatch_fails_before_entity_minting(tmp_path: Path) -> None:
