@@ -237,6 +237,17 @@ def compose_live_canonical_rooms(
     authority = build_source_room_face_authority(
         wall_opening_composition.physical_wall_candidate_authority
     )
+    try:
+        page_label_authority = SourceRoomLabelProducer.from_authorities(
+            source_visibility_producer,
+            authority,
+            page_ids=tuple(wall_opening_composition.page_ids),
+        ).authority()
+    except Exception:
+        # Room labels are semantic annotation only. A label-authority failure
+        # must never destroy already-proven room geometry.
+        page_label_authority = None
+
     rooms: list[LiveCanonicalRoomObject] = []
     reasons: list[str] = []
     resolved_pages: set[int] = set()
@@ -265,12 +276,29 @@ def compose_live_canonical_rooms(
                     resolved_pages.add(int(page_id))
                 else:
                     reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+            label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
+            if page_label_authority is not None:
+                label_result = page_label_authority.resolve_scope(
+                    SourceRoomLabelSelector(
+                        document_id=selector.document_id,
+                        revision_id=selector.revision_id,
+                        source_sha256=selector.source_sha256,
+                        snapshot_id=selector.snapshot_id,
+                        page_id=selector.page_id,
+                        decision_scope_id=selector.decision_scope_id,
+                    )
+                )
+                label_records_by_face = {
+                    str(label.face_id): label for label in label_result.records
+                }
+
             rooms.extend(
                 _room_object_from_record(
                     record,
                     viewport_id=None,
                     canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
                     unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
+                    room_label_record=label_records_by_face.get(str(record.face_id)),
                 )
                 for record in result.records
             )
@@ -306,6 +334,15 @@ def compose_live_canonical_rooms(
             viewport_room_authority = build_source_room_face_authority(
                 viewport_wall_authority
             )
+            try:
+                viewport_label_authority = SourceRoomLabelProducer.from_authorities(
+                    source_visibility_producer,
+                    viewport_room_authority,
+                    page_ids=tuple(unresolved_pages),
+                ).authority()
+            except Exception:
+                viewport_label_authority = None
+
             for page_id in unresolved_pages:
                 selectors = (
                     viewport_wall_authority.selectors_for_authenticated_viewports(
@@ -346,12 +383,30 @@ def compose_live_canonical_rooms(
                         reasons.extend(room_result.reason_codes)
                         continue
 
+                    label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
+                    if viewport_label_authority is not None:
+                        label_result = viewport_label_authority.resolve_scope(
+                            SourceRoomLabelSelector(
+                                document_id=wall_selector.document_id,
+                                revision_id=wall_selector.revision_id,
+                                source_sha256=wall_selector.source_sha256,
+                                snapshot_id=wall_selector.snapshot_id,
+                                page_id=wall_selector.page_id,
+                                decision_scope_id=wall_selector.decision_scope_id,
+                            )
+                        )
+                        label_records_by_face = {
+                            str(label.face_id): label
+                            for label in label_result.records
+                        }
+
                     rooms.extend(
                         _room_object_from_record(
                             record,
                             viewport_id=wall_scope.viewport_id,
                             canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
                             unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
+                            room_label_record=label_records_by_face.get(str(record.face_id)),
                         )
                         for record in room_result.records
                     )
