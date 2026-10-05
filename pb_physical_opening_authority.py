@@ -2787,6 +2787,48 @@ class PhysicalOpeningAuthority:
         physical_geometry = _physical_opening_geometry_identity(candidate, records)
         if not physical_geometry:
             return cache_visible(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(PHYSICAL_OPENING_IDENTITY_UNRESOLVED,),
+                source_observation=source_result,
+                candidate=candidate,
+                missing_upstream_capability=AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE,
+            ))
+        # Physical identity is source geometry, not evidence implementation.
+        # snapshot_id, observation ids, lineage ids and producer version remain
+        # on the record below as provenance and integrity evidence, but cannot
+        # rename unchanged physical geometry across producer revisions.
+        record_payload = {
+            "document_id": candidate.document_id,
+            "revision_id": candidate.revision_id,
+            "source_sha256": candidate.source_sha256,
+            "page_id": candidate.page_id,
+            "semantic_class": "opening",
+            "source_geometry": physical_geometry,
+        }
+        existence = PhysicalOpeningExistenceRecord(
+            record_id=stable_contract_id("physical_opening_existence", record_payload, digest_chars=32),
+            source_observation_ids=candidate.source_observation_ids,
+            source_lineage_root_ids=candidate.source_lineage_root_ids,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            semantic_class="opening",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            structural_pattern=candidate.structural_pattern,
+            diagnostic_confidence=1.0,
+            blocking_reasons=(),
+            structural_reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
+            producer_method=source_result.snapshot.producer_method,
+            producer_version=source_result.snapshot.producer_version,
+            producer_generation=source_result.snapshot.producer_generation,
+        )
+        return cache_visible(PhysicalOpeningExistenceResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
             physical_opening_existence=PHYSICAL_OPENING_EXISTS,
