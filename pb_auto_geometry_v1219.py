@@ -1046,6 +1046,14 @@ def _try_physical_net_wall_rows(
         app._live_room_area_takeoff_rows_by_workspace = room_area_rows_by_workspace
     room_area_rows_by_workspace[int(workspace_id)] = []
 
+    ceiling_rows_by_workspace = getattr(
+        app, "_live_ceiling_takeoff_rows_by_workspace", None
+    )
+    if not isinstance(ceiling_rows_by_workspace, dict):
+        ceiling_rows_by_workspace = {}
+        app._live_ceiling_takeoff_rows_by_workspace = ceiling_rows_by_workspace
+    ceiling_rows_by_workspace[int(workspace_id)] = []
+
     seen_opening_quantity_ids: set[str] = set()
 
     def opening_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
@@ -1168,7 +1176,7 @@ def _try_physical_net_wall_rows(
         return rows
 
     def room_area_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
-        """Project only source-closed figured room areas into AI review rows."""
+        """Project only source-closed room areas into AI review rows."""
         from pb_live_room_area_customer_projection import (
             project_live_room_area_customer_rows,
         )
@@ -1214,6 +1222,76 @@ def _try_physical_net_wall_rows(
                     confidence="Documented",
                     notes=str(item.get("notes") or ""),
                     row_role="floor_area",
+                    unit=unit,
+                    preserve_quantity=True,
+                )
+            )
+        return rows
+
+    def ceiling_rows_for_source(
+        source_path: Path,
+        claim_pages: Sequence[int],
+        claim: Any,
+    ) -> List[Tuple[Any, ...]]:
+        """Project only explicit ceiling-review promotions into customer rows."""
+        from pb_ceiling_lining_review_promotion import (
+            collect_ceiling_lining_review_candidates,
+        )
+
+        candidates = collect_ceiling_lining_review_candidates(
+            source_path,
+            pages=tuple(claim_pages),
+            workspace_id=int(workspace_id),
+            project_id=f"customer-workspace:{int(workspace_id)}",
+            authoritative_area_quantities=tuple(
+                getattr(claim, "room_area_quantity_evidence", ())
+            ),
+        )
+        rows: List[Tuple[Any, ...]] = []
+        for candidate in candidates:
+            item = dict(candidate.review_row)
+            if (
+                str(item.get("origin") or "") != "AI"
+                or str(item.get("quantity_status") or "") != "To review"
+                or str(item.get("row_role") or "") != "ceiling_area"
+            ):
+                raise ValueError(
+                    "ceiling promotion bypassed customer review state"
+                )
+            required = {
+                name: str(item.get(name) or "").strip()
+                for name in ("section", "element", "location", "substrate")
+            }
+            if not all(required.values()):
+                raise ValueError(
+                    "ceiling promotion is missing customer row identity"
+                )
+            quantity_id = str(item.get("quantity_id") or "").strip()
+            if not quantity_id:
+                raise ValueError(
+                    "ceiling promotion is missing quantity identity"
+                )
+            unit = str(item.get("unit") or "").strip().lower()
+            if unit == "m2":
+                unit = "m²"
+            rows.append(
+                _takeoff_row(
+                    workspace_id=int(workspace_id),
+                    section=required["section"],
+                    element=required["element"],
+                    location=required["location"],
+                    substrate=required["substrate"],
+                    quantity=float(item["quantity"]),
+                    status="To review",
+                    source_page=str(
+                        item.get("source_page") or "Selected PDF pages"
+                    ),
+                    source_reference=(
+                        f"{SOURCE_PREFIX} · ceiling_quantity:{quantity_id}"
+                    ),
+                    confidence="Documented",
+                    notes=str(item.get("notes") or ""),
+                    row_role="ceiling_area",
                     unit=unit,
                     preserve_quantity=True,
                 )
@@ -1375,6 +1453,21 @@ def _try_physical_net_wall_rows(
                 current_coverage["family_gaps"].setdefault("floor", []).append(
                     "live_room_area_customer_projection_failed:"
                     f"{type(room_output_exc).__name__}"
+                )
+            try:
+                ceiling_rows_by_workspace[int(workspace_id)].extend(
+                    ceiling_rows_for_source(
+                        group["path"],
+                        claim_pages,
+                        claim,
+                    )
+                )
+            except Exception as ceiling_output_exc:
+                current_coverage["family_gaps"].setdefault(
+                    "ceiling", []
+                ).append(
+                    "live_ceiling_customer_projection_failed:"
+                    f"{type(ceiling_output_exc).__name__}"
                 )
             status_val = getattr(claim.status, "value", str(claim.status))
             source_report.update(status=status_val, quantity_id=claim.quantity_id,
@@ -1924,11 +2017,17 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             int(workspace_id), ()
         )
     )
+    ceiling_rows = list(
+        getattr(app, "_live_ceiling_takeoff_rows_by_workspace", {}).get(
+            int(workspace_id), ()
+        )
+    )
     all_auto_rows = (
         unit_rows
         + facade_rows
         + opening_rows
         + room_area_rows
+        + ceiling_rows
         + partition_rows
         + finish_rows
     )
@@ -2043,6 +2142,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "partitions": partitions, "finishes": finishes,
             "opening_takeoff_rows": len(opening_rows),
             "room_area_takeoff_rows": len(room_area_rows),
+            "ceiling_takeoff_rows": len(ceiling_rows),
             "preserved_source_closed_rows": len(preserved_source_closed_rows),
             "retained_reviewed_source_closed_rows": len(
                 retained_reviewed_source_closed_row_ids
