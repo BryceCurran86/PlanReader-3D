@@ -293,12 +293,12 @@ def test_local_host_scope_abstains_when_excluded_boundary_primitive_can_host() -
         PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
     ],
 )
-def test_local_host_scope_never_inherits_identity_through_tainted_candidate(
+def test_nonhost_tainted_equivalence_cannot_poison_clean_local_host(
     classification,
 ) -> None:
     host_records = _band_records(center_offset=0.0)
     relevant_id = host_records[0].wall_candidate_id
-    unsafe = _record("unsafe-equivalent", ((200.0, 80.0), (260.0, 80.0)))
+    unsafe = _record("unsafe-nonhost", ((200.0, 80.0), (260.0, 80.0)))
     records = host_records + (unsafe,)
     base = _equivalence(records)
     equivalence_groups = (
@@ -336,9 +336,23 @@ def test_local_host_scope_never_inherits_identity_through_tainted_candidate(
 
     local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
 
-    assert local is None
-    assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
-    assert "host_relevant_equivalence_crosses_unsafe_boundary" in reasons
+    assert local is not None
+    assert reasons == (host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,)
+    assert unsafe.wall_candidate_id not in {
+        record.wall_candidate_id for record in local.records
+    }
+    assert all(
+        unsafe.wall_candidate_id not in pair[:2]
+        for pair in local.equivalence.pair_classifications
+    )
+    assert unsafe.wall_candidate_id not in local.equivalence.ambiguous_wall_ids
+    resolved = host._resolve_host_bands(
+        local.records,
+        OPENING,
+        local.equivalence,
+    )
+    assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(resolved.bands) == 1
 
 
 def test_unique_off_center_parallel_band_cannot_corrobate_host() -> None:
