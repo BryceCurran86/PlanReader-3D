@@ -1968,10 +1968,26 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     if blocked_claim_keys:
         from pb_takeoff_output_supersedence import (
             select_prior_commercial_rows_to_preserve,
+            select_prior_reviewed_row_ids_to_retain,
         )
 
+        table_info = app.lquery("PRAGMA table_info(takeoff_rows)")
+        available_columns = {
+            str(row.get("name") or "").strip()
+            for row in table_info
+            if str(row.get("name") or "").strip()
+        }
+        optional_columns = tuple(
+            name
+            for name in (
+                *takeoff_contract.COMMERCIAL_AUTHORITY_FIELDS,
+                *takeoff_contract.PROVENANCE_FIELDS,
+            )
+            if name in available_columns
+        )
+        selected_columns = ("id", *TAKEOFF_ROW_FIELDS, *optional_columns)
         prior_rows = app.lquery(
-            f"""SELECT {','.join(TAKEOFF_ROW_FIELDS)}
+            f"""SELECT {','.join(selected_columns)}
                 FROM takeoff_rows
                 WHERE workspace_id=? AND source_reference LIKE ?
                 ORDER BY id""",
@@ -1981,10 +1997,18 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             dict(zip(TAKEOFF_ROW_FIELDS, row))
             for row in all_auto_rows
         ]
+        prior_named_rows = [dict(row) for row in prior_rows]
         preserved = select_prior_commercial_rows_to_preserve(
-            [dict(row) for row in prior_rows],
+            prior_named_rows,
             blocked_claim_keys=blocked_claim_keys,
             replacement_rows=replacement_rows,
+        )
+        retained_reviewed_source_closed_row_ids = (
+            select_prior_reviewed_row_ids_to_retain(
+                prior_named_rows,
+                blocked_claim_keys=blocked_claim_keys,
+                replacement_rows=replacement_rows,
+            )
         )
         preserved_source_closed_rows = [
             takeoff_contract.values_from_mapping(row, TAKEOFF_ROW_FIELDS)
@@ -1993,7 +2017,12 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         all_auto_rows = all_auto_rows + preserved_source_closed_rows
 
     # Rows, envelope and report are one publication: all commit or none do.
-    with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
+    with _auto_publication(
+        app,
+        int(workspace_id),
+        all_auto_rows,
+        preserve_row_ids=retained_reviewed_source_closed_row_ids,
+    ) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
         coverage_lifecycle = _runtime_coverage_lifecycle_report(
             publication,
