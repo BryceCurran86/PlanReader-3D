@@ -18,7 +18,11 @@ from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateRecord,
 )
-from pb_physical_wall_identity import PhysicalWallEquivalenceResolution, PhysicalWallIdentity
+from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
+    PhysicalWallEquivalenceResolution,
+    PhysicalWallIdentity,
+)
 from pb_source_observation_authority import SourceObservationProducer
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
@@ -316,3 +320,142 @@ def test_generic_gap_host_conflicts_when_one_source_role_has_multiple_unproved_o
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.bands == ()
     assert host.HOST_GAP_LINEAGE_AMBIGUOUS in result.reason_codes
+
+
+def _spanning_face_records(
+    *,
+    top_offset: float = -5.0,
+    bottom_offset: float = 5.0,
+) -> tuple[PhysicalWallCandidateRecord, ...]:
+    return (
+        _record(
+            f"spanning-top:{top_offset}",
+            ((-100.0, top_offset), (140.0, top_offset)),
+        ),
+        _record(
+            f"spanning-bottom:{bottom_offset}",
+            ((-100.0, bottom_offset), (140.0, bottom_offset)),
+        ),
+    )
+
+
+def test_raster_spanning_face_band_is_explicit_opt_in_only() -> None:
+    records = _spanning_face_records()
+    equivalence = _equivalence(records)
+
+    historical = host._resolve_host_bands(
+        records,
+        OPENING,
+        equivalence,
+    )
+    assert historical.status is EvidenceResolutionStatus.CORROBORATED
+    assert historical.bands == ()
+
+    raster = host._resolve_host_bands(
+        records,
+        OPENING,
+        equivalence,
+        allow_spanning_face_band=True,
+    )
+    assert raster.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(raster.bands) == 1
+    assert set(raster.bands[0].member_ids) == {
+        record.wall_candidate_id for record in records
+    }
+    assert abs(raster.bands[0].center_offset) <= 1e-9
+
+
+def test_raster_spanning_face_band_must_match_sealed_wall_thickness() -> None:
+    records = _spanning_face_records(
+        top_offset=-7.0,
+        bottom_offset=7.0,
+    )
+    result = host._resolve_host_bands(
+        records,
+        OPENING,
+        _equivalence(records),
+        allow_spanning_face_band=True,
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.bands == ()
+
+
+def test_raster_spanning_face_band_must_remain_centered_on_aperture() -> None:
+    records = _spanning_face_records(
+        top_offset=15.0,
+        bottom_offset=25.0,
+    )
+    result = host._resolve_host_bands(
+        records,
+        OPENING,
+        _equivalence(records),
+        allow_spanning_face_band=True,
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.bands == ()
+    assert host.HOST_BAND_CENTER_MISMATCH in result.reason_codes
+
+
+def test_raster_spanning_face_band_preserves_equivalence_ambiguity() -> None:
+    top_a = _record("span-top-a", ((-100.0, -5.0), (140.0, -5.0)))
+    top_b = _record("span-top-b", ((-100.0, -5.0), (140.0, -5.0)))
+    bottom = _record("span-bottom", ((-100.0, 5.0), (140.0, 5.0)))
+    records = (top_a, top_b, bottom)
+    base = _equivalence(records)
+    pair = tuple(sorted((top_a.wall_candidate_id, top_b.wall_candidate_id)))
+    equivalence = replace(
+        base,
+        ambiguous_wall_ids=pair,
+        pair_classifications=(
+            (
+                pair[0],
+                pair[1],
+                PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value,
+            ),
+        ),
+    )
+
+    result = host._resolve_host_bands(
+        records,
+        OPENING,
+        equivalence,
+        allow_spanning_face_band=True,
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.bands == ()
+    assert host.HOST_EQUIVALENCE_AMBIGUOUS in result.reason_codes
+
+
+def test_competing_raster_spanning_bands_are_not_ranked_or_suppressed() -> None:
+    centered = _spanning_face_records()
+    competitor = _spanning_face_records(
+        top_offset=15.0,
+        bottom_offset=25.0,
+    )
+    records = centered + competitor
+
+    result = host._resolve_host_bands(
+        records,
+        OPENING,
+        _equivalence(records),
+        allow_spanning_face_band=True,
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.bands) >= 2
+    centers = tuple(band.center_offset for band in result.bands)
+    assert any(abs(value) <= 1e-9 for value in centers)
+    assert any(abs(value - 20.0) <= 1e-9 for value in centers)
+
+
+def test_split_face_host_behavior_is_unchanged_when_raster_mode_is_enabled() -> None:
+    records = _band_records(center_offset=0.0)
+    equivalence = _equivalence(records)
+
+    historical = host._resolve_host_bands(records, OPENING, equivalence)
+    raster_enabled = host._resolve_host_bands(
+        records,
+        OPENING,
+        equivalence,
+        allow_spanning_face_band=True,
+    )
+    assert historical == raster_enabled
