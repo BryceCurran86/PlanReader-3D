@@ -143,9 +143,17 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     }
     canonical_floor = SimpleNamespace(to_dict=lambda: canonical_floor_payload)
 
-    def fake_physical_wall_claim(pdf_path, *, pages=None):
+    def fake_physical_wall_claim(
+        pdf_path,
+        *,
+        pages=None,
+        topology_pages=None,
+        room_area_support_pages=None,
+    ):
         seen["pdf_path"] = pdf_path
         seen["pages"] = list(pages or ())
+        seen["topology_pages"] = list(topology_pages or ())
+        seen["room_area_support_pages"] = list(room_area_support_pages or ())
         return SimpleNamespace(
             status=EvidenceResolutionStatus.CORROBORATED,
             reason_codes=("test_physical_net_wall_resolved",),
@@ -187,6 +195,9 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     )
 
     assert seen["pages"] == [0]
+    # The evidence-only support universe may include non-topology pages, but it
+    # must not expand the wall/topology page selection asserted above.
+    assert set(seen["topology_pages"]).issubset(set(seen["pages"]))
     wall = next(pred for pred in predictions if pred.tag == "perimeter_walling")
     assert wall.quantity == 42.5
     assert wall.unit == "SM"
