@@ -114,10 +114,14 @@ def _two_room_cross_view_area_pdf() -> bytes:
         detail.draw_line((250.0, 68.0), (250.0, 92.0), color=(0, 0, 0), width=1.0)
         detail.insert_text((164.0, 77.0), "3600", fontsize=9.0)
 
-        detail.draw_line((280.0, 100.0), (280.0, 200.0), color=(0, 0, 0), width=1.0)
-        detail.draw_line((268.0, 100.0), (292.0, 100.0), color=(0, 0, 0), width=1.0)
-        detail.draw_line((268.0, 200.0), (292.0, 200.0), color=(0, 0, 0), width=1.0)
-        detail.insert_text((277.0, 167.0), "2400", fontsize=9.0, rotate=90)
+        # The vertical dimension shares a real source witness junction with
+        # the horizontal dimension at (250, 80). Hardened cross-view area
+        # authority requires this positive topology; a merely nearby pair
+        # must remain fail-closed.
+        detail.draw_line((280.0, 80.0), (280.0, 180.0), color=(0, 0, 0), width=1.0)
+        detail.draw_line((250.0, 80.0), (292.0, 80.0), color=(0, 0, 0), width=1.0)
+        detail.draw_line((268.0, 180.0), (292.0, 180.0), color=(0, 0, 0), width=1.0)
+        detail.insert_text((277.0, 147.0), "2400", fontsize=9.0, rotate=90)
         return doc.tobytes()
     finally:
         doc.close()
