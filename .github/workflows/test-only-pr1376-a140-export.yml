@@ -1,0 +1,23 @@
+name: TEST ONLY PR1376 A140 Export
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record SHA
+        run: git rev-parse HEAD > PR1376_EXPORT_SHA.txt
+      - name: Pack repo
+        run: git archive --format=tar.gz -o pr1376-a140-runtime.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr1376-a140-runtime
+          path: |
+            pr1376-a140-runtime.tar.gz
+            PR1376_EXPORT_SHA.txt
+          retention-days: 1
