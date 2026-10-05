@@ -1,0 +1,60 @@
+name: TEST ONLY GPT3 Source-Closed V2 Handoff
+
+on:
+  pull_request:
+    branches:
+      - gpt3/source-closed-project-handoff
+
+jobs:
+  handoff:
+    name: handoff ${{ matrix.project_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project_id: au_qld_maryborough_service_station
+            pdf: documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+          - project_id: au_qld_lot16_power
+            pdf: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Run source-closed production handoff
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "artifacts/${{ matrix.project_id }}"
+          PYTHONPATH=. python tools/run_source_closed_project_handoff.py \
+            --pdf "${{ matrix.pdf }}" \
+            --project-id "${{ matrix.project_id }}" \
+            --workspace-id 1 \
+            --output-dir "artifacts/${{ matrix.project_id }}" \
+            > "artifacts/${{ matrix.project_id }}/run.log" 2>&1
+          code=$?
+          echo "$code" > "artifacts/${{ matrix.project_id }}/exit_code.txt"
+          cat "artifacts/${{ matrix.project_id }}/run.log"
+          echo "handoff_exit_code=$code"
+
+      - name: Upload production handoff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-source-closed-${{ matrix.project_id }}
+          path: artifacts/${{ matrix.project_id }}
+          if-no-files-found: warn
+          retention-days: 1
