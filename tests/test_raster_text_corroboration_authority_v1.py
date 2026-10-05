@@ -21,6 +21,7 @@ from PIL import Image
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_pdf_text_integrity_authority import (
     TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_CLIPPED_BY_CLIP_REGION,
     TEXT_GLYPH_MAPPING_UNVERIFIED,
     TEXT_TRACE_AMBIGUOUS,
 )
@@ -370,7 +371,12 @@ def test_lying_tounicode_claim_is_contradicted_by_the_rendered_glyphs() -> None:
     assert result.record is None
 
 
-def test_a_word_with_another_text_integrity_reason_never_reaches_raster_ocr(monkeypatch) -> None:
+def test_unresolved_clip_state_can_be_discharged_only_by_exact_raster_proof(
+    monkeypatch,
+) -> None:
+    # Non-rectangular clip ownership is structurally unresolved, but the word
+    # remains visibly rendered. The exact post-clip word raster at both DPIs is
+    # therefore independent visual proof of both glyph identity and presence.
     triangle = "q 10 100 m 250 100 l 10 190 l h W n 0 0 5 5 re f "
     pdf = _pdf(
         triangle
@@ -385,7 +391,10 @@ def test_a_word_with_another_text_integrity_reason_never_reaches_raster_ocr(monk
             6: _stream_obj(
                 _cmap(
                     sysinfo=_SYSINFO_DUP,
-                    mappings="\n".join(f"<{c:02X}> <{c:04X}>" for c in sorted(set(map(ord, "150mm")))),
+                    mappings="\n".join(
+                        f"<{c:02X}> <{c:04X}>"
+                        for c in sorted(set(map(ord, "150mm")))
+                    ),
                     count=len(set("150mm")),
                 )
             )
@@ -393,8 +402,11 @@ def test_a_word_with_another_text_integrity_reason_never_reaches_raster_ocr(monk
     )
     setup = _Setup(pdf, _both("150mm"))
     receipt = setup._receipts[setup.oid_of("150mm")]
-    assert TEXT_CLIP_STATE_UNRESOLVED in receipt.reason_codes
-    assert TEXT_GLYPH_MAPPING_UNVERIFIED in receipt.reason_codes
+    assert set(receipt.reason_codes) == {
+        TEXT_CLIP_STATE_UNRESOLVED,
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+    }
+
     calls: list[dict] = []
     original = SourceObservationProducer.render_native_page_png
     monkeypatch.setattr(
@@ -402,10 +414,65 @@ def test_a_word_with_another_text_integrity_reason_never_reaches_raster_ocr(monk
         "render_native_page_png",
         lambda self, **kw: (calls.append(kw), original(self, **kw))[1],
     )
+
     result = setup.publish("150mm")
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert set(result.record.native_text_integrity_reason_codes) == {
+        TEXT_CLIP_STATE_UNRESOLVED,
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+    }
+    assert [call["dpi"] for call in calls] == [300.0, 450.0]
+
+
+def test_explicit_clip_region_remains_a_hard_veto_before_raster_ocr(
+    monkeypatch,
+) -> None:
+    text = "150mm"
+    pdf = _pdf(
+        "q 30 100 20 40 re W n "
+        "0 0 5 5 re f "
+        "BT /F1 14 Tf 40 120 Td (150mm) Tj ET "
+        "0 0 5 5 re f Q",
+        fonts={
+            "F1": (
+                5,
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Arial /FirstChar 32 /LastChar 126 /ToUnicode 6 0 R >>",
+            )
+        },
+        extra={
+            6: _stream_obj(
+                _cmap(
+                    sysinfo=_SYSINFO_DUP,
+                    mappings="\n".join(
+                        f"<{c:02X}> <{c:04X}>"
+                        for c in sorted(set(map(ord, text)))
+                    ),
+                    count=len(set(text)),
+                )
+            )
+        },
+    )
+    setup = _Setup(pdf, _both(text))
+    receipt = setup._receipts[setup.oid_of(text)]
+    assert TEXT_CLIPPED_BY_CLIP_REGION in receipt.reason_codes
+    assert TEXT_GLYPH_MAPPING_UNVERIFIED in receipt.reason_codes
+
+    calls: list[dict] = []
+    original = SourceObservationProducer.render_native_page_png
+    monkeypatch.setattr(
+        SourceObservationProducer,
+        "render_native_page_png",
+        lambda self, **kw: (calls.append(kw), original(self, **kw))[1],
+    )
+
+    result = setup.publish(text)
+
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert RASTER_TEXT_INTEGRITY_NOT_GLYPH_ONLY in result.reason_codes
-    assert TEXT_CLIP_STATE_UNRESOLVED in result.reason_codes
+    assert TEXT_CLIPPED_BY_CLIP_REGION in result.reason_codes
+    assert result.record is None
     assert calls == []
 
 
