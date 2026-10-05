@@ -486,6 +486,36 @@ def _frame_has_title_block_labels(
     return in_side_band and in_lower_band
 
 
+def _page_rectangle_primitives(page: Any) -> tuple[tuple[float, float, float, float], ...]:
+    """Return normalized source rectangle primitives once per immutable page.
+
+    Table-frame rejection evaluates many candidate frames on dense CAD sheets.
+    The rectangle universe is page-invariant, so decode/normalise it once and
+    keep the frame-specific containment and area predicates unchanged.
+    """
+    cache = _page_parse_cache(page)
+    if isinstance(cache, dict) and "rectangle_primitives" in cache:
+        return cache["rectangle_primitives"]
+    rectangles: list[tuple[float, float, float, float]] = []
+    for drawing in _page_drawings(page):
+        for item in drawing.get("items", []) or []:
+            if not item or item[0] != "re" or len(item) < 2:
+                continue
+            rect = item[1]
+            rectangles.append(
+                _normalized_bbox(
+                    float(rect.x0),
+                    float(rect.y0),
+                    float(rect.x1),
+                    float(rect.y1),
+                )
+            )
+    result = tuple(rectangles)
+    if isinstance(cache, dict):
+        cache["rectangle_primitives"] = result
+    return result
+
+
 def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
@@ -507,22 +537,12 @@ def _frame_looks_like_table(
         return False
 
     cells: list[tuple[float, float, float, float]] = []
-    for drawing in _page_drawings(page):
-        for item in drawing.get("items", []) or []:
-            if not item or item[0] != "re" or len(item) < 2:
-                continue
-            rect = item[1]
-            cell = _normalized_bbox(
-                float(rect.x0),
-                float(rect.y0),
-                float(rect.x1),
-                float(rect.y1),
-            )
-            if not _bbox_contains(frame, cell, margin=1.0):
-                continue
-            area = _bbox_area(cell)
-            if 4.0 < area < 0.15 * frame_area:
-                cells.append(cell)
+    for cell in _page_rectangle_primitives(page):
+        if not _bbox_contains(frame, cell, margin=1.0):
+            continue
+        area = _bbox_area(cell)
+        if 4.0 < area < 0.15 * frame_area:
+            cells.append(cell)
 
     if len(cells) < _TABLE_CELL_COUNT:
         return False
