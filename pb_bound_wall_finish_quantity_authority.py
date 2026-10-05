@@ -30,6 +30,7 @@ from pb_net_wall_boolean_union_authority import (
     NetWallBooleanUnionAuthority,
     NetWallBooleanUnionSelector,
 )
+from pb_wall_finish_surface_identity import physical_wall_finish_surface_id
 from pb_wall_finish_face_binding_authority import (
     FinishScopeStatus,
     WallFinishFaceBindingAuthority,
@@ -119,6 +120,7 @@ class SourceBoundWallFinishQuantityRecord:
     quantity_m2: float
     physical_face_ids: tuple[str, ...]
     physical_wall_ids: tuple[str, ...]
+    physical_surface_ids: tuple[str, ...]
     finish_binding_ids: tuple[str, ...]
     net_wall_record_ids: tuple[str, ...]
     finish_scope_record_id: str
@@ -138,6 +140,12 @@ class SourceBoundWallFinishQuantityRecord:
             raise ValueError("positive quantity requires physical faces")
         if len(set(self.physical_face_ids)) != len(self.physical_face_ids):
             raise ValueError("physical_face_ids must be unique")
+        if not self.physical_surface_ids:
+            raise ValueError("positive quantity requires physical finish surfaces")
+        if len(set(self.physical_surface_ids)) != len(self.physical_surface_ids):
+            raise ValueError("physical_surface_ids must be unique")
+        if len(self.physical_surface_ids) != len(self.physical_face_ids):
+            raise ValueError("each physical face must map to one physical finish surface")
 
 
 @dataclass(frozen=True)
@@ -452,6 +460,7 @@ class SourceBoundWallFinishQuantityProducer:
         quantity_m2 = 0.0
         net_record_ids: set[str] = set()
         physical_wall_ids: set[str] = set()
+        physical_surface_ids: set[str] = set()
 
         for face_id in target_faces:
             binding = face_bindings[face_id]
@@ -511,15 +520,25 @@ class SourceBoundWallFinishQuantityProducer:
             quantity_m2 += float(area)
             net_record_ids.add(net_record.record_id)
             physical_wall_ids.add(wall_id)
+            physical_surface_ids.add(
+                physical_wall_finish_surface_id(
+                    document_id=selector.document_id,
+                    physical_wall_id=wall_id,
+                    physical_face_id=face_id,
+                    trade_scope_id=selector.trade_scope_id,
+                )
+            )
 
         finish_binding_ids = tuple(sorted(required_binding_ids))
         net_ids = tuple(sorted(net_record_ids))
         wall_ids = tuple(sorted(physical_wall_ids))
+        surface_ids = tuple(sorted(physical_surface_ids))
         payload = {
             "selector": selector.key,
             "finish_scope_record_id": scope.scope_id,
             "physical_face_ids": target_faces,
             "physical_wall_ids": wall_ids,
+            "physical_surface_ids": surface_ids,
             "finish_binding_ids": finish_binding_ids,
             "net_wall_record_ids": net_ids,
             "quantity_m2": round(quantity_m2, 12),
@@ -543,6 +562,7 @@ class SourceBoundWallFinishQuantityProducer:
             quantity_m2=quantity_m2,
             physical_face_ids=target_faces,
             physical_wall_ids=wall_ids,
+            physical_surface_ids=surface_ids,
             finish_binding_ids=finish_binding_ids,
             net_wall_record_ids=net_ids,
             finish_scope_record_id=scope.scope_id,
