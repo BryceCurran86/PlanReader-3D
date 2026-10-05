@@ -710,14 +710,36 @@ def _filter_repeated_non_physical_drafting_primitives(
         and path_counts.get(segment.get("path_index"), 0) == 1
     )
     singleton_ids = {id(segment) for segment in singleton_lines}
-    signature_counts = Counter(
-        _repeated_motif_signature(segment) for segment in singleton_lines
-    )
+
+    # Dense CAD pages can contain tens of thousands of singleton primitives.
+    # Length, angle and the two motif keys are pure functions of one immutable
+    # source segment, so compute them once and reuse them in every census and
+    # classification pass. This changes no threshold or filtering decision.
+    motif_by_segment_id: dict[
+        int, tuple[float, float, tuple[object, ...], tuple[object, ...], float]
+    ] = {}
+    signature_counts: Counter[tuple[object, ...]] = Counter()
     by_style_length: dict[tuple[object, ...], Counter[float]] = defaultdict(Counter)
     for segment in singleton_lines:
-        by_style_length[_repeated_motif_style_length(segment)][
-            round(_segment_angle_deg(segment), 1)
-        ] += 1
+        length = _segment_length(segment)
+        angle = _segment_angle_deg(segment)
+        signature = (
+            str(segment.get("stroke") or ""),
+            round(float(segment.get("width") or 0.0), 2),
+            round(length, 2),
+            round(angle, 1),
+        )
+        style_length = signature[:3]
+        angle_key = float(signature[3])
+        motif_by_segment_id[id(segment)] = (
+            length,
+            angle,
+            signature,
+            style_length,
+            angle_key,
+        )
+        signature_counts[signature] += 1
+        by_style_length[style_length][angle_key] += 1
 
     multi_angle_styles = {
         style
@@ -746,12 +768,10 @@ def _filter_repeated_non_physical_drafting_primitives(
         if id(segment) not in singleton_ids:
             kept.append(segment)
             continue
-        length = _segment_length(segment)
-        angle = _segment_angle_deg(segment)
-        signature = _repeated_motif_signature(segment)
-        style_length = _repeated_motif_style_length(segment)
+        length, angle, signature, style_length, angle_key = motif_by_segment_id[
+            id(segment)
+        ]
         repeated = signature_counts[signature]
-        angle_key = round(angle, 1)
         multi_angle_member = (
             length <= multi_angle_span
             and style_length in multi_angle_styles
@@ -771,7 +791,6 @@ def _filter_repeated_non_physical_drafting_primitives(
         if not decorative:
             kept.append(segment)
     return tuple(kept)
-
 
 def filtered_wall_topology_source_segment_count(
     segments: Sequence[dict],
@@ -928,22 +947,13 @@ def _visible_observations_by_page(
     """
     visibility = source_producer.authority()
     by_page: dict[str, list[tuple[str, object]]] = {}
-    for observation_id in published.visible_observation_ids:
-        result = visibility.resolve_visible(
-            ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                observation_id=observation_id,
-            )
-        )
-        observation = result.observation
-        if (
-            result.status is not EvidenceResolutionStatus.CORROBORATED
-            or observation is None
-        ):
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    try:
+        resolved_visible = visibility.authenticated_visible_observations(published)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE
+        ) from exc
+    for observation_id, observation in resolved_visible:
         by_page.setdefault(str(observation.page_id), []).append(
             (observation_id, observation)
         )
