@@ -43,7 +43,6 @@ def _payload(
         plan.insert_text((80.0, 60.0), "GROUND FLOOR PLAN", fontsize=10.0)
 
         detail = doc.new_page(width=400.0, height=300.0)
-        detail.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
 
         # 3.6m horizontal figured dimension.
         detail.draw_line(
@@ -77,6 +76,10 @@ def _payload(
         detail.insert_text(
             (277.0, 147.0), "2400", fontsize=9.0, rotate=90,
         )
+
+        # Insert room/material semantics after figured dimensions so dimension
+        # token classification cannot be biased by preceding room-label text.
+        detail.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
 
         # Material codes are source text inside the proven dimension box.
         for index, code in enumerate(detail_codes):
