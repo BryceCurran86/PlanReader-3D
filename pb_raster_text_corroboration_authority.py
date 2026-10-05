@@ -15,11 +15,15 @@ that same text:
          exactly ``text_glyph_mapping_unverified``, optionally plus
          ``text_clip_state_unresolved``; the latter can be discharged only
          by the same post-clip rendered-pixel proof below
-      -> producer-owned word bbox
+      -> producer-owned word bbox for ordinary left-to-right text; for a
+         non-horizontal source word, only a uniquely bound source texttrace
+         character run may replace that bbox as the raster target
       -> the exact region rendered from the immutable stored PDF bytes at
          300 DPI and at 450 DPI (renderer clip; never a page crop)
+      -> non-horizontal source text is normalized by one producer-derived,
+         lossless quarter-turn before OCR; ordinary text is unchanged
       -> NO padding, NO expansion into neighbouring source pixels and NO
-         alternative preprocessing: one deterministic raster pipeline only
+         retry / alternative preprocessing: one deterministic raster pipeline only
          (trying a tight crop, then a padded one, then keeping whichever
          matches the claim would turn preprocessing selection into an
          authority preference)
@@ -54,6 +58,8 @@ import hashlib
 import io
 import math
 import unicodedata
+
+import fitz
 from types import MappingProxyType
 from typing import Mapping, Optional
 
@@ -112,6 +118,229 @@ _AUTHORITY_SEAL = object()
 _OCR_GEOMETRY_ROUNDING_PX = 2.0
 
 
+def _rect4(value: object) -> Optional[tuple[float, float, float, float]]:
+    try:
+        items = tuple(float(v) for v in value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if len(items) != 4 or not all(math.isfinite(v) for v in items):
+        return None
+    x0, y0, x1, y1 = items
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def _point2(value: object) -> Optional[tuple[float, float]]:
+    try:
+        if hasattr(value, "x") and hasattr(value, "y"):
+            result = (float(value.x), float(value.y))  # type: ignore[attr-defined]
+        else:
+            result = (float(value[0]), float(value[1]))  # type: ignore[index]
+    except (TypeError, ValueError, IndexError, AttributeError):
+        return None
+    return result if all(math.isfinite(v) for v in result) else None
+
+
+def _bbox_contains(
+    outer: tuple[float, float, float, float],
+    inner: tuple[float, float, float, float],
+    *,
+    tolerance: float = 1e-4,
+) -> bool:
+    return (
+        inner[0] >= outer[0] - tolerance
+        and inner[1] >= outer[1] - tolerance
+        and inner[2] <= outer[2] + tolerance
+        and inner[3] <= outer[3] + tolerance
+    )
+
+
+def _lossless_rotate(image: Image.Image, degrees: int) -> Image.Image:
+    if degrees == -90:
+        return image.transpose(Image.Transpose.ROTATE_270)
+    if degrees == 90:
+        return image.transpose(Image.Transpose.ROTATE_90)
+    if degrees == 180:
+        return image.transpose(Image.Transpose.ROTATE_180)
+    return image
+
+
+def _producer_owned_ocr_target(
+    source_producer: SourceObservationProducer,
+    *,
+    revision_id: str,
+    source_sha256: str,
+    page_id: str,
+    receipt: object,
+    word_bbox: tuple[float, float, float, float],
+    raw_text: str,
+) -> tuple[tuple[float, float, float, float], int]:
+    """Resolve one source-owned raster target for non-horizontal native text.
+
+    The historical word bbox remains authoritative for ordinary left-to-right
+    text. For text whose authenticated source line direction renders vertical
+    or reversed, PyMuPDF's native word bbox can clip glyph ink even though its
+    text identity is correct. In that case this helper uses exact source
+    character identity (codepoint + origin) to bind the word to one unique
+    texttrace character run, takes that run's glyph bboxes as the raster clip,
+    and returns one lossless quarter-turn that normalizes its source direction
+    to left-to-right before OCR. Any missing or ambiguous source fact falls
+    back to the historical word-bbox / zero-rotation path.
+    """
+
+    block_no = getattr(receipt, "block_no", None)
+    line_no = getattr(receipt, "line_no", None)
+    sequence_number = getattr(receipt, "sequence_number", None)
+    trace_sequence_numbers = tuple(
+        int(value)
+        for value in (getattr(receipt, "trace_sequence_numbers", ()) or ())
+    )
+    if sequence_number is not None:
+        sequence_ids = (int(sequence_number),)
+    else:
+        sequence_ids = trace_sequence_numbers
+    if block_no is None or line_no is None or not sequence_ids:
+        return word_bbox, 0
+
+    source_bytes = source_producer._store.source_bytes_by_revision.get(str(revision_id))
+    if (
+        source_bytes is None
+        or hashlib.sha256(source_bytes).hexdigest() != str(source_sha256)
+    ):
+        return word_bbox, 0
+    try:
+        page_number = int(page_id)
+    except (TypeError, ValueError):
+        return word_bbox, 0
+    if page_number < 1:
+        return word_bbox, 0
+
+    try:
+        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        try:
+            if page_number > int(pdf.page_count):
+                return word_bbox, 0
+            page = pdf.load_page(page_number - 1)
+            rawdict = page.get_text("rawdict") or {}
+            traces = tuple(page.get_texttrace() or ())
+            line = rawdict["blocks"][int(block_no)]["lines"][int(line_no)]
+            native_direction = _point2(line.get("dir"))
+            if native_direction is None:
+                return word_bbox, 0
+
+            origin = fitz.Point(0.0, 0.0) * page.rotation_matrix
+            endpoint = fitz.Point(*native_direction) * page.rotation_matrix
+            display_dx = float(endpoint.x - origin.x)
+            display_dy = float(endpoint.y - origin.y)
+            magnitude = math.hypot(display_dx, display_dy)
+            if magnitude <= 0.0 or not math.isfinite(magnitude):
+                return word_bbox, 0
+            display_dx /= magnitude
+            display_dy /= magnitude
+            axis_tol = 1e-6
+            if abs(display_dy) <= axis_tol and display_dx > 0.0:
+                return word_bbox, 0
+            if abs(display_dy) <= axis_tol and display_dx < 0.0:
+                rotation_degrees = 180
+            elif abs(display_dx) <= axis_tol and display_dy < 0.0:
+                rotation_degrees = -90
+            elif abs(display_dx) <= axis_tol and display_dy > 0.0:
+                rotation_degrees = 90
+            else:
+                return word_bbox, 0
+
+            native_chars: list[
+                tuple[
+                    str,
+                    tuple[float, float],
+                    tuple[float, float, float, float],
+                ]
+            ] = []
+            for span in line.get("spans") or ():
+                for char in span.get("chars") or ():
+                    char_bbox = _rect4(char.get("bbox"))
+                    char_origin = _point2(char.get("origin"))
+                    char_text = str(char.get("c") or "")
+                    if (
+                        char_bbox is not None
+                        and char_origin is not None
+                        and char_text
+                        and _bbox_contains(word_bbox, char_bbox)
+                    ):
+                        native_chars.append((char_text, char_origin, char_bbox))
+            if "".join(item[0] for item in native_chars) != str(raw_text):
+                return word_bbox, 0
+
+            trace_chars: list[
+                tuple[
+                    str,
+                    tuple[float, float],
+                    tuple[float, float, float, float],
+                ]
+            ] = []
+            sequence_set = set(sequence_ids)
+            for span in traces:
+                try:
+                    seqno = int(span.get("seqno"))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                if seqno not in sequence_set:
+                    continue
+                for char in span.get("chars") or ():
+                    try:
+                        char_text = chr(int(char[0]))
+                        char_origin = _point2(char[2])
+                        char_bbox = _rect4(char[3])
+                    except (IndexError, TypeError, ValueError, OverflowError):
+                        continue
+                    if char_origin is not None and char_bbox is not None:
+                        trace_chars.append((char_text, char_origin, char_bbox))
+
+            run_len = len(native_chars)
+            if run_len <= 0 or len(trace_chars) < run_len:
+                return word_bbox, 0
+            hits: list[
+                tuple[
+                    tuple[
+                        str,
+                        tuple[float, float],
+                        tuple[float, float, float, float],
+                    ],
+                    ...,
+                ]
+            ] = []
+            for start in range(0, len(trace_chars) - run_len + 1):
+                window = tuple(trace_chars[start : start + run_len])
+                matched = True
+                for expected, observed in zip(native_chars, window):
+                    if expected[0] != observed[0] or any(
+                        abs(left - right) > 1e-4
+                        for left, right in zip(expected[1], observed[1])
+                    ):
+                        matched = False
+                        break
+                if matched:
+                    hits.append(window)
+            if len(hits) != 1:
+                return word_bbox, 0
+
+            boxes = tuple(item[2] for item in hits[0])
+            trace_bbox = (
+                min(box[0] for box in boxes),
+                min(box[1] for box in boxes),
+                max(box[2] for box in boxes),
+                max(box[3] for box in boxes),
+            )
+            if _rect4(trace_bbox) is None:
+                return word_bbox, 0
+            return trace_bbox, rotation_degrees
+        finally:
+            pdf.close()
+    except Exception:
+        return word_bbox, 0
+
+
 @dataclass(frozen=True)
 class RasterTextCorroborationSelector:
     """Consumer address of one native word. Carries lineage and identity only."""
@@ -151,6 +380,9 @@ class RasterTextView:
     # Diagnostic provenance only. Never compared with a threshold, never used
     # to choose between readings, never part of the record identity.
     ocr_confidence: Optional[float] = None
+    # Lossless, source-owned orientation normalization applied exactly once
+    # before OCR. Zero preserves the historical exact-render path.
+    ocr_rotation_degrees: int = 0
 
 
 @dataclass(frozen=True)
@@ -394,7 +626,22 @@ class RasterTextCorroborationProducer:
         if not native_claim:
             return _abstain(RASTER_TEXT_NATIVE_MISMATCH, "native_claim_empty")
 
-        # 4. Two independent renderings of the exact word region.
+        # 4. Resolve the single producer-owned raster target once, before OCR.
+        # Ordinary left-to-right words preserve the historical exact word bbox.
+        # Non-horizontal words may use a uniquely source-bound texttrace glyph
+        # run plus one lossless quarter-turn; there is still exactly one raster
+        # pipeline per DPI and never a retry/preprocessing preference.
+        raster_bbox, ocr_rotation_degrees = _producer_owned_ocr_target(
+            self._source_producer,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            page_id=observation.page_id,
+            receipt=receipt,
+            word_bbox=bbox,
+            raw_text=str(observation.raw_text),
+        )
+
+        # 5. Two independent renderings of that exact producer-owned region.
         views: list[RasterTextView] = []
         parent_ids: set[tuple[str, str, str]] = set()
         for dpi in RASTER_TEXT_CORROBORATION_DPIS:
@@ -406,7 +653,7 @@ class RasterTextCorroborationProducer:
                     snapshot_id=selector.snapshot_id,
                     page_id=observation.page_id,
                     dpi=float(dpi),
-                    clip_pt=bbox,
+                    clip_pt=raster_bbox,
                 )
             except (ValueError, ProducerIntegrityError) as exc:
                 return _abstain(RASTER_TEXT_RENDER_FAILED, str(exc).split(":")[0].strip())
@@ -422,7 +669,8 @@ class RasterTextCorroborationProducer:
                 (page_parent.observation_id, page_parent.source_partition_id, page_parent.page_id)
             )
             try:
-                cropped = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                rendered = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                cropped = _lossless_rotate(rendered, ocr_rotation_degrees)
             except Exception:
                 return _abstain(RASTER_TEXT_RENDER_FAILED, "render_png_undecodable")
             try:
@@ -438,15 +686,24 @@ class RasterTextCorroborationProducer:
             if len(readable) == 1:
                 reading = normalize_reading(readable[0].text)
                 confidence = readable[0].confidence
+            if ocr_rotation_degrees == 0:
+                ocr_image_png_sha256 = hashlib.sha256(png_bytes).hexdigest()
+            else:
+                ocr_png = io.BytesIO()
+                cropped.save(ocr_png, format="PNG")
+                ocr_image_png_sha256 = hashlib.sha256(
+                    ocr_png.getvalue()
+                ).hexdigest()
             views.append(
                 RasterTextView(
                     dpi=int(dpi),
-                    clip_pt=bbox,  # type: ignore[arg-type]
+                    clip_pt=raster_bbox,
                     image_size_px=(cropped.width, cropped.height),
-                    image_png_sha256=hashlib.sha256(png_bytes).hexdigest(),
+                    image_png_sha256=ocr_image_png_sha256,
                     line_count=len(readable),
                     ocr_reading=reading,
                     ocr_confidence=confidence,
+                    ocr_rotation_degrees=ocr_rotation_degrees,
                 )
             )
 
@@ -454,7 +711,7 @@ class RasterTextCorroborationProducer:
             return _conflict(RASTER_TEXT_PAGE_LINEAGE_MISMATCH)
         (parent_observation_id, partition_id, _page) = next(iter(parent_ids))
 
-        # 5. Strict per-view acceptance, then strict agreement.
+        # 6. Strict per-view acceptance, then strict agreement.
         if any(view.line_count == 0 for view in views):
             return _abstain(RASTER_TEXT_NO_READING)
         if any(view.line_count > 1 for view in views):
@@ -486,6 +743,12 @@ class RasterTextCorroborationProducer:
             ),
             "corroborated_text": native_claim,
         }
+        if ocr_rotation_degrees != 0 or raster_bbox != bbox:
+            payload["source_owned_ocr_target"] = {
+                "clip_pt": raster_bbox,
+                "rotation_degrees": ocr_rotation_degrees,
+            }
+
         record = RasterTextCorroborationRecord(
             record_id=stable_contract_id("raster_text_corroboration", payload, digest_chars=32),
             document_id=selector.document_id,
