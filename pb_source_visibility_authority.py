@@ -35,6 +35,7 @@ from pb_raster_visible_segment_detector import (
 )
 from pb_raster_opening_source_primitives import (
     RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
+    RASTER_LINE_RUN,
     RASTER_THIN_INK_RUN,
     RASTER_WALL_BAND_END,
     RASTER_WALL_BAND_FACE,
@@ -70,7 +71,12 @@ RASTER_PDF_SEGMENT = "raster_pdf_segment"
 RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
 RASTER_OPENING_PRIMITIVE_SEGMENT = "raster_opening_primitive_segment"
 RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS = frozenset(
-    (RASTER_WALL_BAND_FACE, RASTER_WALL_BAND_END, RASTER_THIN_INK_RUN)
+    (
+        RASTER_WALL_BAND_FACE,
+        RASTER_WALL_BAND_END,
+        RASTER_LINE_RUN,
+        RASTER_THIN_INK_RUN,
+    )
 )
 VISIBLE_SEGMENT_ORIGIN_KIND = "producer_visibility_no_active_clip"
 RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND = (
@@ -84,8 +90,8 @@ RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND = (
 )
 VISIBLE_SOURCE_OBSERVATION_EXISTS = "visible_source_observation_exists"
 RASTER_RENDER_DPI = 144
-RASTER_OPENING_PRIMITIVE_RENDER_DPI = 200
-RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION = "1.0.0"
+RASTER_OPENING_PRIMITIVE_RENDER_DPI = 300
+RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION = "2.0.0"
 # Frozen source-identity schema for raster primitives. Detector implementation
 # version is provenance only; changing it must not churn physical/source ids
 # when the producer-owned detected geometry is unchanged. Keep this value
@@ -709,6 +715,50 @@ class SourceVisibilityProducer:
             self._raster_visibility_receipts,
             self._raster_opening_primitive_receipts,
             _seal=_VISIBILITY_AUTHORITY_SEAL,
+        )
+
+    def render_raster_opening_source_page(
+        self,
+        revision_id: str,
+        page_id: str,
+    ):
+        """Return the producer-owned images-only raster evidence for one page.
+
+        Callers may address only a current ingested revision/page. They cannot
+        supply pixels, DPI, crop geometry, masks, thresholds, candidate bands,
+        openings, or expected values. This is source evidence only; it grants no
+        physical-opening proposition.
+        """
+
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        clean_page_id = str(page_id).strip()
+        if not clean_page_id:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        decoded_page_ids = {
+            str(int(value)) for value in published.coverage.decoded_pages
+        }
+        if clean_page_id not in decoded_page_ids:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+
+        png_bytes, page_parent, native_frame = (
+            self._producer.render_native_page_png(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                page_id=clean_page_id,
+                dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                include_native_frame=True,
+                images_only=True,
+            )
+        )
+        return (
+            bytes(png_bytes),
+            replace(page_parent),
+            native_frame,
+            RASTER_OPENING_PRIMITIVE_RENDER_DPI,
         )
 
     def physical_opening_authority(self):
