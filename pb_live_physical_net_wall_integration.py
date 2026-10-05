@@ -91,6 +91,8 @@ class LivePhysicalNetWallClaim:
     canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    room_area_reason_codes: tuple[str, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -119,6 +121,7 @@ def collect_live_physical_net_wall_claim(
     *,
     pages: Optional[Sequence[int]] = None,
     topology_pages: Optional[Sequence[int]] = None,
+    wall_evidence_pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -150,11 +153,28 @@ def collect_live_physical_net_wall_claim(
     topology_page_ids = tuple(
         str(index + 1) for index in topology_selected
     )
-    evidence_page_ids = tuple(
-        page_id
-        for page_id in page_ids
-        if page_id not in topology_page_ids
-    )
+    if wall_evidence_pages is None:
+        evidence_page_ids = tuple(
+            page_id
+            for page_id in page_ids
+            if page_id not in topology_page_ids
+        )
+    else:
+        wall_evidence_selected = tuple(
+            sorted(
+                {
+                    int(page)
+                    for page in wall_evidence_pages
+                    if isinstance(page, int)
+                    and 0 <= int(page) < int(doc.page_count)
+                }
+            )
+        )
+        if not set(wall_evidence_selected) <= set(selected):
+            raise ValueError("wall_evidence_pages must be a subset of pages")
+        if set(wall_evidence_selected) & set(topology_selected):
+            raise ValueError("wall_evidence_pages must not overlap topology_pages")
+        evidence_page_ids = tuple(str(index + 1) for index in wall_evidence_selected)
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
         producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
@@ -239,6 +259,30 @@ def collect_live_physical_net_wall_claim(
     canonical_floors = compose_live_canonical_floor_surfaces(
         canonical_rooms
     )
+    room_area_quantities: tuple[QuantityEvidence, ...] = ()
+    room_area_reason_codes: tuple[str, ...] = ()
+    if canonical_rooms.rooms and any(
+        str(page_number) not in set(topology_page_ids)
+        for page_number in published.coverage.decoded_pages
+    ):
+        try:
+            from pb_live_cross_view_room_area_integration import (
+                collect_live_cross_view_room_area_quantities,
+            )
+
+            room_area_result = collect_live_cross_view_room_area_quantities(
+                source_visibility_producer=source,
+                wall_opening_composition=wall_opening,
+                canonical_rooms=canonical_rooms.rooms,
+                source_bytes=payload,
+                topology_page_ids=topology_page_ids,
+            )
+            room_area_quantities = room_area_result.quantities
+            room_area_reason_codes = room_area_result.reason_codes
+        except Exception as exc:
+            room_area_reason_codes = (
+                f"live_cross_view_room_area_exception:{type(exc).__name__}",
+            )
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
@@ -329,6 +373,8 @@ def collect_live_physical_net_wall_claim(
             canonical_space_reason_codes=canonical_space_core.reason_codes,
             opening_quantity_evidence=opening_quantity_evidence,
             opening_count_quantity_evidence=opening_count_quantity_evidence,
+            room_area_quantity_evidence=room_area_quantities,
+            room_area_reason_codes=room_area_reason_codes,
         )
 
     return LivePhysicalNetWallClaim(
@@ -365,6 +411,8 @@ def collect_live_physical_net_wall_claim(
         canonical_space_reason_codes=canonical_space_core.reason_codes,
         opening_quantity_evidence=opening_quantity_evidence,
         opening_count_quantity_evidence=opening_count_quantity_evidence,
+        room_area_quantity_evidence=room_area_quantities,
+        room_area_reason_codes=room_area_reason_codes,
     )
 
 
