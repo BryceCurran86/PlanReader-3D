@@ -17,6 +17,8 @@ from typing import Optional, Sequence
 
 import fitz
 
+from pb_canonical_building import CanonicalSpace
+from pb_live_canonical_space_bridge import compose_live_canonical_spaces
 from pb_live_canonical_floor_surface import (
     LiveCanonicalFloorSurfaceObject,
     compose_live_canonical_floor_surfaces,
@@ -84,6 +86,11 @@ class LivePhysicalNetWallClaim:
     quantity_id: Optional[str]
     confidence: float
     publication: LiveExternalPhysicalNetWallPublication
+    canonical_spaces: tuple[CanonicalSpace, ...] = ()
+    canonical_space_status: EvidenceResolutionStatus = (
+        EvidenceResolutionStatus.ABSTAINED
+    )
+    canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
@@ -230,6 +237,9 @@ def collect_live_physical_net_wall_claim(
             canonical_wall_core.unresolved_wall_candidate_ids
         ),
     )
+    canonical_space_core = compose_live_canonical_spaces(
+        canonical_rooms
+    )
     canonical_floors = compose_live_canonical_floor_surfaces(
         canonical_rooms
     )
@@ -313,6 +323,9 @@ def collect_live_physical_net_wall_claim(
             canonical_room_status=canonical_rooms.status,
             canonical_room_reason_codes=canonical_rooms.reason_codes,
             canonical_room_source_pages=canonical_rooms.source_pages,
+            canonical_spaces=canonical_space_core.spaces,
+            canonical_space_status=canonical_space_core.status,
+            canonical_space_reason_codes=canonical_space_core.reason_codes,
             external_wall_ids=publication.external_wall_ids,
             evidence_ids=tuple(evidence.evidence_ids),
             quantity_id=evidence.quantity_id,
@@ -346,6 +359,9 @@ def collect_live_physical_net_wall_claim(
         canonical_room_status=canonical_rooms.status,
         canonical_room_reason_codes=canonical_rooms.reason_codes,
         canonical_room_source_pages=canonical_rooms.source_pages,
+        canonical_spaces=canonical_space_core.spaces,
+        canonical_space_status=canonical_space_core.status,
+        canonical_space_reason_codes=canonical_space_core.reason_codes,
         external_wall_ids=(),
         evidence_ids=(),
         quantity_id=None,
