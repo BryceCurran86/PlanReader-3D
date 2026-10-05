@@ -509,14 +509,21 @@ def test_runtime_coverage_does_not_invent_opening_rows_for_abstentions(tmp_path)
     path = tmp_path / "source.pdf"
     path.write_bytes(_complete_void_pdf())
     claim = collect_live_physical_net_wall_claim(path, pages=(0,))
-    assert any(
-        quantity.abstained or quantity.value is None
-        for quantity in (
-            *claim.opening_quantity_evidence,
-            *claim.opening_count_quantity_evidence,
-        )
-    ) or not (
-        claim.opening_quantity_evidence or claim.opening_count_quantity_evidence
+    assert claim.opening_quantity_evidence
+
+    original = claim.opening_quantity_evidence[0]
+    abstained = replace(
+        original,
+        value=None,
+        status="abstained",
+        abstained=True,
+        blocking_reasons=("measurement_unavailable",),
+        reason_codes=("opening_area_unavailable",),
+    )
+    claim = replace(
+        claim,
+        opening_quantity_evidence=(abstained,),
+        opening_count_quantity_evidence=(),
     )
 
     app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(path)}])
@@ -531,6 +538,7 @@ def test_runtime_coverage_does_not_invent_opening_rows_for_abstentions(tmp_path)
             [],
         )
 
+    assert app._live_opening_takeoff_rows_by_workspace[1] == []
     coverage = app._ag09_family_coverage_by_workspace[1]
     assert not any(
         reason.startswith("live_coverage_collection_failed:")
