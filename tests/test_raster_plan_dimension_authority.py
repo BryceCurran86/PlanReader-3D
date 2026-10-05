@@ -7,6 +7,9 @@ import fitz
 from PIL import Image, ImageDraw
 import pytest
 
+from pb_figured_dimension_evidence import (
+    calibrate_dimension_layout_from_word_heights,
+)
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine
 from pb_raster_plan_dimension_authority import (
@@ -119,6 +122,40 @@ def test_third_competing_line_keeps_binding_ambiguous():
         _seg("left", (0.0, 0.0, 0.0, 20.0), "vertical"),
         _seg("right", (100.0, 0.0, 100.0, 20.0), "vertical"),
     )
+    assert _bind_text_to_geometry(text, segments) is None
+
+
+def test_source_typography_calibration_accepts_normal_dimension_extension_gap():
+    text = _text(9385, (84.0, 8.0, 88.0, 12.0))
+    segments = (
+        # The visible dimension line begins 24 pt inboard of the left witness,
+        # matching a normal extension/arrow drafting gap seen on real CAD plans.
+        _seg("line", (24.0, 10.0, 100.0, 10.0), "horizontal"),
+        _seg("left", (0.0, 0.0, 0.0, 20.0), "vertical"),
+        _seg("right", (100.0, 0.0, 100.0, 20.0), "vertical"),
+    )
+    calibration = calibrate_dimension_layout_from_word_heights((16.913818359375,))
+
+    result = _bind_text_to_geometry(
+        text,
+        segments,
+        calibration=calibration,
+    )
+
+    assert result is not None
+    assert result.value_mm == 9385
+    assert result.endpoints_pt == ((0.0, 10.0), (100.0, 10.0))
+    assert set(result.witness_observation_ids) == {"left", "right"}
+
+
+def test_extension_gap_still_fails_without_source_derived_calibration():
+    text = _text(9385, (84.0, 8.0, 88.0, 12.0))
+    segments = (
+        _seg("line", (24.0, 10.0, 100.0, 10.0), "horizontal"),
+        _seg("left", (0.0, 0.0, 0.0, 20.0), "vertical"),
+        _seg("right", (100.0, 0.0, 100.0, 20.0), "vertical"),
+    )
+
     assert _bind_text_to_geometry(text, segments) is None
 
 

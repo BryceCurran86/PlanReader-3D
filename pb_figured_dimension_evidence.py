@@ -373,18 +373,38 @@ def _native_drawings(page: Any) -> tuple:
     return drawings
 
 
-def calibrate_dimension_layout(page: Any) -> DimensionLayoutCalibration:
-    """Derive spatial association tolerances from this page's own typography."""
-    heights = [float(w[3] - w[1]) for w in _native_words(page) if float(w[3] - w[1]) > 0]
+def calibrate_dimension_layout_from_word_heights(
+    word_heights_pt: Sequence[float],
+) -> DimensionLayoutCalibration:
+    """Derive dimension-association tolerances from source typography heights.
+
+    The relationship multipliers are the existing figured-dimension contract;
+    this helper simply makes the same page-derived calibration reusable by
+    producer-owned consumers that already hold authenticated native word
+    geometry without reopening/parsing the PDF page.
+    """
+    heights = [
+        float(value)
+        for value in word_heights_pt
+        if math.isfinite(float(value)) and float(value) > 0.0
+    ]
     median_h = statistics.median(heights) if heights else 8.0
-    # Multipliers express geometric relationships (nearby line / endpoint /
-    # same-axis row) while the absolute scale comes from the document itself.
     return DimensionLayoutCalibration(
         median_word_height_pt=median_h,
         line_search_distance_pt=max(median_h * 2.0, 2.0),
         witness_endpoint_distance_pt=max(median_h * 1.5, 2.0),
         chain_axis_tolerance_pt=max(median_h * 0.55, 1.0),
     )
+
+
+def calibrate_dimension_layout(page: Any) -> DimensionLayoutCalibration:
+    """Derive spatial association tolerances from this page's own typography."""
+    heights = [
+        float(w[3] - w[1])
+        for w in _native_words(page)
+        if float(w[3] - w[1]) > 0
+    ]
+    return calibrate_dimension_layout_from_word_heights(heights)
 
 
 def _xy(point: Any) -> tuple[float, float]:

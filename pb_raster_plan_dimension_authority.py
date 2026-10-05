@@ -25,6 +25,10 @@ from typing import Mapping, Optional, Sequence
 
 from PIL import Image
 
+from pb_figured_dimension_evidence import (
+    DimensionLayoutCalibration,
+    calibrate_dimension_layout_from_word_heights,
+)
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_native_page_frame import NativePageFrame
 from pb_page_scale_calibration_authority import (
@@ -42,6 +46,10 @@ from pb_portable_raster_ocr_authority import (
     RasterOCRBackend,
     TesseractOCRBackend,
     WinOCRBackend,
+)
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
@@ -398,13 +406,19 @@ def _cluster_coordinates(values: Sequence[float], tolerance: float) -> tuple[flo
 def _bind_text_to_geometry(
     text: RasterDimensionTextObservation,
     segments: Sequence[_VisibleSegment],
+    *,
+    calibration: Optional[DimensionLayoutCalibration] = None,
 ) -> Optional[BoundRasterDimension]:
     logical = _logical_lines_for_text(text, segments)
     if len(logical) != 1:
         return None
     line = logical[0]
     render_point = 72.0 / float(RASTER_RENDER_DPI)
-    witness_tol = 2.0 * render_point
+    witness_tol = (
+        float(calibration.witness_endpoint_distance_pt)
+        if calibration is not None
+        else 2.0 * render_point
+    )
 
     endpoint_coords = (line.lo, line.hi)
     witness_ids: list[str] = []
@@ -646,6 +660,141 @@ class RasterPlanDimensionProducer:
         self._results[(str(revision_id), str(page_id))] = result
         return result
 
+    def _native_numeric_text_observations(
+        self,
+        *,
+        published,
+        revision_id: str,
+        page_id: str,
+    ) -> tuple[
+        tuple[RasterDimensionTextObservation, ...],
+        tuple[float, ...],
+    ]:
+        """Authenticate native numeric words without trusting raw PDF text.
+
+        Word geometry is producer-owned regardless of glyph trust and is used
+        only to derive page typography calibration. Numeric content is accepted
+        only from already-trusted PdfTextIntegrity or independent two-render
+        RasterTextCorroboration.
+        """
+        text_authority = self._source_visibility.text_integrity_authority()
+        corroborator: Optional[RasterTextCorroborationProducer] = None
+        observations: list[RasterDimensionTextObservation] = []
+        word_heights: list[float] = []
+
+        for observation_id in published.text_observation_ids:
+            selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+            native = text_authority.resolve_text(selector)
+            receipt = native.receipt
+            if receipt is None or str(receipt.page_id) != page_id:
+                continue
+            try:
+                geometry = tuple(float(value) for value in receipt.geometry[:4])
+            except (TypeError, ValueError):
+                continue
+            if (
+                len(geometry) != 4
+                or not all(math.isfinite(value) for value in geometry)
+                or geometry[2] <= geometry[0]
+                or geometry[3] <= geometry[1]
+            ):
+                continue
+            word_heights.append(geometry[3] - geometry[1])
+
+            trusted_text: Optional[str] = None
+            backend_name = ""
+            backend_version = ""
+            confidence: Optional[float] = None
+            parent_page_observation_id = str(receipt.parent_observation_id)
+
+            if (
+                native.status is EvidenceResolutionStatus.CORROBORATED
+                and native.trusted_text
+            ):
+                trusted_text = str(native.trusted_text)
+                backend_name = "pdf_text_integrity"
+                backend_version = str(receipt.schema_version)
+            else:
+                # Raw text is used only as a cheap numeric-candidate prefilter;
+                # it never becomes measurement evidence by itself.
+                if _parse_dimension_value_mm(str(receipt.raw_text or "")) is None:
+                    continue
+                if corroborator is None:
+                    corroborator = (
+                        RasterTextCorroborationProducer
+                        .from_source_visibility_producer(self._source_visibility)
+                    )
+                raster = corroborator.publish(
+                    RasterTextCorroborationSelector(
+                        document_id=published.revision.document_id,
+                        revision_id=revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                if (
+                    raster.status is not EvidenceResolutionStatus.CORROBORATED
+                    or raster.record is None
+                    or not raster.corroborated_text
+                ):
+                    continue
+                trusted_text = str(raster.corroborated_text)
+                backend_name = f"raster_text:{raster.record.backend_name}"
+                backend_version = str(raster.record.backend_version)
+                parent_page_observation_id = str(
+                    raster.record.page_parent_observation_id
+                )
+                confidences = [
+                    float(view.ocr_confidence)
+                    for view in raster.record.views
+                    if view.ocr_confidence is not None
+                    and math.isfinite(float(view.ocr_confidence))
+                ]
+                confidence = min(confidences) if confidences else None
+
+            value_mm = _parse_dimension_value_mm(trusted_text or "")
+            if value_mm is None:
+                continue
+            observations.append(
+                RasterDimensionTextObservation(
+                    observation_id=str(observation_id),
+                    document_id=published.revision.document_id,
+                    revision_id=revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    page_id=page_id,
+                    parent_page_observation_id=parent_page_observation_id,
+                    raw_text=str(trusted_text).strip(),
+                    value_mm=value_mm,
+                    bbox_pt=geometry,  # already native source coordinates
+                    backend_name=backend_name,
+                    backend_version=backend_version,
+                    confidence=confidence,
+                    _seal=_RECORD_SEAL,
+                )
+            )
+
+        return (
+            tuple(
+                sorted(
+                    observations,
+                    key=lambda item: (
+                        item.bbox_pt,
+                        item.value_mm,
+                        item.observation_id,
+                    ),
+                )
+            ),
+            tuple(word_heights),
+        )
+
     def publish(self, *, revision_id: str, page_id: str) -> RasterPlanDimensionResult:
         revision_id = str(revision_id or "").strip()
         page_id = str(page_id or "").strip()
@@ -682,6 +831,19 @@ class RasterPlanDimensionProducer:
                     page_id=page_id,
                 ),
             )
+
+        native_text_observations, native_word_heights = (
+            self._native_numeric_text_observations(
+                published=published,
+                revision_id=revision_id,
+                page_id=page_id,
+            )
+        )
+        layout_calibration = (
+            calibrate_dimension_layout_from_word_heights(native_word_heights)
+            if native_word_heights
+            else None
+        )
 
         visibility = self._source_visibility.authority()
         segments: list[_VisibleSegment] = []
@@ -752,7 +914,9 @@ class RasterPlanDimensionProducer:
         except Exception:
             raw_lines = ()
 
-        text_observations: list[RasterDimensionTextObservation] = []
+        text_observations: list[RasterDimensionTextObservation] = list(
+            native_text_observations
+        )
         # OCR boxes are normalized into native source user space above, so
         # bounds validation must use the authenticated native frame too. The
         # native page observation's width/height may reflect display rotation.
@@ -827,11 +991,46 @@ class RasterPlanDimensionProducer:
                 ),
             )
 
-        bound = tuple(
+        raw_bound = tuple(
             item
             for text_obs in text_observations
-            for item in (_bind_text_to_geometry(text_obs, segments),)
+            for item in (
+                _bind_text_to_geometry(
+                    text_obs,
+                    segments,
+                    calibration=layout_calibration,
+                ),
+            )
             if item is not None
+        )
+        # Native-authenticated and whole-page OCR may independently observe the
+        # same physical dimension. Collapse only exact same-value/same-endpoint
+        # duplicates; conflicting values remain visible to fail-closed chain
+        # resolution.
+        bound_by_signature: dict[tuple[object, ...], BoundRasterDimension] = {}
+        for item in raw_bound:
+            endpoints = tuple(
+                sorted(
+                    (
+                        (round(item.endpoints_pt[0][0], 4), round(item.endpoints_pt[0][1], 4)),
+                        (round(item.endpoints_pt[1][0], 4), round(item.endpoints_pt[1][1], 4)),
+                    )
+                )
+            )
+            signature = (item.orientation, int(item.value_mm), endpoints)
+            prior = bound_by_signature.get(signature)
+            if prior is None or item.dimension_id < prior.dimension_id:
+                bound_by_signature[signature] = item
+        bound = tuple(
+            sorted(
+                bound_by_signature.values(),
+                key=lambda item: (
+                    item.orientation,
+                    item.endpoints_pt,
+                    item.value_mm,
+                    item.dimension_id,
+                ),
+            )
         )
         horizontal = _resolve_overall("horizontal", bound)
         vertical = _resolve_overall("vertical", bound)
