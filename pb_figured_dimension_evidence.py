@@ -839,6 +839,45 @@ def bind_observation_to_vector_geometry(
     )
 
 
+def _same_line_preceding_context(
+    words: Sequence[object],
+    index: int,
+    *,
+    max_words: int = 2,
+) -> str:
+    """Return immediate preceding native words from the same PDF text line.
+
+    Typed drafting context such as ROOM 300 is meaningful only when the label
+    and number share one native line. Using prior words globally can
+    misclassify an unrelated dimension on the next line merely because PDF
+    extraction order places a room label immediately before it.
+    """
+
+    if index <= 0 or index >= len(words) or max_words <= 0:
+        return ""
+    current = words[index]
+    try:
+        current_block = int(current[5])  # type: ignore[index]
+        current_line = int(current[6])  # type: ignore[index]
+    except (IndexError, TypeError, ValueError):
+        return ""
+
+    collected: list[str] = []
+    for prior in reversed(words[:index]):
+        try:
+            prior_block = int(prior[5])  # type: ignore[index]
+            prior_line = int(prior[6])  # type: ignore[index]
+            prior_text = str(prior[4])  # type: ignore[index]
+        except (IndexError, TypeError, ValueError):
+            break
+        if (prior_block, prior_line) != (current_block, current_line):
+            break
+        collected.append(prior_text)
+        if len(collected) >= max_words:
+            break
+    return " ".join(reversed(collected))
+
+
 def extract_native_dimension_observations(
     page: Any,
     *,
@@ -852,7 +891,7 @@ def extract_native_dimension_observations(
     observations: list[DimensionObservation] = []
     for index, word in enumerate(words):
         text = str(word[4]).strip()
-        preceding = " ".join(str(w[4]) for w in words[max(0, index - 2):index])
+        preceding = _same_line_preceding_context(words, index)
         token = classify_dimension_token(text, preceding_context=preceding)
         if not token.is_linear_dimension:
             continue
@@ -915,7 +954,7 @@ def _extract_witness_promoted_yearlike_observations(
     bindings: list[DimensionAnchorBinding] = []
     for index, word in enumerate(words):
         text = str(word[4]).strip()
-        preceding = " ".join(str(w[4]) for w in words[max(0, index - 2):index])
+        preceding = _same_line_preceding_context(words, index)
         token = classify_dimension_token(text, preceding_context=preceding)
         if token.kind != DimensionTokenKind.YEAR.value:
             continue
