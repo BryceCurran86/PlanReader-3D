@@ -1312,7 +1312,11 @@ def _try_physical_net_wall_rows(
             )
             from pb_takeoff_output_supersedence import blocked_commercial_claim_key
             for blocked_quantity in (
-                getattr(claim.publication, "quantity_evidence", None),
+                getattr(
+                    getattr(claim, "publication", None),
+                    "quantity_evidence",
+                    None,
+                ),
                 *getattr(claim, "opening_quantity_evidence", ()),
                 *getattr(claim, "opening_count_quantity_evidence", ()),
                 *getattr(claim, "room_area_quantity_evidence", ()),
