@@ -11,8 +11,10 @@ the source itself, rendered twice at materially different scales, is read as
 that same text:
 
     producer-owned native word observation
-      -> producer-owned PdfTextIntegrity receipt whose ONLY blocking reason is
-         ``text_glyph_mapping_unverified``
+      -> producer-owned PdfTextIntegrity receipt whose blocking reasons are
+         exactly ``text_glyph_mapping_unverified``, optionally plus
+         ``text_clip_state_unresolved``; the latter can be discharged only
+         by the same post-clip rendered-pixel proof below
       -> producer-owned word bbox
       -> the exact region rendered from the immutable stored PDF bytes at
          300 DPI and at 450 DPI (renderer clip; never a page crop)
@@ -27,8 +29,8 @@ that same text:
          whitespace only; punctuation and every semantic character preserved).
 
 Anything else abstains: any other text-integrity reason (trace ambiguity,
-malformed CMap, hidden/clipped/occluded text, decode or glyph mismatch, ...),
-zero readings, more than one reading (competing or duplicate detections),
+malformed CMap, explicitly clipped text, hidden/occluded text, decode or glyph
+mismatch, ...), zero readings, more than one reading (competing or duplicate detections),
 malformed or out-of-bounds OCR geometry, disagreement between the views, or a
 reading that differs from the native claim. There is no nearest / first /
 highest-confidence / largest-box / edit-distance choice, no confidence
@@ -59,6 +61,7 @@ from PIL import Image
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
     TEXT_GLYPH_MAPPING_UNVERIFIED,
     PdfTextIntegrityAuthority,
 )
@@ -336,8 +339,11 @@ class RasterTextCorroborationProducer:
             return _abstain(RASTER_TEXT_OBSERVATION_NOT_NATIVE_WORD)
 
         # 2. The word must have cleared every text-integrity condition except
-        #    the independent glyph mapping. Raster OCR never overrides another
-        #    failure.
+        #    the independent glyph mapping and, optionally, unresolved clip
+        #    ownership. The latter is eligible only because the proof below is
+        #    performed on the renderer's final post-clip pixels. Explicitly
+        #    proven clipping and every other integrity failure remain hard vetoes
+        #    before OCR.
         text_result = self._text_authority.resolve_text(observation_selector)
         receipt = text_result.receipt
         if receipt is None:
@@ -346,13 +352,21 @@ class RasterTextCorroborationProducer:
             return _conflict(RASTER_TEXT_INTEGRITY_CONFLICT, *text_result.reason_codes)
         if text_result.status == EvidenceResolutionStatus.CORROBORATED:
             return _abstain(RASTER_TEXT_ALREADY_TRUSTED)
+
+        receipt_reasons = tuple(receipt.reason_codes)
+        receipt_reason_set = set(receipt_reasons)
+        raster_admissible_reasons = {
+            TEXT_GLYPH_MAPPING_UNVERIFIED,
+            TEXT_CLIP_STATE_UNRESOLVED,
+        }
         if (
             text_result.status != EvidenceResolutionStatus.ABSTAINED
             or receipt.trusted
-            or tuple(receipt.reason_codes) != (TEXT_GLYPH_MAPPING_UNVERIFIED,)
-            or tuple(text_result.reason_codes) != tuple(receipt.reason_codes)
+            or TEXT_GLYPH_MAPPING_UNVERIFIED not in receipt_reason_set
+            or not receipt_reason_set.issubset(raster_admissible_reasons)
+            or tuple(text_result.reason_codes) != receipt_reasons
         ):
-            return _abstain(RASTER_TEXT_INTEGRITY_NOT_GLYPH_ONLY, *receipt.reason_codes)
+            return _abstain(RASTER_TEXT_INTEGRITY_NOT_GLYPH_ONLY, *receipt_reasons)
 
         # 3. The producer-owned word bbox is the only raster target.
         try:
