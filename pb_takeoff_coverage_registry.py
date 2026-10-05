@@ -808,6 +808,7 @@ def build_coverage_registry_v1(
     takeoff_rows_by_universe: Mapping[tuple[str, str], Sequence[TakeoffOutputRow]] | None = None,
     editable_objects: Sequence[EditableGeometryObject] = (),
     object_metadata_by_id: Mapping[str, Any] | None = None,
+    object_quantity_links: Mapping[str, Sequence[str]] | None = None,
 ) -> CoverageRegistrySummaryV1:
     """Build one fail-closed, read-only coverage registry run.
 
@@ -838,6 +839,11 @@ def build_coverage_registry_v1(
     )
     editable_by_id = _index_editable_objects(editable_objects)
     supplied_metadata = dict(object_metadata_by_id or {})
+    supplied_object_quantity_links = {
+        str(object_id).strip(): _string_tuple(quantity_ids, "object_quantity_links")
+        for object_id, quantity_ids in dict(object_quantity_links or {}).items()
+        if str(object_id).strip()
+    }
 
     admitted_by_id: dict[str, ProducerObjectUniverseSnapshotV1] = {}
     metadata_by_id: dict[str, dict[str, Any]] = {}
@@ -933,9 +939,22 @@ def build_coverage_registry_v1(
         quantity_id for quantity_id, keys in row_declared_keys.items() if len(keys) != 1
     )
 
+    unknown_link_objects = sorted(
+        set(supplied_object_quantity_links) - set(admitted_by_id)
+    )
+    if unknown_link_objects:
+        raise CoverageRegistryContractError(
+            "object_quantity_link_object_not_admitted",
+            ",".join(unknown_link_objects),
+        )
+
     qe_lineage_reasons: dict[str, tuple[str, ...]] = {}
     qe_links_by_object: dict[str, set[str]] = {
         object_id: set() for object_id in admitted_by_id
+    }
+    explicit_links_by_object: dict[str, set[str]] = {
+        object_id: set(quantity_ids)
+        for object_id, quantity_ids in supplied_object_quantity_links.items()
     }
     qe_unadmitted_targets: dict[str, set[str]] = {}
     for quantity_id, records in qe_records_by_id.items():
@@ -948,6 +967,13 @@ def build_coverage_registry_v1(
                 else:
                     qe_unadmitted_targets.setdefault(quantity_id, set()).add(object_id)
         qe_lineage_reasons[quantity_id] = tuple(sorted(reasons))
+
+    declared_qe_ids = set(qe_declared_keys)
+    for object_id, quantity_ids in explicit_links_by_object.items():
+        for quantity_id in quantity_ids:
+            if quantity_id not in declared_qe_ids:
+                continue
+            qe_links_by_object[object_id].add(quantity_id)
 
     editable_links_by_quantity: dict[str, set[str]] = {}
     for object_id, quantity_ids in editable_dependency_ids.items():
@@ -1019,7 +1045,10 @@ def build_coverage_registry_v1(
                 dependency_reasons.add("quantity_evidence_record_missing")
             dependency_reasons.update(qe_lineage_reasons.get(quantity_id, ()))
             dependency_reasons.update(row_lineage_reasons.get(quantity_id, ()))
-            if qe_unadmitted_targets.get(quantity_id):
+            if (
+                qe_unadmitted_targets.get(quantity_id)
+                and quantity_id not in explicit_links_by_object.get(object_id, set())
+            ):
                 dependency_reasons.add("quantity_input_entity_not_admitted")
 
             quantity = quantities[0] if len(quantities) == 1 else None
@@ -1061,7 +1090,14 @@ def build_coverage_registry_v1(
                 units[quantity_id] = quantity.unit
                 if quantity.abstained:
                     contributions[quantity_id] = None
-                elif not quantity.input_entity_ids or quantity.input_entity_ids == (object_id,):
+                elif (
+                    not quantity.input_entity_ids
+                    or quantity.input_entity_ids == (object_id,)
+                    or (
+                        quantity_id in explicit_links_by_object.get(object_id, set())
+                        and len(exact_links_by_quantity.get(quantity_id, ())) == 1
+                    )
+                ):
                     contributions[quantity_id] = quantity.value
                 else:
                     contributions[quantity_id] = None
