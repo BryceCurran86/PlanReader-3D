@@ -159,7 +159,10 @@ def _trusted_lines_for_page(
     if published is None:
         return ()
     text_authority = source.text_integrity_authority()
-    grouped: dict[tuple[str, int, int], list[tuple[object, object]]] = {}
+    grouped: dict[
+        tuple[str, int, int],
+        list[tuple[str, object, object]],
+    ] = {}
 
     for observation_id in published.text_observation_ids:
         result = text_authority.resolve_text(
@@ -187,7 +190,7 @@ def _trusted_lines_for_page(
                 int(receipt.line_no),
             ),
             [],
-        ).append((result, receipt))
+        ).append((str(observation_id), result, receipt))
 
     lines: list[_TrustedLine] = []
     for key in sorted(grouped):
@@ -195,21 +198,27 @@ def _trusted_lines_for_page(
         if any(
             result.status is not EvidenceResolutionStatus.CORROBORATED
             or not result.trusted_text
-            for result, _receipt in items
+            for _observation_id, result, _receipt in items
         ):
             continue
-        word_nos = [int(receipt.word_no) for _result, receipt in items]
+        word_nos = [
+            int(receipt.word_no)
+            for _observation_id, _result, receipt in items
+        ]
         if len(set(word_nos)) != len(word_nos):
             continue
         lo, hi = min(word_nos), max(word_nos)
         if set(word_nos) != set(range(lo, hi + 1)):
             continue
-        ordered = sorted(items, key=lambda item: int(item[1].word_no))
-        boxes = [_finite_bbox(item[1].geometry) for item in ordered]
+        ordered = sorted(items, key=lambda item: int(item[2].word_no))
+        boxes = [_finite_bbox(item[2].geometry) for item in ordered]
         if any(box is None for box in boxes):
             continue
         concrete_boxes = tuple(box for box in boxes if box is not None)
-        line_text = " ".join(str(item[0].trusted_text).strip() for item in ordered)
+        line_text = " ".join(
+            str(item[1].trusted_text).strip()
+            for item in ordered
+        )
         if not _norm_label(line_text):
             continue
         lines.append(
@@ -222,8 +231,8 @@ def _trusted_lines_for_page(
                     max(box[2] for box in concrete_boxes),
                     max(box[3] for box in concrete_boxes),
                 ),
-                observation_ids=tuple(str(item[1].parent_observation_id) for item in ordered),
-                receipt_ids=tuple(str(item[1].receipt_id) for item in ordered),
+                observation_ids=tuple(str(item[0]) for item in ordered),
+                receipt_ids=tuple(str(item[2].receipt_id) for item in ordered),
             )
         )
     return tuple(lines)
