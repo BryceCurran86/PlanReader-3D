@@ -35,6 +35,20 @@ def _pdf(text: str = "Alpha 900", *, width: float = 300.0, height: float = 200.0
     return data
 
 
+def _rotated_pdf() -> bytes:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=300.0, height=200.0)
+        # Native source geometry remains in the unrotated 300 x 200 user space.
+        # Put the word beyond the rotated display width (200 pt) so validating
+        # its native bbox against page.rect would incorrectly reject it.
+        page.insert_text((230.0, 100.0), "EDGE", fontsize=14.0)
+        page.set_rotation(90)
+        return bytes(doc.tobytes())
+    finally:
+        doc.close()
+
+
 def _ingest(payload: bytes | None = None, document_id: str = DOC):
     producer = SourceObservationProducer(producer_method="render-clip-test", producer_version="1")
     published = producer.ingest_native_pdf_bytes(
@@ -193,3 +207,53 @@ def test_swapped_page_uses_that_pages_own_pixels_and_parent() -> None:
     assert a != b
     assert parent_a.page_id == "1" and parent_b.page_id == "2"
     assert parent_a.observation_id != parent_b.observation_id
+
+def test_rotated_page_clip_uses_native_source_frame_then_display_transform() -> None:
+    payload = _rotated_pdf()
+    producer, published = _ingest(payload, "rotated-render-clip")
+
+    doc = fitz.open(stream=payload, filetype="pdf")
+    try:
+        page = doc[0]
+        assert page.rotation == 90
+        word = page.get_text("words")[0]
+        native_clip = tuple(float(value) for value in word[:4])
+        # This is the production bug guard: native geometry is valid even
+        # though its X extent lies beyond the rotated display width.
+        assert native_clip[2] > float(page.rect.x1)
+
+        png, parent = producer.render_native_page_png(
+            **_kwargs(published),
+            dpi=300.0,
+            clip_pt=native_clip,
+        )
+
+        display_clip = fitz.Rect(*native_clip) * page.rotation_matrix
+        expected = page.get_pixmap(
+            matrix=fitz.Matrix(300.0 / 72.0, 300.0 / 72.0),
+            clip=display_clip,
+            alpha=False,
+        ).tobytes("png")
+    finally:
+        doc.close()
+
+    assert png == expected
+    image = _image(png)
+    assert image.width > 0 and image.height > 0
+    assert parent.page_id == "1"
+
+
+def test_rotated_page_clip_outside_native_frame_is_rejected_even_if_inside_display_rect() -> None:
+    payload = _rotated_pdf()
+    producer, published = _ingest(payload, "rotated-render-native-bounds")
+
+    # /Rotate 90 yields display rect 200 x 300, but native geometry is bounded
+    # by 300 x 200. This clip is inside the display rectangle yet outside the
+    # native source frame and therefore must fail closed.
+    with pytest.raises(ValueError, match=INVALID_RENDER_CLIP):
+        producer.render_native_page_png(
+            **_kwargs(published),
+            dpi=300.0,
+            clip_pt=(20.0, 220.0, 60.0, 240.0),
+        )
+
