@@ -175,13 +175,13 @@ def test_authenticated_opening_count_seals_exact_member_lineage(tmp_path) -> Non
     assert trace.project_id == "source-project"
     assert trace.canonical_entity_ids == quantity.input_entity_ids
     assert set(quantity.evidence_ids).issubset(set(trace.evidence_ids))
-    assert trace.metadata["aggregate_source_trace"] is True
+    assert trace.metadata["aggregate_source_trace"] is False
     assert tuple(trace.metadata["member_opening_ids"]) == tuple(
         sorted(quantity.input_entity_ids)
     )
     assert trace.metadata["opening_mark"] == "W1"
-    assert str(trace.source_page).startswith("aggregate:")
-    assert trace.viewport_id
+    assert trace.source_page == opening.page_id
+    assert trace.viewport_id == opening.viewport_id
 
     sealed = seal_live_opening_count_run(
         claim,
