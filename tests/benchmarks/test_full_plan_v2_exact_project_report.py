@@ -178,3 +178,30 @@ def test_exact_project_report_rejects_tampered_sealed_handoff(tmp_path) -> None:
             sealed_run_path=sealed,
             identity_map_path=identity,
         )
+
+
+
+def test_exact_project_report_cli_writes_requested_json(tmp_path) -> None:
+    manifest = tmp_path / "source_manifest.json"
+    sealed = tmp_path / "sealed.json"
+    identity = tmp_path / "identity.json"
+    output = tmp_path / "report.json"
+    _write_manifest(manifest)
+    _sealed_run(sealed)
+    _identity_map(identity)
+
+    assert _MODULE.main([
+        "--manifest", str(manifest),
+        "--sealed-run", str(sealed),
+        "--identity-map", str(identity),
+        "--output", str(output),
+    ]) == 0
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["source_sha_verified"] is True
+    assert payload["reconciliation_complete"] is True
+    assert payload["denominator"] == 1
+    assert payload["matched_within_tolerance"] == 1
+    assert payload["coverage_accuracy"] == pytest.approx(1.0)
+    assert payload["precision_adjusted_accuracy"] == pytest.approx(1.0)
+    assert payload["produced_items"][0]["quantity_id"] == "qty-1"
