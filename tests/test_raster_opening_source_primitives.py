@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from io import BytesIO
-
 import cv2
 import fitz
 import numpy as np
@@ -85,7 +83,9 @@ def test_translation_moves_geometry_without_changing_primitive_roles() -> None:
                 for x0, y0, x1, y1 in base[kind]
             )
         )
-        assert shifted[kind] == pytest.approx(expected)
+        assert len(shifted[kind]) == len(expected)
+        for actual_row, expected_row in zip(shifted[kind], expected):
+            assert actual_row == pytest.approx(expected_row)
 
 
 def test_quarter_turn_preserves_role_counts() -> None:
