@@ -21,7 +21,7 @@ import fitz
 from pb_ceiling_lining_review_promotion import (
     collect_ceiling_lining_review_candidates,
 )
-from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
 from pb_live_ceiling_source_closed_export import seal_live_ceiling_review_run
 from pb_live_opening_count_source_closed_export import (
     seal_live_opening_count_run,
@@ -53,27 +53,30 @@ def _sha256(path: Path) -> str:
 
 
 def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
-    """Return zero-based pages that source authority recognizes as floor plans."""
+    """Reuse the customer runtime's source-owned topology page scope.
+
+    Bound drawing titles and F.07 viewport evidence can narrow topology only
+    when the production page-scope authority has positive evidence on both
+    sides. Otherwise the existing full page universe is retained unchanged.
+    """
     doc = fitz.open(path)
     try:
         page_count = int(doc.page_count)
-        selected: list[int] = []
-        for index in range(page_count):
-            try:
-                candidates = authoritative_floor_plan_viewports(
-                    doc[index],
-                    page_number=index + 1,
-                )
-            except Exception:
-                continue
-            if any(
-                getattr(candidate, "bounding_box", None) is not None
-                for candidate in candidates
-            ):
-                selected.append(index)
-        return tuple(selected), page_count
     finally:
         doc.close()
+
+    selected = tuple(range(page_count))
+    if not selected:
+        return (), page_count
+
+    scope = source_floor_plan_topology_scope(path, selected)
+    if scope is None:
+        return selected, page_count
+
+    topology = scope.topology_page_indices()
+    if topology is None:
+        return selected, page_count
+    return tuple(topology), page_count
 
 
 def _non_abstained(
@@ -126,8 +129,8 @@ def generate_project_handoff(
     topology_pages, page_count = _source_topology_pages(pdf_path)
     all_pages = tuple(range(page_count))
     topology_mode = (
-        "source_viewport_hints"
-        if topology_pages
+        "source_classified_scope"
+        if topology_pages and tuple(topology_pages) != tuple(all_pages)
         else "live_authority_all_pages_fallback"
     )
 
