@@ -1,0 +1,25 @@
+name: TEST ONLY PR1360 A110 Export
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Record checked out SHA
+        run: git rev-parse HEAD > PR1360_EXPORT_SHA.txt
+      - name: Pack repository
+        run: git archive --format=tar.gz -o pr1360-a110-runtime.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr1360-a110-runtime
+          path: |
+            pr1360-a110-runtime.tar.gz
+            PR1360_EXPORT_SHA.txt
+          retention-days: 1
