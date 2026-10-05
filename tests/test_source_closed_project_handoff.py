@@ -149,6 +149,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     assert summary["status"] == "sealed"
     assert summary["source_sha256"] == source_sha
     assert summary["topology_pages"] == [1]
+    assert summary["topology_mode"] == "source_viewport_hints"
     assert summary["family_counts"] == {
         "room_area": 1,
         "opening_area": 1,
@@ -161,7 +162,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     assert sorted((output / "family_runs").glob("*.sealed.json"))
 
 
-def test_project_handoff_no_source_topology_fails_closed_without_extraction(
+def test_project_handoff_without_vector_hints_delegates_topology_to_live_authority(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -169,13 +170,33 @@ def test_project_handoff_no_source_topology_fails_closed_without_extraction(
     pdf.write_bytes(b"source-bytes")
     monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((), 3))
 
-    def _unexpected(*args, **kwargs):
-        raise AssertionError("production extraction must not run without source topology")
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="abstained"),
+        reason_codes=("live-authority-unavailable",),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_spaces=(),
+        room_area_quantity_evidence=(),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+    seen = {}
+
+    def _collect(*args, **kwargs):
+        seen.update(kwargs)
+        return claim
 
     monkeypatch.setattr(
         handoff,
         "collect_live_physical_net_wall_claim",
-        _unexpected,
+        _collect,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_ceiling_lining_review_candidates",
+        lambda *args, **kwargs: (),
     )
 
     summary = handoff.generate_project_handoff(
@@ -185,11 +206,13 @@ def test_project_handoff_no_source_topology_fails_closed_without_extraction(
         output_dir=tmp_path / "out",
     )
 
-    assert summary["status"] == "unavailable"
+    assert seen["pages"] == (0, 1, 2)
+    assert seen["topology_pages"] is None
+    assert seen["room_area_support_pages"] == (0, 1, 2)
+    assert summary["status"] == "no_sealable_quantities"
     assert summary["topology_pages"] == []
-    assert summary["claim_reason_codes"] == [
-        "no_source_authoritative_floor_plan_topology"
-    ]
+    assert summary["topology_mode"] == "live_authority_all_pages_fallback"
+    assert summary["claim_reason_codes"] == ["live-authority-unavailable"]
     assert summary["combined_run_file"] is None
 
 
