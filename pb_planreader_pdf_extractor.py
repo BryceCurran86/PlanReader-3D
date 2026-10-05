@@ -147,6 +147,39 @@ def _predictions_are_proven_same_type_claim(
     return existing_ref == incoming_ref and existing_bbox == incoming_bbox
 
 
+def _predictions_have_proven_distinct_source_scope(
+    existing: ExtractedPrediction,
+    incoming: ExtractedPrediction,
+) -> bool:
+    """Return True only when source evidence proves distinct claim scope."""
+    if (
+        existing.source_page is not None
+        and incoming.source_page is not None
+        and existing.source_page != incoming.source_page
+    ):
+        return True
+    if (
+        existing.sheet_number
+        and incoming.sheet_number
+        and existing.sheet_number != incoming.sheet_number
+    ):
+        return True
+
+    existing_meta = existing.metadata or {}
+    incoming_meta = incoming.metadata or {}
+    for key in ("raw_evidence_ref", "decision_scope_id", "scope_id", "source_scope_id"):
+        left = str(existing_meta.get(key) or "").strip()
+        right = str(incoming_meta.get(key) or "").strip()
+        if left and right and left != right:
+            return True
+
+    left_bbox = _bbox_tuple(existing.bounding_box)
+    right_bbox = _bbox_tuple(incoming.bounding_box)
+    if left_bbox is not None and right_bbox is not None and left_bbox != right_bbox:
+        return True
+    return False
+
+
 def _scoped_claims_have_measurable_conflict(
     claims: Sequence[Dict[str, Any]],
 ) -> bool:
@@ -288,6 +321,21 @@ def merge_extracted_prediction(
             scoped_claims=[existing, incoming],
             merge_source=merge_source,
             blocking_reason="conflicting_measurable_fields",
+        )
+        return
+
+    if _predictions_have_proven_distinct_source_scope(existing, incoming):
+        pred_dict[incoming.tag] = _blocked_extracted_prediction(
+            tag=existing.tag,
+            trade_type=existing.trade_type,
+            description=(
+                f"{existing.description} [distinct source scopes unresolved; publication blocked]"
+            ),
+            unit=existing.unit,
+            reconciliation_status="ambiguous_unresolved",
+            scoped_claims=[existing, incoming],
+            merge_source=merge_source,
+            blocking_reason="distinct_source_scope_unresolved",
         )
         return
 
