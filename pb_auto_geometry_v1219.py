@@ -703,7 +703,10 @@ def _ceiling_review_rows_from_candidates(
                     f"{SOURCE_PREFIX} · ceiling_quantity:{quantity_id}"
                 ),
                 confidence="Documented",
-                notes=str(item.get("notes") or ""),
+                notes=(
+                    "AI draft; "
+                    + str(item.get("notes") or "")
+                ),
                 row_role="ceiling_area",
                 unit=unit,
                 preserve_quantity=True,
