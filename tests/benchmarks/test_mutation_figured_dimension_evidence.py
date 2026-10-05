@@ -15,6 +15,7 @@ from pb_figured_dimension_evidence import (
     BindingStatus,
     CoordinateSpace,
     DimensionEvidenceTier,
+    DimensionLayoutCalibration,
     ObservedGeometrySegment,
     RasterCoordinateTransform,
     apply_anchor_binding,
@@ -159,6 +160,69 @@ class TestVectorWitnessBinding:
         assert bound.endpoints == binding.endpoints
         assert evidence_tier_for(bound, binding) == DimensionEvidenceTier.WITNESS_BOUND.value
         doc.close()
+
+    def test_stroked_witness_replaces_unstroked_fill_edge_in_same_cluster(self) -> None:
+        observation = DimensionObservation(
+            dimension_id="D1700",
+            source_page=1,
+            view_id="",
+            bbox=(154.0, 140.0, 166.0, 150.0),
+            raw_text="1700",
+            value=1700.0,
+            unit="mm",
+            extraction_method="native_text",
+            authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            confidence=1.0,
+        )
+        calibration = DimensionLayoutCalibration(
+            median_word_height_pt=10.0,
+            line_search_distance_pt=20.0,
+            witness_endpoint_distance_pt=20.0,
+            chain_axis_tolerance_pt=5.0,
+        )
+        segments = [
+            ObservedGeometrySegment(
+                "dimension-line",
+                1,
+                (160.0, 100.0),
+                (160.0, 200.0),
+                stroke_width_pt=0.5,
+                stroke_color_rgb=(0.0, 0.0, 0.0),
+            ),
+            ObservedGeometrySegment(
+                "fill-edge",
+                1,
+                (150.0, 85.0),
+                (170.0, 85.0),
+            ),
+            ObservedGeometrySegment(
+                "real-top-witness",
+                1,
+                (150.0, 95.0),
+                (170.0, 95.0),
+                stroke_width_pt=0.5,
+                stroke_color_rgb=(0.0, 0.0, 0.0),
+            ),
+            ObservedGeometrySegment(
+                "real-bottom-witness",
+                1,
+                (150.0, 200.0),
+                (170.0, 200.0),
+                stroke_width_pt=0.5,
+                stroke_color_rgb=(0.0, 0.0, 0.0),
+            ),
+        ]
+        binding = bind_observation_to_vector_geometry(
+            observation,
+            segments,
+            calibration,
+        )
+        assert binding.status == BindingStatus.WITNESS_BOUND.value
+        assert binding.witness_line_ids == (
+            "real-top-witness",
+            "real-bottom-witness",
+        )
+        assert binding.endpoints == ((160.0, 95.0), (160.0, 200.0))
 
     def test_one_witness_fails_closed_as_partial(self) -> None:
         doc = fitz.open()
