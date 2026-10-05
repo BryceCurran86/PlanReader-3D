@@ -802,20 +802,52 @@ def bind_observation_to_vector_geometry(
         if intersection is not None:
             witness_hits.append((segment, intersection))
 
-    # Collapse multiple vector fragments at effectively the same witness
-    # coordinate; vector exporters commonly split one visual line into pieces.
+    # Collapse only truly coincident witness fragments. The broad
+    # witness_endpoint_distance_pt is a SEARCH tolerance and must not also be
+    # used as an identity/deduplication tolerance: on dense CAD pages it can
+    # merge a real endpoint witness with a different nearby annotation edge.
+    coincidence_tolerance = 1e-3
     unique_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
-    for segment, point in sorted(witness_hits, key=lambda h: (h[1][0], h[1][1], h[0].segment_id)):
-        if not any(math.hypot(point[0] - p[0], point[1] - p[1]) <= calibration.witness_endpoint_distance_pt for _, p in unique_hits):
+    for segment, point in sorted(
+        witness_hits,
+        key=lambda h: (h[1][0], h[1][1], h[0].segment_id),
+    ):
+        if not any(
+            math.hypot(point[0] - prior[0], point[1] - prior[1])
+            <= coincidence_tolerance
+            for _, prior in unique_hits
+        ):
             unique_hits.append((segment, point))
 
     if best.orientation == DimensionOrientation.HORIZONTAL.value:
-        unique_hits.sort(key=lambda h: h[1][0])
+        start_coord, end_coord = sorted((best.start[0], best.end[0]))
+        along = lambda hit: hit[1][0]
     else:
-        unique_hits.sort(key=lambda h: h[1][1])
+        start_coord, end_coord = sorted((best.start[1], best.end[1]))
+        along = lambda hit: hit[1][1]
 
-    if len(unique_hits) >= 2:
-        first, last = unique_hits[0], unique_hits[-1]
+    def nearest_endpoint_hit(
+        target: float,
+    ) -> Optional[tuple[ObservedGeometrySegment, tuple[float, float]]]:
+        eligible = [
+            hit
+            for hit in unique_hits
+            if abs(along(hit) - target)
+            <= calibration.witness_endpoint_distance_pt
+        ]
+        if not eligible:
+            return None
+        eligible.sort(
+            key=lambda hit: (
+                abs(along(hit) - target),
+                hit[0].segment_id,
+            )
+        )
+        return eligible[0]
+
+    first = nearest_endpoint_hit(start_coord)
+    last = nearest_endpoint_hit(end_coord)
+    if first is not None and last is not None and first[1] != last[1]:
         return DimensionAnchorBinding(
             observation.dimension_id,
             BindingStatus.WITNESS_BOUND.value,
@@ -823,13 +855,15 @@ def bind_observation_to_vector_geometry(
             witness_line_ids=(first[0].segment_id, last[0].segment_id),
             endpoints=(first[1], last[1]),
         )
-    if len(unique_hits) == 1:
+
+    partial = first if first is not None else last
+    if partial is not None:
         return DimensionAnchorBinding(
             observation.dimension_id,
             BindingStatus.PARTIAL_WITNESS.value,
             dimension_line_id=best.segment_id,
-            witness_line_ids=(unique_hits[0][0].segment_id,),
-            notes=["only one witness/extension line resolved"],
+            witness_line_ids=(partial[0].segment_id,),
+            notes=["only one endpoint witness/extension line resolved"],
         )
     return DimensionAnchorBinding(
         observation.dimension_id,
