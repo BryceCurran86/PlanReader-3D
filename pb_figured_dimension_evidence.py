@@ -701,6 +701,8 @@ def bind_observation_to_vector_geometry(
     observation: DimensionObservation,
     segments: Sequence[ObservedGeometrySegment],
     calibration: DimensionLayoutCalibration,
+    *,
+    text_orientation_hint: Optional[str] = None,
 ) -> DimensionAnchorBinding:
     """Bind one figured dimension to a unique nearby dimension/witness-line system."""
     if observation.bbox is None:
@@ -718,36 +720,42 @@ def bind_observation_to_vector_geometry(
         if _axis_distance(center, s) <= calibration.line_search_distance_pt
         and _projection_contains(center, s, calibration.line_search_distance_pt)
     ]
-    if observation.orientation in (
+    if not candidates:
+        return DimensionAnchorBinding(observation.dimension_id, BindingStatus.UNSUPPORTED.value, notes=["no nearby axis-aligned vector dimension line"])
+
+    tie_tolerance = calibration.median_word_height_pt * 0.25
+    if text_orientation_hint in (
         DimensionOrientation.HORIZONTAL.value,
         DimensionOrientation.VERTICAL.value,
     ):
-        preferred_orientation = [
-            segment
-            for segment in candidates
-            if segment.orientation == observation.orientation
+        hinted = [
+            candidate
+            for candidate in candidates
+            if candidate.orientation == text_orientation_hint
         ]
-        # Native text direction is positive orientation evidence only when
-        # same-orientation geometry is itself at least as spatially plausible
-        # as the best source line. Perpendicular witness ticks can sit close to
-        # the text on legitimate orthogonal-depth dimensions; they must not
-        # suppress a clearly nearer perpendicular dimension line.
-        if preferred_orientation and candidates:
-            best_any_distance = min(_axis_distance(center, s) for s in candidates)
-            best_preferred_distance = min(
-                _axis_distance(center, s) for s in preferred_orientation
-            )
-            orientation_slack = calibration.median_word_height_pt * 0.05
-            if best_preferred_distance <= best_any_distance + orientation_slack:
-                candidates = preferred_orientation
-    if not candidates:
-        return DimensionAnchorBinding(observation.dimension_id, BindingStatus.UNSUPPORTED.value, notes=["no nearby axis-aligned vector dimension line"])
+        if len(hinted) >= 2:
+            hinted.sort(key=lambda s: (_axis_distance(center, s), -s.length, s.segment_id))
+            hinted_best = _axis_distance(center, hinted[0])
+            hinted_tied = [
+                candidate
+                for candidate in hinted
+                if abs(_axis_distance(center, candidate) - hinted_best) <= tie_tolerance
+            ]
+            # Native text direction is a tie-break hint only. It may narrow the
+            # universe when same-orientation source geometry is itself ambiguous
+            # and source graphic state independently proves one strict winner.
+            # It must never create a binding by suppressing one perpendicular
+            # nearby primitive.
+            if (
+                len(hinted_tied) >= 2
+                and _strict_style_dominator(hinted_tied) is not None
+            ):
+                candidates = hinted
 
     candidates.sort(key=lambda s: (_axis_distance(center, s), -s.length, s.segment_id))
     best = candidates[0]
     if len(candidates) > 1:
         d0 = _axis_distance(center, candidates[0])
-        tie_tolerance = calibration.median_word_height_pt * 0.25
         tied = [
             candidate
             for candidate in candidates
@@ -841,7 +849,6 @@ def extract_native_dimension_observations(
 ) -> list[DimensionObservation]:
     """Extract typed native-text figured-dimension candidates from a PDF page."""
     words = list(_native_words(page))
-    word_orientations = _native_word_orientations(page)
     observations: list[DimensionObservation] = []
     for index, word in enumerate(words):
         text = str(word[4]).strip()
@@ -861,10 +868,6 @@ def extract_native_dimension_observations(
                 raw_text=text,
                 value=float(token.value),
                 unit=str(token.unit),
-                orientation=word_orientations.get(
-                    (int(word[5]), int(word[6])),
-                    DimensionOrientation.UNKNOWN.value,
-                ),
                 authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
                 confidence=1.0,
                 conflict_state=ConstraintStatus.FULLY_CONSTRAINED.value,
@@ -1160,10 +1163,34 @@ def extract_dimension_evidence_bundle(
         view_id=view_id,
         view_type=view_type,
     )
+    native_words = list(_native_words(page))
+    word_orientations = _native_word_orientations(page)
+    orientation_hints: dict[str, str] = {}
+    prefix = f"native_dim_p{page_num}_"
+    for observation in native:
+        if not observation.dimension_id.startswith(prefix):
+            continue
+        try:
+            word_index = int(observation.dimension_id[len(prefix):])
+            word = native_words[word_index]
+            hint = word_orientations.get((int(word[5]), int(word[6])))
+        except (IndexError, TypeError, ValueError):
+            hint = None
+        if hint in (
+            DimensionOrientation.HORIZONTAL.value,
+            DimensionOrientation.VERTICAL.value,
+        ):
+            orientation_hints[observation.dimension_id] = hint
+
     bindings: list[DimensionAnchorBinding] = []
     bound_native: list[DimensionObservation] = []
     for observation in native:
-        binding = bind_observation_to_vector_geometry(observation, segments, layout)
+        binding = bind_observation_to_vector_geometry(
+            observation,
+            segments,
+            layout,
+            text_orientation_hint=orientation_hints.get(observation.dimension_id),
+        )
         bindings.append(binding)
         bound_native.append(apply_anchor_binding(observation, binding))
 
