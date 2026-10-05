@@ -426,3 +426,127 @@ def test_incomplete_viewport_wall_scope_cannot_publish_when_room_authority_absta
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.rooms == ()
     assert result.source_pages == ()
+
+
+
+def test_physical_room_identity_ignores_evidence_revision_fingerprints() -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    polygon = (
+        (10.0, 10.0),
+        (20.0, 10.0),
+        (20.0, 20.0),
+        (10.0, 20.0),
+    )
+    first = SimpleNamespace(
+        face_id="source-face-revision-a",
+        record_id="source-face-record-revision-a",
+        document_id="logical-document-1",
+        revision_id="revision-a",
+        source_sha256="a" * 64,
+        snapshot_id="snapshot-a",
+        page_id="7",
+        decision_scope_id="wall-source:viewport:7:first",
+        polygon_pdf_pts=polygon,
+        bounding_wall_ids=("w1", "w2", "w3", "w4"),
+        area_page_pts2=100.0,
+    )
+    second = SimpleNamespace(
+        face_id="source-face-revision-b",
+        record_id="source-face-record-revision-b",
+        document_id="logical-document-1",
+        revision_id="revision-b",
+        source_sha256="b" * 64,
+        snapshot_id="snapshot-b",
+        page_id="7",
+        decision_scope_id="wall-source:viewport:7:second",
+        polygon_pdf_pts=polygon,
+        bounding_wall_ids=("new-w1", "new-w2", "new-w3", "new-w4"),
+        area_page_pts2=100.0,
+    )
+
+    left = module._room_object_from_record(
+        first,
+        viewport_id="floor-plan-view",
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+    right = module._room_object_from_record(
+        second,
+        viewport_id="floor-plan-view",
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+
+    assert left.physical_room_id == right.physical_room_id
+    assert left.canonical_room_id == right.canonical_room_id
+    assert left.source_room_face_record_id != right.source_room_face_record_id
+    assert left.evidence_ids != right.evidence_ids
+
+
+def test_physical_room_identity_keeps_distinct_rooms_and_documents_distinct() -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    def room_record(*, document_id: str, polygon):
+        return SimpleNamespace(
+            face_id="evidence-face",
+            record_id="evidence-record",
+            document_id=document_id,
+            revision_id="revision",
+            source_sha256="c" * 64,
+            snapshot_id="snapshot",
+            page_id="1",
+            decision_scope_id="wall-source:page-1",
+            polygon_pdf_pts=polygon,
+            bounding_wall_ids=("w1", "w2", "w3", "w4"),
+            area_page_pts2=100.0,
+        )
+
+    first_polygon = (
+        (10.0, 10.0),
+        (20.0, 10.0),
+        (20.0, 20.0),
+        (10.0, 20.0),
+    )
+    second_polygon = (
+        (30.0, 10.0),
+        (40.0, 10.0),
+        (40.0, 20.0),
+        (30.0, 20.0),
+    )
+
+    first = module._room_object_from_record(
+        room_record(document_id="doc-a", polygon=first_polygon),
+        viewport_id=None,
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+    other_room = module._room_object_from_record(
+        room_record(document_id="doc-a", polygon=second_polygon),
+        viewport_id=None,
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+    other_document = module._room_object_from_record(
+        room_record(document_id="doc-b", polygon=first_polygon),
+        viewport_id=None,
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+    other_view = module._room_object_from_record(
+        room_record(document_id="doc-a", polygon=first_polygon),
+        viewport_id="detail-view",
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+
+    assert len(
+        {
+            first.physical_room_id,
+            other_room.physical_room_id,
+            other_document.physical_room_id,
+            other_view.physical_room_id,
+        }
+    ) == 4

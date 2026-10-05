@@ -13,7 +13,7 @@ from pb_drawing_evidence_binding import DrawingViewType
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_face_authority import (
     SourceRoomFaceSelector,
@@ -22,7 +22,8 @@ from pb_source_room_face_authority import (
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.1.0"
+LIVE_PHYSICAL_ROOM_IDENTITY_SCHEMA_VERSION = "1.0.0"
 LIVE_CANONICAL_ROOM_RESOLVED = "live_canonical_room_composition_resolved"
 LIVE_CANONICAL_ROOM_PARTIAL = "live_canonical_room_composition_partial"
 LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL = "live_canonical_room_face_universe_partial"
@@ -94,6 +95,32 @@ def _dedupe(values: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
 
 
+def _physical_room_id(record, *, viewport_id: Optional[str]) -> str:
+    """Physical room identity separate from revision/evidence fingerprints.
+
+    SourceRoomFace record ids deliberately remain revision/snapshot specific for
+    reproducibility. A canonical physical room is instead scoped by the logical
+    document, source page/view and the already-canonical source-room polygon.
+    Producer version, revision SHA, snapshot id, source-face record id and wall
+    evidence ids therefore cannot churn the physical room id when geometry is
+    unchanged.
+    """
+    return stable_contract_id(
+        "live_physical_room",
+        {
+            "identity_schema_version": LIVE_PHYSICAL_ROOM_IDENTITY_SCHEMA_VERSION,
+            "document_id": str(record.document_id),
+            "page_id": str(record.page_id),
+            "viewport_id": str(viewport_id or ""),
+            "polygon_pdf_pts": tuple(
+                (float(point[0]), float(point[1]))
+                for point in record.polygon_pdf_pts
+            ),
+        },
+        digest_chars=32,
+    )
+
+
 def _room_object_from_record(
     record,
     *,
@@ -119,9 +146,10 @@ def _room_object_from_record(
                 wall_id in unresolved_ids for wall_id in record.bounding_wall_ids
             )
 
+    physical_room_id = _physical_room_id(record, viewport_id=viewport_id)
     return LiveCanonicalRoomObject(
-        canonical_room_id=record.face_id,
-        physical_room_id=record.face_id,
+        canonical_room_id=physical_room_id,
+        physical_room_id=physical_room_id,
         document_id=record.document_id,
         revision_id=record.revision_id,
         source_sha256=record.source_sha256,
@@ -343,6 +371,7 @@ __all__ = [
     "LIVE_CANONICAL_ROOM_SCHEMA_VERSION",
     "LIVE_CANONICAL_ROOM_UNAVAILABLE",
     "LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED",
+    "LIVE_PHYSICAL_ROOM_IDENTITY_SCHEMA_VERSION",
     "LiveCanonicalRoomComposition",
     "LiveCanonicalRoomObject",
     "compose_live_canonical_rooms",
