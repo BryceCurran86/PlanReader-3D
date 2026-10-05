@@ -251,6 +251,90 @@ def _viewport_fallback_source():
     return source, wall_opening
 
 
+def _viewport_boundary_local_recovery_source():
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=400.0, height=300.0)
+        page.draw_rect(
+            fitz.Rect(30.0, 30.0, 300.0, 270.0),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+        page.insert_text((80.0, 60.0), "GROUND FLOOR PLAN", fontsize=10.0)
+
+        # Keep the page-wide scope unresolved, as in the existing fallback test.
+        page.insert_text((325.0, 70.0), "LEGEND", fontsize=10.0)
+        page.draw_line(
+            fitz.Point(325.0, 150.0),
+            fitz.Point(385.0, 150.0),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+
+        # Two valid rooms wholly inside the authenticated frame.
+        for first, second in (
+            ((70.0, 90.0), (270.0, 90.0)),
+            ((270.0, 90.0), (270.0, 240.0)),
+            ((270.0, 240.0), (70.0, 240.0)),
+            ((70.0, 240.0), (70.0, 90.0)),
+            ((170.0, 90.0), (170.0, 240.0)),
+        ):
+            page.draw_line(
+                fitz.Point(*first),
+                fitz.Point(*second),
+                color=(0, 0, 0),
+                width=1.0,
+            )
+
+        # Structural source geometry crosses the authenticated viewport frame
+        # well above the rooms. The viewport wall universe is therefore
+        # globally incomplete, but its producer-owned boundary audit can prove
+        # that neither room is touched by the excluded primitive.
+        page.draw_line(
+            fitz.Point(0.0, 75.0),
+            fitz.Point(50.0, 75.0),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+
+        payload = doc.tobytes()
+    finally:
+        doc.close()
+
+    source = SourceVisibilityProducer(
+        producer_method="live-canonical-room-boundary-local-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-canonical-room-boundary-local-doc",
+        source_bytes=payload,
+        source_locator="memory://live-canonical-room-boundary-local.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    return source, wall_opening
+
+
+def test_incomplete_viewport_wall_scope_can_publish_boundary_clean_room_faces() -> None:
+    source, wall_opening = _viewport_boundary_local_recovery_source()
+
+    result = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.source_pages == (1,)
+    assert len(result.rooms) == 2
+    assert all(room.viewport_id for room in result.rooms)
+    assert LIVE_CANONICAL_ROOM_PARTIAL in result.reason_codes
+    assert LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED in result.reason_codes
+    assert LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL in result.reason_codes
+
+
 def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewport() -> None:
     source, wall_opening = _viewport_fallback_source()
 
