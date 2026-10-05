@@ -103,6 +103,10 @@ def test_resolved_floor_plan_emits_live_chipboard_ceiling_claim(tmp_path) -> Non
     assert result.quantity_evidence[0].quantity_id in claim.room_quantity_ids
     assert len(result.canonical_ceilings) == 1
     ceiling = result.canonical_ceilings[0]
+    assert ceiling.document_id
+    assert ceiling.snapshot_id
+    assert ceiling.source_sha256
+    assert ceiling.revision_id
     assert ceiling.room_entity_id in claim.room_entity_ids
     assert ceiling.area_m2 == claim.quantity_m2
     assert ceiling.finish_descriptor == claim.finish_descriptor
