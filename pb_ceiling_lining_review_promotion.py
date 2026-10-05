@@ -7,14 +7,16 @@ The only positive path starts from an already-ingested SourceVisibilityProducer
 and reruns the fully source-owned shadow composition. A review-eligible ceiling
 quantity may be minted only when:
 - the ceiling shadow claim is non-abstained, PROVISIONAL and explicitly shadow-only;
-- its same-scope upstream room area is FIRM and PDF_SCALED;
+- its same-scope upstream room area is FIRM and either PDF_SCALED or
+  DOCUMENTED_DIMENSION;
 - the numeric value is copied exactly from that room area;
 - finish semantics came from producer-owned trusted PDF text and are non-empty;
 - source/document/revision/page/viewport identity is current and consistent;
-- the physical scale bridge is CORROBORATED and retains a source scale record;
+- scaled geometry retains a CORROBORATED source scale record, while documented
+  dimensions retain explicit figured-dimension lineage and need no drawing scale;
 - the ProviderContext carries a positive workspace_record_id.
 
-The promoted QuantityEvidence inherits the existing PDF_SCALED numeric authority
+The promoted QuantityEvidence inherits the existing FIRM room-area numeric authority
 but remains REVIEW_REQUIRED. It is then projected through the canonical M5
 commercial adapter as an unreviewed AI draft. Existing estimator, pricing and
 JobHub gates remain unchanged and therefore block the row until explicit review.
@@ -22,7 +24,7 @@ JobHub gates remain unchanged and therefore block the row until explicit review.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from pb_geometry_takeoff_model import (
     AuthorityStatus,
@@ -154,7 +156,11 @@ def _promotion_candidate(
         area.abstained
         or area.value is None
         or area.status != AuthorityStatus.FIRM.value
-        or area.authority != MeasurementAuthorityType.PDF_SCALED.value
+        or area.authority
+        not in {
+            MeasurementAuthorityType.PDF_SCALED.value,
+            MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+        }
         or _norm(area.unit) not in _ACCEPTED_AREA_UNITS
         or len(area.input_entity_ids) != 1
         or area.input_entity_ids[0] != scope
@@ -181,19 +187,35 @@ def _promotion_candidate(
     ):
         return None
 
-    scale_bridge = source_result.scale_bridge
-    scale_evidence = scale_bridge.physical_scale_evidence
-    calibration = scale_bridge.calibration
-    if (
-        scale_bridge.status is not EvidenceResolutionStatus.CORROBORATED
-        or calibration is None
-        or scale_evidence is None
-        or not scale_evidence.record_id
-        or measurement_authority_for_page_scale(calibration)
-        != AuthorityStatus.FIRM.value
-        or calibration.revision_id != context.current_revision_id
-    ):
-        return None
+    area_metadata = area.metadata if isinstance(area.metadata, Mapping) else {}
+    scale_evidence = None
+    figured_dimension_ids: tuple[str, ...] = ()
+    if area.authority == MeasurementAuthorityType.PDF_SCALED.value:
+        scale_bridge = source_result.scale_bridge
+        scale_evidence = scale_bridge.physical_scale_evidence
+        calibration = scale_bridge.calibration
+        if (
+            scale_bridge.status is not EvidenceResolutionStatus.CORROBORATED
+            or calibration is None
+            or scale_evidence is None
+            or not scale_evidence.record_id
+            or measurement_authority_for_page_scale(calibration)
+            != AuthorityStatus.FIRM.value
+            or calibration.revision_id != context.current_revision_id
+        ):
+            return None
+    else:
+        figured_dimension_ids = tuple(
+            sorted(
+                {
+                    str(value).strip()
+                    for value in (area_metadata.get("figured_dimension_ids") or ())
+                    if str(value).strip()
+                }
+            )
+        )
+        if not figured_dimension_ids:
+            return None
 
     promoted_metadata = dict(metadata)
     promoted_metadata.update(
@@ -204,17 +226,28 @@ def _promotion_candidate(
             "source_owned_ceiling_promotion": True,
             "promotion_parent_quantity_id": shadow.quantity_id,
             "numeric_authority_source_quantity_id": area.quantity_id,
-            "physical_scale_record_id": scale_evidence.record_id,
             "element": "Ceiling lining",
+            "section": "Internal",
+            "location": "Ceiling",
+            "substrate": "Other",
+            "row_role": "ceiling_area",
             "finish_system": finish_descriptor,
+            "figured_dimension_ids": figured_dimension_ids,
         }
     )
+    if scale_evidence is not None:
+        promoted_metadata["physical_scale_record_id"] = scale_evidence.record_id
+
     promotion_payload = {
         "family": shadow.family,
         "semantic_key": shadow.semantic_key,
         "parent_quantity_id": shadow.quantity_id,
         "upstream_area_quantity_id": area.quantity_id,
-        "physical_scale_record_id": scale_evidence.record_id,
+        "numeric_authority": area.authority,
+        "physical_scale_record_id": (
+            scale_evidence.record_id if scale_evidence is not None else ""
+        ),
+        "figured_dimension_ids": figured_dimension_ids,
         "source_sha256": context.source_sha256,
         "revision_id": context.current_revision_id,
         "viewport_id": viewport_id,
@@ -269,17 +302,28 @@ def _promotion_candidate(
             "upstream_area_quantity_id": area.quantity_id,
         },
     )
-    measurement = CommercialMeasurementAuthority(
-        method="scaled_geometry",
-        resolved_scale_id=scale_evidence.record_id,
-        scale_status="resolved",
-        scale_conflicts=(),
-        metadata={
-            "ceiling_review_promotion": True,
-            "upstream_area_quantity_id": area.quantity_id,
-            "scale_source_kind": scale_evidence.source_kind,
-        },
-    )
+    if scale_evidence is not None:
+        measurement = CommercialMeasurementAuthority(
+            method="scaled_geometry",
+            resolved_scale_id=scale_evidence.record_id,
+            scale_status="resolved",
+            scale_conflicts=(),
+            metadata={
+                "ceiling_review_promotion": True,
+                "upstream_area_quantity_id": area.quantity_id,
+                "scale_source_kind": scale_evidence.source_kind,
+            },
+        )
+    else:
+        measurement = CommercialMeasurementAuthority(
+            method="figured_dimension",
+            figured_dimension_ids=figured_dimension_ids,
+            metadata={
+                "ceiling_review_promotion": True,
+                "upstream_area_quantity_id": area.quantity_id,
+                "numeric_authority": area.authority,
+            },
+        )
     row = quantity_evidence_to_takeoff_output_row(
         promoted,
         trace=trace,
@@ -311,6 +355,7 @@ def build_ceiling_lining_review_promotions(
     context: ProviderContext,
     viewport: ViewportEvidence,
     page_no: int,
+    authoritative_area_quantities: Sequence[QuantityEvidence] | None = None,
 ) -> CeilingLiningReviewPromotionResult:
     """Build estimator-review candidates from the full producer-owned chain."""
 
@@ -322,6 +367,7 @@ def build_ceiling_lining_review_promotions(
         context=context,
         viewport=viewport,
         page_no=page_no,
+        authoritative_area_quantities=authoritative_area_quantities,
     )
 
     candidates = tuple(
