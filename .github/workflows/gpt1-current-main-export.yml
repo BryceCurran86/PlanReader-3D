@@ -13,11 +13,11 @@ jobs:
       - name: Record SHA
         run: git rev-parse HEAD > CURRENT_EXPORT_SHA.txt
       - name: Archive checkout
-        run: tar --exclude=.git -czf planreader-current-main.tar.gz .
+        run: tar --exclude=.git -czf /tmp/planreader-current-main.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
           name: gpt1-current-main-export
           path: |
             CURRENT_EXPORT_SHA.txt
-            planreader-current-main.tar.gz
+            /tmp/planreader-current-main.tar.gz
           retention-days: 1
