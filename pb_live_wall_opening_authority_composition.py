@@ -183,6 +183,17 @@ def compose_live_wall_opening_authority(
     if published is None:
         raise ValueError(LIVE_WALL_OPENING_COMPOSITION_UNAVAILABLE)
 
+    # Materialize isolated raster-opening evidence before wall scopes. The wall
+    # producer may subsequently augment ordinary raster-visible geometry, and
+    # SourceVisibilityProducer preserves these isolated receipts across that
+    # snapshot transition. This order keeps wall/opening selectors on one final
+    # immutable producer snapshot without exposing raster opening primitives as
+    # ordinary visible observations.
+    published = source_visibility_producer.augment_with_raster_opening_primitives(
+        revision_id,
+        page_ids=selected_pages,
+    )
+
     wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source_visibility_producer,
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
