@@ -29,6 +29,7 @@ from pb_physical_wall_identity import (
 )
 from pb_source_observation_authority import SourceObservationProducer
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 
 
