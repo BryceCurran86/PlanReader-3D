@@ -1,13 +1,18 @@
-"""Producer-owned ceiling-finish evidence from trusted native PDF text.
+"""Producer-owned ceiling-finish evidence from authenticated source text.
 
 This adapter removes caller-supplied page text and text bboxes from the C15
 ceiling-finish path. It consumes only the complete text-observation universe
-retained by SourceVisibilityProducer and only words independently resolved by
-PdfTextIntegrityAuthority.
+retained by SourceVisibilityProducer. Native text accepted by
+PdfTextIntegrityAuthority remains the primary path; a glyph-only-untrusted word
+may instead be admitted only through the existing two-render
+RasterTextCorroborationProducer, which must independently read the exact native
+claim at both raster scales.
 
 Phrase reconstruction is intentionally narrow and fail-closed:
 - words may combine only when producer receipts share exact page/block/line;
-- every word in the reconstructed native line must resolve as trusted text;
+- the untrusted native line is used only as a cheap semantic routing claim;
+- every word in a semantically eligible reconstructed line must independently
+  resolve as trusted native text or exact two-render raster corroboration;
 - word_no values must be unique and contiguous;
 - every participating word must lie fully inside the trusted viewport bbox;
 - no proximity or nearest-neighbour grouping is used.
@@ -32,6 +37,10 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -111,7 +120,7 @@ def collect_source_owned_ceiling_finish_candidates(
     authority = source_visibility_producer.text_integrity_authority()
     line_results: dict[
         tuple[str, int, int],
-        list[tuple[int, object, object]],
+        list[tuple[int, object, object, str]],
     ] = {}
 
     # Iterate the complete producer-owned text universe. We deliberately do
@@ -136,11 +145,13 @@ def collect_source_owned_ceiling_finish_candidates(
             continue
         key = (receipt.page_id, int(receipt.block_no), int(receipt.line_no))
         line_results.setdefault(key, []).append(
-            (int(receipt.word_no), result, receipt)
+            (int(receipt.word_no), result, receipt, observation_id)
         )
 
     atoms: list[EvidenceAtom] = []
     viewport_bbox = tuple(float(value) for value in viewport.bbox)
+
+    raster_producer: Optional[RasterTextCorroborationProducer] = None
 
     for key in sorted(line_results):
         entries = line_results[key]
@@ -154,23 +165,66 @@ def collect_source_owned_ceiling_finish_candidates(
         ):
             continue
 
-        # Reject the WHOLE native line if any word is not trusted. Otherwise
-        # omission of an unsafe word could fabricate a semantic phrase.
-        if any(
-            result.status is not EvidenceResolutionStatus.CORROBORATED
-            or not _clean(result.trusted_text)
-            for _, result, _ in ordered
-        ):
+        # Use the native text only as a ROUTING CLAIM. If the line cannot even
+        # express an explicit ceiling-finish semantic, do not spend OCR work on
+        # it. This claim can never create evidence: every participating word is
+        # independently authenticated below, and raster corroboration requires
+        # exact equality back to the native claim at both render scales.
+        claim_texts = [_clean(receipt.raw_text) for _, _, receipt, _ in ordered]
+        claim_line = " ".join(claim_texts)
+        if not iter_explicit_ceiling_finish_matches(claim_line):
             continue
 
-        boxes = [_bbox(receipt.geometry) for _, _, receipt in ordered]
+        texts: list[str] = []
+        raster_record_ids: list[str] = []
+        line_authenticated = True
+        for _word_no, result, receipt, observation_id in ordered:
+            trusted = (
+                _clean(result.trusted_text)
+                if result.status is EvidenceResolutionStatus.CORROBORATED
+                else ""
+            )
+            if trusted:
+                texts.append(trusted)
+                continue
+
+            if raster_producer is None:
+                raster_producer = (
+                    RasterTextCorroborationProducer.from_source_visibility_producer(
+                        source_visibility_producer
+                    )
+                )
+            raster_result = raster_producer.publish(
+                RasterTextCorroborationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if (
+                raster_result.status is not EvidenceResolutionStatus.CORROBORATED
+                or raster_result.record is None
+                or not _clean(raster_result.corroborated_text)
+            ):
+                line_authenticated = False
+                break
+            texts.append(_clean(raster_result.corroborated_text))
+            raster_record_ids.append(raster_result.record.record_id)
+
+        # Reject the WHOLE line if any word is not independently authenticated.
+        # Omitting one unsafe word could fabricate a different semantic phrase.
+        if not line_authenticated or len(texts) != len(ordered):
+            continue
+
+        boxes = [_bbox(receipt.geometry) for _, _, receipt, _ in ordered]
         if any(box is None for box in boxes):
             continue
         trusted_boxes = tuple(box for box in boxes if box is not None)
         if any(not _inside(box, viewport_bbox) for box in trusted_boxes):
             continue
 
-        texts = [_clean(result.trusted_text) for _, result, _ in ordered]
         line_text = " ".join(texts)
         matches = iter_explicit_ceiling_finish_matches(line_text)
         if not matches:
@@ -214,6 +268,9 @@ def collect_source_owned_ceiling_finish_candidates(
                 ordered[index][2].receipt_id
                 for index in selected_indexes
             )
+            selected_raster_ids = tuple(
+                raster_record_ids
+            )
             candidates = collect_unscoped_ceiling_finish_candidates(
                 page_text=raw_match,
                 document_id=published.revision.document_id,
@@ -235,6 +292,8 @@ def collect_source_owned_ceiling_finish_candidates(
                         "native_line_no": key[2],
                         "source_text_observation_ids": parent_ids,
                         "text_integrity_receipt_ids": receipt_ids,
+                        "raster_text_corroboration_record_ids": selected_raster_ids,
+                        "raster_text_corroborated": bool(selected_raster_ids),
                     }
                 )
                 evidence_id = stable_contract_id(
@@ -252,6 +311,7 @@ def collect_source_owned_ceiling_finish_candidates(
                         "bbox": candidate.bbox,
                         "parent_observation_ids": parent_ids,
                         "receipt_ids": receipt_ids,
+                        "raster_text_corroboration_record_ids": selected_raster_ids,
                     },
                 )
                 atoms.append(
