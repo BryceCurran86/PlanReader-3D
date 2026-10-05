@@ -405,20 +405,42 @@ class CrossViewRoomAreaProducer:
             for room in group
         }
 
+        # Source decode coverage is already 1-based. Resolve trusted label
+        # lines first and run the expensive dimension/OCR authority only on
+        # source pages that can actually support a unique cross-view room
+        # proposition. This is both fail-closed and important for large plan
+        # sets with dozens or hundreds of irrelevant sheets.
+        unique_labels = {
+            label: grouped_rooms[0]
+            for label, grouped_rooms in labels.items()
+            if len(grouped_rooms) == 1
+        }
         page_results: dict[str, RasterPlanDimensionResult] = {}
         page_lines: dict[str, tuple[_TrustedLine, ...]] = {}
-        for page_index in tuple(published.coverage.decoded_pages):
-            page_id = str(int(page_index) + 1)
+        for page_number in tuple(published.coverage.decoded_pages):
+            page_id = str(int(page_number))
+            trusted_lines = _trusted_lines_for_page(
+                self._source,
+                revision_id=revision_id,
+                page_id=page_id,
+            )
+            relevant_lines = tuple(
+                line
+                for line in trusted_lines
+                if (
+                    _norm_label(line.text) in unique_labels
+                    and str(unique_labels[_norm_label(line.text)].page_id)
+                    != page_id
+                )
+            )
+            if not relevant_lines:
+                continue
             dimension_result = self._dimensions.publish(
                 revision_id=revision_id,
                 page_id=page_id,
             )
             page_results[page_id] = dimension_result
-            page_lines[page_id] = _trusted_lines_for_page(
-                self._source,
-                revision_id=revision_id,
-                page_id=page_id,
-            )
+            page_lines[page_id] = relevant_lines
 
         records: list[CrossViewRoomAreaRecord] = []
         unresolved: set[str] = {
@@ -442,6 +464,8 @@ class CrossViewRoomAreaProducer:
                 ]
             ] = []
             for page_id, trusted_lines in sorted(page_lines.items()):
+                if page_id == str(room.page_id):
+                    continue
                 dimension_result = page_results[page_id]
                 trusted_dimensions = tuple(
                     dimension
