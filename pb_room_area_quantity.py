@@ -178,7 +178,7 @@ def _validate_explicit_area(
         blockers.append("explicit_area_document_mismatch")
 
     if evidence.method == SOURCE_ROOM_CROSS_VIEW_AREA_METHOD:
-        metadata = evidence.metadata if isinstance(evidence.metadata, dict) else {}
+        metadata = dict(evidence.metadata or {})
         bound_room_ref = str(metadata.get("bound_room_ref") or "").strip()
         source_room_face_record_id = str(
             metadata.get("source_room_face_record_id") or ""
