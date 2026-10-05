@@ -1956,6 +1956,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
     # by the current run. A changed source, disappeared object, unmatched
     # identity, reviewed row or legacy heuristic row is replaced normally.
     preserved_source_closed_rows: List[Tuple[Any, ...]] = []
+    retained_reviewed_source_closed_row_ids: Tuple[int, ...] = ()
     coverage = getattr(app, "_ag09_family_coverage_by_workspace", {}).get(
         int(workspace_id), {}
     )
