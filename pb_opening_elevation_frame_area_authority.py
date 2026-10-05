@@ -279,6 +279,184 @@ def _edge_support(
     )
 
 
+def _binding_line_coordinate(binding, axis_name: str) -> float | None:
+    endpoints = getattr(binding, "endpoints", None)
+    if endpoints is None or len(endpoints) != 2:
+        return None
+    try:
+        x0, y0 = float(endpoints[0][0]), float(endpoints[0][1])
+        x1, y1 = float(endpoints[1][0]), float(endpoints[1][1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if axis_name == "x":
+        return (y0 + y1) / 2.0
+    if axis_name == "y":
+        return (x0 + x1) / 2.0
+    return None
+
+
+def _parallel_subdimension_partition(
+    *,
+    selected_item,
+    dimensions: Sequence[tuple],
+    locality_limit: float,
+    tolerance: float,
+) -> tuple[tuple[float, float], ...]:
+    """Return a proven parallel subdimension chain spanning one overall axis.
+
+    Overall dimensions can legitimately describe one opening, so subdivision
+    alone is not a rejection. This helper only proves the source structure
+    needed by the mixed-opening assembly gate below.
+    """
+
+    selected_observation, selected_binding, _mm, selected_axis, _trusted = (
+        selected_item
+    )
+    axis_name, span_lo, span_hi = selected_axis
+    span_lo, span_hi = float(span_lo), float(span_hi)
+    span_length = span_hi - span_lo
+    if span_length <= 0.0:
+        return ()
+
+    selected_line = _binding_line_coordinate(selected_binding, axis_name)
+    if selected_line is None:
+        return ()
+
+    candidates: list[tuple[float, float, float]] = []
+    selected_id = str(getattr(selected_observation, "dimension_id", ""))
+    for item in dimensions:
+        observation, binding, _value, axis, _word = item
+        if str(getattr(observation, "dimension_id", "")) == selected_id:
+            continue
+        if axis[0] != axis_name:
+            continue
+        lo, hi = float(axis[1]), float(axis[2])
+        if (
+            lo < span_lo - tolerance
+            or hi > span_hi + tolerance
+            or hi - lo >= span_length - tolerance
+        ):
+            continue
+        line = _binding_line_coordinate(binding, axis_name)
+        if line is None or abs(line - selected_line) > locality_limit:
+            continue
+        candidates.append((lo, hi, line))
+
+    if len(candidates) < 2:
+        return ()
+
+    # Subdimensions on one source chain share a common parallel dimension
+    # line. Build only from such a cluster; unrelated nearby dimensions cannot
+    # collectively manufacture an assembly partition.
+    for seed_line in sorted({item[2] for item in candidates}):
+        cluster = [
+            (max(span_lo, lo), min(span_hi, hi))
+            for lo, hi, line in candidates
+            if abs(line - seed_line) <= tolerance
+        ]
+        cluster = sorted(set(cluster))
+        if len(cluster) < 2:
+            continue
+
+        cursor = span_lo
+        chain: list[tuple[float, float]] = []
+        for lo, hi in cluster:
+            if hi <= cursor + tolerance:
+                continue
+            if lo > cursor + tolerance:
+                break
+            # A clean partition may meet at a boundary within tolerance but
+            # must not rely on a substantial overlap between independent
+            # dimension spans.
+            if lo < cursor - tolerance:
+                continue
+            chain.append((lo, hi))
+            cursor = hi
+            if cursor >= span_hi - tolerance:
+                break
+
+        if len(chain) >= 2 and cursor >= span_hi - tolerance:
+            return tuple(chain)
+    return ()
+
+
+def _mixed_opening_mark_near_dimension_span(
+    *,
+    selected_axis: tuple[str, float, float],
+    all_tags: Sequence[tuple[_TrustedWord, str, str]],
+    mark: str,
+    mark_kind: str,
+    frame_bbox: tuple[float, float, float, float],
+    locality_limit: float,
+    tolerance: float,
+) -> bool:
+    axis_name, span_lo, span_hi = selected_axis
+    x0, y0, x1, y1 = frame_bbox
+    if axis_name == "x":
+        secondary_lo, secondary_hi = y0, y1
+    elif axis_name == "y":
+        secondary_lo, secondary_hi = x0, x1
+    else:
+        return False
+    secondary_span = max(0.0, secondary_hi - secondary_lo)
+    local_band = locality_limit + secondary_span
+
+    for word, other_mark, other_kind in all_tags:
+        if other_mark == mark or other_kind == mark_kind:
+            continue
+        primary, secondary = _center(word.bbox)
+        if axis_name == "y":
+            primary, secondary = secondary, primary
+        if not (
+            float(span_lo) - tolerance
+            <= primary
+            <= float(span_hi) + tolerance
+        ):
+            continue
+        if secondary_lo <= secondary <= secondary_hi:
+            distance = 0.0
+        else:
+            distance = min(
+                abs(secondary - secondary_lo),
+                abs(secondary - secondary_hi),
+            )
+        if distance <= local_band:
+            return True
+    return False
+
+
+def _dimension_is_mixed_opening_assembly_span(
+    *,
+    selected_item,
+    dimensions: Sequence[tuple],
+    all_tags: Sequence[tuple[_TrustedWord, str, str]],
+    mark: str,
+    mark_kind: str,
+    frame_bbox: tuple[float, float, float, float],
+    locality_limit: float,
+    tolerance: float,
+) -> bool:
+    """True only when independent source structure proves a composite span."""
+
+    partition = _parallel_subdimension_partition(
+        selected_item=selected_item,
+        dimensions=dimensions,
+        locality_limit=locality_limit,
+        tolerance=tolerance,
+    )
+    if not partition:
+        return False
+    return _mixed_opening_mark_near_dimension_span(
+        selected_axis=selected_item[3],
+        all_tags=all_tags,
+        mark=mark,
+        mark_kind=mark_kind,
+        frame_bbox=frame_bbox,
+        locality_limit=locality_limit,
+        tolerance=tolerance,
+    )
+
+
 def _match_trusted_dimension_word(
     trusted_words: Sequence[_TrustedWord],
     observation,
@@ -496,6 +674,34 @@ def _record_candidates_for_page(
                 }
                 # Composite assemblies are not one opening's gross frame.
                 if contained != {mark}:
+                    continue
+
+                # A second composite shape occurs when the selected figured
+                # dimension is an assembly-wide overall span: a nearby
+                # parallel source dimension chain partitions it end-to-end and
+                # a different opening kind occupies that same local span.
+                # This catches transom/storefront-style window+door assemblies
+                # without rejecting a sidelight merely because it shares one
+                # full-height dimension with a neighbouring door.
+                if _dimension_is_mixed_opening_assembly_span(
+                    selected_item=x_item,
+                    dimensions=dimensions,
+                    all_tags=all_tags,
+                    mark=mark,
+                    mark_kind=mark_kind,
+                    frame_bbox=frame_bbox,
+                    locality_limit=locality_limit,
+                    tolerance=geometry_tolerance,
+                ) or _dimension_is_mixed_opening_assembly_span(
+                    selected_item=y_item,
+                    dimensions=dimensions,
+                    all_tags=all_tags,
+                    mark=mark,
+                    mark_kind=mark_kind,
+                    frame_bbox=frame_bbox,
+                    locality_limit=locality_limit,
+                    tolerance=geometry_tolerance,
+                ):
                     continue
 
                 geo_ratio = (x_hi - x_lo) / (y_hi - y_lo)
@@ -1008,6 +1214,7 @@ __all__ = [
     "OpeningElevationFrameAreaResult",
     "OpeningElevationFrameAreaSelector",
     "opening_elevation_claim_family",
+    "_dimension_is_mixed_opening_assembly_span",
     "_edge_support",
     "_record_candidates_for_page",
 ]
