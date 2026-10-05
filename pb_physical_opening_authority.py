@@ -2703,6 +2703,24 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
+        primitive_result = visibility.resolve_raster_opening_primitive(selector)
+        if (
+            primitive_result.status is EvidenceResolutionStatus.CORROBORATED
+            and primitive_result.observation is not None
+        ):
+            return self._prove_raster_framed_existence(
+                selector,
+                primitive_result,
+            )
+        if VISIBILITY_RECEIPT_UNAVAILABLE not in primitive_result.reason_codes:
+            return PhysicalOpeningExistenceResult(
+                status=_source_failure_status(primitive_result),
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=_dedupe_reason_codes(primitive_result.reason_codes),
+                source_observation=primitive_result,
+            )
+
         visible_cache_key = (
             str(selector.document_id),
             str(selector.revision_id),
