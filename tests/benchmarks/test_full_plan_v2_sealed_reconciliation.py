@@ -120,6 +120,7 @@ def sealed_quantity(
     lineage_ok: bool = True,
     abstained: bool = False,
     family: str = "room_area",
+    unit: str = "m2",
 ) -> dict:
     payload = {
         "schema_version": "1.0.0",
@@ -128,7 +129,7 @@ def sealed_quantity(
         "family": family,
         "semantic_key": "anything-not-used-for-matching",
         "value": value,
-        "unit": "m2",
+        "unit": unit,
         "status": "firm" if not abstained else "abstained",
         "authority": "figured_dimension",
         "confidence": 1.0,
@@ -174,6 +175,110 @@ def test_exact_production_identity_reconciles_to_verified_v2_object() -> None:
     result = evaluate_project_v2(manifest(), produced)
     assert result.matched_within_tolerance == 1
     assert result.unsupported_extra == 0
+
+
+def test_multiple_sealed_quantities_cannot_map_to_one_v2_binding() -> None:
+    first = sealed_quantity()
+    second_payload = dict(sealed_quantity())
+    second_payload.pop("fingerprint", None)
+    second_payload["quantity_id"] = "qty-2"
+    second_payload["semantic_key"] = "different-semantic-key"
+    second = {
+        **second_payload,
+        "fingerprint": _fingerprint(second_payload),
+    }
+    run_payload = {
+        "schema_version": "1.0.0",
+        "run_id": "source_closed_run_duplicate-binding",
+        "project_id": "project-a",
+        "source_sha256s": [SHA],
+        "revision_ids": ["rev-a"],
+        "quantities": [first, second],
+    }
+    run = {
+        **run_payload,
+        "fingerprint": _fingerprint(run_payload),
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="multiple sealed quantities map to one V2 binding",
+    ):
+        reconcile_sealed_run_v2(
+            manifest(),
+            run,
+            identity_map(),
+        )
+
+
+def test_exact_identity_bound_count_reconciles_ea_to_nr_without_value_conversion() -> None:
+    count_item = VerifiedTakeoffItemV2(
+        item_id="project-a-opening-count",
+        project_id="project-a",
+        description="Verified opening count",
+        trade_category="doors",
+        unit="nr",
+        expected_quantity=3.0,
+        tolerance_policy_id="relative-tolerance-v1",
+        tolerance_fraction=0.0,
+        expected_object_refs=(
+            "benchmark:door:d01",
+            "benchmark:door:d02",
+            "benchmark:door:d03",
+        ),
+        source_document_refs=("reference_takeoff.json",),
+        source_location_refs=("A600:door_schedule",),
+    )
+    count_manifest = ProjectBenchmarkManifestV2(
+        project_id="project-a",
+        status=PROJECT_VERIFIED,
+        source_package_complete=True,
+        source_documents=manifest().source_documents,
+        reference_takeoff_documents=manifest().reference_takeoff_documents,
+        verified_items=(count_item,),
+    )
+    refs = ("opening-1", "opening-2", "opening-3")
+    count_map = V2ProductionIdentityMap(
+        project_id="project-a",
+        source_sha256s=(SHA,),
+        bindings=(
+            V2ProductionIdentityBinding(
+                benchmark_item_id="project-a-opening-count",
+                production_object_identity_refs=refs,
+                production_family="opening_count",
+            ),
+        ),
+    )
+    row = sealed_quantity(
+        refs=refs,
+        value=3.0,
+        family="opening_count",
+        unit="ea",
+    )
+
+    produced = reconcile_sealed_run_v2(
+        count_manifest,
+        sealed_run(row),
+        count_map,
+    )
+
+    assert produced[0].value == 3.0
+    assert produced[0].unit == "nr"
+    result = evaluate_project_v2(count_manifest, produced)
+    assert result.matched_within_tolerance == 1
+    assert result.unsupported_extra == 0
+
+
+def test_exact_identity_binding_rejects_incompatible_production_unit() -> None:
+    with pytest.raises(
+        ValueError,
+        match="not equivalent to benchmark unit",
+    ):
+        reconcile_sealed_run_v2(
+            manifest(),
+            sealed_run(sealed_quantity(unit="ea")),
+            identity_map(),
+        )
 
 
 def test_same_number_wrong_identity_is_missed_and_unsupported_extra() -> None:
