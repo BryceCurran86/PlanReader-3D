@@ -279,6 +279,40 @@ def test_identity_map_must_cover_the_sealed_run_source_scope() -> None:
         )
 
 
+def test_identity_map_may_cover_a_superset_of_run_sources() -> None:
+    second_sha = "c" * 64
+    source_b = SourceDocumentV2(
+        name="plans-b.pdf",
+        role="architectural_drawings",
+        sha256=second_sha,
+        size_bytes=100,
+        page_count=2,
+    )
+    base = manifest()
+    two_source_manifest = ProjectBenchmarkManifestV2(
+        project_id=base.project_id,
+        status=base.status,
+        source_package_complete=True,
+        source_documents=(*base.source_documents, source_b),
+        reference_takeoff_documents=base.reference_takeoff_documents,
+        verified_items=base.verified_items,
+    )
+    mapping = V2ProductionIdentityMap(
+        project_id="project-a",
+        source_sha256s=(SHA, second_sha),
+        bindings=identity_map().bindings,
+    )
+
+    produced = reconcile_sealed_run_v2(
+        two_source_manifest,
+        sealed_run(),
+        mapping,
+    )
+
+    assert len(produced) == 1
+    assert produced[0].object_refs == ("benchmark:floor:food-prep",)
+
+
 def test_tampered_quantity_fingerprint_fails_closed() -> None:
     row = sealed_quantity()
     row["value"] = 999.0
