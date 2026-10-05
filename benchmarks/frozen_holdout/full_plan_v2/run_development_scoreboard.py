@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 if __package__:
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
     from .development_scoreboard import (
         build_development_failure_ledger_v2,
         evaluate_development_suite_v2,
@@ -20,6 +21,7 @@ if __package__:
 else:
     repo_root = Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(repo_root))
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
     from benchmarks.frozen_holdout.full_plan_v2.development_scoreboard import (
         build_development_failure_ledger_v2,
         evaluate_development_suite_v2,
@@ -112,11 +114,13 @@ def main() -> int:
                 raise FileNotFoundError(
                     f"sealed run exists but identity map is missing: {map_path}"
                 )
-            sealed_run = _json_object(sealed_path)
+            sealed_run = sealed_source_closed_run_from_dict(
+                _json_object(sealed_path)
+            )
             identity_map = identity_map_from_dict(_json_object(map_path))
             produced[manifest.project_id] = reconcile_sealed_run_v2(
                 manifest,
-                sealed_run,
+                sealed_run.to_dict(),
                 identity_map,
             )
 
