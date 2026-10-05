@@ -208,6 +208,70 @@ def test_sealed_fingerprint_does_not_collapse_distinct_canonical_instances() -> 
     assert first.object_identity_refs != second.object_identity_refs
     assert first.fingerprint != second.fingerprint
 
+def test_verified_loader_round_trips_sealed_json_payload() -> None:
+    run = export.seal_source_closed_run(
+        [quantity()],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+
+    loaded = export.sealed_source_closed_run_from_dict(
+        json.loads(run.to_json())
+    )
+
+    assert loaded.run_id == run.run_id
+    assert loaded.fingerprint == run.fingerprint
+    assert loaded.to_dict() == run.to_dict()
+
+
+def test_verified_loader_rejects_tampered_nested_quantity() -> None:
+    run = export.seal_source_closed_run(
+        [quantity()],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    payload = json.loads(run.to_json())
+    payload["quantities"][0]["value"] = 999.0
+
+    with pytest.raises(
+        export.SourceClosedRunConflictError,
+        match="quantity fingerprint mismatch",
+    ):
+        export.sealed_source_closed_run_from_dict(payload)
+
+
+def test_verified_loader_rejects_tampered_run_id_even_with_untouched_rows() -> None:
+    run = export.seal_source_closed_run(
+        [quantity()],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    payload = json.loads(run.to_json())
+    payload["run_id"] = "source_closed_run_" + ("0" * 32)
+
+    with pytest.raises(
+        export.SourceClosedRunConflictError,
+        match="run_id is inconsistent",
+    ):
+        export.sealed_source_closed_run_from_dict(payload)
+
+
+def test_verified_loader_rejects_tampered_top_level_fingerprint() -> None:
+    run = export.seal_source_closed_run(
+        [quantity()],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    payload = json.loads(run.to_json())
+    payload["fingerprint"] = "0" * 64
+
+    with pytest.raises(
+        export.SourceClosedRunConflictError,
+        match="run fingerprint is inconsistent",
+    ):
+        export.sealed_source_closed_run_from_dict(payload)
+
+
 def test_combines_independent_family_runs_into_one_deterministic_project_run() -> None:
     room_quantity = quantity(
         quantity_id="qty-room",
