@@ -38,7 +38,13 @@ from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
     RASTER_PDF_VISIBLE_SEGMENT,
     VISIBILITY_RECEIPT_UNAVAILABLE,
+    RASTER_OPENING_PRIMITIVE_RENDER_DPI,
     SourceVisibilityAuthority,
+)
+from pb_raster_opening_source_primitives import (
+    RASTER_THIN_INK_RUN,
+    RASTER_WALL_BAND_END,
+    RASTER_WALL_BAND_FACE,
 )
 
 
@@ -66,6 +72,12 @@ MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY = (
 )
 
 JAMB_BOUNDED_TWO_FACE_INTERRUPTION = "jamb_bounded_two_face_interruption"
+RASTER_FRAMED_WALL_BAND_INTERRUPTION = "raster_framed_wall_band_interruption"
+RASTER_FRAME_MIN_COVERAGE = 0.80
+RASTER_FRAME_MIN_INNER_RUNS = 2
+RASTER_MIN_OPENING_GAP_PT = 8.0
+RASTER_MIN_GAP_TO_WALL_THICKNESS = 2.0
+RASTER_GEOMETRY_EQ_TOL_PT = 72.0 / float(RASTER_OPENING_PRIMITIVE_RENDER_DPI)
 GAP_CORROBORATED_DOOR_JAMB_LEAF = "gap_corroborated_door_jamb_leaf"
 GAP_CORROBORATED_WINDOW_JAMB_PAIR = "gap_corroborated_window_jamb_pair"
 WALL_FACE_INTERRUPTION_KIND = "wall_face_interruption"
@@ -490,6 +502,7 @@ def _canonical_line(record: SourceObservationRecord) -> tuple[tuple[float, float
     return tuple(sorted((first, second)))  # type: ignore[return-value]
 
 
+
 def _physical_opening_geometry_identity(
     candidate: CandidateSemanticOpening,
     records: Sequence[SourceObservationRecord],
@@ -522,6 +535,104 @@ def _physical_opening_geometry_identity(
     ):
         return ()
     return geometry
+
+
+def _line_projection_interval(
+    line: tuple[float, float, float, float],
+    direction: tuple[float, float],
+) -> tuple[float, float]:
+    values = sorted(
+        (
+            _projection((line[0], line[1]), direction),
+            _projection((line[2], line[3]), direction),
+        )
+    )
+    return (values[0], values[1])
+
+
+def _raster_frame_run_relation(
+    record: SourceObservationRecord,
+    *,
+    first_break: _FaceBreak,
+    second_break: _FaceBreak,
+) -> Optional[str]:
+    """Classify one authenticated thin run relative to a candidate aperture.
+
+    Returns "inner" for a frame run strictly between the two wall faces,
+    "face" when the run continues one of the wall faces through the opening,
+    otherwise None. This is exact source geometry, not proximity binding.
+    """
+
+    line = _line_geometry(record)
+    if line is None or not _parallel(line, (
+        first_break.direction[0],
+        first_break.direction[1],
+        first_break.direction[0] + first_break.direction[0],
+        first_break.direction[1] + first_break.direction[1],
+    )):
+        return None
+
+    direction = first_break.direction
+    run_start, run_end = _line_projection_interval(line, direction)
+    gap_start = min(first_break.gap_start, first_break.gap_end)
+    gap_end = max(first_break.gap_start, first_break.gap_end)
+    gap_length = gap_end - gap_start
+    if gap_length <= _COORD_EQ_ABS_TOL:
+        return None
+    overlap = max(0.0, min(run_end, gap_end) - max(run_start, gap_start))
+    if overlap < RASTER_FRAME_MIN_COVERAGE * gap_length:
+        return None
+
+    run_offset = _cross(direction, (line[0], line[1]))
+    first_offset = _cross(direction, first_break.start_point)
+    second_offset = _cross(direction, second_break.start_point)
+    low, high = sorted((first_offset, second_offset))
+    if high - low <= _COORD_EQ_ABS_TOL:
+        return None
+
+    if (
+        abs(run_offset - low) <= RASTER_GEOMETRY_EQ_TOL_PT
+        or abs(run_offset - high) <= RASTER_GEOMETRY_EQ_TOL_PT
+    ):
+        return "face"
+    if (
+        low + RASTER_GEOMETRY_EQ_TOL_PT
+        < run_offset
+        < high - RASTER_GEOMETRY_EQ_TOL_PT
+    ):
+        return "inner"
+    return None
+
+
+def _raster_candidate_aperture_geometry(
+    support: Sequence[SourceObservationRecord],
+) -> tuple[tuple[float, float], ...]:
+    """Return canonical four-corner aperture geometry from raster face support."""
+
+    faces = tuple(
+        record for record in support
+        if record.observation_kind == RASTER_WALL_BAND_FACE
+        and _line_geometry(record) is not None
+    )
+    breaks: list[_FaceBreak] = []
+    for index, first in enumerate(faces):
+        for second in faces[index + 1:]:
+            found = _face_break(first, second)
+            if found is not None:
+                breaks.append(found)
+    for index, first_break in enumerate(breaks):
+        for second_break in breaks[index + 1:]:
+            if (
+                _same_gap(first_break, second_break)
+                and _distinct_parallel_axes(first_break, second_break)
+            ):
+                return tuple(sorted((
+                    (round(first_break.start_point[0], 6), round(first_break.start_point[1], 6)),
+                    (round(first_break.end_point[0], 6), round(first_break.end_point[1], 6)),
+                    (round(second_break.start_point[0], 6), round(second_break.start_point[1], 6)),
+                    (round(second_break.end_point[0], 6), round(second_break.end_point[1], 6)),
+                )))
+    return ()
 
 
 class PhysicalOpeningAuthority:
@@ -598,6 +709,21 @@ class PhysicalOpeningAuthority:
                 tuple[SourceObservationRecord, ...],
                 tuple[SourceObservationAuthorityResult, ...],
             ],
+        ] = {}
+        self._raster_primitive_snapshot_cache: dict[
+            tuple[str, str, str, str],
+            tuple[
+                tuple[SourceObservationRecord, ...],
+                tuple[SourceObservationAuthorityResult, ...],
+            ],
+        ] = {}
+        self._raster_framed_candidate_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[CandidateSemanticOpening, ...],
+        ] = {}
+        self._raster_existence_cache: dict[
+            tuple[str, str, str, str, str],
+            PhysicalOpeningExistenceResult,
         ] = {}
 
     @classmethod
@@ -766,6 +892,444 @@ class PhysicalOpeningAuthority:
         resolved = (tuple(records), tuple(failures))
         self._visible_snapshot_cache[cache_key] = resolved
         return resolved
+
+    def _raster_primitive_snapshot_records(
+        self,
+        seed: SourceObservationAuthorityResult,
+    ) -> tuple[
+        tuple[SourceObservationRecord, ...],
+        tuple[SourceObservationAuthorityResult, ...],
+    ]:
+        producer = self._source_visibility_producer
+        visibility = self._source_visibility_authority
+        if (
+            producer is None
+            or visibility is None
+            or seed.snapshot is None
+            or seed.source_revision is None
+        ):
+            return (), ()
+
+        key = (
+            str(seed.snapshot.document_id),
+            str(seed.snapshot.revision_id),
+            str(seed.snapshot.source_sha256),
+            str(seed.snapshot.snapshot_id),
+        )
+        cached = self._raster_primitive_snapshot_cache.get(key)
+        if cached is not None:
+            return cached
+
+        published = producer.published_snapshot_for_revision(
+            seed.snapshot.revision_id
+        )
+        if (
+            published is None
+            or published.snapshot.snapshot_id != seed.snapshot.snapshot_id
+        ):
+            return (), ()
+
+        records: list[SourceObservationRecord] = []
+        failures: list[SourceObservationAuthorityResult] = []
+        for observation_id in published.raster_opening_primitive_observation_ids:
+            result = visibility.resolve_raster_opening_primitive(
+                ObservationSelector(
+                    document_id=seed.snapshot.document_id,
+                    revision_id=seed.snapshot.revision_id,
+                    source_sha256=seed.snapshot.source_sha256,
+                    snapshot_id=seed.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if (
+                result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.observation is not None
+            ):
+                records.append(result.observation)
+            else:
+                failures.append(result)
+        resolved = (tuple(records), tuple(failures))
+        self._raster_primitive_snapshot_cache[key] = resolved
+        return resolved
+
+    def _raster_framed_candidates_for(
+        self,
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+    ) -> tuple[CandidateSemanticOpening, ...]:
+        cache_key = self._visible_page_candidate_key(seed)
+        cached = self._raster_framed_candidate_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        scoped = tuple(
+            record
+            for record in records
+            if record.document_id == seed.document_id
+            and record.revision_id == seed.revision_id
+            and record.source_sha256 == seed.source_sha256
+            and record.snapshot_id == seed.snapshot_id
+            and record.page_id == seed.page_id
+            and record.viewport_id is None
+        )
+        faces = tuple(
+            record for record in scoped
+            if record.observation_kind == RASTER_WALL_BAND_FACE
+            and _line_geometry(record) is not None
+        )
+        ends = tuple(
+            record for record in scoped
+            if record.observation_kind == RASTER_WALL_BAND_END
+            and _line_geometry(record) is not None
+        )
+        thin_runs = tuple(
+            record for record in scoped
+            if record.observation_kind == RASTER_THIN_INK_RUN
+            and _line_geometry(record) is not None
+        )
+
+        breaks: list[_FaceBreak] = []
+        for first_index, second_index in _candidate_collinear_record_pairs(faces):
+            found = _face_break(faces[first_index], faces[second_index])
+            if found is not None:
+                breaks.append(found)
+
+        discovered: dict[
+            str, dict[str, SourceObservationRecord]
+        ] = {}
+        for index, first_break in enumerate(breaks):
+            for second_break in breaks[index + 1:]:
+                if not _same_gap(first_break, second_break):
+                    continue
+                if not _distinct_parallel_axes(first_break, second_break):
+                    continue
+
+                gap_length = abs(first_break.gap_end - first_break.gap_start)
+                wall_thickness = abs(
+                    _cross(
+                        first_break.direction,
+                        (
+                            second_break.start_point[0] - first_break.start_point[0],
+                            second_break.start_point[1] - first_break.start_point[1],
+                        ),
+                    )
+                )
+                if (
+                    gap_length < RASTER_MIN_OPENING_GAP_PT
+                    or wall_thickness <= _COORD_EQ_ABS_TOL
+                    or gap_length
+                    < RASTER_MIN_GAP_TO_WALL_THICKNESS * wall_thickness
+                ):
+                    continue
+
+                left_ends = tuple(
+                    record for record in ends
+                    if _segment_matches(
+                        record,
+                        first_break.start_point,
+                        second_break.start_point,
+                    )
+                )
+                right_ends = tuple(
+                    record for record in ends
+                    if _segment_matches(
+                        record,
+                        first_break.end_point,
+                        second_break.end_point,
+                    )
+                )
+                if not left_ends or not right_ends:
+                    continue
+
+                inner_runs: list[SourceObservationRecord] = []
+                face_continues = False
+                for run in thin_runs:
+                    relation = _raster_frame_run_relation(
+                        run,
+                        first_break=first_break,
+                        second_break=second_break,
+                    )
+                    if relation == "face":
+                        face_continues = True
+                        break
+                    if relation == "inner":
+                        inner_runs.append(run)
+                if face_continues:
+                    continue
+
+                inner_by_geometry: dict[
+                    tuple[tuple[float, float], tuple[float, float]],
+                    SourceObservationRecord,
+                ] = {}
+                for run in inner_runs:
+                    inner_by_geometry[_canonical_line(run)] = run
+                inner = tuple(
+                    inner_by_geometry[geometry_key]
+                    for geometry_key in sorted(inner_by_geometry)
+                )
+                if len(inner) < RASTER_FRAME_MIN_INNER_RUNS:
+                    continue
+
+                for left_end in left_ends:
+                    for right_end in right_ends:
+                        support = (
+                            first_break.first,
+                            first_break.second,
+                            second_break.first,
+                            second_break.second,
+                            left_end,
+                            right_end,
+                            *inner,
+                        )
+                        if len({item.observation_id for item in support}) != len(support):
+                            continue
+                        aperture = _raster_candidate_aperture_geometry(support)
+                        if len(aperture) != 4:
+                            continue
+                        payload = {
+                            "document_id": seed.document_id,
+                            "revision_id": seed.revision_id,
+                            "source_sha256": seed.source_sha256,
+                            "page_id": seed.page_id,
+                            "structural_pattern": RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                            "aperture_geometry": aperture,
+                        }
+                        candidate_id = stable_contract_id(
+                            "physical_opening_candidate",
+                            payload,
+                            digest_chars=32,
+                        )
+                        evidence = discovered.setdefault(candidate_id, {})
+                        for item in support:
+                            evidence[item.observation_id] = item
+
+        candidates: list[CandidateSemanticOpening] = []
+        for candidate_id in sorted(discovered):
+            support = tuple(
+                discovered[candidate_id][observation_id]
+                for observation_id in sorted(discovered[candidate_id])
+            )
+            source_observation_ids = tuple(
+                item.observation_id for item in support
+            )
+            source_lineage_root_ids = tuple(
+                sorted(
+                    {
+                        parent
+                        for item in support
+                        for parent in item.derivation_parent_ids
+                    }
+                )
+            )
+            candidates.append(CandidateSemanticOpening(
+                candidate_id=candidate_id,
+                source_observation_ids=source_observation_ids,
+                source_lineage_root_ids=source_lineage_root_ids,
+                document_id=seed.document_id,
+                revision_id=seed.revision_id,
+                source_sha256=seed.source_sha256,
+                snapshot_id=seed.snapshot_id,
+                page_id=seed.page_id,
+                viewport_id=None,
+                structural_pattern=RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                status=EvidenceResolutionStatus.CANDIDATE,
+                reason_codes=(
+                    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                    VISIBLE_WALL_CONTINUATION_REQUIRED,
+                ),
+            ))
+        candidates = tuple(candidates)
+        self._raster_framed_candidate_cache[cache_key] = candidates
+        return candidates
+
+    def _viewport_scoped_raster_candidates_for(
+        self,
+        seed: SourceObservationRecord,
+        records: tuple[SourceObservationRecord, ...],
+        candidates: tuple[CandidateSemanticOpening, ...],
+    ) -> tuple[CandidateSemanticOpening, ...]:
+        if self._source_visibility_producer is None or not candidates:
+            return candidates
+
+        from pb_physical_opening_viewport_scope_authority import (
+            classify_opening_candidate_viewport_scopes,
+        )
+
+        scope_result = classify_opening_candidate_viewport_scopes(
+            source_visibility_producer=self._source_visibility_producer,
+            revision_id=seed.revision_id,
+            page_id=seed.page_id,
+            snapshot_id=seed.snapshot_id,
+            candidates=candidates,
+            records=records,
+        )
+        if scope_result.status is not EvidenceResolutionStatus.CORROBORATED:
+            return ()
+        if not tuple(scope_result.authenticated_viewports):
+            return candidates
+
+        promoted: list[CandidateSemanticOpening] = []
+        decisions = dict(scope_result.decisions)
+        for candidate in candidates:
+            decision = decisions.get(candidate.candidate_id)
+            if decision is None or not bool(getattr(decision, "promotable", False)):
+                continue
+            viewport_id = str(getattr(decision, "viewport_id", "") or "").strip()
+            if viewport_id:
+                promoted.append(replace(candidate, viewport_id=viewport_id))
+        return tuple(promoted)
+
+    def _prove_raster_framed_existence(
+        self,
+        selector: ObservationSelector,
+        source_result: SourceObservationAuthorityResult,
+    ) -> PhysicalOpeningExistenceResult:
+        cache_key = (
+            str(selector.document_id),
+            str(selector.revision_id),
+            str(selector.source_sha256),
+            str(selector.snapshot_id),
+            str(selector.observation_id),
+        )
+        cached = self._raster_existence_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        def cache(result: PhysicalOpeningExistenceResult) -> PhysicalOpeningExistenceResult:
+            self._raster_existence_cache[cache_key] = result
+            return result
+
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or source_result.observation is None
+            or source_result.snapshot is None
+        ):
+            return cache(PhysicalOpeningExistenceResult(
+                status=_source_failure_status(source_result),
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=_dedupe_reason_codes(source_result.reason_codes),
+                source_observation=source_result,
+            ))
+
+        records, failures = self._raster_primitive_snapshot_records(source_result)
+        if failures:
+            return cache(PhysicalOpeningExistenceResult(
+                status=_source_failure_status(*failures),
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=_dedupe_reason_codes(
+                    (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                    *tuple(item.reason_codes for item in failures),
+                ),
+                source_observation=source_result,
+            ))
+
+        observation = source_result.observation
+        raw_candidates = self._raster_framed_candidates_for(observation, records)
+        candidates = self._viewport_scoped_raster_candidates_for(
+            observation,
+            records,
+            raw_candidates,
+        )
+        containing = tuple(
+            candidate for candidate in candidates
+            if observation.observation_id in candidate.source_observation_ids
+        )
+        if len(containing) > 1:
+            return cache(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.CONFLICT,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
+                source_observation=source_result,
+            ))
+        if len(containing) != 1:
+            return cache(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
+                source_observation=source_result,
+            ))
+
+        candidate = containing[0]
+        support_by_id = {
+            record.observation_id: record for record in records
+        }
+        support = tuple(
+            support_by_id[observation_id]
+            for observation_id in candidate.source_observation_ids
+            if observation_id in support_by_id
+        )
+        if len(support) != len(candidate.source_observation_ids):
+            return cache(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                source_observation=source_result,
+                candidate=candidate,
+            ))
+        aperture = _raster_candidate_aperture_geometry(support)
+        if len(aperture) != 4:
+            return cache(PhysicalOpeningExistenceResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=(INVALID_STRUCTURAL_GEOMETRY,),
+                source_observation=source_result,
+                candidate=candidate,
+            ))
+
+        record_payload = {
+            "document_id": candidate.document_id,
+            "revision_id": candidate.revision_id,
+            "source_sha256": candidate.source_sha256,
+            "page_id": candidate.page_id,
+            "semantic_class": "opening",
+            "aperture_geometry": aperture,
+        }
+        existence = PhysicalOpeningExistenceRecord(
+            record_id=stable_contract_id(
+                "physical_opening_existence",
+                record_payload,
+                digest_chars=32,
+            ),
+            source_observation_ids=candidate.source_observation_ids,
+            source_lineage_root_ids=candidate.source_lineage_root_ids,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            semantic_class="opening",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            structural_pattern=RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            diagnostic_confidence=1.0,
+            blocking_reasons=(),
+            structural_reason_codes=(
+                STRUCTURAL_OPENING_EXISTENCE_RESOLVED,
+                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            ),
+            producer_method=source_result.snapshot.producer_method,
+            producer_version=source_result.snapshot.producer_version,
+            producer_generation=source_result.snapshot.producer_generation,
+        )
+        return cache(PhysicalOpeningExistenceResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            physical_opening_existence=PHYSICAL_OPENING_EXISTS,
+            reason_codes=(
+                STRUCTURAL_OPENING_EXISTENCE_RESOLVED,
+                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            ),
+            source_observation=source_result,
+            candidate=candidate,
+            existence_record=existence,
+        ))
 
     @staticmethod
     def _raw_structural_candidates(
@@ -1947,6 +2511,21 @@ class PhysicalOpeningAuthority:
             )
 
         visibility = self._source_visibility_authority
+        primitive_result = visibility.resolve_raster_opening_primitive(selector)
+        if (
+            primitive_result.status is EvidenceResolutionStatus.CORROBORATED
+            and primitive_result.observation is not None
+        ):
+            return self._prove_raster_framed_existence(selector, primitive_result)
+        if VISIBILITY_RECEIPT_UNAVAILABLE not in primitive_result.reason_codes:
+            return PhysicalOpeningExistenceResult(
+                status=_source_failure_status(primitive_result),
+                proposition=None,
+                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                reason_codes=_dedupe_reason_codes(primitive_result.reason_codes),
+                source_observation=primitive_result,
+            )
+
         visible_cache_key = (
             str(selector.document_id),
             str(selector.revision_id),
@@ -2208,48 +2787,6 @@ class PhysicalOpeningAuthority:
         physical_geometry = _physical_opening_geometry_identity(candidate, records)
         if not physical_geometry:
             return cache_visible(PhysicalOpeningExistenceResult(
-                status=EvidenceResolutionStatus.ABSTAINED,
-                proposition=None,
-                physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
-                reason_codes=(PHYSICAL_OPENING_IDENTITY_UNRESOLVED,),
-                source_observation=source_result,
-                candidate=candidate,
-                missing_upstream_capability=AUTHORITATIVE_PHYSICAL_OPENING_IDENTITY_UNAVAILABLE,
-            ))
-        # Physical identity is source geometry, not evidence implementation.
-        # snapshot_id, observation ids, lineage ids and producer version remain
-        # on the record below as provenance and integrity evidence, but cannot
-        # rename unchanged physical geometry across producer revisions.
-        record_payload = {
-            "document_id": candidate.document_id,
-            "revision_id": candidate.revision_id,
-            "source_sha256": candidate.source_sha256,
-            "page_id": candidate.page_id,
-            "semantic_class": "opening",
-            "source_geometry": physical_geometry,
-        }
-        existence = PhysicalOpeningExistenceRecord(
-            record_id=stable_contract_id("physical_opening_existence", record_payload, digest_chars=32),
-            source_observation_ids=candidate.source_observation_ids,
-            source_lineage_root_ids=candidate.source_lineage_root_ids,
-            document_id=candidate.document_id,
-            revision_id=candidate.revision_id,
-            source_sha256=candidate.source_sha256,
-            snapshot_id=candidate.snapshot_id,
-            page_id=candidate.page_id,
-            viewport_id=candidate.viewport_id,
-            semantic_class="opening",
-            status=EvidenceResolutionStatus.CORROBORATED,
-            proposition=PHYSICAL_OPENING_EXISTS,
-            structural_pattern=candidate.structural_pattern,
-            diagnostic_confidence=1.0,
-            blocking_reasons=(),
-            structural_reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
-            producer_method=source_result.snapshot.producer_method,
-            producer_version=source_result.snapshot.producer_version,
-            producer_generation=source_result.snapshot.producer_generation,
-        )
-        return cache_visible(PhysicalOpeningExistenceResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
             physical_opening_existence=PHYSICAL_OPENING_EXISTS,
