@@ -671,32 +671,64 @@ class PhysicalOpeningAuthority:
             return cached
         records: list[SourceObservationRecord] = []
         failures: list[SourceObservationAuthorityResult] = []
-        visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
-            seed.snapshot.snapshot_id
-        )
-        for observation_id in seed.snapshot.observation_ids:
-            # Non-visible source observations historically resolve to
-            # VISIBILITY_RECEIPT_UNAVAILABLE and are intentionally ignored.
-            # Skip that no-op authority round trip using the producer-owned
-            # receipt index, while preserving exact snapshot ordering for every
-            # visible record that still undergoes full resolve_visible checks.
-            if observation_id not in visible_observation_ids:
-                continue
-            result = self._resolve_visible_cached(
-                ObservationSelector(
-                    document_id=seed.snapshot.document_id,
-                    revision_id=seed.snapshot.revision_id,
-                    source_sha256=seed.snapshot.source_sha256,
-                    snapshot_id=seed.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
+
+        # Reuse the producer's fail-closed batch authenticator for this exact
+        # immutable visible snapshot. Preserve historical snapshot ordering and
+        # defensive copies; any batch integrity failure falls back to the
+        # existing scalar visibility path unchanged.
+        batch_rows = None
+        producer = self._source_visibility_producer
+        if producer is not None:
+            published = producer.published_snapshot_for_revision(
+                seed.snapshot.revision_id
             )
-            if result.status is EvidenceResolutionStatus.CORROBORATED and result.observation:
-                records.append(result.observation)
-            elif result.status is EvidenceResolutionStatus.CONFLICT:
-                failures.append(result)
-            elif VISIBILITY_RECEIPT_UNAVAILABLE not in result.reason_codes:
-                failures.append(result)
+            if (
+                published is not None
+                and published.snapshot.snapshot_id == seed.snapshot.snapshot_id
+            ):
+                try:
+                    batch_rows = visibility.authenticated_visible_observations(
+                        published
+                    )
+                except RuntimeError:
+                    batch_rows = None
+        if batch_rows is not None:
+            by_id = {
+                str(observation_id): record
+                for observation_id, record in batch_rows
+            }
+            records.extend(
+                replace(by_id[observation_id])
+                for observation_id in seed.snapshot.observation_ids
+                if observation_id in by_id
+            )
+        else:
+            visible_observation_ids = visibility.visible_observation_ids_for_snapshot(
+                seed.snapshot.snapshot_id
+            )
+            for observation_id in seed.snapshot.observation_ids:
+                # Non-visible source observations historically resolve to
+                # VISIBILITY_RECEIPT_UNAVAILABLE and are intentionally ignored.
+                if observation_id not in visible_observation_ids:
+                    continue
+                result = self._resolve_visible_cached(
+                    ObservationSelector(
+                        document_id=seed.snapshot.document_id,
+                        revision_id=seed.snapshot.revision_id,
+                        source_sha256=seed.snapshot.source_sha256,
+                        snapshot_id=seed.snapshot.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                if (
+                    result.status is EvidenceResolutionStatus.CORROBORATED
+                    and result.observation
+                ):
+                    records.append(result.observation)
+                elif result.status is EvidenceResolutionStatus.CONFLICT:
+                    failures.append(result)
+                elif VISIBILITY_RECEIPT_UNAVAILABLE not in result.reason_codes:
+                    failures.append(result)
         resolved = (tuple(records), tuple(failures))
         self._visible_snapshot_cache[cache_key] = resolved
         return resolved
