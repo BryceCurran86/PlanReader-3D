@@ -6,7 +6,7 @@ geometry, names, levels, finishes, quantities, or commercial authority.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Collection, Mapping, Optional
 
 from pb_drawing_evidence_binding import DrawingViewType
@@ -16,6 +16,7 @@ from pb_live_wall_opening_authority_composition import (
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_face_authority import (
+    SourceRoomFaceAuthority,
     SourceRoomFaceSelector,
     build_source_room_face_authority,
 )
@@ -36,6 +37,26 @@ LIVE_CANONICAL_ROOM_UNAVAILABLE = "live_canonical_room_composition_unavailable"
 LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED = (
     "live_canonical_room_viewport_fallback_resolved"
 )
+
+_ROOM_FACE_AUTHORITY_BINDING_SEAL = object()
+
+
+@dataclass(frozen=True)
+class _RoomFaceAuthorityBinding:
+    snapshot_id: str
+    page_id: str
+    decision_scope_id: str
+    source_room_face_record_ids: tuple[str, ...]
+    authority: SourceRoomFaceAuthority = field(repr=False, compare=False)
+    _seal: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if (
+            self._seal is not _ROOM_FACE_AUTHORITY_BINDING_SEAL
+            or type(self.authority) is not SourceRoomFaceAuthority
+        ):
+            raise TypeError("room-face authority binding is producer-owned")
+
 
 @dataclass(frozen=True)
 class LiveCanonicalRoomObject:
@@ -102,6 +123,100 @@ class LiveCanonicalRoomComposition:
     rooms: tuple[LiveCanonicalRoomObject, ...]
     source_pages: tuple[int, ...]
     schema_version: str = LIVE_CANONICAL_ROOM_SCHEMA_VERSION
+    _room_face_authority_bindings: tuple[_RoomFaceAuthorityBinding, ...] = field(
+        default_factory=tuple,
+        repr=False,
+        compare=False,
+    )
+
+    def room_face_authority_for(
+        self,
+        room: LiveCanonicalRoomObject,
+    ) -> Optional[SourceRoomFaceAuthority]:
+        """Return the exact sealed room-face authority that published the room.
+
+        This runtime-only handoff prevents downstream consumers from rebuilding
+        a page-wide authority when a room was recovered from an authenticated
+        viewport scope. Manual/caller-created compositions carry no bindings.
+        """
+        if type(room) is not LiveCanonicalRoomObject:
+            return None
+        owned = [
+            candidate
+            for candidate in self.rooms
+            if (
+                candidate.canonical_room_id == room.canonical_room_id
+                and candidate.source_room_face_record_id == room.source_room_face_record_id
+                and candidate.snapshot_id == room.snapshot_id
+                and candidate.page_id == room.page_id
+                and candidate.decision_scope_id == room.decision_scope_id
+            )
+        ]
+        if len(owned) != 1:
+            return None
+
+        matches = [
+            binding
+            for binding in self._room_face_authority_bindings
+            if (
+                binding._seal is _ROOM_FACE_AUTHORITY_BINDING_SEAL
+                and binding.snapshot_id == room.snapshot_id
+                and binding.page_id == room.page_id
+                and binding.decision_scope_id == room.decision_scope_id
+                and room.source_room_face_record_id in binding.source_room_face_record_ids
+            )
+        ]
+        if len(matches) != 1:
+            return None
+        authority = matches[0].authority
+        selector = SourceRoomFaceSelector(
+            document_id=room.document_id,
+            revision_id=room.revision_id,
+            source_sha256=room.source_sha256,
+            snapshot_id=room.snapshot_id,
+            page_id=room.page_id,
+            decision_scope_id=room.decision_scope_id,
+        )
+        resolved = authority.resolve_scope(selector)
+        if (
+            resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or not resolved.scope_complete
+            or sum(
+                1
+                for record in resolved.records
+                if str(record.record_id) == room.source_room_face_record_id
+            ) != 1
+        ):
+            return None
+        return authority
+
+
+def _authority_binding(
+    authority: object,
+    selector: SourceRoomFaceSelector,
+    records: Collection[object],
+) -> Optional[_RoomFaceAuthorityBinding]:
+    if type(authority) is not SourceRoomFaceAuthority:
+        return None
+    record_ids = tuple(
+        sorted(
+            {
+                str(getattr(record, "record_id", "") or "").strip()
+                for record in records
+                if str(getattr(record, "record_id", "") or "").strip()
+            }
+        )
+    )
+    if not record_ids:
+        return None
+    return _RoomFaceAuthorityBinding(
+        snapshot_id=str(selector.snapshot_id),
+        page_id=str(selector.page_id),
+        decision_scope_id=str(selector.decision_scope_id),
+        source_room_face_record_ids=record_ids,
+        authority=authority,
+        _seal=_ROOM_FACE_AUTHORITY_BINDING_SEAL,
+    )
 
 
 def _dedupe(values: list[str]) -> tuple[str, ...]:
@@ -282,6 +397,7 @@ def compose_live_canonical_rooms(
     room_pages: set[int] = set()
     unresolved_pages: list[str] = []
     viewport_fallback_used = False
+    authority_bindings: list[_RoomFaceAuthorityBinding] = []
 
     for page_id in wall_opening_composition.page_ids:
         selector = SourceRoomFaceSelector(
@@ -319,6 +435,10 @@ def compose_live_canonical_rooms(
                 label_records_by_face = {
                     str(label.face_id): label for label in label_result.records
                 }
+
+            binding = _authority_binding(authority, selector, result.records)
+            if binding is not None:
+                authority_bindings.append(binding)
 
             rooms.extend(
                 _room_object_from_record(
@@ -428,9 +548,24 @@ def compose_live_canonical_rooms(
                             for label in label_result.records
                         }
 
+                    room_selector = SourceRoomFaceSelector(
+                        document_id=wall_selector.document_id,
+                        revision_id=wall_selector.revision_id,
+                        source_sha256=wall_selector.source_sha256,
+                        snapshot_id=wall_selector.snapshot_id,
+                        page_id=wall_selector.page_id,
+                        decision_scope_id=wall_selector.decision_scope_id,
+                    )
+                    binding = _authority_binding(
+                        viewport_room_authority,
+                        room_selector,
+                        room_result.records,
+                    )
+                    if binding is not None:
+                        authority_bindings.append(binding)
+
                     rooms.extend(
-                        _room_object_from_record(
-                            record,
+                        _room_object_from_record(                            record,
                             viewport_id=wall_scope.viewport_id,
                             canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
                             unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
@@ -463,6 +598,7 @@ def compose_live_canonical_rooms(
             ),
             rooms=tuple(rooms),
             source_pages=tuple(sorted(room_pages)),
+            _room_face_authority_bindings=tuple(authority_bindings),
         )
     if rooms:
         return LiveCanonicalRoomComposition(
@@ -478,6 +614,7 @@ def compose_live_canonical_rooms(
             ),
             rooms=tuple(rooms),
             source_pages=tuple(sorted(room_pages)),
+            _room_face_authority_bindings=tuple(authority_bindings),
         )
     return LiveCanonicalRoomComposition(
         status=EvidenceResolutionStatus.ABSTAINED,
