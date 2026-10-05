@@ -200,9 +200,10 @@ def publish_live_canonical_room_area_quantities(
             floor_quantity.metadata.get("page_no")
         ):
             continue
-        if not set(source.evidence_ids).issubset(set(room.evidence_ids)):
-            continue
-
+        # Metric-area evidence is deliberately attached to the canonical floor
+        # during enrichment. The canonical room is linked through the exact
+        # source-room-face identity above; requiring the room object itself to
+        # duplicate cross-view dimension evidence would create a false dropout.
         payload = {
             "schema_version": LIVE_FLOOR_AREA_QUANTITY_SCHEMA_VERSION,
             "upstream_room_area_quantity_id": source_id,
