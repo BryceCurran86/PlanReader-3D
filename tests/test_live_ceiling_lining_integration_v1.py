@@ -96,6 +96,8 @@ def test_resolved_floor_plan_emits_live_chipboard_ceiling_claim(tmp_path) -> Non
     assert claim.room_entity_ids
     assert claim.evidence_ids
     assert claim.physical_scale_record_id
+    assert len(result.quantity_evidence) == 1
+    assert result.quantity_evidence[0].quantity_id in claim.room_quantity_ids
     assert len(result.canonical_ceilings) == 1
     ceiling = result.canonical_ceilings[0]
     assert ceiling.room_entity_id in claim.room_entity_ids
@@ -209,6 +211,7 @@ def test_distinct_finish_descriptors_that_share_one_family_tag_abstain(tmp_path)
     result = collect_live_ceiling_lining_claims(path, pages=(0,))
 
     assert result.claims == ()
+    assert result.quantity_evidence == ()
     assert LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT in result.reason_codes
     assert len(result.canonical_ceilings) == 2
     assert len(
@@ -217,3 +220,105 @@ def test_distinct_finish_descriptors_that_share_one_family_tag_abstain(tmp_path)
     assert {
         ceiling.finish_descriptor for ceiling in result.canonical_ceilings
     } == {"board type a", "board type b"}
+
+def _documented_area_claim_fixture(*, include_figured_ids: bool = True):
+    from types import SimpleNamespace
+
+    from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+    from pb_migration_contracts import QuantityEvidence
+    import pb_live_ceiling_lining_integration as live
+
+    scope = "source-room-face:1"
+    area = QuantityEvidence(
+        quantity_id="qty-room-area-documented",
+        family="room_area",
+        semantic_key=f"room_area:{scope}",
+        value=13.270425,
+        unit="m2",
+        input_entity_ids=(scope,),
+        formula="authoritative_explicit_area",
+        formula_version="test",
+        evidence_ids=("ev-dim-h", "ev-dim-v"),
+        authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+        status=AuthorityStatus.FIRM.value,
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        metadata={
+            "source_sha256": "a" * 64,
+            "revision_id": "rev-1",
+            "page_no": 1,
+            "viewport_id": "vp-1",
+            "figured_dimension_ids": (
+                ["dim-h", "dim-v"] if include_figured_ids else []
+            ),
+        },
+    )
+    ceiling = QuantityEvidence(
+        quantity_id="qty-ceiling",
+        family="ceiling_lining",
+        semantic_key=f"ceiling_lining:{scope}",
+        value=13.270425,
+        unit="m2",
+        input_entity_ids=(scope,),
+        formula="reuse_same_scope_authoritative_area_with_explicit_ceiling_finish",
+        formula_version="test",
+        evidence_ids=("ev-dim-h", "ev-dim-v", "ev-finish"),
+        authority=MeasurementAuthorityType.MODEL_DERIVED.value,
+        status=AuthorityStatus.PROVISIONAL.value,
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        metadata={
+            "shadow_only": True,
+            "commercial_projection_allowed": False,
+            "viewport_id": "vp-1",
+            "page_no": 1,
+            "finish_descriptor": "plasterboard",
+            "finish_source_methods": (live.SOURCE_CEILING_FINISH_METHOD,),
+            "finish_evidence_ids": ("ev-finish",),
+            "upstream_area_quantity_id": area.quantity_id,
+        },
+    )
+    source_result = SimpleNamespace(
+        room_area_quantities=(area,),
+        scale_bridge=SimpleNamespace(
+            status=None,
+            calibration=None,
+            physical_scale_evidence=None,
+        ),
+    )
+    return live, ceiling, source_result
+
+
+def test_live_ceiling_accepts_documented_dimension_area_without_scale() -> None:
+    from pb_geometry_takeoff_model import MeasurementAuthorityType
+
+    live, ceiling, source_result = _documented_area_claim_fixture()
+    resolved = live._claim_from_quantity(
+        quantity=ceiling,
+        source_result=source_result,
+        page_no=1,
+        viewport_id="vp-1",
+    )
+    assert resolved is not None
+    assert resolved[2] == 13.270425
+    assert resolved[6] == ""
+    assert resolved[7] == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert resolved[8] == ("dim-h", "dim-v")
+
+
+def test_live_ceiling_documented_dimension_requires_figured_lineage() -> None:
+    live, ceiling, source_result = _documented_area_claim_fixture(
+        include_figured_ids=False
+    )
+    assert (
+        live._claim_from_quantity(
+            quantity=ceiling,
+            source_result=source_result,
+            page_no=1,
+            viewport_id="vp-1",
+        )
+        is None
+    )
+
