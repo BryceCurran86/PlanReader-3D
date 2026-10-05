@@ -108,6 +108,35 @@ def _dedupe(values: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
 
 
+def _canonical_polygon_identity(
+    polygon: Collection[Collection[float]],
+) -> tuple[tuple[float, float], ...]:
+    """Normalize page-space room geometry before physical identity hashing.
+
+    Source room faces already use this six-decimal cyclic/reversal-invariant
+    geometry contract. Repeating it at the canonical identity boundary prevents
+    representation-order churn from changing a physical room id if another
+    trusted producer supplies the same polygon with a different start vertex or
+    winding.
+    """
+
+    points = tuple(
+        (round(float(point[0]), 6), round(float(point[1]), 6))
+        for point in polygon
+    )
+    if len(points) < 3:
+        return ()
+    variants: list[tuple[tuple[float, float], ...]] = []
+    for start in range(len(points)):
+        variants.append(
+            tuple(points[(start + offset) % len(points)] for offset in range(len(points)))
+        )
+        variants.append(
+            tuple(points[(start - offset) % len(points)] for offset in range(len(points)))
+        )
+    return min(variants)
+
+
 def _physical_room_id(record, *, viewport_id: Optional[str]) -> str:
     """Physical room identity separate from revision/evidence fingerprints.
 
@@ -125,9 +154,8 @@ def _physical_room_id(record, *, viewport_id: Optional[str]) -> str:
             "document_id": str(record.document_id),
             "page_id": str(record.page_id),
             "viewport_id": str(viewport_id or ""),
-            "polygon_pdf_pts": tuple(
-                (float(point[0]), float(point[1]))
-                for point in record.polygon_pdf_pts
+            "polygon_pdf_pts": _canonical_polygon_identity(
+                record.polygon_pdf_pts
             ),
         },
         digest_chars=32,

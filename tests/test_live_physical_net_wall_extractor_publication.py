@@ -122,6 +122,14 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
         "metric_geometry_complete": False,
     }
     canonical_room = SimpleNamespace(to_dict=lambda: canonical_room_payload)
+    canonical_space_payload = {
+        "id": "room-1",
+        "object_type": "space",
+        "name": "OFFICE",
+        "takeoff_eligible": False,
+        "deduction_authority": False,
+    }
+    canonical_space = SimpleNamespace(to_dict=lambda: canonical_space_payload)
     canonical_floor_payload = {
         "canonical_floor_id": "floor-room-1",
         "room_entity_id": "room-1",
@@ -150,6 +158,9 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
             unresolved_wall_candidate_ids=(),
             canonical_openings=(canonical_opening,),
             canonical_rooms=(canonical_room,),
+            canonical_spaces=(canonical_space,),
+            canonical_space_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_space_reason_codes=("test_canonical_space_resolved",),
             canonical_floors=(canonical_floor,),
             canonical_floor_status=EvidenceResolutionStatus.CORROBORATED,
             canonical_floor_reason_codes=("test_canonical_floor_resolved",),
@@ -202,6 +213,11 @@ def test_extractor_scopes_physical_net_wall_to_drawing_pages_and_publishes_claim
     assert extractor.canonical_rooms_live["status"] == "corroborated"
     assert extractor.canonical_rooms_live["source_pages"] == [1]
     assert extractor.canonical_rooms_live["rooms"] == [canonical_room_payload]
+    assert extractor.canonical_spaces_live["status"] == "corroborated"
+    assert extractor.canonical_spaces_live["reason_codes"] == [
+        "test_canonical_space_resolved"
+    ]
+    assert extractor.canonical_spaces_live["spaces"] == [canonical_space_payload]
     assert extractor.canonical_building_live["status"] == "corroborated"
     assert extractor.canonical_building_live["building_id"]
     assert extractor.canonical_building_live["levels"] == []
@@ -244,6 +260,14 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
         "metric_geometry_complete": False,
     }
     canonical_room = SimpleNamespace(to_dict=lambda: canonical_room_payload)
+    canonical_space_payload = {
+        "id": "room-1",
+        "object_type": "space",
+        "name": "OFFICE",
+        "takeoff_eligible": False,
+        "deduction_authority": False,
+    }
+    canonical_space = SimpleNamespace(to_dict=lambda: canonical_space_payload)
     canonical_floor_payload = {
         "canonical_floor_id": "floor-room-1",
         "room_entity_id": "room-1",
@@ -286,6 +310,9 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
             unresolved_wall_candidate_ids=("wall-candidate-1",),
             canonical_openings=(canonical_opening,),
             canonical_rooms=(canonical_room,),
+            canonical_spaces=(canonical_space,),
+            canonical_space_status=EvidenceResolutionStatus.CORROBORATED,
+            canonical_space_reason_codes=("test_canonical_space_resolved",),
             canonical_floors=(canonical_floor,),
             canonical_floor_status=EvidenceResolutionStatus.CORROBORATED,
             canonical_floor_reason_codes=("test_canonical_floor_resolved",),
@@ -319,6 +346,8 @@ def test_extractor_does_not_promote_abstained_physical_net_wall_claim(
     ]
     assert extractor.canonical_rooms_live["status"] == "corroborated"
     assert extractor.canonical_rooms_live["rooms"] == [canonical_room_payload]
+    assert extractor.canonical_spaces_live["status"] == "corroborated"
+    assert extractor.canonical_spaces_live["spaces"] == [canonical_space_payload]
     assert extractor.canonical_building_live["status"] == "corroborated"
     assert extractor.canonical_building_live["building_id"]
     assert extractor.canonical_building_live["levels"] == []

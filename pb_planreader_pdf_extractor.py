@@ -498,6 +498,11 @@ class GenericPlanReaderExtractor:
             "source_pages": [],
             "rooms": [],
         }
+        self.canonical_spaces_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "spaces": [],
+        }
         self.canonical_floors_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -1324,6 +1329,11 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "source_pages": [],
             "rooms": [],
+        }
+        self.canonical_spaces_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "spaces": [],
         }
 
         # ------------------------------------------------------------------
@@ -3581,6 +3591,13 @@ class GenericPlanReaderExtractor:
                     ],
                     "rooms": [],
                 }
+                self.canonical_spaces_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        physical_net_preflight_reason
+                    ],
+                    "spaces": [],
+                }
                 self.canonical_floors_live = {
                     "status": "abstained",
                     "reason_codes": [
@@ -3604,6 +3621,30 @@ class GenericPlanReaderExtractor:
                 )
                 _coverage_objects.extend(physical_wall_result.canonical_walls)
                 _coverage_objects.extend(physical_wall_result.canonical_openings)
+                canonical_door_fillings = ()
+                canonical_window_fillings = ()
+                canonical_filling_reason_codes = ()
+                try:
+                    from pb_live_canonical_opening_filling import (
+                        project_live_canonical_opening_fillings,
+                    )
+
+                    canonical_filling_projection = (
+                        project_live_canonical_opening_fillings(
+                            physical_wall_result.canonical_openings
+                        )
+                    )
+                    canonical_door_fillings = canonical_filling_projection.doors
+                    canonical_window_fillings = canonical_filling_projection.windows
+                    canonical_filling_reason_codes = (
+                        canonical_filling_projection.reason_codes
+                    )
+                    _coverage_objects.extend(canonical_door_fillings)
+                    _coverage_objects.extend(canonical_window_fillings)
+                except Exception as exc:
+                    canonical_filling_reason_codes = (
+                        f"live_canonical_opening_filling_exception:{type(exc).__name__}",
+                    )
                 _coverage_objects.extend(getattr(physical_wall_result, "canonical_rooms", ()))
                 _coverage_objects.extend(getattr(physical_wall_result, "canonical_floors", ()))
                 _wall_quantity = getattr(getattr(physical_wall_result, "publication", None), "quantity_evidence", None)
@@ -3682,6 +3723,14 @@ class GenericPlanReaderExtractor:
                         (),
                     )
                 ]
+                canonical_space_objects = [
+                    space.to_dict()
+                    for space in getattr(
+                        physical_wall_result,
+                        "canonical_spaces",
+                        (),
+                    )
+                ]
                 canonical_floor_objects = [
                     floor.to_dict()
                     for floor in getattr(
@@ -3700,14 +3749,10 @@ class GenericPlanReaderExtractor:
                     "openings": canonical_opening_objects,
                 }
                 canonical_door_objects = [
-                    opening
-                    for opening in canonical_opening_objects
-                    if opening.get("opening_kind") == "door"
+                    door.to_dict() for door in canonical_door_fillings
                 ]
                 canonical_window_objects = [
-                    opening
-                    for opening in canonical_opening_objects
-                    if opening.get("opening_kind") == "window"
+                    window.to_dict() for window in canonical_window_fillings
                 ]
                 self.canonical_doors_live = {
                     "status": (
@@ -3715,7 +3760,7 @@ class GenericPlanReaderExtractor:
                         if canonical_door_objects
                         else "abstained"
                     ),
-                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "reason_codes": list(canonical_filling_reason_codes),
                     "doors": canonical_door_objects,
                 }
                 self.canonical_windows_live = {
@@ -3724,7 +3769,7 @@ class GenericPlanReaderExtractor:
                         if canonical_window_objects
                         else "abstained"
                     ),
-                    "reason_codes": list(physical_wall_result.reason_codes),
+                    "reason_codes": list(canonical_filling_reason_codes),
                     "windows": canonical_window_objects,
                 }
                 room_status = getattr(
@@ -3757,6 +3802,29 @@ class GenericPlanReaderExtractor:
                         )
                     ),
                     "rooms": canonical_room_objects,
+                }
+                space_status = getattr(
+                    physical_wall_result,
+                    "canonical_space_status",
+                    None,
+                )
+                space_status_value = getattr(space_status, "value", None)
+                if space_status_value is None:
+                    space_status_value = (
+                        "corroborated"
+                        if canonical_space_objects
+                        else "abstained"
+                    )
+                self.canonical_spaces_live = {
+                    "status": space_status_value,
+                    "reason_codes": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_space_reason_codes",
+                            (),
+                        )
+                    ),
+                    "spaces": canonical_space_objects,
                 }
                 floor_status = getattr(
                     physical_wall_result,
@@ -3910,6 +3978,11 @@ class GenericPlanReaderExtractor:
                     "reason_codes": ["no_drawing_pages_selected"],
                     "rooms": [],
                 }
+                self.canonical_spaces_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "spaces": [],
+                }
                 self.canonical_floors_live = {
                     "status": "abstained",
                     "reason_codes": ["no_drawing_pages_selected"],
@@ -3965,6 +4038,13 @@ class GenericPlanReaderExtractor:
                     f"live_canonical_room_exception:{type(exc).__name__}"
                 ],
                 "rooms": [],
+            }
+            self.canonical_spaces_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_space_exception:{type(exc).__name__}"
+                ],
+                "spaces": [],
             }
             self.canonical_floors_live = {
                 "status": "abstained",

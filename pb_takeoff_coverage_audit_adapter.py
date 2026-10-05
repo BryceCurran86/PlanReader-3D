@@ -260,24 +260,45 @@ def _record_is_published(
     published_takeoff_rows: Sequence[Mapping[str, Any]],
     valid_quantity_ids: Sequence[str],
 ) -> bool:
-    if not record.takeoff_row_ids:
-        return False
-    for row_id in record.takeoff_row_ids:
-        if row_id not in valid_quantity_ids or any(
-            reason.startswith("takeoff_row_")
-            or reason == "duplicate_or_conflicting_takeoff_row_quantity_id"
-            for reason in _quantity_dependency_reasons(record, row_id)
-        ):
+    """Verify publication from the current customer transaction.
+
+    Coverage registries are often captured by the extractor before customer rows
+    are written. In that case takeoff_row_ids is legitimately empty even though
+    the same transaction later publishes the exact QuantityEvidence.
+
+    A current row may therefore advance PUBLISHED from an exact, already-valid
+    quantity dependency when it preserves that quantity's id/value/unit. This
+    never reconstructs a row and never creates a quantity/object link: the link
+    is already present in record.quantity_ids. Any row lineage conflict
+    previously observed by the registry remains a hard blocker. A plain
+    takeoff_row_missing reason is temporal only and may be satisfied by the
+    current transaction.
+    """
+
+    valid = set(valid_quantity_ids)
+    for quantity_id in record.quantity_ids:
+        if quantity_id not in valid:
+            continue
+        row_reasons = set(_quantity_dependency_reasons(record, quantity_id))
+        hard_row_blocker = any(
+            reason == "duplicate_or_conflicting_takeoff_row_quantity_id"
+            or reason == "takeoff_row_record_missing"
+            or (
+                reason.startswith("takeoff_row_")
+                and reason != "takeoff_row_missing"
+            )
+            for reason in row_reasons
+        )
+        if hard_row_blocker:
             continue
         if any(
-            _row_publishes_identifier(row, row_id)
-            and _row_preserves_quantity(record, row_id, row)
+            _row_publishes_identifier(row, quantity_id)
+            and _row_preserves_quantity(record, quantity_id, row)
             for row in published_takeoff_rows
             if isinstance(row, Mapping)
         ):
             return True
     return False
-
 
 def _quantity_dependency_reasons(record: CoverageObjectRecordV1, quantity_id: str) -> tuple[str, ...]:
     # Contract ids may themselves contain colons. Remove the exact id suffix.
@@ -333,8 +354,9 @@ def audit_registry_runtime_lifecycle(
 
     CANONICALIZED: one-or-more explicit geometry ids
     QUANTIFIED: a quantity dependency without abstention or quantity conflicts
-    PUBLISHED: a registry takeoff-row id is present in the customer row source
-               identity or explicit quantity-id field
+    PUBLISHED: an exact valid quantity dependency is present in the current
+               customer row source identity or explicit quantity-id field, with
+               its value/unit preserved and no known row-lineage blocker
     """
     if not isinstance(summary, CoverageRegistrySummaryV1):
         raise TypeError("summary must be CoverageRegistrySummaryV1")
