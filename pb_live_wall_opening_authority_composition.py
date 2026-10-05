@@ -186,6 +186,12 @@ def compose_live_wall_opening_authority(
     wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
         source_visibility_producer,
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
+        # Evidence-only sheets remain addressable by the same producer-owned
+        # authority but do not pay wall-topology reconstruction up front.
+        # If a downstream cross-sheet authority actually requests one of these
+        # scopes, the producer materializes it lazily from the same immutable
+        # source snapshot and caches the result deterministically.
+        deferred_page_ids=evidence_pages or None,
     )
 
     # Wall-candidate materialization may legitimately augment the producer-owned
