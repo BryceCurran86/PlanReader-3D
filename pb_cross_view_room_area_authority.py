@@ -542,6 +542,7 @@ def _trusted_native_dimensions_for_page(
     *,
     revision_id: str,
     page_id: str,
+    candidate_lines: Sequence[_TrustedLine] = (),
 ) -> tuple[_TrustedBoundDimension, ...]:
     """Resolve source-owned native figured dimensions without trusting raw text.
 
@@ -601,8 +602,59 @@ def _trusted_native_dimensions_for_page(
         ):
             continue
         observation = observations.get(binding.observation_id)
-        if observation is None or observation.bbox is None:
+        if (
+            observation is None
+            or observation.bbox is None
+            or observation.orientation
+            not in {
+                DimensionOrientation.HORIZONTAL.value,
+                DimensionOrientation.VERTICAL.value,
+            }
+        ):
             continue
+
+        # Geometry-only narrowing: authenticate only WITNESS_BOUND dimensions
+        # whose producer-owned source span can contain an already-authenticated
+        # candidate room label. This is a negative/performance filter only; it
+        # cannot make any dimension authoritative. The existing text, witness,
+        # scale-consistency and intersection gates remain mandatory below.
+        if candidate_lines:
+            first, second = binding.endpoints
+            if observation.orientation == DimensionOrientation.HORIZONTAL.value:
+                lo, hi = sorted((float(first[0]), float(second[0])))
+                relevant = False
+                for line in candidate_lines:
+                    x0, y0, x1, y1 = line.bbox
+                    centre = (x0 + x1) / 2.0
+                    word_count = max(1, len(line.receipt_ids))
+                    tolerance = max(
+                        (x1 - x0) / word_count,
+                        (y1 - y0) / word_count,
+                        1e-6,
+                    )
+                    if lo - tolerance <= centre <= hi + tolerance:
+                        relevant = True
+                        break
+                if not relevant:
+                    continue
+            else:
+                lo, hi = sorted((float(first[1]), float(second[1])))
+                relevant = False
+                for line in candidate_lines:
+                    x0, y0, x1, y1 = line.bbox
+                    centre = (y0 + y1) / 2.0
+                    word_count = max(1, len(line.receipt_ids))
+                    tolerance = max(
+                        (x1 - x0) / word_count,
+                        (y1 - y0) / word_count,
+                        1e-6,
+                    )
+                    if lo - tolerance <= centre <= hi + tolerance:
+                        relevant = True
+                        break
+                if not relevant:
+                    continue
+
         key = _bbox_key(observation.bbox)
         if key is not None:
             needed_bbox_keys.add(key)
@@ -1142,6 +1194,7 @@ class CrossViewRoomAreaProducer:
                 self._source,
                 revision_id=revision_id,
                 page_id=page_id,
+                candidate_lines=relevant_lines,
             )
             if not trusted_dimensions:
                 continue
