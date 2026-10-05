@@ -1928,36 +1928,31 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         else ()
     )
     if blocked_claim_keys:
-        try:
-            from pb_takeoff_output_supersedence import (
-                select_prior_commercial_rows_to_preserve,
-            )
+        from pb_takeoff_output_supersedence import (
+            select_prior_commercial_rows_to_preserve,
+        )
 
-            prior_rows = app.lquery(
-                f"""SELECT {','.join(TAKEOFF_ROW_FIELDS)}
-                    FROM takeoff_rows
-                    WHERE workspace_id=? AND source_reference LIKE ?
-                    ORDER BY id""",
-                (int(workspace_id), SOURCE_PREFIX + "%"),
-            )
-            replacement_rows = [
-                dict(zip(TAKEOFF_ROW_FIELDS, row))
-                for row in all_auto_rows
-            ]
-            preserved = select_prior_commercial_rows_to_preserve(
-                [dict(row) for row in prior_rows],
-                blocked_claim_keys=blocked_claim_keys,
-                replacement_rows=replacement_rows,
-            )
-            preserved_source_closed_rows = [
-                takeoff_contract.values_from_mapping(row, TAKEOFF_ROW_FIELDS)
-                for row in preserved
-            ]
-            all_auto_rows = all_auto_rows + preserved_source_closed_rows
-        except Exception:
-            # Preservation is an optional safety net. Never let an inability to
-            # prove exact prior lineage block the current transaction.
-            preserved_source_closed_rows = []
+        prior_rows = app.lquery(
+            f"""SELECT {','.join(TAKEOFF_ROW_FIELDS)}
+                FROM takeoff_rows
+                WHERE workspace_id=? AND source_reference LIKE ?
+                ORDER BY id""",
+            (int(workspace_id), SOURCE_PREFIX + "%"),
+        )
+        replacement_rows = [
+            dict(zip(TAKEOFF_ROW_FIELDS, row))
+            for row in all_auto_rows
+        ]
+        preserved = select_prior_commercial_rows_to_preserve(
+            [dict(row) for row in prior_rows],
+            blocked_claim_keys=blocked_claim_keys,
+            replacement_rows=replacement_rows,
+        )
+        preserved_source_closed_rows = [
+            takeoff_contract.values_from_mapping(row, TAKEOFF_ROW_FIELDS)
+            for row in preserved
+        ]
+        all_auto_rows = all_auto_rows + preserved_source_closed_rows
 
     # Rows, envelope and report are one publication: all commit or none do.
     with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
