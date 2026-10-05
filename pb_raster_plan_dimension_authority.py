@@ -3,8 +3,8 @@
 This module composes the existing producer-owned source boundaries:
 - SourceVisibilityProducer owns immutable PDF bytes and raster-visible segments.
 - A built-in OCR backend reads only a producer-rendered page.
-- Numeric OCR is accepted only when raster line/witness geometry binds it to a
-  physical dimension-line system.
+- Numeric OCR is accepted only when producer-authenticated visible line/witness
+  geometry (native vector or raster) binds it to a physical dimension-line system.
 - An overall span resolves only when one contiguous child chain spans the same
   endpoints and the child values sum exactly to the overall figured value.
 - Orthogonal overall spans must reconcile through the canonical page-scale
@@ -44,6 +44,7 @@ from pb_portable_raster_ocr_authority import (
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
+    NATIVE_PDF_VISIBLE_SEGMENT,
     RASTER_PDF_VISIBLE_SEGMENT,
     RASTER_RENDER_DPI,
     SourceVisibilityProducer,
@@ -643,7 +644,10 @@ class RasterPlanDimensionProducer:
                 result.status is not EvidenceResolutionStatus.CORROBORATED
                 or observation is None
                 or observation.page_id != page_id
-                or observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
+                or observation.observation_kind not in {
+                    NATIVE_PDF_VISIBLE_SEGMENT,
+                    RASTER_PDF_VISIBLE_SEGMENT,
+                }
             ):
                 continue
             orientation = _segment_orientation(observation.geometry)
