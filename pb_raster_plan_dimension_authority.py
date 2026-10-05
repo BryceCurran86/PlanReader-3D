@@ -168,6 +168,9 @@ class _VisibleSegment:
     observation_id: str
     geometry: tuple[float, float, float, float]
     orientation: str
+    source_raw_segment_id: Optional[str] = None
+    stroke_width_pt: Optional[float] = None
+    stroke_color_rgb: Optional[tuple[float, float, float]] = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +184,209 @@ class _LogicalLine:
     @property
     def span(self) -> float:
         return self.hi - self.lo
+
+
+def _canonical_segment_geometry(
+    values: Sequence[float],
+) -> Optional[tuple[float, float, float, float]]:
+    if len(values) != 4:
+        return None
+    try:
+        geometry = tuple(float(value) for value in values)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in geometry):
+        return None
+    first = (geometry[0], geometry[1])
+    second = (geometry[2], geometry[3])
+    if second < first:
+        first, second = second, first
+    if first == second:
+        return None
+    return (first[0], first[1], second[0], second[1])
+
+
+def _native_segment_style_table(
+    source_visibility: SourceVisibilityProducer,
+    *,
+    source_sha256: str,
+    page_id: str,
+) -> Mapping[
+    str,
+    tuple[
+        tuple[float, float, float, float],
+        Optional[float],
+        Optional[tuple[float, float, float]],
+    ],
+]:
+    """Return source graphic state only from the producer-owned native decode.
+
+    This is provenance metadata for tie-breaking only. Missing, malformed or
+    stale cache data simply disables the tie-break; it can never create a
+    visible segment or change source identity.
+    """
+    try:
+        page_number = int(str(page_id))
+    except (TypeError, ValueError):
+        return MappingProxyType({})
+    source_writer = source_visibility._producer
+    cached = source_writer._cached_native_page(str(source_sha256), page_number)
+    native_page = (
+        None
+        if cached is None or cached.failed
+        else cached.native_page
+    )
+    if not isinstance(native_page, Mapping):
+        return MappingProxyType({})
+
+    out: dict[
+        str,
+        tuple[
+            tuple[float, float, float, float],
+            Optional[float],
+            Optional[tuple[float, float, float]],
+        ],
+    ] = {}
+    for raw in native_page.get("segments", ()) or ():
+        if not isinstance(raw, Mapping):
+            continue
+        raw_id = str(raw.get("id") or "").strip()
+        if not raw_id:
+            continue
+        geometry = _canonical_segment_geometry(
+            (
+                raw.get("x1"),
+                raw.get("y1"),
+                raw.get("x2"),
+                raw.get("y2"),
+            )
+        )
+        if geometry is None:
+            continue
+
+        width: Optional[float] = None
+        if raw.get("width_present") is True:
+            try:
+                candidate_width = float(raw.get("width"))
+            except (TypeError, ValueError):
+                candidate_width = float("nan")
+            if math.isfinite(candidate_width) and candidate_width > 0.0:
+                width = candidate_width
+
+        color: Optional[tuple[float, float, float]] = None
+        stroke = raw.get("stroke")
+        if (
+            raw.get("stroke_present") is True
+            and isinstance(stroke, (tuple, list))
+            and len(stroke) >= 3
+        ):
+            try:
+                candidate_color = tuple(float(value) for value in stroke[:3])
+            except (TypeError, ValueError):
+                candidate_color = ()
+            if (
+                len(candidate_color) == 3
+                and all(math.isfinite(value) for value in candidate_color)
+            ):
+                color = candidate_color  # type: ignore[assignment]
+
+        out[raw_id] = (geometry, width, color)
+    return MappingProxyType(out)
+
+
+def _visible_native_raw_id(source_primitive_ref: str) -> Optional[str]:
+    prefix = "visible:segment:"
+    value = str(source_primitive_ref or "")
+    if not value.startswith(prefix):
+        return None
+    raw_id = value[len(prefix):].strip()
+    return raw_id or None
+
+
+def _source_luminance(
+    color: Optional[tuple[float, float, float]],
+) -> Optional[float]:
+    if color is None or len(color) != 3:
+        return None
+    if not all(math.isfinite(float(value)) for value in color):
+        return None
+    return sum(float(value) for value in color) / 3.0
+
+
+def _logical_line_style_envelope(
+    line: _LogicalLine,
+    segments_by_id: Mapping[str, _VisibleSegment],
+) -> Optional[tuple[float, float, float, float]]:
+    """Return conservative width/luminance bounds for one logical line."""
+    widths: list[float] = []
+    luminances: list[float] = []
+    for observation_id in line.observation_ids:
+        segment = segments_by_id.get(observation_id)
+        if segment is None or segment.stroke_width_pt is None:
+            return None
+        luminance = _source_luminance(segment.stroke_color_rgb)
+        if luminance is None:
+            return None
+        width = float(segment.stroke_width_pt)
+        if not math.isfinite(width) or width <= 0.0:
+            return None
+        widths.append(width)
+        luminances.append(luminance)
+    if not widths or not luminances:
+        return None
+    return (
+        min(widths),
+        max(widths),
+        min(luminances),
+        max(luminances),
+    )
+
+
+def _strict_logical_line_style_dominator(
+    logical: Sequence[_LogicalLine],
+    segments: Sequence[_VisibleSegment],
+) -> Optional[_LogicalLine]:
+    """Resolve a same-orientation ambiguity only by strict source style proof."""
+    if len(logical) < 2:
+        return logical[0] if logical else None
+    if len({line.orientation for line in logical}) != 1:
+        return None
+
+    segments_by_id = {segment.observation_id: segment for segment in segments}
+    envelopes = {
+        line.observation_ids: _logical_line_style_envelope(
+            line, segments_by_id
+        )
+        for line in logical
+    }
+    winners: list[_LogicalLine] = []
+    for candidate in logical:
+        candidate_env = envelopes.get(candidate.observation_ids)
+        if candidate_env is None:
+            continue
+        cand_min_width, _cand_max_width, _cand_min_lum, cand_max_lum = (
+            candidate_env
+        )
+        dominates = True
+        for other in logical:
+            if other is candidate:
+                continue
+            other_env = envelopes.get(other.observation_ids)
+            if other_env is None:
+                dominates = False
+                break
+            _other_min_width, other_max_width, other_min_lum, _other_max_lum = (
+                other_env
+            )
+            if not (
+                cand_min_width > other_max_width + 1e-9
+                and cand_max_lum < other_min_lum - 1e-9
+            ):
+                dominates = False
+                break
+        if dominates:
+            winners.append(candidate)
+    return winners[0] if len(winners) == 1 else None
 
 
 def _choose_backend() -> RasterOCRBackend:
@@ -410,9 +616,15 @@ def _bind_text_to_geometry(
     calibration: Optional[DimensionLayoutCalibration] = None,
 ) -> Optional[BoundRasterDimension]:
     logical = _logical_lines_for_text(text, segments)
-    if len(logical) != 1:
+    if not logical:
         return None
-    line = logical[0]
+    line = (
+        logical[0]
+        if len(logical) == 1
+        else _strict_logical_line_style_dominator(logical, segments)
+    )
+    if line is None:
+        return None
     render_point = 72.0 / float(RASTER_RENDER_DPI)
     witness_tol = (
         float(calibration.witness_endpoint_distance_pt)
@@ -846,6 +1058,11 @@ class RasterPlanDimensionProducer:
         )
 
         visibility = self._source_visibility.authority()
+        native_style_by_raw_id = _native_segment_style_table(
+            self._source_visibility,
+            source_sha256=published.revision.source_sha256,
+            page_id=page_id,
+        )
         segments: list[_VisibleSegment] = []
         for observation_id in published.visible_observation_ids:
             result = visibility.resolve_visible(
@@ -871,11 +1088,35 @@ class RasterPlanDimensionProducer:
             orientation = _segment_orientation(observation.geometry)
             if orientation is None:
                 continue
+            raw_segment_id = (
+                _visible_native_raw_id(observation.source_primitive_ref)
+                if observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT
+                else None
+            )
+            stroke_width: Optional[float] = None
+            stroke_color: Optional[tuple[float, float, float]] = None
+            if raw_segment_id is not None:
+                source_style = native_style_by_raw_id.get(raw_segment_id)
+                if source_style is not None:
+                    source_geometry, candidate_width, candidate_color = source_style
+                    visible_geometry = _canonical_segment_geometry(
+                        observation.geometry
+                    )
+                    if (
+                        visible_geometry is not None
+                        and visible_geometry == source_geometry
+                    ):
+                        stroke_width = candidate_width
+                        stroke_color = candidate_color
+
             segments.append(
                 _VisibleSegment(
                     observation.observation_id,
                     tuple(float(v) for v in observation.geometry),
                     orientation,
+                    source_raw_segment_id=raw_segment_id,
+                    stroke_width_pt=stroke_width,
+                    stroke_color_rgb=stroke_color,
                 )
             )
         if not segments:
