@@ -112,6 +112,26 @@ def test_filling_identity_is_geometry_order_and_line_direction_invariant() -> No
     assert first.physical_filling_id == second.physical_filling_id
 
 
+def test_missing_host_wall_does_not_mint_filling_identity() -> None:
+    opening = replace(_opening("W1"), host_wall_id=None)
+    projection = project_live_canonical_opening_fillings((opening,))
+
+    assert projection.status is EvidenceResolutionStatus.ABSTAINED
+    assert projection.windows == ()
+    assert projection.unresolved_opening_ids == (opening.physical_opening_id,)
+
+
+def test_nonfinite_source_geometry_does_not_mint_filling_identity() -> None:
+    opening = replace(
+        _opening("W1"),
+        source_geometries=((0.0, 0.0, float("nan"), 1.0),),
+    )
+    projection = project_live_canonical_opening_fillings((opening,))
+
+    assert projection.status is EvidenceResolutionStatus.ABSTAINED
+    assert projection.windows == ()
+
+
 def test_unresolved_kind_does_not_mint_filling_identity() -> None:
     opening = replace(_opening("W1"), opening_kind=None)
     projection = project_live_canonical_opening_fillings((opening,))
