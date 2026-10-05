@@ -373,35 +373,78 @@ def _trusted_native_dimensions_for_page(
     except Exception:
         return ()
 
+    observations = {
+        observation.dimension_id: observation
+        for observation in bundle.observations
+    }
+    needed_bbox_keys: set[tuple[float, float, float, float]] = set()
+    for binding in bundle.bindings:
+        if (
+            binding.status != BindingStatus.WITNESS_BOUND.value
+            or binding.endpoints is None
+            or not binding.dimension_line_id
+            or len(binding.witness_line_ids) < 2
+        ):
+            continue
+        observation = observations.get(binding.observation_id)
+        if observation is None or observation.bbox is None:
+            continue
+        key = _bbox_key(observation.bbox)
+        if key is not None:
+            needed_bbox_keys.add(key)
+
     text_authority = source.text_integrity_authority()
+    raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+        source
+    )
     trusted_by_bbox: dict[
         tuple[float, float, float, float],
         list[tuple[str, str, str]],
     ] = {}
     for observation_id in published.text_observation_ids:
-        resolved = text_authority.resolve_text(
-            ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                observation_id=observation_id,
-            )
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
         )
+        resolved = text_authority.resolve_text(selector)
         receipt = resolved.receipt
-        if (
-            resolved.status is not EvidenceResolutionStatus.CORROBORATED
-            or not resolved.trusted_text
-            or receipt is None
-            or str(receipt.page_id) != str(page_id)
-        ):
+        if receipt is None or str(receipt.page_id) != str(page_id):
             continue
         key = _bbox_key(receipt.geometry)
-        if key is None:
+        if key is None or key not in needed_bbox_keys:
+            continue
+
+        trusted_text: Optional[str] = None
+        if (
+            resolved.status is EvidenceResolutionStatus.CORROBORATED
+            and resolved.trusted_text
+        ):
+            trusted_text = str(resolved.trusted_text)
+        else:
+            corroborated = raster.publish(
+                RasterTextCorroborationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if (
+                corroborated.status is EvidenceResolutionStatus.CORROBORATED
+                and corroborated.record is not None
+                and corroborated.corroborated_text
+            ):
+                trusted_text = str(corroborated.corroborated_text)
+
+        if not trusted_text:
             continue
         trusted_by_bbox.setdefault(key, []).append(
             (
-                str(resolved.trusted_text),
+                trusted_text,
                 str(observation_id),
                 str(receipt.receipt_id),
             )
@@ -474,10 +517,6 @@ def _trusted_native_dimensions_for_page(
             out.append(matches[0])
         return tuple(dict.fromkeys(out))
 
-    observations = {
-        observation.dimension_id: observation
-        for observation in bundle.observations
-    }
     positive: list[_TrustedBoundDimension] = []
     for binding in bundle.bindings:
         if (
