@@ -7,7 +7,10 @@ import pytest
 from PIL import Image
 
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_pdf_text_integrity_authority import TEXT_GLYPH_MAPPING_UNVERIFIED
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
 from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine
 from pb_opening_elevation_frame_area_authority import (
     OPENING_ELEVATION_FRAME_AREA_UNAVAILABLE,
@@ -55,7 +58,7 @@ def _elevation_pdf(*, composite: bool = False, far_width_dimension: bool = False
         doc.close()
 
 
-def _glyph_unverified_elevation_pdf() -> bytes:
+def _glyph_unverified_elevation_pdf(*, unresolved_clip: bool = False) -> bytes:
     texts = "WINDOW ELEVATIONS W1 3000 2400 NOT REQUIRED"
     codes = sorted(set(map(ord, texts)))
     cmap = _cmap(
@@ -78,6 +81,12 @@ BT /F1 8 Tf 140 150 Td (3000) Tj ET
 BT /F1 7 Tf 65 88 Td (2400) Tj ET
 BT /F1 6 Tf 220 180 Td (NOT REQUIRED) Tj ET
 """
+    if unresolved_clip:
+        stream = (
+            "q 10 0 m 500 0 l 10 400 l h W n "
+            + stream
+            + " Q"
+        )
     return _pdf(
         stream,
         fonts={
@@ -91,7 +100,12 @@ BT /F1 6 Tf 220 180 Td (NOT REQUIRED) Tj ET
     )
 
 
-def _exact_word_backend(source, published) -> MockOCRBackend:
+def _exact_word_backend(
+    source,
+    published,
+    *,
+    expected_reason_codes: tuple[str, ...] = (TEXT_GLYPH_MAPPING_UNVERIFIED,),
+) -> MockOCRBackend:
     text_authority = source.text_integrity_authority()
     raster_key_to_text: dict[tuple[int, int, int], str] = {}
     required = {"WINDOW", "ELEVATIONS", "W1", "3000", "2400"}
@@ -108,7 +122,7 @@ def _exact_word_backend(source, published) -> MockOCRBackend:
         if receipt is None or receipt.raw_text not in required:
             continue
         assert native.status is EvidenceResolutionStatus.ABSTAINED
-        assert native.reason_codes == (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+        assert set(native.reason_codes) == set(expected_reason_codes)
         for dpi in (300, 450):
             png, _page_parent = source._producer.render_native_page_png(
                 document_id=published.revision.document_id,
@@ -206,6 +220,42 @@ def test_glyph_unverified_elevation_words_use_strict_raster_corroboration() -> N
     assert result.record is not None
     assert result.record.area_m2 == pytest.approx(7.2)
     assert sorted((result.record.axis_x_mm, result.record.axis_y_mm)) == [2400.0, 3000.0]
+
+
+def test_glyph_and_clip_unverified_elevation_words_use_post_clip_raster_proof() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="opening-elevation-raster-clip-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="opening-elevation-raster-clip",
+        source_bytes=_glyph_unverified_elevation_pdf(unresolved_clip=True),
+        source_locator="memory://opening-elevation-raster-clip.pdf",
+    )
+    backend = _exact_word_backend(
+        source,
+        published,
+        expected_reason_codes=(
+            TEXT_GLYPH_MAPPING_UNVERIFIED,
+            TEXT_CLIP_STATE_UNRESOLVED,
+        ),
+    )
+
+    producer = (
+        OpeningElevationFrameAreaProducer.from_source_visibility_producer_for_tests(
+            source,
+            backend,
+        )
+    )
+    result = producer.authority().resolve(_selector(published, "W1"))
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED, result.reason_codes
+    assert result.record is not None
+    assert result.record.area_m2 == pytest.approx(7.2)
+    assert sorted((result.record.axis_x_mm, result.record.axis_y_mm)) == [
+        2400.0,
+        3000.0,
+    ]
 
 
 def test_marked_window_elevation_proves_closed_gross_frame_area() -> None:
