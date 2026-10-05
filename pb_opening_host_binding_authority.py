@@ -1,8 +1,15 @@
 """Producer-owned authenticated physical-opening -> host-wall binding authority V3.
 
 This module proves one narrow proposition only: an already source-authenticated
-physical opening instance is bound to exactly one host wall band derived from the
-complete sealed physical-wall-candidate scope for the same exact source/page.
+physical opening instance is bound to exactly one host wall band. The normal path
+uses the complete sealed physical-wall-candidate scope for the same exact
+source/page. When that global scope is incomplete, the sealed binding producer may
+instead use an opening-local subset only when producer-owned per-candidate boundary
+evidence proves every wall capable of entering that exact host search is evaluated
+and clean, no excluded boundary primitive can enter the same host role, and
+upstream physical equivalence does not bridge through unsafe evidence. The global
+scope remains incomplete and the public host-wall-universe authority still
+abstains.
 
 Host binding consumes the producer-owned physical-wall equivalence result. A
 candidate identity is only an address for one wall representation; it is never
