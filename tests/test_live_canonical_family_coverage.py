@@ -213,16 +213,36 @@ def test_source_authenticated_rooms_are_partial_without_metric_quantity_and_inpu
     assert all(not record.quantity_ids for summary in summaries for record in summary.object_records)
 
 
-def test_floor_footprint_does_not_manufacture_physical_floor_identity():
+def test_room_owned_floor_surface_reuses_physical_room_identity_without_quantity_promotion():
     floors = compose_live_canonical_floor_surfaces(_rooms()).floors
-    summaries, gaps = collect_live_canonical_coverage(objects=floors, registry_run_scope="test")
-    assert summaries and all(not summary.object_records for summary in summaries)
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=floors,
+        registry_run_scope="test",
+    )
+    assert gaps == {}
+    assert summaries
+    records = [
+        record
+        for summary in summaries
+        for record in summary.object_records
+    ]
+    assert len(records) == len(floors)
+    assert {record.object_id for record in records} == {
+        floor.physical_floor_surface_id for floor in floors
+    }
+    assert all(not record.quantity_ids for record in records)
+
     report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
     family = report["family_reports"]["floor_slab"]
-    assert family["classification"] == "UNAVAILABLE"
-    assert set(family["stage_counts"].values()) == {None}
-    assert "producer_physical_identity_unresolved" in family["reason_codes"]
-    assert all(not floor.physical_floor_surface_identity_resolved for floor in floors)
+    assert family["classification"] == "PARTIAL"
+    assert family["stage_counts"] == {
+        "DETECTED": len(floors),
+        "AUTHENTICATED": len(floors),
+        "CANONICALIZED": len(floors),
+        "QUANTIFIED": 0,
+        "PUBLISHED": 0,
+    }
+    assert all(floor.physical_floor_surface_identity_resolved for floor in floors)
 
 
 def test_structural_registry_reuses_original_count_quantity_and_canonical_member_ids():
