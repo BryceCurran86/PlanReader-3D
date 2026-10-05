@@ -67,6 +67,9 @@ SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN = (
 SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE = (
     "semantic_opening_candidate_universe_complete"
 )
+SEMANTIC_OPENING_RASTER_CANDIDATE_CLOSURE_UNPROVEN = (
+    "semantic_opening_raster_candidate_closure_unproven"
+)
 SEMANTIC_OPENING_NO_VISIBLE_SEGMENTS = "semantic_opening_no_visible_segments"
 SEMANTIC_OPENING_PRODUCER_EQUIVOCATION = "semantic_opening_producer_equivocation"
 
@@ -424,6 +427,7 @@ class SemanticOpeningEnumerationProducer:
         scoped_visible_ids: list[str] = []
         page_representative_observation_ids: dict[str, str] = {}
         unknown_scope_resolution = False
+        scoped_raster_ids: list[str] = []
 
         for observation_id in tuple(sorted(set(published.visible_observation_ids))):
             obs_selector = ObservationSelector(
@@ -508,6 +512,87 @@ class SemanticOpeningEnumerationProducer:
             else:
                 unresolved_visible_ids.add(observation_id)
 
+        # Raster-opening primitives are intentionally isolated from
+        # visible_observation_ids. They may still address independently proven
+        # G17 physical openings, but they do not become ordinary visibility
+        # evidence and they do not establish source-closed candidate coverage.
+        for observation_id in tuple(
+            sorted(set(published.raster_opening_primitive_observation_ids))
+        ):
+            obs_selector = ObservationSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                observation_id=observation_id,
+            )
+            primitive_result = visibility.resolve_raster_opening_primitive(
+                obs_selector
+            )
+            if (
+                primitive_result.status
+                is not EvidenceResolutionStatus.CORROBORATED
+                or primitive_result.observation is None
+            ):
+                if primitive_result.status is EvidenceResolutionStatus.CONFLICT:
+                    conflict_ids.add(observation_id)
+                else:
+                    unknown_scope_resolution = True
+                continue
+
+            observation = primitive_result.observation
+            if str(observation.page_id) not in allowed_pages:
+                continue
+            scoped_raster_ids.append(observation_id)
+
+            if (
+                observation.document_id != selector.document_id
+                or observation.revision_id != selector.revision_id
+                or observation.source_sha256 != selector.source_sha256
+                or observation.snapshot_id != selector.snapshot_id
+            ):
+                lineage_mismatch = True
+                conflict_ids.add(observation_id)
+                continue
+
+            disposition = physical.classify_disposition(obs_selector)
+            if (
+                disposition.status is EvidenceResolutionStatus.CORROBORATED
+                and disposition.disposition
+                == PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT
+                and disposition.existence_record is not None
+            ):
+                record = disposition.existence_record
+                if (
+                    record.document_id != selector.document_id
+                    or record.revision_id != selector.revision_id
+                    or record.source_sha256 != selector.source_sha256
+                    or record.snapshot_id != selector.snapshot_id
+                    or str(record.page_id) not in allowed_pages
+                ):
+                    lineage_mismatch = True
+                    conflict_ids.add(observation_id)
+                    continue
+                prior = opening_records.get(record.record_id)
+                if prior is not None and prior != record:
+                    lineage_mismatch = True
+                    conflict_ids.add(observation_id)
+                    continue
+                opening_records[record.record_id] = record
+                support_ids.update(record.source_observation_ids)
+                representative_candidates.setdefault(
+                    record.record_id, set()
+                ).add(observation_id)
+            elif (
+                disposition.status is EvidenceResolutionStatus.CONFLICT
+                or disposition.disposition
+                == PHYSICAL_OPENING_DISPOSITION_CONFLICT
+            ):
+                conflict_ids.add(observation_id)
+            # Other raster primitives remain retained source evidence, but are
+            # not residual *visible* observations. Candidate-universe closure
+            # stays explicitly unproven below for any scoped raster evidence.
+
         # Deterministically choose only among selectors already proven above
         # to resolve the exact physical opening. This is not a heuristic tie
         # break: every candidate in each set has already returned that record.
@@ -526,7 +611,7 @@ class SemanticOpeningEnumerationProducer:
         # gap/jamb candidates cannot disappear as isolated noncandidate lines.
         residual_ids = set(unresolved_visible_ids) - support_ids
 
-        candidate_closure_complete = True
+        candidate_closure_complete = not bool(scoped_raster_ids)
         for page_id in scoped_page_ids:
             representative_id = page_representative_observation_ids.get(page_id)
             if representative_id is None:
@@ -569,6 +654,10 @@ class SemanticOpeningEnumerationProducer:
             reasons.append(SEMANTIC_OPENING_PHYSICAL_CONFLICT)
         if residual_ids:
             reasons.append(SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE)
+        if scoped_raster_ids:
+            reasons.append(
+                SEMANTIC_OPENING_RASTER_CANDIDATE_CLOSURE_UNPROVEN
+            )
 
         structural_complete = bool(visible_ids) and not (
             unknown_scope_resolution
