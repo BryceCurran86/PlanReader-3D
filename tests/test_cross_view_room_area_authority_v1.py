@@ -22,7 +22,11 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
+def _payload(
+    *,
+    duplicate_dimension_box: bool = False,
+    duplicate_source_witness: bool = False,
+) -> bytes:
     doc = fitz.open()
     try:
         plan = doc.new_page(width=400.0, height=300.0)
@@ -34,6 +38,16 @@ def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
         detail.draw_line((100.0, 80.0), (250.0, 80.0), color=(0, 0, 0), width=1.0)
         detail.draw_line((100.0, 68.0), (100.0, 92.0), color=(0, 0, 0), width=1.0)
         detail.draw_line((250.0, 68.0), (250.0, 92.0), color=(0, 0, 0), width=1.0)
+        if duplicate_source_witness:
+            # Multiple native primitives may paint the exact same physical
+            # witness. The authority must preserve both source IDs without
+            # inventing an ambiguity in the already-identical geometry.
+            detail.draw_line(
+                (250.0, 68.0),
+                (250.0, 92.0),
+                color=(0, 0, 0),
+                width=1.0,
+            )
         detail.insert_text((164.0, 77.0), "3600", fontsize=9.0)
 
         # 2.4m vertical span: 100 source points, same figured scale ratio.
@@ -73,6 +87,7 @@ def _source_and_room(
     *,
     duplicate_room_label: bool = False,
     duplicate_dimension_box: bool = False,
+    duplicate_source_witness: bool = False,
     page_ids: tuple[str, ...] | None = None,
     room_page_id: str = "1",
 ):
@@ -82,7 +97,10 @@ def _source_and_room(
     )
     published = source.ingest_native_pdf_bytes(
         document_id="cross-view-room-area-doc",
-        source_bytes=_payload(duplicate_dimension_box=duplicate_dimension_box),
+        source_bytes=_payload(
+            duplicate_dimension_box=duplicate_dimension_box,
+            duplicate_source_witness=duplicate_source_witness,
+        ),
         source_locator="memory://cross-view-room-area.pdf",
         page_ids=page_ids,
     )
@@ -336,6 +354,18 @@ def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_ow
     }
     assert evidence.metadata["horizontal_witness_observation_ids"]
     assert evidence.metadata["vertical_witness_observation_ids"]
+
+
+def test_exact_coincident_source_witnesses_preserve_all_provenance_without_ambiguity():
+    source, rooms = _source_and_room(duplicate_source_witness=True)
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_evidence.normalized_value == 8.64
 
 
 def test_scoped_ingest_preserves_one_based_measurement_page_identity():
