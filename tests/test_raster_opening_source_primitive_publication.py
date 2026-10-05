@@ -7,7 +7,7 @@ import numpy as np
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
-    RASTER_OPENING_VISIBLE_PRIMITIVE,
+    RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS,
     SourceVisibilityProducer,
     VISIBILITY_RECEIPT_UNAVAILABLE,
 )
@@ -90,7 +90,11 @@ def test_primitive_publication_is_isolated_from_visible_universe() -> None:
         isolated = authority.resolve_raster_opening_primitive(selector)
         assert isolated.status is EvidenceResolutionStatus.CORROBORATED
         assert isolated.observation is not None
-        assert isolated.observation.observation_kind == RASTER_OPENING_VISIBLE_PRIMITIVE
+        assert (
+            isolated.observation.observation_kind
+            in RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS
+        )
+        assert isolated.observation.raw_text == ""
 
         generic = authority.resolve_visible(selector)
         assert generic.status is EvidenceResolutionStatus.ABSTAINED
