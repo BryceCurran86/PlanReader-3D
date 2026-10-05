@@ -25,7 +25,6 @@ def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
         plan.insert_text((80.0, 60.0), "GROUND FLOOR PLAN", fontsize=10.0)
 
         detail = doc.new_page(width=400.0, height=300.0)
-        detail.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
 
         # 3.6m horizontal span: 150 source points.
         detail.draw_line((100.0, 80.0), (250.0, 80.0), color=(0, 0, 0), width=1.0)
@@ -51,6 +50,10 @@ def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
             detail.draw_line((308.0, 90.0), (332.0, 90.0), color=(0, 0, 0), width=1.0)
             detail.draw_line((308.0, 210.0), (332.0, 210.0), color=(0, 0, 0), width=1.0)
             detail.insert_text((317.0, 167.0), "2880", fontsize=9.0, rotate=90)
+
+        # Insert semantic label after figured dimensions so the dimension-token
+        # classifier does not see a room-label context immediately before 3600.
+        detail.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
 
         return doc.tobytes()
     finally:
