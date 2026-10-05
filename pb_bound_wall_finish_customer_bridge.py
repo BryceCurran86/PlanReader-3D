@@ -28,6 +28,7 @@ from pb_bound_wall_finish_quantity_authority import (
     SourceBoundWallFinishQuantityResult,
     SourceBoundWallFinishQuantitySelector,
 )
+from pb_live_wall_finish_quantity_publication import publish_bound_wall_finish_quantity
 from pb_migration_contracts import EvidenceResolutionStatus
 import pb_takeoff_row_contract as takeoff_contract
 
@@ -73,7 +74,11 @@ def bound_wall_finish_record_to_takeoff_row(
         f"Host walls: {wall_list}; faces bound: {face_count}; net area: {qty:.2f} m²."
     )
     source_page = str(record.page_id or "1")
-    source_ref = f"{source_prefix} · bound_wall_finish:{record.record_id}"
+    quantity = publish_bound_wall_finish_quantity(record)
+    source_ref = (
+        f"{source_prefix} · bound_wall_finish:{record.record_id}"
+        f" · finish_quantity:{quantity.quantity_id}"
+    )
 
     stamp = ""  # Replaced by database transaction / caller
     return (
@@ -133,6 +138,8 @@ def build_bound_wall_finish_rows(
                             "quantity_m2": float(rec.quantity_m2),
                             "physical_wall_ids": list(rec.physical_wall_ids),
                             "physical_face_ids": list(rec.physical_face_ids),
+                            "physical_surface_ids": list(rec.physical_surface_ids),
+                            "quantity_id": publish_bound_wall_finish_quantity(rec).quantity_id,
                             "page_id": rec.page_id,
                         })
         except Exception:
