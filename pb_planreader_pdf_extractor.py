@@ -498,6 +498,11 @@ class GenericPlanReaderExtractor:
             "source_pages": [],
             "rooms": [],
         }
+        self.canonical_spaces_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "spaces": [],
+        }
         self.canonical_floors_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -1324,6 +1329,11 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "source_pages": [],
             "rooms": [],
+        }
+        self.canonical_spaces_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "spaces": [],
         }
 
         # ------------------------------------------------------------------
@@ -3597,6 +3607,13 @@ class GenericPlanReaderExtractor:
                     ],
                     "rooms": [],
                 }
+                self.canonical_spaces_live = {
+                    "status": "abstained",
+                    "reason_codes": [
+                        physical_net_preflight_reason
+                    ],
+                    "spaces": [],
+                }
                 self.canonical_floors_live = {
                     "status": "abstained",
                     "reason_codes": [
@@ -3722,6 +3739,14 @@ class GenericPlanReaderExtractor:
                         (),
                     )
                 ]
+                canonical_space_objects = [
+                    space.to_dict()
+                    for space in getattr(
+                        physical_wall_result,
+                        "canonical_spaces",
+                        (),
+                    )
+                ]
                 canonical_floor_objects = [
                     floor.to_dict()
                     for floor in getattr(
@@ -3793,6 +3818,29 @@ class GenericPlanReaderExtractor:
                         )
                     ),
                     "rooms": canonical_room_objects,
+                }
+                space_status = getattr(
+                    physical_wall_result,
+                    "canonical_space_status",
+                    None,
+                )
+                space_status_value = getattr(space_status, "value", None)
+                if space_status_value is None:
+                    space_status_value = (
+                        "corroborated"
+                        if canonical_space_objects
+                        else "abstained"
+                    )
+                self.canonical_spaces_live = {
+                    "status": space_status_value,
+                    "reason_codes": list(
+                        getattr(
+                            physical_wall_result,
+                            "canonical_space_reason_codes",
+                            (),
+                        )
+                    ),
+                    "spaces": canonical_space_objects,
                 }
                 floor_status = getattr(
                     physical_wall_result,
@@ -3946,6 +3994,11 @@ class GenericPlanReaderExtractor:
                     "reason_codes": ["no_drawing_pages_selected"],
                     "rooms": [],
                 }
+                self.canonical_spaces_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "spaces": [],
+                }
                 self.canonical_floors_live = {
                     "status": "abstained",
                     "reason_codes": ["no_drawing_pages_selected"],
@@ -4001,6 +4054,13 @@ class GenericPlanReaderExtractor:
                     f"live_canonical_room_exception:{type(exc).__name__}"
                 ],
                 "rooms": [],
+            }
+            self.canonical_spaces_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_canonical_space_exception:{type(exc).__name__}"
+                ],
+                "spaces": [],
             }
             self.canonical_floors_live = {
                 "status": "abstained",
