@@ -15,6 +15,7 @@ commercial takeoff, or JobHub publication is written here.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Sequence
 
 from pb_geometry_takeoff_model import ScaleCalibration
 from pb_migration_contracts import (
@@ -201,6 +202,7 @@ def run_source_owned_ceiling_lining_shadow(
     context: ProviderContext,
     viewport: ViewportEvidence,
     page_no: int,
+    authoritative_area_quantities: Sequence[QuantityEvidence] | None = None,
 ) -> SourceOwnedCeilingLiningShadowResult:
     """Run the complete producer-owned ceiling-lining shadow path."""
 
@@ -299,6 +301,7 @@ def run_source_owned_ceiling_lining_shadow(
         page_no=page_no,
         unscoped_finish_candidates=finish_candidates,
         scale_calibration=scale_bridge.calibration,
+        authoritative_area_quantities=authoritative_area_quantities,
     )
 
     if (

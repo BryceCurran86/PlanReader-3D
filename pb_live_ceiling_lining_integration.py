@@ -30,6 +30,7 @@ from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
+    QuantityEvidence,
     ViewportEvidence,
     ViewportResolutionStatus,
     stable_contract_id,
@@ -69,6 +70,8 @@ class LiveCanonicalCeilingSurfaceObject:
     source_room_index_id: str
     evidence_ids: tuple[str, ...]
     physical_scale_record_id: str
+    measurement_authority: str = ""
+    figured_dimension_ids: tuple[str, ...] = ()
     geometry_complete: bool = True
     metric_area_complete: bool = True
     metric_geometry_complete: bool = False
@@ -91,6 +94,8 @@ class LiveCanonicalCeilingSurfaceObject:
             "source_room_index_id": self.source_room_index_id,
             "evidence_ids": list(self.evidence_ids),
             "physical_scale_record_id": self.physical_scale_record_id,
+            "measurement_authority": self.measurement_authority,
+            "figured_dimension_ids": list(self.figured_dimension_ids),
             "geometry_complete": self.geometry_complete,
             "metric_area_complete": self.metric_area_complete,
             "metric_geometry_complete": self.metric_geometry_complete,
@@ -114,6 +119,8 @@ class LiveCeilingLiningClaim:
     room_entity_ids: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     physical_scale_record_id: str
+    measurement_authority: str = ""
+    figured_dimension_ids: tuple[str, ...] = ()
     status: str = AuthorityStatus.PROVISIONAL.value
     schema_version: str = LIVE_CEILING_LINING_SCHEMA_VERSION
 
@@ -124,6 +131,7 @@ class LiveCeilingLiningResult:
     reason_codes: tuple[str, ...]
     claims: tuple[LiveCeilingLiningClaim, ...]
     canonical_ceilings: tuple[LiveCanonicalCeilingSurfaceObject, ...] = ()
+    quantity_evidence: tuple[QuantityEvidence, ...] = ()
     schema_version: str = LIVE_CEILING_LINING_SCHEMA_VERSION
 
 
@@ -174,7 +182,19 @@ def _claim_from_quantity(
     source_result,
     page_no: int,
     viewport_id: str,
-) -> Optional[tuple[str, str, float, tuple[str, ...], tuple[str, ...], tuple[str, ...], str]]:
+) -> Optional[
+    tuple[
+        str,
+        str,
+        float,
+        tuple[str, ...],
+        tuple[str, ...],
+        tuple[str, ...],
+        str,
+        str,
+        tuple[str, ...],
+    ]
+]:
     if (
         quantity.family != "ceiling_lining"
         or quantity.abstained
@@ -217,24 +237,46 @@ def _claim_from_quantity(
         or area.abstained
         or area.value is None
         or area.status != AuthorityStatus.FIRM.value
-        or area.authority != MeasurementAuthorityType.PDF_SCALED.value
+        or area.authority
+        not in {
+            MeasurementAuthorityType.PDF_SCALED.value,
+            MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+        }
         or tuple(area.input_entity_ids) != (scope,)
         or float(area.value) != float(quantity.value)
         or area.blocking_reasons
     ):
         return None
 
-    bridge = source_result.scale_bridge
-    calibration = bridge.calibration
-    physical = bridge.physical_scale_evidence
-    if (
-        bridge.status is not EvidenceResolutionStatus.CORROBORATED
-        or calibration is None
-        or physical is None
-        or not physical.record_id
-        or measurement_authority_for_page_scale(calibration) != AuthorityStatus.FIRM.value
-    ):
-        return None
+    scale_record_id = ""
+    figured_dimension_ids: tuple[str, ...] = ()
+    if area.authority == MeasurementAuthorityType.PDF_SCALED.value:
+        bridge = source_result.scale_bridge
+        calibration = bridge.calibration
+        physical = bridge.physical_scale_evidence
+        if (
+            bridge.status is not EvidenceResolutionStatus.CORROBORATED
+            or calibration is None
+            or physical is None
+            or not physical.record_id
+            or measurement_authority_for_page_scale(calibration)
+            != AuthorityStatus.FIRM.value
+        ):
+            return None
+        scale_record_id = str(physical.record_id)
+    else:
+        area_meta = area.metadata if isinstance(area.metadata, dict) else {}
+        figured_dimension_ids = tuple(
+            sorted(
+                {
+                    _clean(value)
+                    for value in (area_meta.get("figured_dimension_ids") or ())
+                    if _clean(value)
+                }
+            )
+        )
+        if not figured_dimension_ids:
+            return None
 
     return (
         _tag_for_descriptor(finish_descriptor),
@@ -243,7 +285,9 @@ def _claim_from_quantity(
         (quantity.quantity_id,),
         tuple(quantity.input_entity_ids),
         tuple(quantity.evidence_ids),
-        physical.record_id,
+        scale_record_id,
+        str(area.authority),
+        figured_dimension_ids,
     )
 
 
@@ -251,6 +295,7 @@ def collect_live_ceiling_lining_claims(
     pdf_path: Path | str,
     *,
     pages: Optional[Sequence[int]] = None,
+    authoritative_room_area_quantities: Optional[Sequence[QuantityEvidence]] = None,
 ) -> LiveCeilingLiningResult:
     """Collect live provisional ceiling claims from authoritative source viewports."""
 
@@ -293,6 +338,8 @@ def collect_live_ceiling_lining_claims(
             str, LiveCanonicalCeilingSurfaceObject
         ] = {}
         canonical_conflicts: set[str] = set()
+        validated_quantities: dict[str, QuantityEvidence] = {}
+        upstream_room_areas = tuple(authoritative_room_area_quantities or ())
 
         for page_index in selected:
             page_no = page_index + 1
@@ -336,12 +383,29 @@ def collect_live_ceiling_lining_claims(
                     viewport_page_ownership=((viewport_id, page_no),),
                 )
 
+                scoped_room_areas = tuple(
+                    area
+                    for area in upstream_room_areas
+                    if (
+                        isinstance(area.metadata, dict)
+                        and _clean(area.metadata.get("source_sha256")).lower()
+                        == current.revision.source_sha256.lower()
+                        and _clean(area.metadata.get("revision_id"))
+                        == current.revision.revision_id
+                        and _clean(area.metadata.get("viewport_id")) == viewport_id
+                        and _clean(area.metadata.get("page_no")) == str(page_no)
+                    )
+                )
+
                 try:
                     result = run_source_owned_ceiling_lining_shadow(
                         source_visibility_producer=source,
                         context=context,
                         viewport=viewport,
                         page_no=page_no,
+                        authoritative_area_quantities=(
+                            scoped_room_areas if scoped_room_areas else None
+                        ),
                     )
                 except Exception:
                     continue
@@ -363,7 +427,10 @@ def collect_live_ceiling_lining_claims(
                         room_ids,
                         evidence_ids,
                         scale_record_id,
+                        measurement_authority,
+                        figured_dimension_ids,
                     ) = resolved
+                    validated_quantities[quantity.quantity_id] = quantity
                     by_descriptor.setdefault(descriptor, []).append(
                         (
                             page_no,
@@ -374,6 +441,8 @@ def collect_live_ceiling_lining_claims(
                             room_ids,
                             evidence_ids,
                             scale_record_id,
+                            measurement_authority,
+                            figured_dimension_ids,
                             float(quantity.confidence),
                         )
                     )
@@ -423,6 +492,8 @@ def collect_live_ceiling_lining_claims(
                                 source_room_index_id=room_index.index_id,
                                 evidence_ids=tuple(evidence_ids),
                                 physical_scale_record_id=scale_record_id,
+                                measurement_authority=measurement_authority,
+                                figured_dimension_ids=figured_dimension_ids,
                             )
                             prior = canonical_ceilings_by_id.get(canonical_id)
                             if prior is not None and prior != ceiling_object:
@@ -461,9 +532,16 @@ def collect_live_ceiling_lining_claims(
             evidence_ids = tuple(
                 sorted({eid for row in rows for eid in row[6]})
             )
-            confidence = min(row[8] for row in rows)
+            confidence = min(row[10] for row in rows)
             tag = next(iter(tag_values))
             scale_record_id = next(iter(scale_ids))
+            measurement_authorities = {row[8] for row in rows}
+            figured_dimension_ids = tuple(
+                sorted({value for row in rows for value in row[9]})
+            )
+            if len(measurement_authorities) != 1:
+                continue
+            measurement_authority = next(iter(measurement_authorities))
             claim_id = stable_contract_id(
                 "live_ceiling",
                 {
@@ -478,6 +556,8 @@ def collect_live_ceiling_lining_claims(
                     "room_entity_ids": room_entity_ids,
                     "evidence_ids": evidence_ids,
                     "physical_scale_record_id": scale_record_id,
+                    "measurement_authority": measurement_authority,
+                    "figured_dimension_ids": figured_dimension_ids,
                 },
             )
             claims.append(
@@ -495,6 +575,8 @@ def collect_live_ceiling_lining_claims(
                     room_entity_ids=room_entity_ids,
                     evidence_ids=evidence_ids,
                     physical_scale_record_id=scale_record_id,
+                    measurement_authority=measurement_authority,
+                    figured_dimension_ids=figured_dimension_ids,
                 )
             )
 
@@ -518,6 +600,20 @@ def collect_live_ceiling_lining_claims(
                 key=lambda item: item.canonical_ceiling_id,
             )
         )
+        claim_quantity_ids = {
+            quantity_id
+            for claim in claims
+            for quantity_id in claim.room_quantity_ids
+        }
+        canonical_quantity_ids = {
+            ceiling.ceiling_quantity_id for ceiling in canonical_ceilings
+        }
+        surviving_quantity_ids = claim_quantity_ids & canonical_quantity_ids
+        surviving_quantities = tuple(
+            validated_quantities[quantity_id]
+            for quantity_id in sorted(surviving_quantity_ids)
+            if quantity_id in validated_quantities
+        )
 
         if claims:
             reasons = [LIVE_CEILING_LINING_RESOLVED]
@@ -532,6 +628,7 @@ def collect_live_ceiling_lining_claims(
                 reason_codes=tuple(reasons),
                 claims=tuple(sorted(claims, key=lambda item: item.claim_id)),
                 canonical_ceilings=canonical_ceilings,
+                quantity_evidence=surviving_quantities,
             )
 
         reasons = [LIVE_CEILING_LINING_UNAVAILABLE]
@@ -546,6 +643,7 @@ def collect_live_ceiling_lining_claims(
             reason_codes=tuple(reasons),
             claims=(),
             canonical_ceilings=canonical_ceilings,
+            quantity_evidence=surviving_quantities,
         )
     finally:
         doc.close()

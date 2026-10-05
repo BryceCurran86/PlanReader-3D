@@ -3503,6 +3503,7 @@ class GenericPlanReaderExtractor:
             )
 
         # Source-owned physical external net-wall LIVE firm output.
+        _live_room_area_quantities_for_ceiling = ()
         self._mark_performance("physical_net_wall_live_start")
         #
         # This is intentionally late: the complete source-owned
@@ -3686,6 +3687,13 @@ class GenericPlanReaderExtractor:
                 physical_wall_result = collect_live_physical_net_wall_claim(
                     p_path,
                     **physical_claim_kwargs,
+                )
+                _live_room_area_quantities_for_ceiling = tuple(
+                    getattr(
+                        physical_wall_result,
+                        "room_area_quantity_evidence",
+                        (),
+                    )
                 )
                 _coverage_objects.extend(physical_wall_result.canonical_walls)
                 _coverage_objects.extend(physical_wall_result.canonical_openings)
@@ -4152,6 +4160,9 @@ class GenericPlanReaderExtractor:
             ceiling_result = collect_live_ceiling_lining_claims(
                 p_path,
                 pages=target_pages,
+                authoritative_room_area_quantities=(
+                    _live_room_area_quantities_for_ceiling
+                ),
             )
             canonical_ceiling_objects = [
                 ceiling.to_dict()
@@ -4184,12 +4195,17 @@ class GenericPlanReaderExtractor:
                         "room_quantity_ids": list(claim.room_quantity_ids),
                         "room_entity_ids": list(claim.room_entity_ids),
                         "physical_scale_record_id": claim.physical_scale_record_id,
+                        "measurement_authority": claim.measurement_authority,
+                        "figured_dimension_ids": list(claim.figured_dimension_ids),
                     }
                     for claim in ceiling_result.claims
                 ],
             }
             self.extraction_status["ceiling_lining_live"] = ceiling_result.status.value
             _coverage_objects.extend(ceiling_result.canonical_ceilings)
+            _coverage_quantities.extend(
+                getattr(ceiling_result, "quantity_evidence", ())
+            )
 
             for claim in ceiling_result.claims:
                 claim_ceiling_objects = [

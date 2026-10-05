@@ -44,11 +44,16 @@ SOURCE_CEILING_PIPELINE_SCHEMA_VERSION = "1.0.0"
 class SourceCeilingLiningShadowResult:
     room_area_bridge: SourceRoomAreaBridgeResult
     ceiling_result: ProviderResult
+    authoritative_area_quantities: tuple[QuantityEvidence, ...] = ()
     schema_version: str = SOURCE_CEILING_PIPELINE_SCHEMA_VERSION
 
     @property
     def room_area_quantities(self) -> tuple[QuantityEvidence, ...]:
-        return self.room_area_bridge.quantities
+        return (
+            self.authoritative_area_quantities
+            if self.authoritative_area_quantities
+            else self.room_area_bridge.quantities
+        )
 
     @property
     def ceiling_quantities(self) -> tuple[QuantityEvidence, ...]:
@@ -66,6 +71,7 @@ def run_source_ceiling_lining_shadow(
     unscoped_finish_candidates: Sequence[EvidenceAtom],
     scale_calibration: Optional[ScaleCalibration] = None,
     explicit_area_evidence_by_room_id: Optional[Mapping[str, EvidenceAtom]] = None,
+    authoritative_area_quantities: Optional[Sequence[QuantityEvidence]] = None,
 ) -> SourceCeilingLiningShadowResult:
     """Run the authenticated room-area and ceiling-lining shadow chain.
 
@@ -86,12 +92,32 @@ def run_source_ceiling_lining_shadow(
         explicit_area_evidence_by_room_id=explicit_area_evidence_by_room_id,
     )
 
+    base_area_quantities = tuple(room_area.quantities)
+    supplied_area_quantities = tuple(authoritative_area_quantities or ())
+    if supplied_area_quantities:
+        supplied_scopes = {
+            str(quantity.input_entity_ids[0]).strip()
+            for quantity in supplied_area_quantities
+            if len(tuple(quantity.input_entity_ids or ())) == 1
+            and str(quantity.input_entity_ids[0]).strip()
+        }
+        area_quantities = tuple(
+            quantity
+            for quantity in base_area_quantities
+            if not (
+                len(tuple(quantity.input_entity_ids or ())) == 1
+                and str(quantity.input_entity_ids[0]).strip() in supplied_scopes
+            )
+        ) + supplied_area_quantities
+    else:
+        area_quantities = base_area_quantities
+
     provider = CeilingLiningShadowProvider(
         inputs=CeilingLiningShadowInputs(
             document=room_area.document,
             viewport=viewport,
             page_no=page_no,
-            authoritative_area_quantities=tuple(room_area.quantities),
+            authoritative_area_quantities=area_quantities,
             unscoped_finish_candidates=tuple(unscoped_finish_candidates),
             source_room_face_authority=room_face_authority,
             source_room_face_selector=selector,
@@ -101,6 +127,7 @@ def run_source_ceiling_lining_shadow(
     return SourceCeilingLiningShadowResult(
         room_area_bridge=room_area,
         ceiling_result=ceiling,
+        authoritative_area_quantities=area_quantities,
     )
 
 
