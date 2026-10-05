@@ -917,8 +917,8 @@ class PhysicalOpeningAuthority:
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
     ) -> tuple[CandidateSemanticOpening, ...]:
-        key = self._visible_page_candidate_key(seed)
-        cached = self._raster_framed_candidate_cache.get(key)
+        cache_key = self._visible_page_candidate_key(seed)
+        cached = self._raster_framed_candidate_cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -1024,8 +1024,8 @@ class PhysicalOpeningAuthority:
                 for run in inner_runs:
                     inner_by_geometry[_canonical_line(run)] = run
                 inner = tuple(
-                    inner_by_geometry[key]
-                    for key in sorted(inner_by_geometry)
+                    inner_by_geometry[geometry_key]
+                    for geometry_key in sorted(inner_by_geometry)
                 )
                 if len(inner) < RASTER_FRAME_MIN_INNER_RUNS:
                     continue
@@ -1117,7 +1117,7 @@ class PhysicalOpeningAuthority:
             )
             for key, support in sorted(discovered.items(), key=lambda row: repr(row[0]))
         )
-        self._raster_framed_candidate_cache[key] = candidates
+        self._raster_framed_candidate_cache[cache_key] = candidates
         return candidates
 
     def _viewport_scoped_raster_candidates_for(
