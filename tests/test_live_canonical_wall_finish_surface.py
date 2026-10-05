@@ -79,6 +79,7 @@ def test_positive_binding_becomes_one_noncommercial_canonical_surface():
     assert result.unresolved_binding_ids == ()
     assert len(result.surfaces) == 1
     surface = result.surfaces[0]
+    assert surface.canonical_surface_id == surface.physical_surface_id
     assert surface.canonical_wall_id == "cw-1"
     assert surface.physical_wall_id == "wall-1"
     assert surface.physical_face_id == "face-1"
@@ -114,6 +115,79 @@ def test_repeated_source_support_enriches_one_surface_not_duplicate_geometry():
     assert surface.finish_binding_ids == ("bind-1", "bind-2")
     assert "ann" in surface.source_evidence_ids
     assert "ann-2" in surface.source_evidence_ids
+
+
+def test_physical_surface_identity_ignores_revision_sha_material_and_canonical_wall_churn():
+    first = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(_binding(),),
+    )
+    second = project_wall_finish_bindings(
+        canonical_walls=(
+            _wall(
+                canonical_wall_id="cw-2",
+                revision_id="r2",
+                source_sha256="b" * 64,
+                snapshot_id="snap-2",
+            ),
+        ),
+        bindings=(
+            _binding(
+                binding_id="bind-2",
+                revision_id="r2",
+                source_sha256="b" * 64,
+                snapshot_id="snap-2",
+                finish_material="paint",
+                annotation_observation_ids=("ann-2",),
+                leader_path_ids=("lead-3",),
+                terminator_primitive_ids=("term-2",),
+                source_evidence_ids=("ann-2", "lead-3", "term-2", "role-2"),
+                wall_role_record_id="role-2",
+            ),
+        ),
+    )
+
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert second.status is EvidenceResolutionStatus.CORROBORATED
+    left = first.surfaces[0]
+    right = second.surfaces[0]
+    assert left.finish_material == "key_pointing"
+    assert right.finish_material == "paint"
+    assert left.canonical_wall_id != right.canonical_wall_id
+    assert left.source_sha256 != right.source_sha256
+    assert left.physical_surface_id == right.physical_surface_id
+    assert left.canonical_surface_id == right.canonical_surface_id
+
+
+def test_distinct_face_or_trade_scope_mints_distinct_physical_surface_identity():
+    base = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(_binding(),),
+    ).surfaces[0]
+    other_face = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(
+            _binding(
+                binding_id="bind-face-2",
+                physical_face_id="face-2",
+                source_evidence_ids=("ann-2", "role-1"),
+            ),
+        ),
+    ).surfaces[0]
+    other_trade = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(
+            _binding(
+                binding_id="bind-trade-2",
+                trade_scope_id="external_paint",
+                source_evidence_ids=("ann-3", "role-1"),
+            ),
+        ),
+    ).surfaces[0]
+
+    assert base.physical_surface_id != other_face.physical_surface_id
+    assert base.physical_surface_id != other_trade.physical_surface_id
+    assert other_face.physical_surface_id != other_trade.physical_surface_id
 
 
 def test_conflicting_material_same_face_and_trade_fails_closed():
