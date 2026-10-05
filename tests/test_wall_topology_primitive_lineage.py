@@ -14,9 +14,12 @@ from pb_vector_geometry_v130 import extract_native_page
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     SNAP_COLLAPSE_REASON,
+    _build_source_containment_grid,
+    _containment_grid_candidates,
     attach_lineage_to_split_fragments,
     fabricated_live_fields,
     lineage_from_source_segments,
+    sources_for_fragment,
 )
 from pb_wall_room_topology_stage_a import (
     build_wall_graph_for_viewport,
@@ -60,6 +63,56 @@ def _assert_live_sentinels(edge: Dict[str, Any]) -> None:
     live = fabricated_live_fields()
     for key, value in live.items():
         assert edge[key] == value
+
+
+class TestSplitFragmentContainmentIndex:
+    def test_indexed_candidates_match_exhaustive_containment(self) -> None:
+        segments = [
+            _seg("horizontal", 0, 0, 1000, 0),
+            _seg("vertical", 400, -500, 400, 500),
+            _seg("diagonal", -500, -500, 500, 500),
+            _seg("remote", 5000, 5000, 5100, 5000),
+            # Deliberately spans more grid cells than the indexing cap. It must
+            # remain globally eligible rather than disappear from provenance.
+            _seg("pathological", 0, 0, 500000, 500000),
+        ]
+        grid, global_indexes = _build_source_containment_grid(segments)
+        fragments = [
+            ((100.0, 0.0), (200.0, 0.0)),
+            ((400.0, -25.0), (400.0, 25.0)),
+            ((-10.0, -10.0), (10.0, 10.0)),
+            ((100.0, 100.0), (200.0, 200.0)),
+        ]
+
+        for fragment in fragments:
+            exhaustive = {
+                str(segment["id"])
+                for segment in sources_for_fragment(fragment, segments)
+            }
+            candidates = _containment_grid_candidates(
+                fragment, segments, grid, global_indexes
+            )
+            indexed = {
+                str(segment["id"])
+                for segment in sources_for_fragment(fragment, candidates)
+            }
+            assert indexed == exhaustive
+
+    def test_index_excludes_remote_sources_before_exact_containment(self) -> None:
+        parent = _seg("parent", 0, 0, 100, 0)
+        remote = [
+            _seg(f"remote-{index}", 10000 + index * 100, 10000, 10050 + index * 100, 10000)
+            for index in range(250)
+        ]
+        segments = [parent, *remote]
+        grid, global_indexes = _build_source_containment_grid(segments)
+        candidates = _containment_grid_candidates(
+            ((25.0, 0.0), (75.0, 0.0)),
+            segments,
+            grid,
+            global_indexes,
+        )
+        assert [segment["id"] for segment in candidates] == ["parent"]
 
 
 class TestOneSourceMultipleFragments:
