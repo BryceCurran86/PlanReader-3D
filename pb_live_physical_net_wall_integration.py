@@ -22,6 +22,7 @@ from pb_live_canonical_space_bridge import compose_live_canonical_spaces
 from pb_live_canonical_floor_surface import (
     LiveCanonicalFloorSurfaceObject,
     compose_live_canonical_floor_surfaces,
+    enrich_live_canonical_floor_metric_areas,
 )
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
@@ -48,11 +49,26 @@ from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
 from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
-from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+from pb_drawing_evidence_binding import DrawingViewType
+from pb_migration_contracts import (
+    DocumentEvidence,
+    EvidenceResolutionStatus,
+    QuantityEvidence,
+    ViewportEvidence,
+    ViewportResolutionStatus,
+    stable_contract_id,
+)
+from pb_migration_provider_envelope import ProviderContext
+from pb_source_room_area_bridge import build_source_room_area_bridge
+from pb_source_room_face_authority import (
+    SourceRoomFaceSelector,
+    build_source_room_face_authority,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.2.0"
+LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION = "1.3.0"
 LIVE_PHYSICAL_NET_WALL_INTEGRATION_RESOLVED = (
     "live_physical_net_wall_integration_resolved"
 )
@@ -91,6 +107,7 @@ class LivePhysicalNetWallClaim:
     canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -119,6 +136,7 @@ def collect_live_physical_net_wall_claim(
     *,
     pages: Optional[Sequence[int]] = None,
     topology_pages: Optional[Sequence[int]] = None,
+    room_area_support_pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -134,25 +152,44 @@ def collect_live_physical_net_wall_claim(
 
     doc = fitz.open(stream=payload, filetype="pdf")
     try:
-        selected = _selected_page_indices(int(doc.page_count), pages)
+        page_count = int(doc.page_count)
+        selected = _selected_page_indices(page_count, pages)
         if topology_pages is None:
             topology_selected = selected
         else:
             topology_selected = _selected_page_indices(
-                int(doc.page_count), topology_pages
+                page_count, topology_pages
             )
             if not set(topology_selected) <= set(selected):
                 raise ValueError("topology_pages must be a subset of pages")
+        if room_area_support_pages is None:
+            room_area_support_selected: tuple[int, ...] = ()
+        else:
+            room_area_support_selected = _selected_page_indices(
+                page_count,
+                room_area_support_pages,
+            )
+        decoded_selected = tuple(
+            sorted(set(selected) | set(room_area_support_selected))
+        )
+        page_extents = {
+            str(index + 1): (
+                float(doc[index].rect.width),
+                float(doc[index].rect.height),
+            )
+            for index in topology_selected
+        }
     finally:
         doc.close()
 
-    page_ids = tuple(str(index + 1) for index in selected)
+    selected_page_ids = tuple(str(index + 1) for index in selected)
+    decoded_page_ids = tuple(str(index + 1) for index in decoded_selected)
     topology_page_ids = tuple(
         str(index + 1) for index in topology_selected
     )
     evidence_page_ids = tuple(
         page_id
-        for page_id in page_ids
+        for page_id in selected_page_ids
         if page_id not in topology_page_ids
     )
     source = SourceVisibilityProducer(
@@ -163,7 +200,7 @@ def collect_live_physical_net_wall_claim(
         document_id=document_id,
         source_bytes=payload,
         source_locator="memory://live-physical-net-wall-source.pdf",
-        page_ids=page_ids,
+        page_ids=decoded_page_ids,
     )
 
     try:
@@ -239,6 +276,180 @@ def collect_live_physical_net_wall_claim(
     canonical_floors = compose_live_canonical_floor_surfaces(
         canonical_rooms
     )
+
+    room_area_quantity_evidence: list[QuantityEvidence] = []
+    if room_area_support_selected and canonical_rooms.rooms:
+        cross_view_area = CrossViewRoomAreaProducer.from_source(
+            source=source,
+            rooms=canonical_rooms,
+        ).publish()
+        if cross_view_area.records:
+            room_face_authority = build_source_room_face_authority(
+                wall_opening.physical_wall_candidate_authority
+            )
+            evidence_by_record = (
+                cross_view_area.evidence_by_source_room_face_record_id
+            )
+            rooms_by_scope: dict[tuple[str, str, str], list[LiveCanonicalRoomObject]] = {}
+            for room in canonical_rooms.rooms:
+                rooms_by_scope.setdefault(
+                    (
+                        str(room.page_id),
+                        str(room.snapshot_id),
+                        str(room.decision_scope_id),
+                    ),
+                    [],
+                ).append(room)
+
+            for (page_id, snapshot_id, decision_scope_id), scope_rooms in sorted(
+                rooms_by_scope.items()
+            ):
+                matching_evidence = {
+                    str(room.source_room_face_record_id): evidence_by_record[
+                        str(room.source_room_face_record_id)
+                    ]
+                    for room in scope_rooms
+                    if str(room.source_room_face_record_id) in evidence_by_record
+                }
+                if not matching_evidence:
+                    continue
+                try:
+                    page_no = int(page_id)
+                except (TypeError, ValueError):
+                    continue
+                extent = page_extents.get(page_id)
+                if extent is None:
+                    continue
+
+                selector = SourceRoomFaceSelector(
+                    document_id=scope_rooms[0].document_id,
+                    revision_id=scope_rooms[0].revision_id,
+                    source_sha256=scope_rooms[0].source_sha256,
+                    snapshot_id=snapshot_id,
+                    page_id=page_id,
+                    decision_scope_id=decision_scope_id,
+                )
+                room_scope = room_face_authority.resolve_scope(selector)
+                if (
+                    room_scope.status is not EvidenceResolutionStatus.CORROBORATED
+                    or not room_scope.records
+                ):
+                    continue
+                face_id_by_record = {
+                    str(record.record_id): str(record.face_id)
+                    for record in room_scope.records
+                }
+                explicit_by_face_id = {
+                    face_id_by_record[record_id]: evidence
+                    for record_id, evidence in matching_evidence.items()
+                    if record_id in face_id_by_record
+                }
+                if not explicit_by_face_id:
+                    continue
+
+                wall_selector = (
+                    wall_opening.physical_wall_candidate_authority
+                    .selector_for_decision_scope(
+                        document_id=scope_rooms[0].document_id,
+                        revision_id=scope_rooms[0].revision_id,
+                        source_sha256=scope_rooms[0].source_sha256,
+                        snapshot_id=snapshot_id,
+                        page_id=page_id,
+                        decision_scope_id=decision_scope_id,
+                    )
+                )
+                wall_scope = (
+                    None
+                    if wall_selector is None
+                    else wall_opening.physical_wall_candidate_authority
+                    .resolve_scope(wall_selector)
+                )
+                if (
+                    wall_scope is not None
+                    and wall_scope.scope_kind == "viewport"
+                    and wall_scope.viewport_id
+                    and wall_scope.viewport_bbox is not None
+                ):
+                    viewport_id = str(wall_scope.viewport_id)
+                    viewport_bbox = tuple(
+                        float(value) for value in wall_scope.viewport_bbox
+                    )
+                    viewport_status = ViewportResolutionStatus.RESOLVED
+                    viewport_reason_codes = tuple(wall_scope.reason_codes)
+                else:
+                    viewport_id = stable_contract_id(
+                        "room_area_page_scope",
+                        {
+                            "document_id": scope_rooms[0].document_id,
+                            "page_id": page_id,
+                            "decision_scope_id": decision_scope_id,
+                        },
+                        digest_chars=24,
+                    )
+                    viewport_bbox = (0.0, 0.0, extent[0], extent[1])
+                    viewport_status = ViewportResolutionStatus.DERIVED
+                    viewport_reason_codes = (
+                        "producer_owned_full_page_room_area_scope",
+                    )
+
+                viewport = ViewportEvidence(
+                    viewport_id=viewport_id,
+                    document_id=scope_rooms[0].document_id,
+                    page_id=page_id,
+                    bbox=viewport_bbox,
+                    view_type=DrawingViewType.FLOOR_PLAN.value,
+                    status=viewport_status,
+                    evidence_ids=(),
+                    confidence=1.0,
+                    reason_codes=viewport_reason_codes,
+                )
+                context = ProviderContext(
+                    run_id=stable_contract_id(
+                        "live_room_area_run",
+                        {
+                            "document_id": scope_rooms[0].document_id,
+                            "revision_id": scope_rooms[0].revision_id,
+                            "snapshot_id": snapshot_id,
+                            "page_id": page_id,
+                            "decision_scope_id": decision_scope_id,
+                        },
+                    ),
+                    workspace_id="live-extractor",
+                    project_id="live-extractor",
+                    document_id=scope_rooms[0].document_id,
+                    source_sha256=scope_rooms[0].source_sha256,
+                    revision_id=scope_rooms[0].revision_id,
+                    current_revision_id=scope_rooms[0].revision_id,
+                    selected_pages=(page_no - 1,),
+                    owned_viewport_ids=(viewport_id,),
+                    evidence_snapshot_id=snapshot_id,
+                    owned_page_numbers=(page_no,),
+                    viewport_page_ownership=((viewport_id, page_no),),
+                )
+                document = DocumentEvidence(
+                    document_id=scope_rooms[0].document_id,
+                    source_sha256=scope_rooms[0].source_sha256,
+                    page_count=page_count,
+                    evidence_ids=(),
+                    producer="live-physical-net-wall",
+                    producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+                )
+                bridge = build_source_room_area_bridge(
+                    room_face_authority=room_face_authority,
+                    selector=selector,
+                    context=context,
+                    document=document,
+                    viewport=viewport,
+                    page_no=page_no,
+                    scale_calibration=None,
+                    explicit_area_evidence_by_room_id=explicit_by_face_id,
+                )
+                canonical_floors = enrich_live_canonical_floor_metric_areas(
+                    canonical_floors,
+                    bridge,
+                )
+                room_area_quantity_evidence.extend(bridge.quantities)
+
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
@@ -329,6 +540,7 @@ def collect_live_physical_net_wall_claim(
             canonical_space_reason_codes=canonical_space_core.reason_codes,
             opening_quantity_evidence=opening_quantity_evidence,
             opening_count_quantity_evidence=opening_count_quantity_evidence,
+            room_area_quantity_evidence=tuple(room_area_quantity_evidence),
         )
 
     return LivePhysicalNetWallClaim(
@@ -365,6 +577,7 @@ def collect_live_physical_net_wall_claim(
         canonical_space_reason_codes=canonical_space_core.reason_codes,
         opening_quantity_evidence=opening_quantity_evidence,
         opening_count_quantity_evidence=opening_count_quantity_evidence,
+        room_area_quantity_evidence=tuple(room_area_quantity_evidence),
     )
 
 
