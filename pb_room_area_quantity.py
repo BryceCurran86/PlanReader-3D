@@ -296,6 +296,22 @@ def build_room_area_quantity(
                     },
                 )
         value = round(explicit_value, 6)
+        explicit_metadata = (
+            dict(explicit_area_evidence.metadata)
+            if isinstance(explicit_area_evidence.metadata, dict)
+            else {}
+        )
+        figured_dimension_ids = tuple(
+            sorted(
+                {
+                    str(value).strip()
+                    for value in (
+                        explicit_metadata.get("figured_dimension_ids") or ()
+                    )
+                    if str(value).strip()
+                }
+            )
+        )
         payload = {
             "family": ROOM_AREA_FAMILY,
             "room_id": room.room_ref,
@@ -330,6 +346,18 @@ def build_room_area_quantity(
                 "viewport_id": viewport.viewport_id,
                 "explicit_area_evidence_id": explicit_area_evidence.evidence_id,
                 "explicit_area_evidence_fingerprint": explicit_fp,
+                "figured_dimension_ids": list(figured_dimension_ids),
+                "room_label": str(
+                    explicit_metadata.get("source_label_text") or room.label or ""
+                ).strip(),
+                "section": "Internal",
+                "element": "Floor area",
+                "location": str(
+                    explicit_metadata.get("source_label_text") or room.label or ""
+                ).strip(),
+                "substrate": "Other",
+                "inclusion_status": "INCLUSION",
+                "row_role": "floor_area",
                 "scale_fingerprint": scale_fp,
                 "ignored_prefilled_floor_area_m2": room.floor_area_m2,
                 "ignored_prefilled_explicit_area_label_m2": room.explicit_area_label_m2,

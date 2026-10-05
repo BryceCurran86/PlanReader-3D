@@ -136,7 +136,12 @@ def _scale(*, ratio=100.0, revision: str | None = "R1", source=ScaleSourceType.S
     )
 
 
-def _explicit_area(value=25.0, *, status=EvidenceResolutionStatus.CORROBORATED) -> EvidenceAtom:
+def _explicit_area(
+    value=25.0,
+    *,
+    status=EvidenceResolutionStatus.CORROBORATED,
+    metadata=None,
+) -> EvidenceAtom:
     return EvidenceAtom(
         evidence_id="area-ev",
         document_id="doc",
@@ -149,6 +154,7 @@ def _explicit_area(value=25.0, *, status=EvidenceResolutionStatus.CORROBORATED) 
         unit="m2",
         confidence=1.0,
         status=status,
+        metadata=dict(metadata or {}),
     )
 
 
@@ -280,6 +286,36 @@ def test_authoritative_explicit_area_can_resolve_without_scale() -> None:
     assert qty.abstained is False
     assert qty.value == 25.0
     assert qty.formula == "authoritative_explicit_area"
+
+
+def test_authoritative_explicit_area_preserves_figured_dimension_ids() -> None:
+    qty = build_room_area_quantity(
+        room=_room(),
+        context=_context(),
+        document=_document(),
+        viewport=_viewport(),
+        entity=_entity(),
+        page_no=1,
+        explicit_area_evidence=_explicit_area(
+            25.0,
+            metadata={
+                "figured_dimension_ids": ["dim-vertical", "dim-horizontal"],
+                "source_label_text": "FOOD PREP",
+            },
+        ),
+    )
+    assert qty.abstained is False
+    assert qty.metadata["figured_dimension_ids"] == [
+        "dim-horizontal",
+        "dim-vertical",
+    ]
+    assert qty.metadata["room_label"] == "FOOD PREP"
+    assert qty.metadata["section"] == "Internal"
+    assert qty.metadata["element"] == "Floor area"
+    assert qty.metadata["location"] == "FOOD PREP"
+    assert qty.metadata["substrate"] == "Other"
+    assert qty.metadata["inclusion_status"] == "INCLUSION"
+    assert qty.metadata["row_role"] == "floor_area"
 
 
 def test_explicit_vs_scaled_area_conflict_abstains() -> None:
