@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import sys
@@ -242,11 +243,36 @@ def test_suite_runner_verifies_sealed_handoff_before_reconciliation() -> None:
         / "full_plan_v2"
         / "run_development_scoreboard.py"
     ).read_text(encoding="utf-8")
+    tree = ast.parse(runner)
 
-    assert "sealed_source_closed_run_from_dict" in runner
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    ]
+    verified_calls = [
+        node
+        for node in calls
+        if isinstance(node.func, ast.Name)
+        and node.func.id == "sealed_source_closed_run_from_dict"
+    ]
+    reconciliation_calls = [
+        node
+        for node in calls
+        if isinstance(node.func, ast.Name)
+        and node.func.id == "reconcile_sealed_run_v2"
+    ]
+
+    assert len(verified_calls) == 1
+    assert reconciliation_calls
+    assert verified_calls[0].lineno < max(
+        node.lineno for node in reconciliation_calls
+    )
+
+    verified_arg = verified_calls[0].args[0]
+    assert isinstance(verified_arg, ast.Call)
+    assert isinstance(verified_arg.func, ast.Name)
+    assert verified_arg.func.id == "_json_object"
+
     assert "sealed_run.to_dict()" in runner
     assert "sealed_run = _json_object(sealed_path)" not in runner
-
-    verify_at = runner.index("sealed_source_closed_run_from_dict")
-    reconcile_at = runner.rindex("reconcile_sealed_run_v2(")
-    assert verify_at < reconcile_at
