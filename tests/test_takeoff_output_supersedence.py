@@ -146,8 +146,14 @@ def test_current_replacement_wins_over_prior_row():
 
 
 
-def reviewed_prior_row(*, row_id: int = 17, sha: str = SHA_A):
+def reviewed_prior_row(
+    *,
+    row_id: int = 17,
+    sha: str = SHA_A,
+    quantity: float = 13.27,
+):
     row = prior_row(sha=sha, quantity_status="Measured")
+    row["quantity"] = quantity
     return {
         **row,
         "id": row_id,
@@ -212,3 +218,35 @@ def test_duplicate_reviewed_rows_for_one_physical_claim_fail_closed():
             [reviewed_prior_row(row_id=17), reviewed_prior_row(row_id=18)],
             blocked_claim_keys=(key,),
         )
+
+
+
+def test_reviewed_estimator_quantity_correction_retains_physical_claim():
+    key = blocked_commercial_claim_key(
+        blocked_quantity(),
+        source_sha256=SHA_A,
+    )
+    assert key is not None
+    reviewed = reviewed_prior_row(quantity=14.125)
+
+    assert prior_reviewed_commercial_projection_key(reviewed) == key
+    assert select_prior_reviewed_row_ids_to_retain(
+        [reviewed],
+        blocked_claim_keys=(key,),
+    ) == (17,)
+
+
+def test_unreviewed_non_ai_row_is_not_treated_as_reviewed_authority():
+    key = blocked_commercial_claim_key(
+        blocked_quantity(),
+        source_sha256=SHA_A,
+    )
+    assert key is not None
+    row = reviewed_prior_row()
+    row["origin"] = ""
+
+    assert prior_reviewed_commercial_projection_key(row) is None
+    assert select_prior_reviewed_row_ids_to_retain(
+        [row],
+        blocked_claim_keys=(key,),
+    ) == ()
