@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
+from pb_migration_contracts import stable_contract_id
 from pb_slab_classification_geometry import (
     CandidateBoundary,
     ResolvedSlabEntity,
@@ -19,17 +20,23 @@ from pb_slab_classification_geometry import (
 )
 
 
-LIVE_CANONICAL_SLAB_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_SLAB_SCHEMA_VERSION = "1.1.0"
 LIVE_CANONICAL_SLAB_RESOLVED = "live_canonical_slab_resolved"
 LIVE_CANONICAL_SLAB_UNAVAILABLE = "live_canonical_slab_unavailable"
 LIVE_CANONICAL_SLAB_BOUNDARY_MISMATCH = "live_canonical_slab_boundary_mismatch"
+LIVE_CANONICAL_SLAB_LINEAGE_UNAVAILABLE = "live_canonical_slab_lineage_unavailable"
 
 
 @dataclass(frozen=True)
 class LiveCanonicalSlabObject:
     canonical_slab_id: str
+    physical_slab_id: str
     slab_id: str
     slab_type: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
     source_page: int
     boundary_id: str
     polygon_m: tuple[tuple[float, float], ...]
@@ -45,8 +52,13 @@ class LiveCanonicalSlabObject:
     def to_dict(self) -> dict:
         return {
             "canonical_slab_id": self.canonical_slab_id,
+            "physical_slab_id": self.physical_slab_id,
             "slab_id": self.slab_id,
             "slab_type": self.slab_type,
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "snapshot_id": self.snapshot_id,
             "source_page": self.source_page,
             "boundary_id": self.boundary_id,
             "polygon_m": [list(point) for point in self.polygon_m],
@@ -67,15 +79,58 @@ class LiveCanonicalSlabProjection:
     reason_codes: tuple[str, ...]
 
 
+def _canonical_polygon_identity(
+    polygon: Sequence[Sequence[float]],
+) -> tuple[tuple[float, float], ...]:
+    """Canonicalize metric polygon geometry for physical identity only.
+
+    Stored boundary ordering is preserved on the canonical object. Identity is
+    invariant to start vertex and winding, with six-decimal metric precision.
+    """
+    points = tuple(
+        (round(float(point[0]), 6), round(float(point[1]), 6))
+        for point in polygon
+    )
+    if len(points) < 3:
+        return ()
+    variants: list[tuple[tuple[float, float], ...]] = []
+    for start in range(len(points)):
+        variants.append(
+            tuple(points[(start + offset) % len(points)] for offset in range(len(points)))
+        )
+        variants.append(
+            tuple(points[(start - offset) % len(points)] for offset in range(len(points)))
+        )
+    return min(variants)
+
+
 def project_resolved_slab_entity(
     *,
     slab: ResolvedSlabEntity,
     boundary: CandidateBoundary,
+    document_id: str = "",
+    revision_id: str = "",
+    source_sha256: str = "",
+    snapshot_id: str = "",
 ) -> LiveCanonicalSlabProjection:
     """Preserve one already-resolved slab without strengthening its authority."""
 
     if type(slab) is not ResolvedSlabEntity or type(boundary) is not CandidateBoundary:
         raise TypeError("slab and boundary must use the existing slab resolver contracts")
+
+    lineage = tuple(
+        str(value or "").strip()
+        for value in (document_id, revision_id, source_sha256, snapshot_id)
+    )
+    if (
+        not all(lineage)
+        or len(lineage[2]) != 64
+        or any(ch not in "0123456789abcdefABCDEF" for ch in lineage[2])
+    ):
+        return LiveCanonicalSlabProjection(
+            object=None,
+            reason_codes=(LIVE_CANONICAL_SLAB_LINEAGE_UNAVAILABLE,),
+        )
 
     if (
         slab.resolution_state != SlabResolutionState.RESOLVED.value
@@ -127,10 +182,31 @@ def project_resolved_slab_entity(
             reason_codes=(LIVE_CANONICAL_SLAB_UNAVAILABLE,),
         )
 
+    physical_polygon = _canonical_polygon_identity(slab.boundary_polygon)
+    if not physical_polygon:
+        return LiveCanonicalSlabProjection(
+            object=None,
+            reason_codes=(LIVE_CANONICAL_SLAB_BOUNDARY_MISMATCH,),
+        )
+    physical_slab_id = stable_contract_id(
+        "physical_slab",
+        {
+            "document_id": lineage[0],
+            "source_page": source_page,
+            "polygon_m": physical_polygon,
+        },
+        digest_chars=32,
+    )
+
     canonical = LiveCanonicalSlabObject(
-        canonical_slab_id=str(slab.slab_id),
+        canonical_slab_id=physical_slab_id,
+        physical_slab_id=physical_slab_id,
         slab_id=str(slab.slab_id),
         slab_type=str(slab.slab_type),
+        document_id=lineage[0],
+        revision_id=lineage[1],
+        source_sha256=lineage[2].lower(),
+        snapshot_id=lineage[3],
         source_page=source_page,
         boundary_id=str(boundary.boundary_id),
         polygon_m=tuple(
@@ -149,6 +225,7 @@ def project_resolved_slab_entity(
 
 __all__ = [
     "LIVE_CANONICAL_SLAB_BOUNDARY_MISMATCH",
+    "LIVE_CANONICAL_SLAB_LINEAGE_UNAVAILABLE",
     "LIVE_CANONICAL_SLAB_RESOLVED",
     "LIVE_CANONICAL_SLAB_SCHEMA_VERSION",
     "LIVE_CANONICAL_SLAB_UNAVAILABLE",
