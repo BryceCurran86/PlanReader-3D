@@ -8,7 +8,10 @@ import pytest
 import pb_combine_source_closed_runs as cli
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_closed_run_export import (
+    SourceClosedRunConflictError,
+    seal_source_closed_run,
+)
 
 
 SHA_A = "a" * 64
@@ -99,7 +102,7 @@ def test_cli_rejects_tampered_input_before_composition(tmp_path) -> None:
     path = tmp_path / "tampered.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(Exception, match="fingerprint mismatch"):
+    with pytest.raises(SourceClosedRunConflictError, match="fingerprint mismatch"):
         cli.combine_sealed_run_files([path], project_id="project-a")
 
 
