@@ -33,6 +33,11 @@ from pb_raster_visible_segment_detector import (
     RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
     detect_axis_aligned_raster_segments,
 )
+from pb_raster_opening_source_primitives import (
+    RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
+    RasterOpeningSourcePrimitive,
+    detect_raster_opening_source_primitives,
+)
 from pb_pdf_text_integrity_authority import (
     PdfTextIntegrityAuthority,
     PdfTextIntegrityReceipt,
@@ -56,18 +61,26 @@ from pb_source_observation_authority import (
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
 
-SOURCE_VISIBILITY_SCHEMA_VERSION = "1.2.0"
+SOURCE_VISIBILITY_SCHEMA_VERSION = "1.3.0"
 NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
 RASTER_PDF_SEGMENT = "raster_pdf_segment"
 RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
+RASTER_OPENING_PRIMITIVE_SEGMENT = "raster_opening_primitive_segment"
+RASTER_OPENING_VISIBLE_PRIMITIVE = "raster_opening_visible_primitive"
 VISIBLE_SEGMENT_ORIGIN_KIND = "producer_visibility_no_active_clip"
 RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND = (
     "producer_visibility_exact_rectangular_clip"
 )
 RASTER_SEGMENT_ORIGIN_KIND = "producer_raster_page_render_segment"
 RASTER_VISIBLE_SEGMENT_ORIGIN_KIND = "producer_raster_visibility"
+RASTER_OPENING_PRIMITIVE_ORIGIN_KIND = "producer_raster_opening_source_primitive"
+RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND = (
+    "producer_raster_opening_primitive_visibility"
+)
 VISIBLE_SOURCE_OBSERVATION_EXISTS = "visible_source_observation_exists"
 RASTER_RENDER_DPI = 144
+RASTER_OPENING_PRIMITIVE_RENDER_DPI = 200
+RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION = "1.0.0"
 # Frozen source-identity schema for raster primitives. Detector implementation
 # version is provenance only; changing it must not churn physical/source ids
 # when the producer-owned detected geometry is unchanged. Keep this value
@@ -194,6 +207,23 @@ class RasterSegmentVisibilityReceipt:
 
 
 @dataclass(frozen=True)
+class RasterOpeningPrimitiveVisibilityReceipt:
+    parent_observation_id: str
+    page_parent_observation_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    page_id: str
+    source_partition_id: str
+    render_sha256: str
+    primitive_kind: str
+    dpi: int
+    pixel_geometry: tuple[float, float, float, float]
+    geometry: tuple[float, float, float, float]
+    detector_version: str = RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION
+
+
+@dataclass(frozen=True)
 class PublishedVisibleSourceSnapshot:
     revision: SourceRevisionRecord
     coverage: SourceDecodeCoverageRecord
@@ -202,6 +232,7 @@ class PublishedVisibleSourceSnapshot:
     visible_observation_ids: tuple[str, ...]
     text_observation_ids: tuple[str, ...] = ()
     ocr_tag_observation_ids: tuple[str, ...] = ()
+    raster_opening_primitive_observation_ids: tuple[str, ...] = ()
     schema_version: str = SOURCE_VISIBILITY_SCHEMA_VERSION
 
 
@@ -561,6 +592,50 @@ def _raster_visible_observation_id(
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
+def _raster_opening_primitive_observation_id(
+    *,
+    document_id: str,
+    revision_id: str,
+    page_id: str,
+    partition_id: str,
+    primitive: RasterOpeningSourcePrimitive,
+) -> str:
+    payload = {
+        "document_id": document_id,
+        "revision_id": revision_id,
+        "page_id": page_id,
+        "partition_id": partition_id,
+        "kind": RASTER_OPENING_PRIMITIVE_SEGMENT,
+        "identity_version": RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION,
+        "primitive_kind": primitive.primitive_kind,
+        "geometry": tuple(float(value) for value in primitive.geometry_pt),
+    }
+    return stable_contract_id("source_observation", payload, digest_chars=32)
+
+
+def _raster_opening_visible_primitive_id(
+    *,
+    document_id: str,
+    revision_id: str,
+    page_id: str,
+    partition_id: str,
+    parent_observation_id: str,
+    primitive: RasterOpeningSourcePrimitive,
+) -> str:
+    payload = {
+        "document_id": document_id,
+        "revision_id": revision_id,
+        "page_id": page_id,
+        "partition_id": partition_id,
+        "kind": RASTER_OPENING_VISIBLE_PRIMITIVE,
+        "origin_kind": RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND,
+        "parents": (parent_observation_id,),
+        "primitive_kind": primitive.primitive_kind,
+        "geometry": tuple(float(value) for value in primitive.geometry_pt),
+    }
+    return stable_contract_id("source_observation", payload, digest_chars=32)
+
+
 class SourceVisibilityProducer:
     """Trusted producer wrapper that mints visibility receipts from PDF bytes.
 
@@ -576,6 +651,9 @@ class SourceVisibilityProducer:
         self._visibility_receipts: dict[tuple[str, str], str] = {}
         self._raster_visibility_receipts: dict[
             tuple[str, str], RasterSegmentVisibilityReceipt
+        ] = {}
+        self._raster_opening_primitive_receipts: dict[
+            tuple[str, str], RasterOpeningPrimitiveVisibilityReceipt
         ] = {}
         self._visibility_page_cache: (
             "OrderedDict[tuple[str, str, int], _CachedVisibilityPage]"
@@ -611,6 +689,9 @@ class SourceVisibilityProducer:
         # attempts per revision/page so repeated downstream compositions do not
         # rerender and republish the same page into ever-growing snapshots.
         self._raster_visibility_attempted_pages: set[tuple[str, str]] = set()
+        self._raster_opening_primitive_attempted_pages: set[
+            tuple[str, str]
+        ] = set()
         self._text_integrity_receipts: dict[
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
@@ -621,6 +702,7 @@ class SourceVisibilityProducer:
             self._producer.authority(),
             self._visibility_receipts,
             self._raster_visibility_receipts,
+            self._raster_opening_primitive_receipts,
             _seal=_VISIBILITY_AUTHORITY_SEAL,
         )
 
@@ -772,6 +854,14 @@ class SourceVisibilityProducer:
             receipt = self._text_integrity_receipts.get((old_snapshot_id, observation_id))
             if receipt is not None:
                 self._text_integrity_receipts[(final_snapshot_id, observation_id)] = receipt
+        for observation_id in published.raster_opening_primitive_observation_ids:
+            receipt = self._raster_opening_primitive_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if receipt is not None:
+                self._raster_opening_primitive_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = receipt
 
         tag_ids = tuple(
             dict.fromkeys(
@@ -792,6 +882,9 @@ class SourceVisibilityProducer:
             visible_observation_ids=tuple(published.visible_observation_ids),
             text_observation_ids=tuple(published.text_observation_ids),
             ocr_tag_observation_ids=tag_ids,
+            raster_opening_primitive_observation_ids=tuple(
+                published.raster_opening_primitive_observation_ids
+            ),
         )
         self._published_by_revision[updated.revision.revision_id] = updated
         return tuple(tags), updated
@@ -1436,6 +1529,14 @@ class SourceVisibilityProducer:
             self._raster_visibility_receipts[
                 (final_snapshot_id, observation_id)
             ] = receipt
+        for observation_id in published.raster_opening_primitive_observation_ids:
+            receipt = self._raster_opening_primitive_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if receipt is not None:
+                self._raster_opening_primitive_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = receipt
 
         updated = PublishedVisibleSourceSnapshot(
             revision=replace(published.revision),
@@ -1445,6 +1546,239 @@ class SourceVisibilityProducer:
             visible_observation_ids=tuple(sorted(set(visible_ids))),
             text_observation_ids=tuple(published.text_observation_ids),
             ocr_tag_observation_ids=tuple(published.ocr_tag_observation_ids),
+            raster_opening_primitive_observation_ids=tuple(
+                published.raster_opening_primitive_observation_ids
+            ),
+        )
+        self._published_by_revision[updated.revision.revision_id] = updated
+        return updated
+
+    def augment_with_raster_opening_primitives(
+        self,
+        revision_id: str,
+        *,
+        page_ids: Sequence[str] | None = None,
+    ) -> PublishedVisibleSourceSnapshot:
+        """Publish source-owned raster primitives without granting opening authority.
+
+        The renderer is producer-owned and images-only. Callers can address pages
+        but cannot provide pixels, DPI, geometry, primitive roles, gaps, openings,
+        hosts, dimensions, or quantities. Published primitives are intentionally
+        isolated from visible_observation_ids so existing G17 paths cannot consume
+        them until an explicit authority-promotion step does so.
+        """
+
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+
+        old_snapshot_id = published.snapshot.snapshot_id
+        snapshot = published.snapshot
+        primitive_ids = list(
+            published.raster_opening_primitive_observation_ids
+        )
+        new_receipts: dict[
+            str, RasterOpeningPrimitiveVisibilityReceipt
+        ] = {}
+
+        decoded_page_ids = {
+            str(int(value)) for value in published.coverage.decoded_pages
+        }
+        if page_ids is None:
+            selected_page_ids = decoded_page_ids
+        else:
+            selected_page_ids = {
+                str(page_id).strip()
+                for page_id in page_ids
+                if str(page_id).strip()
+            }
+            if not selected_page_ids:
+                raise ValueError("page_ids must contain at least one source page")
+            if not selected_page_ids <= decoded_page_ids:
+                raise ValueError(OBSERVATION_UNAVAILABLE)
+
+        for page_number in sorted({int(value) for value in selected_page_ids}):
+            page_id = str(page_number)
+            attempt_key = (published.revision.revision_id, page_id)
+            if attempt_key in self._raster_opening_primitive_attempted_pages:
+                continue
+
+            image_regions = self._producer.native_page_image_regions(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=snapshot.snapshot_id,
+                page_id=page_id,
+            )
+            if not image_regions:
+                self._raster_opening_primitive_attempted_pages.add(attempt_key)
+                continue
+
+            png_bytes, page_parent, native_frame = self._producer.render_native_page_png(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=snapshot.snapshot_id,
+                page_id=page_id,
+                dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                include_native_frame=True,
+                images_only=True,
+            )
+            self._raster_opening_primitive_attempted_pages.add(attempt_key)
+            if int(getattr(native_frame, "rotation", 0) or 0) != 0:
+                continue
+
+            primitives = detect_raster_opening_source_primitives(
+                png_bytes,
+                dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+            )
+            if not primitives:
+                continue
+            render_sha256 = hashlib.sha256(png_bytes).hexdigest()
+
+            parent_specs: list[dict[str, object]] = []
+            visible_specs: list[dict[str, object]] = []
+            page_receipts: list[
+                tuple[str, RasterOpeningPrimitiveVisibilityReceipt]
+            ] = []
+            for index, primitive in enumerate(primitives):
+                parent_id = _raster_opening_primitive_observation_id(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    page_id=page_id,
+                    partition_id=page_parent.source_partition_id,
+                    primitive=primitive,
+                )
+                parent_ref = (
+                    f"raster_opening_primitive:{render_sha256}:"
+                    f"{RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION}:"
+                    f"{primitive.primitive_kind}:{index}"
+                )
+                parent_specs.append(
+                    {
+                        "page_id": page_id,
+                        "source_partition_id": page_parent.source_partition_id,
+                        "observation_kind": RASTER_OPENING_PRIMITIVE_SEGMENT,
+                        "source_primitive_ref": parent_ref,
+                        "origin_kind": RASTER_OPENING_PRIMITIVE_ORIGIN_KIND,
+                        "parent_observation_ids": (page_parent.observation_id,),
+                        "raw_text": primitive.primitive_kind,
+                        "geometry": primitive.geometry_pt,
+                        "viewport_id": None,
+                        "observation_id": parent_id,
+                    }
+                )
+                visible_id = _raster_opening_visible_primitive_id(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    page_id=page_id,
+                    partition_id=page_parent.source_partition_id,
+                    parent_observation_id=parent_id,
+                    primitive=primitive,
+                )
+                visible_specs.append(
+                    {
+                        "page_id": page_id,
+                        "source_partition_id": page_parent.source_partition_id,
+                        "observation_kind": RASTER_OPENING_VISIBLE_PRIMITIVE,
+                        "source_primitive_ref": f"visible:{parent_ref}",
+                        "origin_kind": RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND,
+                        "parent_observation_ids": (parent_id,),
+                        "raw_text": primitive.primitive_kind,
+                        "geometry": primitive.geometry_pt,
+                        "viewport_id": None,
+                        "observation_id": visible_id,
+                    }
+                )
+                page_receipts.append(
+                    (
+                        visible_id,
+                        RasterOpeningPrimitiveVisibilityReceipt(
+                            parent_observation_id=parent_id,
+                            page_parent_observation_id=page_parent.observation_id,
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            page_id=page_id,
+                            source_partition_id=page_parent.source_partition_id,
+                            render_sha256=render_sha256,
+                            primitive_kind=primitive.primitive_kind,
+                            dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                            pixel_geometry=tuple(primitive.pixel_geometry),
+                            geometry=tuple(primitive.geometry_pt),
+                        ),
+                    )
+                )
+
+            snapshot = self._producer.publish_derived_observations(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                base_snapshot_id=snapshot.snapshot_id,
+                observations=parent_specs,
+            )
+            snapshot = self._producer.publish_derived_observations(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                base_snapshot_id=snapshot.snapshot_id,
+                observations=visible_specs,
+            )
+            for visible_id, receipt in page_receipts:
+                primitive_ids.append(visible_id)
+                new_receipts[visible_id] = receipt
+
+        if snapshot.snapshot_id == old_snapshot_id:
+            return published
+
+        final_snapshot_id = snapshot.snapshot_id
+        for observation_id in published.visible_observation_ids:
+            native_parent = self._visibility_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if native_parent is not None:
+                self._visibility_receipts[(final_snapshot_id, observation_id)] = (
+                    native_parent
+                )
+            raster_receipt = self._raster_visibility_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if raster_receipt is not None:
+                self._raster_visibility_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = raster_receipt
+
+        for observation_id in published.text_observation_ids:
+            text_receipt = self._text_integrity_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if text_receipt is not None:
+                self._text_integrity_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = text_receipt
+
+        for observation_id in published.raster_opening_primitive_observation_ids:
+            receipt = self._raster_opening_primitive_receipts.get(
+                (old_snapshot_id, observation_id)
+            )
+            if receipt is not None:
+                self._raster_opening_primitive_receipts[
+                    (final_snapshot_id, observation_id)
+                ] = receipt
+        for observation_id, receipt in new_receipts.items():
+            self._raster_opening_primitive_receipts[
+                (final_snapshot_id, observation_id)
+            ] = receipt
+
+        updated = PublishedVisibleSourceSnapshot(
+            revision=replace(published.revision),
+            coverage=replace(published.coverage),
+            snapshot=replace(snapshot),
+            base_source_snapshot_id=published.base_source_snapshot_id,
+            visible_observation_ids=tuple(published.visible_observation_ids),
+            text_observation_ids=tuple(published.text_observation_ids),
+            ocr_tag_observation_ids=tuple(published.ocr_tag_observation_ids),
+            raster_opening_primitive_observation_ids=tuple(
+                sorted(set(primitive_ids))
+            ),
         )
         self._published_by_revision[updated.revision.revision_id] = updated
         return updated
@@ -1464,6 +1798,9 @@ class SourceVisibilityAuthority:
         raster_visibility_receipts: Mapping[
             tuple[str, str], RasterSegmentVisibilityReceipt
         ],
+        raster_opening_primitive_receipts: Mapping[
+            tuple[str, str], RasterOpeningPrimitiveVisibilityReceipt
+        ],
         *,
         _seal: object = None,
     ) -> None:
@@ -1475,6 +1812,9 @@ class SourceVisibilityAuthority:
         self._source_authority = source_authority
         self._visibility_receipts = visibility_receipts
         self._raster_visibility_receipts = raster_visibility_receipts
+        self._raster_opening_primitive_receipts = (
+            raster_opening_primitive_receipts
+        )
 
     def _blocked(self, reason: str) -> SourceObservationAuthorityResult:
         return SourceObservationAuthorityResult(
@@ -1491,6 +1831,100 @@ class SourceVisibilityAuthority:
             physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
             reason_codes=(reason,),
         )
+
+    def resolve_raster_opening_primitive(
+        self,
+        selector: ObservationSelector,
+    ) -> SourceObservationAuthorityResult:
+        """Authenticate one isolated raster-opening source primitive.
+
+        This reader proves source ownership only. A successful result is not a
+        physical opening, host, dimension, or quantity proposition.
+        """
+
+        receipt = self._raster_opening_primitive_receipts.get(
+            (selector.snapshot_id, selector.observation_id)
+        )
+        if receipt is None:
+            return self._blocked(VISIBILITY_RECEIPT_UNAVAILABLE)
+
+        result = self._source_authority.resolve(selector)
+        observation = result.observation
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or observation is None
+        ):
+            return result
+        if (
+            observation.observation_kind != RASTER_OPENING_VISIBLE_PRIMITIVE
+            or observation.origin_kind
+            != RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND
+            or observation.viewport_id is not None
+            or observation.derivation_parent_ids
+            != (receipt.parent_observation_id,)
+            or observation.document_id != receipt.document_id
+            or observation.revision_id != receipt.revision_id
+            or observation.source_sha256 != receipt.source_sha256
+            or observation.page_id != receipt.page_id
+            or observation.source_partition_id != receipt.source_partition_id
+            or observation.raw_text != receipt.primitive_kind
+            or tuple(observation.geometry) != tuple(receipt.geometry)
+        ):
+            return self._conflict(PRODUCER_INTEGRITY_FAILURE)
+
+        parent_result = self._source_authority.resolve(
+            ObservationSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                observation_id=receipt.parent_observation_id,
+            )
+        )
+        parent = parent_result.observation
+        if (
+            parent_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or parent is None
+            or parent.observation_kind != RASTER_OPENING_PRIMITIVE_SEGMENT
+            or parent.origin_kind != RASTER_OPENING_PRIMITIVE_ORIGIN_KIND
+            or parent.derivation_parent_ids
+            != (receipt.page_parent_observation_id,)
+            or parent.document_id != observation.document_id
+            or parent.revision_id != observation.revision_id
+            or parent.source_sha256 != observation.source_sha256
+            or parent.page_id != observation.page_id
+            or parent.source_partition_id != observation.source_partition_id
+            or parent.raw_text != receipt.primitive_kind
+            or parent.geometry != observation.geometry
+            or observation.source_primitive_ref
+            != f"visible:{parent.source_primitive_ref}"
+        ):
+            return self._conflict(VISIBILITY_PARENT_MISMATCH)
+
+        page_result = self._source_authority.resolve(
+            ObservationSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                observation_id=receipt.page_parent_observation_id,
+            )
+        )
+        page_parent = page_result.observation
+        if (
+            page_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or page_parent is None
+            or page_parent.observation_kind != "native_pdf_page"
+            or page_parent.origin_kind != "native"
+            or page_parent.derivation_parent_ids
+            or page_parent.document_id != observation.document_id
+            or page_parent.revision_id != observation.revision_id
+            or page_parent.source_sha256 != observation.source_sha256
+            or page_parent.page_id != observation.page_id
+            or page_parent.source_partition_id != observation.source_partition_id
+        ):
+            return self._conflict(VISIBILITY_PARENT_MISMATCH)
+        return result
 
     def visible_observation_ids_for_snapshot(self, snapshot_id: str) -> frozenset[str]:
         """Return producer-receipted visible ids for one immutable snapshot.
