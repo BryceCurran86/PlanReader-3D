@@ -146,6 +146,124 @@ class SealedSourceClosedQuantity:
         return {**self.payload(), "fingerprint": self.fingerprint}
 
 
+def sealed_source_closed_run_from_dict(
+    payload: Mapping[str, Any],
+) -> "SealedSourceClosedRun":
+    """Load and cryptographically re-verify a sealed run dictionary.
+
+    This is intentionally stricter than ordinary dataclass construction. Every
+    nested quantity fingerprint, the source/revision envelope, deterministic
+    run_id and top-level fingerprint are recomputed before the run is accepted.
+    """
+    if not isinstance(payload, Mapping):
+        raise TypeError("sealed run payload must be a mapping")
+    if _clean(payload.get("schema_version")) != SOURCE_CLOSED_RUN_EXPORT_SCHEMA_VERSION:
+        raise SourceClosedRunConflictError("unsupported sealed run schema_version")
+
+    raw_rows = payload.get("quantities")
+    if not isinstance(raw_rows, (list, tuple)):
+        raise SourceClosedRunConflictError("sealed run quantities must be a sequence")
+
+    rows: list[SealedSourceClosedQuantity] = []
+    for index, raw in enumerate(raw_rows):
+        if not isinstance(raw, Mapping):
+            raise SourceClosedRunConflictError(
+                f"sealed quantity {index} must be a mapping"
+            )
+        try:
+            row = SealedSourceClosedQuantity(
+                project_id=_clean(raw.get("project_id")),
+                quantity_id=_clean(raw.get("quantity_id")),
+                family=_clean(raw.get("family")),
+                semantic_key=_clean(raw.get("semantic_key")),
+                value=(
+                    None
+                    if raw.get("value") is None
+                    else float(raw.get("value"))
+                ),
+                unit=_clean(raw.get("unit")),
+                status=_clean(raw.get("status")),
+                authority=_clean(raw.get("authority")),
+                confidence=float(raw.get("confidence")),
+                abstained=bool(raw.get("abstained")),
+                document_id=_clean(raw.get("document_id")),
+                source_sha256=_clean(raw.get("source_sha256")),
+                source_page=_clean(raw.get("source_page")),
+                viewport_id=_clean(raw.get("viewport_id")),
+                revision_id=_clean(raw.get("revision_id")),
+                object_identity_refs=tuple(
+                    _clean(value)
+                    for value in (raw.get("object_identity_refs") or ())
+                ),
+                trace_canonical_entity_ids=tuple(
+                    _clean(value)
+                    for value in (raw.get("trace_canonical_entity_ids") or ())
+                ),
+                evidence_ids=tuple(
+                    _clean(value) for value in (raw.get("evidence_ids") or ())
+                ),
+                trace_evidence_ids=tuple(
+                    _clean(value)
+                    for value in (raw.get("trace_evidence_ids") or ())
+                ),
+                blocking_reasons=tuple(
+                    _clean(value)
+                    for value in (raw.get("blocking_reasons") or ())
+                ),
+                reason_codes=tuple(
+                    _clean(value) for value in (raw.get("reason_codes") or ())
+                ),
+                lineage_ok=bool(raw.get("lineage_ok")),
+                lineage_reason_codes=tuple(
+                    _clean(value)
+                    for value in (raw.get("lineage_reason_codes") or ())
+                ),
+                schema_version=_clean(raw.get("schema_version")),
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SourceClosedRunConflictError(
+                f"sealed quantity {index} is invalid"
+            ) from exc
+
+        supplied_fingerprint = _clean(raw.get("fingerprint")).lower()
+        if not supplied_fingerprint or supplied_fingerprint != row.fingerprint:
+            raise SourceClosedRunConflictError(
+                f"sealed quantity fingerprint mismatch: {row.quantity_id or index}"
+            )
+        rows.append(row)
+
+    project_id = _clean(payload.get("project_id"))
+    expected = _build_sealed_run(rows, project_id=project_id)
+
+    supplied_sources = tuple(
+        sorted(
+            _clean(value).lower()
+            for value in (payload.get("source_sha256s") or ())
+            if _clean(value)
+        )
+    )
+    if supplied_sources != tuple(value.lower() for value in expected.source_sha256s):
+        raise SourceClosedRunConflictError("sealed run source envelope is inconsistent")
+
+    supplied_revisions = tuple(
+        sorted(
+            _clean(value)
+            for value in (payload.get("revision_ids") or ())
+            if _clean(value)
+        )
+    )
+    if supplied_revisions != expected.revision_ids:
+        raise SourceClosedRunConflictError("sealed run revision envelope is inconsistent")
+
+    if _clean(payload.get("run_id")) != expected.run_id:
+        raise SourceClosedRunConflictError("sealed run_id is inconsistent")
+    supplied_fingerprint = _clean(payload.get("fingerprint")).lower()
+    if not supplied_fingerprint or supplied_fingerprint != expected.fingerprint:
+        raise SourceClosedRunConflictError("sealed run fingerprint is inconsistent")
+
+    return expected
+
+
 def seal_source_closed_quantity(
     quantity: QuantityEvidence,
     *,
@@ -365,4 +483,5 @@ __all__ = [
     "combine_source_closed_runs",
     "seal_source_closed_quantity",
     "seal_source_closed_run",
+    "sealed_source_closed_run_from_dict",
 ]
