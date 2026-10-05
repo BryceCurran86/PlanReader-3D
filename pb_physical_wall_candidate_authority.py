@@ -2627,11 +2627,11 @@ def _producer_raster_opening_relation_overrides(
 
         left = sorted(
             (item for item in faces if item[0] == "left"),
-            key=lambda item: (item[1], item[2]),
+            key=lambda item: (item[1], item[2] or ""),
         )
         right = sorted(
             (item for item in faces if item[0] == "right"),
-            key=lambda item: (item[1], item[2]),
+            key=lambda item: (item[1], item[2] or ""),
         )
         if len(left) != 2 or len(right) != 2:
             continue
