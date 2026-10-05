@@ -10,6 +10,7 @@ import pytest
 import pb_auto_geometry_v1219 as auto
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_live_canonical_floor_surface import compose_live_canonical_floor_surfaces
+from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
 from pb_live_canonical_roof_projection import project_source_gable_roof
 from pb_live_canonical_room_composition import compose_live_canonical_rooms
 from pb_live_canonical_slab_projection import (
@@ -33,6 +34,7 @@ from tests.test_live_canonical_slab_projection import _boundary, _resolved_slab
 from tests.test_live_canonical_structural_member_projection import _resolved
 from tests.test_live_canonical_wall_finish_surface import _binding, _wall
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
+from tests.test_live_ceiling_lining_integration_v1 import _write as _write_ceiling_pdf
 from tests.test_live_room_area_source_closed_export import _cross_view_room_area_pdf
 
 
@@ -195,6 +197,40 @@ def test_quantity_stage_respects_the_existing_exact_status_vocabularies(status, 
     counts = report["family_reports"]["structural_member"]["stage_counts"]
     assert counts["QUANTIFIED"] == (len(members) if verified else 0)
     assert counts["PUBLISHED"] == 0
+
+
+def test_live_ceiling_enters_registry_without_promoting_provisional_quantity(tmp_path):
+    path = _write_ceiling_pdf(tmp_path, framed=True)
+    result = collect_live_ceiling_lining_claims(path, pages=(0,))
+    assert len(result.canonical_ceilings) == 1
+    assert len(result.quantity_evidence) == 1
+    assert result.quantity_evidence[0].status == "provisional"
+
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=result.canonical_ceilings,
+        quantities=result.quantity_evidence,
+        registry_run_scope="live-ceiling-lineage",
+    )
+
+    assert gaps == {}
+    assert len(summaries) == 1
+    record = summaries[0].object_records[0]
+    assert record.object_type == "ceiling"
+    assert record.object_id == result.canonical_ceilings[0].canonical_ceiling_id
+    # The upstream shadow quantity belongs to the source room scope, not the
+    # canonical ceiling identity. Coverage must not invent that dependency.
+    assert record.quantity_ids == ()
+
+    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    family = report["family_reports"]["ceiling"]
+    assert family["classification"] == "PARTIAL"
+    assert family["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 0,
+        "PUBLISHED": 0,
+    }
 
 
 def test_source_authenticated_rooms_are_partial_without_metric_quantity_and_inputs_stay_unchanged():
