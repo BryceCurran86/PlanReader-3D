@@ -804,10 +804,35 @@ def bind_observation_to_vector_geometry(
 
     # Collapse multiple vector fragments at effectively the same witness
     # coordinate; vector exporters commonly split one visual line into pieces.
+    # Prefer a positively stroked drafting primitive over an unstroked/fill-only
+    # representative inside the same tolerance cluster. This changes only the
+    # representative provenance, never cluster membership or tolerance.
+    def _positive_stroke(segment: ObservedGeometrySegment) -> bool:
+        width = segment.stroke_width_pt
+        return (
+            width is not None
+            and math.isfinite(float(width))
+            and float(width) > 0.0
+            and segment.stroke_color_rgb is not None
+        )
+
     unique_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
     for segment, point in sorted(witness_hits, key=lambda h: (h[1][0], h[1][1], h[0].segment_id)):
-        if not any(math.hypot(point[0] - p[0], point[1] - p[1]) <= calibration.witness_endpoint_distance_pt for _, p in unique_hits):
+        match_index = next(
+            (
+                index
+                for index, (_prior_segment, prior_point) in enumerate(unique_hits)
+                if math.hypot(point[0] - prior_point[0], point[1] - prior_point[1])
+                <= calibration.witness_endpoint_distance_pt
+            ),
+            None,
+        )
+        if match_index is None:
             unique_hits.append((segment, point))
+            continue
+        prior_segment, _prior_point = unique_hits[match_index]
+        if _positive_stroke(segment) and not _positive_stroke(prior_segment):
+            unique_hits[match_index] = (segment, point)
 
     if best.orientation == DimensionOrientation.HORIZONTAL.value:
         unique_hits.sort(key=lambda h: h[1][0])
