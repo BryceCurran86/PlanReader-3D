@@ -237,6 +237,17 @@ def reconcile_sealed_run_v2(
     """Convert sealed production output into exact-identity V2 evaluator rows."""
     items = _validate_identity_map(manifest, identity_map)
     rows = _validate_sealed_run(manifest, sealed_run)
+
+    run_hashes = {
+        _required(value, "sealed_run.source_sha256s")
+        for value in sealed_run.get("source_sha256s", ())
+    }
+    map_hashes = set(identity_map.source_sha256s)
+    if not run_hashes.issubset(map_hashes):
+        raise ValueError(
+            "sealed-run source hashes are not covered by the frozen V2 identity map"
+        )
+
     produced: list[ProducedTakeoffItemV2] = []
 
     for row in rows:
