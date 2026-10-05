@@ -166,6 +166,7 @@ class PhysicalOpeningExistenceRecord:
     producer_method: str
     producer_version: str
     producer_generation: int
+    aperture_bbox_pt: Optional[tuple[float, float, float, float]] = None
 
 
 @dataclass(frozen=True)
@@ -547,6 +548,21 @@ def _raster_odd(value: int) -> int:
 
 def _raster_pt(value_px: float, dpi: int) -> float:
     return round(float(value_px) * 72.0 / float(dpi), 6)
+
+
+def _raster_box_pt(
+    box_px: Sequence[float],
+    dpi: int,
+) -> tuple[float, float, float, float]:
+    values = tuple(float(value) for value in box_px)
+    if len(values) != 4:
+        raise ValueError("raster box must contain four coordinates")
+    return (
+        _raster_pt(values[0], dpi),
+        _raster_pt(values[1], dpi),
+        _raster_pt(values[2] + 1.0, dpi),
+        _raster_pt(values[3] + 1.0, dpi),
+    )
 
 
 def _raster_geometry_pt(
@@ -1297,7 +1313,7 @@ class PhysicalOpeningAuthority:
                     continue
 
                 gap_box_px = _raster_gap_box_page_px(pair, axis)
-                gap_box_pt = _raster_geometry_pt(gap_box_px, dpi)
+                gap_box_pt = _raster_box_pt(gap_box_px, dpi)
                 payload = {
                     "document_id": seed.document_id,
                     "revision_id": seed.revision_id,
@@ -1509,6 +1525,7 @@ class PhysicalOpeningAuthority:
             producer_method=source_result.snapshot.producer_method,
             producer_version=source_result.snapshot.producer_version,
             producer_generation=source_result.snapshot.producer_generation,
+            aperture_bbox_pt=gap_box,
         )
         return cache(PhysicalOpeningExistenceResult(
             status=EvidenceResolutionStatus.CORROBORATED,
