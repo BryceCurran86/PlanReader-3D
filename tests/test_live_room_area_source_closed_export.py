@@ -12,7 +12,10 @@ from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
 from pb_source_closed_run_export import SourceClosedRunConflictError
-from pb_quantity_takeoff_adapter import existing_commercial_gate_results
+from pb_quantity_takeoff_adapter import (
+    CommercialTakeoffConflictError,
+    existing_commercial_gate_results,
+)
 
 
 def _cross_view_room_area_pdf() -> bytes:
@@ -275,6 +278,109 @@ def test_live_room_area_figured_quantity_projects_to_unreviewed_customer_row(
 
     gates = existing_commercial_gate_results(row)
     assert all(result[0] is False for result in gates.values())
+
+
+def _scaled_room_area_claim(
+    live_claim,
+    *,
+    resolved_scale_id: str | None,
+    scale_status: str = "resolved",
+    scale_conflicts: tuple[str, ...] = (),
+):
+    quantity = _firm_quantity(live_claim)
+    metadata = dict(quantity.metadata or {})
+    metadata["figured_dimension_ids"] = []
+    metadata["resolved_scale_id"] = resolved_scale_id
+    metadata["scale_status"] = scale_status
+    metadata["scale_conflicts"] = list(scale_conflicts)
+    scaled = replace(
+        quantity,
+        authority="pdf_scaled",
+        formula="shoelace_polygon_area / trusted_px_per_m^2",
+        metadata=metadata,
+    )
+    floor = _resolved_floor(live_claim)
+    scaled_floor = replace(
+        floor,
+        metric_area_authority="pdf_scaled",
+    )
+    return replace(
+        live_claim,
+        room_area_quantity_evidence=tuple(
+            scaled if item.quantity_id == quantity.quantity_id else item
+            for item in live_claim.room_area_quantity_evidence
+        ),
+        canonical_floors=tuple(
+            scaled_floor if item.canonical_floor_id == floor.canonical_floor_id else item
+            for item in live_claim.canonical_floors
+        ),
+    )
+
+
+def test_live_room_area_scaled_quantity_projects_only_with_explicit_scale_authority(
+    live_claim,
+) -> None:
+    claim = _scaled_room_area_claim(
+        live_claim,
+        resolved_scale_id="scale:room-area:1",
+        scale_status="resolved",
+    )
+
+    rows = customer_projection.project_live_room_area_customer_rows(
+        claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["quantity"] == pytest.approx(8.64)
+    assert row["quantity_status"] == "To review"
+    assert row["origin"] == "AI"
+    assert row["measurement_method"] == "scaled_geometry"
+    assert row["resolved_scale_id"] == "scale:room-area:1"
+    assert row["scale_status"] == "resolved"
+    assert row["scale_conflicts"] == []
+    assert row["row_role"] == "floor_area"
+
+    gates = existing_commercial_gate_results(row)
+    assert all(result[0] is False for result in gates.values())
+
+
+def test_scaled_room_area_without_resolved_scale_id_remains_unprojected(
+    live_claim,
+) -> None:
+    claim = _scaled_room_area_claim(
+        live_claim,
+        resolved_scale_id=None,
+        scale_status="resolved",
+    )
+
+    rows = customer_projection.project_live_room_area_customer_rows(
+        claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert rows == ()
+
+
+def test_scaled_room_area_with_scale_conflict_fails_closed(
+    live_claim,
+) -> None:
+    claim = _scaled_room_area_claim(
+        live_claim,
+        resolved_scale_id="scale:room-area:1",
+        scale_status="resolved",
+        scale_conflicts=("scale_conflict",),
+    )
+
+    with pytest.raises(CommercialTakeoffConflictError, match="scale conflicts"):
+        customer_projection.project_live_room_area_customer_rows(
+            claim,
+            workspace_id=7,
+            project_id="source-project",
+        )
 
 
 def test_room_area_customer_projection_omits_abstention_instead_of_zero(

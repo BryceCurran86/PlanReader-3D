@@ -5,10 +5,11 @@ source/canonical trace produced by the live room-area source-closed exporter.
 It does not create room geometry, measurement authority, estimator approval, or
 benchmark identity.
 
-Only figured/documented room areas with explicit figured-dimension evidence are
-currently admitted. Scaled-geometry room areas remain unprojected until a
-separate current commercial scale authority is supplied. Every emitted row is
-therefore the existing commercial adapter unreviewed AI draft ("To review").
+Figured/documented room areas are admitted only with explicit figured-dimension
+evidence. Scaled-geometry room areas are admitted only when the upstream
+QuantityEvidence also carries a current resolved scale identity/status and zero
+scale conflicts. This bridge never invents scale authority. Every emitted row is
+the existing commercial adapter unreviewed AI draft ("To review").
 """
 from __future__ import annotations
 
@@ -101,19 +102,68 @@ def _figured_measurement_authority(
     )
 
 
+def _scaled_measurement_authority(
+    quantity: QuantityEvidence,
+) -> CommercialMeasurementAuthority | None:
+    """Return explicit scaled authority, never inferred from a fingerprint."""
+    authority = (
+        _clean(quantity.authority)
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
+    if "scale" not in authority and "geometry" not in authority:
+        return None
+
+    metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    scale_id = _clean(metadata.get("resolved_scale_id"))
+    scale_status = _clean(metadata.get("scale_status"))
+    raw_conflicts = metadata.get("scale_conflicts") or ()
+    if isinstance(raw_conflicts, (str, bytes)):
+        raw_conflicts = (raw_conflicts,)
+    elif not isinstance(raw_conflicts, (list, tuple)):
+        raw_conflicts = ()
+    conflicts = tuple(
+        sorted({_clean(value) for value in raw_conflicts if _clean(value)})
+    )
+    if not scale_id or not scale_status:
+        return None
+
+    return CommercialMeasurementAuthority(
+        method="scaled_geometry",
+        resolved_scale_id=scale_id,
+        scale_status=scale_status,
+        scale_conflicts=conflicts,
+        metadata={
+            "source": "live_room_area_customer_projection",
+            "quantity_id": quantity.quantity_id,
+            "scale_fingerprint": _clean(metadata.get("scale_fingerprint")),
+        },
+    )
+
+
+def _measurement_authority(
+    quantity: QuantityEvidence,
+) -> CommercialMeasurementAuthority | None:
+    figured = _figured_measurement_authority(quantity)
+    if figured is not None:
+        return figured
+    return _scaled_measurement_authority(quantity)
+
+
 def project_live_room_area_customer_rows(
     claim: LivePhysicalNetWallClaim,
     *,
     workspace_id: int,
     project_id: str,
 ) -> tuple[dict[str, Any], ...]:
-    """Project source-closed figured room areas into unreviewed customer rows.
+    """Project source-closed room areas into unreviewed customer rows.
 
     Source/canonical lineage is revalidated by
     build_live_room_area_source_traces. Missing or ambiguous floor mapping
     fails closed there. ABSTAIN/BLOCKED quantities are omitted. Scaled geometry
-    is also omitted here because this bridge does not own a commercial scale
-    authority.
+    is admitted only when the quantity explicitly carries current resolved scale
+    authority; a scale fingerprint alone is never sufficient.
     """
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
@@ -135,7 +185,7 @@ def project_live_room_area_customer_rows(
             raise ValueError(
                 f"missing live room-area source trace: {quantity.quantity_id}"
             )
-        authority = _figured_measurement_authority(quantity)
+        authority = _measurement_authority(quantity)
         if authority is None:
             continue
         row = quantity_evidence_to_takeoff_output_row(
