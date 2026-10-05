@@ -12,6 +12,7 @@ RapidOCR tests skip when the backend is not installed.
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from typing import Callable, Mapping, Optional, Sequence
 
 import fitz
@@ -429,35 +430,43 @@ def test_unresolved_clip_state_can_be_discharged_only_by_exact_raster_proof(
 def test_explicit_clip_region_remains_a_hard_veto_before_raster_ocr(
     monkeypatch,
 ) -> None:
-    text = "150mm"
-    pdf = _pdf(
-        "q 30 100 20 40 re W n "
-        "0 0 5 5 re f "
-        "BT /F1 14 Tf 40 120 Td (150mm) Tj ET "
-        "0 0 5 5 re f Q",
-        fonts={
-            "F1": (
-                5,
-                "<< /Type /Font /Subtype /Type1 /BaseFont /Arial /FirstChar 32 /LastChar 126 /ToUnicode 6 0 R >>",
-            )
-        },
-        extra={
-            6: _stream_obj(
-                _cmap(
-                    sysinfo=_SYSINFO_DUP,
-                    mappings="\n".join(
-                        f"<{c:02X}> <{c:04X}>"
-                        for c in sorted(set(map(ord, text)))
-                    ),
-                    count=len(set(text)),
-                )
-            )
-        },
+    # Exercise the raster gate directly rather than relying on a PDF fixture
+    # where MuPDF may itself truncate / omit explicitly clipped native text.
+    # Start from a producer-owned glyph-unverified receipt, then inject the
+    # independently proven clip reason into that same immutable lineage.
+    setup = _Setup(
+        _glyph_unverified_pdf([("150mm", 40, 120)]),
+        _both("150mm"),
     )
-    setup = _Setup(pdf, _both(text))
-    receipt = setup._receipts[setup.oid_of(text)]
-    assert TEXT_CLIPPED_BY_CLIP_REGION in receipt.reason_codes
-    assert TEXT_GLYPH_MAPPING_UNVERIFIED in receipt.reason_codes
+    oid = setup.oid_of("150mm")
+    selector = setup._observation_selector(oid)
+    native = setup.text_authority.resolve_text(selector)
+    assert native.status is EvidenceResolutionStatus.ABSTAINED
+    assert native.receipt is not None
+    assert native.reason_codes == (TEXT_GLYPH_MAPPING_UNVERIFIED,)
+
+    blocked_reasons = (
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+        TEXT_CLIPPED_BY_CLIP_REGION,
+    )
+    blocked_receipt = replace(
+        native.receipt,
+        trusted=False,
+        reason_codes=blocked_reasons,
+    )
+    blocked_result = replace(
+        native,
+        status=EvidenceResolutionStatus.ABSTAINED,
+        proposition=None,
+        trusted_text=None,
+        reason_codes=blocked_reasons,
+        receipt=blocked_receipt,
+    )
+    monkeypatch.setattr(
+        setup.producer._text_authority,
+        "resolve_text",
+        lambda _selector: blocked_result,
+    )
 
     calls: list[dict] = []
     original = SourceObservationProducer.render_native_page_png
@@ -467,7 +476,7 @@ def test_explicit_clip_region_remains_a_hard_veto_before_raster_ocr(
         lambda self, **kw: (calls.append(kw), original(self, **kw))[1],
     )
 
-    result = setup.publish(text)
+    result = setup.publish("150mm")
 
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert RASTER_TEXT_INTEGRITY_NOT_GLYPH_ONLY in result.reason_codes
