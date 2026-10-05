@@ -12,6 +12,7 @@ from collections.abc import Mapping
 
 from pb_geometry_takeoff_model import AuthorityStatus
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
+from pb_live_canonical_room_composition import LiveCanonicalRoomObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 
@@ -21,6 +22,22 @@ LIVE_FLOOR_AREA_QUANTITY_SCHEMA_VERSION = "1.0.0"
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def _canonical_rooms_by_id(
+    claim: LivePhysicalNetWallClaim,
+) -> dict[str, LiveCanonicalRoomObject]:
+    rooms: dict[str, LiveCanonicalRoomObject] = {}
+    for room in claim.canonical_rooms:
+        if type(room) is not LiveCanonicalRoomObject:
+            raise TypeError("canonical_rooms must contain LiveCanonicalRoomObject")
+        room_id = _clean(room.canonical_room_id)
+        if not room_id:
+            continue
+        if room_id in rooms:
+            raise ValueError(f"duplicate canonical room identity: {room_id}")
+        rooms[room_id] = room
+    return rooms
 
 
 def publish_live_floor_area_quantities(
@@ -137,7 +154,106 @@ def publish_live_floor_area_quantities(
     return tuple(sorted(out, key=lambda item: item.quantity_id))
 
 
+def publish_live_canonical_room_area_quantities(
+    claim: LivePhysicalNetWallClaim,
+) -> tuple[QuantityEvidence, ...]:
+    """Reissue already-FIRM room area onto exact canonical room identity."""
+    if type(claim) is not LivePhysicalNetWallClaim:
+        raise TypeError("claim must be LivePhysicalNetWallClaim")
+
+    rooms = _canonical_rooms_by_id(claim)
+    floor_quantities = publish_live_floor_area_quantities(claim)
+    source_by_id = {
+        _clean(quantity.quantity_id): quantity
+        for quantity in claim.room_area_quantity_evidence
+        if isinstance(quantity, QuantityEvidence)
+    }
+
+    out: list[QuantityEvidence] = []
+    for floor_quantity in floor_quantities:
+        metadata = (
+            floor_quantity.metadata
+            if isinstance(floor_quantity.metadata, Mapping)
+            else {}
+        )
+        room_id = _clean(metadata.get("room_entity_id"))
+        source_id = _clean(metadata.get("upstream_room_area_quantity_id"))
+        room = rooms.get(room_id)
+        source = source_by_id.get(source_id)
+        if room is None or source is None:
+            continue
+        if not room.physical_room_id or not room.canonical_room_id:
+            continue
+        if _clean(room.source_room_face_record_id) != _clean(
+            metadata.get("source_room_face_record_id")
+        ):
+            continue
+        if room.source_sha256.lower() != floor_quantity.metadata.get(
+            "source_sha256", ""
+        ).lower():
+            continue
+        if room.revision_id != _clean(
+            floor_quantity.metadata.get("revision_id")
+        ):
+            continue
+        if str(room.page_id) != _clean(
+            floor_quantity.metadata.get("page_no")
+        ):
+            continue
+        if not set(source.evidence_ids).issubset(set(room.evidence_ids)):
+            continue
+
+        payload = {
+            "schema_version": LIVE_FLOOR_AREA_QUANTITY_SCHEMA_VERSION,
+            "upstream_room_area_quantity_id": source_id,
+            "canonical_room_id": room.canonical_room_id,
+            "physical_room_id": room.physical_room_id,
+            "value_m2": float(floor_quantity.value),
+            "authority": floor_quantity.authority,
+            "source_sha256": room.source_sha256,
+            "revision_id": room.revision_id,
+        }
+        out.append(
+            QuantityEvidence(
+                quantity_id=stable_contract_id(
+                    "canonical_room_area_quantity",
+                    payload,
+                ),
+                family="room_area",
+                semantic_key=f"room_area:{room.physical_room_id}",
+                value=float(floor_quantity.value),
+                unit="m2",
+                input_entity_ids=(room.physical_room_id,),
+                formula=(
+                    "reuse exact firm room-area authority for its one-to-one "
+                    "canonical room"
+                ),
+                formula_version=LIVE_FLOOR_AREA_QUANTITY_SCHEMA_VERSION,
+                evidence_ids=tuple(source.evidence_ids),
+                authority=source.authority,
+                status=AuthorityStatus.FIRM.value,
+                confidence=float(source.confidence),
+                abstained=False,
+                blocking_reasons=(),
+                reason_codes=tuple(source.reason_codes),
+                metadata={
+                    **dict(source.metadata)
+                    if isinstance(source.metadata, Mapping)
+                    else {},
+                    "upstream_room_area_quantity_id": source_id,
+                    "canonical_room_id": room.canonical_room_id,
+                    "physical_room_id": room.physical_room_id,
+                    "source_room_face_record_id": room.source_room_face_record_id,
+                    "commercial_projection_allowed": True,
+                    "row_role": "floor_area",
+                },
+            )
+        )
+    return tuple(sorted(out, key=lambda item: item.quantity_id))
+
+
 __all__ = [
     "LIVE_FLOOR_AREA_QUANTITY_SCHEMA_VERSION",
+    "publish_live_canonical_room_area_quantities",
     "publish_live_floor_area_quantities",
 ]
