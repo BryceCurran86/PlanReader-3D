@@ -553,9 +553,15 @@ def test_component_edge_membership_preserves_same_and_ambiguous_chain_semantics(
 
     result = resolve_physical_wall_equivalence(identities)
 
-    assert set(result.abstained_wall_ids) == {"a", "b", "c"}
+    assert set(result.ambiguous_wall_ids) == {"a", "b", "c"}
+    assert {"a", "b", "c"} <= set(result.abstained_wall_ids)
     assert result.equivalence_groups == (("d", "e"),)
     assert len(result.representative_wall_ids) == 1
-    assert result.representative_wall_ids[0] in {"d", "e"}
-    assert set(result.same_wall_ids) == {"a", "b", "d", "e"}
-    assert set(result.ambiguous_wall_ids) == {"a", "b", "c"}
+    representative = result.representative_wall_ids[0]
+    assert representative in {"d", "e"}
+    covered = ({"d", "e"} - {representative}).pop()
+    assert covered in result.abstained_wall_ids
+    assert result.blockers_for(covered) == (
+        f"equivalent_physical_wall_represented_by:{representative}",
+    )
+    assert set(result.same_wall_ids) == {"d", "e"}
