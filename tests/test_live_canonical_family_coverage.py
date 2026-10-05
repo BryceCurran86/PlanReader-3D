@@ -377,8 +377,18 @@ def test_finish_surface_remains_partial_without_proven_finish_extent_or_quantity
     assert all(surface.commercial_quantity_authority is False for surface in surfaces)
 
 
-def test_lineage_incomplete_roof_is_unavailable_and_slab_fails_before_registry():
-    roof = project_source_gable_roof(_measurement()).object
+def test_lineage_incomplete_roof_and_slab_fail_before_registry():
+    roof_measurement = replace(
+        _measurement(),
+        document_id="",
+        revision_id="",
+        source_sha256="",
+        snapshot_id="",
+        physical_roof_id="",
+    )
+    roof_result = project_source_gable_roof(roof_measurement)
+    assert roof_result.object is None
+
     slab_result = project_resolved_slab_entity(
         slab=_resolved_slab(),
         boundary=_boundary(),
@@ -387,13 +397,11 @@ def test_lineage_incomplete_roof_is_unavailable_and_slab_fails_before_registry()
     assert slab_result.reason_codes == (LIVE_CANONICAL_SLAB_LINEAGE_UNAVAILABLE,)
 
     summaries, gaps = collect_live_canonical_coverage(
-        objects=(roof,),
+        objects=(),
         registry_run_scope="test",
     )
     assert summaries == ()
-    assert gaps == {"roof": ["producer_source_lineage_unavailable"]}
-    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
-    assert report["family_reports"]["roof"]["classification"] == "UNAVAILABLE"
+    assert gaps == {}
 
 
 def test_lineage_bound_slab_reaches_canonicalized_floor_slab_coverage():
