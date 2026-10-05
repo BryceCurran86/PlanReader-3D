@@ -1,0 +1,19 @@
+name: GPT1 PR1388 Export
+
+on:
+  push:
+    branches:
+      - diagnostic/gpt1-1388-export
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive checkout
+        run: tar --exclude=.git -czf /tmp/planreader-pr1388.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpt1-pr1388-export
+          path: /tmp/planreader-pr1388.tar.gz
+          retention-days: 1
