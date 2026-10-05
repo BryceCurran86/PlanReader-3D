@@ -105,6 +105,37 @@ class TestTypedDimensionGrammar:
         token = classify_dimension_token(number, preceding_context=context)
         assert not token.is_linear_dimension
 
+    def test_native_context_does_not_leak_across_text_lines(self) -> None:
+        doc = fitz.open()
+        page = doc.new_page(width=320, height=240)
+
+        # Same-line drafting context must keep a room number non-dimensional.
+        page.insert_text((20, 35), "ROOM 300", fontsize=10)
+
+        # A semantic room label on its own line must not retype the next native
+        # text line when source geometry proves that number is a dimension.
+        page.insert_text((20, 75), "COLD ROOM", fontsize=10)
+        page.draw_line((60, 120), (240, 120))
+        page.draw_line((60, 95), (60, 145))
+        page.draw_line((240, 95), (240, 145))
+        page.insert_text((135, 116), "3950", fontsize=10)
+
+        doc = _reopen(doc)
+        observations = extract_native_dimension_observations(doc[0], page_num=1)
+        by_text = {item.raw_text: item for item in observations}
+
+        assert "300" not in by_text
+        assert "3950" in by_text
+
+        bundle = extract_dimension_evidence_bundle(doc[0], page_num=1)
+        target = next(
+            binding
+            for binding in bundle.bindings
+            if binding.observation_id == by_text["3950"].dimension_id
+        )
+        assert target.status == BindingStatus.WITNESS_BOUND.value
+        doc.close()
+
     def test_mutating_dimension_changes_only_parsed_value(self) -> None:
         before = classify_dimension_token("3000")
         after = classify_dimension_token("3800")
