@@ -6,9 +6,14 @@ publishes exact page-space polygons only where the enclosing wall component is
 topologically resolved.
 
 Positive publication is intentionally narrow:
-- the physical-wall scope is CORROBORATED and complete;
+- the physical-wall scope is CORROBORATED and either complete, or is a
+  producer-owned authenticated viewport whose per-candidate boundary audit is
+  available for fail-closed local recovery;
 - every PUBLISHED bounded-face edge belongs to exactly one authenticated
-  physical wall;
+  physical wall and every bounding wall is boundary-clean when local recovery
+  is used;
+- no structural primitive excluded at the viewport boundary may touch or cross
+  a published face;
 - a strict minority of faces touched by competing-owner edge spans may be
   withheld explicitly, but a missing owner or a non-minority contaminated
   universe still fails the whole scope;
@@ -39,7 +44,10 @@ from typing import Iterable, Mapping
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
-from pb_physical_wall_candidate_authority import PhysicalWallCandidateAuthority
+from pb_physical_wall_candidate_authority import (
+    BOUNDARY_EVALUATION_EVALUATED,
+    PhysicalWallCandidateAuthority,
+)
 
 
 SOURCE_ROOM_FACE_SCHEMA_VERSION = "1.0.0"
@@ -47,6 +55,7 @@ SOURCE_ROOM_FACE_SCOPE_RESOLVED = "source_room_face_scope_resolved"
 SOURCE_ROOM_FACE_UNIVERSE_PARTIAL = "source_room_face_universe_partial"
 SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE = "source_room_face_scope_unavailable"
 SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED = "source_room_face_boundary_unresolved"
+SOURCE_ROOM_FACE_BOUNDARY_LOCAL_RECOVERY = "source_room_face_boundary_local_recovery"
 SOURCE_ROOM_FACE_DUPLICATE_EDGE = "source_room_face_duplicate_edge_ownership"
 SOURCE_ROOM_FACE_DEGENERATE = "source_room_face_tiny_or_degenerate"
 SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS = "source_room_face_component_ambiguous"
@@ -194,6 +203,146 @@ def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
 def _edges_share_positive_collinear_span(left: Edge, right: Edge) -> bool:
     """True only when two quantized edges share positive-length collinear span."""
     return _collinear_overlap_edge(left, right) is not None
+
+
+def _orientation(first: Point, second: Point, third: Point) -> float:
+    return (
+        (second[0] - first[0]) * (third[1] - first[1])
+        - (second[1] - first[1]) * (third[0] - first[0])
+    )
+
+
+def _point_on_edge(point: Point, edge: Edge) -> bool:
+    tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+    (ax, ay), (bx, by) = edge
+    px, py = point
+    if (
+        px < min(ax, bx) - tolerance
+        or px > max(ax, bx) + tolerance
+        or py < min(ay, by) - tolerance
+        or py > max(ay, by) + tolerance
+    ):
+        return False
+    length = math.hypot(bx - ax, by - ay)
+    if length <= tolerance:
+        return math.hypot(px - ax, py - ay) <= tolerance
+    return (
+        abs((px - ax) * (by - ay) - (py - ay) * (bx - ax)) / length
+        <= tolerance
+    )
+
+
+def _edges_intersect(left: Edge, right: Edge) -> bool:
+    """Closed segment intersection used only for fail-closed contamination."""
+    a, b = left
+    c, d = right
+    tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
+    o1 = _orientation(a, b, c)
+    o2 = _orientation(a, b, d)
+    o3 = _orientation(c, d, a)
+    o4 = _orientation(c, d, b)
+    if (
+        ((o1 > tolerance and o2 < -tolerance) or (o1 < -tolerance and o2 > tolerance))
+        and ((o3 > tolerance and o4 < -tolerance) or (o3 < -tolerance and o4 > tolerance))
+    ):
+        return True
+    return (
+        (abs(o1) <= tolerance and _point_on_edge(c, left))
+        or (abs(o2) <= tolerance and _point_on_edge(d, left))
+        or (abs(o3) <= tolerance and _point_on_edge(a, right))
+        or (abs(o4) <= tolerance and _point_on_edge(b, right))
+    )
+
+
+def _point_in_or_on_polygon(point: Point, polygon: tuple[Point, ...]) -> bool:
+    if len(polygon) < 3:
+        return False
+    edges = tuple(
+        _edge(first, polygon[(index + 1) % len(polygon)])
+        for index, first in enumerate(polygon)
+    )
+    if any(_point_on_edge(point, edge) for edge in edges):
+        return True
+
+    x, y = point
+    inside = False
+    for first, second in edges:
+        x1, y1 = first
+        x2, y2 = second
+        if (y1 > y) == (y2 > y):
+            continue
+        crossing_x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+        if crossing_x > x:
+            inside = not inside
+    return inside
+
+
+def _excluded_primitive_touches_face(
+    primitive: object, polygon: tuple[Point, ...]
+) -> bool:
+    """Return True when excluded structural geometry can affect this face."""
+    try:
+        primitive_edge = _edge(
+            (float(getattr(primitive, "x1")), float(getattr(primitive, "y1"))),
+            (float(getattr(primitive, "x2")), float(getattr(primitive, "y2"))),
+        )
+    except (TypeError, ValueError, AttributeError):
+        return True
+    if primitive_edge[0] == primitive_edge[1]:
+        return True
+    if _point_in_or_on_polygon(primitive_edge[0], polygon):
+        return True
+    if _point_in_or_on_polygon(primitive_edge[1], polygon):
+        return True
+    return any(
+        _edges_intersect(
+            primitive_edge,
+            _edge(first, polygon[(index + 1) % len(polygon)]),
+        )
+        for index, first in enumerate(polygon)
+    )
+
+
+def _boundary_local_recovery_inputs(
+    scope: object,
+    records: tuple[object, ...],
+) -> tuple[set[str], tuple[object, ...]] | None:
+    """Return producer-owned contamination for a safe local viewport proof."""
+    if bool(getattr(scope, "scope_complete", False)):
+        return set(), ()
+    if str(getattr(scope, "scope_kind", "")) != "viewport":
+        return None
+    evaluation = getattr(scope, "boundary_evaluation", None)
+    if (
+        evaluation is None
+        or getattr(evaluation, "status", None) != BOUNDARY_EVALUATION_EVALUATED
+    ):
+        return None
+
+    record_ids = {
+        _clean(getattr(record, "wall_candidate_id", ""))
+        for record in records
+        if _clean(getattr(record, "wall_candidate_id", ""))
+    }
+    evaluated_ids = {
+        _clean(value)
+        for value in tuple(
+            getattr(evaluation, "evaluated_wall_candidate_ids", ()) or ()
+        )
+        if _clean(value)
+    }
+    tainted_ids = {
+        _clean(value)
+        for value in tuple(
+            getattr(evaluation, "boundary_tainted_wall_candidate_ids", ()) or ()
+        )
+        if _clean(value)
+    }
+    if not record_ids or evaluated_ids != record_ids or not tainted_ids <= record_ids:
+        return None
+    return tainted_ids, tuple(
+        getattr(evaluation, "excluded_boundary_primitives", ()) or ()
+    )
 
 
 def _unique_containing_wall_owner(
@@ -375,11 +524,12 @@ class SourceRoomFaceScopeResult:
 
     @property
     def face_universe_complete(self) -> bool:
-        """True only when no discovered face was withheld locally."""
+        """True only when the authority proved the whole face universe."""
         return (
             self.status is EvidenceResolutionStatus.CORROBORATED
             and bool(self.scope_complete)
             and not self.abstained_faces
+            and SOURCE_ROOM_FACE_UNIVERSE_PARTIAL not in self.reason_codes
         )
 
 
@@ -432,14 +582,18 @@ def _blocked(scope: object, reason: str) -> SourceRoomFaceScopeResult:
 
 
 def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
+    records = tuple(getattr(scope, "records", ()) or ())
     if (
         getattr(scope, "status", None) is not EvidenceResolutionStatus.CORROBORATED
-        or not bool(getattr(scope, "scope_complete", False))
-        or not tuple(getattr(scope, "records", ()) or ())
+        or not records
     ):
         return _blocked(scope, SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE)
 
-    records = tuple(getattr(scope, "records", ()) or ())
+    boundary_local_recovery = not bool(getattr(scope, "scope_complete", False))
+    boundary_inputs = _boundary_local_recovery_inputs(scope, records)
+    if boundary_inputs is None:
+        return _blocked(scope, SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE)
+    boundary_tainted_wall_ids, excluded_boundary_primitives = boundary_inputs
     wall_edges: dict[str, tuple[Edge, ...]] = {}
     edge_owner: dict[Edge, str] = {}
     duplicate_edges: set[Edge] = set()
@@ -606,13 +760,27 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                     sorted(set(face_walls[face_id]) | contaminating_wall_ids)
                 )
 
-    ownership_clean_face_ids = set(polygons) - ownership_tainted_face_ids
+    boundary_tainted_face_ids: set[str] = set()
+    if boundary_local_recovery:
+        for face_id, polygon in polygons.items():
+            if set(face_walls[face_id]) & boundary_tainted_wall_ids:
+                boundary_tainted_face_ids.add(face_id)
+                continue
+            if any(
+                _excluded_primitive_touches_face(primitive, polygon)
+                for primitive in excluded_boundary_primitives
+            ):
+                boundary_tainted_face_ids.add(face_id)
+
+    ownership_clean_face_ids = (
+        set(polygons) - ownership_tainted_face_ids - boundary_tainted_face_ids
+    )
     if not ownership_clean_face_ids:
         return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
-    # Tiny/degenerate classification is evaluated only over ownership-clean
-    # faces. An unresolved giant must never make an otherwise sound room appear
-    # tiny. This is the same rule already measured by the ownership shadow.
+    # Tiny/degenerate classification is evaluated only over boundary- and
+    # ownership-clean faces. A contaminated giant must never make an otherwise
+    # sound room appear tiny.
     largest_area = max(face_areas[face_id] for face_id in ownership_clean_face_ids)
     degenerate_face_ids = {
         face_id
@@ -627,12 +795,14 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     # Generalized pollution guard: ALL locally withheld defects combined must
     # remain a strict minority of the discovered face universe. Otherwise the
     # survivors are not independently trustworthy enough to publish.
-    locally_withheld_face_ids = ownership_tainted_face_ids | degenerate_face_ids
+    locally_withheld_face_ids = (
+        ownership_tainted_face_ids | boundary_tainted_face_ids | degenerate_face_ids
+    )
     if locally_withheld_face_ids and 2 * len(locally_withheld_face_ids) >= len(polygons):
         return _blocked(
             scope,
             SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
-            if ownership_tainted_face_ids
+            if ownership_tainted_face_ids or boundary_tainted_face_ids
             else SOURCE_ROOM_FACE_DEGENERATE,
         )
 
@@ -647,7 +817,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         return _blocked(
             scope,
             SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
-            if ownership_tainted_face_ids
+            if ownership_tainted_face_ids or boundary_tainted_face_ids
             else SOURCE_ROOM_FACE_DEGENERATE,
         )
 
@@ -663,7 +833,12 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             if wall_id in wall_face_edges:
                 wall_face_edges[wall_id][face_edge].add(face_id)
 
-    parent = {wall_id: wall_id for wall_id in wall_ids}
+    active_wall_ids = tuple(
+        wall_id
+        for wall_id in wall_ids
+        if not boundary_local_recovery or wall_id not in boundary_tainted_wall_ids
+    )
+    parent = {wall_id: wall_id for wall_id in active_wall_ids}
 
     def find(wall_id: str) -> str:
         while parent[wall_id] != wall_id:
@@ -676,13 +851,13 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         if a != b:
             parent[max(a, b)] = min(a, b)
 
-    for index, left in enumerate(wall_ids):
-        for right in wall_ids[index + 1 :]:
+    for index, left in enumerate(active_wall_ids):
+        for right in active_wall_ids[index + 1 :]:
             if endpoints_by_wall[left] & endpoints_by_wall[right]:
                 union(left, right)
 
     component_walls: dict[str, set[str]] = defaultdict(set)
-    for wall_id in wall_ids:
+    for wall_id in active_wall_ids:
         component_walls[find(wall_id)].add(wall_id)
 
     resolved_faces: set[str] = set()
@@ -745,7 +920,10 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             face_id=face_id,
             reason=(
                 SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
-                if face_id in ownership_tainted_face_ids
+                if (
+                    face_id in ownership_tainted_face_ids
+                    or face_id in boundary_tainted_face_ids
+                )
                 else SOURCE_ROOM_FACE_DEGENERATE
             ),
             document_id=scope.document_id,
@@ -766,7 +944,12 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         records=tuple(output),
         reason_codes=(
             SOURCE_ROOM_FACE_SCOPE_RESOLVED,
-            *((SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,) if abstained else ()),
+            *((SOURCE_ROOM_FACE_BOUNDARY_LOCAL_RECOVERY,) if boundary_local_recovery else ()),
+            *(
+                (SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,)
+                if abstained or boundary_local_recovery
+                else ()
+            ),
         ),
         document_id=scope.document_id,
         revision_id=scope.revision_id,
