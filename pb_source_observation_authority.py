@@ -23,6 +23,7 @@ from pb_migration_contracts import (
     canonical_contract_json,
     stable_contract_id,
 )
+from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
 
@@ -469,14 +470,16 @@ class SourceObservationProducer:
         """Render one page from the exact immutable PDF bytes this producer ingested.
 
         ``clip_pt`` is optional. ``None`` renders the whole page exactly as
-        before. Otherwise it is a PDF page-space ``(x0, y0, x1, y1)`` region
-        (the coordinate space of ``page.rect`` and of native word geometry)
-        rendered with the PDF renderer's own clip -- the page is never rendered
-        whole and cropped afterwards. The clip must be four finite numbers with
-        positive width and height lying entirely inside the producer-owned page
-        rectangle; anything else is rejected with ``INVALID_RENDER_CLIP``,
-        never clamped. The clip is a rendering request, not an authority
-        claim: page-parent lineage and every lineage check are unchanged.
+        before. Otherwise it is a native PDF user-space
+        ``(x0, y0, x1, y1)`` region -- the same unrotated coordinate space
+        used by native word/vector observations. The clip is validated against
+        the producer-owned native page frame, then transformed into display
+        coordinates only when required by the page's authenticated rotation
+        before being passed to the renderer. The page is never rendered whole
+        and cropped afterwards. Anything outside the native page frame is
+        rejected with ``INVALID_RENDER_CLIP``, never clamped. The clip is a
+        rendering request, not an authority claim: page-parent lineage and every
+        lineage check are unchanged.
 
         This is the producer-owned raster boundary for downstream OCR. Callers
         address the page by immutable lineage only; they cannot supply page pixels,
@@ -577,19 +580,44 @@ class SourceObservationProducer:
             if clip_rect is None:
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
             else:
-                page_rect = page.rect
+                try:
+                    frame = native_page_frame(page)
+                except NativePageFrameUnresolved as exc:
+                    raise ValueError(
+                        f"{INVALID_RENDER_CLIP}: native page frame unresolved"
+                    ) from exc
+
                 if not (
-                    clip_rect[0] >= float(page_rect.x0)
-                    and clip_rect[1] >= float(page_rect.y0)
-                    and clip_rect[2] <= float(page_rect.x1)
-                    and clip_rect[3] <= float(page_rect.y1)
+                    clip_rect[0] >= 0.0
+                    and clip_rect[1] >= 0.0
+                    and clip_rect[2] <= float(frame.native_width)
+                    and clip_rect[3] <= float(frame.native_height)
                 ):
                     raise ValueError(
-                        f"{INVALID_RENDER_CLIP}: clip lies outside the page rectangle"
+                        f"{INVALID_RENDER_CLIP}: clip lies outside the native page frame"
                     )
+
+                render_clip = fitz.Rect(*clip_rect)
+                if frame.rotation != 0:
+                    render_clip = render_clip * page.rotation_matrix
+
+                page_rect = page.rect
+                tolerance = 1e-6
+                if not (
+                    float(render_clip.x0) >= float(page_rect.x0) - tolerance
+                    and float(render_clip.y0) >= float(page_rect.y0) - tolerance
+                    and float(render_clip.x1) <= float(page_rect.x1) + tolerance
+                    and float(render_clip.y1) <= float(page_rect.y1) + tolerance
+                    and float(render_clip.x1) > float(render_clip.x0)
+                    and float(render_clip.y1) > float(render_clip.y0)
+                ):
+                    raise ValueError(
+                        f"{INVALID_RENDER_CLIP}: transformed clip lies outside the display page"
+                    )
+
                 pix = page.get_pixmap(
                     matrix=fitz.Matrix(scale, scale),
-                    clip=fitz.Rect(*clip_rect),
+                    clip=render_clip,
                     alpha=False,
                 )
             png_bytes = pix.tobytes("png")
