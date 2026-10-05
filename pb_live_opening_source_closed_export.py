@@ -11,7 +11,7 @@ document/revision/hash, owned viewport, source page and complete evidence set.
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from pb_live_opening_area_quantity_publication import (
     publish_live_opening_area_quantities,
@@ -20,6 +20,7 @@ from pb_live_physical_opening_void_composition import (
     LiveCanonicalOpeningObject,
     LivePhysicalOpeningVoidComposition,
 )
+from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
@@ -28,11 +29,11 @@ from pb_source_closed_run_export import (
 )
 
 
-def _opening_by_identity(
-    composition: LivePhysicalOpeningVoidComposition,
+def _opening_map(
+    canonical_openings: Sequence[LiveCanonicalOpeningObject],
 ) -> Mapping[str, LiveCanonicalOpeningObject]:
     by_id: dict[str, LiveCanonicalOpeningObject] = {}
-    for opening in composition.canonical_openings:
+    for opening in canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError(
                 "canonical_openings must contain LiveCanonicalOpeningObject"
@@ -50,24 +51,33 @@ def _opening_by_identity(
     return MappingProxyType(by_id)
 
 
-def build_live_opening_area_source_traces(
+def _opening_by_identity(
     composition: LivePhysicalOpeningVoidComposition,
+) -> Mapping[str, LiveCanonicalOpeningObject]:
+    return _opening_map(composition.canonical_openings)
+
+
+def _build_opening_area_source_traces(
+    quantities: Sequence[QuantityEvidence],
+    canonical_openings: Sequence[LiveCanonicalOpeningObject],
     *,
     workspace_id: int,
     project_id: str,
 ) -> Mapping[str, CommercialTakeoffSourceTrace]:
-    """Build exact source traces for quantities publishable from a composition."""
-
-    if type(composition) is not LivePhysicalOpeningVoidComposition:
-        raise TypeError(
-            "composition must be LivePhysicalOpeningVoidComposition"
-        )
-
-    quantities = publish_live_opening_area_quantities(composition)
-    openings = _opening_by_identity(composition)
+    openings = _opening_map(canonical_openings)
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
 
     for quantity in quantities:
+        if not isinstance(quantity, QuantityEvidence):
+            raise TypeError(
+                "opening area quantities must contain QuantityEvidence"
+            )
+        if quantity.family != "opening_area":
+            raise SourceClosedRunConflictError(
+                "opening-area export received a non-opening-area quantity"
+            )
+        if quantity.abstained:
+            continue
         if len(quantity.input_entity_ids) != 1:
             raise SourceClosedRunConflictError(
                 "opening area quantity must reference exactly one canonical opening"
@@ -129,6 +139,75 @@ def build_live_opening_area_source_traces(
     return MappingProxyType(traces)
 
 
+def build_live_opening_area_source_traces(
+    composition: LivePhysicalOpeningVoidComposition,
+    *,
+    workspace_id: int,
+    project_id: str,
+) -> Mapping[str, CommercialTakeoffSourceTrace]:
+    """Build exact source traces for quantities publishable from a composition."""
+
+    if type(composition) is not LivePhysicalOpeningVoidComposition:
+        raise TypeError(
+            "composition must be LivePhysicalOpeningVoidComposition"
+        )
+
+    quantities = publish_live_opening_area_quantities(composition)
+    return _build_opening_area_source_traces(
+        quantities,
+        composition.canonical_openings,
+        workspace_id=workspace_id,
+        project_id=project_id,
+    )
+
+
+def build_live_opening_area_claim_source_traces(
+    claim,
+    *,
+    workspace_id: int,
+    project_id: str,
+) -> Mapping[str, CommercialTakeoffSourceTrace]:
+    """Build traces directly from the final live production claim."""
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+    if type(claim) is not LivePhysicalNetWallClaim:
+        raise TypeError("claim must be LivePhysicalNetWallClaim")
+    return _build_opening_area_source_traces(
+        tuple(claim.opening_quantity_evidence),
+        tuple(claim.canonical_openings),
+        workspace_id=workspace_id,
+        project_id=project_id,
+    )
+
+
+def seal_live_opening_area_claim_run(
+    claim,
+    *,
+    workspace_id: int,
+    project_id: str,
+) -> SealedSourceClosedRun:
+    """Seal opening areas already present on one final live production claim."""
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+
+    if type(claim) is not LivePhysicalNetWallClaim:
+        raise TypeError("claim must be LivePhysicalNetWallClaim")
+    quantities = tuple(
+        quantity
+        for quantity in claim.opening_quantity_evidence
+        if not quantity.abstained
+    )
+    traces = build_live_opening_area_claim_source_traces(
+        claim,
+        workspace_id=workspace_id,
+        project_id=project_id,
+    )
+    return seal_source_closed_run(
+        quantities,
+        project_id=project_id,
+        traces_by_quantity_id=traces,
+    )
+
+
 def seal_live_opening_area_run(
     composition: LivePhysicalOpeningVoidComposition,
     *,
@@ -155,6 +234,8 @@ def seal_live_opening_area_run(
 
 
 __all__ = [
+    "build_live_opening_area_claim_source_traces",
     "build_live_opening_area_source_traces",
+    "seal_live_opening_area_claim_run",
     "seal_live_opening_area_run",
 ]
