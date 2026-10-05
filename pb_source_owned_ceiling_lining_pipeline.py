@@ -240,15 +240,53 @@ def run_source_owned_ceiling_lining_shadow(
         # explicit boundary error rather than fabricating evidence objects.
         raise ValueError(SOURCE_OWNED_CEILING_SHADOW_CONTEXT_MISMATCH)
 
-    # Building physical wall candidates is allowed to augment the producer
-    # snapshot with producer-owned raster-visible segments.
-    wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+    # Prefer the exact producer-owned authenticated viewport wall scope that
+    # matches the caller's already-trusted viewport. This preserves page-wide
+    # fallback for drawings with no authenticated source viewport, but prevents
+    # unrelated linework elsewhere on a sheet from poisoning a floor-plan room
+    # universe that has its own sealed viewport boundary.
+    viewport_wall_producer = PhysicalWallCandidateProducer.from_authenticated_viewports(
         source_visibility_producer,
         page_ids=(viewport.page_id,),
     )
     post = source_visibility_producer.published_snapshot_for_revision(revision_id)
     if post is None:
         raise RuntimeError(SOURCE_OWNED_CEILING_SHADOW_CONTEXT_MISMATCH)
+
+    viewport_wall_authority = viewport_wall_producer.authority()
+    wall_selector = viewport_wall_authority.selector_for_viewport(
+        document_id=post.revision.document_id,
+        revision_id=post.revision.revision_id,
+        source_sha256=post.revision.source_sha256,
+        snapshot_id=post.snapshot.snapshot_id,
+        page_id=viewport.page_id,
+        viewport_id=viewport.viewport_id,
+    )
+
+    if wall_selector is not None:
+        wall_authority = viewport_wall_authority
+    else:
+        # Compatibility path for simple/full-page drawings whose viewport is a
+        # caller-owned whole-page execution scope rather than a producer-owned
+        # segmented source viewport. The legacy page-scope behavior is unchanged.
+        wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=(viewport.page_id,),
+        )
+        post = source_visibility_producer.published_snapshot_for_revision(revision_id)
+        if post is None:
+            raise RuntimeError(SOURCE_OWNED_CEILING_SHADOW_CONTEXT_MISMATCH)
+        wall_authority = wall_producer.authority()
+        wall_selector = wall_authority.selector_for_decision_scope(
+            document_id=post.revision.document_id,
+            revision_id=post.revision.revision_id,
+            source_sha256=post.revision.source_sha256,
+            snapshot_id=post.snapshot.snapshot_id,
+            page_id=viewport.page_id,
+            decision_scope_id=f"wall-source:page-{viewport.page_id}",
+        )
+        if wall_selector is None:
+            raise RuntimeError(SOURCE_OWNED_CEILING_SHADOW_ROOM_AUTHORITY_UNAVAILABLE)
 
     # Rebind only when THIS trusted wall-build operation advanced the exact
     # entry snapshot. Arbitrary stale caller contexts were rejected above.
@@ -258,16 +296,14 @@ def run_source_owned_ceiling_lining_shadow(
         else replace(context, evidence_snapshot_id=post.snapshot.snapshot_id)
     )
 
-    room_face_authority = build_source_room_face_authority(
-        wall_producer.authority()
-    )
+    room_face_authority = build_source_room_face_authority(wall_authority)
     room_selector = SourceRoomFaceSelector(
-        document_id=post.revision.document_id,
-        revision_id=post.revision.revision_id,
-        source_sha256=post.revision.source_sha256,
-        snapshot_id=post.snapshot.snapshot_id,
-        page_id=viewport.page_id,
-        decision_scope_id=f"wall-source:page-{viewport.page_id}",
+        document_id=wall_selector.document_id,
+        revision_id=wall_selector.revision_id,
+        source_sha256=wall_selector.source_sha256,
+        snapshot_id=wall_selector.snapshot_id,
+        page_id=wall_selector.page_id,
+        decision_scope_id=wall_selector.decision_scope_id,
     )
     room_result = room_face_authority.resolve_scope(room_selector)
 
