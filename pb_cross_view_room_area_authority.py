@@ -39,6 +39,10 @@ from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
@@ -154,11 +158,20 @@ def _trusted_lines_for_page(
     *,
     revision_id: str,
     page_id: str,
+    candidate_labels: Sequence[str],
 ) -> tuple[_TrustedLine, ...]:
     published = source.published_snapshot_for_revision(revision_id)
     if published is None:
         return ()
     text_authority = source.text_integrity_authority()
+    raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)
+    wanted_labels = {
+        _norm_label(value)
+        for value in candidate_labels
+        if _norm_label(value)
+    }
+    if not wanted_labels:
+        return ()
     grouped: dict[
         tuple[str, int, int],
         list[tuple[str, object, object]],
@@ -195,12 +208,6 @@ def _trusted_lines_for_page(
     lines: list[_TrustedLine] = []
     for key in sorted(grouped):
         items = grouped[key]
-        if any(
-            result.status is not EvidenceResolutionStatus.CORROBORATED
-            or not result.trusted_text
-            for _observation_id, result, _receipt in items
-        ):
-            continue
         word_nos = [
             int(receipt.word_no)
             for _observation_id, _result, receipt in items
@@ -210,17 +217,56 @@ def _trusted_lines_for_page(
         lo, hi = min(word_nos), max(word_nos)
         if set(word_nos) != set(range(lo, hi + 1)):
             continue
+
         ordered = sorted(items, key=lambda item: int(item[2].word_no))
+        raw_line = " ".join(
+            str(item[2].raw_text or "").strip()
+            for item in ordered
+            if str(item[2].raw_text or "").strip()
+        )
+        if _norm_label(raw_line) not in wanted_labels:
+            continue
+
+        trusted_words: list[str] = []
+        failed = False
+        for observation_id, native, _receipt in ordered:
+            trusted: Optional[str] = None
+            if (
+                native.status is EvidenceResolutionStatus.CORROBORATED
+                and native.trusted_text
+            ):
+                trusted = str(native.trusted_text)
+            else:
+                corroborated = raster.publish(
+                    RasterTextCorroborationSelector(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                if (
+                    corroborated.status is EvidenceResolutionStatus.CORROBORATED
+                    and corroborated.record is not None
+                    and corroborated.corroborated_text
+                ):
+                    trusted = str(corroborated.corroborated_text)
+            if not trusted:
+                failed = True
+                break
+            trusted_words.append(trusted.strip())
+        if failed:
+            continue
+
+        line_text = " ".join(value for value in trusted_words if value)
+        if _norm_label(line_text) not in wanted_labels:
+            continue
+
         boxes = [_finite_bbox(item[2].geometry) for item in ordered]
         if any(box is None for box in boxes):
             continue
         concrete_boxes = tuple(box for box in boxes if box is not None)
-        line_text = " ".join(
-            str(item[1].trusted_text).strip()
-            for item in ordered
-        )
-        if not _norm_label(line_text):
-            continue
         lines.append(
             _TrustedLine(
                 page_id=str(page_id),
@@ -654,6 +700,7 @@ class CrossViewRoomAreaProducer:
                 self._source,
                 revision_id=revision_id,
                 page_id=page_id,
+                candidate_labels=tuple(unique_labels),
             )
             relevant_lines = tuple(
                 line
