@@ -35,6 +35,10 @@ from pb_geometry_takeoff_model import (
     MeasurementAuthorityType,
 )
 from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+from pb_live_ceiling_lining_integration import (
+    LiveCanonicalCeilingSurfaceObject,
+    canonical_ceiling_from_shadow_quantity,
+)
 from pb_migration_contracts import (
     EvidenceResolutionStatus,
     QuantityEvidence,
@@ -73,6 +77,13 @@ class CeilingLiningReviewCandidate:
     source_trace: CommercialTakeoffSourceTrace
     measurement_authority: CommercialMeasurementAuthority
     review_row: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class CeilingLiningReviewCollection:
+    candidates: tuple[CeilingLiningReviewCandidate, ...]
+    canonical_ceilings: tuple[LiveCanonicalCeilingSurfaceObject, ...]
+    schema_version: str = CEILING_REVIEW_PROMOTION_SCHEMA_VERSION
 
 
 @dataclass(frozen=True)
@@ -374,15 +385,15 @@ def _selected_page_indices(
     return tuple(sorted(selected))
 
 
-def collect_ceiling_lining_review_candidates(
+def collect_ceiling_lining_review_bundle(
     pdf_path: Path | str,
     *,
     pages: Optional[Sequence[int]] = None,
     workspace_id: int,
     project_id: str,
     authoritative_area_quantities: Optional[Sequence[QuantityEvidence]] = None,
-) -> tuple[CeilingLiningReviewCandidate, ...]:
-    """Collect source-owned ceiling candidates already eligible for review."""
+) -> CeilingLiningReviewCollection:
+    """Collect review candidates and canonical ceilings in one source replay."""
     if isinstance(workspace_id, bool):
         raise ValueError("workspace_id must be a positive integer")
     try:
@@ -405,7 +416,10 @@ def collect_ceiling_lining_review_candidates(
     try:
         selected = _selected_page_indices(len(doc), pages)
         if not selected:
-            return ()
+            return CeilingLiningReviewCollection(
+                candidates=(),
+                canonical_ceilings=(),
+            )
         page_ids = tuple(str(index + 1) for index in selected)
         source = SourceVisibilityProducer(
             producer_method="live-ceiling-review",
@@ -419,6 +433,8 @@ def collect_ceiling_lining_review_candidates(
         )
 
         by_quantity_id: dict[str, CeilingLiningReviewCandidate] = {}
+        canonical_by_id: dict[str, LiveCanonicalCeilingSurfaceObject] = {}
+        canonical_conflicts: set[str] = set()
         for page_index in selected:
             page_no = page_index + 1
             page = doc[page_index]
@@ -495,6 +511,22 @@ def collect_ceiling_lining_review_candidates(
                         scoped_room_areas if scoped_room_areas else None
                     ),
                 )
+                for shadow_quantity in result.source_result.ceiling_quantities:
+                    ceiling = canonical_ceiling_from_shadow_quantity(
+                        quantity=shadow_quantity,
+                        source_result=result.source_result,
+                        page_no=page_no,
+                        viewport_id=viewport_id,
+                    )
+                    if ceiling is None:
+                        continue
+                    canonical_id = ceiling.canonical_ceiling_id
+                    prior_ceiling = canonical_by_id.get(canonical_id)
+                    if prior_ceiling is not None and prior_ceiling != ceiling:
+                        canonical_conflicts.add(canonical_id)
+                    else:
+                        canonical_by_id[canonical_id] = ceiling
+
                 for candidate in result.candidates:
                     quantity_id = candidate.promoted_quantity.quantity_id
                     prior = by_quantity_id.get(quantity_id)
@@ -505,12 +537,38 @@ def collect_ceiling_lining_review_candidates(
                         )
                     by_quantity_id[quantity_id] = candidate
 
-        return tuple(
-            by_quantity_id[quantity_id]
-            for quantity_id in sorted(by_quantity_id)
+        for canonical_id in canonical_conflicts:
+            canonical_by_id.pop(canonical_id, None)
+        return CeilingLiningReviewCollection(
+            candidates=tuple(
+                by_quantity_id[quantity_id]
+                for quantity_id in sorted(by_quantity_id)
+            ),
+            canonical_ceilings=tuple(
+                canonical_by_id[canonical_id]
+                for canonical_id in sorted(canonical_by_id)
+            ),
         )
     finally:
         doc.close()
+
+
+def collect_ceiling_lining_review_candidates(
+    pdf_path: Path | str,
+    *,
+    pages: Optional[Sequence[int]] = None,
+    workspace_id: int,
+    project_id: str,
+    authoritative_area_quantities: Optional[Sequence[QuantityEvidence]] = None,
+) -> tuple[CeilingLiningReviewCandidate, ...]:
+    """Compatibility wrapper returning only review candidates."""
+    return collect_ceiling_lining_review_bundle(
+        pdf_path,
+        pages=pages,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        authoritative_area_quantities=authoritative_area_quantities,
+    ).candidates
 
 
 def build_ceiling_lining_review_promotions(
@@ -564,7 +622,9 @@ __all__ = [
     "CEILING_REVIEW_PROMOTION_SCHEMA_VERSION",
     "CEILING_REVIEW_PROMOTION_UNAVAILABLE",
     "CeilingLiningReviewCandidate",
+    "CeilingLiningReviewCollection",
     "CeilingLiningReviewPromotionResult",
     "build_ceiling_lining_review_promotions",
+    "collect_ceiling_lining_review_bundle",
     "collect_ceiling_lining_review_candidates",
 ]
