@@ -237,9 +237,11 @@ def publish_live_canonical_room_area_quantities(
                 blocking_reasons=(),
                 reason_codes=tuple(source.reason_codes),
                 metadata={
-                    **dict(source.metadata)
-                    if isinstance(source.metadata, Mapping)
-                    else {},
+                    **(
+                        dict(source.metadata)
+                        if isinstance(source.metadata, Mapping)
+                        else {}
+                    ),
                     "upstream_room_area_quantity_id": source_id,
                     "canonical_room_id": room.canonical_room_id,
                     "physical_room_id": room.physical_room_id,
