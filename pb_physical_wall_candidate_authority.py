@@ -2573,7 +2573,7 @@ def _producer_raster_opening_relation_overrides(
             direction = (0.0, 1.0)
             opening_start, opening_end = y0, y1
 
-        faces: list[tuple[str, float, object, Line]] = []
+        faces: list[tuple[str, float, Optional[str], Line]] = []
         valid = True
         for support_id in tuple(existence.source_observation_ids):
             support = visibility.resolve_raster_opening_primitive(
@@ -2618,9 +2618,9 @@ def _producer_raster_opening_relation_overrides(
                 raster_visible_rows=raster_visible_rows,
                 records_by_raw_id=records_by_raw_id,
             )
-            if owner is None:
-                valid = False
-                break
+            # Ownership failure is local to this face. Preserve the independent
+            # opposite-face SAME proof when its two owners remain unique, just
+            # like the native G17 partial-SAME bridge.
             faces.append((role[0], role[1], owner, line))
         if not valid or len(faces) != 4:
             continue
@@ -2640,6 +2640,8 @@ def _producer_raster_opening_relation_overrides(
         # across one physical opening. Sorted face order therefore pairs lower
         # with lower and upper with upper without inferring a cross-face relation.
         for left_face, right_face in zip(left, right):
+            if left_face[2] is None or right_face[2] is None:
+                continue
             left_owner, right_owner = str(left_face[2]), str(right_face[2])
             if left_owner == right_owner:
                 continue
