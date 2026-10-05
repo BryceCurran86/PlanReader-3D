@@ -39,6 +39,13 @@ from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
+from pb_page_scale_calibration_authority import (
+    POINTS_PER_METRE_AT_1_1,
+    ScaleCalibrationStatus,
+    ScaleSourceReading,
+    ScaleSourceType,
+    resolve_page_scale_calibration,
+)
 from pb_raster_text_corroboration_authority import (
     RasterTextCorroborationProducer,
     RasterTextCorroborationSelector,
@@ -568,11 +575,77 @@ def _trusted_native_dimensions_for_page(
         )
     )
 
+def _dimension_span_pt(dimension: _TrustedBoundDimension) -> float:
+    first, second = dimension.endpoints_pt
+    return math.hypot(
+        float(second[0]) - float(first[0]),
+        float(second[1]) - float(first[1]),
+    )
+
+
+def _figured_pair_scale_consistent(
+    *,
+    page_id: str,
+    horizontal: _TrustedBoundDimension,
+    vertical: _TrustedBoundDimension,
+) -> bool:
+    """Use the existing page-scale conflict contract as a pair-consistency gate.
+
+    The resulting calibration is never published or consumed as measurement
+    authority. It is used only to reject two figured dimensions whose source
+    spans imply materially different drawing ratios.
+    """
+    try:
+        page_no = int(str(page_id))
+    except (TypeError, ValueError):
+        return False
+
+    readings: list[ScaleSourceReading] = []
+    for name, dimension in (
+        ("horizontal", horizontal),
+        ("vertical", vertical),
+    ):
+        span_pt = _dimension_span_pt(dimension)
+        metres = float(dimension.value_mm) / 1000.0
+        if (
+            not math.isfinite(span_pt)
+            or span_pt <= 0.0
+            or not math.isfinite(metres)
+            or metres <= 0.0
+        ):
+            return False
+        points_per_metre = span_pt / metres
+        if not math.isfinite(points_per_metre) or points_per_metre <= 0.0:
+            return False
+        ratio = POINTS_PER_METRE_AT_1_1 / points_per_metre
+        readings.append(
+            ScaleSourceReading(
+                source_type=ScaleSourceType.INFERRED.value,
+                scale_text=f"cross-view figured {name} consistency",
+                ratio=ratio,
+                confidence=1.0,
+            )
+        )
+
+    calibration = resolve_page_scale_calibration(
+        page_no=page_no,
+        sheet_label="",
+        readings=readings,
+    )
+    return calibration.status == ScaleCalibrationStatus.PROVISIONAL.value
+
+
 def _line_inside_dimension_pair(
     line: _TrustedLine,
     horizontal: _TrustedBoundDimension,
     vertical: _TrustedBoundDimension,
 ) -> bool:
+    """Require the authenticated label to belong spatially to the figured box.
+
+    Architectural dimensions are normally offset outside the measured room.
+    Permit only a typography-derived offset from the source label itself,
+    rather than a fixed page/project distance.
+    """
     hx = sorted(
         (
             float(horizontal.endpoints_pt[0][0]),
@@ -586,10 +659,21 @@ def _line_inside_dimension_pair(
         )
     )
     x0, y0, x1, y1 = line.bbox
-    eps = 1e-6
+    centre_x = (x0 + x1) / 2.0
+    centre_y = (y0 + y1) / 2.0
+    word_count = max(1, len(line.receipt_ids))
+    typography_tolerance = max(
+        (x1 - x0) / word_count,
+        (y1 - y0) / word_count,
+        1e-6,
+    )
     return (
-        hx[0] - eps <= x0 <= x1 <= hx[1] + eps
-        and vy[0] - eps <= y0 <= y1 <= vy[1] + eps
+        hx[0] - typography_tolerance
+        <= centre_x
+        <= hx[1] + typography_tolerance
+        and vy[0] - typography_tolerance
+        <= centre_y
+        <= vy[1] + typography_tolerance
     )
 
 
@@ -765,10 +849,17 @@ class CrossViewRoomAreaProducer:
                         continue
                     for horizontal in horizontals:
                         for vertical in verticals:
-                            if _line_inside_dimension_pair(
-                                line,
-                                horizontal,
-                                vertical,
+                            if (
+                                _line_inside_dimension_pair(
+                                    line,
+                                    horizontal,
+                                    vertical,
+                                )
+                                and _figured_pair_scale_consistent(
+                                    page_id=page_id,
+                                    horizontal=horizontal,
+                                    vertical=vertical,
+                                )
                             ):
                                 matches.append(
                                     (
