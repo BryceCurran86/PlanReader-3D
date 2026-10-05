@@ -15,10 +15,18 @@ from pb_migration_contracts import EvidenceResolutionStatus
 import pb_opening_host_binding_authority as host
 from pb_physical_opening_authority import PhysicalOpeningAuthority
 from pb_physical_wall_candidate_authority import (
+    BOUNDARY_EVALUATION_EVALUATED,
+    ExcludedBoundaryPrimitive,
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateRecord,
+    PhysicalWallCandidateScopeResult,
+    PhysicalWallScopeBoundaryEvaluation,
 )
-from pb_physical_wall_identity import PhysicalWallEquivalenceResolution, PhysicalWallIdentity
+from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
+    PhysicalWallEquivalenceResolution,
+    PhysicalWallIdentity,
+)
 from pb_source_observation_authority import SourceObservationProducer
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
@@ -176,6 +184,160 @@ def test_offset_clustering_does_not_chain_across_more_than_role_tolerance() -> N
     c = _record("cluster-c", ((-10.0, 0.8), (0.0, 0.8)))
     clusters = host._clusters_by_offset(((0.0, a), (0.4, b), (0.8, c)), 0.5)
     assert tuple(len(cluster) for cluster in clusters) == (2, 1)
+
+
+def _incomplete_scope(
+    records: tuple[PhysicalWallCandidateRecord, ...],
+    *,
+    tainted_ids: tuple[str, ...] = (),
+    excluded_primitives: tuple[ExcludedBoundaryPrimitive, ...] = (),
+    equivalence: PhysicalWallEquivalenceResolution | None = None,
+) -> PhysicalWallCandidateScopeResult:
+    ids = tuple(record.wall_candidate_id for record in records)
+    return PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=False,
+        records=records,
+        source_observation_ids=tuple(f"obs:{wall_id}" for wall_id in ids),
+        document_id="doc-local-host",
+        revision_id="rev-local-host",
+        source_sha256="sha-local-host",
+        snapshot_id="snap-local-host",
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+        reason_codes=(
+            "physical_wall_candidate_scope_resolved",
+            "physical_wall_candidate_scope_cropped_at_page_boundary",
+        ),
+        equivalence=equivalence or _equivalence(records),
+        proposition="physical_wall_candidate_scope_resolved",
+        boundary_evaluation=PhysicalWallScopeBoundaryEvaluation(
+            status=BOUNDARY_EVALUATION_EVALUATED,
+            reason_code=None,
+            evaluated_wall_candidate_ids=ids,
+            boundary_tainted_wall_candidate_ids=tuple(sorted(tainted_ids)),
+            boundary_taint_reason_codes=tuple(
+                (wall_id, ("scope_boundary_dangling_end",))
+                for wall_id in sorted(tainted_ids)
+            ),
+            excluded_boundary_primitives=excluded_primitives,
+            authenticated_frame_edge_primitive_count=0,
+            contact_tolerance_pt=float(DEFAULT_GAP_SNAP_TOLERANCE_PT),
+        ),
+    )
+
+
+def test_local_host_scope_ignores_unrelated_boundary_taint() -> None:
+    host_records = _band_records(center_offset=0.0)
+    unrelated = _record("unrelated-tainted", ((200.0, 80.0), (260.0, 80.0)))
+    scope = _incomplete_scope(
+        host_records + (unrelated,),
+        tainted_ids=(unrelated.wall_candidate_id,),
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is not None
+    assert reasons == (host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,)
+    assert {record.wall_candidate_id for record in local.records} == {
+        record.wall_candidate_id for record in host_records
+    }
+    resolved = host._resolve_host_bands(
+        local.records,
+        OPENING,
+        local.equivalence,
+    )
+    assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(resolved.bands) == 1
+
+
+def test_local_host_scope_abstains_when_relevant_wall_is_boundary_tainted() -> None:
+    host_records = _band_records(center_offset=0.0)
+    tainted = host_records[0].wall_candidate_id
+    scope = _incomplete_scope(host_records, tainted_ids=(tainted,))
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
+    assert "host_relevant_wall_boundary_tainted" in reasons
+
+
+def test_local_host_scope_abstains_when_excluded_boundary_primitive_can_host() -> None:
+    host_records = _band_records(center_offset=0.0)
+    excluded = ExcludedBoundaryPrimitive(
+        category="crosses_scope_boundary",
+        source_observation_id="obs:excluded-host-role",
+        x1=-100.0,
+        y1=15.0,
+        x2=0.0,
+        y2=15.0,
+    )
+    scope = _incomplete_scope(
+        host_records,
+        excluded_primitives=(excluded,),
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
+    assert "host_relevant_excluded_boundary_primitive" in reasons
+
+
+@pytest.mark.parametrize(
+    "classification",
+    [
+        PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+        PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+    ],
+)
+def test_local_host_scope_never_inherits_identity_through_tainted_candidate(
+    classification,
+) -> None:
+    host_records = _band_records(center_offset=0.0)
+    relevant_id = host_records[0].wall_candidate_id
+    unsafe = _record("unsafe-equivalent", ((200.0, 80.0), (260.0, 80.0)))
+    records = host_records + (unsafe,)
+    base = _equivalence(records)
+    equivalence_groups = (
+        ((relevant_id, unsafe.wall_candidate_id),)
+        if classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+        else ()
+    )
+    equivalence = replace(
+        base,
+        equivalence_groups=equivalence_groups,
+        same_wall_ids=(
+            tuple(sorted((relevant_id, unsafe.wall_candidate_id)))
+            if equivalence_groups
+            else ()
+        ),
+        ambiguous_wall_ids=(
+            tuple(sorted((relevant_id, unsafe.wall_candidate_id)))
+            if classification
+            is PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
+            else ()
+        ),
+        pair_classifications=(
+            (
+                min(relevant_id, unsafe.wall_candidate_id),
+                max(relevant_id, unsafe.wall_candidate_id),
+                classification.value,
+            ),
+        ),
+    )
+    scope = _incomplete_scope(
+        records,
+        tainted_ids=(unsafe.wall_candidate_id,),
+        equivalence=equivalence,
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
+    assert "host_relevant_equivalence_crosses_unsafe_boundary" in reasons
 
 
 def test_unique_off_center_parallel_band_cannot_corrobate_host() -> None:
