@@ -753,8 +753,11 @@ class RasterPlanDimensionProducer:
             raw_lines = ()
 
         text_observations: list[RasterDimensionTextObservation] = []
-        page_width = float(page_parent.geometry[0]) if len(page_parent.geometry) >= 2 else 0.0
-        page_height = float(page_parent.geometry[1]) if len(page_parent.geometry) >= 2 else 0.0
+        # OCR boxes are normalized into native source user space above, so
+        # bounds validation must use the authenticated native frame too. The
+        # native page observation's width/height may reflect display rotation.
+        page_width = float(native_frame.native_width)
+        page_height = float(native_frame.native_height)
         px_to_pt = 72.0 / float(RASTER_DIMENSION_OCR_DPI)
         for line in raw_lines:
             value_mm = _parse_dimension_value_mm(line.text)
