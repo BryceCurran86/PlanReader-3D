@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from pb_migration_contracts import QuantityEvidence
 from pb_takeoff_output_supersedence import (
     blocked_commercial_claim_key,
     prior_commercial_projection_key,
+    prior_reviewed_commercial_projection_key,
     select_prior_commercial_rows_to_preserve,
+    select_prior_reviewed_row_ids_to_retain,
 )
 
 
@@ -139,3 +143,72 @@ def test_current_replacement_wins_over_prior_row():
         replacement_rows=(replacement,),
     )
     assert rows == ()
+
+
+
+def reviewed_prior_row(*, row_id: int = 17, sha: str = SHA_A):
+    row = prior_row(sha=sha, quantity_status="Measured")
+    return {
+        **row,
+        "id": row_id,
+        "origin": "AI_REVIEWED",
+        "confidence": "Reviewed",
+        "commercial_authority_status": "",
+        "commercial_authority_source": "",
+        "commercial_authority_reviewed_by": "",
+        "commercial_authority_reviewed_at": "",
+        "commercial_authority_fingerprint": "",
+    }
+
+
+def test_reviewed_row_is_retained_in_place_for_exact_blocked_claim():
+    key = blocked_commercial_claim_key(
+        blocked_quantity(),
+        source_sha256=SHA_A,
+    )
+    assert key is not None
+    reviewed = reviewed_prior_row()
+
+    assert prior_reviewed_commercial_projection_key(reviewed) == key
+    assert select_prior_reviewed_row_ids_to_retain(
+        [reviewed],
+        blocked_claim_keys=(key,),
+    ) == (17,)
+
+
+def test_reviewed_row_is_not_retained_after_source_change():
+    key = blocked_commercial_claim_key(
+        blocked_quantity(),
+        source_sha256=SHA_B,
+    )
+    assert key is not None
+    assert select_prior_reviewed_row_ids_to_retain(
+        [reviewed_prior_row(sha=SHA_A)],
+        blocked_claim_keys=(key,),
+    ) == ()
+
+
+def test_current_replacement_invalidates_prior_reviewed_row():
+    key = blocked_commercial_claim_key(
+        blocked_quantity(),
+        source_sha256=SHA_A,
+    )
+    assert key is not None
+    assert select_prior_reviewed_row_ids_to_retain(
+        [reviewed_prior_row()],
+        blocked_claim_keys=(key,),
+        replacement_rows=(prior_row(),),
+    ) == ()
+
+
+def test_duplicate_reviewed_rows_for_one_physical_claim_fail_closed():
+    key = blocked_commercial_claim_key(
+        blocked_quantity(),
+        source_sha256=SHA_A,
+    )
+    assert key is not None
+    with pytest.raises(ValueError, match="duplicate reviewed commercial rows"):
+        select_prior_reviewed_row_ids_to_retain(
+            [reviewed_prior_row(row_id=17), reviewed_prior_row(row_id=18)],
+            blocked_claim_keys=(key,),
+        )
