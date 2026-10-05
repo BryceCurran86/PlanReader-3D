@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from pb_raster_opening_source_primitives import (
+    RASTER_LINE_RUN,
     RASTER_THIN_INK_RUN,
     RASTER_WALL_BAND_END,
     RASTER_WALL_BAND_FACE,
@@ -55,6 +56,32 @@ def test_detector_emits_source_primitives_but_no_opening_decision() -> None:
     # The perception layer deliberately has no opening/existence proposition.
     assert all(not hasattr(primitive, "proposition") for primitive in primitives)
     assert all(not hasattr(primitive, "opening_id") for primitive in primitives)
+
+
+def test_raw_line_runs_preserve_frame_ink_that_touches_wall_mass() -> None:
+    gray = np.full((220, 440), 255, np.uint8)
+    cv2.rectangle(gray, (20, 80), (160, 90), 0, -1)
+    cv2.rectangle(gray, (240, 80), (400, 90), 0, -1)
+    # These frame rows touch both wall pieces at their ends. A halo-based
+    # hairline mask is allowed to suppress them, but neutral source evidence
+    # must retain the actual raster runs for later G17 review.
+    cv2.line(gray, (160, 83), (240, 83), 0, 1)
+    cv2.line(gray, (160, 87), (240, 87), 0, 1)
+
+    primitives = detect_raster_opening_source_primitives(_png(gray), dpi=DPI)
+    line_runs = tuple(
+        primitive
+        for primitive in primitives
+        if primitive.primitive_kind == RASTER_LINE_RUN
+    )
+    horizontal_gap_runs = tuple(
+        primitive
+        for primitive in line_runs
+        if abs(primitive.pixel_geometry[1] - primitive.pixel_geometry[3]) < 1e-9
+        and primitive.pixel_geometry[0] <= 160.0
+        and primitive.pixel_geometry[2] >= 240.0
+    )
+    assert len(horizontal_gap_runs) >= 2
 
 
 def test_detector_is_deterministic_and_input_order_free() -> None:
