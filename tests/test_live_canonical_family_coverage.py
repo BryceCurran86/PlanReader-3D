@@ -9,6 +9,7 @@ import pytest
 
 import pb_auto_geometry_v1219 as auto
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
+from pb_ceiling_lining_review_promotion import collect_ceiling_lining_review_bundle
 from pb_live_canonical_floor_surface import compose_live_canonical_floor_surfaces
 from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
 from pb_live_canonical_roof_projection import project_source_gable_roof
@@ -35,6 +36,7 @@ from tests.test_live_canonical_structural_member_projection import _resolved
 from tests.test_live_canonical_wall_finish_surface import _binding, _wall
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
 from tests.test_live_ceiling_lining_integration_v1 import _write as _write_ceiling_pdf
+from tests.test_ceiling_lining_review_promotion_v1 import _source_pdf as _ceiling_review_pdf
 from tests.test_live_room_area_source_closed_export import _cross_view_room_area_pdf
 
 
@@ -197,6 +199,40 @@ def test_quantity_stage_respects_the_existing_exact_status_vocabularies(status, 
     counts = report["family_reports"]["structural_member"]["stage_counts"]
     assert counts["QUANTIFIED"] == (len(members) if verified else 0)
     assert counts["PUBLISHED"] == 0
+
+
+def test_ceiling_review_bundle_registers_canonical_object_without_quantity_promotion(tmp_path):
+    path = tmp_path / "ceiling-review-coverage.pdf"
+    path.write_bytes(_ceiling_review_pdf(include_scale_bar=True))
+    bundle = collect_ceiling_lining_review_bundle(
+        path,
+        pages=(0,),
+        workspace_id=17,
+        project_id="ceiling-review-coverage",
+    )
+    assert len(bundle.candidates) == 1
+    assert len(bundle.canonical_ceilings) == 1
+    assert bundle.candidates[0].promoted_quantity.status == "review_required"
+
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=bundle.canonical_ceilings,
+        quantities=(),
+        output_rows=(),
+        registry_run_scope="ceiling-review-runtime-coverage",
+    )
+    report = build_runtime_coverage_publication(
+        summaries,
+        family_gaps=gaps,
+    )
+    family = report["family_reports"]["ceiling"]
+    assert family["classification"] == "PARTIAL"
+    assert family["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 0,
+        "PUBLISHED": 0,
+    }
 
 
 def test_live_ceiling_enters_registry_without_promoting_provisional_quantity(tmp_path):
