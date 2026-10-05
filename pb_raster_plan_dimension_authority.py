@@ -817,21 +817,6 @@ class RasterPlanDimensionProducer:
                 ),
             )
 
-        if not self._backend.is_available():
-            return self._store(
-                revision_id,
-                page_id,
-                RasterPlanDimensionResult(
-                    EvidenceResolutionStatus.ABSTAINED,
-                    (RASTER_DIMENSION_TEXT_UNAVAILABLE,),
-                    document_id=published.revision.document_id,
-                    revision_id=revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    page_id=page_id,
-                ),
-            )
-
         native_text_observations, native_word_heights = (
             self._native_numeric_text_observations(
                 published=published,
@@ -897,33 +882,49 @@ class RasterPlanDimensionProducer:
         # caller never sees or supplies the underlying source writer, page
         # pixels, OCR backend inputs, parent observation id, or partition id.
         source_writer = self._source_visibility._producer
-        try:
-            png_bytes, page_parent, native_frame = source_writer.render_native_page_png(
-                document_id=published.revision.document_id,
-                revision_id=revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                page_id=page_id,
-                dpi=float(RASTER_DIMENSION_OCR_DPI),
-                include_native_frame=True,
-            )
-            image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-            raw_lines = self._backend.extract_lines(
-                image, dpi=RASTER_DIMENSION_OCR_DPI
-            )
-        except Exception:
-            raw_lines = ()
+        raw_lines = ()
+        page_parent = None
+        native_frame = None
+        if self._backend.is_available():
+            try:
+                png_bytes, page_parent, native_frame = source_writer.render_native_page_png(
+                    document_id=published.revision.document_id,
+                    revision_id=revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    page_id=page_id,
+                    dpi=float(RASTER_DIMENSION_OCR_DPI),
+                    include_native_frame=True,
+                )
+                image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                raw_lines = self._backend.extract_lines(
+                    image, dpi=RASTER_DIMENSION_OCR_DPI
+                )
+            except Exception:
+                raw_lines = ()
 
         text_observations: list[RasterDimensionTextObservation] = list(
             native_text_observations
         )
-        # OCR boxes are normalized into native source user space above, so
-        # bounds validation must use the authenticated native frame too. The
-        # native page observation's width/height may reflect display rotation.
-        page_width = float(native_frame.native_width)
-        page_height = float(native_frame.native_height)
+        # OCR is optional corroboration. Already-authenticated native numeric
+        # text remains usable when the OCR backend or raster render is
+        # unavailable; only OCR candidates require the native-frame transform.
+        page_width = (
+            float(native_frame.native_width)
+            if native_frame is not None
+            else 0.0
+        )
+        page_height = (
+            float(native_frame.native_height)
+            if native_frame is not None
+            else 0.0
+        )
         px_to_pt = 72.0 / float(RASTER_DIMENSION_OCR_DPI)
-        for line in raw_lines:
+        for line in (
+            raw_lines
+            if native_frame is not None and page_parent is not None
+            else ()
+        ):
             value_mm = _parse_dimension_value_mm(line.text)
             if value_mm is None:
                 continue
