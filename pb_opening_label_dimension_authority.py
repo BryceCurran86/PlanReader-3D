@@ -26,6 +26,7 @@ from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     PHYSICAL_OPENING_EXISTS,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningExistenceRecord,
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
@@ -445,6 +446,82 @@ def _gap_span(records: Sequence[SourceObservationRecord]) -> Optional[_GapSpan]:
         cross_center=sum(cross_values) / len(cross_values),
         cross_spread=max(cross_values) - min(cross_values),
     )
+
+
+def _gap_span_for_opening(
+    source: SourceVisibilityProducer,
+    opening: PhysicalOpeningExistenceRecord,
+) -> Optional[_GapSpan]:
+    """Resolve spatial label ownership for one already-proven physical opening.
+
+    Native/vector openings keep the historical source-line reconstruction
+    byte-for-byte. The G17 raster-framed pattern is different by design: its
+    supporting primitives are isolated from ordinary visible observations.
+    For that one pattern only, consume G17's sealed aperture bbox as spatial
+    ownership geometry. The bbox cannot establish semantic kind, figured
+    dimensions, metric measurement authority, host identity, or quantity.
+    """
+
+    if opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION:
+        bbox = opening.aperture_bbox_pt
+        if bbox is None or len(bbox) != 4:
+            return None
+        try:
+            x0, y0, x1, y1 = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+            return None
+        width = x1 - x0
+        height = y1 - y0
+        if width <= _COORD_TOL or height <= _COORD_TOL:
+            return None
+
+        # Mirror the G17/host geometry invariant. This is only an orientation
+        # proof over already-authenticated page-point geometry; it is not scale.
+        if width > height + _COORD_TOL:
+            if width + _COORD_TOL < 2.0 * height:
+                return None
+            return _GapSpan(
+                axis=(1.0, 0.0),
+                normal=(0.0, 1.0),
+                along_min=x0,
+                along_max=x1,
+                cross_center=(y0 + y1) / 2.0,
+                cross_spread=height,
+            )
+        if height > width + _COORD_TOL:
+            if height + _COORD_TOL < 2.0 * width:
+                return None
+            return _GapSpan(
+                axis=(0.0, 1.0),
+                normal=(-1.0, 0.0),
+                along_min=y0,
+                along_max=y1,
+                cross_center=-(x0 + x1) / 2.0,
+                cross_spread=width,
+            )
+        return None
+
+    visibility = source.authority()
+    source_records: list[SourceObservationRecord] = []
+    for observation_id in opening.source_observation_ids:
+        resolved = visibility.resolve_visible(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or resolved.observation is None
+        ):
+            return None
+        source_records.append(resolved.observation)
+    return _gap_span(source_records)
 
 
 def _bbox_union(values: Sequence[Sequence[float]]) -> Optional[tuple[float, float, float, float]]:
@@ -891,32 +968,7 @@ class OpeningLabelDimensionProducer:
         if prior is not None:
             return prior
 
-        visibility = self._source.authority()
-        source_records: list[SourceObservationRecord] = []
-        for observation_id in opening.source_observation_ids:
-            resolved = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=opening.document_id,
-                    revision_id=opening.revision_id,
-                    source_sha256=opening.source_sha256,
-                    snapshot_id=opening.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            if (
-                resolved.status is not EvidenceResolutionStatus.CORROBORATED
-                or resolved.observation is None
-            ):
-                return self._store(
-                    key,
-                    _blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        OPENING_LABEL_DIMENSION_SOURCE_SCOPE_UNAVAILABLE,
-                    ),
-                )
-            source_records.append(resolved.observation)
-
-        gap = _gap_span(source_records)
+        gap = _gap_span_for_opening(self._source, opening)
         if gap is None:
             return self._store(
                 key,
