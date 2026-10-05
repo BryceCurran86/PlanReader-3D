@@ -268,7 +268,7 @@ def generate_project_handoff(
             tuple(run for _, run in family_runs),
             project_id=project_id,
         )
-        combined_path = output_dir / f"{project_id}.sealed.json"
+        combined_path = output_dir / f"{project_id}.json"
         combined_path.write_text(combined.to_json(), encoding="utf-8")
         summary["combined_run_file"] = str(combined_path)
         summary["combined_run_id"] = combined.run_id
