@@ -488,9 +488,7 @@ def compose_live_physical_opening_voids(
         height_results[opening_id] = height_producer.publish_scope(height_selector)
         vertical_results[opening_id] = vertical_producer.publish_scope(vertical_selector)
 
-    scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
-        source_visibility_producer
-    )
+    scale_producer = source_visibility_producer.physical_scale_producer()
     scale_results = {}
     for opening_id, existence in existence_by_opening.items():
         page_id = opening_pages[opening_id]
