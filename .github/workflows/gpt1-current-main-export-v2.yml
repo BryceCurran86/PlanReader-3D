@@ -1,0 +1,23 @@
+name: GPT1 Current Main Export V2
+
+on:
+  push:
+    branches:
+      - diagnostic/gpt1-current-main-export-v2
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record SHA
+        run: git rev-parse HEAD > CURRENT_EXPORT_SHA.txt
+      - name: Archive checkout
+        run: tar --exclude=.git -czf /tmp/planreader-current-main.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpt1-current-main-export-v2
+          path: |
+            CURRENT_EXPORT_SHA.txt
+            /tmp/planreader-current-main.tar.gz
+          retention-days: 1
