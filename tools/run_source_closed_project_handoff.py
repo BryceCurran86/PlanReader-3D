@@ -155,15 +155,25 @@ def generate_project_handoff(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    claim = collect_live_physical_net_wall_claim(
-        pdf_path,
-        pages=all_pages,
-        topology_pages=(topology_pages if topology_pages else None),
-        # Enable source-owned cross-view room measurement using the complete
-        # source package. The producer itself remains responsible for deciding
-        # which pages/evidence are authoritative.
-        room_area_support_pages=all_pages,
-    )
+    try:
+        claim = collect_live_physical_net_wall_claim(
+            pdf_path,
+            pages=all_pages,
+            topology_pages=(topology_pages if topology_pages else None),
+            # Enable source-owned cross-view room measurement using the complete
+            # source package. The producer itself remains responsible for deciding
+            # which pages/evidence are authoritative.
+            room_area_support_pages=all_pages,
+        )
+    except Exception as exc:
+        summary["status"] = "production_failed"
+        summary["production_error_type"] = type(exc).__name__
+        summary["production_error_message"] = str(exc)
+        summary["claim_reason_codes"] = [
+            f"production_extraction_error:{type(exc).__name__}"
+        ]
+        _write_json(output_dir / "production_summary.json", summary)
+        raise
     summary["claim_status"] = getattr(
         getattr(claim, "status", None),
         "value",
@@ -270,7 +280,7 @@ def generate_project_handoff(
             tuple(run for _, run in family_runs),
             project_id=project_id,
         )
-        combined_path = output_dir / f"{project_id}.sealed.json"
+        combined_path = output_dir / f"{project_id}.json"
         combined_path.write_text(combined.to_json(), encoding="utf-8")
         summary["combined_run_file"] = str(combined_path)
         summary["combined_run_id"] = combined.run_id
