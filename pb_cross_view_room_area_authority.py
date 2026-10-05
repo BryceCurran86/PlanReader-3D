@@ -346,7 +346,7 @@ def _trusted_native_dimensions_for_page(
         trusted_by_bbox.setdefault(key, []).append(
             (
                 str(resolved.trusted_text),
-                str(receipt.parent_observation_id),
+                str(observation_id),
                 str(receipt.receipt_id),
             )
         )
