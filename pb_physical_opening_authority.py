@@ -2003,6 +2003,96 @@ class PhysicalOpeningAuthority:
             reason_codes=(VISIBLE_WALL_CONTINUATION_REQUIRED,),
         ))
 
+    @staticmethod
+    def _existence_record_from_candidate(
+        candidate: CandidateSemanticOpening,
+        snapshot,
+    ) -> PhysicalOpeningExistenceRecord:
+        record_payload = {
+            "document_id": candidate.document_id,
+            "revision_id": candidate.revision_id,
+            "source_sha256": candidate.source_sha256,
+            "snapshot_id": candidate.snapshot_id,
+            "page_id": candidate.page_id,
+            "viewport_id": candidate.viewport_id,
+            "semantic_class": "opening",
+            "structural_pattern": candidate.structural_pattern,
+            "source_observation_ids": candidate.source_observation_ids,
+            "source_lineage_root_ids": candidate.source_lineage_root_ids,
+        }
+        return PhysicalOpeningExistenceRecord(
+            record_id=stable_contract_id(
+                "physical_opening_existence", record_payload, digest_chars=32
+            ),
+            source_observation_ids=candidate.source_observation_ids,
+            source_lineage_root_ids=candidate.source_lineage_root_ids,
+            document_id=candidate.document_id,
+            revision_id=candidate.revision_id,
+            source_sha256=candidate.source_sha256,
+            snapshot_id=candidate.snapshot_id,
+            page_id=candidate.page_id,
+            viewport_id=candidate.viewport_id,
+            semantic_class="opening",
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            structural_pattern=candidate.structural_pattern,
+            diagnostic_confidence=1.0,
+            blocking_reasons=(),
+            structural_reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
+            producer_method=snapshot.producer_method,
+            producer_version=snapshot.producer_version,
+            producer_generation=snapshot.producer_generation,
+        )
+
+    def visible_page_existence_records(
+        self, selector: ObservationSelector
+    ) -> Optional[tuple[PhysicalOpeningExistenceRecord, ...]]:
+        """Bulk positive opening existence records for one authenticated page.
+
+        Uses the same candidate universe, viewport scope, and unique membership
+        rule as scalar prove_existence. None means bulk authority was not
+        authenticated and callers must preserve the historical scalar path.
+        """
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        if self._source_visibility_authority is None:
+            return None
+
+        source_result = self._resolve_visible_cached(selector)
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or source_result.observation is None
+            or source_result.snapshot is None
+        ):
+            return None
+        records, failures = self._visible_snapshot_records(source_result)
+        if failures:
+            return None
+
+        observation = source_result.observation
+        raw_candidates = self._visible_candidates_for(observation, records)
+        scoped_candidates, _viewport_decisions, _viewport_reasons = (
+            self._viewport_scoped_visible_candidates_for(observation, records)
+        )
+        _raw_membership, scoped_membership = (
+            self._candidate_memberships_for_returned_candidates(
+                observation, raw_candidates, scoped_candidates
+            )
+        )
+        provable: dict[str, CandidateSemanticOpening] = {}
+        for containing in scoped_membership.values():
+            if len(containing) != 1:
+                continue
+            candidate = containing[0]
+            provable[str(candidate.candidate_id)] = candidate
+
+        return tuple(
+            self._existence_record_from_candidate(
+                provable[candidate_id], source_result.snapshot
+            )
+            for candidate_id in sorted(provable)
+        )
+
     def prove_existence(self, selector: ObservationSelector) -> PhysicalOpeningExistenceResult:
         if not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")
@@ -2139,38 +2229,8 @@ class PhysicalOpeningAuthority:
             ))
 
         candidate = containing[0]
-        record_payload = {
-            "document_id": candidate.document_id,
-            "revision_id": candidate.revision_id,
-            "source_sha256": candidate.source_sha256,
-            "snapshot_id": candidate.snapshot_id,
-            "page_id": candidate.page_id,
-            "viewport_id": candidate.viewport_id,
-            "semantic_class": "opening",
-            "structural_pattern": candidate.structural_pattern,
-            "source_observation_ids": candidate.source_observation_ids,
-            "source_lineage_root_ids": candidate.source_lineage_root_ids,
-        }
-        existence = PhysicalOpeningExistenceRecord(
-            record_id=stable_contract_id("physical_opening_existence", record_payload, digest_chars=32),
-            source_observation_ids=candidate.source_observation_ids,
-            source_lineage_root_ids=candidate.source_lineage_root_ids,
-            document_id=candidate.document_id,
-            revision_id=candidate.revision_id,
-            source_sha256=candidate.source_sha256,
-            snapshot_id=candidate.snapshot_id,
-            page_id=candidate.page_id,
-            viewport_id=candidate.viewport_id,
-            semantic_class="opening",
-            status=EvidenceResolutionStatus.CORROBORATED,
-            proposition=PHYSICAL_OPENING_EXISTS,
-            structural_pattern=candidate.structural_pattern,
-            diagnostic_confidence=1.0,
-            blocking_reasons=(),
-            structural_reason_codes=(STRUCTURAL_OPENING_EXISTENCE_RESOLVED,),
-            producer_method=source_result.snapshot.producer_method,
-            producer_version=source_result.snapshot.producer_version,
-            producer_generation=source_result.snapshot.producer_generation,
+        existence = self._existence_record_from_candidate(
+            candidate, source_result.snapshot
         )
         return cache_visible(PhysicalOpeningExistenceResult(
             status=EvidenceResolutionStatus.CORROBORATED,
