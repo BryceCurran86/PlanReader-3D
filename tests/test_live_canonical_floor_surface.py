@@ -237,7 +237,7 @@ def test_explicit_room_area_without_scale_enriches_physical_room_floor(
     evidence = _explicit_area(
         published,
         evidence_id="cross-view-explicit-floor-area",
-        value=13.270425,
+        value=12.345,
     )
     bridge = build_source_room_area_bridge(
         room_face_authority=room_faces,
@@ -261,7 +261,7 @@ def test_explicit_room_area_without_scale_enriches_physical_room_floor(
         if floor.source_room_face_record_id in target_entity.evidence_ids
     )
     assert target_floor.room_entity_id != target_room
-    assert target_floor.metric_area_m2 == 13.270425
+    assert target_floor.metric_area_m2 == 12.345
     assert target_floor.metric_area_quantity_id
     assert target_floor.metric_area_authority
 
