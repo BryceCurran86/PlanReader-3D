@@ -230,7 +230,6 @@ def build_source_room_area_bridge(
             or record.document_id != room_index.document_id
             or record.revision_id != room_index.revision_id
             or record.source_sha256.lower() != room_index.source_sha256.lower()
-            or record.snapshot_id != selector.snapshot_id
             or record.topology_page_id != selector.page_id
             or record.evidence.document_id != document.document_id
             or record.evidence.evidence_id == ""
