@@ -95,6 +95,70 @@ def test_positive_binding_becomes_one_noncommercial_canonical_surface():
     assert "bind-1" in surface.source_evidence_ids
 
 
+def test_surface_identity_ignores_revision_evidence_and_material_state():
+    first = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(_binding(),),
+    ).surfaces[0]
+
+    second = project_wall_finish_bindings(
+        canonical_walls=(
+            _wall(
+                canonical_wall_id="cw-republished",
+                revision_id="r2",
+                source_sha256="b" * 64,
+                snapshot_id="snap-2",
+            ),
+        ),
+        bindings=(
+            _binding(
+                binding_id="bind-r2",
+                revision_id="r2",
+                source_sha256="b" * 64,
+                snapshot_id="snap-2",
+                finish_material="paint",
+                source_evidence_ids=("ann-r2", "role-r2"),
+            ),
+        ),
+    ).surfaces[0]
+
+    assert first.canonical_surface_id == second.canonical_surface_id
+    assert first.physical_wall_id == second.physical_wall_id == "wall-1"
+    assert first.physical_face_id == second.physical_face_id == "face-1"
+    assert first.finish_material == "key_pointing"
+    assert second.finish_material == "paint"
+
+
+def test_surface_identity_changes_only_when_physical_face_or_trade_scope_changes():
+    base = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(_binding(),),
+    ).surfaces[0]
+    other_face = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(
+            _binding(
+                binding_id="bind-face-2",
+                physical_face_id="face-2",
+                source_evidence_ids=("ann-face-2", "role-1"),
+            ),
+        ),
+    ).surfaces[0]
+    other_trade = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(
+            _binding(
+                binding_id="bind-trade-2",
+                trade_scope_id="external_paint",
+                source_evidence_ids=("ann-trade-2", "role-1"),
+            ),
+        ),
+    ).surfaces[0]
+
+    assert base.canonical_surface_id != other_face.canonical_surface_id
+    assert base.canonical_surface_id != other_trade.canonical_surface_id
+
+
 def test_repeated_source_support_enriches_one_surface_not_duplicate_geometry():
     second = _binding(
         binding_id="bind-2",
