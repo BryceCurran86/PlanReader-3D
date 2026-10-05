@@ -1,8 +1,15 @@
 """Producer-owned authenticated physical-opening -> host-wall binding authority V3.
 
 This module proves one narrow proposition only: an already source-authenticated
-physical opening instance is bound to exactly one host wall band derived from the
-complete sealed physical-wall-candidate scope for the same exact source/page.
+physical opening instance is bound to exactly one host wall band. The normal path
+uses the complete sealed physical-wall-candidate scope for the same exact
+source/page. When that global scope is incomplete, the sealed binding producer may
+instead use an opening-local subset only when producer-owned per-candidate boundary
+evidence proves every wall capable of entering that exact host search is evaluated
+and clean, no excluded boundary primitive can enter the same host role, and
+upstream physical equivalence does not bridge through unsafe evidence. The global
+scope remains incomplete and the public host-wall-universe authority still
+abstains.
 
 Host binding consumes the producer-owned physical-wall equivalence result. A
 candidate identity is only an address for one wall representation; it is never
@@ -21,7 +28,7 @@ geometry.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
@@ -36,13 +43,17 @@ from pb_physical_opening_authority import (
     PhysicalOpeningExistenceRecord,
 )
 from pb_physical_wall_candidate_authority import (
+    BOUNDARY_EVALUATION_EVALUATED,
+    ExcludedBoundaryPrimitive,
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateRecord,
+    PhysicalWallCandidateScopeResult,
     PhysicalWallCandidateSelector,
 )
 from pb_physical_wall_identity import (
     PhysicalEquivalenceClass,
     PhysicalWallEquivalenceResolution,
+    resolve_physical_wall_equivalence,
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityAuthority
@@ -56,6 +67,12 @@ OPENING_HOST_BINDING_UNAVAILABLE = "opening_host_binding_unavailable"
 HOST_EQUIVALENCE_AMBIGUOUS = "ambiguous_physical_wall_equivalence_for_host"
 HOST_EQUIVALENCE_UNAVAILABLE = "physical_wall_equivalence_required_for_host"
 HOST_BAND_CENTER_MISMATCH = "authenticated_host_wall_band_not_centered_on_opening"
+HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED = (
+    "opening_host_local_boundary_clean_scope_resolved"
+)
+HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE = (
+    "opening_host_local_boundary_scope_unavailable"
+)
 
 _UNIVERSE_PRODUCER_SEAL = object()
 _UNIVERSE_AUTHORITY_SEAL = object()
@@ -189,6 +206,13 @@ class _HostBandResolution:
     reason_codes: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _LocalHostScope:
+    records: tuple[PhysicalWallCandidateRecord, ...]
+    equivalence: PhysicalWallEquivalenceResolution
+    source_observation_ids: tuple[str, ...]
+
+
 _BindingKey = tuple[str, str, str, str, str, str, str]
 
 
@@ -283,13 +307,15 @@ class OpeningHostWallUniverseAuthority:
             raise TypeError("physical_wall_candidate_authority must be producer-owned")
         self._wall_authority = physical_wall_candidate_authority
 
-    def resolve_scope(
+    def _resolve_physical_wall_scope(
         self,
         selector: OpeningHostWallUniverseSelector,
-    ) -> OpeningHostWallUniverseResult:
+    ) -> PhysicalWallCandidateScopeResult:
+        """Internal producer-owned wall scope; never exposed as host authority."""
+
         if not isinstance(selector, OpeningHostWallUniverseSelector):
             raise TypeError("selector must be OpeningHostWallUniverseSelector")
-        wall_result = self._wall_authority.resolve_scope(
+        return self._wall_authority.resolve_scope(
             PhysicalWallCandidateSelector(
                 document_id=selector.document_id,
                 revision_id=selector.revision_id,
@@ -299,6 +325,14 @@ class OpeningHostWallUniverseAuthority:
                 decision_scope_id=selector.decision_scope_id,
             )
         )
+
+    def resolve_scope(
+        self,
+        selector: OpeningHostWallUniverseSelector,
+    ) -> OpeningHostWallUniverseResult:
+        if not isinstance(selector, OpeningHostWallUniverseSelector):
+            raise TypeError("selector must be OpeningHostWallUniverseSelector")
+        wall_result = self._resolve_physical_wall_scope(selector)
         if (
             wall_result.status is not EvidenceResolutionStatus.CORROBORATED
             or wall_result.scope_complete is not True
@@ -410,38 +444,86 @@ class OpeningHostBindingProducer:
             return _blocked_binding("opening_host_scope_mismatch")
 
         universe = self._universe.resolve_scope(host_universe_selector)
+        host_records: tuple[PhysicalWallCandidateRecord, ...]
+        host_equivalence: PhysicalWallEquivalenceResolution
+        host_source_observation_ids: tuple[str, ...]
+        binding_resolution_reasons: tuple[str, ...] = ()
+        opening_geometry: Optional[_OpeningGeometry] = None
+
         if (
-            universe.status is not EvidenceResolutionStatus.CORROBORATED
-            or universe.scope_complete is not True
-            or universe.equivalence is None
+            universe.status is EvidenceResolutionStatus.CORROBORATED
+            and universe.scope_complete is True
+            and universe.equivalence is not None
         ):
-            status = (
-                EvidenceResolutionStatus.CONFLICT
-                if universe.status is EvidenceResolutionStatus.CONFLICT
-                else EvidenceResolutionStatus.ABSTAINED
+            # Historical complete-scope path is unchanged.
+            host_records = tuple(universe.records)
+            host_equivalence = universe.equivalence
+            host_source_observation_ids = tuple(universe.source_observation_ids)
+        else:
+            # Do not relax or relabel the public host-wall universe. The sealed
+            # binding producer may recover one opening only when producer-owned
+            # boundary evidence proves this exact host search locally complete.
+            opening_geometry = _opening_geometry(self._opening, opening)
+            if opening_geometry is None:
+                status = (
+                    EvidenceResolutionStatus.CONFLICT
+                    if universe.status is EvidenceResolutionStatus.CONFLICT
+                    else EvidenceResolutionStatus.ABSTAINED
+                )
+                return _blocked_binding(
+                    "complete_authenticated_host_wall_universe_required",
+                    *universe.reason_codes,
+                    "authenticated_opening_geometry_unavailable",
+                    status=status,
+                )
+
+            wall_result = self._universe._resolve_physical_wall_scope(
+                host_universe_selector
             )
-            return _blocked_binding(
-                "complete_authenticated_host_wall_universe_required",
-                *universe.reason_codes,
-                status=status,
+            local_scope, local_reasons = _local_boundary_clean_host_scope(
+                wall_result,
+                opening_geometry,
             )
+            if local_scope is None:
+                status = (
+                    EvidenceResolutionStatus.CONFLICT
+                    if (
+                        universe.status is EvidenceResolutionStatus.CONFLICT
+                        or wall_result.status is EvidenceResolutionStatus.CONFLICT
+                    )
+                    else EvidenceResolutionStatus.ABSTAINED
+                )
+                return _blocked_binding(
+                    "complete_authenticated_host_wall_universe_required",
+                    *universe.reason_codes,
+                    *local_reasons,
+                    status=status,
+                )
+            host_records = local_scope.records
+            host_equivalence = local_scope.equivalence
+            host_source_observation_ids = local_scope.source_observation_ids
+            binding_resolution_reasons = local_reasons
 
         lineage_resolution = _resolve_generic_gap_lineage_host(
             self._opening,
             opening,
-            universe.records,
-            universe.equivalence,
+            host_records,
+            host_equivalence,
         )
         if lineage_resolution is not None:
             band_resolution = lineage_resolution
         else:
-            geometry = _opening_geometry(self._opening, opening)
+            geometry = (
+                opening_geometry
+                if opening_geometry is not None
+                else _opening_geometry(self._opening, opening)
+            )
             if geometry is None:
                 return _blocked_binding("authenticated_opening_geometry_unavailable")
             band_resolution = _resolve_host_bands(
-                universe.records,
+                host_records,
                 geometry,
-                universe.equivalence,
+                host_equivalence,
             )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
@@ -488,7 +570,7 @@ class OpeningHostBindingProducer:
             "member_wall_candidate_ids": band.member_ids,
             "member_candidate_identity_ids": band.member_candidate_identity_ids,
             "member_equivalence_groups": band.member_equivalence_groups,
-            "source_observation_ids": universe.source_observation_ids,
+            "source_observation_ids": host_source_observation_ids,
         }
         record = OpeningHostBindingRecord(
             record_id=stable_contract_id("opening_host_binding_v3", payload, digest_chars=32),
@@ -503,11 +585,14 @@ class OpeningHostBindingProducer:
             member_wall_candidate_ids=band.member_ids,
             member_candidate_identity_ids=band.member_candidate_identity_ids,
             member_equivalence_groups=band.member_equivalence_groups,
-            source_observation_ids=tuple(universe.source_observation_ids),
+            source_observation_ids=tuple(host_source_observation_ids),
         )
         result = OpeningHostBindingResult(
             status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(OPENING_HOST_BINDING_RESOLVED,),
+            reason_codes=(
+                OPENING_HOST_BINDING_RESOLVED,
+                *binding_resolution_reasons,
+            ),
             record=record,
         )
         key = _binding_key(
@@ -1144,6 +1229,187 @@ def _candidate_axis_data(
     return (min(along), max(along), sum(offsets) / len(offsets))
 
 
+
+def _host_roles_from_axis_data(
+    data: Optional[tuple[float, float, float]],
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    if data is None:
+        return ()
+    along_min, along_max, _offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    roles: list[str] = []
+    if along_min < -edge_tol and abs(along_max) <= edge_tol:
+        roles.append("left")
+    if (
+        along_max > opening.length + edge_tol
+        and abs(along_min - opening.length) <= edge_tol
+    ):
+        roles.append("right")
+    return tuple(roles)
+
+
+def _candidate_host_roles(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    return _host_roles_from_axis_data(
+        _candidate_axis_data(record, opening),
+        opening,
+    )
+
+
+def _excluded_boundary_primitive_host_roles(
+    primitive: ExcludedBoundaryPrimitive,
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    try:
+        first = (float(primitive.x1), float(primitive.y1))
+        second = (float(primitive.x2), float(primitive.y2))
+    except (TypeError, ValueError):
+        return ()
+    if not all(math.isfinite(value) for point in (first, second) for value in point):
+        return ()
+    unit = _canonical_unit((first[0], first[1], second[0], second[1]))
+    if unit is None or abs(_cross(unit, opening.axis)) > _PARALLEL_TOL:
+        return ()
+    along = (
+        _project(first, opening.origin, opening.axis),
+        _project(second, opening.origin, opening.axis),
+    )
+    offsets = (
+        _project(first, opening.origin, opening.normal),
+        _project(second, opening.origin, opening.normal),
+    )
+    if abs(offsets[1] - offsets[0]) > DEFAULT_GAP_SNAP_TOLERANCE_PT:
+        return ()
+    return _host_roles_from_axis_data(
+        (min(along), max(along), sum(offsets) / 2.0),
+        opening,
+    )
+
+
+def _local_boundary_clean_host_scope(
+    wall_result: PhysicalWallCandidateScopeResult,
+    opening: _OpeningGeometry,
+) -> tuple[Optional[_LocalHostScope], tuple[str, ...]]:
+    """Prove opening-local host completeness inside an incomplete wall scope.
+
+    The page/viewport scope itself remains incomplete. Only wall candidates
+    capable of participating in this exact opening's existing host-role search
+    may enter the local proof. Any such candidate that is unevaluated or
+    boundary-tainted blocks. Excluded boundary primitives that could themselves
+    occupy a host role also block. Upstream SAME/AMBIGUOUS identity cannot be
+    inherited through a tainted/unevaluated representation.
+    """
+
+    if (
+        wall_result.status is not EvidenceResolutionStatus.CORROBORATED
+        or wall_result.scope_complete is True
+        or not wall_result.records
+        or wall_result.equivalence is None
+        or wall_result.boundary_evaluation is None
+        or wall_result.boundary_evaluation.status
+        != BOUNDARY_EVALUATION_EVALUATED
+    ):
+        return None, (HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,)
+
+    evaluation = wall_result.boundary_evaluation
+    records_by_id = {
+        str(record.wall_candidate_id): record for record in wall_result.records
+    }
+    relevant_ids = {
+        wall_id
+        for wall_id, record in records_by_id.items()
+        if _candidate_host_roles(record, opening)
+    }
+    if not relevant_ids:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "no_local_host_wall_candidates",
+        )
+
+    evaluated_ids = {
+        str(value) for value in evaluation.evaluated_wall_candidate_ids
+    }
+    tainted_ids = {
+        str(value) for value in evaluation.boundary_tainted_wall_candidate_ids
+    }
+    unevaluated_relevant = relevant_ids - evaluated_ids
+    tainted_relevant = relevant_ids & tainted_ids
+    if unevaluated_relevant:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_wall_boundary_unevaluated",
+        )
+    if tainted_relevant:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_wall_boundary_tainted",
+        )
+
+    if any(
+        _excluded_boundary_primitive_host_roles(primitive, opening)
+        for primitive in evaluation.excluded_boundary_primitives
+    ):
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_excluded_boundary_primitive",
+        )
+
+    clean_ids = evaluated_ids - tainted_ids
+    equivalence = wall_result.equivalence
+    unsafe_ids = set(records_by_id) - clean_ids
+
+    # Boundary-local host proof must never sever an already-proven physical
+    # identity bridge to unsafe evidence. If a relevant host candidate is
+    # SAME/AMBIGUOUS-linked (directly or through a SAME group) to any tainted
+    # or unevaluated representation, the opening-local host scope is not
+    # closed and must abstain. Unrelated unsafe candidates may remain outside
+    # this exact host proposition.
+    for group in equivalence.equivalence_groups:
+        members = {str(value) for value in group}
+        if members & relevant_ids and members & unsafe_ids:
+            return None, (
+                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                "host_equivalence_bridges_unsafe_boundary_evidence",
+            )
+    for left, right, raw_classification in equivalence.pair_classifications:
+        classification = str(raw_classification)
+        if classification not in {
+            PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value,
+            PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value,
+        }:
+            continue
+        pair = {str(left), str(right)}
+        if pair & relevant_ids and pair & unsafe_ids:
+            return None, (
+                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                "host_equivalence_bridges_unsafe_boundary_evidence",
+            )
+
+    local_records = tuple(
+        records_by_id[wall_id] for wall_id in sorted(relevant_ids)
+    )
+    # Re-run the canonical pure equivalence resolver on the proven local
+    # subset instead of hand-editing a page-wide resolution. This preserves
+    # representative / abstention / SAME / AMBIGUOUS invariants exactly.
+    audit = equivalence.candidate_pair_audit
+    filtered_equivalence = resolve_physical_wall_equivalence(
+        tuple(record.physical_identity for record in local_records),
+        points_per_mm=(
+            None if audit is None else audit.verified_points_per_mm
+        ),
+    )
+    return (
+        _LocalHostScope(
+            records=local_records,
+            equivalence=filtered_equivalence,
+            source_observation_ids=tuple(wall_result.source_observation_ids),
+        ),
+        (HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,),
+    )
+
 def _pair_lookup(
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
@@ -1277,16 +1543,15 @@ def _resolve_host_bands(
 ) -> _HostBandResolution:
     left_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
     right_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
-    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
-
     for record in records:
         data = _candidate_axis_data(record, opening)
         if data is None:
             continue
-        along_min, along_max, offset = data
-        if along_min < -edge_tol and abs(along_max) <= edge_tol:
+        _along_min, _along_max, offset = data
+        roles = _host_roles_from_axis_data(data, opening)
+        if "left" in roles:
             left_raw.append((offset, record))
-        if along_max > opening.length + edge_tol and abs(along_min - opening.length) <= edge_tol:
+        if "right" in roles:
             right_raw.append((offset, record))
 
     pair_lookup = _pair_lookup(equivalence)
