@@ -8,6 +8,8 @@ from pb_ceiling_lining_review_promotion import (
     CEILING_REVIEW_PROMOTION_RESOLVED,
     CEILING_REVIEW_PROMOTION_UNAVAILABLE,
     build_ceiling_lining_review_promotions,
+    collect_ceiling_lining_review_bundle,
+    collect_ceiling_lining_review_candidates,
 )
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_migration_contracts import (
@@ -158,6 +160,38 @@ def test_generic_adapter_rejects_explicit_shadow_quantity() -> None:
             trace=trace,
             authority=authority,
         )
+
+
+def test_review_collection_reuses_one_shadow_replay_for_canonical_ceiling(tmp_path) -> None:
+    path = tmp_path / "ceiling-review.pdf"
+    path.write_bytes(_source_pdf(include_scale_bar=True))
+
+    bundle = collect_ceiling_lining_review_bundle(
+        path,
+        pages=(0,),
+        workspace_id=17,
+        project_id="project-ceiling-review",
+    )
+    assert len(bundle.candidates) == 1
+    assert len(bundle.canonical_ceilings) == 1
+
+    candidate = bundle.candidates[0]
+    ceiling = bundle.canonical_ceilings[0]
+    assert ceiling.ceiling_quantity_id == candidate.shadow_quantity_id
+    assert ceiling.area_m2 == pytest.approx(
+        float(candidate.promoted_quantity.value)
+    )
+    assert ceiling.source_sha256 == candidate.source_trace.source_sha256
+    assert ceiling.revision_id == candidate.source_trace.revision_id
+
+    # Existing callers retain the tuple-only API.
+    candidates = collect_ceiling_lining_review_candidates(
+        path,
+        pages=(0,),
+        workspace_id=17,
+        project_id="project-ceiling-review",
+    )
+    assert candidates == bundle.candidates
 
 
 def test_source_owned_ceiling_becomes_review_required_ai_draft_only() -> None:
