@@ -255,12 +255,18 @@ def compose_live_canonical_rooms(
                     wall_scope = viewport_wall_authority.resolve_scope(wall_selector)
                     if (
                         wall_scope.status is not EvidenceResolutionStatus.CORROBORATED
-                        or not wall_scope.scope_complete
                         or not wall_scope.records
                     ):
                         reasons.extend(wall_scope.reason_codes)
                         continue
 
+                    # Do not pre-empt the room authority's stricter local
+                    # boundary proof. An authenticated viewport wall scope may
+                    # remain globally incomplete while producer-owned
+                    # per-candidate boundary evidence proves individual room
+                    # faces safe to publish. SourceRoomFaceAuthority remains
+                    # fail-closed when that audit is unavailable, mismatched or
+                    # contaminates the face.
                     room_result = viewport_room_authority.resolve_scope(
                         SourceRoomFaceSelector(
                             document_id=wall_selector.document_id,
