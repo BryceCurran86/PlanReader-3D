@@ -2939,7 +2939,7 @@ def _build_scope_result(
     scale_producer = (
         physical_scale_producer
         if physical_scale_producer is not None
-        else PhysicalScaleProducer.from_source_visibility_producer(source_producer)
+        else source_producer.physical_scale_producer()
     )
     points_per_mm = _producer_owned_points_per_mm(
         scale_producer=scale_producer,
@@ -3027,7 +3027,7 @@ def _build_authenticated_viewport_scope_results(
     scale_producer = (
         physical_scale_producer
         if physical_scale_producer is not None
-        else PhysicalScaleProducer.from_source_visibility_producer(source_producer)
+        else source_producer.physical_scale_producer()
     )
 
     results: list[PhysicalWallCandidateScopeResult] = []
@@ -3303,9 +3303,7 @@ class PhysicalWallCandidateProducer:
                 source_visibility_producer.physical_opening_authority()
             )
             physical_scale_producer = (
-                PhysicalScaleProducer.from_source_visibility_producer(
-                    source_visibility_producer
-                )
+                source_visibility_producer.physical_scale_producer()
             )
 
             for page_id in materialized_page_ids:
