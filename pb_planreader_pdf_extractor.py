@@ -4250,6 +4250,11 @@ class GenericPlanReaderExtractor:
                 resolve_document_gable_roof_covering,
             )
 
+            _roof_source_sha256 = _source_sha256()
+            _roof_document_id = f"extractor:{p_path.name}"
+            _roof_revision_id = f"source:{_roof_source_sha256}"
+            _roof_snapshot_id = f"source:{_roof_source_sha256}"
+
             # Discover actual building footprint axes. A wall-area prediction's
             # dimensions are [wall perimeter, wall height], not plan length/width,
             # so they must never be reused as roof/gable footprint axes.
@@ -4293,8 +4298,11 @@ class GenericPlanReaderExtractor:
                     doc,
                     building_length_m=_b_len_m,
                     building_width_m=_b_wid_m,
-                    source_sha256=getattr(self, "source_sha256", "") or ("0" * 64),
+                    source_sha256=_roof_source_sha256,
                     target_pages=target_pages,
+                    document_id=_roof_document_id,
+                    revision_id=_roof_revision_id,
+                    snapshot_id=_roof_snapshot_id,
                 )
 
                 # A source-scaled structural gable span can legitimately align
@@ -4340,11 +4348,11 @@ class GenericPlanReaderExtractor:
                                     doc,
                                     building_length_m=_trial_len,
                                     building_width_m=_trial_wid,
-                                    source_sha256=(
-                                        getattr(self, "source_sha256", "")
-                                        or ("0" * 64)
-                                    ),
+                                    source_sha256=_roof_source_sha256,
                                     target_pages=target_pages,
+                                    document_id=_roof_document_id,
+                                    revision_id=_roof_revision_id,
+                                    snapshot_id=_roof_snapshot_id,
                                 )
                                 if (
                                     _trial.status.value == "corroborated"
