@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from pb_bound_wall_finish_customer_bridge import (
+    bound_wall_finish_record_to_takeoff_row,
+)
+from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
+from pb_live_canonical_wall_finish_surface import project_wall_finish_bindings
+from pb_live_wall_finish_quantity_publication import (
+    publish_bound_wall_finish_quantity,
+)
+from pb_takeoff_coverage_audit_adapter import build_runtime_coverage_publication
+import pb_takeoff_row_contract as takeoff_contract
+from tests.test_bound_wall_finish_quantity_authority_v1 import (
+    DOC,
+    PAGE,
+    REV,
+    SHA,
+    SNAP,
+    _binding,
+    _finish_authority,
+    _net_authority,
+    _producer,
+    _selector,
+)
+
+
+def _canonical_wall():
+    return {
+        "canonical_wall_id": "canonical-wall-1",
+        "physical_wall_id": "wall-1",
+        "document_id": DOC,
+        "revision_id": REV,
+        "source_sha256": SHA,
+        "snapshot_id": SNAP,
+        "page_id": PAGE,
+        "level_ids": ["L1"],
+        "net_area_m2": 12.5,
+        "quantity_complete": True,
+        "physical_identity_resolved": True,
+        "evidence_ids": ["wall-evidence-1"],
+    }
+
+
+def _resolved_record_and_surface():
+    binding = _binding("b1", "face-1", "wall-1")
+    quantity_result = _producer(
+        _finish_authority((binding,)),
+        _net_authority({"wall-1": 12.5}),
+    ).publish(_selector())
+    assert quantity_result.record is not None
+
+    projection = project_wall_finish_bindings(
+        canonical_walls=(_canonical_wall(),),
+        bindings=(binding,),
+    )
+    assert len(projection.surfaces) == 1
+    return quantity_result.record, projection.surfaces[0]
+
+
+def test_corroborated_finish_quantity_reuses_exact_canonical_surface_identity():
+    record, surface = _resolved_record_and_surface()
+    quantity = publish_bound_wall_finish_quantity(record)
+
+    assert record.physical_surface_ids == (surface.physical_surface_id,)
+    assert quantity.input_entity_ids == (surface.physical_surface_id,)
+    assert quantity.value == 12.5
+    assert quantity.unit == "m2"
+    assert quantity.status == "corroborated"
+    assert quantity.metadata["source_quantity_record_id"] == record.record_id
+
+
+def test_finish_surface_reaches_published_only_through_exact_quantity_identity():
+    record, surface = _resolved_record_and_surface()
+    quantity = publish_bound_wall_finish_quantity(record)
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=(surface,),
+        quantities=(quantity,),
+        registry_run_scope="wall-finish-live-quantity",
+    )
+
+    assert gaps == {}
+    pre = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    assert pre["family_reports"]["finish_surface"]["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 1,
+        "PUBLISHED": 0,
+    }
+
+    row = bound_wall_finish_record_to_takeoff_row(7, record)
+    named = dict(zip(takeoff_contract.CORE_FIELDS, row))
+    assert quantity.quantity_id in named["source_reference"]
+    report = build_runtime_coverage_publication(
+        summaries,
+        family_gaps=gaps,
+        published_takeoff_rows=(named,),
+    )
+    assert report["family_reports"]["finish_surface"]["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 1,
+        "PUBLISHED": 1,
+    }
+
+
+def test_customer_row_value_change_cannot_publish_finish_surface():
+    record, surface = _resolved_record_and_surface()
+    quantity = publish_bound_wall_finish_quantity(record)
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=(surface,),
+        quantities=(quantity,),
+        registry_run_scope="wall-finish-value-guard",
+    )
+    row = dict(
+        zip(
+            takeoff_contract.CORE_FIELDS,
+            bound_wall_finish_record_to_takeoff_row(7, record),
+        )
+    )
+    row["quantity"] = float(row["quantity"]) + 0.01
+
+    report = build_runtime_coverage_publication(
+        summaries,
+        family_gaps=gaps,
+        published_takeoff_rows=(row,),
+    )
+    counts = report["family_reports"]["finish_surface"]["stage_counts"]
+    assert counts["QUANTIFIED"] == 1
+    assert counts["PUBLISHED"] == 0

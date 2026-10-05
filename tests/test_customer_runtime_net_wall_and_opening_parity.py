@@ -906,6 +906,7 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
             SourceBoundWallFinishQuantityRecord,
         )
         import pb_bound_wall_finish_quantity_authority as quantmod
+        from pb_wall_finish_surface_identity import physical_wall_finish_surface_id
 
         with _test_workspace() as ws:
             pdf_path = ws.root / "drawing.pdf"
@@ -928,6 +929,14 @@ class CustomerRuntimeNetWallParityTests(unittest.TestCase):
                 quantity_m2=48.25,
                 physical_face_ids=("F400_ext",),
                 physical_wall_ids=("W400",),
+                physical_surface_ids=(
+                    physical_wall_finish_surface_id(
+                        document_id="doc4",
+                        physical_wall_id="W400",
+                        physical_face_id="F400_ext",
+                        trade_scope_id="external_key_pointing",
+                    ),
+                ),
                 finish_binding_ids=("bind-400",),
                 net_wall_record_ids=("net-400",),
                 finish_scope_record_id="scope-rec-4",

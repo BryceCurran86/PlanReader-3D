@@ -17,8 +17,9 @@ from dataclasses import dataclass
 import math
 from typing import Mapping, Optional, Sequence
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_wall_finish_face_binding_authority import WallFinishFaceBindingRecord
+from pb_wall_finish_surface_identity import physical_wall_finish_surface_id
 
 
 LIVE_CANONICAL_WALL_FINISH_SURFACE_SCHEMA_VERSION = "1.1.0"
@@ -255,15 +256,11 @@ def project_wall_finish_bindings(
         finish_material = next(iter(materials))
         physical_face_role = next(iter(roles))
         canonical_wall_id = _clean(wall.get("canonical_wall_id"))
-        physical_surface_id = stable_contract_id(
-            "physical_wall_finish_surface",
-            {
-                "document_id": _clean(group[0].document_id),
-                "physical_wall_id": physical_wall_id,
-                "physical_face_id": physical_face_id,
-                "trade_scope_id": trade_scope_id,
-            },
-            digest_chars=32,
+        physical_surface_id = physical_wall_finish_surface_id(
+            document_id=_clean(group[0].document_id),
+            physical_wall_id=physical_wall_id,
+            physical_face_id=physical_face_id,
+            trade_scope_id=trade_scope_id,
         )
         # Canonical identity follows the physical finish-surface identity.
         # Revision/SHA/evidence/material are mutable semantic state, not the
