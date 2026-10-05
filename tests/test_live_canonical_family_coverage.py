@@ -12,7 +12,10 @@ from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_live_canonical_floor_surface import compose_live_canonical_floor_surfaces
 from pb_live_canonical_roof_projection import project_source_gable_roof
 from pb_live_canonical_room_composition import compose_live_canonical_rooms
-from pb_live_canonical_slab_projection import project_resolved_slab_entity
+from pb_live_canonical_slab_projection import (
+    LIVE_CANONICAL_SLAB_LINEAGE_UNAVAILABLE,
+    project_resolved_slab_entity,
+)
 from pb_live_canonical_structural_member_projection import project_structural_member_resolution
 from pb_live_canonical_wall_finish_surface import project_wall_finish_bindings
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
@@ -354,15 +357,56 @@ def test_finish_surface_remains_partial_without_proven_finish_extent_or_quantity
     assert all(surface.commercial_quantity_authority is False for surface in surfaces)
 
 
-def test_lineage_incomplete_roof_and_slab_are_unavailable_without_invented_revision():
+def test_lineage_incomplete_roof_is_unavailable_and_slab_fails_before_registry():
     roof = project_source_gable_roof(_measurement()).object
-    slab = project_resolved_slab_entity(slab=_resolved_slab(), boundary=_boundary()).object
-    summaries, gaps = collect_live_canonical_coverage(objects=(roof, slab), registry_run_scope="test")
+    slab_result = project_resolved_slab_entity(
+        slab=_resolved_slab(),
+        boundary=_boundary(),
+    )
+    assert slab_result.object is None
+    assert slab_result.reason_codes == (LIVE_CANONICAL_SLAB_LINEAGE_UNAVAILABLE,)
+
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=(roof,),
+        registry_run_scope="test",
+    )
     assert summaries == ()
-    assert gaps == {"roof": ["producer_source_lineage_unavailable"], "slab": ["producer_source_lineage_unavailable"]}
+    assert gaps == {"roof": ["producer_source_lineage_unavailable"]}
     report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
     assert report["family_reports"]["roof"]["classification"] == "UNAVAILABLE"
-    assert report["family_reports"]["floor_slab"]["classification"] == "UNAVAILABLE"
+
+
+def test_lineage_bound_slab_reaches_canonicalized_floor_slab_coverage():
+    slab_result = project_resolved_slab_entity(
+        slab=_resolved_slab(),
+        boundary=_boundary(),
+        document_id="doc-slab",
+        revision_id="rev-1",
+        source_sha256="a" * 64,
+        snapshot_id="snap-1",
+    )
+    assert slab_result.object is not None
+
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=(slab_result.object,),
+        registry_run_scope="slab-live",
+    )
+    assert gaps == {}
+    assert len(summaries) == 1
+    record = summaries[0].object_records[0]
+    assert record.object_id == slab_result.object.physical_slab_id
+    assert record.quantity_ids == ()
+
+    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    family = report["family_reports"]["floor_slab"]
+    assert family["classification"] == "PARTIAL"
+    assert family["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 0,
+        "PUBLISHED": 0,
+    }
 
 
 def test_canonical_dict_and_duplicate_physical_identity_are_rejected():
