@@ -33,6 +33,7 @@ from tests.test_live_canonical_slab_projection import _boundary, _resolved_slab
 from tests.test_live_canonical_structural_member_projection import _resolved
 from tests.test_live_canonical_wall_finish_surface import _binding, _wall
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
+from tests.test_live_room_area_source_closed_export import _cross_view_room_area_pdf
 
 
 def _rooms():
@@ -463,3 +464,76 @@ def test_real_upload_authority_exposes_wall_opening_dropout_without_default_heig
     assert report["family_reports"]["wall"]["stage_counts"]["QUANTIFIED"] == 0
     assert report["family_reports"]["opening"]["stage_counts"]["PUBLISHED"] == 0
     assert auto._runtime_coverage_registry_summaries(app, 2) == []
+
+
+def test_runtime_bridges_source_closed_room_area_to_customer_review_row(tmp_path):
+    path = tmp_path / "room-area-source.pdf"
+    path.write_bytes(_cross_view_room_area_pdf())
+    claim = collect_live_physical_net_wall_claim(
+        path,
+        pages=(0,),
+        room_area_support_pages=(1,),
+    )
+    firm = [
+        quantity
+        for quantity in claim.room_area_quantity_evidence
+        if not quantity.abstained
+    ]
+    assert len(firm) == 1
+
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(path)}])
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app,
+            1,
+            [{"document_id": 1, "page_no": 1}],
+            [],
+        )
+
+    rows = app._live_room_area_takeoff_rows_by_workspace[1]
+    assert len(rows) == 1
+    named = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+    assert named["quantity"] == pytest.approx(float(firm[0].value))
+    assert named["unit"] == "m²"
+    assert named["quantity_status"] == "To review"
+    assert named["row_role"] == "floor_area"
+    assert named["inclusion_status"] == "INCLUSION"
+    assert f"room_area_quantity:{firm[0].quantity_id}" in named["source_reference"]
+    assert firm[0].quantity_id in named["notes"]
+
+
+def test_runtime_coverage_does_not_invent_opening_rows_for_abstentions(tmp_path):
+    path = tmp_path / "source.pdf"
+    path.write_bytes(_complete_void_pdf())
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert any(
+        quantity.abstained or quantity.value is None
+        for quantity in (
+            *claim.opening_quantity_evidence,
+            *claim.opening_count_quantity_evidence,
+        )
+    ) or not (
+        claim.opening_quantity_evidence or claim.opening_count_quantity_evidence
+    )
+
+    app = SimpleNamespace(lquery=lambda *_: [{"id": 1, "path": str(path)}])
+    with patch(
+        "pb_live_physical_net_wall_integration.collect_live_physical_net_wall_claim",
+        return_value=claim,
+    ):
+        auto._try_physical_net_wall_rows(
+            app,
+            1,
+            [{"document_id": 1, "page_no": 1}],
+            [],
+        )
+
+    coverage = app._ag09_family_coverage_by_workspace[1]
+    assert not any(
+        reason.startswith("live_coverage_collection_failed:")
+        for reasons in coverage["family_gaps"].values()
+        for reason in reasons
+    )
