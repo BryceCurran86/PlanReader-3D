@@ -551,6 +551,11 @@ class GenericPlanReaderExtractor:
             "reason_codes": ["not_collected"],
             "spaces": [],
         }
+        self.room_area_live: Dict[str, Any] = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "quantities": [],
+        }
         self.canonical_floors_live: Dict[str, Any] = {
             "status": "abstained",
             "reason_codes": ["not_collected"],
@@ -1393,6 +1398,11 @@ class GenericPlanReaderExtractor:
             "status": "abstained",
             "reason_codes": ["not_collected"],
             "spaces": [],
+        }
+        self.room_area_live = {
+            "status": "abstained",
+            "reason_codes": ["not_collected"],
+            "quantities": [],
         }
 
         # ------------------------------------------------------------------
@@ -3566,10 +3576,45 @@ class GenericPlanReaderExtractor:
                     # path rather than widening by guess.
                     physical_opening_evidence_pages = []
 
+            physical_room_area_evidence_pages: list[int] = []
+            if physical_net_pages:
+                try:
+                    from pb_drawing_evidence_binding import (
+                        DrawingViewClassifier,
+                        DrawingViewType,
+                    )
+
+                    excluded_topology = set(physical_net_pages)
+                    for page_index, (
+                        source_title,
+                        source_title_confidence,
+                    ) in sorted(_resolved_page_title_map().items()):
+                        if (
+                            page_index in excluded_topology
+                            or not source_title
+                            or source_title_confidence <= 0
+                        ):
+                            continue
+                        view_type = DrawingViewClassifier.classify_text(
+                            str(source_title)
+                        )
+                        if view_type in {
+                            DrawingViewType.FLOOR_PLAN,
+                            DrawingViewType.ELEVATION,
+                            DrawingViewType.SECTION,
+                            DrawingViewType.DETAIL,
+                        }:
+                            physical_room_area_evidence_pages.append(page_index)
+                except Exception:
+                    # Cross-view room-area evidence expansion is additive only.
+                    # Failure preserves the historical topology/evidence universe.
+                    physical_room_area_evidence_pages = []
+
             physical_claim_pages = tuple(
                 sorted(
                     set(physical_net_pages)
                     | set(physical_opening_evidence_pages)
+                    | set(physical_room_area_evidence_pages)
                 )
             )
             from pb_physical_wall_candidate_authority import (
@@ -3674,11 +3719,11 @@ class GenericPlanReaderExtractor:
             elif physical_net_pages:
                 physical_claim_kwargs: dict[str, object] = {
                     "pages": physical_claim_pages,
+                    "topology_pages": tuple(physical_net_pages),
+                    "wall_evidence_pages": tuple(
+                        physical_opening_evidence_pages
+                    ),
                 }
-                if physical_opening_evidence_pages:
-                    physical_claim_kwargs["topology_pages"] = tuple(
-                        physical_net_pages
-                    )
                 physical_wall_result = collect_live_physical_net_wall_claim(
                     p_path,
                     **physical_claim_kwargs,
@@ -3724,6 +3769,32 @@ class GenericPlanReaderExtractor:
                         (),
                     )
                 )
+                _room_area_quantities = tuple(
+                    getattr(
+                        physical_wall_result,
+                        "room_area_quantity_evidence",
+                        (),
+                    )
+                )
+                _coverage_quantities.extend(_room_area_quantities)
+                self.room_area_live = {
+                    "status": (
+                        "corroborated"
+                        if _room_area_quantities
+                        else "abstained"
+                    ),
+                    "reason_codes": list(
+                        getattr(
+                            physical_wall_result,
+                            "room_area_reason_codes",
+                            (),
+                        )
+                    ),
+                    "quantities": [
+                        quantity.to_dict()
+                        for quantity in _room_area_quantities
+                    ],
+                }
                 canonical_wall_objects = [
                     wall.to_dict()
                     for wall in physical_wall_result.canonical_walls
@@ -4053,6 +4124,11 @@ class GenericPlanReaderExtractor:
                     "source_pages": [],
                     "floors": [],
                 }
+                self.room_area_live = {
+                    "status": "abstained",
+                    "reason_codes": ["no_drawing_pages_selected"],
+                    "quantities": [],
+                }
                 self.extraction_status["physical_net_wall_live"] = "abstained"
         except Exception as exc:
             self.physical_net_wall_live = {
@@ -4117,6 +4193,13 @@ class GenericPlanReaderExtractor:
                 ],
                 "source_pages": [],
                 "floors": [],
+            }
+            self.room_area_live = {
+                "status": "abstained",
+                "reason_codes": [
+                    f"live_cross_view_room_area_exception:{type(exc).__name__}"
+                ],
+                "quantities": [],
             }
             self.extraction_status["physical_net_wall_live"] = (
                 "extraction_failed"
