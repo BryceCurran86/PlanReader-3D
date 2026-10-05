@@ -15,6 +15,7 @@ from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_room_face_authority import SourceRoomFaceSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -105,6 +106,29 @@ def test_two_room_source_publishes_stable_canonical_room_objects() -> None:
         assert payload["bounding_wall_ids"]
         assert payload["canonical_bounding_wall_ids"]
         assert payload["wall_relationships_complete"] is False
+
+        room_binding = result.room_face_authority_binding_for(room)
+        assert room_binding is not None
+        assert room_binding.viewport_id is None
+        assert room_binding.viewport_bbox is None
+        room_authority = result.room_face_authority_for(room)
+        assert room_authority is room_binding.authority
+        resolved = room_authority.resolve_scope(
+            SourceRoomFaceSelector(
+                document_id=room.document_id,
+                revision_id=room.revision_id,
+                source_sha256=room.source_sha256,
+                snapshot_id=room.snapshot_id,
+                page_id=room.page_id,
+                decision_scope_id=room.decision_scope_id,
+            )
+        )
+        assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+        assert resolved.scope_complete is True
+        assert sum(
+            record.record_id == room.source_room_face_record_id
+            for record in resolved.records
+        ) == 1
 
 
 def test_valid_rooms_publish_but_partial_face_universe_stays_candidate() -> None:
@@ -276,6 +300,42 @@ def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewp
     # The fallback does not guess a relationship to page-wide canonical walls.
     assert all(room.canonical_bounding_wall_ids == () for room in result.rooms)
     assert all(room.wall_relationships_complete is False for room in result.rooms)
+    for room in result.rooms:
+        room_binding = result.room_face_authority_binding_for(room)
+        assert room_binding is not None
+        assert room_binding.viewport_id == room.viewport_id
+        assert room_binding.viewport_bbox is not None
+        room_authority = result.room_face_authority_for(room)
+        assert room_authority is room_binding.authority
+        resolved = room_authority.resolve_scope(
+            SourceRoomFaceSelector(
+                document_id=room.document_id,
+                revision_id=room.revision_id,
+                source_sha256=room.source_sha256,
+                snapshot_id=room.snapshot_id,
+                page_id=room.page_id,
+                decision_scope_id=room.decision_scope_id,
+            )
+        )
+        assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+        assert resolved.scope_complete is True
+        assert sum(
+            record.record_id == room.source_room_face_record_id
+            for record in resolved.records
+        ) == 1
+
+    # Runtime authority provenance is not recreated by copying public room data.
+    rebuilt = type(result)(
+        status=result.status,
+        reason_codes=result.reason_codes,
+        rooms=result.rooms,
+        source_pages=result.source_pages,
+    )
+    assert all(
+        rebuilt.room_face_authority_binding_for(room) is None
+        and rebuilt.room_face_authority_for(room) is None
+        for room in rebuilt.rooms
+    )
 
 
 def test_incomplete_viewport_wall_scope_is_delegated_to_room_authority(monkeypatch) -> None:
