@@ -82,3 +82,23 @@ jobs:
 
       - name: Smoke test (envelope, quotes, copy, reconcile, publish)
         run: python tests/ci_smoke.py
+
+
+  export-current-source:
+    if: github.event_name == 'pull_request' && github.head_ref == 'diagnostic/current-main-source-export-ef0aaa7'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record exact source SHA
+        run: git rev-parse HEAD > CURRENT_SOURCE_SHA.txt
+      - name: Pack exact source tree
+        run: git archive --format=tar.gz -o current-main-source.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-main-source-ef0aaa7
+          path: |
+            current-main-source.tar.gz
+            CURRENT_SOURCE_SHA.txt
+          retention-days: 1
