@@ -231,3 +231,22 @@ def test_active_v2_truth_inventory_has_at_least_120_source_closed_items():
         )
     assert len(suite["projects"]) == 4
     assert denominator >= 120
+
+
+
+def test_suite_runner_verifies_sealed_handoff_before_reconciliation() -> None:
+    runner = (
+        Path(__file__).resolve().parents[2]
+        / "benchmarks"
+        / "frozen_holdout"
+        / "full_plan_v2"
+        / "run_development_scoreboard.py"
+    ).read_text(encoding="utf-8")
+
+    assert "sealed_source_closed_run_from_dict" in runner
+    assert "sealed_run.to_dict()" in runner
+    assert "sealed_run = _json_object(sealed_path)" not in runner
+
+    verify_at = runner.index("sealed_source_closed_run_from_dict")
+    reconcile_at = runner.rindex("reconcile_sealed_run_v2(")
+    assert verify_at < reconcile_at
