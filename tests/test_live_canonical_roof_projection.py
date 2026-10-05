@@ -8,7 +8,9 @@ from pb_live_canonical_roof_projection import (
     LIVE_CANONICAL_ROOF_UNAVAILABLE,
     project_source_gable_roof,
 )
+from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_takeoff_coverage_audit_adapter import build_runtime_coverage_publication
 from pb_source_roof_covering_authority import (
     GableRoofApexEvidence,
     SourceRoofCoveringMeasurement,
@@ -50,6 +52,12 @@ def test_corroborated_gable_measurement_projects_to_canonical_roof() -> None:
     assert result.reason_codes == (LIVE_CANONICAL_ROOF_RESOLVED,)
     assert result.object is not None
     roof = result.object
+    assert roof.canonical_roof_id == roof.physical_roof_id
+    assert roof.physical_roof_id == measurement.physical_roof_id
+    assert roof.document_id == "roof-projection-test"
+    assert roof.revision_id == "source:" + ("a" * 64)
+    assert roof.source_sha256 == "a" * 64
+    assert roof.snapshot_id == "source:" + ("a" * 64)
     assert roof.roof_type == "gable"
     assert roof.source_page == 3
     assert roof.source_viewport_id == "elevation-1"
@@ -75,6 +83,57 @@ def test_roof_projection_is_deterministic_for_same_source_evidence() -> None:
     assert first.object is not None
     assert second.object is not None
     assert first.object.to_dict() == second.object.to_dict()
+
+
+def test_physical_roof_identity_is_stable_across_source_revision_evidence_churn() -> None:
+    first_measurement = _measurement()
+    evidence = first_measurement.gable_evidence
+    assert evidence is not None
+
+    second_measurement = measure_source_roof_covering(
+        evidence,
+        building_length_m=12.0,
+        building_width_m=8.0,
+        source_sha256="b" * 64,
+        document_id="roof-projection-test",
+        revision_id="revision-2",
+        snapshot_id="snapshot-2",
+    )
+
+    first = project_source_gable_roof(first_measurement)
+    second = project_source_gable_roof(second_measurement)
+    assert first.object is not None
+    assert second.object is not None
+    assert first.object.physical_roof_id == second.object.physical_roof_id
+    assert first.object.canonical_roof_id == second.object.canonical_roof_id
+    assert first.object.source_sha256 != second.object.source_sha256
+    assert first.object.quantity_id != second.object.quantity_id
+
+
+def test_roof_quantity_is_attached_to_canonical_roof_in_coverage_registry() -> None:
+    measurement = _measurement()
+    projection = project_source_gable_roof(measurement)
+    assert projection.object is not None
+    assert measurement.quantity_evidence is not None
+
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=(projection.object,),
+        quantities=(measurement.quantity_evidence,),
+        registry_run_scope="roof-quantity-link",
+    )
+    assert gaps == {}
+    assert len(summaries) == 1
+    record = summaries[0].object_records[0]
+    assert record.object_id == projection.object.physical_roof_id
+    assert record.quantity_ids == (measurement.quantity_evidence.quantity_id,)
+    assert record.quantity_contribution[measurement.quantity_evidence.quantity_id] == measurement.quantity_evidence.value
+
+    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    family = report["family_reports"]["roof"]
+    assert family["classification"] == "PARTIAL"
+    assert family["stage_counts"]["CANONICALIZED"] == 1
+    assert family["stage_counts"]["QUANTIFIED"] == 1
+    assert family["stage_counts"]["PUBLISHED"] == 0
 
 
 def test_quantity_geometry_mismatch_fails_closed() -> None:

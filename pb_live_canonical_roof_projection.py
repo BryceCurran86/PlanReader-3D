@@ -15,7 +15,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_source_roof_covering_authority import SourceRoofCoveringMeasurement
 
 
-LIVE_CANONICAL_ROOF_SCHEMA_VERSION = "1.0.0"
+LIVE_CANONICAL_ROOF_SCHEMA_VERSION = "1.1.0"
 LIVE_CANONICAL_ROOF_RESOLVED = "live_canonical_roof_resolved"
 LIVE_CANONICAL_ROOF_UNAVAILABLE = "live_canonical_roof_unavailable"
 LIVE_CANONICAL_ROOF_LINEAGE_INVALID = "live_canonical_roof_lineage_invalid"
@@ -24,6 +24,11 @@ LIVE_CANONICAL_ROOF_LINEAGE_INVALID = "live_canonical_roof_lineage_invalid"
 @dataclass(frozen=True)
 class LiveCanonicalRoofObject:
     canonical_roof_id: str
+    physical_roof_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
     roof_type: str
     source_page: int
     source_viewport_id: Optional[str]
@@ -50,6 +55,11 @@ class LiveCanonicalRoofObject:
     def to_dict(self) -> dict:
         return {
             "canonical_roof_id": self.canonical_roof_id,
+            "physical_roof_id": self.physical_roof_id,
+            "document_id": self.document_id,
+            "revision_id": self.revision_id,
+            "source_sha256": self.source_sha256,
+            "snapshot_id": self.snapshot_id,
             "roof_type": self.roof_type,
             "source_page": self.source_page,
             "source_viewport_id": self.source_viewport_id,
@@ -106,6 +116,12 @@ def project_source_gable_roof(
         or quantity.value is None
         or str(quantity.status) != EvidenceResolutionStatus.CORROBORATED.value
         or not quantity.evidence_ids
+        or not measurement.document_id
+        or not measurement.revision_id
+        or not measurement.source_sha256
+        or not measurement.snapshot_id
+        or not measurement.physical_roof_id
+        or quantity.input_entity_ids != (measurement.physical_roof_id,)
         or not _finite_positive(measurement.pitch_deg)
         or not _finite_positive(measurement.cross_ridge_span_m)
         or not _finite_positive(measurement.ridge_length_m)
@@ -164,22 +180,7 @@ def project_source_gable_roof(
                 object=None,
                 reason_codes=(LIVE_CANONICAL_ROOF_LINEAGE_INVALID,),
             )
-    canonical_id = stable_contract_id(
-        "live_canonical_roof",
-        {
-            "source_page": int(evidence.source_page),
-            "source_viewport_id": evidence.source_viewport_id,
-            "apex_xy": tuple(float(value) for value in evidence.apex_xy),
-            "left_support_xy": tuple(
-                float(value) for value in evidence.left_support_xy
-            ),
-            "right_support_xy": tuple(
-                float(value) for value in evidence.right_support_xy
-            ),
-            "evidence_ids": tuple(quantity.evidence_ids),
-        },
-        digest_chars=32,
-    )
+    canonical_id = str(measurement.physical_roof_id)
     provenance = {
         "authority": quantity.authority,
         "formula": quantity.formula,
@@ -192,6 +193,11 @@ def project_source_gable_roof(
     return LiveCanonicalRoofProjection(
         object=LiveCanonicalRoofObject(
             canonical_roof_id=canonical_id,
+            physical_roof_id=str(measurement.physical_roof_id),
+            document_id=str(measurement.document_id),
+            revision_id=str(measurement.revision_id),
+            source_sha256=str(measurement.source_sha256),
+            snapshot_id=str(measurement.snapshot_id),
             roof_type="gable",
             source_page=int(evidence.source_page),
             source_viewport_id=evidence.source_viewport_id,
