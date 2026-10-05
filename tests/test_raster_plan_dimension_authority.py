@@ -264,8 +264,103 @@ def _image_only_dimension_pdf() -> bytes:
     return payload
 
 
+def _vector_only_dimension_pdf() -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=360, height=200)
+
+    def h(x0, y, x1):
+        page.draw_line(
+            fitz.Point(x0, y),
+            fitz.Point(x1, y),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+
+    def v(x, y0, y1):
+        page.draw_line(
+            fitz.Point(x, y0),
+            fitz.Point(x, y1),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+
+    # Same orthogonal dimension system as the raster fixture, but every witness
+    # and dimension line is native vector source geometry.
+    h(40, 30, 240)
+    v(40, 24, 36)
+    v(240, 24, 36)
+    h(40, 60, 140)
+    v(40, 54, 66)
+    v(140, 54, 66)
+    h(140, 80, 240)
+    v(140, 74, 86)
+    v(240, 74, 86)
+
+    v(280, 30, 130)
+    h(274, 30, 286)
+    h(274, 130, 286)
+    v(310, 30, 80)
+    h(304, 30, 316)
+    h(304, 80, 316)
+    v(330, 80, 130)
+    h(324, 80, 336)
+    h(324, 130, 336)
+
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
 def _ocr(text: str, bbox: tuple[float, float, float, float]) -> OCRLine:
     return OCRLine(text=text, confidence=1.0, bbox_px=bbox, bbox_pt=bbox)
+
+
+def test_end_to_end_producer_can_bind_ocr_to_native_visible_dimension_geometry():
+    source = SourceVisibilityProducer(
+        producer_method="native-vector-raster-dimension-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="synthetic-native-vector-dims",
+        source_bytes=_vector_only_dimension_pdf(),
+        source_locator="memory://synthetic-native-vector-dims.pdf",
+    )
+
+    backend = MockOCRBackend(
+        (
+            _ocr("10000", (125.0, 26.0, 155.0, 34.0)),
+            _ocr("5000", (75.0, 56.0, 105.0, 64.0)),
+            _ocr("5000", (175.0, 76.0, 205.0, 84.0)),
+            _ocr("5000", (276.0, 68.0, 284.0, 92.0)),
+            _ocr("2500", (306.0, 44.0, 314.0, 66.0)),
+            _ocr("2500", (326.0, 94.0, 334.0, 116.0)),
+        )
+    )
+
+    result = RasterPlanDimensionProducer.create_for_tests(
+        source_visibility=source,
+        backend=backend,
+    ).publish(
+        revision_id=published.revision.revision_id,
+        page_id="1",
+    )
+
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.length_m == 10.0
+    assert result.width_m == 5.0
+    assert result.horizontal is not None
+    assert result.vertical is not None
+    assert result.horizontal.child_values_mm == (5000, 5000)
+    assert result.vertical.child_values_mm == (2500, 2500)
+    assert result.quantity_m2 is None
+    assert result.bound_dimensions
+    # The binding evidence comes from producer-owned visible source observations;
+    # no caller geometry or scale is introduced by this path.
+    assert all(
+        dimension.dimension_line_observation_ids
+        and dimension.witness_observation_ids
+        for dimension in result.bound_dimensions
+    )
 
 
 def test_end_to_end_producer_resolves_only_source_owned_orthogonal_chains():
