@@ -485,6 +485,103 @@ def test_physical_room_identity_ignores_evidence_revision_fingerprints() -> None
     assert left.evidence_ids != right.evidence_ids
 
 
+def test_physical_room_identity_is_invariant_to_polygon_start_vertex_and_winding() -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    def room_record(polygon):
+        return SimpleNamespace(
+            face_id="evidence-face",
+            record_id="evidence-record",
+            document_id="doc-a",
+            revision_id="revision",
+            source_sha256="c" * 64,
+            snapshot_id="snapshot",
+            page_id="1",
+            decision_scope_id="wall-source:page-1",
+            polygon_pdf_pts=polygon,
+            bounding_wall_ids=("w1", "w2", "w3", "w4"),
+            area_page_pts2=100.0,
+        )
+
+    base = (
+        (10.0, 10.0),
+        (20.0, 10.0),
+        (20.0, 20.0),
+        (10.0, 20.0),
+    )
+    shifted = (
+        (20.0, 20.0),
+        (10.0, 20.0),
+        (10.0, 10.0),
+        (20.0, 10.0),
+    )
+    reversed_winding = (
+        (10.0, 10.0),
+        (10.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 10.0),
+    )
+
+    ids = {
+        module._room_object_from_record(
+            room_record(polygon),
+            viewport_id="floor-plan-view",
+            canonical_wall_ids_by_candidate=None,
+            unresolved_wall_candidate_ids=None,
+        ).physical_room_id
+        for polygon in (base, shifted, reversed_winding)
+    }
+    assert len(ids) == 1
+
+
+def test_physical_room_identity_uses_same_six_decimal_geometry_contract_as_source_faces() -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    def room_record(polygon):
+        return SimpleNamespace(
+            face_id="evidence-face",
+            record_id="evidence-record",
+            document_id="doc-a",
+            revision_id="revision",
+            source_sha256="c" * 64,
+            snapshot_id="snapshot",
+            page_id="1",
+            decision_scope_id="wall-source:page-1",
+            polygon_pdf_pts=polygon,
+            bounding_wall_ids=("w1", "w2", "w3", "w4"),
+            area_page_pts2=100.0,
+        )
+
+    base = (
+        (10.0, 10.0),
+        (20.0, 10.0),
+        (20.0, 20.0),
+        (10.0, 20.0),
+    )
+    sub_quantum_noise = (
+        (10.0000004, 9.9999996),
+        (20.0000004, 10.0000004),
+        (19.9999996, 20.0000004),
+        (9.9999996, 19.9999996),
+    )
+
+    left = module._room_object_from_record(
+        room_record(base),
+        viewport_id="floor-plan-view",
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+    right = module._room_object_from_record(
+        room_record(sub_quantum_noise),
+        viewport_id="floor-plan-view",
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+    )
+    assert left.physical_room_id == right.physical_room_id
+
+
 def test_physical_room_identity_keeps_distinct_rooms_and_documents_distinct() -> None:
     from types import SimpleNamespace
     import pb_live_canonical_room_composition as module

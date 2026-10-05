@@ -132,6 +132,16 @@ class TestPhysicalVerandahSupportWiring:
         assert len(set(prediction.metadata["physical_member_ids"])) == 4
         assert len(prediction.metadata["source_sha256"]) == 64
         int(prediction.metadata["source_sha256"], 16)
+        quantity_id = extractor.structural_member_coverage_shadow["quantity_id"]
+        assert quantity_id
+        assert "quantity_id" not in prediction.metadata
+        assert "raw_evidence_ref" not in prediction.metadata
+        assert (
+            extractor.structural_member_coverage_shadow["quantity_evidence"][
+                "quantity_id"
+            ]
+            == quantity_id
+        )
         # No textual support keyword exists, so the older dimension+keyword
         # structural_columns path must remain locked.
         assert "structural_columns" not in pred_map

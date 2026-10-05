@@ -19,6 +19,10 @@ from pb_live_canonical_wall_finish_surface import LiveCanonicalWallFinishSurface
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
 from pb_live_external_physical_net_wall_publication import LiveCanonicalWallObject
 from pb_live_physical_opening_void_composition import LiveCanonicalOpeningObject
+from pb_live_canonical_opening_filling import (
+    LiveCanonicalDoorObject,
+    LiveCanonicalWindowObject,
+)
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
 from pb_takeoff_coverage_registry import (
     ENUMERATION_COMPLETE,
@@ -39,6 +43,8 @@ from pb_takeoff_output_authority import TakeoffOutputRow
 _PRODUCERS = {
     LiveCanonicalWallObject: ("wall", "canonical_wall_id", "physical_wall_id", "pb_live_canonical_wall_composition"),
     LiveCanonicalOpeningObject: ("opening", "canonical_opening_id", "physical_opening_id", "pb_live_physical_opening_void_composition"),
+    LiveCanonicalDoorObject: ("door", "canonical_filling_id", "physical_filling_id", "pb_live_canonical_opening_filling"),
+    LiveCanonicalWindowObject: ("window", "canonical_filling_id", "physical_filling_id", "pb_live_canonical_opening_filling"),
     LiveCanonicalRoomObject: ("room", "canonical_room_id", "physical_room_id", "pb_live_canonical_room_composition"),
     LiveCanonicalFloorSurfaceObject: ("floor", "canonical_floor_id", "canonical_floor_id", "pb_live_canonical_floor_surface"),
     LiveCanonicalSlabObject: ("slab", "canonical_slab_id", "slab_id", "pb_live_canonical_slab_projection"),
@@ -123,8 +129,6 @@ def collect_live_canonical_coverage(
         if descriptor is None:
             raise TypeError("objects must contain supported live canonical producer types")
         category, canonical_field, physical_field, producer = descriptor
-        if type(obj) is LiveCanonicalOpeningObject and obj.opening_kind in {"door", "window"}:
-            gaps["door_window"].add("door_window_reuses_opening_identity_without_filling_identity")
         lineage = _lineage(obj)
         if not all(lineage):
             gaps[category].add("producer_source_lineage_unavailable")
