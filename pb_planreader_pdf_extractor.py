@@ -1112,6 +1112,17 @@ class GenericPlanReaderExtractor:
         # PyMuPDF to reparse the same content stream repeatedly.
         native_page_text: Dict[int, str] = {}
         drawing_page_flags: Dict[int, bool] = {}
+        source_sha256_cache: Optional[str] = None
+
+        def _source_sha256() -> str:
+            nonlocal source_sha256_cache
+            if source_sha256_cache is None:
+                digest = hashlib.sha256()
+                with p_path.open("rb") as source_file:
+                    for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                source_sha256_cache = digest.hexdigest()
+            return source_sha256_cache
 
         def _native_text(page_index: int) -> str:
             cached = native_page_text.get(page_index)
@@ -2054,9 +2065,14 @@ class GenericPlanReaderExtractor:
                                     project_resolved_slab_entity,
                                 )
 
+                                slab_source_sha256 = _source_sha256()
                                 slab_projection = project_resolved_slab_entity(
                                     slab=slab,
                                     boundary=slab_boundary,
+                                    document_id=f"pdf-sha256:{slab_source_sha256}",
+                                    revision_id=f"source:{slab_source_sha256}",
+                                    source_sha256=slab_source_sha256,
+                                    snapshot_id=f"source:{slab_source_sha256}",
                                 )
                                 canonical_slab_payload = None
                                 if slab_projection.object is not None:
@@ -3164,7 +3180,7 @@ class GenericPlanReaderExtractor:
                 extract_source_plan_opening_callouts,
             )
 
-            source_sha256 = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            source_sha256 = _source_sha256()
             source_callouts = []
             for page_index in target_pages:
                 if 0 <= page_index < len(doc):
@@ -3391,7 +3407,7 @@ class GenericPlanReaderExtractor:
                 collect_source_owned_floor_plan_levels,
             )
 
-            _level_source_sha = hashlib.sha256(p_path.read_bytes()).hexdigest()
+            _level_source_sha = _source_sha256()
             _level_pages = [
                 page_index
                 for page_index in target_pages
@@ -4449,7 +4465,7 @@ class GenericPlanReaderExtractor:
             )
 
             _building_core = assemble_live_canonical_building_core(
-                source_sha256=hashlib.sha256(p_path.read_bytes()).hexdigest(),
+                source_sha256=_source_sha256(),
                 levels=self.canonical_levels_live.get("levels", ()),
                 walls=self.canonical_walls_live.get("walls", ()),
                 openings=self.canonical_openings_live.get("openings", ()),
