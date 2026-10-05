@@ -9,15 +9,30 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
 
-from pb_source_closed_run_export import sealed_source_closed_run_from_dict
-
-from .development_scoreboard import evaluate_development_project_v2
-from .manifest_io import load_project_manifest
-from .sealed_reconciliation import (
-    identity_map_from_dict,
-    reconcile_sealed_run_v2,
-)
+if __package__:
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    from .development_scoreboard import evaluate_development_project_v2
+    from .manifest_io import load_project_manifest
+    from .sealed_reconciliation import (
+        identity_map_from_dict,
+        reconcile_sealed_run_v2,
+    )
+else:
+    repo_root = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo_root))
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    from benchmarks.frozen_holdout.full_plan_v2.development_scoreboard import (
+        evaluate_development_project_v2,
+    )
+    from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
+        load_project_manifest,
+    )
+    from benchmarks.frozen_holdout.full_plan_v2.sealed_reconciliation import (
+        identity_map_from_dict,
+        reconcile_sealed_run_v2,
+    )
 
 
 def _json_object(path: Path) -> dict:
