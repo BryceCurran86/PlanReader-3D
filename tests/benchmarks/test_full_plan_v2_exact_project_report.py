@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
-from benchmarks.frozen_holdout.full_plan_v2.run_exact_project_reconciliation import (
-    build_exact_project_report,
+_REPORT_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "benchmarks"
+    / "frozen_holdout"
+    / "full_plan_v2"
+    / "run_exact_project_reconciliation.py"
 )
+_SPEC = importlib.util.spec_from_file_location(
+    "full_plan_v2_exact_project_reconciliation",
+    _REPORT_PATH,
+)
+assert _SPEC is not None and _SPEC.loader is not None
+_MODULE = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _MODULE
+_SPEC.loader.exec_module(_MODULE)
+build_exact_project_report = _MODULE.build_exact_project_report
+
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
