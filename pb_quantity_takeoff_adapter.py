@@ -482,34 +482,78 @@ def quantity_evidence_to_takeoff_output_row(
     }
 
 
+def _commercial_claim_identity_refs(
+    quantity: QuantityEvidence,
+    trace: CommercialTakeoffSourceTrace,
+) -> frozenset[str]:
+    """Return the strongest source-owned identity set available for one claim.
+
+    Quantity input identities are authoritative when present. The trace's
+    canonical identities are only a fallback for older producers that have not
+    yet populated input_entity_ids. Evidence IDs, labels, values and source
+    coordinates are deliberately not treated as physical identity.
+    """
+    quantity_refs = frozenset(
+        _clean(value) for value in quantity.input_entity_ids if _clean(value)
+    )
+    if quantity_refs:
+        return quantity_refs
+    return frozenset(
+        _clean(value) for value in trace.canonical_entity_ids if _clean(value)
+    )
+
+
 def quantities_to_takeoff_output_rows(
     quantities: Sequence[QuantityEvidence],
     *,
     traces_by_quantity_id: Mapping[str, CommercialTakeoffSourceTrace],
     authorities_by_quantity_id: Mapping[str, CommercialMeasurementAuthority],
 ) -> list[dict[str, Any]]:
-    """Project a bundle, failing closed on duplicate/conflicting semantic claims."""
-    seen: dict[str, tuple[float, str]] = {}
+    """Project a bundle without collapsing proven-distinct physical claims.
+
+    A semantic key describes what a quantity means; it is not a physical object
+    identity. Two quantities with the same semantic key may therefore both be
+    valid when their source-owned entity identities are non-empty and disjoint.
+
+    Claims with overlapping or unavailable identity remain duplicate/conflict
+    candidates and fail closed. This preserves the previous protection against
+    duplicate publication while preventing distinct rooms/openings/surfaces from
+    being erased merely because they share a semantic quantity type.
+    """
+    seen: dict[str, list[tuple[frozenset[str], tuple[float, str], str]]] = {}
     output: list[dict[str, Any]] = []
     for quantity in quantities:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("quantities must contain only QuantityEvidence records")
+        trace = traces_by_quantity_id.get(quantity.quantity_id)
         row = quantity_evidence_to_takeoff_output_row(
             quantity,
-            trace=traces_by_quantity_id.get(quantity.quantity_id),
+            trace=trace,
             authority=authorities_by_quantity_id.get(quantity.quantity_id),
         )
         if row is None:
             continue
+        assert trace is not None  # required by successful commercial projection
+
         key = quantity.semantic_key
         claim = (float(quantity.value), _norm(quantity.unit))
-        if key in seen:
-            prior = seen[key]
-            detail = "conflicting" if prior != claim else "duplicate"
-            raise CommercialTakeoffConflictError(
-                f"{detail} emitted commercial quantities claim semantic key {key!r}"
+        identities = _commercial_claim_identity_refs(quantity, trace)
+        for prior_identities, prior_claim, prior_quantity_id in seen.get(key, ()):
+            proven_distinct = bool(
+                identities
+                and prior_identities
+                and identities.isdisjoint(prior_identities)
             )
-        seen[key] = claim
+            if proven_distinct:
+                continue
+            detail = "conflicting" if prior_claim != claim else "duplicate"
+            raise CommercialTakeoffConflictError(
+                f"{detail} emitted commercial quantities claim semantic key {key!r}; "
+                f"physical identity is overlapping or unresolved between "
+                f"{prior_quantity_id!r} and {quantity.quantity_id!r}"
+            )
+
+        seen.setdefault(key, []).append((identities, claim, quantity.quantity_id))
         output.append(row)
     return output
 
