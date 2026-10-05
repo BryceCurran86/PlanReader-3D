@@ -19,12 +19,13 @@ import cv2
 import numpy as np
 
 
-RASTER_OPENING_PRIMITIVE_SCHEMA_VERSION = "1.0.0"
-RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION = "raster_opening_source_primitives_v1"
+RASTER_OPENING_PRIMITIVE_SCHEMA_VERSION = "1.1.0"
+RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION = "raster_opening_source_primitives_v2"
 
 RASTER_WALL_BAND_FACE = "raster_wall_band_face"
 RASTER_WALL_BAND_END = "raster_wall_band_end"
 RASTER_THIN_INK_RUN = "raster_thin_ink_run"
+RASTER_LINE_RUN = "raster_line_run"
 
 # Paper-unit / relative geometry constants inherited from the reviewed shadow
 # primitive layer. None is a drawing scale, project coordinate, or BOQ value.
@@ -154,6 +155,42 @@ def _band_edge_primitives(
                 yield _primitive(RASTER_WALL_BAND_END, geometry, dpi=dpi)
 
 
+def _raw_axis_line_run_primitives(
+    line_mask: np.ndarray,
+    *,
+    dpi: int,
+    axis: str,
+) -> Iterable[RasterOpeningSourcePrimitive]:
+    """Publish lossless-enough axis line runs without component merging.
+
+    Frame lines can touch jamb or wall ink and therefore cannot be recovered
+    safely from connected-component boxes. Scan each raster row (or column)
+    independently and retain every contiguous source-ink run at least 4 pt
+    long. This is perception only: no gap, frame, opening, or host relation is
+    decided here.
+    """
+
+    work = (
+        line_mask
+        if axis == "horizontal"
+        else np.ascontiguousarray(line_mask.T)
+    )
+    minimum = _px(THIN_RUN_MIN_PT, dpi)
+    for row_index, row in enumerate(work):
+        padded = np.pad(row.astype(np.int8, copy=False), (1, 1))
+        transitions = np.diff(padded)
+        starts = np.flatnonzero(transitions == 1)
+        ends = np.flatnonzero(transitions == -1) - 1
+        for start, end in zip(starts.tolist(), ends.tolist()):
+            if end - start + 1 < minimum:
+                continue
+            center = float(row_index)
+            geometry = (float(start), center, float(end), center)
+            if axis == "vertical":
+                geometry = (center, float(start), center, float(end))
+            yield _primitive(RASTER_LINE_RUN, geometry, dpi=dpi)
+
+
 def _axis_run_primitives(
     thin_mask: np.ndarray,
     *,
@@ -213,6 +250,15 @@ def detect_raster_opening_source_primitives(
     thin_mask = (line_mask & (halo == 0)).astype(np.uint8)
 
     primitives = set(_band_edge_primitives(thick, dpi=dpi))
+    primitives.update(
+        _raw_axis_line_run_primitives(line_mask, dpi=dpi, axis="horizontal")
+    )
+    primitives.update(
+        _raw_axis_line_run_primitives(line_mask, dpi=dpi, axis="vertical")
+    )
+    # Preserve the stricter hairline primitive for later swing evidence. It is
+    # intentionally distinct from RASTER_LINE_RUN, which is the neutral source
+    # evidence required by framed-opening G17 review.
     primitives.update(_axis_run_primitives(thin_mask, dpi=dpi, axis="horizontal"))
     primitives.update(_axis_run_primitives(thin_mask, dpi=dpi, axis="vertical"))
     if len(primitives) > MAX_PRIMITIVES:
@@ -231,9 +277,16 @@ def detect_raster_opening_source_primitives(
 __all__ = [
     "RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION",
     "RASTER_OPENING_PRIMITIVE_SCHEMA_VERSION",
+    "RASTER_LINE_RUN",
     "RASTER_THIN_INK_RUN",
     "RASTER_WALL_BAND_END",
     "RASTER_WALL_BAND_FACE",
+    "MASS_THRESHOLD",
+    "LINE_THRESHOLD",
+    "POCHE_MIN_PT",
+    "BAND_MIN_RUN_PT",
+    "BAND_MAX_THICKNESS_PT",
+    "BAND_MIN_ASPECT",
     "RasterOpeningSourcePrimitive",
     "detect_raster_opening_source_primitives",
 ]
