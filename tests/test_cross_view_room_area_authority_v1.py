@@ -154,10 +154,9 @@ def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_ow
 
 def test_scoped_ingest_preserves_one_based_measurement_page_identity():
     source, rooms = _source_and_room(page_ids=("2",))
-    result = CrossViewRoomAreaProducer.from_source_for_tests(
+    result = CrossViewRoomAreaProducer.from_source(
         source=source,
         rooms=rooms,
-        backend=MockOCRBackend(()),
     ).publish()
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
@@ -171,10 +170,9 @@ def test_same_page_dimensions_cannot_mint_cross_view_room_area():
         page_ids=("2",),
         room_page_id="2",
     )
-    result = CrossViewRoomAreaProducer.from_source_for_tests(
+    result = CrossViewRoomAreaProducer.from_source(
         source=source,
         rooms=rooms,
-        backend=MockOCRBackend(()),
     ).publish()
 
     assert result.records == ()
@@ -187,10 +185,9 @@ def test_same_page_dimensions_cannot_mint_cross_view_room_area():
 
 def test_duplicate_canonical_room_label_fails_closed_before_cross_view_binding():
     source, rooms = _source_and_room(duplicate_room_label=True)
-    result = CrossViewRoomAreaProducer.from_source_for_tests(
+    result = CrossViewRoomAreaProducer.from_source(
         source=source,
         rooms=rooms,
-        backend=MockOCRBackend(()),
     ).publish()
 
     assert result.status is EvidenceResolutionStatus.CONFLICT
@@ -204,10 +201,9 @@ def test_duplicate_canonical_room_label_fails_closed_before_cross_view_binding()
 
 def test_multiple_orthogonal_dimension_pairs_around_same_label_fail_closed():
     source, rooms = _source_and_room(duplicate_dimension_box=True)
-    result = CrossViewRoomAreaProducer.from_source_for_tests(
+    result = CrossViewRoomAreaProducer.from_source(
         source=source,
         rooms=rooms,
-        backend=MockOCRBackend(()),
     ).publish()
 
     assert result.status in {
@@ -220,10 +216,9 @@ def test_multiple_orthogonal_dimension_pairs_around_same_label_fail_closed():
 
 def test_record_constructor_rejects_caller_forgery():
     source, rooms = _source_and_room()
-    result = CrossViewRoomAreaProducer.from_source_for_tests(
+    result = CrossViewRoomAreaProducer.from_source(
         source=source,
         rooms=rooms,
-        backend=MockOCRBackend(()),
     ).publish()
     assert result.records
     record = result.records[0]
