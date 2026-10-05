@@ -15,10 +15,12 @@ or conflicting.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 import math
 from types import MappingProxyType
 
 import fitz
+from PIL import Image, ImageOps
 from typing import Mapping, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import DimensionOrientation
@@ -46,9 +48,19 @@ from pb_page_scale_calibration_authority import (
     ScaleSourceType,
     resolve_page_scale_calibration,
 )
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
+from pb_portable_raster_ocr_authority import (
+    TesseractOCRBackend,
+    select_production_ocr_backend,
+)
 from pb_raster_text_corroboration_authority import (
-    RasterTextCorroborationProducer,
-    RasterTextCorroborationSelector,
+    RASTER_TEXT_CORROBORATION_DPIS,
+    _lossless_rotate,
+    _producer_owned_ocr_target,
+    normalize_reading,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
@@ -323,6 +335,206 @@ def _bbox_key(
     return tuple(round(value, 4) for value in bbox)
 
 
+_DIMENSION_OCR_BLANK_MARGIN_MM = 1.0
+
+
+def _single_isolated_ocr_reading(
+    backend,
+    image: Image.Image,
+    *,
+    dpi: int,
+) -> Optional[str]:
+    """Read one already-isolated source word with the selected OCR backend.
+
+    Tesseract gets single-line page segmentation only for this exact,
+    producer-owned word crop. Other selected production backends receive the
+    same isolated image through their normal extraction entrypoint. There is
+    never a retry on a different backend.
+    """
+
+    if not backend.is_available():
+        return None
+
+    if type(backend) is TesseractOCRBackend:
+        try:
+            import pytesseract
+
+            command = backend._resolved_cmd()
+            if not command:
+                return None
+            pytesseract.pytesseract.tesseract_cmd = command
+            raw = pytesseract.image_to_string(image, config="--psm 7")
+        except Exception:
+            return None
+        readings = tuple(
+            normalize_reading(line)
+            for line in str(raw or "").splitlines()
+            if normalize_reading(line)
+        )
+        return readings[0] if len(readings) == 1 else None
+
+    try:
+        lines = tuple(backend.extract_lines(image, dpi=int(dpi)))
+    except Exception:
+        return None
+    readings = tuple(
+        normalize_reading(getattr(line, "text", ""))
+        for line in lines
+        if normalize_reading(getattr(line, "text", ""))
+    )
+    return readings[0] if len(readings) == 1 else None
+
+
+def _isolated_dimension_numeric_corroboration(
+    source: SourceVisibilityProducer,
+    *,
+    published,
+    selector: ObservationSelector,
+    text_result,
+    backend,
+) -> Optional[str]:
+    """Authenticate one witness-bound numeric word by two isolated renders.
+
+    This is a deliberately narrower fallback than general raster OCR:
+    - the caller has already reduced the universe to WITNESS_BOUND dimension
+      word bboxes;
+    - only native text failures eligible for RasterTextCorroboration are
+      accepted;
+    - the exact producer-owned source word region is rendered independently at
+      300 and 450 DPI;
+    - blank margin is added only after rendering, so no neighbouring source
+      pixels can enter the OCR proof;
+    - both renders must yield exactly one reading and parse to exactly the same
+      figured millimetre value as the native numeric claim.
+    """
+
+    receipt = getattr(text_result, "receipt", None)
+    if receipt is None:
+        return None
+    receipt_reasons = tuple(getattr(receipt, "reason_codes", ()) or ())
+    reason_set = set(receipt_reasons)
+    admissible = {
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+        TEXT_CLIP_STATE_UNRESOLVED,
+    }
+    if (
+        text_result.status is not EvidenceResolutionStatus.ABSTAINED
+        or bool(getattr(receipt, "trusted", False))
+        or TEXT_GLYPH_MAPPING_UNVERIFIED not in reason_set
+        or not reason_set.issubset(admissible)
+        or tuple(text_result.reason_codes) != receipt_reasons
+    ):
+        return None
+
+    source_result = source._producer.authority().resolve(selector)
+    observation = source_result.observation
+    if (
+        source_result.status is not EvidenceResolutionStatus.CORROBORATED
+        or observation is None
+        or observation.observation_kind != "native_pdf_word"
+        or observation.origin_kind != "native"
+        or observation.viewport_id is not None
+        or str(observation.page_id) != str(receipt.page_id)
+        or tuple(observation.geometry) != tuple(receipt.geometry)
+    ):
+        return None
+
+    bbox = _finite_bbox(observation.geometry)
+    if bbox is None:
+        return None
+    native_claim = normalize_reading(observation.raw_text)
+    if not native_claim:
+        return None
+    try:
+        native_mm = float(parse_figured_dimension_mm(native_claim))
+    except DimensionParseError:
+        return None
+
+    raster_bbox, ocr_rotation_degrees = _producer_owned_ocr_target(
+        source._producer,
+        revision_id=selector.revision_id,
+        source_sha256=selector.source_sha256,
+        page_id=str(observation.page_id),
+        receipt=receipt,
+        word_bbox=bbox,
+        raw_text=str(observation.raw_text),
+    )
+
+    readings: list[str] = []
+    parent_keys: set[tuple[str, str, str]] = set()
+    for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+        try:
+            png_bytes, page_parent = source._producer.render_native_page_png(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=str(observation.page_id),
+                dpi=float(dpi),
+                clip_pt=raster_bbox,
+            )
+        except Exception:
+            return None
+        if (
+            page_parent.page_id != observation.page_id
+            or page_parent.source_partition_id != observation.source_partition_id
+            or page_parent.document_id != observation.document_id
+            or page_parent.revision_id != observation.revision_id
+            or page_parent.source_sha256 != observation.source_sha256
+        ):
+            return None
+        parent_keys.add(
+            (
+                str(page_parent.observation_id),
+                str(page_parent.source_partition_id),
+                str(page_parent.page_id),
+            )
+        )
+
+        try:
+            rendered = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+            normalized = _lossless_rotate(
+                rendered,
+                int(ocr_rotation_degrees),
+            )
+        except Exception:
+            return None
+
+        margin_px = max(
+            1,
+            int(round(float(dpi) * _DIMENSION_OCR_BLANK_MARGIN_MM / 25.4)),
+        )
+        isolated = ImageOps.expand(
+            normalized,
+            border=margin_px,
+            fill="white",
+        )
+        reading = _single_isolated_ocr_reading(
+            backend,
+            isolated,
+            dpi=int(dpi),
+        )
+        if reading is None:
+            return None
+        try:
+            reading_mm = float(parse_figured_dimension_mm(reading))
+        except DimensionParseError:
+            return None
+        if abs(reading_mm - native_mm) > 1e-6:
+            return None
+        readings.append(reading)
+
+    if len(parent_keys) != 1 or len(readings) != len(RASTER_TEXT_CORROBORATION_DPIS):
+        return None
+    try:
+        parsed = tuple(float(parse_figured_dimension_mm(value)) for value in readings)
+    except DimensionParseError:
+        return None
+    if len(set(parsed)) != 1 or abs(parsed[0] - native_mm) > 1e-6:
+        return None
+    return native_claim
+
+
 def _trusted_native_dimensions_for_page(
     source: SourceVisibilityProducer,
     *,
@@ -394,8 +606,8 @@ def _trusted_native_dimensions_for_page(
             needed_bbox_keys.add(key)
 
     text_authority = source.text_integrity_authority()
-    raster = RasterTextCorroborationProducer.from_source_visibility_producer(
-        source
+    dimension_ocr_backend, _ocr_selection_reason = (
+        select_production_ocr_backend()
     )
     trusted_by_bbox: dict[
         tuple[float, float, float, float],
@@ -424,21 +636,13 @@ def _trusted_native_dimensions_for_page(
         ):
             trusted_text = str(resolved.trusted_text)
         else:
-            corroborated = raster.publish(
-                RasterTextCorroborationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
+            trusted_text = _isolated_dimension_numeric_corroboration(
+                source,
+                published=published,
+                selector=selector,
+                text_result=resolved,
+                backend=dimension_ocr_backend,
             )
-            if (
-                corroborated.status is EvidenceResolutionStatus.CORROBORATED
-                and corroborated.record is not None
-                and corroborated.corroborated_text
-            ):
-                trusted_text = str(corroborated.corroborated_text)
 
         if not trusted_text:
             continue
