@@ -1,0 +1,23 @@
+name: TEST ONLY A610 Post-1338 Runtime Export
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  export-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - run: git rev-parse HEAD > CURRENT_MAIN_SHA.txt
+      - run: git archive --format=tar.gz -o current-main-runtime.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a610-post1338-runtime
+          path: |
+            current-main-runtime.tar.gz
+            CURRENT_MAIN_SHA.txt
+          retention-days: 1
