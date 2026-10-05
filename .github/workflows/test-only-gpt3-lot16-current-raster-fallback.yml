@@ -1,0 +1,53 @@
+name: TEST ONLY GPT3 Lot16 Current Raster Fallback
+
+on:
+  pull_request:
+    branches:
+      - gpt3/handoff-live-topology-fallback-refresh
+
+jobs:
+  lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run Lot16 handoff
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p artifacts/lot16
+          git rev-parse HEAD > artifacts/lot16/head_sha.txt
+          sha256sum "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" > artifacts/lot16/source_sha256.txt
+          set +e
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --project-id "au_qld_lot16_power" \
+            --workspace-id 1 \
+            --output-dir artifacts/lot16 \
+            > artifacts/lot16/run.log 2>&1
+          code=$?
+          echo "$code" > artifacts/lot16/exit_code.txt
+          cat artifacts/lot16/run.log
+          exit 0
+      - name: Show summary
+        if: always()
+        run: |
+          find artifacts/lot16 -maxdepth 3 -type f -print || true
+          cat artifacts/lot16/production_summary.json 2>/dev/null || true
+          tail -n 160 artifacts/lot16/run.log 2>/dev/null || true
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-lot16-current-raster-fallback
+          path: artifacts/lot16
+          retention-days: 1
+          if-no-files-found: warn
