@@ -15,6 +15,7 @@ from pathlib import Path
 
 if __package__:
     from .evaluator import (
+        MATCHED_WITHIN_TOLERANCE,
         PROJECT_VERIFIED,
         ProducedTakeoffItemV2,
         ProjectBenchmarkManifestV2,
@@ -31,6 +32,7 @@ else:
         _spec.loader.exec_module(_module)
     ProducedTakeoffItemV2 = _module.ProducedTakeoffItemV2
     ProjectBenchmarkManifestV2 = _module.ProjectBenchmarkManifestV2
+    MATCHED_WITHIN_TOLERANCE = _module.MATCHED_WITHIN_TOLERANCE
     PROJECT_VERIFIED = _module.PROJECT_VERIFIED
     evaluate_project_v2 = _module.evaluate_project_v2
 
@@ -51,6 +53,35 @@ class DevelopmentProjectResultV2:
     lineage_conflicts: int
     observed_accuracy: float | None
     precision_adjusted_accuracy: float | None
+
+
+@dataclass(frozen=True)
+class DevelopmentFailureLedgerItemV2:
+    project_id: str
+    item_id: str
+    state: str
+    trade_category: str
+    unit: str
+    produced_quantity_id: str | None
+    error_fraction: float | None
+    expected_object_refs: tuple[str, ...]
+    matched_object_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DevelopmentUnsupportedOutputV2:
+    project_id: str
+    quantity_id: str
+    trade_category: str
+    unit: str
+    object_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DevelopmentFailureLedgerV2:
+    failure_items: tuple[DevelopmentFailureLedgerItemV2, ...]
+    unsupported_outputs: tuple[DevelopmentUnsupportedOutputV2, ...]
+    missing_execution_project_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -163,6 +194,113 @@ def evaluate_development_project_v2(
         lineage_conflicts=lineage_conflicts,
         observed_accuracy=result.coverage_accuracy,
         precision_adjusted_accuracy=result.precision_adjusted_accuracy,
+    )
+
+
+def build_development_failure_ledger_v2(
+    manifests: Iterable[ProjectBenchmarkManifestV2],
+    produced_by_project: dict[str, Iterable[ProducedTakeoffItemV2]],
+) -> DevelopmentFailureLedgerV2:
+    """Return exact evaluator failures without changing any score or truth.
+
+    Missing project executions are reported separately instead of being
+    mislabelled as MISSED denominator objects. For executed projects, item
+    states come directly from the existing V2 evaluator. Matched-within-
+    tolerance rows are omitted because this is a failure ledger.
+    """
+    manifest_tuple = tuple(manifests)
+    if len({manifest.project_id for manifest in manifest_tuple}) != len(manifest_tuple):
+        raise ValueError("project ids must be unique")
+
+    produced_map = {
+        str(project_id): tuple(rows)
+        for project_id, rows in produced_by_project.items()
+    }
+    expected_ids = {manifest.project_id for manifest in manifest_tuple}
+    unexpected_ids = tuple(sorted(set(produced_map) - expected_ids))
+    if unexpected_ids:
+        raise ValueError(
+            "produced output contains unexpected projects: " + ", ".join(unexpected_ids)
+        )
+
+    failure_items: list[DevelopmentFailureLedgerItemV2] = []
+    unsupported_outputs: list[DevelopmentUnsupportedOutputV2] = []
+    missing_execution: list[str] = []
+
+    for manifest in manifest_tuple:
+        produced = produced_map.get(manifest.project_id)
+        if produced is None:
+            missing_execution.append(manifest.project_id)
+            continue
+
+        scorable = _scorable_manifest(manifest)
+        if scorable is None:
+            for item in manifest.verified_items:
+                if not item.denominator_eligible:
+                    continue
+                failure_items.append(
+                    DevelopmentFailureLedgerItemV2(
+                        project_id=manifest.project_id,
+                        item_id=item.item_id,
+                        state="UNRESOLVED",
+                        trade_category=item.trade_category,
+                        unit=item.unit,
+                        produced_quantity_id=None,
+                        error_fraction=None,
+                        expected_object_refs=item.expected_object_refs,
+                        matched_object_refs=(),
+                    )
+                )
+            continue
+
+        result = evaluate_project_v2(scorable, produced)
+        items_by_id = {
+            item.item_id: item
+            for item in scorable.verified_items
+            if item.denominator_eligible
+        }
+        for item_result in result.item_results:
+            if item_result.state == MATCHED_WITHIN_TOLERANCE:
+                continue
+            item = items_by_id[item_result.item_id]
+            failure_items.append(
+                DevelopmentFailureLedgerItemV2(
+                    project_id=manifest.project_id,
+                    item_id=item_result.item_id,
+                    state=item_result.state,
+                    trade_category=item.trade_category,
+                    unit=item.unit,
+                    produced_quantity_id=item_result.produced_quantity_id,
+                    error_fraction=item_result.error_fraction,
+                    expected_object_refs=item.expected_object_refs,
+                    matched_object_refs=item_result.matched_object_refs,
+                )
+            )
+
+        produced_by_id = {row.quantity_id: row for row in produced}
+        for quantity_id in result.unsupported_quantity_ids:
+            row = produced_by_id[quantity_id]
+            unsupported_outputs.append(
+                DevelopmentUnsupportedOutputV2(
+                    project_id=manifest.project_id,
+                    quantity_id=quantity_id,
+                    trade_category=row.trade_category,
+                    unit=row.unit,
+                    object_refs=row.object_refs,
+                )
+            )
+
+    return DevelopmentFailureLedgerV2(
+        failure_items=tuple(
+            sorted(failure_items, key=lambda row: (row.project_id, row.item_id))
+        ),
+        unsupported_outputs=tuple(
+            sorted(
+                unsupported_outputs,
+                key=lambda row: (row.project_id, row.quantity_id),
+            )
+        ),
+        missing_execution_project_ids=tuple(sorted(missing_execution)),
     )
 
 

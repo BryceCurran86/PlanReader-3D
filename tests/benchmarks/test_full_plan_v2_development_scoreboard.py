@@ -23,6 +23,7 @@ _MODULE = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _MODULE
 _SPEC.loader.exec_module(_MODULE)
 
+build_development_failure_ledger_v2 = _MODULE.build_development_failure_ledger_v2
 evaluate_development_suite_v2 = _MODULE.evaluate_development_suite_v2
 ProducedTakeoffItemV2 = _MODULE.ProducedTakeoffItemV2
 ProjectBenchmarkManifestV2 = _MODULE.ProjectBenchmarkManifestV2
@@ -164,6 +165,54 @@ def test_lineage_conflict_blocks_headline():
     assert result.lineage_conflicts == 1
     assert result.development_accuracy is None
     assert "lineage_conflict" in result.reason_codes
+
+
+def test_failure_ledger_reports_exact_item_failures_without_faking_missing_execution():
+    manifests = (_manifest("p1"), _manifest("p2"))
+    produced = {
+        "p1": (
+            _produced("p1", value=12.0),
+            _produced(
+                "p1",
+                quantity_id="unsupported-extra",
+                refs=("p1:invented-floor",),
+                value=5.0,
+            ),
+        ),
+    }
+
+    ledger = build_development_failure_ledger_v2(manifests, produced)
+
+    assert ledger.missing_execution_project_ids == ("p2",)
+    assert len(ledger.failure_items) == 1
+    failure = ledger.failure_items[0]
+    assert failure.project_id == "p1"
+    assert failure.item_id == "p1-floor"
+    assert failure.state == "MATCHED_OUTSIDE_TOLERANCE"
+    assert failure.produced_quantity_id == "p1-q"
+    assert failure.error_fraction == pytest.approx(0.2)
+    assert failure.expected_object_refs == ("p1:floor",)
+    assert failure.matched_object_refs == ("p1:floor",)
+
+    assert len(ledger.unsupported_outputs) == 1
+    unsupported = ledger.unsupported_outputs[0]
+    assert unsupported.project_id == "p1"
+    assert unsupported.quantity_id == "unsupported-extra"
+    assert unsupported.object_refs == ("p1:invented-floor",)
+
+    # A project that was not executed is not falsely classified as a MISSED item.
+    assert all(item.project_id != "p2" for item in ledger.failure_items)
+
+
+def test_failure_ledger_omits_items_already_within_tolerance():
+    manifest = _manifest("p1")
+    ledger = build_development_failure_ledger_v2(
+        (manifest,),
+        {"p1": (_produced("p1"),)},
+    )
+    assert ledger.failure_items == ()
+    assert ledger.unsupported_outputs == ()
+    assert ledger.missing_execution_project_ids == ()
 
 
 def test_active_v2_truth_inventory_has_at_least_120_source_closed_items():
