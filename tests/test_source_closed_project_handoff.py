@@ -268,3 +268,49 @@ def test_project_handoff_rejects_family_run_from_different_source(
             workspace_id=1,
             output_dir=tmp_path / "out",
         )
+
+
+
+def test_project_handoff_persists_production_failure_summary_before_reraise(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    output = tmp_path / "out"
+
+    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((), 2))
+
+    def _fail(*args, **kwargs):
+        raise ValueError("raster opening primitive count exceeds safety bound")
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        _fail,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="raster opening primitive count exceeds safety bound",
+    ):
+        handoff.generate_project_handoff(
+            pdf_path=pdf,
+            project_id="project-a",
+            workspace_id=1,
+            output_dir=output,
+        )
+
+    summary = __import__("json").loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["status"] == "production_failed"
+    assert summary["topology_mode"] == "live_authority_all_pages_fallback"
+    assert summary["production_error_type"] == "ValueError"
+    assert summary["production_error_message"] == (
+        "raster opening primitive count exceeds safety bound"
+    )
+    assert summary["claim_reason_codes"] == [
+        "production_extraction_error:ValueError"
+    ]
+    assert summary["combined_run_file"] is None
