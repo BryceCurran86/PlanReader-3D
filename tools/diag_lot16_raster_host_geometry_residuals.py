@@ -63,6 +63,7 @@ def main() -> None:
 
     rows = []
     seen = set()
+    wall_scope_cache = {}
     semantic = composition.semantic_enumeration_result.record
     representatives = (
         tuple(semantic.representative_observation_ids)
@@ -96,16 +97,27 @@ def main() -> None:
             })
             continue
 
-        wall_scope = wall_authority.resolve_scope(
-            PhysicalWallCandidateSelector(
-                document_id=binding_selector.document_id,
-                revision_id=binding_selector.revision_id,
-                source_sha256=binding_selector.source_sha256,
-                snapshot_id=binding_selector.snapshot_id,
-                page_id=binding_selector.page_id,
-                decision_scope_id=binding_selector.decision_scope_id,
-            )
+        scope_key = (
+            binding_selector.document_id,
+            binding_selector.revision_id,
+            binding_selector.source_sha256,
+            binding_selector.snapshot_id,
+            binding_selector.page_id,
+            binding_selector.decision_scope_id,
         )
+        wall_scope = wall_scope_cache.get(scope_key)
+        if wall_scope is None:
+            wall_scope = wall_authority.resolve_scope(
+                PhysicalWallCandidateSelector(
+                    document_id=binding_selector.document_id,
+                    revision_id=binding_selector.revision_id,
+                    source_sha256=binding_selector.source_sha256,
+                    snapshot_id=binding_selector.snapshot_id,
+                    page_id=binding_selector.page_id,
+                    decision_scope_id=binding_selector.decision_scope_id,
+                )
+            )
+            wall_scope_cache[scope_key] = wall_scope
         edge_tol = max(0.5, min(2.0, geometry.length * 0.02))
         parallel = []
         left = []
