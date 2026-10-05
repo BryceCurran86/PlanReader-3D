@@ -2,6 +2,30 @@
 
 This note records the production work completed and source-validated by ChatGPT on the active Full Plan V2 accuracy lane so parallel agents do not repeat it.
 
+## GPT-3 / GPT-4 lane completion status
+
+The assigned production accuracy lanes are complete on current `main`.
+
+- GPT-3 Tasks 17-23 merged in PR #1350 as `f064dd7ae4c6fab265839bca1fbc9147a77c4765`.
+  - source-owned schedule/material semantics
+  - finish/legend semantic authority
+  - cross-view physical identity and internal-elevation wall-face mapping
+  - structural definition-family expansion
+  - fail-closed source roof measurement hardening
+  - trade-authority guardrails
+- GPT-4 Tasks 24-30 completed through:
+  - PR #1364 `9b14639b8a2b41eafe9bc8454920e5e12bd2fd76` — stable finish-surface physical identity
+  - PR #1361 `1abd63d1e215b6347f7c67dbb529564eb8899e87` — Room identity hardening, separate Door/Window filling identities, live customer-publication reconciliation and shadow isolation
+  - PR #1374 `78be1061379519cac4dec9fa60e8441d19b6e3fd` — Slab and Floor physical identities, Roof physical identity + source-owned quantity linkage, generic distinct-source duplicate suppression, and final Tasks 24-30 integration
+- PR #1372 `1a77ae6512b56a8d9dc16dd88d9a6b97ea1fdb88` is merged and removed the prior figured-dimension blocker while preserving F23 orthogonal-depth symmetry.
+- Final #1374 integrated validation passed:
+  - full CI
+  - Performance Fastpath CI
+  - Docker Runtime Smoke
+  - Item19B Wall Equivalence Grid Shadow
+
+Do not reopen Tasks 17-30 unless a new production regression proves a specific defect. Remaining accuracy work is new downstream work: explicit room-area evidence, customer quantity publication, raster-plan recovery and exact Full Plan V2 reconciliation.
+
 ## Active benchmark scope
 
 - `benchmarks/frozen_holdout/full_plan_v2`
@@ -85,30 +109,13 @@ After #1359 + #1360:
 
 ## Current work / next blocker
 
-Stale PR #1368 was closed without merge after its first CI attempt exposed two F23 left-edge regressions.
+PR #1372 is merged and the previous dimension tie-break blocker is closed.
 
-Replacement PR #1372 — `fix(dimensions): use native text direction only as graphic-state tie-break`
-
-The corrected rule keeps native text direction as a binder-only hint. It can narrow a candidate universe only when at least two same-orientation candidates remain tied and source graphic state independently proves one strict darker+thicker winner. A single hint cannot manufacture a binding by suppressing one perpendicular nearby primitive.
-
-Validation completed before opening #1372:
-
-- F23 all-four-edges + input-order invariance: 5 / 5 PASS
-- broader local figured-dimension regression set: 87 / 87 PASS
-- exact frozen Maryborough A140 source:
-  - FOOD PREP 4025 -> WITNESS_BOUND with two witnesses
-  - FOOD PREP 3297 -> WITNESS_BOUND with two witnesses
-- no scale, benchmark values, Maryborough constants or project-specific coordinates used
-
-At the time of this note refresh:
-- #1372 Performance Fastpath CI: GREEN
-- #1372 Wall Equivalence Grid Shadow: GREEN
-- #1372 full CI: still running
-- do not merge #1372 until full CI is green
+The next production accuracy blocker is downstream of the now-authenticated cross-view dimensions: generically bind a proven physical room / CanonicalSpace to two authenticated orthogonal figured dimensions, derive one source-owned explicit room-area EvidenceAtom, and feed the existing room-area quantity/customer publication path. Do not multiply arbitrary same-sheet dimensions merely because their values look plausible.
 
 ## Intended next authority chain
 
-Once #1372 is fully green and merged:
+Now that #1372 is merged:
 
 1. proven A110 physical room / stable CanonicalSpace identity
 2. authenticated cross-view room label binding to A140
