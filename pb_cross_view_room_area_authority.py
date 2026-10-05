@@ -3,9 +3,9 @@
 This authority composes only already-authenticated evidence:
 - a canonical physical room with an authenticated source room label;
 - the exact same independently trusted native label line on another decoded view;
-- one native-text-authenticated horizontal and one vertical dimension, each
-  already sealed to a unique dimension line with witness geometry by
-  RasterPlanDimensionProducer.
+- one native-text-authenticated horizontal and one vertical figured dimension,
+  each WITNESS_BOUND by the existing native vector binder and independently
+  mapped back to unique producer-owned visible source observations.
 
 It never accepts caller-supplied room names, page numbers, dimensions, geometry,
 expected quantities or benchmark identities. Scale status is deliberately not an
@@ -17,12 +17,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
+
+import fitz
 from typing import Mapping, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import DimensionOrientation
 from pb_figured_dimension_authority import (
     DimensionParseError,
     parse_figured_dimension_mm,
+)
+from pb_figured_dimension_evidence import (
+    BindingStatus,
+    extract_dimension_evidence_bundle,
 )
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
@@ -33,14 +39,11 @@ from pb_migration_contracts import (
     EvidenceResolutionStatus,
     stable_contract_id,
 )
-from pb_portable_raster_ocr_authority import MockOCRBackend
-from pb_raster_plan_dimension_authority import (
-    BoundRasterDimension,
-    RasterPlanDimensionProducer,
-    RasterPlanDimensionResult,
-)
 from pb_source_observation_authority import ObservationSelector
-from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_visibility_authority import (
+    NATIVE_PDF_VISIBLE_SEGMENT,
+    SourceVisibilityProducer,
+)
 
 
 CROSS_VIEW_ROOM_AREA_SCHEMA_VERSION = "1.0.0"
@@ -86,6 +89,18 @@ class _TrustedLine:
     bbox: tuple[float, float, float, float]
     observation_ids: tuple[str, ...]
     receipt_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _TrustedBoundDimension:
+    dimension_id: str
+    text_observation_id: str
+    text_receipt_id: str
+    value_mm: float
+    orientation: str
+    endpoints_pt: tuple[tuple[float, float], tuple[float, float]]
+    dimension_line_observation_ids: tuple[str, ...]
+    witness_observation_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -214,60 +229,294 @@ def _trusted_lines_for_page(
     return tuple(lines)
 
 
-def _native_trusted_dimension(
+def _canonical_segment_geometry(
+    values: Sequence[object],
+) -> Optional[tuple[float, float, float, float]]:
+    if len(values) != 4:
+        return None
+    try:
+        coords = tuple(float(value) for value in values)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(value) for value in coords):
+        return None
+    first = (coords[0], coords[1])
+    second = (coords[2], coords[3])
+    if second < first:
+        first, second = second, first
+    if first == second:
+        return None
+    return (first[0], first[1], second[0], second[1])
+
+
+def _bbox_key(
+    values: Sequence[object],
+) -> Optional[tuple[float, float, float, float]]:
+    bbox = _finite_bbox(values)
+    if bbox is None:
+        return None
+    return tuple(round(value, 4) for value in bbox)
+
+
+def _trusted_native_dimensions_for_page(
     source: SourceVisibilityProducer,
-    result: RasterPlanDimensionResult,
-    dimension: BoundRasterDimension,
-) -> bool:
+    *,
+    revision_id: str,
+    page_id: str,
+) -> tuple[_TrustedBoundDimension, ...]:
+    """Resolve source-owned native figured dimensions without trusting raw text.
+
+    Geometry is derived only from the immutable PDF bytes held by the source
+    producer. Positive dimensions additionally require PdfTextIntegrity for the
+    exact word and a unique mapping of every bound vector segment back to a
+    producer-owned native visible observation.
+    """
+    published = source.published_snapshot_for_revision(revision_id)
+    if published is None:
+        return ()
+    try:
+        page_number = int(str(page_id))
+    except (TypeError, ValueError):
+        return ()
+    if page_number not in set(published.coverage.decoded_pages):
+        return ()
+
+    writer = source._producer
+    source_bytes = writer._store.source_bytes_by_revision.get(revision_id)
     if (
-        not result.document_id
-        or not result.revision_id
-        or not result.source_sha256
-        or not result.snapshot_id
-        or not result.page_id
-        or dimension.orientation
-        not in {
-            DimensionOrientation.HORIZONTAL.value,
-            DimensionOrientation.VERTICAL.value,
-        }
-        or not dimension.dimension_line_observation_ids
-        or not dimension.witness_observation_ids
-        or len(dimension.endpoints_pt) != 2
+        not isinstance(source_bytes, bytes)
+        or not writer._store.source_bytes_match_revision(
+            revision_id,
+            source_bytes,
+            published.revision.source_sha256,
+        )
     ):
-        return False
-    resolved = source.text_integrity_authority().resolve_text(
-        ObservationSelector(
-            document_id=str(result.document_id),
-            revision_id=str(result.revision_id),
-            source_sha256=str(result.source_sha256),
-            snapshot_id=str(result.snapshot_id),
-            observation_id=str(dimension.text_observation_id),
+        return ()
+
+    try:
+        pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        if page_number < 1 or page_number > pdf.page_count:
+            pdf.close()
+            return ()
+        try:
+            bundle = extract_dimension_evidence_bundle(
+                pdf.load_page(page_number - 1),
+                page_num=page_number,
+            )
+        finally:
+            pdf.close()
+    except Exception:
+        return ()
+
+    text_authority = source.text_integrity_authority()
+    trusted_by_bbox: dict[
+        tuple[float, float, float, float],
+        list[tuple[str, str, str]],
+    ] = {}
+    for observation_id in published.text_observation_ids:
+        resolved = text_authority.resolve_text(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        receipt = resolved.receipt
+        if (
+            resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or not resolved.trusted_text
+            or receipt is None
+            or str(receipt.page_id) != str(page_id)
+        ):
+            continue
+        key = _bbox_key(receipt.geometry)
+        if key is None:
+            continue
+        trusted_by_bbox.setdefault(key, []).append(
+            (
+                str(resolved.trusted_text),
+                str(receipt.parent_observation_id),
+                str(receipt.receipt_id),
+            )
+        )
+
+    visibility = source.authority()
+    source_ids_by_geometry: dict[
+        tuple[float, float, float, float],
+        list[str],
+    ] = {}
+    for observation_id in published.visible_observation_ids:
+        resolved = visibility.resolve_visible(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        observation = resolved.observation
+        if (
+            resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or observation is None
+            or str(observation.page_id) != str(page_id)
+            or observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
+        ):
+            continue
+        geometry = _canonical_segment_geometry(observation.geometry)
+        if geometry is None:
+            continue
+        source_ids_by_geometry.setdefault(geometry, []).append(
+            str(observation.observation_id)
+        )
+
+    geometry_by_segment_id = {
+        segment.segment_id: _canonical_segment_geometry(
+            (
+                segment.start[0],
+                segment.start[1],
+                segment.end[0],
+                segment.end[1],
+            )
+        )
+        for segment in bundle.observed_geometry
+    }
+
+    def source_ids_for_segment(segment_id: str) -> tuple[str, ...]:
+        parts = tuple(
+            part
+            for part in str(segment_id or "").split("+")
+            if part
+        )
+        if not parts:
+            return ()
+        out: list[str] = []
+        for part in parts:
+            geometry = geometry_by_segment_id.get(part)
+            if geometry is None:
+                return ()
+            matches = source_ids_by_geometry.get(geometry, ())
+            if len(matches) != 1:
+                return ()
+            out.append(matches[0])
+        return tuple(dict.fromkeys(out))
+
+    observations = {
+        observation.dimension_id: observation
+        for observation in bundle.observations
+    }
+    positive: list[_TrustedBoundDimension] = []
+    for binding in bundle.bindings:
+        if (
+            binding.status != BindingStatus.WITNESS_BOUND.value
+            or binding.endpoints is None
+            or not binding.dimension_line_id
+            or len(binding.witness_line_ids) < 2
+        ):
+            continue
+        observation = observations.get(binding.observation_id)
+        if (
+            observation is None
+            or observation.bbox is None
+            or observation.orientation
+            not in {
+                DimensionOrientation.HORIZONTAL.value,
+                DimensionOrientation.VERTICAL.value,
+            }
+        ):
+            continue
+
+        trusted = trusted_by_bbox.get(_bbox_key(observation.bbox), ())
+        if len(trusted) != 1:
+            continue
+        trusted_text, text_observation_id, text_receipt_id = trusted[0]
+        try:
+            parsed_mm = parse_figured_dimension_mm(trusted_text)
+            observation_mm = float(observation.value_m) * 1000.0
+        except (DimensionParseError, TypeError, ValueError):
+            continue
+        if abs(float(parsed_mm) - observation_mm) > 1e-6:
+            continue
+
+        dimension_line_ids = source_ids_for_segment(binding.dimension_line_id)
+        if not dimension_line_ids:
+            continue
+        witness_ids: list[str] = []
+        failed = False
+        for witness_line_id in binding.witness_line_ids:
+            mapped = source_ids_for_segment(witness_line_id)
+            if not mapped:
+                failed = True
+                break
+            witness_ids.extend(mapped)
+        if failed or len(set(witness_ids)) < 2:
+            continue
+
+        endpoints = (
+            (
+                float(binding.endpoints[0][0]),
+                float(binding.endpoints[0][1]),
+            ),
+            (
+                float(binding.endpoints[1][0]),
+                float(binding.endpoints[1][1]),
+            ),
+        )
+        if not all(
+            math.isfinite(value)
+            for endpoint in endpoints
+            for value in endpoint
+        ):
+            continue
+        dimension_id = stable_contract_id(
+            "cross_view_native_dimension",
+            {
+                "document_id": published.revision.document_id,
+                "revision_id": published.revision.revision_id,
+                "source_sha256": published.revision.source_sha256,
+                "snapshot_id": published.snapshot.snapshot_id,
+                "page_id": str(page_id),
+                "text_observation_id": text_observation_id,
+                "text_receipt_id": text_receipt_id,
+                "value_mm": float(parsed_mm),
+                "orientation": observation.orientation,
+                "endpoints_pt": endpoints,
+                "dimension_line_observation_ids": dimension_line_ids,
+                "witness_observation_ids": tuple(sorted(set(witness_ids))),
+            },
+            digest_chars=32,
+        )
+        positive.append(
+            _TrustedBoundDimension(
+                dimension_id=dimension_id,
+                text_observation_id=text_observation_id,
+                text_receipt_id=text_receipt_id,
+                value_mm=float(parsed_mm),
+                orientation=str(observation.orientation),
+                endpoints_pt=endpoints,
+                dimension_line_observation_ids=dimension_line_ids,
+                witness_observation_ids=tuple(sorted(set(witness_ids))),
+            )
+        )
+
+    return tuple(
+        sorted(
+            positive,
+            key=lambda item: (
+                item.orientation,
+                item.endpoints_pt,
+                item.value_mm,
+                item.dimension_id,
+            ),
         )
     )
-    if (
-        resolved.status is not EvidenceResolutionStatus.CORROBORATED
-        or not resolved.trusted_text
-        or resolved.receipt is None
-        or str(resolved.receipt.page_id) != str(result.page_id)
-    ):
-        return False
-    try:
-        parsed_mm = parse_figured_dimension_mm(str(resolved.trusted_text))
-    except DimensionParseError:
-        return False
-    if abs(float(parsed_mm) - float(dimension.value_mm)) > 1e-6:
-        return False
-    return all(
-        math.isfinite(float(value))
-        for endpoint in dimension.endpoints_pt
-        for value in endpoint
-    )
-
 
 def _line_inside_dimension_pair(
     line: _TrustedLine,
-    horizontal: BoundRasterDimension,
-    vertical: BoundRasterDimension,
+    horizontal: _TrustedBoundDimension,
+    vertical: _TrustedBoundDimension,
 ) -> bool:
     hx = sorted(
         (
@@ -295,7 +544,6 @@ class CrossViewRoomAreaProducer:
         *,
         source: SourceVisibilityProducer,
         rooms: LiveCanonicalRoomComposition,
-        dimension_producer: RasterPlanDimensionProducer,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -304,11 +552,8 @@ class CrossViewRoomAreaProducer:
             raise TypeError("source must be exact SourceVisibilityProducer")
         if type(rooms) is not LiveCanonicalRoomComposition:
             raise TypeError("rooms must be exact LiveCanonicalRoomComposition")
-        if type(dimension_producer) is not RasterPlanDimensionProducer:
-            raise TypeError("dimension_producer must be producer-owned")
         self._source = source
         self._rooms = rooms
-        self._dimensions = dimension_producer
 
     @classmethod
     def from_source(
@@ -320,29 +565,6 @@ class CrossViewRoomAreaProducer:
         return cls(
             source=source,
             rooms=rooms,
-            dimension_producer=RasterPlanDimensionProducer.create(
-                source_visibility=source
-            ),
-            _seal=_PRODUCER_SEAL,
-        )
-
-    @classmethod
-    def from_source_for_tests(
-        cls,
-        *,
-        source: SourceVisibilityProducer,
-        rooms: LiveCanonicalRoomComposition,
-        backend: MockOCRBackend,
-    ) -> "CrossViewRoomAreaProducer":
-        if type(backend) is not MockOCRBackend:
-            raise TypeError("tests require exact MockOCRBackend")
-        return cls(
-            source=source,
-            rooms=rooms,
-            dimension_producer=RasterPlanDimensionProducer.create_for_tests(
-                source_visibility=source,
-                backend=backend,
-            ),
             _seal=_PRODUCER_SEAL,
         )
 
@@ -415,7 +637,7 @@ class CrossViewRoomAreaProducer:
             for label, grouped_rooms in labels.items()
             if len(grouped_rooms) == 1
         }
-        page_results: dict[str, RasterPlanDimensionResult] = {}
+        page_results: dict[str, tuple[_TrustedBoundDimension, ...]] = {}
         page_lines: dict[str, tuple[_TrustedLine, ...]] = {}
         for page_number in tuple(published.coverage.decoded_pages):
             page_id = str(int(page_number))
@@ -435,11 +657,14 @@ class CrossViewRoomAreaProducer:
             )
             if not relevant_lines:
                 continue
-            dimension_result = self._dimensions.publish(
+            trusted_dimensions = _trusted_native_dimensions_for_page(
+                self._source,
                 revision_id=revision_id,
                 page_id=page_id,
             )
-            page_results[page_id] = dimension_result
+            if not trusted_dimensions:
+                continue
+            page_results[page_id] = trusted_dimensions
             page_lines[page_id] = relevant_lines
 
         records: list[CrossViewRoomAreaRecord] = []
@@ -458,24 +683,15 @@ class CrossViewRoomAreaProducer:
             matches: list[
                 tuple[
                     _TrustedLine,
-                    RasterPlanDimensionResult,
-                    BoundRasterDimension,
-                    BoundRasterDimension,
+                    str,
+                    _TrustedBoundDimension,
+                    _TrustedBoundDimension,
                 ]
             ] = []
             for page_id, trusted_lines in sorted(page_lines.items()):
                 if page_id == str(room.page_id):
                     continue
-                dimension_result = page_results[page_id]
-                trusted_dimensions = tuple(
-                    dimension
-                    for dimension in dimension_result.bound_dimensions
-                    if _native_trusted_dimension(
-                        self._source,
-                        dimension_result,
-                        dimension,
-                    )
-                )
+                trusted_dimensions = page_results[page_id]
                 horizontals = tuple(
                     item
                     for item in trusted_dimensions
@@ -501,7 +717,7 @@ class CrossViewRoomAreaProducer:
                                 matches.append(
                                     (
                                         line,
-                                        dimension_result,
+                                        page_id,
                                         horizontal,
                                         vertical,
                                     )
@@ -513,7 +729,7 @@ class CrossViewRoomAreaProducer:
                     conflict_seen = True
                 continue
 
-            line, dimension_result, horizontal, vertical = matches[0]
+            line, dimension_page_id, horizontal, vertical = matches[0]
             area_m2 = round(
                 float(horizontal.value_mm)
                 * float(vertical.value_mm)
@@ -529,7 +745,7 @@ class CrossViewRoomAreaProducer:
                     "document_id": room.document_id,
                     "physical_room_id": room.physical_room_id,
                     "source_room_face_record_id": room.source_room_face_record_id,
-                    "dimension_page_id": dimension_result.page_id,
+                    "dimension_page_id": dimension_page_id,
                     "label_receipt_ids": line.receipt_ids,
                     "horizontal_dimension_id": horizontal.dimension_id,
                     "vertical_dimension_id": vertical.dimension_id,
@@ -558,9 +774,9 @@ class CrossViewRoomAreaProducer:
                         room.room_label_binding_record_id
                     ),
                     "room_label_evidence_ids": list(room.room_label_evidence_ids),
-                    "source_dimension_page_id": str(dimension_result.page_id),
+                    "source_dimension_page_id": str(dimension_page_id),
                     "source_dimension_snapshot_id": str(
-                        dimension_result.snapshot_id or ""
+                        published.snapshot.snapshot_id
                     ),
                     "source_label_text": line.text,
                     "source_label_observation_ids": list(line.observation_ids),
@@ -597,7 +813,7 @@ class CrossViewRoomAreaProducer:
                         room.source_room_face_record_id
                     ),
                     room_label=str(room.room_label),
-                    source_dimension_page_id=str(dimension_result.page_id),
+                    source_dimension_page_id=str(dimension_page_id),
                     source_label_observation_ids=line.observation_ids,
                     source_label_receipt_ids=line.receipt_ids,
                     horizontal_dimension_id=horizontal.dimension_id,
