@@ -655,6 +655,63 @@ def _takeoff_row(*, workspace_id: int, section: str, element: str, location: str
     )
 
 
+def _ceiling_review_rows_from_candidates(
+    workspace_id: int,
+    candidates: Sequence[Any],
+) -> List[Tuple[Any, ...]]:
+    """Convert only unreviewed ceiling-promotion candidates to core rows."""
+    rows: List[Tuple[Any, ...]] = []
+    seen_quantity_ids: set[str] = set()
+    for candidate in candidates:
+        item = dict(getattr(candidate, "review_row", {}) or {})
+        if (
+            str(item.get("origin") or "") != "AI"
+            or str(item.get("quantity_status") or "") != "To review"
+            or str(item.get("row_role") or "") != "ceiling_area"
+        ):
+            raise ValueError("ceiling promotion bypassed customer review state")
+        try:
+            row_workspace_id = int(item.get("workspace_id"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("ceiling promotion has invalid workspace identity") from exc
+        if row_workspace_id != int(workspace_id):
+            raise ValueError("ceiling promotion belongs to another workspace")
+        required = {
+            name: str(item.get(name) or "").strip()
+            for name in ("section", "element", "location", "substrate")
+        }
+        if not all(required.values()):
+            raise ValueError("ceiling promotion is missing customer row identity")
+        quantity_id = str(item.get("quantity_id") or "").strip()
+        if not quantity_id or quantity_id in seen_quantity_ids:
+            raise ValueError("ceiling promotion has duplicate or missing quantity identity")
+        seen_quantity_ids.add(quantity_id)
+        unit = str(item.get("unit") or "").strip().lower()
+        if unit == "m2":
+            unit = "m²"
+        rows.append(
+            _takeoff_row(
+                workspace_id=int(workspace_id),
+                section=required["section"],
+                element=required["element"],
+                location=required["location"],
+                substrate=required["substrate"],
+                quantity=float(item["quantity"]),
+                status="To review",
+                source_page=str(item.get("source_page") or "Selected PDF pages"),
+                source_reference=(
+                    f"{SOURCE_PREFIX} · ceiling_quantity:{quantity_id}"
+                ),
+                confidence="Documented",
+                notes=str(item.get("notes") or ""),
+                row_role="ceiling_area",
+                unit=unit,
+                preserve_quantity=True,
+            )
+        )
+    return rows
+
+
 # Canonical auto-geometry take-off row: the core takeoff_rows layout.
 TAKEOFF_ROW_FIELDS = takeoff_contract.CORE_FIELDS
 TAKEOFF_ROW_FIELD_COUNT = len(TAKEOFF_ROW_FIELDS)
@@ -676,7 +733,14 @@ def _is_finite_number(value: Any) -> bool:
 
 # What an automatic row may carry: the roles _takeoff_row() assigns, text in
 # every text column (required ones non-empty), and finite non-negative numbers.
-AUTO_ROW_ROLES = ("", "floor_area", "external_wall", "internal_partition", "wall_finish")
+AUTO_ROW_ROLES = (
+    "",
+    "floor_area",
+    "ceiling_area",
+    "external_wall",
+    "internal_partition",
+    "wall_finish",
+)
 _AUTO_REQUIRED_TEXT = ("section", "element", "location", "substrate", "unit", "quantity_status",
                        "source_reference", "inclusion_status", "confidence")
 _AUTO_OPTIONAL_TEXT = ("finish_system", "source_page", "notes", "row_role")
@@ -1247,56 +1311,10 @@ def _try_physical_net_wall_rows(
                 getattr(claim, "room_area_quantity_evidence", ())
             ),
         )
-        rows: List[Tuple[Any, ...]] = []
-        for candidate in candidates:
-            item = dict(candidate.review_row)
-            if (
-                str(item.get("origin") or "") != "AI"
-                or str(item.get("quantity_status") or "") != "To review"
-                or str(item.get("row_role") or "") != "ceiling_area"
-            ):
-                raise ValueError(
-                    "ceiling promotion bypassed customer review state"
-                )
-            required = {
-                name: str(item.get(name) or "").strip()
-                for name in ("section", "element", "location", "substrate")
-            }
-            if not all(required.values()):
-                raise ValueError(
-                    "ceiling promotion is missing customer row identity"
-                )
-            quantity_id = str(item.get("quantity_id") or "").strip()
-            if not quantity_id:
-                raise ValueError(
-                    "ceiling promotion is missing quantity identity"
-                )
-            unit = str(item.get("unit") or "").strip().lower()
-            if unit == "m2":
-                unit = "m²"
-            rows.append(
-                _takeoff_row(
-                    workspace_id=int(workspace_id),
-                    section=required["section"],
-                    element=required["element"],
-                    location=required["location"],
-                    substrate=required["substrate"],
-                    quantity=float(item["quantity"]),
-                    status="To review",
-                    source_page=str(
-                        item.get("source_page") or "Selected PDF pages"
-                    ),
-                    source_reference=(
-                        f"{SOURCE_PREFIX} · ceiling_quantity:{quantity_id}"
-                    ),
-                    confidence="Documented",
-                    notes=str(item.get("notes") or ""),
-                    row_role="ceiling_area",
-                    unit=unit,
-                    preserve_quantity=True,
-                )
-            )
-        return rows
+        return _ceiling_review_rows_from_candidates(
+            int(workspace_id),
+            candidates,
+        )
 
     def record_coverage(claim: Any, row: Optional[Tuple[Any, ...]] = None) -> None:
         from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
