@@ -16,6 +16,9 @@ from dataclasses import dataclass, replace
 import math
 from typing import Optional, Sequence
 
+import cv2
+import numpy as np
+
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_plan_opening_detection_v171 import (
     Segment as LegacyPlanSegment,
@@ -36,9 +39,21 @@ from pb_source_observation_authority import (
 )
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
+    RASTER_OPENING_PRIMITIVE_RENDER_DPI,
     RASTER_PDF_VISIBLE_SEGMENT,
     VISIBILITY_RECEIPT_UNAVAILABLE,
     SourceVisibilityAuthority,
+)
+from pb_raster_opening_source_primitives import (
+    BAND_MAX_THICKNESS_PT as RASTER_BAND_MAX_THICKNESS_PT,
+    BAND_MIN_ASPECT as RASTER_BAND_MIN_ASPECT,
+    BAND_MIN_RUN_PT as RASTER_BAND_MIN_RUN_PT,
+    LINE_THRESHOLD as RASTER_LINE_THRESHOLD,
+    MASS_THRESHOLD as RASTER_MASS_THRESHOLD,
+    POCHE_MIN_PT as RASTER_POCHE_MIN_PT,
+    RASTER_LINE_RUN,
+    RASTER_WALL_BAND_END,
+    RASTER_WALL_BAND_FACE,
 )
 
 
@@ -66,6 +81,22 @@ MISSING_PHYSICAL_OPENING_SEMANTIC_CAPABILITY = (
 )
 
 JAMB_BOUNDED_TWO_FACE_INTERRUPTION = "jamb_bounded_two_face_interruption"
+RASTER_FRAMED_WALL_BAND_INTERRUPTION = "raster_framed_wall_band_interruption"
+
+# Reviewed raster framed-opening authority constants. These are generic paper
+# units / relative geometry tests from the independently validated #1276
+# shadow rule; no drawing scale, project identity, coordinate, or expected
+# quantity enters them.
+_RASTER_END_WINDOW_PT = 1.5
+_RASTER_END_COVERAGE = 0.8
+_RASTER_CLEAN_GAP_MAX_PARTIAL = 0.15
+_RASTER_THICKNESS_OVERLAP = 0.8
+_RASTER_THICKNESS_TOLERANCE = 0.35
+_RASTER_MIN_OPENING_GAP_PT = 8.0
+_RASTER_MIN_GAP_THICKNESS_RATIO = 2.0
+_RASTER_LINE_COVERAGE = 0.8
+_RASTER_MIN_FRAME_LINES = 2
+_RASTER_LINE_ROW_PAD_PT = 0.5
 GAP_CORROBORATED_DOOR_JAMB_LEAF = "gap_corroborated_door_jamb_leaf"
 GAP_CORROBORATED_WINDOW_JAMB_PAIR = "gap_corroborated_window_jamb_pair"
 WALL_FACE_INTERRUPTION_KIND = "wall_face_interruption"
@@ -211,6 +242,21 @@ class PhysicalOpeningIdentityResult:
     left_source_observation: Optional[SourceObservationAuthorityResult] = None
     right_source_observation: Optional[SourceObservationAuthorityResult] = None
     missing_upstream_capability: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class _RasterBandPair:
+    """One raster wall-band interruption in its horizontal analysis frame."""
+
+    a: tuple[int, int, int, int]
+    b: tuple[int, int, int, int]
+    gap_x0: int
+    gap_x1: int
+    row0: int
+    row1: int
+    thickness_a: int
+    thickness_b: int
+    reasons: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -488,6 +534,246 @@ def _canonical_line(record: SourceObservationRecord) -> tuple[tuple[float, float
     first = (round(line[0], 6), round(line[1], 6))
     second = (round(line[2], 6), round(line[3], 6))
     return tuple(sorted((first, second)))  # type: ignore[return-value]
+
+
+def _raster_px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
+    return max(int(minimum), int(round(float(value_pt) * float(dpi) / 72.0)))
+
+
+def _raster_odd(value: int) -> int:
+    value = int(value)
+    return value if value % 2 == 1 else value + 1
+
+
+def _raster_pt(value_px: float, dpi: int) -> float:
+    return round(float(value_px) * 72.0 / float(dpi), 6)
+
+
+def _raster_geometry_pt(
+    geometry_px: Sequence[float],
+    dpi: int,
+) -> tuple[float, float, float, float]:
+    values = tuple(_raster_pt(value, dpi) for value in geometry_px)
+    if len(values) != 4:
+        raise ValueError("raster geometry must contain four coordinates")
+    return values  # type: ignore[return-value]
+
+
+def _raster_to_page_box(
+    box: tuple[int, int, int, int],
+    axis: str,
+) -> tuple[int, int, int, int]:
+    if axis == "horizontal":
+        return box
+    return (box[1], box[0], box[3], box[2])
+
+
+def _raster_band_boxes(
+    thick: np.ndarray,
+    *,
+    dpi: int,
+    axis: str,
+) -> tuple[tuple[int, int, int, int], ...]:
+    """Return reviewed solid wall-band pieces in page pixel coordinates."""
+
+    work = thick if axis == "horizontal" else np.ascontiguousarray(thick.T)
+    run = _raster_odd(_raster_px(RASTER_BAND_MIN_RUN_PT, dpi))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (run, 1))
+    band = cv2.morphologyEx(work, cv2.MORPH_OPEN, kernel)
+    count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        band,
+        connectivity=8,
+    )
+    solid = _raster_px(RASTER_POCHE_MIN_PT, dpi)
+    tmax = _raster_px(RASTER_BAND_MAX_THICKNESS_PT, dpi)
+    boxes: list[tuple[int, int, int, int]] = []
+    for index in range(1, int(count)):
+        x = int(stats[index, cv2.CC_STAT_LEFT])
+        y = int(stats[index, cv2.CC_STAT_TOP])
+        width = int(stats[index, cv2.CC_STAT_WIDTH])
+        height = int(stats[index, cv2.CC_STAT_HEIGHT])
+        if (
+            height < solid
+            or height > tmax
+            or width < RASTER_BAND_MIN_ASPECT * height
+        ):
+            continue
+        analysis_box = (x, y, x + width - 1, y + height - 1)
+        boxes.append(_raster_to_page_box(analysis_box, axis))
+    return tuple(sorted(set(boxes)))
+
+
+def _raster_analysis_box(
+    page_box: tuple[int, int, int, int],
+    axis: str,
+) -> tuple[int, int, int, int]:
+    if axis == "horizontal":
+        return page_box
+    return (page_box[1], page_box[0], page_box[3], page_box[2])
+
+
+def _raster_end_interval(
+    work_thick: np.ndarray,
+    piece_box: tuple[int, int, int, int],
+    *,
+    at_high_end: bool,
+    window: int,
+) -> Optional[tuple[int, int]]:
+    x0, y0, x1, y1 = piece_box
+    if at_high_end:
+        xs = max(x1 - window + 1, 0), x1 + 1
+    else:
+        xs = x0, min(x0 + window, work_thick.shape[1])
+    sub = work_thick[y0 : y1 + 1, xs[0] : xs[1]]
+    if sub.size == 0:
+        return None
+    coverage = sub.mean(axis=1)
+    rows = np.where(coverage >= _RASTER_END_COVERAGE)[0]
+    if rows.size == 0:
+        return None
+    return y0 + int(rows.min()), y0 + int(rows.max())
+
+
+def _raster_pair_flanks(
+    work_thick: np.ndarray,
+    boxes: Sequence[tuple[int, int, int, int]],
+    *,
+    dpi: int,
+) -> tuple[_RasterBandPair, ...]:
+    """Pair each band only with the first real solid continuation in its row profile."""
+
+    window = _raster_px(_RASTER_END_WINDOW_PT, dpi)
+    min_gap_floor = _raster_px(_RASTER_MIN_OPENING_GAP_PT, dpi)
+    width = work_thick.shape[1]
+    box_array = np.asarray(tuple(boxes), dtype=np.int64).reshape(-1, 4)
+    pairs: list[_RasterBandPair] = []
+    for a in boxes:
+        rows = _raster_end_interval(
+            work_thick,
+            a,
+            at_high_end=True,
+            window=window,
+        )
+        if rows is None:
+            continue
+        r0, r1 = rows
+        start = a[2] + 1
+        if start >= width:
+            continue
+        profile = work_thick[r0 : r1 + 1, :].mean(axis=0)
+        tail = profile[start:]
+        solid_hits = np.where(tail >= _RASTER_END_COVERAGE)[0]
+        partial_hits = np.where(tail > _RASTER_CLEAN_GAP_MAX_PARTIAL)[0]
+        if solid_hits.size == 0:
+            continue
+        position = start + int(solid_hits[0])
+        hit = np.where(
+            (box_array[:, 0] <= position)
+            & (position <= box_array[:, 2])
+            & ~((box_array[:, 3] < r0) | (box_array[:, 1] > r1))
+        )[0]
+        if hit.size == 0:
+            continue
+        partner = tuple(int(value) for value in box_array[int(hit[0])])
+        reasons: list[str] = []
+        if partial_hits.size and start + int(partial_hits[0]) < position:
+            reasons.append("raster_gap_not_clean")
+
+        b_rows = _raster_end_interval(
+            work_thick,
+            partner,
+            at_high_end=False,
+            window=window,
+        )
+        if b_rows is None:
+            continue
+        c0, c1 = max(r0, b_rows[0]), min(r1, b_rows[1])
+        thickness_a = r1 - r0 + 1
+        thickness_b = b_rows[1] - b_rows[0] + 1
+        if (
+            c1 < c0
+            or (c1 - c0 + 1)
+            < _RASTER_THICKNESS_OVERLAP * min(thickness_a, thickness_b)
+            or abs(thickness_a - thickness_b)
+            > _RASTER_THICKNESS_TOLERANCE * max(thickness_a, thickness_b)
+        ):
+            reasons.append("raster_flanks_not_collinear_bands")
+
+        gap_x0 = a[2] + 1
+        gap_x1 = position - 1
+        gap = gap_x1 - gap_x0 + 1
+        thickness = max(min(thickness_a, thickness_b), 1)
+        if gap < max(
+            min_gap_floor,
+            int(math.ceil(_RASTER_MIN_GAP_THICKNESS_RATIO * thickness)),
+        ):
+            reasons.append("raster_gap_too_small")
+        if gap < 1:
+            continue
+        pairs.append(_RasterBandPair(
+            a=a,
+            b=partner,
+            gap_x0=gap_x0,
+            gap_x1=gap_x1,
+            row0=c0 if c1 >= c0 else r0,
+            row1=c1 if c1 >= c0 else r1,
+            thickness_a=thickness_a,
+            thickness_b=thickness_b,
+            reasons=tuple(dict.fromkeys(reasons)),
+        ))
+    return tuple(pairs)
+
+
+def _raster_frame_line_groups(
+    line_mask: np.ndarray,
+    pair: _RasterBandPair,
+    *,
+    dpi: int,
+) -> tuple[tuple[int, int], ...]:
+    pad = _raster_px(_RASTER_LINE_ROW_PAD_PT, dpi, minimum=1)
+    r0 = max(pair.row0 - pad, 0)
+    r1 = min(pair.row1 + pad, line_mask.shape[0] - 1)
+    region = line_mask[r0 : r1 + 1, pair.gap_x0 : pair.gap_x1 + 1]
+    if region.size == 0:
+        return ()
+    covered = region.mean(axis=1) >= _RASTER_LINE_COVERAGE
+    groups: list[tuple[int, int]] = []
+    start: Optional[int] = None
+    for index, flag in enumerate(covered.tolist() + [False]):
+        if flag and start is None:
+            start = index
+        elif not flag and start is not None:
+            groups.append((r0 + start, r0 + index - 1))
+            start = None
+    if len(groups) < _RASTER_MIN_FRAME_LINES:
+        return ()
+    return tuple(groups)
+
+
+def _raster_wall_face_continues(
+    line_mask: np.ndarray,
+    pair: _RasterBandPair,
+) -> bool:
+    for row in (pair.row0, pair.row1):
+        if (
+            0 <= row < line_mask.shape[0]
+            and float(
+                line_mask[row, pair.gap_x0 : pair.gap_x1 + 1].mean()
+            )
+            >= _RASTER_LINE_COVERAGE
+        ):
+            return True
+    return False
+
+
+def _raster_gap_box_page_px(
+    pair: _RasterBandPair,
+    axis: str,
+) -> tuple[int, int, int, int]:
+    return _raster_to_page_box(
+        (pair.gap_x0, pair.row0, pair.gap_x1, pair.row1),
+        axis,
+    )
 
 
 class PhysicalOpeningAuthority:
