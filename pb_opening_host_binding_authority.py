@@ -1357,47 +1357,15 @@ def _local_boundary_clean_host_scope(
         )
 
     clean_ids = evaluated_ids - tainted_ids
-    unsafe_ids = set(records_by_id) - clean_ids
     equivalence = wall_result.equivalence
 
-    # Positive SAME groups cannot bridge a relevant clean host role through a
-    # boundary-tainted / unevaluated representation.
-    for group in equivalence.equivalence_groups:
-        members = {str(value) for value in group}
-        if members & relevant_ids and members & unsafe_ids:
-            return None, (
-                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
-                "host_relevant_equivalence_crosses_unsafe_boundary",
-            )
-
-    for left, right, raw_classification in equivalence.pair_classifications:
-        pair = {str(left), str(right)}
-        if not pair & relevant_ids or not pair & unsafe_ids:
-            continue
-        try:
-            classification = PhysicalEquivalenceClass(raw_classification)
-        except ValueError:
-            return None, (
-                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
-                HOST_EQUIVALENCE_UNAVAILABLE,
-            )
-        if classification in {
-            PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
-            PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
-        }:
-            return None, (
-                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
-                "host_relevant_equivalence_crosses_unsafe_boundary",
-            )
-
-    # Preserve clean SAME-group provenance for relevant members, while only
-    # supplying geometrically relevant records to the host-role resolver.
+    # Equivalence authority is opening-local for the same reason geometry is:
+    # only candidates capable of entering this opening's host roles may affect
+    # this host proposition. A tainted/unevaluated candidate was already
+    # rejected above if it is host-relevant. Non-host candidates stay excluded
+    # and cannot poison a clean host merely because page-wide identity compared
+    # them for another purpose.
     equivalence_member_ids = set(relevant_ids)
-    for group in equivalence.equivalence_groups:
-        members = {str(value) for value in group}
-        if members & relevant_ids:
-            equivalence_member_ids.update(members & clean_ids)
-
     filtered_groups = tuple(
         sorted(
             {
@@ -1432,28 +1400,32 @@ def _local_boundary_clean_host_scope(
             and str(right) in equivalence_member_ids
         )
     )
+    filtered_ambiguous_ids = tuple(
+        sorted(
+            {
+                wall_id
+                for left, right, raw_classification in filtered_pairs
+                if raw_classification
+                == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value
+                for wall_id in (left, right)
+            }
+        )
+    )
     filtered_same_ids = tuple(
         sorted({member for group in filtered_groups for member in group})
     )
     filtered_equivalence = replace(
         equivalence,
-        representative_wall_ids=tuple(
-            sorted(set(equivalence.representative_wall_ids) & relevant_ids)
-        ),
-        abstained_wall_ids=tuple(
-            sorted(set(equivalence.abstained_wall_ids) & relevant_ids)
-        ),
+        representative_wall_ids=tuple(sorted(relevant_ids)),
+        abstained_wall_ids=filtered_ambiguous_ids,
         equivalence_groups=filtered_groups,
-        ambiguous_wall_ids=tuple(
-            sorted(set(equivalence.ambiguous_wall_ids) & relevant_ids)
-        ),
+        ambiguous_wall_ids=filtered_ambiguous_ids,
         same_wall_ids=filtered_same_ids,
         pair_classifications=filtered_pairs,
         blocking_reasons_by_wall_id=MappingProxyType(
             {
-                str(wall_id): tuple(reasons)
-                for wall_id, reasons in equivalence.blocking_reasons_by_wall_id.items()
-                if str(wall_id) in relevant_ids
+                wall_id: (HOST_EQUIVALENCE_AMBIGUOUS,)
+                for wall_id in filtered_ambiguous_ids
             }
         ),
     )
