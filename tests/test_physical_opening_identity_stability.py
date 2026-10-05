@@ -40,6 +40,7 @@ def _g17_opening_pdf() -> bytes:
 
 
 def _resolved_opening_ids(
+    source_bytes: bytes,
     *,
     producer_method: str,
     producer_version: str,
@@ -50,7 +51,7 @@ def _resolved_opening_ids(
     )
     published = source.ingest_native_pdf_bytes(
         document_id="physical-opening-stable-identity",
-        source_bytes=_g17_opening_pdf(),
+        source_bytes=source_bytes,
         source_locator="memory://physical-opening-stable-identity.pdf",
         page_ids=("1",),
     )
@@ -79,11 +80,14 @@ def _resolved_opening_ids(
 
 
 def test_physical_opening_id_ignores_producer_method_and_version_churn() -> None:
+    source_bytes = _g17_opening_pdf()
     first_snapshot, first_ids = _resolved_opening_ids(
+        source_bytes,
         producer_method="physical-opening-identity-producer-a",
         producer_version="1.0.0",
     )
     second_snapshot, second_ids = _resolved_opening_ids(
+        source_bytes,
         producer_method="physical-opening-identity-producer-b",
         producer_version="9.9.9",
     )
