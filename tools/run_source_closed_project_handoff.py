@@ -125,6 +125,11 @@ def generate_project_handoff(
     source_sha256 = _sha256(pdf_path)
     topology_pages, page_count = _source_topology_pages(pdf_path)
     all_pages = tuple(range(page_count))
+    topology_mode = (
+        "source_viewport_hints"
+        if topology_pages
+        else "live_authority_all_pages_fallback"
+    )
 
     summary: dict[str, Any] = {
         "schema_version": "1.0.0",
@@ -133,6 +138,7 @@ def generate_project_handoff(
         "source_sha256": source_sha256,
         "page_count": page_count,
         "topology_pages": [page + 1 for page in topology_pages],
+        "topology_mode": topology_mode,
         "status": "unavailable",
         "family_counts": {},
         "family_run_ids": {},
@@ -146,17 +152,10 @@ def generate_project_handoff(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not topology_pages:
-        summary["claim_reason_codes"] = [
-            "no_source_authoritative_floor_plan_topology"
-        ]
-        _write_json(output_dir / "production_summary.json", summary)
-        return summary
-
     claim = collect_live_physical_net_wall_claim(
         pdf_path,
         pages=all_pages,
-        topology_pages=topology_pages,
+        topology_pages=(topology_pages if topology_pages else None),
         # Enable source-owned cross-view room measurement using the complete
         # source package. The producer itself remains responsible for deciding
         # which pages/evidence are authoritative.
@@ -234,7 +233,7 @@ def generate_project_handoff(
 
     ceiling_candidates = collect_ceiling_lining_review_candidates(
         pdf_path,
-        pages=topology_pages,
+        pages=(topology_pages if topology_pages else all_pages),
         workspace_id=int(workspace_id),
         project_id=project_id,
         authoritative_area_quantities=tuple(
