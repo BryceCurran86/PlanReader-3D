@@ -30,6 +30,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PHYSICAL_OPENING_EXISTS,
     PHYSICAL_OPENING_IDENTITY_RESOLVED,
     PhysicalOpeningAuthority,
@@ -1025,6 +1026,47 @@ def _opening_geometry(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
 ) -> Optional[_OpeningGeometry]:
+    if opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION:
+        bbox = opening.aperture_bbox_pt
+        if bbox is None or len(bbox) != 4:
+            return None
+        try:
+            x0, y0, x1, y1 = (float(value) for value in bbox)
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+            return None
+        width = x1 - x0
+        height = y1 - y0
+        if width <= _COORD_TOL or height <= _COORD_TOL:
+            return None
+
+        # G17 proves framed raster openings only when the aperture span is at
+        # least twice the local wall thickness. Recheck that invariant here so
+        # the sealed bbox can recover orientation without nearest-wall or
+        # caller-supplied geometry.
+        if width > height + _COORD_TOL:
+            if width + _COORD_TOL < 2.0 * height:
+                return None
+            return _OpeningGeometry(
+                origin=(x0, (y0 + y1) / 2.0),
+                axis=(1.0, 0.0),
+                normal=(0.0, 1.0),
+                length=width,
+                thickness=height,
+            )
+        if height > width + _COORD_TOL:
+            if height + _COORD_TOL < 2.0 * width:
+                return None
+            return _OpeningGeometry(
+                origin=((x0 + x1) / 2.0, y0),
+                axis=(0.0, 1.0),
+                normal=(-1.0, 0.0),
+                length=height,
+                thickness=width,
+            )
+        return None
+
     visibility = authority.source_visibility_authority()
     if type(visibility) is not SourceVisibilityAuthority:
         return None
