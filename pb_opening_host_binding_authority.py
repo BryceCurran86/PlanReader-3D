@@ -198,6 +198,13 @@ class _HostBandResolution:
     reason_codes: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _LocalHostScope:
+    records: tuple[PhysicalWallCandidateRecord, ...]
+    equivalence: PhysicalWallEquivalenceResolution
+    source_observation_ids: tuple[str, ...]
+
+
 _BindingKey = tuple[str, str, str, str, str, str, str]
 
 
@@ -1163,6 +1170,247 @@ def _candidate_axis_data(
     return (min(along), max(along), sum(offsets) / len(offsets))
 
 
+
+def _host_roles_from_axis_data(
+    data: Optional[tuple[float, float, float]],
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    if data is None:
+        return ()
+    along_min, along_max, _offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    roles: list[str] = []
+    if along_min < -edge_tol and abs(along_max) <= edge_tol:
+        roles.append("left")
+    if (
+        along_max > opening.length + edge_tol
+        and abs(along_min - opening.length) <= edge_tol
+    ):
+        roles.append("right")
+    return tuple(roles)
+
+
+def _candidate_host_roles(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    return _host_roles_from_axis_data(
+        _candidate_axis_data(record, opening),
+        opening,
+    )
+
+
+def _excluded_boundary_primitive_host_roles(
+    primitive: ExcludedBoundaryPrimitive,
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    try:
+        first = (float(primitive.x1), float(primitive.y1))
+        second = (float(primitive.x2), float(primitive.y2))
+    except (TypeError, ValueError):
+        return ()
+    if not all(math.isfinite(value) for point in (first, second) for value in point):
+        return ()
+    unit = _canonical_unit((first[0], first[1], second[0], second[1]))
+    if unit is None or abs(_cross(unit, opening.axis)) > _PARALLEL_TOL:
+        return ()
+    along = (
+        _project(first, opening.origin, opening.axis),
+        _project(second, opening.origin, opening.axis),
+    )
+    offsets = (
+        _project(first, opening.origin, opening.normal),
+        _project(second, opening.origin, opening.normal),
+    )
+    if abs(offsets[1] - offsets[0]) > DEFAULT_GAP_SNAP_TOLERANCE_PT:
+        return ()
+    return _host_roles_from_axis_data(
+        (min(along), max(along), sum(offsets) / 2.0),
+        opening,
+    )
+
+
+def _local_boundary_clean_host_scope(
+    wall_result: PhysicalWallCandidateScopeResult,
+    opening: _OpeningGeometry,
+) -> tuple[Optional[_LocalHostScope], tuple[str, ...]]:
+    """Prove opening-local host completeness inside an incomplete wall scope.
+
+    The page/viewport scope itself remains incomplete. Only wall candidates
+    capable of participating in this exact opening's existing host-role search
+    may enter the local proof. Any such candidate that is unevaluated or
+    boundary-tainted blocks. Excluded boundary primitives that could themselves
+    occupy a host role also block. Upstream SAME/AMBIGUOUS identity cannot be
+    inherited through a tainted/unevaluated representation.
+    """
+
+    if (
+        wall_result.status is not EvidenceResolutionStatus.CORROBORATED
+        or wall_result.scope_complete is True
+        or not wall_result.records
+        or wall_result.equivalence is None
+        or wall_result.boundary_evaluation is None
+        or wall_result.boundary_evaluation.status
+        != BOUNDARY_EVALUATION_EVALUATED
+    ):
+        return None, (HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,)
+
+    evaluation = wall_result.boundary_evaluation
+    records_by_id = {
+        str(record.wall_candidate_id): record for record in wall_result.records
+    }
+    relevant_ids = {
+        wall_id
+        for wall_id, record in records_by_id.items()
+        if _candidate_host_roles(record, opening)
+    }
+    if not relevant_ids:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "no_local_host_wall_candidates",
+        )
+
+    evaluated_ids = {
+        str(value) for value in evaluation.evaluated_wall_candidate_ids
+    }
+    tainted_ids = {
+        str(value) for value in evaluation.boundary_tainted_wall_candidate_ids
+    }
+    unevaluated_relevant = relevant_ids - evaluated_ids
+    tainted_relevant = relevant_ids & tainted_ids
+    if unevaluated_relevant:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_wall_boundary_unevaluated",
+        )
+    if tainted_relevant:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_wall_boundary_tainted",
+        )
+
+    if any(
+        _excluded_boundary_primitive_host_roles(primitive, opening)
+        for primitive in evaluation.excluded_boundary_primitives
+    ):
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_excluded_boundary_primitive",
+        )
+
+    clean_ids = evaluated_ids - tainted_ids
+    unsafe_ids = set(records_by_id) - clean_ids
+    equivalence = wall_result.equivalence
+
+    # Positive SAME groups cannot bridge a relevant clean host role through a
+    # boundary-tainted / unevaluated representation.
+    for group in equivalence.equivalence_groups:
+        members = {str(value) for value in group}
+        if members & relevant_ids and members & unsafe_ids:
+            return None, (
+                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                "host_relevant_equivalence_crosses_unsafe_boundary",
+            )
+
+    for left, right, raw_classification in equivalence.pair_classifications:
+        pair = {str(left), str(right)}
+        if not pair & relevant_ids or not pair & unsafe_ids:
+            continue
+        try:
+            classification = PhysicalEquivalenceClass(raw_classification)
+        except ValueError:
+            return None, (
+                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                HOST_EQUIVALENCE_UNAVAILABLE,
+            )
+        if classification in {
+            PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+            PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        }:
+            return None, (
+                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                "host_relevant_equivalence_crosses_unsafe_boundary",
+            )
+
+    # Preserve clean SAME-group provenance for relevant members, while only
+    # supplying geometrically relevant records to the host-role resolver.
+    equivalence_member_ids = set(relevant_ids)
+    for group in equivalence.equivalence_groups:
+        members = {str(value) for value in group}
+        if members & relevant_ids:
+            equivalence_member_ids.update(members & clean_ids)
+
+    filtered_groups = tuple(
+        sorted(
+            {
+                tuple(
+                    sorted(
+                        str(value)
+                        for value in group
+                        if str(value) in equivalence_member_ids
+                    )
+                )
+                for group in equivalence.equivalence_groups
+                if len(
+                    {
+                        str(value)
+                        for value in group
+                        if str(value) in equivalence_member_ids
+                    }
+                )
+                >= 2
+            }
+        )
+    )
+    filtered_pairs = tuple(
+        sorted(
+            (
+                str(left),
+                str(right),
+                str(classification),
+            )
+            for left, right, classification in equivalence.pair_classifications
+            if str(left) in equivalence_member_ids
+            and str(right) in equivalence_member_ids
+        )
+    )
+    filtered_same_ids = tuple(
+        sorted({member for group in filtered_groups for member in group})
+    )
+    filtered_equivalence = replace(
+        equivalence,
+        representative_wall_ids=tuple(
+            sorted(set(equivalence.representative_wall_ids) & relevant_ids)
+        ),
+        abstained_wall_ids=tuple(
+            sorted(set(equivalence.abstained_wall_ids) & relevant_ids)
+        ),
+        equivalence_groups=filtered_groups,
+        ambiguous_wall_ids=tuple(
+            sorted(set(equivalence.ambiguous_wall_ids) & relevant_ids)
+        ),
+        same_wall_ids=filtered_same_ids,
+        pair_classifications=filtered_pairs,
+        blocking_reasons_by_wall_id=MappingProxyType(
+            {
+                str(wall_id): tuple(reasons)
+                for wall_id, reasons in equivalence.blocking_reasons_by_wall_id.items()
+                if str(wall_id) in relevant_ids
+            }
+        ),
+    )
+    local_records = tuple(
+        records_by_id[wall_id] for wall_id in sorted(relevant_ids)
+    )
+    return (
+        _LocalHostScope(
+            records=local_records,
+            equivalence=filtered_equivalence,
+            source_observation_ids=tuple(wall_result.source_observation_ids),
+        ),
+        (HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,),
+    )
+
 def _pair_lookup(
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
@@ -1296,16 +1544,15 @@ def _resolve_host_bands(
 ) -> _HostBandResolution:
     left_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
     right_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
-    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
-
     for record in records:
         data = _candidate_axis_data(record, opening)
         if data is None:
             continue
-        along_min, along_max, offset = data
-        if along_min < -edge_tol and abs(along_max) <= edge_tol:
+        _along_min, _along_max, offset = data
+        roles = _host_roles_from_axis_data(data, opening)
+        if "left" in roles:
             left_raw.append((offset, record))
-        if along_max > opening.length + edge_tol and abs(along_min - opening.length) <= edge_tol:
+        if "right" in roles:
             right_raw.append((offset, record))
 
     pair_lookup = _pair_lookup(equivalence)
