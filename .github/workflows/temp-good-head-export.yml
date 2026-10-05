@@ -1,0 +1,32 @@
+name: Temporary Good Head Export
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/temp-good-head-export.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8d66089c699a10ef2d7734802caf71c4ca244034
+          fetch-depth: 1
+      - name: Record checked out SHA
+        run: git rev-parse HEAD | tee GOOD_EXPORT_SHA.txt
+      - name: Package repository
+        run: |
+          tar --exclude=.git -czf "$RUNNER_TEMP/planreader-good-head-export.tar.gz" .
+          cp "$RUNNER_TEMP/planreader-good-head-export.tar.gz" ./planreader-good-head-export.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planreader-good-head-export
+          path: |
+            planreader-good-head-export.tar.gz
+            GOOD_EXPORT_SHA.txt
+          if-no-files-found: error
+          retention-days: 1
