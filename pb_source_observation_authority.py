@@ -456,7 +456,8 @@ class SourceObservationProducer:
         page_id: str,
         dpi: float = 300.0,
         clip_pt: Optional[Sequence[float]] = None,
-    ) -> tuple[bytes, SourceObservationRecord]:
+        include_native_frame: bool = False,
+    ):
         """Render one page from the exact immutable PDF bytes this producer ingested.
 
         ``clip_pt`` is optional. ``None`` renders the whole page exactly as
@@ -477,8 +478,11 @@ class SourceObservationProducer:
         parent and partition are resolved internally from snapshot_id and the
         producer's own observation store.
 
-        Returns (png_bytes, native_pdf_page_observation). The returned observation
-        is a defensive copy scoped to the requested snapshot.
+        By default returns (png_bytes, native_pdf_page_observation). When
+        include_native_frame=True it also returns the producer-derived
+        NativePageFrame as a third value. This metadata cannot alter rendering,
+        lineage or source authority. The returned observation is a defensive
+        copy scoped to the requested snapshot.
         """
 
         document_id = _nonempty(document_id, "document_id")
@@ -566,6 +570,7 @@ class SourceObservationProducer:
             if page_number > int(pdf.page_count):
                 raise ValueError(f"{SOURCE_UNAVAILABLE}: page {page_id} out of range")
             page = pdf.load_page(page_number - 1)
+            native_frame = native_page_frame(page) if include_native_frame else None
             scale = dpi_value / 72.0
             if clip_rect is None:
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
@@ -614,6 +619,9 @@ class SourceObservationProducer:
         finally:
             pdf.close()
 
+        if include_native_frame:
+            assert native_frame is not None
+            return png_bytes, replace(page_parent), native_frame
         return png_bytes, replace(page_parent)
 
     def native_page_image_regions(
