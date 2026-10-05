@@ -76,7 +76,7 @@ def test_indexed_page_reconstruction_equals_legacy_fallback():
         assert current == legacy
 
 
-def test_visibility_index_authenticates_each_snapshot_observation_once(monkeypatch):
+def test_visibility_index_uses_authenticated_batch_without_scalar_calls(monkeypatch):
     source, published, _payload = _source(page_count=8)
     original = SourceVisibilityAuthority.resolve_visible
     calls = 0
@@ -93,7 +93,7 @@ def test_visibility_index_authenticates_each_snapshot_observation_once(monkeypat
         published=published,
     )
 
-    assert calls == len(published.visible_observation_ids)
+    assert calls == 0
     assert sum(len(rows) for rows in indexed.values()) == len(
         published.visible_observation_ids
     )

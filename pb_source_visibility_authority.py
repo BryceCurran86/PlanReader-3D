@@ -1511,6 +1511,173 @@ class SourceVisibilityAuthority:
         )
         return frozenset(ids)
 
+    def authenticated_visible_observations(
+        self, published: "PublishedVisibleSourceSnapshot"
+    ) -> tuple[tuple[str, object], ...]:
+        """Bulk-authenticate the producer-owned visible universe for one snapshot.
+
+        This is semantically equivalent to resolving every visible id separately,
+        but validates shared revision/source/snapshot integrity once and reuses
+        the producer-owned identity-bound verified-record cache. Cache misses or
+        replaced/tampered records fall back to scalar source authority validation.
+        Receipt and full parent-lineage predicates remain unchanged.
+        """
+        if type(published) is not PublishedVisibleSourceSnapshot:
+            raise TypeError("published must be PublishedVisibleSourceSnapshot")
+
+        store = self._source_authority._store
+        document_id = str(published.revision.document_id)
+        revision_id = str(published.revision.revision_id)
+        source_sha256 = str(published.revision.source_sha256)
+        snapshot_id = str(published.snapshot.snapshot_id)
+
+        current = store.current_revision_by_document.get(document_id)
+        revision = store.revisions.get(revision_id)
+        source_bytes = store.source_bytes_by_revision.get(revision_id)
+        snapshot = store.snapshots.get(snapshot_id)
+        if (
+            current != revision_id
+            or revision is None
+            or source_bytes is None
+            or revision.source_sha256 != source_sha256
+            or not store.source_bytes_match_revision(
+                revision_id, source_bytes, source_sha256
+            )
+            or snapshot is None
+            or snapshot.document_id != document_id
+            or snapshot.revision_id != revision_id
+            or snapshot.source_sha256 != source_sha256
+        ):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+
+        def _record(observation_id: str):
+            observation_id = str(observation_id)
+            key = (snapshot_id, observation_id)
+            record = store.observations.get(key)
+            if record is None or not store.snapshot_contains_observation(
+                snapshot, observation_id
+            ):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            expected = store.record_fingerprints.get(key)
+            cached = store.verified_resolution_cache.get(key)
+            if not (
+                expected is not None
+                and cached is not None
+                and cached[0] is revision
+                and cached[1] is snapshot
+                and cached[2] is record
+                and cached[3] == expected
+                and all(
+                    (snapshot_id, parent_id) in store.observations
+                    for parent_id in record.derivation_parent_ids
+                )
+            ):
+                resolved = self._source_authority.resolve(
+                    ObservationSelector(
+                        document_id=document_id,
+                        revision_id=revision_id,
+                        source_sha256=source_sha256,
+                        snapshot_id=snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                if (
+                    resolved.status is not EvidenceResolutionStatus.CORROBORATED
+                    or resolved.observation is None
+                ):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                record = store.observations.get(key)
+                if record is None:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            return record
+
+        rows: list[tuple[str, object]] = []
+        for observation_id in published.visible_observation_ids:
+            observation_id = str(observation_id)
+            expected_parent = self._visibility_receipts.get(
+                (snapshot_id, observation_id)
+            )
+            raster_receipt = self._raster_visibility_receipts.get(
+                (snapshot_id, observation_id)
+            )
+            if expected_parent is None and raster_receipt is None:
+                raise RuntimeError(VISIBILITY_RECEIPT_UNAVAILABLE)
+
+            observation = _record(observation_id)
+            if expected_parent is not None:
+                if (
+                    observation.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT
+                    or observation.origin_kind not in (
+                        VISIBLE_SEGMENT_ORIGIN_KIND,
+                        RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND,
+                    )
+                    or observation.viewport_id is not None
+                    or observation.derivation_parent_ids != (expected_parent,)
+                ):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                parent = _record(expected_parent)
+                if (
+                    parent.observation_kind != "native_pdf_segment"
+                    or parent.origin_kind != "native"
+                    or parent.document_id != observation.document_id
+                    or parent.revision_id != observation.revision_id
+                    or parent.source_sha256 != observation.source_sha256
+                    or parent.page_id != observation.page_id
+                    or parent.source_partition_id != observation.source_partition_id
+                    or parent.geometry != observation.geometry
+                    or observation.source_primitive_ref
+                    != f"visible:{parent.source_primitive_ref}"
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+            else:
+                assert raster_receipt is not None
+                if (
+                    observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
+                    or observation.origin_kind != RASTER_VISIBLE_SEGMENT_ORIGIN_KIND
+                    or observation.viewport_id is not None
+                    or observation.derivation_parent_ids
+                    != (raster_receipt.parent_observation_id,)
+                    or observation.document_id != raster_receipt.document_id
+                    or observation.revision_id != raster_receipt.revision_id
+                    or observation.source_sha256 != raster_receipt.source_sha256
+                    or observation.page_id != raster_receipt.page_id
+                    or observation.source_partition_id
+                    != raster_receipt.source_partition_id
+                    or tuple(observation.geometry) != tuple(raster_receipt.geometry)
+                ):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                parent = _record(raster_receipt.parent_observation_id)
+                if (
+                    parent.observation_kind != RASTER_PDF_SEGMENT
+                    or parent.origin_kind != RASTER_SEGMENT_ORIGIN_KIND
+                    or parent.derivation_parent_ids
+                    != (raster_receipt.page_parent_observation_id,)
+                    or parent.document_id != observation.document_id
+                    or parent.revision_id != observation.revision_id
+                    or parent.source_sha256 != observation.source_sha256
+                    or parent.page_id != observation.page_id
+                    or parent.source_partition_id != observation.source_partition_id
+                    or parent.geometry != observation.geometry
+                    or observation.source_primitive_ref
+                    != f"visible:{parent.source_primitive_ref}"
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+                page_parent = _record(raster_receipt.page_parent_observation_id)
+                if (
+                    page_parent.observation_kind != "native_pdf_page"
+                    or page_parent.origin_kind != "native"
+                    or page_parent.derivation_parent_ids
+                    or page_parent.document_id != observation.document_id
+                    or page_parent.revision_id != observation.revision_id
+                    or page_parent.source_sha256 != observation.source_sha256
+                    or page_parent.page_id != observation.page_id
+                    or page_parent.source_partition_id != observation.source_partition_id
+                ):
+                    raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
+
+            rows.append((observation_id, replace(observation)))
+        return tuple(rows)
+
     def resolve_visible(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
         expected_parent = self._visibility_receipts.get(
             (selector.snapshot_id, selector.observation_id)

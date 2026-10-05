@@ -321,3 +321,43 @@ def test_oversized_fill_rectangle_does_not_authenticate_as_text_mask() -> None:
 
     assert all(not edge.get("annotation_mask_authority") for edge in annotated)
     assert _filter(list(annotated)) == tuple(annotated)
+
+
+def test_singleton_motif_geometry_is_computed_once(monkeypatch) -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    lines = [
+        _line(
+            f"once-{index}",
+            float(index),
+            0.0,
+            float(index) + 3.0,
+            3.0,
+            path_index=index,
+            stroke=(0.5, 0.5, 0.5),
+            width=0.24,
+        )
+        for index in range(12)
+    ]
+    original_length = module._segment_length
+    original_angle = module._segment_angle_deg
+    calls = {"length": 0, "angle": 0}
+
+    def counted_length(segment):
+        calls["length"] += 1
+        return original_length(segment)
+
+    def counted_angle(segment):
+        calls["angle"] += 1
+        return original_angle(segment)
+
+    monkeypatch.setattr(module, "_segment_length", counted_length)
+    monkeypatch.setattr(module, "_segment_angle_deg", counted_angle)
+
+    module._filter_repeated_non_physical_drafting_primitives(
+        lines,
+        page_width=1000.0,
+        page_height=1000.0,
+    )
+
+    assert calls == {"length": len(lines), "angle": len(lines)}
