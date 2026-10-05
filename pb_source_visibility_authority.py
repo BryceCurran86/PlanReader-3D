@@ -35,6 +35,9 @@ from pb_raster_visible_segment_detector import (
 )
 from pb_raster_opening_source_primitives import (
     RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
+    RASTER_THIN_INK_RUN,
+    RASTER_WALL_BAND_END,
+    RASTER_WALL_BAND_FACE,
     RasterOpeningSourcePrimitive,
     detect_raster_opening_source_primitives,
 )
@@ -66,7 +69,9 @@ NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
 RASTER_PDF_SEGMENT = "raster_pdf_segment"
 RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
 RASTER_OPENING_PRIMITIVE_SEGMENT = "raster_opening_primitive_segment"
-RASTER_OPENING_VISIBLE_PRIMITIVE = "raster_opening_visible_primitive"
+RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS = frozenset(
+    (RASTER_WALL_BAND_FACE, RASTER_WALL_BAND_END, RASTER_THIN_INK_RUN)
+)
 VISIBLE_SEGMENT_ORIGIN_KIND = "producer_visibility_no_active_clip"
 RECTANGULAR_CLIP_VISIBLE_SEGMENT_ORIGIN_KIND = (
     "producer_visibility_exact_rectangular_clip"
@@ -627,7 +632,7 @@ def _raster_opening_visible_primitive_id(
         "revision_id": revision_id,
         "page_id": page_id,
         "partition_id": partition_id,
-        "kind": RASTER_OPENING_VISIBLE_PRIMITIVE,
+        "kind": primitive.primitive_kind,
         "origin_kind": RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND,
         "parents": (parent_observation_id,),
         "primitive_kind": primitive.primitive_kind,
@@ -1662,7 +1667,7 @@ class SourceVisibilityProducer:
                         "source_primitive_ref": parent_ref,
                         "origin_kind": RASTER_OPENING_PRIMITIVE_ORIGIN_KIND,
                         "parent_observation_ids": (page_parent.observation_id,),
-                        "raw_text": primitive.primitive_kind,
+                        "raw_text": "",
                         "geometry": primitive.geometry_pt,
                         "viewport_id": None,
                         "observation_id": parent_id,
@@ -1680,11 +1685,11 @@ class SourceVisibilityProducer:
                     {
                         "page_id": page_id,
                         "source_partition_id": page_parent.source_partition_id,
-                        "observation_kind": RASTER_OPENING_VISIBLE_PRIMITIVE,
+                        "observation_kind": primitive.primitive_kind,
                         "source_primitive_ref": f"visible:{parent_ref}",
                         "origin_kind": RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND,
                         "parent_observation_ids": (parent_id,),
-                        "raw_text": primitive.primitive_kind,
+                        "raw_text": "",
                         "geometry": primitive.geometry_pt,
                         "viewport_id": None,
                         "observation_id": visible_id,
@@ -1856,7 +1861,8 @@ class SourceVisibilityAuthority:
         ):
             return result
         if (
-            observation.observation_kind != RASTER_OPENING_VISIBLE_PRIMITIVE
+            observation.observation_kind not in RASTER_OPENING_VISIBLE_PRIMITIVE_KINDS
+            or observation.observation_kind != receipt.primitive_kind
             or observation.origin_kind
             != RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND
             or observation.viewport_id is not None
@@ -1867,7 +1873,7 @@ class SourceVisibilityAuthority:
             or observation.source_sha256 != receipt.source_sha256
             or observation.page_id != receipt.page_id
             or observation.source_partition_id != receipt.source_partition_id
-            or observation.raw_text != receipt.primitive_kind
+            or observation.raw_text
             or tuple(observation.geometry) != tuple(receipt.geometry)
         ):
             return self._conflict(PRODUCER_INTEGRITY_FAILURE)
@@ -1894,7 +1900,7 @@ class SourceVisibilityAuthority:
             or parent.source_sha256 != observation.source_sha256
             or parent.page_id != observation.page_id
             or parent.source_partition_id != observation.source_partition_id
-            or parent.raw_text != receipt.primitive_kind
+            or parent.raw_text
             or parent.geometry != observation.geometry
             or observation.source_primitive_ref
             != f"visible:{parent.source_primitive_ref}"
