@@ -53,8 +53,17 @@ def _seg(
     obs_id: str,
     geometry: tuple[float, float, float, float],
     orientation: str,
+    *,
+    width: float | None = None,
+    color: tuple[float, float, float] | None = None,
 ) -> _VisibleSegment:
-    return _VisibleSegment(obs_id, geometry, orientation)
+    return _VisibleSegment(
+        obs_id,
+        geometry,
+        orientation,
+        stroke_width_pt=width,
+        stroke_color_rgb=color,
+    )
 
 
 def _bound(
@@ -123,6 +132,81 @@ def test_third_competing_line_keeps_binding_ambiguous():
         _seg("right", (100.0, 0.0, 100.0, 20.0), "vertical"),
     )
     assert _bind_text_to_geometry(text, segments) is None
+
+
+def test_strict_native_style_breaks_same_orientation_logical_line_tie():
+    text = _text(4025, (98.0, 80.0, 102.0, 120.0))
+    segments = (
+        _seg(
+            "background",
+            (96.0, 20.0, 96.0, 180.0),
+            "vertical",
+            width=0.24,
+            color=(0.5, 0.5, 0.5),
+        ),
+        _seg(
+            "dimension",
+            (100.0, 20.0, 100.0, 180.0),
+            "vertical",
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _seg(
+            "top",
+            (90.0, 20.0, 110.0, 20.0),
+            "horizontal",
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _seg(
+            "bottom",
+            (90.0, 180.0, 110.0, 180.0),
+            "horizontal",
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = _bind_text_to_geometry(text, segments)
+
+    assert result is not None
+    assert result.value_mm == 4025
+    assert result.orientation == "vertical"
+    assert result.dimension_line_observation_ids == ("dimension",)
+    assert set(result.witness_observation_ids) == {"top", "bottom"}
+
+
+def test_equal_or_missing_native_style_keeps_logical_line_tie_ambiguous():
+    text = _text(4025, (98.0, 80.0, 102.0, 120.0))
+    equal = (
+        _seg(
+            "left",
+            (96.0, 20.0, 96.0, 180.0),
+            "vertical",
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _seg(
+            "right",
+            (100.0, 20.0, 100.0, 180.0),
+            "vertical",
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+    assert _bind_text_to_geometry(text, equal) is None
+
+    missing = (
+        _seg("left", (96.0, 20.0, 96.0, 180.0), "vertical"),
+        _seg(
+            "right",
+            (100.0, 20.0, 100.0, 180.0),
+            "vertical",
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+    assert _bind_text_to_geometry(text, missing) is None
 
 
 def test_source_typography_calibration_accepts_normal_dimension_extension_gap():
@@ -301,6 +385,41 @@ def _image_only_dimension_pdf() -> bytes:
     return payload
 
 
+def _native_style_tie_pdf(*, equal_style: bool = False) -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=200, height=200)
+    weak_color = (0.0, 0.0, 0.0) if equal_style else (0.5, 0.5, 0.5)
+    weak_width = 2.0 if equal_style else 1.0
+
+    page.draw_line(
+        fitz.Point(96.0, 20.0),
+        fitz.Point(96.0, 180.0),
+        color=weak_color,
+        width=weak_width,
+    )
+    page.draw_line(
+        fitz.Point(100.0, 20.0),
+        fitz.Point(100.0, 180.0),
+        color=(0.0, 0.0, 0.0),
+        width=2.0,
+    )
+    page.draw_line(
+        fitz.Point(90.0, 20.0),
+        fitz.Point(110.0, 20.0),
+        color=(0.0, 0.0, 0.0),
+        width=2.0,
+    )
+    page.draw_line(
+        fitz.Point(90.0, 180.0),
+        fitz.Point(110.0, 180.0),
+        color=(0.0, 0.0, 0.0),
+        width=2.0,
+    )
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
 def _vector_only_dimension_pdf(*, rotation: int = 0) -> bytes:
     doc = fitz.open()
     page = doc.new_page(width=360, height=200)
@@ -366,6 +485,65 @@ def _display_bbox_90(
 
 def _ocr(text: str, bbox: tuple[float, float, float, float]) -> OCRLine:
     return OCRLine(text=text, confidence=1.0, bbox_px=bbox, bbox_pt=bbox)
+
+
+# This exercises style recovery from the producer-owned native page cache,
+# not caller-supplied _VisibleSegment metadata.
+def test_end_to_end_producer_uses_verified_native_style_to_break_line_tie():
+    source = SourceVisibilityProducer(
+        producer_method="native-style-dimension-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="synthetic-native-style-dimension",
+        source_bytes=_native_style_tie_pdf(),
+        source_locator="memory://synthetic-native-style-dimension.pdf",
+    )
+    backend = MockOCRBackend(
+        (_ocr("4025", (98.0, 80.0, 102.0, 120.0)),)
+    )
+
+    result = RasterPlanDimensionProducer.create_for_tests(
+        source_visibility=source,
+        backend=backend,
+    ).publish(
+        revision_id=published.revision.revision_id,
+        page_id="1",
+    )
+
+    matches = [
+        item for item in result.bound_dimensions if item.value_mm == 4025
+    ]
+    assert len(matches) == 1
+    assert matches[0].orientation == "vertical"
+    assert len(matches[0].witness_observation_ids) >= 2
+
+
+def test_end_to_end_equal_native_style_remains_unbound():
+    source = SourceVisibilityProducer(
+        producer_method="native-style-equal-dimension-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="synthetic-native-style-equal-dimension",
+        source_bytes=_native_style_tie_pdf(equal_style=True),
+        source_locator="memory://synthetic-native-style-equal-dimension.pdf",
+    )
+    backend = MockOCRBackend(
+        (_ocr("4025", (98.0, 80.0, 102.0, 120.0)),)
+    )
+
+    result = RasterPlanDimensionProducer.create_for_tests(
+        source_visibility=source,
+        backend=backend,
+    ).publish(
+        revision_id=published.revision.revision_id,
+        page_id="1",
+    )
+
+    assert not any(
+        item.value_mm == 4025 for item in result.bound_dimensions
+    )
 
 
 def test_end_to_end_producer_can_bind_ocr_to_native_visible_dimension_geometry():
