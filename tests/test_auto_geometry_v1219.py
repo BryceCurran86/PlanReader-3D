@@ -5,9 +5,14 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import pb_auto_geometry_v1219 as auto
 import pb_auto_geometry_guard_v1219 as guard
+from pb_takeoff_authority_v164 import (
+    ai_takeoff_authority,
+    takeoff_row_publishability,
+)
 
 
 class _DBApp:
@@ -255,6 +260,111 @@ class AutoGeometryV1219Tests(unittest.TestCase):
                     for row in rows
                 )
             )
+
+    def test_ceiling_review_candidate_becomes_valid_ceiling_area_auto_row(self):
+        candidate = SimpleNamespace(
+            review_row={
+                "workspace_id": 7,
+                "origin": "AI",
+                "quantity_status": "To review",
+                "row_role": "ceiling_area",
+                "section": "Internal",
+                "element": "Ceiling lining",
+                "location": "Ceiling",
+                "substrate": "Other",
+                "quantity": 13.270425,
+                "source_page": "1",
+                "quantity_id": "qty-ceiling-1",
+                "unit": "m2",
+                "notes": "{}",
+            }
+        )
+
+        rows = auto._ceiling_review_rows_from_candidates(7, (candidate,))
+        self.assertEqual(len(rows), 1)
+        named = dict(zip(auto.TAKEOFF_ROW_FIELDS, rows[0]))
+        self.assertEqual(named["workspace_id"], 7)
+        self.assertEqual(named["quantity_status"], "To review")
+        self.assertEqual(named["row_role"], "ceiling_area")
+        self.assertEqual(named["unit"], "m²")
+        self.assertEqual(named["quantity"], 13.270425)
+        self.assertEqual(named["inclusion_status"], "PROVISIONAL")
+        self.assertIn("AI draft", named["notes"])
+        self.assertTrue(
+            named["source_reference"].startswith(
+                auto.SOURCE_PREFIX + " · ceiling_quantity:"
+            )
+        )
+        self.assertEqual(
+            ai_takeoff_authority(named),
+            (
+                False,
+                "AI draft has not been explicitly reviewed by an estimator",
+            ),
+        )
+        self.assertFalse(takeoff_row_publishability(named)[0])
+        auto._validate_auto_rows(rows, 7)
+
+    def test_ceiling_review_candidate_rejects_reviewed_or_wrong_workspace_rows(self):
+        base = {
+            "workspace_id": 7,
+            "origin": "AI",
+            "quantity_status": "To review",
+            "row_role": "ceiling_area",
+            "section": "Internal",
+            "element": "Ceiling lining",
+            "location": "Ceiling",
+            "substrate": "Other",
+            "quantity": 8.64,
+            "source_page": "1",
+            "quantity_id": "qty-ceiling-1",
+            "unit": "m2",
+            "notes": "{}",
+        }
+
+        reviewed = SimpleNamespace(
+            review_row={**base, "quantity_status": "Measured"}
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "bypassed customer review state",
+        ):
+            auto._ceiling_review_rows_from_candidates(7, (reviewed,))
+
+        wrong_workspace = SimpleNamespace(
+            review_row={**base, "workspace_id": 8}
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "another workspace",
+        ):
+            auto._ceiling_review_rows_from_candidates(7, (wrong_workspace,))
+
+    def test_ceiling_review_candidate_rejects_duplicate_quantity_identity(self):
+        base = {
+            "workspace_id": 7,
+            "origin": "AI",
+            "quantity_status": "To review",
+            "row_role": "ceiling_area",
+            "section": "Internal",
+            "element": "Ceiling lining",
+            "location": "Ceiling",
+            "substrate": "Other",
+            "quantity": 8.64,
+            "source_page": "1",
+            "quantity_id": "qty-ceiling-1",
+            "unit": "m2",
+            "notes": "{}",
+        }
+        candidates = (
+            SimpleNamespace(review_row=dict(base)),
+            SimpleNamespace(review_row=dict(base)),
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "duplicate or missing quantity identity",
+        ):
+            auto._ceiling_review_rows_from_candidates(7, candidates)
 
     def test_manual_takeoff_rows_are_detected_as_precedence_sources(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -4,6 +4,9 @@ from __future__ import annotations
 import fitz
 
 from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
+from pb_ceiling_lining_review_promotion import (
+    collect_ceiling_lining_review_candidates,
+)
 from pb_live_ceiling_lining_integration import (
     LIVE_CEILING_LINING_RESOLVED,
     LIVE_CEILING_LINING_TAG_FAMILY_CONFLICT,
@@ -107,6 +110,32 @@ def test_resolved_floor_plan_emits_live_chipboard_ceiling_claim(tmp_path) -> Non
     assert ceiling.geometry_complete is True
     assert ceiling.metric_area_complete is True
     assert ceiling.metric_geometry_complete is False
+
+
+def test_runtime_collector_returns_only_review_gated_ceiling_candidate(tmp_path) -> None:
+    path = _write(tmp_path, framed=True)
+
+    candidates = collect_ceiling_lining_review_candidates(
+        path,
+        pages=(0,),
+        workspace_id=17,
+        project_id="project-ceiling-runtime",
+    )
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    row = dict(candidate.review_row)
+    assert row["workspace_id"] == 17
+    assert row["project_id"] == "project-ceiling-runtime"
+    assert row["origin"] == "AI"
+    assert row["quantity_status"] == "To review"
+    assert row["row_role"] == "ceiling_area"
+    assert row["quantity"] > 0.0
+    assert candidate.promoted_quantity.metadata["shadow_only"] is False
+    assert (
+        candidate.promoted_quantity.metadata["commercial_projection_allowed"]
+        is True
+    )
 
 
 def test_generic_extractor_publishes_only_separate_live_provisional_prediction(tmp_path) -> None:
