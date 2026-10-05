@@ -14,7 +14,6 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_portable_raster_ocr_authority import MockOCRBackend
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -115,10 +114,9 @@ def _source_and_room(
 
 def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_owned_area():
     source, rooms = _source_and_room()
-    result = CrossViewRoomAreaProducer.from_source_for_tests(
+    result = CrossViewRoomAreaProducer.from_source(
         source=source,
         rooms=rooms,
-        backend=MockOCRBackend(()),
     ).publish()
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
