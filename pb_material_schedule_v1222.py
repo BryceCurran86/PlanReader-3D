@@ -24,6 +24,10 @@ CODE_RE = re.compile(
     r"\b(?:EC\d+|FC\d+|RBL\d*|SOF\d*|CL\d+|PT\d+|PF\d+|WF\d+|BA\d+|SCR\d*|SHD\d*|DP\d*|GD\d*|RS\d*|BC\d*|IP)\b",
     re.IGNORECASE,
 )
+_GENERIC_SCHEDULE_CODE_RE = re.compile(
+    r"^[\s:;|,\-–—]*([A-Z]{1,4}(?:[-_.]?\d{1,4})[A-Z]?)(?![A-Z0-9])",
+    re.IGNORECASE,
+)
 SCHEDULE_WORDS = (
     "finish schedule", "finishes schedule", "finishing schedule", "material schedule",
     "colour schedule", "color schedule", "external finishes", "paint schedule",
@@ -64,6 +68,46 @@ def _codes(value: Any) -> List[str]:
     return sorted({match.group(0).upper() for match in CODE_RE.finditer(str(value or ""))})
 
 
+def _schedule_codes(value: Any) -> List[str]:
+    """Return code-shaped tokens that a schedule row can define.
+
+    The legacy code vocabulary remains supported, but a finishing/material
+    schedule is itself authority for ordinary letter+number codes such as
+    WT1 or WM1. Requiring a numeric component keeps prose headings from
+    becoming definitions; non-numeric legacy codes (for example IP) still
+    come only from the explicit CODE_RE vocabulary.
+    """
+
+    text = str(value or "")
+    codes = set(_codes(text))
+    codes.update(
+        match.group(1).upper()
+        for match in _GENERIC_SCHEDULE_CODE_RE.finditer(text)
+    )
+    return sorted(codes)
+
+
+def _defined_codes_in_text(
+    value: Any,
+    dictionary: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    """Return drawing codes, extending legacy detection only with defined codes."""
+
+    text = str(value or "")
+    codes = set(_codes(text))
+    for raw_code in dictionary:
+        code = str(raw_code or "").strip().upper()
+        if not code or code in codes:
+            continue
+        if re.search(
+            rf"(?<![A-Z0-9]){re.escape(code)}(?![A-Z0-9])",
+            text,
+            re.IGNORECASE,
+        ):
+            codes.add(code)
+    return sorted(codes)
+
+
 def _schedule_page(page: Dict[str, Any]) -> bool:
     kind = str(page.get("page_type") or "").lower()
     text = f"{page.get('page_label') or ''} {page.get('extracted_text') or ''}".lower()
@@ -97,6 +141,29 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
 
     if str(entry.get("status") or "").strip().lower() != "confirmed":
         return ""
+    finish_text = _normalise(entry.get("finish"))
+    if (
+        "paint" in finish_text
+        or "primer" in finish_text
+        or "undercoat" in finish_text
+        or "topcoat" in finish_text
+        or "low sheen" in finish_text
+        or "semi gloss" in finish_text
+        or "semigloss" in finish_text
+        or "matt" in finish_text
+        or "matte" in finish_text
+        or "satin" in finish_text
+    ):
+        return "paint"
+    if "epoxy" in finish_text:
+        return "epoxy"
+    if "vinyl" in finish_text:
+        return "vinyl"
+    if "tile" in finish_text.split() or "tiles" in finish_text.split():
+        return "tile"
+    if "membrane" in finish_text.split():
+        return "membrane"
+
     text = _normalise(
         " ".join(
             str(entry.get(key) or "")
@@ -107,10 +174,33 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         return "sandwich_panel"
     if "insulated panel" in text or "insulation panel" in text:
         return "insulated_panel"
+    if "fibre cement" in text or "fiber cement" in text or "fc sheet" in text or "fc cladding" in text:
+        return "fibre_cement"
+    if "plasterboard" in text or "gyprock" in text or "gypsum board" in text:
+        return "plasterboard"
     if "epoxy" in text:
         return "epoxy"
     if "vinyl" in text:
         return "vinyl"
+    if "ceramic tile" in text or "porcelain tile" in text or "wall tile" in text or "floor tile" in text or "tiles" in text:
+        return "tile"
+    if "waterproof membrane" in text or "waterproofing membrane" in text or "sheet membrane" in text or "liquid membrane" in text:
+        return "membrane"
+    if "roof sheet" in text or "roof sheeting" in text or "metal roofing" in text or "roofing" in text:
+        return "roofing"
+    if (
+        "paint" in text
+        or "primer" in text
+        or "undercoat" in text
+        or "topcoat" in text
+        or "low sheen" in text
+        or "semi gloss" in text
+        or "semigloss" in text
+        or "matt" in text
+        or "matte" in text
+        or "satin" in text
+    ):
+        return "paint"
     return ""
 
 
@@ -126,19 +216,28 @@ def parse_schedule_text(text: Any, page_id: int = 0, page_label: str = "") -> Li
     lines = [re.sub(r"\s+", " ", raw).strip() for raw in str(text or "").splitlines() if str(raw).strip()]
     out: List[Dict[str, Any]] = []
     for idx, line in enumerate(lines):
-        codes = _codes(line)
+        codes = _schedule_codes(line)
         if len(codes) != 1:
             continue
         code = codes[0]
-        desc = CODE_RE.sub(" ", line)
+        desc = re.sub(
+            rf"^[\s:;|,\-–—]*{re.escape(code)}(?![A-Z0-9])",
+            " ",
+            line,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        desc = CODE_RE.sub(" ", desc)
         desc = re.sub(r"^[\s:;|\-–—]+|[\s:;|\-–—]+$", "", desc).strip()
         parts = [desc] if len(_normalise(desc)) >= 3 else []
+        contributing_lines = [line]
         # Many schedules use one cell/line for the code and the next cells/lines for description.
         for nxt in range(idx + 1, min(len(lines), idx + 4)):
-            if _codes(lines[nxt]):
+            if _schedule_codes(lines[nxt]):
                 break
             if len(_normalise(lines[nxt])) >= 3:
                 parts.append(lines[nxt])
+                contributing_lines.append(lines[nxt])
             if len(" ".join(parts)) >= 40:
                 break
         description = re.sub(r"\s+", " ", " ".join(parts)).strip()
@@ -152,6 +251,7 @@ def parse_schedule_text(text: Any, page_id: int = 0, page_label: str = "") -> Li
             "page_id": int(page_id or 0),
             "page_label": str(page_label or ""),
             "source_line": line,
+            "source_lines": tuple(contributing_lines),
         })
     return out
 
@@ -209,7 +309,7 @@ def _page_occurrences(app: Any, page: Dict[str, Any], dictionary: Dict[str, Dict
         lines = []
     if lines:
         for line in lines:
-            for code in _codes(line.get("text")):
+            for code in _defined_codes_in_text(line.get("text"), dictionary):
                 entry = dictionary.get(code)
                 occurrences.append({
                     "code": code, "page_id": int(page["id"]), "page_label": str(page.get("page_label") or ""),
@@ -222,7 +322,7 @@ def _page_occurrences(app: Any, page: Dict[str, Any], dictionary: Dict[str, Dict
                     "description": entry.get("description", "") if entry else "",
                 })
         return occurrences
-    for code in _codes(page.get("extracted_text")):
+    for code in _defined_codes_in_text(page.get("extracted_text"), dictionary):
         entry = dictionary.get(code)
         occurrences.append({
             "code": code, "page_id": int(page["id"]), "page_label": str(page.get("page_label") or ""),
@@ -273,7 +373,7 @@ def build_material_state(app: Any, workspace_id: int) -> Dict[str, Any]:
 def resolved_substrates_from_text(base_substrates, text: Any) -> List[Dict[str, str]]:
     base = list(base_substrates(text) or [])
     resolver = _resolver_context.get()
-    codes = _codes(text)
+    codes = _defined_codes_in_text(text, resolver)
     resolved: List[Dict[str, str]] = []
     resolved_codes: set[str] = set()
     for code in codes:

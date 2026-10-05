@@ -29,6 +29,7 @@ def _measurement() -> SourceRoofCoveringMeasurement:
         member_count=2,
         source_viewport_id="elevation-1",
         source_page=3,
+        source_scale_denominator=(8.0 * 1000.0 * 72.0) / (160.0 * 25.4),
         material_annotations=("METAL ROOF SHEETING",),
         reason_codes=("authenticated_gable_roofline",),
     )
