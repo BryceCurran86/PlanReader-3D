@@ -756,7 +756,24 @@ class ScheduleOpeningInstanceBindingProducer:
                 ),
             )
 
-        if published.coverage.state != "complete" or published.coverage.failed_pages:
+        # Plan-tag authentication is page-local: a scoped source decode may
+        # still prove the exact tag contained by this physical opening when the
+        # opening page itself decoded successfully. Do not require unrelated
+        # document pages merely to establish that local proposition.
+        try:
+            opening_page_number = int(opening.page_id)
+        except (TypeError, ValueError):
+            return self._store(
+                key,
+                _blocked(
+                    EvidenceResolutionStatus.ABSTAINED,
+                    BINDING_PARTIAL_SOURCE_COVERAGE,
+                ),
+            )
+        if (
+            opening_page_number not in published.coverage.decoded_pages
+            or opening_page_number in published.coverage.failed_pages
+        ):
             return self._store(
                 key,
                 _blocked(
@@ -899,6 +916,22 @@ class ScheduleOpeningInstanceBindingProducer:
                 ),
             )
         tag_observation_id, tag_mark, _tag_bbox, _tag_source = deduped_tags[0]
+
+        # Schedule-row uniqueness is document-evidence-wide, unlike the
+        # opening-contained plan tag above. On a scoped/partial decode, omitted
+        # pages could still contain a competing schedule row, so preserve the
+        # independently authenticated tag but never publish schedule authority.
+        if published.coverage.state != "complete" or published.coverage.failed_pages:
+            return self._store(
+                key,
+                ScheduleOpeningInstanceBindingResult(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    reason_codes=(BINDING_PARTIAL_SOURCE_COVERAGE,),
+                    record=None,
+                    authenticated_tag_observation_id=tag_observation_id,
+                    authenticated_tag_mark=tag_mark,
+                ),
+            )
 
         discovered: dict[
             tuple[str, tuple[str, ...]],
