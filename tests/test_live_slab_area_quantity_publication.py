@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_live_canonical_slab_projection import project_resolved_slab_entity
 from pb_live_slab_area_quantity_publication import (
@@ -68,13 +70,11 @@ def test_slab_area_publication_fails_closed_if_boundary_provenance_is_damaged():
         **_lineage(),
     )
     assert result.object is not None
-    damaged = type(result.object)(
-        **{
-            **result.object.__dict__,
-            "provenance": {
-                **dict(result.object.provenance),
-                "boundary_id": "different-boundary",
-            },
-        }
+    damaged = replace(
+        result.object,
+        provenance={
+            **dict(result.object.provenance),
+            "boundary_id": "different-boundary",
+        },
     )
     assert publish_live_slab_area_quantity(damaged) is None
