@@ -76,6 +76,8 @@ def test_filling_identity_is_stable_across_evidence_lineage_churn() -> None:
     first = project_live_canonical_opening_fillings((opening,)).windows[0]
     changed = replace(
         opening,
+        physical_opening_id="different-evidence-record-id",
+        canonical_opening_id="different-canonical-evidence-id",
         revision_id="revision-2",
         source_sha256="f" * 64,
         snapshot_id="snapshot-2",
@@ -86,6 +88,34 @@ def test_filling_identity_is_stable_across_evidence_lineage_churn() -> None:
 
     assert first.physical_filling_id == second.physical_filling_id
     assert first.canonical_filling_id == second.canonical_filling_id
+
+
+def test_filling_identity_is_geometry_order_and_line_direction_invariant() -> None:
+    opening = _opening("W1")
+    first = project_live_canonical_opening_fillings((opening,)).windows[0]
+    reversed_geometries = tuple(
+        tuple(reversed((geometry[2], geometry[3], geometry[0], geometry[1])))
+        if len(geometry) == 4
+        else tuple(reversed(geometry))
+        for geometry in reversed(opening.source_geometries)
+    )
+    # For four-value line records, reverse both collection order and endpoint
+    # direction without changing physical geometry.
+    reversed_geometries = tuple(
+        (
+            geometry[2],
+            geometry[3],
+            geometry[0],
+            geometry[1],
+        )
+        if len(geometry) == 4
+        else geometry
+        for geometry in reversed(opening.source_geometries)
+    )
+    second_opening = replace(opening, source_geometries=reversed_geometries)
+    second = project_live_canonical_opening_fillings((second_opening,)).windows[0]
+
+    assert first.physical_filling_id == second.physical_filling_id
 
 
 def test_unresolved_kind_does_not_mint_filling_identity() -> None:
