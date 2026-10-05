@@ -241,6 +241,110 @@ def test_structural_registry_reuses_original_count_quantity_and_canonical_member
     assert report["family_reports"]["structural_member"]["stage_counts"]["PUBLISHED"] == 0
 
 
+def test_current_customer_row_closes_publication_after_pre_row_extractor_snapshot():
+    resolution = _resolved(with_geometry=True)
+    members = project_structural_member_resolution(resolution).objects
+    quantity = build_structural_member_count_quantity(resolution)
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=members,
+        quantities=(quantity,),
+        registry_run_scope="pre-row-extractor-snapshot",
+    )
+
+    assert all(
+        not record.takeoff_row_ids
+        for summary in summaries
+        for record in summary.object_records
+    )
+
+    report = build_runtime_coverage_publication(
+        summaries,
+        family_gaps=gaps,
+        published_takeoff_rows=[
+            {
+                "source_reference": (
+                    f"PB Auto geometry · structural_quantity:{quantity.quantity_id}"
+                ),
+                "quantity": quantity.value,
+                "unit": quantity.unit,
+            }
+        ],
+    )
+    family = report["family_reports"]["structural_member"]
+    assert family["classification"] == "PARTIAL"
+    assert family["stage_counts"]["QUANTIFIED"] == len(members)
+    assert family["stage_counts"]["PUBLISHED"] == len(members)
+    assert all(
+        obj["highest_stage_reached"] == "PUBLISHED"
+        for registry in report["registry_reports"]
+        for obj in registry["object_reports"]
+    )
+
+
+@pytest.mark.parametrize(
+    "published_quantity,published_unit",
+    [
+        (2.01, "NO"),
+        (2.0, "m²"),
+        (None, "NO"),
+    ],
+)
+def test_current_customer_row_cannot_publish_when_value_or_unit_changes(
+    published_quantity,
+    published_unit,
+):
+    resolution = _resolved(with_geometry=True)
+    members = project_structural_member_resolution(resolution).objects
+    quantity = build_structural_member_count_quantity(resolution)
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=members,
+        quantities=(quantity,),
+        registry_run_scope="customer-row-mismatch",
+    )
+    report = build_runtime_coverage_publication(
+        summaries,
+        family_gaps=gaps,
+        published_takeoff_rows=[
+            {
+                "source_reference": (
+                    f"PB Auto geometry · structural_quantity:{quantity.quantity_id}"
+                ),
+                "quantity": published_quantity,
+                "unit": published_unit,
+            }
+        ],
+    )
+    counts = report["family_reports"]["structural_member"]["stage_counts"]
+    assert counts["QUANTIFIED"] == len(members)
+    assert counts["PUBLISHED"] == 0
+
+
+def test_known_takeoff_row_lineage_conflict_still_blocks_runtime_reconciliation():
+    summary = _summary()
+    record = replace(
+        summary.object_records[0],
+        takeoff_row_ids=(),
+        reason_codes=(
+            *summary.object_records[0].reason_codes,
+            "takeoff_row_geometry_lineage_conflict:qty-live-1",
+        ),
+    )
+    hostile = replace(summary, object_records=(record,))
+    report = build_runtime_coverage_publication(
+        (hostile,),
+        published_takeoff_rows=[
+            {
+                "source_reference": "physical:qty-live-1",
+                "quantity": 12.5,
+                "unit": "m²",
+            }
+        ],
+    )
+    family = report["family_reports"]["wall"]
+    assert family["stage_counts"]["QUANTIFIED"] == 1
+    assert family["stage_counts"]["PUBLISHED"] == 0
+
+
 def test_finish_surface_remains_partial_without_proven_finish_extent_or_quantity():
     surfaces = project_wall_finish_bindings(canonical_walls=(_wall(),), bindings=(_binding(),)).surfaces
     summaries, gaps = collect_live_canonical_coverage(objects=surfaces, registry_run_scope="test")
