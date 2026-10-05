@@ -2019,12 +2019,19 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         all_auto_rows = all_auto_rows + preserved_source_closed_rows
 
     # Rows, envelope and report are one publication: all commit or none do.
-    with _auto_publication(
-        app,
-        int(workspace_id),
-        all_auto_rows,
-        preserve_row_ids=retained_reviewed_source_closed_row_ids,
-    ) as publication:
+    # Preserve the historical three-argument call when there is nothing to
+    # retain so existing wrappers/tests remain source-compatible.
+    publication_context = (
+        _auto_publication(
+            app,
+            int(workspace_id),
+            all_auto_rows,
+            preserve_row_ids=retained_reviewed_source_closed_row_ids,
+        )
+        if retained_reviewed_source_closed_row_ids
+        else _auto_publication(app, int(workspace_id), all_auto_rows)
+    )
+    with publication_context as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
         coverage_lifecycle = _runtime_coverage_lifecycle_report(
             publication,
