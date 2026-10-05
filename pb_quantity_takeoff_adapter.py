@@ -14,6 +14,7 @@ import math
 import re
 from typing import Any, Mapping, Optional, Sequence
 
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_migration_contracts import QuantityEvidence, canonical_contract_json
 
 
@@ -264,9 +265,17 @@ def _validate_quantity_trace(
         )
 
     q_authority = _norm(quantity.authority)
-    if authority.method == "figured_dimension" and "figured" not in q_authority:
+    figured_quantity_authorities = {
+        _norm(MeasurementAuthorityType.DOCUMENTED_DIMENSION.value),
+        "figured_dimension",
+    }
+    if (
+        authority.method == "figured_dimension"
+        and q_authority not in figured_quantity_authorities
+        and "figured" not in q_authority
+    ):
         raise MissingCommercialAuthorityError(
-            "figured_dimension projection requires figured QuantityEvidence authority"
+            "figured_dimension projection requires documented/figured QuantityEvidence authority"
         )
     if authority.method == "scaled_geometry" and not (
         "scale" in q_authority or "geometry" in q_authority
