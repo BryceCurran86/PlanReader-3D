@@ -91,6 +91,25 @@ def _room_and_floor_for_quantity(
     return room, floor
 
 
+def _source_closed_room_area_quantities(
+    claim: LivePhysicalNetWallClaim,
+) -> tuple[QuantityEvidence, ...]:
+    """Return only positive source-closed quantities.
+
+    Missing/blocked rooms remain absent from the sealed production run. They are
+    not coerced to zero and are not manufactured as customer quantities.
+    """
+    return tuple(
+        quantity
+        for quantity in claim.room_area_quantity_evidence
+        if (
+            type(quantity) is QuantityEvidence
+            and not quantity.abstained
+            and quantity.value is not None
+        )
+    )
+
+
 def build_live_room_area_source_traces(
     claim: LivePhysicalNetWallClaim,
     *,
@@ -103,7 +122,7 @@ def build_live_room_area_source_traces(
         raise TypeError("claim must be exact LivePhysicalNetWallClaim")
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
-    for quantity in claim.room_area_quantity_evidence:
+    for quantity in _source_closed_room_area_quantities(claim):
         if type(quantity) is not QuantityEvidence:
             raise TypeError(
                 "room_area_quantity_evidence must contain exact QuantityEvidence"
@@ -199,7 +218,7 @@ def seal_live_room_area_run(
 
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be exact LivePhysicalNetWallClaim")
-    quantities = tuple(claim.room_area_quantity_evidence)
+    quantities = _source_closed_room_area_quantities(claim)
     traces = build_live_room_area_source_traces(
         claim,
         workspace_id=workspace_id,
