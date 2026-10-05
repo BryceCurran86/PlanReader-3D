@@ -6,7 +6,7 @@ geometry, names, levels, finishes, quantities, or commercial authority.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Collection, Mapping, Optional
 
 from pb_drawing_evidence_binding import DrawingViewType
@@ -20,9 +20,10 @@ from pb_source_room_face_authority import (
     build_source_room_face_authority,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_source_room_label_authority import bind_source_room_labels
 
 
-LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.1.0"
+LIVE_CANONICAL_ROOM_SCHEMA_VERSION = "1.2.0"
 LIVE_PHYSICAL_ROOM_IDENTITY_SCHEMA_VERSION = "1.0.0"
 LIVE_CANONICAL_ROOM_RESOLVED = "live_canonical_room_composition_resolved"
 LIVE_CANONICAL_ROOM_PARTIAL = "live_canonical_room_composition_partial"
@@ -54,6 +55,10 @@ class LiveCanonicalRoomObject:
     evidence_ids: tuple[str, ...]
     geometry_complete: bool
     metric_geometry_complete: bool
+    room_label: Optional[str] = None
+    room_label_binding_record_id: Optional[str] = None
+    room_label_evidence_ids: tuple[str, ...] = ()
+    room_label_reason_codes: tuple[str, ...] = ()
     coordinate_unit: str = "pdf_pt"
     schema_version: str = LIVE_CANONICAL_ROOM_SCHEMA_VERSION
 
@@ -77,6 +82,10 @@ class LiveCanonicalRoomObject:
             "evidence_ids": list(self.evidence_ids),
             "geometry_complete": self.geometry_complete,
             "metric_geometry_complete": self.metric_geometry_complete,
+            "room_label": self.room_label,
+            "room_label_binding_record_id": self.room_label_binding_record_id,
+            "room_label_evidence_ids": list(self.room_label_evidence_ids),
+            "room_label_reason_codes": list(self.room_label_reason_codes),
             "coordinate_unit": self.coordinate_unit,
             "schema_version": self.schema_version,
         }
@@ -325,6 +334,34 @@ def compose_live_canonical_rooms(
                     room_pages.add(int(page_id))
                     if page_face_universe_complete:
                         resolved_pages.add(int(page_id))
+
+    if rooms:
+        label_bindings = bind_source_room_labels(
+            source_visibility_producer,
+            rooms,
+        )
+        rooms = [
+            replace(
+                room,
+                room_label=(
+                    binding.label
+                    if binding is not None
+                    and binding.status is EvidenceResolutionStatus.CORROBORATED
+                    else None
+                ),
+                room_label_binding_record_id=(
+                    binding.record_id if binding is not None else None
+                ),
+                room_label_evidence_ids=(
+                    binding.evidence_ids if binding is not None else ()
+                ),
+                room_label_reason_codes=(
+                    binding.reason_codes if binding is not None else ()
+                ),
+            )
+            for room in rooms
+            for binding in (label_bindings.get(room.canonical_room_id),)
+        ]
 
     rooms.sort(key=lambda room: (room.page_id, room.canonical_room_id))
     if rooms and len(resolved_pages) == len(wall_opening_composition.page_ids):
