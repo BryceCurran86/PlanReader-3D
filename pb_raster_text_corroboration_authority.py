@@ -68,8 +68,8 @@ from pb_pdf_text_integrity_authority import (
 from pb_portable_raster_ocr_authority import (
     MockOCRBackend,
     OCRLine,
-    RapidOCRBackend,
     RasterOCRBackend,
+    select_production_ocr_backend,
 )
 from pb_source_observation_authority import (
     ObservationSelector,
@@ -276,11 +276,17 @@ class RasterTextCorroborationProducer:
     def from_source_visibility_producer(
         cls, source_visibility_producer: SourceVisibilityProducer
     ) -> "RasterTextCorroborationProducer":
-        """Production entry: always the exact production RapidOCR backend."""
+        """Production entry with deterministic availability-only OCR selection.
+
+        Backend choice is resolved once before any claim is evaluated using the
+        shared production preference order. A failed/no-text result is never
+        retried on another engine.
+        """
 
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
-        return cls(source_visibility_producer, RapidOCRBackend(), _seal=_PRODUCER_SEAL)
+        backend, _selection_reason = select_production_ocr_backend()
+        return cls(source_visibility_producer, backend, _seal=_PRODUCER_SEAL)
 
     @classmethod
     def from_source_visibility_producer_for_tests(

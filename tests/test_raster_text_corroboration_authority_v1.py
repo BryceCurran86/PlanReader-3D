@@ -28,10 +28,13 @@ from pb_pdf_text_integrity_authority import (
 )
 from pb_portable_raster_ocr_authority import (
     MockOCRBackend,
+    NullOCRBackend,
     OCRLine,
     PortableRasterOCRProducer,
     PortableRasterOCRSelector,
     RapidOCRBackend,
+    TesseractOCRBackend,
+    WinOCRBackend,
 )
 from pb_raster_text_corroboration_authority import (
     RASTER_TEXT_ALREADY_TRUSTED,
@@ -776,7 +779,55 @@ def test_producer_and_authority_cannot_be_constructed_directly_or_with_foreign_b
             svp, MockOCRBackend(), page_images={"1": Image.new("RGB", (4, 4))}
         )
     prod = RasterTextCorroborationProducer.from_source_visibility_producer(svp)
-    assert type(prod._backend) is RapidOCRBackend
+    assert type(prod._backend) in {
+        RapidOCRBackend,
+        TesseractOCRBackend,
+        WinOCRBackend,
+        NullOCRBackend,
+    }
+
+
+@pytest.mark.parametrize(
+    ("rapid_available", "tesseract_available", "winocr_available", "expected_type"),
+    [
+        (True, True, True, RapidOCRBackend),
+        (False, True, True, TesseractOCRBackend),
+        (False, False, True, WinOCRBackend),
+        (False, False, False, NullOCRBackend),
+    ],
+)
+def test_production_factory_uses_shared_availability_only_backend_order(
+    monkeypatch,
+    rapid_available,
+    tesseract_available,
+    winocr_available,
+    expected_type,
+) -> None:
+    monkeypatch.setattr(
+        RapidOCRBackend,
+        "is_available",
+        lambda _self: rapid_available,
+    )
+    monkeypatch.setattr(
+        TesseractOCRBackend,
+        "is_available",
+        lambda _self: tesseract_available,
+    )
+    monkeypatch.setattr(
+        WinOCRBackend,
+        "is_available",
+        lambda _self: winocr_available,
+    )
+
+    svp = SourceVisibilityProducer(
+        producer_method="raster-production-backend-selection-test",
+        producer_version="1",
+    )
+    producer = RasterTextCorroborationProducer.from_source_visibility_producer(
+        svp
+    )
+
+    assert type(producer._backend) is expected_type
 
 
 def test_publish_rejects_anything_but_the_exact_selector_type() -> None:

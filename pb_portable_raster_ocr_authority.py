@@ -572,6 +572,30 @@ def detect_ocr_capabilities() -> OCRCapabilityReport:
     )
 
 
+def select_production_ocr_backend() -> tuple[RasterOCRBackend, str]:
+    """Choose one installed production OCR backend deterministically.
+
+    Selection depends only on runtime capability, never on a page, claim,
+    OCR result, confidence, or benchmark identity. Callers must use the
+    returned backend exactly; they must not retry a failed/no-text claim on a
+    lower-priority engine.
+    """
+
+    rapid = RapidOCRBackend()
+    if rapid.is_available():
+        return rapid, OCR_BACKEND_SELECTED_RAPIDOCR_AVAILABLE
+
+    tess = TesseractOCRBackend()
+    if tess.is_available():
+        return tess, OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE
+
+    win = WinOCRBackend()
+    if win.is_available():
+        return win, OCR_BACKEND_SELECTED_WINOCR_AVAILABLE
+
+    return NullOCRBackend(), OCR_BACKEND_SELECTED_NONE_AVAILABLE
+
+
 # ---------------------------------------------------------------------------
 # Selectors & Records
 # ---------------------------------------------------------------------------
@@ -880,21 +904,7 @@ class PortableRasterOCRProducer:
         ``from_backend(backend=...)`` calls are never affected by this
         method or by what is installed in the environment.
         """
-        rapid = RapidOCRBackend()
-        tess = TesseractOCRBackend()
-        win = WinOCRBackend()
-        if rapid.is_available():
-            chosen: RasterOCRBackend = rapid
-            reason = OCR_BACKEND_SELECTED_RAPIDOCR_AVAILABLE
-        elif tess.is_available():
-            chosen = tess
-            reason = OCR_BACKEND_SELECTED_TESSERACT_AVAILABLE
-        elif win.is_available():
-            chosen = win
-            reason = OCR_BACKEND_SELECTED_WINOCR_AVAILABLE
-        else:
-            chosen = NullOCRBackend()
-            reason = OCR_BACKEND_SELECTED_NONE_AVAILABLE
+        chosen, reason = select_production_ocr_backend()
 
         producer = cls(
             backend=chosen,
@@ -1164,5 +1174,6 @@ __all__ = [
     "WinOCRBackend",
     "detect_ocr_capabilities",
     "normalize_text_for_reconciliation",
+    "select_production_ocr_backend",
     "reconcile_native_and_ocr_text",
 ]
