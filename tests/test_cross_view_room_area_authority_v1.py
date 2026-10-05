@@ -455,3 +455,26 @@ def test_record_constructor_rejects_caller_forgery():
         pass
     else:
         raise AssertionError("caller-forged cross-view room area record was accepted")
+
+def test_cross_view_narrows_dimension_auth_to_authenticated_candidate_lines(monkeypatch):
+    source, rooms = _source_and_room()
+    observed = []
+    original = cross_view._trusted_native_dimensions_for_page
+
+    def wrapped(source_arg, *, revision_id, page_id, candidate_lines=()):
+        if candidate_lines:
+            observed.extend(candidate_lines)
+        return original(
+            source_arg,
+            revision_id=revision_id,
+            page_id=page_id,
+            candidate_lines=candidate_lines,
+        )
+
+    monkeypatch.setattr(cross_view, "_trusted_native_dimensions_for_page", wrapped)
+    result = CrossViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert observed
+    assert {line.text for line in observed} == {"TEST ROOM"}
+
