@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from types import SimpleNamespace
 
 import fitz
 
@@ -18,7 +17,7 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_portable_raster_ocr_authority import MockOCRBackend
+from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -126,12 +125,15 @@ def _source_and_room(
     )
 
 
-def _force_dimension_words_to_raster_authority(
+def _force_dimension_words_to_isolated_authority(
     monkeypatch,
     source: SourceVisibilityProducer,
     revision_id: str,
     *,
-    raster_override: dict[str, str] | None = None,
+    readings_by_word: dict[str, tuple[str | None, str | None]] | None = None,
+    integrity_reason_codes: tuple[str, ...] = (
+        "text_glyph_mapping_unverified",
+    ),
 ) -> None:
     published = source.published_snapshot_for_revision(revision_id)
     assert published is not None
@@ -163,47 +165,57 @@ def _force_dimension_words_to_raster_authority(
     def forced_resolve(self, selector):
         result = original_resolve(self, selector)
         if str(selector.observation_id) in dimension_words:
+            forced_receipt = replace(
+                result.receipt,
+                trusted=False,
+                reason_codes=integrity_reason_codes,
+            )
             return replace(
                 result,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 trusted_text=None,
-                reason_codes=("text_glyph_mapping_unverified",),
+                receipt=forced_receipt,
+                reason_codes=integrity_reason_codes,
             )
         return result
 
     monkeypatch.setattr(authority_type, "resolve_text", forced_resolve)
 
-    readings = dict(dimension_words)
-    if raster_override:
-        readings.update(raster_override)
+    scripted = readings_by_word or {}
+    sequence: list[str | None] = []
+    for value in dimension_words.values():
+        sequence.extend(scripted.get(value, (value, value)))
+    iterator = iter(sequence)
 
-    class FakeRaster:
-        def publish(self, selector):
-            value = readings.get(str(selector.observation_id))
-            if value is None:
-                return SimpleNamespace(
-                    status=EvidenceResolutionStatus.ABSTAINED,
-                    record=None,
-                    corroborated_text=None,
-                )
-            return SimpleNamespace(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                record=object(),
-                corroborated_text=value,
-            )
+    def responder(image, dpi):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            return ()
+        if value is None:
+            return ()
+        return (
+            OCRLine(
+                text=value,
+                confidence=1.0,
+                bbox_px=(1.0, 1.0, 10.0, 10.0),
+                bbox_pt=(1.0, 1.0, 10.0, 10.0),
+            ),
+        )
 
+    backend = MockOCRBackend(responder=responder)
     monkeypatch.setattr(
-        cross_view.RasterTextCorroborationProducer,
-        "from_source_visibility_producer",
-        classmethod(lambda cls, source: FakeRaster()),
+        cross_view,
+        "select_production_ocr_backend",
+        lambda: (backend, "test_isolated_dimension_backend"),
     )
 
 
-def test_cross_view_dimension_text_accepts_independent_raster_corroboration(
+def test_cross_view_dimension_text_accepts_isolated_two_render_corroboration(
     monkeypatch,
 ) -> None:
     source, rooms = _source_and_room()
-    _force_dimension_words_to_raster_authority(
+    _force_dimension_words_to_isolated_authority(
         monkeypatch,
         source,
         rooms.rooms[0].revision_id,
@@ -219,41 +231,15 @@ def test_cross_view_dimension_text_accepts_independent_raster_corroboration(
     assert result.records[0].area_evidence.normalized_value == 8.64
 
 
-def test_cross_view_dimension_raster_corroboration_must_match_figured_value(
+def test_cross_view_dimension_isolated_corroboration_must_match_native_value(
     monkeypatch,
 ) -> None:
     source, rooms = _source_and_room()
-
-    published = source.published_snapshot_for_revision(
-        rooms.rooms[0].revision_id
-    )
-    assert published is not None
-    authority = source.text_integrity_authority()
-    wrong_observation_id = None
-    for observation_id in published.text_observation_ids:
-        result = authority.resolve_text(
-            ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                observation_id=observation_id,
-            )
-        )
-        if (
-            result.receipt is not None
-            and str(result.receipt.page_id) == "2"
-            and str(result.receipt.raw_text).strip() == "3600"
-        ):
-            wrong_observation_id = str(observation_id)
-            break
-    assert wrong_observation_id is not None
-
-    _force_dimension_words_to_raster_authority(
+    _force_dimension_words_to_isolated_authority(
         monkeypatch,
         source,
         rooms.rooms[0].revision_id,
-        raster_override={wrong_observation_id: "3601"},
+        readings_by_word={"3600": ("3601", "3601")},
     )
 
     result = CrossViewRoomAreaProducer.from_source(
@@ -266,6 +252,47 @@ def test_cross_view_dimension_raster_corroboration_must_match_figured_value(
         EvidenceResolutionStatus.ABSTAINED,
         EvidenceResolutionStatus.CONFLICT,
     }
+
+
+def test_cross_view_dimension_isolated_corroboration_requires_view_agreement(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    _force_dimension_words_to_isolated_authority(
+        monkeypatch,
+        source,
+        rooms.rooms[0].revision_id,
+        readings_by_word={"3600": ("3600", "3601")},
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.records == ()
+
+
+def test_cross_view_dimension_isolated_corroboration_keeps_other_text_vetoes(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    _force_dimension_words_to_isolated_authority(
+        monkeypatch,
+        source,
+        rooms.rooms[0].revision_id,
+        integrity_reason_codes=(
+            "text_glyph_mapping_unverified",
+            "text_occluded_by_later_paint",
+        ),
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.records == ()
 
 
 def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_owned_area():
