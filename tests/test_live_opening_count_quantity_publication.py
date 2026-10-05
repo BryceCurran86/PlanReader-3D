@@ -164,7 +164,9 @@ def test_authenticated_opening_count_seals_exact_member_lineage(tmp_path) -> Non
     path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
     claim = collect_live_physical_net_wall_claim(path, pages=(0,))
     assert len(claim.opening_count_quantity_evidence) == 1
+    assert len(claim.canonical_openings) == 1
     quantity = claim.opening_count_quantity_evidence[0]
+    opening = claim.canonical_openings[0]
 
     traces = build_live_opening_count_source_traces(
         claim,
