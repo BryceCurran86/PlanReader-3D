@@ -5,13 +5,16 @@ quantity. It consumes only LiveCanonicalOpeningObject values whose upstream
 opening-kind authority already resolved door/window without conflict.
 
 The installed filling is a different physical/canonical proposition from the
-wall void that hosts it. The filling identity is therefore derived from the
-producer-owned physical opening identity plus the authenticated kind, while
-source/evidence lineage remains metadata rather than physical identity.
+wall void that hosts it. Filling identity is derived only from stable physical
+scope: document/page, proven host wall, normalized source geometry and the
+authenticated door/window kind. Revision, source hash, snapshot, detector
+version, observation ids and material evidence remain lineage rather than
+physical identity.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Optional, Sequence
 
 from pb_live_physical_opening_void_composition import LiveCanonicalOpeningObject
@@ -107,7 +110,13 @@ def _canonical_source_geometries(
 
     normalized: list[tuple[float, ...]] = []
     for geometry in geometries:
-        values = tuple(round(float(value), 6) for value in geometry)
+        try:
+            raw_values = tuple(float(value) for value in geometry)
+        except (TypeError, ValueError, OverflowError):
+            return ()
+        if not raw_values or not all(math.isfinite(value) for value in raw_values):
+            return ()
+        values = tuple(round(value, 6) for value in raw_values)
         if len(values) == 4:
             first = (values[0], values[1])
             second = (values[2], values[3])
@@ -129,6 +138,7 @@ def _filling_from_opening(
         return None
 
     physical_opening_id = _clean(opening.physical_opening_id)
+    host_wall_id = _clean(opening.host_wall_id)
     lineage = (
         _clean(opening.document_id),
         _clean(opening.revision_id),
@@ -139,6 +149,7 @@ def _filling_from_opening(
     canonical_geometries = _canonical_source_geometries(opening.source_geometries)
     if (
         not physical_opening_id
+        or not host_wall_id
         or not all(lineage)
         or not opening.evidence_ids
         or not canonical_geometries
@@ -150,6 +161,7 @@ def _filling_from_opening(
         {
             "document_id": lineage[0],
             "page_id": lineage[4],
+            "host_wall_id": host_wall_id,
             "filling_kind": kind,
             "source_geometries": canonical_geometries,
         },
@@ -168,7 +180,7 @@ def _filling_from_opening(
         viewport_id=opening.viewport_id,
         filling_kind=kind,
         type_mark=opening.type_mark,
-        host_wall_id=opening.host_wall_id,
+        host_wall_id=host_wall_id,
         evidence_ids=tuple(opening.evidence_ids),
         opening_geometry_complete=bool(opening.geometry_complete),
     )
