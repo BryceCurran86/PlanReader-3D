@@ -93,12 +93,6 @@ def test_filling_identity_is_stable_across_evidence_lineage_churn() -> None:
 def test_filling_identity_is_geometry_order_and_line_direction_invariant() -> None:
     opening = _opening("W1")
     first = project_live_canonical_opening_fillings((opening,)).windows[0]
-    reversed_geometries = tuple(
-        tuple(reversed((geometry[2], geometry[3], geometry[0], geometry[1])))
-        if len(geometry) == 4
-        else tuple(reversed(geometry))
-        for geometry in reversed(opening.source_geometries)
-    )
     # For four-value line records, reverse both collection order and endpoint
     # direction without changing physical geometry.
     reversed_geometries = tuple(
