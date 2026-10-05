@@ -478,3 +478,242 @@ def test_cross_view_narrows_dimension_auth_to_authenticated_candidate_lines(monk
     assert observed
     assert {line.text for line in observed} == {"TEST ROOM"}
 
+
+
+def test_exact_label_line_can_fallback_to_two_render_line_corroboration(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    source, rooms = _source_and_room()
+    revision_id = rooms.rooms[0].revision_id
+    published = source.published_snapshot_for_revision(revision_id)
+    assert published is not None
+
+    authority = source.text_integrity_authority()
+    authority_type = type(authority)
+    original_resolve = authority_type.resolve_text
+    label_observation_ids: set[str] = set()
+    for observation_id in published.text_observation_ids:
+        result = original_resolve(
+            authority,
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            ),
+        )
+        receipt = result.receipt
+        if (
+            receipt is not None
+            and str(receipt.page_id) == "2"
+            and str(receipt.raw_text).strip() in {"TEST", "ROOM"}
+        ):
+            label_observation_ids.add(str(observation_id))
+    assert len(label_observation_ids) == 2
+
+    def forced_resolve(self, selector):
+        result = original_resolve(self, selector)
+        if str(selector.observation_id) in label_observation_ids:
+            reasons = ("text_glyph_mapping_unverified",)
+            return replace(
+                result,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                trusted_text=None,
+                receipt=replace(
+                    result.receipt,
+                    trusted=False,
+                    reason_codes=reasons,
+                ),
+                reason_codes=reasons,
+            )
+        return result
+
+    monkeypatch.setattr(authority_type, "resolve_text", forced_resolve)
+    monkeypatch.setattr(
+        cross_view.RasterTextCorroborationProducer,
+        "publish",
+        lambda self, selector: SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            record=None,
+            corroborated_text=None,
+            reason_codes=("raster_text_no_reading",),
+        ),
+    )
+
+    readings = iter(("TEST ROOM", "TEST ROOM"))
+
+    def responder(image, dpi):
+        value = next(readings)
+        return (
+            OCRLine(
+                text=value,
+                confidence=1.0,
+                bbox_px=(1.0, 1.0, 20.0, 10.0),
+                bbox_pt=(1.0, 1.0, 20.0, 10.0),
+            ),
+        )
+
+    backend = MockOCRBackend(responder=responder)
+    monkeypatch.setattr(
+        cross_view,
+        "select_production_ocr_backend",
+        lambda: (backend, "test_line_backend"),
+    )
+
+    lines = cross_view._trusted_lines_for_page(
+        source,
+        revision_id=revision_id,
+        page_id="2",
+        candidate_labels=("TEST ROOM",),
+    )
+
+    assert len(lines) == 1
+    assert lines[0].text == "TEST ROOM"
+    assert len(lines[0].observation_ids) == 2
+
+
+def test_repeated_exact_label_annotation_blocks_can_supply_orthogonal_dimensions(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+
+    horizontal_line = cross_view._TrustedLine(
+        page_id="2",
+        text="TEST ROOM",
+        bbox=(120.0, 70.0, 180.0, 78.0),
+        observation_ids=("label-h",),
+        receipt_ids=("receipt-h",),
+        source_partition_id="partition-2",
+        block_no=10,
+        line_no=0,
+    )
+    vertical_line = cross_view._TrustedLine(
+        page_id="2",
+        text="TEST ROOM",
+        bbox=(270.0, 110.0, 278.0, 170.0),
+        observation_ids=("label-v",),
+        receipt_ids=("receipt-v",),
+        source_partition_id="partition-2",
+        block_no=20,
+        line_no=0,
+    )
+    horizontal = cross_view._TrustedBoundDimension(
+        dimension_id="h-3600",
+        text_observation_id="text-h",
+        text_receipt_id="text-receipt-h",
+        text_source_partition_id="partition-2",
+        text_block_no=10,
+        text_line_no=1,
+        text_word_no=0,
+        value_mm=3600.0,
+        orientation="horizontal",
+        endpoints_pt=((100.0, 80.0), (250.0, 80.0)),
+        dimension_line_observation_ids=("h-line",),
+        witness_observation_ids=("h-w1", "h-w2"),
+        witness_geometries=(
+            (100.0, 68.0, 100.0, 92.0),
+            (250.0, 68.0, 250.0, 92.0),
+        ),
+    )
+    vertical = cross_view._TrustedBoundDimension(
+        dimension_id="v-2400",
+        text_observation_id="text-v",
+        text_receipt_id="text-receipt-v",
+        text_source_partition_id="partition-2",
+        text_block_no=20,
+        text_line_no=1,
+        text_word_no=0,
+        value_mm=2400.0,
+        orientation="vertical",
+        endpoints_pt=((280.0, 100.0), (280.0, 200.0)),
+        dimension_line_observation_ids=("v-line",),
+        witness_observation_ids=("v-w1", "v-w2"),
+        witness_geometries=(
+            (268.0, 100.0, 292.0, 100.0),
+            (268.0, 200.0, 292.0, 200.0),
+        ),
+    )
+
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_lines_for_page",
+        lambda source_arg, *, revision_id, page_id, candidate_labels: (
+            horizontal_line,
+            vertical_line,
+        ) if str(page_id) == "2" else (),
+    )
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_native_dimensions_for_page",
+        lambda source_arg, *, revision_id, page_id, candidate_lines=(): (
+            horizontal,
+            vertical,
+        ) if str(page_id) == "2" else (),
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.area_evidence.normalized_value == 8.64
+    assert record.area_evidence.metadata["source_label_support_mode"] == (
+        "repeated_label_annotation_blocks"
+    )
+    assert len(record.source_label_receipt_ids) == 2
+
+
+def test_repeated_label_annotation_blocks_remain_fail_closed_when_pair_is_not_unique(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+
+    line_h1 = cross_view._TrustedLine(
+        page_id="2", text="TEST ROOM", bbox=(100, 70, 160, 78),
+        observation_ids=("lh1",), receipt_ids=("rh1",),
+        source_partition_id="partition-2", block_no=10, line_no=0,
+    )
+    line_h2 = cross_view._TrustedLine(
+        page_id="2", text="TEST ROOM", bbox=(100, 220, 160, 228),
+        observation_ids=("lh2",), receipt_ids=("rh2",),
+        source_partition_id="partition-2", block_no=30, line_no=0,
+    )
+    line_v = cross_view._TrustedLine(
+        page_id="2", text="TEST ROOM", bbox=(270, 110, 278, 170),
+        observation_ids=("lv",), receipt_ids=("rv",),
+        source_partition_id="partition-2", block_no=20, line_no=0,
+    )
+    h1 = cross_view._TrustedBoundDimension(
+        "h1", "th1", "trh1", "partition-2", 10, 1, 0, 3600.0,
+        "horizontal", ((100, 80), (250, 80)), ("hl1",),
+        ("hw1", "hw2"), ((100, 68, 100, 92), (250, 68, 250, 92)),
+    )
+    h2 = cross_view._TrustedBoundDimension(
+        "h2", "th2", "trh2", "partition-2", 30, 1, 0, 4080.0,
+        "horizontal", ((90, 230), (260, 230)), ("hl2",),
+        ("hw3", "hw4"), ((90, 218, 90, 242), (260, 218, 260, 242)),
+    )
+    v = cross_view._TrustedBoundDimension(
+        "v", "tv", "trv", "partition-2", 20, 1, 0, 2400.0,
+        "vertical", ((280, 100), (280, 200)), ("vl",),
+        ("vw1", "vw2"), ((268, 100, 292, 100), (268, 200, 292, 200)),
+    )
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_lines_for_page",
+        lambda *args, **kwargs: (line_h1, line_h2, line_v),
+    )
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_native_dimensions_for_page",
+        lambda *args, **kwargs: (h1, h2, v),
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
+
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
