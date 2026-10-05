@@ -1094,12 +1094,25 @@ def _source_page_segments(
     if page_number < 1:
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
 
+    cached_native = source_producer._producer._cached_native_page(
+        published.revision.source_sha256, page_number
+    )
+    native = (
+        None
+        if cached_native is None or cached_native.failed
+        else cached_native.native_page
+    )
     pdf = fitz.open(stream=source_bytes, filetype="pdf")
     try:
         if page_number > int(pdf.page_count):
             raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
         page = pdf.load_page(page_number - 1)
-        native = extract_native_page(page)
+        # Native ingest already decoded this exact immutable page. Reuse the
+        # producer-owned parse so wall reconstruction does not rebuild the same
+        # drawings and words. Page-frame authority still reads /Rotate from the
+        # exact PDF page because that metadata is not part of the native decode.
+        if native is None:
+            native = extract_native_page(page)
         page_width, page_height = native_wall_scope_page_extent(page)
     finally:
         pdf.close()
