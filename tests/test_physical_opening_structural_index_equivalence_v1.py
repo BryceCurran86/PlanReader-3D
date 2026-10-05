@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fitz
 
+import pb_physical_opening_authority as opening_module
 from pb_physical_opening_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
     RASTER_PDF_VISIBLE_SEGMENT,
@@ -158,3 +159,77 @@ def test_indexed_structural_search_is_semantically_identical_to_reference() -> N
     }
     assert actual == expected
     assert len(actual) == 1
+
+
+def _duplicate_geometry_pdf() -> bytes:
+    doc = fitz.open()
+    page = doc.new_page(width=800, height=500)
+    lines = (
+        ((40.0, 100.0), (180.0, 100.0)),
+        ((240.0, 100.0), (420.0, 100.0)),
+        ((40.0, 120.0), (180.0, 120.0)),
+        ((240.0, 120.0), (420.0, 120.0)),
+        ((180.0, 100.0), (180.0, 120.0)),
+        ((240.0, 100.0), (240.0, 120.0)),
+    )
+    for _repeat in range(2):
+        for first, second in lines:
+            page.draw_line(fitz.Point(*first), fitz.Point(*second), width=1)
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def test_structural_search_collapses_duplicate_geometry_without_changing_support(
+    monkeypatch,
+) -> None:
+    source = SourceVisibilityProducer(
+        producer_method="structural-duplicate-geometry-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="structural-duplicate-geometry",
+        source_bytes=_duplicate_geometry_pdf(),
+        source_locator="memory://structural-duplicate-geometry.pdf",
+    )
+    authority = PhysicalOpeningAuthority(source.authority())
+
+    resolved = source.authority().resolve_visible(
+        ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=published.visible_observation_ids[0],
+        )
+    )
+    assert resolved.observation is not None
+    records, failures = authority._visible_snapshot_records(resolved)
+    assert not failures
+    assert len(records) == 12
+
+    expected = _reference_support_sets(resolved.observation, records)
+    original = opening_module._candidate_collinear_record_pairs
+    candidate_input_sizes: list[int] = []
+
+    def counted(records, *, line_geometries=None):
+        candidate_input_sizes.append(len(records))
+        return original(records, line_geometries=line_geometries)
+
+    monkeypatch.setattr(
+        opening_module,
+        "_candidate_collinear_record_pairs",
+        counted,
+    )
+    actual = {
+        frozenset(candidate.source_observation_ids)
+        for candidate in authority._visible_structural_candidates(
+            resolved.observation, records
+        )
+    }
+
+    assert actual == expected
+    assert len(actual) == 1
+    # Two observations exist for each of six exact geometries, but the
+    # structural search needs only the deterministic historical winner.
+    assert candidate_input_sizes == [6]
