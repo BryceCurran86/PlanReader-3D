@@ -35,6 +35,14 @@ class MissingDrawingPage:
         raise RuntimeError("drawing state unavailable")
 
 
+class FakeTextTracePage:
+    def __init__(self, spans):
+        self.spans = deepcopy(spans)
+
+    def get_texttrace(self):
+        return deepcopy(self.spans)
+
+
 def _fill_rectangles(
     seqno: int,
     rectangles,
@@ -201,6 +209,88 @@ def test_live_occlusion_fails_closed_on_missing_or_duplicate_ownership():
 
     assert _later_paint_occlusion_reasons(
         FakePage((drawing, deepcopy(drawing))),
+        subject,
+        0,
+        bboxlog,
+    ) == (TEXT_OCCLUDED_BY_LATER_PAINT,)
+
+
+def test_later_fill_text_coarse_bbox_clears_when_all_character_boxes_are_disjoint():
+    subject = (40.0, 40.0, 60.0, 50.0)
+    bboxlog = (
+        ("fill-text", subject),
+        ("fill-text", (0.0, 0.0, 100.0, 100.0)),
+    )
+    page = FakeTextTracePage(
+        (
+            {
+                "seqno": 1,
+                "type": 0,
+                "bbox": (0.0, 0.0, 100.0, 100.0),
+                "chars": (
+                    (ord("A"), 1, (0.0, 10.0), (0.0, 0.0, 10.0, 10.0)),
+                    (ord("B"), 2, (90.0, 100.0), (90.0, 90.0, 100.0, 100.0)),
+                ),
+            },
+        )
+    )
+
+    assert _later_paint_occlusion_reasons(
+        page,
+        subject,
+        0,
+        bboxlog,
+    ) == ()
+
+
+def test_later_fill_text_character_boxes_covering_subject_remain_occluding():
+    subject = (40.0, 40.0, 60.0, 50.0)
+    bboxlog = (
+        ("fill-text", subject),
+        ("fill-text", (0.0, 0.0, 100.0, 100.0)),
+    )
+    page = FakeTextTracePage(
+        (
+            {
+                "seqno": 1,
+                "type": 0,
+                "bbox": (0.0, 0.0, 100.0, 100.0),
+                "chars": (
+                    (ord("X"), 1, (40.0, 50.0), subject),
+                ),
+            },
+        )
+    )
+
+    assert _later_paint_occlusion_reasons(
+        page,
+        subject,
+        0,
+        bboxlog,
+    ) == (TEXT_OCCLUDED_BY_LATER_PAINT,)
+
+
+def test_later_fill_text_missing_exact_trace_ownership_stays_fail_closed():
+    subject = (40.0, 40.0, 60.0, 50.0)
+    bboxlog = (
+        ("fill-text", subject),
+        ("fill-text", (0.0, 0.0, 100.0, 100.0)),
+    )
+    page = FakeTextTracePage(
+        (
+            {
+                "seqno": 2,
+                "type": 0,
+                "bbox": (0.0, 0.0, 100.0, 100.0),
+                "chars": (
+                    (ord("A"), 1, (0.0, 10.0), (0.0, 0.0, 10.0, 10.0)),
+                ),
+            },
+        )
+    )
+
+    assert _later_paint_occlusion_reasons(
+        page,
         subject,
         0,
         bboxlog,
