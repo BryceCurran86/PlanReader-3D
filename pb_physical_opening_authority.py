@@ -826,8 +826,28 @@ class PhysicalOpeningAuthority:
                 continue
             scoped_records.append(record)
             scoped_lines.append(line)
-        scoped = tuple(scoped_records)
-        cached_lines = tuple(scoped_lines)
+        # The final structural candidate map is keyed by canonical six-line
+        # geometry and historically overwrites duplicate support with the last
+        # source observation for identical geometry. Dense CAD/raster overlays
+        # can contain thousands of observations of the exact same line, which
+        # otherwise multiply the intermediate face-break universe without
+        # changing the final candidate set. Apply that existing deterministic
+        # overwrite rule before the all-break search. The generic correlated
+        # door/window path is intentionally untouched because its candidate
+        # identity is not geometry-keyed in the same way.
+        last_by_geometry: dict[
+            tuple[tuple[float, float], tuple[float, float]],
+            tuple[int, SourceObservationRecord, tuple[float, float, float, float]],
+        ] = {}
+        for index, (record, line) in enumerate(zip(scoped_records, scoped_lines)):
+            first = (round(line[0], 6), round(line[1], 6))
+            second = (round(line[2], 6), round(line[3], 6))
+            geometry_key = tuple(sorted((first, second)))
+            last_by_geometry[geometry_key] = (index, record, line)
+
+        collapsed = sorted(last_by_geometry.values(), key=lambda row: row[0])
+        scoped = tuple(row[1] for row in collapsed)
+        cached_lines = tuple(row[2] for row in collapsed)
         breaks: list[_FaceBreak] = []
         for first_index, second_index in _candidate_collinear_record_pairs(
             scoped, line_geometries=cached_lines
