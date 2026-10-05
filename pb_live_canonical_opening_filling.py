@@ -93,6 +93,31 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _canonical_source_geometries(
+    geometries: Sequence[Sequence[float]],
+) -> tuple[tuple[float, ...], ...]:
+    """Normalize source geometry for physical filling identity.
+
+    Four-value line segments are endpoint-order invariant. All coordinates are
+    rounded to the same six-decimal source-geometry contract used by the live
+    physical authorities, and the geometry collection itself is order
+    invariant. Evidence ids, revision ids, snapshot ids and detector versions
+    are deliberately excluded.
+    """
+
+    normalized: list[tuple[float, ...]] = []
+    for geometry in geometries:
+        values = tuple(round(float(value), 6) for value in geometry)
+        if len(values) == 4:
+            first = (values[0], values[1])
+            second = (values[2], values[3])
+            start, end = sorted((first, second))
+            values = (*start, *end)
+        if values:
+            normalized.append(values)
+    return tuple(sorted(set(normalized)))
+
+
 def _filling_from_opening(
     opening: LiveCanonicalOpeningObject,
 ) -> LiveCanonicalOpeningFillingObject | None:
@@ -111,18 +136,22 @@ def _filling_from_opening(
         _clean(opening.snapshot_id),
         _clean(opening.page_id),
     )
+    canonical_geometries = _canonical_source_geometries(opening.source_geometries)
     if (
         not physical_opening_id
         or not all(lineage)
         or not opening.evidence_ids
+        or not canonical_geometries
     ):
         return None
 
     physical_filling_id = stable_contract_id(
         "physical_opening_filling",
         {
-            "physical_opening_id": physical_opening_id,
+            "document_id": lineage[0],
+            "page_id": lineage[4],
             "filling_kind": kind,
+            "source_geometries": canonical_geometries,
         },
         digest_chars=32,
     )
