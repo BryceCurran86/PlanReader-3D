@@ -295,6 +295,101 @@ def _claim_from_quantity(
     )
 
 
+def canonical_ceiling_from_shadow_quantity(
+    *,
+    quantity: QuantityEvidence,
+    source_result,
+    page_no: int,
+    viewport_id: str,
+) -> Optional[LiveCanonicalCeilingSurfaceObject]:
+    """Project one already-validated shadow quantity onto canonical ceiling identity.
+
+    This performs no extraction, measurement or commercial promotion.  It is
+    intentionally reusable by the estimator-review collector so AG-09 can see
+    the same canonical object without replaying the ceiling pipeline.
+    """
+    resolved = _claim_from_quantity(
+        quantity=quantity,
+        source_result=source_result,
+        page_no=page_no,
+        viewport_id=viewport_id,
+    )
+    if resolved is None:
+        return None
+    (
+        _tag,
+        descriptor,
+        value,
+        _quantity_ids,
+        room_ids,
+        evidence_ids,
+        scale_record_id,
+        measurement_authority,
+        figured_dimension_ids,
+    ) = resolved
+    if len(room_ids) != 1:
+        return None
+
+    room_index = source_result.pipeline.room_area_bridge.room_index
+    if room_index is None:
+        return None
+    room_id = room_ids[0]
+    room = room_index.room(room_id)
+    if room is None or len(room.polygon_pdf_pts) < 3:
+        return None
+
+    quantity_meta = (
+        quantity.metadata if isinstance(quantity.metadata, dict) else {}
+    )
+    upstream_area_id = _clean(
+        quantity_meta.get("upstream_area_quantity_id")
+    )
+    if not upstream_area_id:
+        return None
+
+    context = source_result.effective_context
+    document_id = _clean(context.document_id)
+    source_sha256 = _clean(context.source_sha256)
+    revision_id = _clean(context.current_revision_id)
+    snapshot_id = _clean(context.evidence_snapshot_id)
+    if not all((document_id, source_sha256, revision_id, snapshot_id)):
+        return None
+
+    canonical_id = stable_contract_id(
+        "live_canonical_ceiling_surface",
+        {
+            "source_sha256": source_sha256,
+            "revision_id": revision_id,
+            "page_no": int(page_no),
+            "viewport_id": viewport_id,
+            "room_entity_id": room_id,
+        },
+    )
+    return LiveCanonicalCeilingSurfaceObject(
+        canonical_ceiling_id=canonical_id,
+        document_id=document_id,
+        snapshot_id=snapshot_id,
+        room_entity_id=room_id,
+        source_page=int(page_no),
+        viewport_id=viewport_id,
+        source_sha256=source_sha256,
+        revision_id=revision_id,
+        polygon_pdf_pts=tuple(
+            (float(point[0]), float(point[1]))
+            for point in room.polygon_pdf_pts
+        ),
+        area_m2=float(value),
+        finish_descriptor=descriptor,
+        room_area_quantity_id=upstream_area_id,
+        ceiling_quantity_id=quantity.quantity_id,
+        source_room_index_id=room_index.index_id,
+        evidence_ids=tuple(evidence_ids),
+        physical_scale_record_id=scale_record_id,
+        measurement_authority=measurement_authority,
+        figured_dimension_ids=figured_dimension_ids,
+    )
+
+
 def collect_live_ceiling_lining_claims(
     pdf_path: Path | str,
     *,
@@ -451,63 +546,19 @@ def collect_live_ceiling_lining_claims(
                         )
                     )
 
-                    room_index = result.pipeline.room_area_bridge.room_index
-                    if room_index is not None and len(room_ids) == 1:
-                        room_id = room_ids[0]
-                        room = room_index.room(room_id)
-                        quantity_meta = (
-                            quantity.metadata
-                            if isinstance(quantity.metadata, dict)
-                            else {}
-                        )
-                        upstream_area_id = _clean(
-                            quantity_meta.get("upstream_area_quantity_id")
-                        )
-                        if (
-                            room is not None
-                            and upstream_area_id
-                            and len(room.polygon_pdf_pts) >= 3
-                        ):
-                            canonical_id = stable_contract_id(
-                                "live_canonical_ceiling_surface",
-                                {
-                                    "source_sha256": current.revision.source_sha256,
-                                    "revision_id": current.revision.revision_id,
-                                    "page_no": page_no,
-                                    "viewport_id": viewport_id,
-                                    "room_entity_id": room_id,
-                                },
-                            )
-                            ceiling_object = LiveCanonicalCeilingSurfaceObject(
-                                canonical_ceiling_id=canonical_id,
-                                document_id=current.revision.document_id,
-                                snapshot_id=current.snapshot.snapshot_id,
-                                room_entity_id=room_id,
-                                source_page=page_no,
-                                viewport_id=viewport_id,
-                                source_sha256=current.revision.source_sha256,
-                                revision_id=current.revision.revision_id,
-                                polygon_pdf_pts=tuple(
-                                    (float(point[0]), float(point[1]))
-                                    for point in room.polygon_pdf_pts
-                                ),
-                                area_m2=float(value),
-                                finish_descriptor=descriptor,
-                                room_area_quantity_id=upstream_area_id,
-                                ceiling_quantity_id=quantity.quantity_id,
-                                source_room_index_id=room_index.index_id,
-                                evidence_ids=tuple(evidence_ids),
-                                physical_scale_record_id=scale_record_id,
-                                measurement_authority=measurement_authority,
-                                figured_dimension_ids=figured_dimension_ids,
-                            )
-                            prior = canonical_ceilings_by_id.get(canonical_id)
-                            if prior is not None and prior != ceiling_object:
-                                canonical_conflicts.add(canonical_id)
-                            else:
-                                canonical_ceilings_by_id[canonical_id] = (
-                                    ceiling_object
-                                )
+                    ceiling_object = canonical_ceiling_from_shadow_quantity(
+                        quantity=quantity,
+                        source_result=result,
+                        page_no=page_no,
+                        viewport_id=viewport_id,
+                    )
+                    if ceiling_object is not None:
+                        canonical_id = ceiling_object.canonical_ceiling_id
+                        prior = canonical_ceilings_by_id.get(canonical_id)
+                        if prior is not None and prior != ceiling_object:
+                            canonical_conflicts.add(canonical_id)
+                        else:
+                            canonical_ceilings_by_id[canonical_id] = ceiling_object
 
         for canonical_id in canonical_conflicts:
             canonical_ceilings_by_id.pop(canonical_id, None)
@@ -665,5 +716,6 @@ __all__ = [
     "LiveCanonicalCeilingSurfaceObject",
     "LiveCeilingLiningClaim",
     "LiveCeilingLiningResult",
+    "canonical_ceiling_from_shadow_quantity",
     "collect_live_ceiling_lining_claims",
 ]
