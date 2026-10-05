@@ -1951,10 +1951,12 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             conflicts,
         )
 
-    # Preserve only an earlier, fully source-closed commercial draft when this
-    # exact source + semantic claim + physical identity is explicitly blocked
-    # by the current run. A changed source, disappeared object, unmatched
-    # identity, reviewed row or legacy heuristic row is replaced normally.
+    # Preserve only earlier source-closed output when this exact source +
+    # semantic claim + physical identity is explicitly blocked by the current
+    # run. Unreviewed drafts are reinserted through the core writer; estimator-
+    # reviewed AI rows stay in-place so review/authority columns survive.
+    # Changed sources, disappeared objects and current replacements invalidate
+    # prior rows normally.
     preserved_source_closed_rows: List[Tuple[Any, ...]] = []
     retained_reviewed_source_closed_row_ids: Tuple[int, ...] = ()
     coverage = getattr(app, "_ag09_family_coverage_by_workspace", {}).get(
@@ -2040,7 +2042,11 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             ),
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "coverage_lifecycle": coverage_lifecycle,
-            "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
+            "auto_takeoff_rows": (
+                len(all_auto_rows)
+                + len(retained_reviewed_source_closed_row_ids)
+            ),
+            "model_mass_id": mass_id,
         }
         _setting_set(publication, int(workspace_id), report)
     return report
