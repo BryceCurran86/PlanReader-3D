@@ -68,14 +68,12 @@ def blocked_commercial_claim_key(
     )
 
 
-def prior_commercial_projection_key(
+def _commercial_projection_key_from_provenance(
     row: Mapping[str, Any],
 ) -> BlockedCommercialClaimKey | None:
-    """Read exact provenance from a prior unreviewed commercial projection."""
+    """Read exact source/physical identity from commercial projection provenance."""
     if not isinstance(row, Mapping):
         raise TypeError("row must be a mapping")
-    if _clean(row.get("quantity_status")).lower() != "to review":
-        return None
 
     notes = row.get("notes")
     if not isinstance(notes, str) or not notes.strip():
@@ -128,6 +126,30 @@ def prior_commercial_projection_key(
     )
 
 
+def prior_commercial_projection_key(
+    row: Mapping[str, Any],
+) -> BlockedCommercialClaimKey | None:
+    """Return exact provenance for an unreviewed commercial projection."""
+    if _clean(row.get("quantity_status")).lower() != "to review":
+        return None
+    return _commercial_projection_key_from_provenance(row)
+
+
+def prior_reviewed_commercial_projection_key(
+    row: Mapping[str, Any],
+) -> BlockedCommercialClaimKey | None:
+    """Return exact provenance only for estimator-reviewed AI output."""
+    key = _commercial_projection_key_from_provenance(row)
+    if key is None:
+        return None
+    try:
+        from pb_takeoff_authority_v164 import ai_takeoff_authority
+        approved, _reason = ai_takeoff_authority(row)
+    except Exception:
+        return None
+    return key if approved else None
+
+
 def select_prior_commercial_rows_to_preserve(
     prior_rows: Iterable[Mapping[str, Any]],
     *,
@@ -157,9 +179,55 @@ def select_prior_commercial_rows_to_preserve(
     return tuple(preserved)
 
 
+def select_prior_reviewed_row_ids_to_retain(
+    prior_rows: Iterable[Mapping[str, Any]],
+    *,
+    blocked_claim_keys: Iterable[BlockedCommercialClaimKey],
+    replacement_rows: Iterable[Mapping[str, Any]] = (),
+) -> tuple[int, ...]:
+    """Keep reviewed AI rows in-place across an exact blocked rerun.
+
+    Retaining the database row, rather than reserializing through the core
+    21-field writer, preserves commercial-authority and AI-review columns.
+    Duplicate reviewed rows for the same exact physical claim fail closed.
+    """
+    blocked = set(blocked_claim_keys)
+    replacement_keys = {
+        key
+        for row in replacement_rows
+        if (key := _commercial_projection_key_from_provenance(row)) is not None
+    }
+    retained: list[int] = []
+    seen: set[BlockedCommercialClaimKey] = set()
+    for row in prior_rows:
+        key = prior_reviewed_commercial_projection_key(row)
+        if key is None or key not in blocked or key in replacement_keys:
+            continue
+        if key in seen:
+            raise ValueError(
+                "duplicate reviewed commercial rows share one physical claim"
+            )
+        seen.add(key)
+        raw_id = row.get("id")
+        if isinstance(raw_id, bool):
+            raise ValueError("reviewed commercial row id must be a positive integer")
+        try:
+            row_id = int(raw_id)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                "reviewed commercial row id must be a positive integer"
+            ) from exc
+        if row_id <= 0:
+            raise ValueError("reviewed commercial row id must be a positive integer")
+        retained.append(row_id)
+    return tuple(sorted(retained))
+
+
 __all__ = [
     "BlockedCommercialClaimKey",
     "blocked_commercial_claim_key",
     "prior_commercial_projection_key",
+    "prior_reviewed_commercial_projection_key",
     "select_prior_commercial_rows_to_preserve",
+    "select_prior_reviewed_row_ids_to_retain",
 ]
