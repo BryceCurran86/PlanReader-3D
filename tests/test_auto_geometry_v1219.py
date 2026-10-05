@@ -137,6 +137,125 @@ class AutoGeometryV1219Tests(unittest.TestCase):
             self.assertFalse(guard.is_manual_calibration_override(app, unchanged))
             self.assertTrue(guard.is_manual_calibration_override(app, corrected))
 
+    def test_auto_publication_retains_protected_reviewed_row_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "db.sqlite"
+            numeric_fields = {
+                "workspace_id",
+                "quantity",
+                "coats",
+                "coverage_m2_per_litre",
+                "productivity_m2_per_hour",
+                "rate_per_unit",
+            }
+            definitions = [
+                f"{name} {'REAL' if name in numeric_fields else 'TEXT'}"
+                for name in auto.TAKEOFF_ROW_FIELDS
+            ]
+            conn = sqlite3.connect(db)
+            conn.execute(
+                "CREATE TABLE takeoff_rows("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + ",".join(definitions)
+                + ",commercial_authority_status TEXT DEFAULT '',"
+                "origin TEXT DEFAULT '')"
+            )
+
+            reviewed = auto._takeoff_row(
+                workspace_id=1,
+                section="Internal",
+                element="Floor area",
+                location="Reviewed room",
+                substrate="Other",
+                quantity=13.27,
+                status="Measured",
+                source_page="A100",
+                source_reference=auto.SOURCE_PREFIX + " · reviewed",
+                confidence="Reviewed",
+                notes="reviewed-provenance",
+                row_role="floor_area",
+                preserve_quantity=True,
+            )
+            sibling = auto._takeoff_row(
+                workspace_id=1,
+                section="Internal",
+                element="Floor area",
+                location="Old sibling",
+                substrate="Other",
+                quantity=8.0,
+                status="To review",
+                source_page="A100",
+                source_reference=auto.SOURCE_PREFIX + " · sibling",
+                confidence="Documented",
+                notes="old",
+                row_role="floor_area",
+                preserve_quantity=True,
+            )
+            conn.executemany(auto._TAKEOFF_INSERT, [reviewed, sibling])
+            reviewed_id = conn.execute(
+                "SELECT id FROM takeoff_rows WHERE source_reference=?",
+                (auto.SOURCE_PREFIX + " · reviewed",),
+            ).fetchone()[0]
+            conn.execute(
+                """UPDATE takeoff_rows
+                   SET commercial_authority_status='APPROVED', origin='AI_REVIEWED'
+                   WHERE id=?""",
+                (reviewed_id,),
+            )
+            conn.commit()
+            conn.close()
+
+            app = _DBApp(db)
+            app.now_stamp = lambda: "2026-10-06T00:00:00Z"
+            fresh = auto._takeoff_row(
+                workspace_id=1,
+                section="Internal",
+                element="Floor area",
+                location="Fresh room",
+                substrate="Other",
+                quantity=9.0,
+                status="To review",
+                source_page="A101",
+                source_reference=auto.SOURCE_PREFIX + " · fresh",
+                confidence="Documented",
+                notes="fresh",
+                row_role="floor_area",
+                preserve_quantity=True,
+            )
+
+            with auto._auto_publication(
+                app,
+                1,
+                [fresh],
+                preserve_row_ids=(reviewed_id,),
+            ):
+                pass
+
+            rows = app.lquery(
+                """SELECT id,source_reference,commercial_authority_status,origin
+                   FROM takeoff_rows WHERE workspace_id=1 ORDER BY id"""
+            )
+            self.assertEqual(len(rows), 2)
+            retained = next(
+                row for row in rows
+                if row["source_reference"] == auto.SOURCE_PREFIX + " · reviewed"
+            )
+            self.assertEqual(retained["id"], reviewed_id)
+            self.assertEqual(retained["commercial_authority_status"], "APPROVED")
+            self.assertEqual(retained["origin"], "AI_REVIEWED")
+            self.assertFalse(
+                any(
+                    row["source_reference"] == auto.SOURCE_PREFIX + " · sibling"
+                    for row in rows
+                )
+            )
+            self.assertTrue(
+                any(
+                    row["source_reference"] == auto.SOURCE_PREFIX + " · fresh"
+                    for row in rows
+                )
+            )
+
     def test_manual_takeoff_rows_are_detected_as_precedence_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "db.sqlite"

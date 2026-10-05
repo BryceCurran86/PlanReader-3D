@@ -753,17 +753,50 @@ class _TransactionApp:
 
 
 @contextmanager
-def _auto_publication(app: Any, workspace_id: int, rows: Sequence[Tuple[Any, ...]]):
-    """Replace the automatic take-off rows; yield an app writing in the same transaction.
-
-    The rows and everything written through the yielded app commit together or
-    not at all, so a failed envelope/report write cannot leave new take-off rows
-    beside a stale 3D mass and report.
-    """
+def _auto_publication(
+    app: Any,
+    workspace_id: int,
+    rows: Sequence[Tuple[Any, ...]],
+    *,
+    preserve_row_ids: Sequence[int] = (),
+):
+    """Replace automatic rows while retaining protected reviewed rows."""
     _validate_auto_rows(rows, int(workspace_id))
+    preserved_ids: List[int] = []
+    for raw_id in preserve_row_ids:
+        if isinstance(raw_id, bool):
+            raise TakeoffRowContractError(
+                "preserved take-off row ids must be positive integers"
+            )
+        try:
+            row_id = int(raw_id)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TakeoffRowContractError(
+                "preserved take-off row ids must be positive integers"
+            ) from exc
+        if row_id <= 0:
+            raise TakeoffRowContractError(
+                "preserved take-off row ids must be positive integers"
+            )
+        preserved_ids.append(row_id)
+    if len(preserved_ids) != len(set(preserved_ids)):
+        raise TakeoffRowContractError("preserved take-off row ids must be unique")
+
     conn = app.local_connect()
     try:
-        conn.execute("DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?", (workspace_id, SOURCE_PREFIX + "%"))
+        if preserved_ids:
+            placeholders = ",".join("?" for _ in preserved_ids)
+            conn.execute(
+                f"""DELETE FROM takeoff_rows
+                    WHERE workspace_id=? AND source_reference LIKE ?
+                    AND id NOT IN ({placeholders})""",
+                (workspace_id, SOURCE_PREFIX + "%", *preserved_ids),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM takeoff_rows WHERE workspace_id=? AND source_reference LIKE ?",
+                (workspace_id, SOURCE_PREFIX + "%"),
+            )
         stamp = app.now_stamp()
         values = [tuple(list(row[:-2]) + [stamp, stamp]) for row in rows]
         conn.executemany(_TAKEOFF_INSERT, values)
@@ -993,6 +1026,7 @@ def _try_physical_net_wall_rows(
     current_coverage: Dict[str, Any] = {
         "summaries": [], "family_gaps": {}, "source_sha256s": [],
         "physical_net_document_ids": [], "source_reports": [], "wall_bridge_mode": None,
+        "blocked_commercial_claim_keys": [],
     }
     workspace_coverage[int(workspace_id)] = current_coverage
 
@@ -1309,6 +1343,27 @@ def _try_physical_net_wall_rows(
             claim = collect_live_physical_net_wall_claim(
                 group["path"], **claim_kwargs
             )
+            from pb_takeoff_output_supersedence import blocked_commercial_claim_key
+            for blocked_quantity in (
+                getattr(
+                    getattr(claim, "publication", None),
+                    "quantity_evidence",
+                    None,
+                ),
+                *getattr(claim, "opening_quantity_evidence", ()),
+                *getattr(claim, "opening_count_quantity_evidence", ()),
+                *getattr(claim, "room_area_quantity_evidence", ()),
+            ):
+                if blocked_quantity is None:
+                    continue
+                blocked_key = blocked_commercial_claim_key(
+                    blocked_quantity,
+                    source_sha256=sha256,
+                )
+                if blocked_key is not None:
+                    current_coverage["blocked_commercial_claim_keys"].append(
+                        blocked_key
+                    )
             opening_rows_by_workspace[int(workspace_id)].extend(
                 opening_rows_for_claim(claim)
             )
@@ -1896,8 +1951,87 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             conflicts,
         )
 
+    # Preserve only earlier source-closed output when this exact source +
+    # semantic claim + physical identity is explicitly blocked by the current
+    # run. Unreviewed drafts are reinserted through the core writer; estimator-
+    # reviewed AI rows stay in-place so review/authority columns survive.
+    # Changed sources, disappeared objects and current replacements invalidate
+    # prior rows normally.
+    preserved_source_closed_rows: List[Tuple[Any, ...]] = []
+    retained_reviewed_source_closed_row_ids: Tuple[int, ...] = ()
+    coverage = getattr(app, "_ag09_family_coverage_by_workspace", {}).get(
+        int(workspace_id), {}
+    )
+    blocked_claim_keys = (
+        coverage.get("blocked_commercial_claim_keys", ())
+        if isinstance(coverage, Mapping)
+        else ()
+    )
+    if blocked_claim_keys:
+        from pb_takeoff_output_supersedence import (
+            select_prior_commercial_rows_to_preserve,
+            select_prior_reviewed_row_ids_to_retain,
+        )
+
+        table_info = app.lquery("PRAGMA table_info(takeoff_rows)")
+        available_columns = {
+            str(row.get("name") or "").strip()
+            for row in table_info
+            if str(row.get("name") or "").strip()
+        }
+        optional_columns = tuple(
+            name
+            for name in (
+                *takeoff_contract.COMMERCIAL_AUTHORITY_FIELDS,
+                *takeoff_contract.PROVENANCE_FIELDS,
+            )
+            if name in available_columns
+        )
+        selected_columns = ("id", *TAKEOFF_ROW_FIELDS, *optional_columns)
+        prior_rows = app.lquery(
+            f"""SELECT {','.join(selected_columns)}
+                FROM takeoff_rows
+                WHERE workspace_id=? AND source_reference LIKE ?
+                ORDER BY id""",
+            (int(workspace_id), SOURCE_PREFIX + "%"),
+        )
+        replacement_rows = [
+            dict(zip(TAKEOFF_ROW_FIELDS, row))
+            for row in all_auto_rows
+        ]
+        prior_named_rows = [dict(row) for row in prior_rows]
+        preserved = select_prior_commercial_rows_to_preserve(
+            prior_named_rows,
+            blocked_claim_keys=blocked_claim_keys,
+            replacement_rows=replacement_rows,
+        )
+        retained_reviewed_source_closed_row_ids = (
+            select_prior_reviewed_row_ids_to_retain(
+                prior_named_rows,
+                blocked_claim_keys=blocked_claim_keys,
+                replacement_rows=replacement_rows,
+            )
+        )
+        preserved_source_closed_rows = [
+            takeoff_contract.values_from_mapping(row, TAKEOFF_ROW_FIELDS)
+            for row in preserved
+        ]
+        all_auto_rows = all_auto_rows + preserved_source_closed_rows
+
     # Rows, envelope and report are one publication: all commit or none do.
-    with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
+    # Preserve the historical three-argument call when there is nothing to
+    # retain so existing wrappers/tests remain source-compatible.
+    publication_context = (
+        _auto_publication(
+            app,
+            int(workspace_id),
+            all_auto_rows,
+            preserve_row_ids=retained_reviewed_source_closed_row_ids,
+        )
+        if retained_reviewed_source_closed_row_ids
+        else _auto_publication(app, int(workspace_id), all_auto_rows)
+    )
+    with publication_context as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
         coverage_lifecycle = _runtime_coverage_lifecycle_report(
             publication,
@@ -1909,9 +2043,17 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "partitions": partitions, "finishes": finishes,
             "opening_takeoff_rows": len(opening_rows),
             "room_area_takeoff_rows": len(room_area_rows),
+            "preserved_source_closed_rows": len(preserved_source_closed_rows),
+            "retained_reviewed_source_closed_rows": len(
+                retained_reviewed_source_closed_row_ids
+            ),
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "coverage_lifecycle": coverage_lifecycle,
-            "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
+            "auto_takeoff_rows": (
+                len(all_auto_rows)
+                + len(retained_reviewed_source_closed_row_ids)
+            ),
+            "model_mass_id": mass_id,
         }
         _setting_set(publication, int(workspace_id), report)
     return report
