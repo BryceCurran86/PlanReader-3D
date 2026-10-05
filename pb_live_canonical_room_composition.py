@@ -47,6 +47,8 @@ class _RoomFaceAuthorityBinding:
     page_id: str
     decision_scope_id: str
     source_room_face_record_ids: tuple[str, ...]
+    viewport_id: Optional[str]
+    viewport_bbox: Optional[tuple[float, float, float, float]]
     authority: SourceRoomFaceAuthority = field(repr=False, compare=False)
     _seal: object = field(default=None, repr=False, compare=False)
 
@@ -129,10 +131,10 @@ class LiveCanonicalRoomComposition:
         compare=False,
     )
 
-    def room_face_authority_for(
+    def room_face_authority_binding_for(
         self,
         room: LiveCanonicalRoomObject,
-    ) -> Optional[SourceRoomFaceAuthority]:
+    ) -> Optional[_RoomFaceAuthorityBinding]:
         """Return the exact sealed room-face authority that published the room.
 
         This runtime-only handoff prevents downstream consumers from rebuilding
@@ -168,7 +170,8 @@ class LiveCanonicalRoomComposition:
         ]
         if len(matches) != 1:
             return None
-        authority = matches[0].authority
+        binding = matches[0]
+        authority = binding.authority
         selector = SourceRoomFaceSelector(
             document_id=room.document_id,
             revision_id=room.revision_id,
@@ -188,13 +191,29 @@ class LiveCanonicalRoomComposition:
             ) != 1
         ):
             return None
-        return authority
+        if room.viewport_id:
+            if (
+                binding.viewport_id != room.viewport_id
+                or binding.viewport_bbox is None
+            ):
+                return None
+        return binding
+
+    def room_face_authority_for(
+        self,
+        room: LiveCanonicalRoomObject,
+    ) -> Optional[SourceRoomFaceAuthority]:
+        binding = self.room_face_authority_binding_for(room)
+        return None if binding is None else binding.authority
 
 
 def _authority_binding(
     authority: object,
     selector: SourceRoomFaceSelector,
     records: Collection[object],
+    *,
+    viewport_id: Optional[str] = None,
+    viewport_bbox: Optional[Collection[float]] = None,
 ) -> Optional[_RoomFaceAuthorityBinding]:
     if type(authority) is not SourceRoomFaceAuthority:
         return None
@@ -209,11 +228,28 @@ def _authority_binding(
     )
     if not record_ids:
         return None
+    normalized_bbox: Optional[tuple[float, float, float, float]] = None
+    if viewport_id is not None:
+        if viewport_bbox is None:
+            return None
+        try:
+            candidate_bbox = tuple(float(value) for value in viewport_bbox)
+        except (TypeError, ValueError):
+            return None
+        if (
+            len(candidate_bbox) != 4
+            or candidate_bbox[2] <= candidate_bbox[0]
+            or candidate_bbox[3] <= candidate_bbox[1]
+        ):
+            return None
+        normalized_bbox = candidate_bbox
     return _RoomFaceAuthorityBinding(
         snapshot_id=str(selector.snapshot_id),
         page_id=str(selector.page_id),
         decision_scope_id=str(selector.decision_scope_id),
         source_room_face_record_ids=record_ids,
+        viewport_id=(None if viewport_id is None else str(viewport_id)),
+        viewport_bbox=normalized_bbox,
         authority=authority,
         _seal=_ROOM_FACE_AUTHORITY_BINDING_SEAL,
     )
@@ -560,6 +596,12 @@ def compose_live_canonical_rooms(
                         viewport_room_authority,
                         room_selector,
                         room_result.records,
+                        viewport_id=(
+                            None
+                            if wall_scope.viewport_id is None
+                            else str(wall_scope.viewport_id)
+                        ),
+                        viewport_bbox=wall_scope.viewport_bbox,
                     )
                     if binding is not None:
                         authority_bindings.append(binding)
