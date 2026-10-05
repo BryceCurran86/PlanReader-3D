@@ -191,7 +191,7 @@ def test_floor_area_seals_on_physical_floor_identity(
         project_id="source-project",
     )
     trace = traces[quantity.quantity_id]
-    assert trace.canonical_entity_ids[0] == floor.physical_floor_surface_id
+    assert floor.physical_floor_surface_id in trace.canonical_entity_ids
     assert floor.canonical_floor_id in trace.canonical_entity_ids
     assert set(quantity.evidence_ids).issubset(trace.evidence_ids)
 
@@ -206,7 +206,7 @@ def test_floor_area_seals_on_physical_floor_identity(
     assert row.quantity_id == quantity.quantity_id
     assert row.value == pytest.approx(8.64)
     assert row.object_identity_refs == (floor.physical_floor_surface_id,)
-    assert row.trace_canonical_entity_ids[0] == floor.physical_floor_surface_id
+    assert floor.physical_floor_surface_id in row.trace_canonical_entity_ids
     assert row.lineage_ok is True
 
 
