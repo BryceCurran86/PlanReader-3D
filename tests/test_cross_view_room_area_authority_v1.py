@@ -156,6 +156,10 @@ def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_ow
     assert evidence.metadata["source_dimension_page_id"] == "2"
     assert evidence.metadata["horizontal_value_mm"] == 3600
     assert evidence.metadata["vertical_value_mm"] == 2400
+    assert set(evidence.metadata["figured_dimension_ids"]) == {
+        record.horizontal_dimension_id,
+        record.vertical_dimension_id,
+    }
     assert evidence.metadata["horizontal_witness_observation_ids"]
     assert evidence.metadata["vertical_witness_observation_ids"]
 

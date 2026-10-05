@@ -1022,6 +1022,10 @@ class CrossViewRoomAreaProducer:
                     "source_label_text": line.text,
                     "source_label_observation_ids": list(line.observation_ids),
                     "source_label_receipt_ids": list(line.receipt_ids),
+                    "figured_dimension_ids": [
+                        horizontal.dimension_id,
+                        vertical.dimension_id,
+                    ],
                     "horizontal_dimension_id": horizontal.dimension_id,
                     "horizontal_text_observation_id": (
                         horizontal.text_observation_id
