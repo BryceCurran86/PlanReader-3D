@@ -261,6 +261,52 @@ def test_attack_partial_source_coverage_abstains() -> None:
     assert BINDING_PARTIAL_SOURCE_COVERAGE in result.reason_codes
 
 
+def test_scoped_decode_preserves_authenticated_plan_tag_but_not_schedule_authority() -> None:
+    doc = fitz.open()
+    plan = doc.new_page(width=700, height=650)
+    _draw_opening(
+        plan,
+        x0=20.0,
+        gap0=100.0,
+        gap1=140.0,
+        x1=220.0,
+        y0=100.0,
+        y1=110.0,
+    )
+    plan.insert_text(fitz.Point(112, TAG_Y), "W1", color=(0, 0, 0))
+
+    schedule = doc.new_page(width=700, height=650)
+    _insert_schedule_table(
+        schedule,
+        (("MARK", "WIDTH", "HEIGHT"), ("W1", "900", "2100")),
+    )
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(
+        producer_method="sched-bind-partial-tag-test",
+        producer_version="1.0",
+    )
+    published = src.ingest_native_pdf_bytes(
+        document_id="sched-partial-tag-preserved",
+        source_bytes=payload,
+        source_locator="memory://sched-partial-tag-preserved.pdf",
+        page_ids=("1",),
+    )
+    assert published.coverage.state == "partial"
+    assert published.coverage.failed_pages == ()
+    assert published.coverage.decoded_pages == (1,)
+
+    opening_selector = _opening_selector(published, src.authority())
+    result = _bind(src, opening_selector)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.reason_codes == (BINDING_PARTIAL_SOURCE_COVERAGE,)
+    assert result.record is None
+    assert result.authenticated_tag_mark == "W1"
+    assert result.authenticated_tag_observation_id
+
+
 def test_attack_a_omitted_second_tag_is_impossible_conflict() -> None:
     """A. Two real, trusted tags inside one physical opening's footprint.
     There is no caller-side id list left to omit the second one with --
