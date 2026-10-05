@@ -1509,8 +1509,16 @@ def resolve_physical_wall_equivalence(
     # Components over SAME ∪ AMBIGUOUS edges.
     related_links = same_links + ambiguous_links
     components = _union_find_groups(related_links, member_ids) if member_ids else []
-    ambiguous_edges = {frozenset(pair) for pair in ambiguous_links}
-    same_edges = {frozenset(pair) for pair in same_links}
+
+    # Components are built only from SAME/AMBIGUOUS edges, so an edge of either
+    # class belongs to a component iff either endpoint belongs to that component.
+    # Track endpoint membership once instead of re-enumerating every possible
+    # pair inside each connected component. This preserves the exact publication
+    # semantics while avoiding quadratic component bookkeeping.
+    ambiguous_edge_wall_ids = {
+        wall_id for pair in ambiguous_links for wall_id in pair
+    }
+    same_edge_wall_ids = {wall_id for pair in same_links for wall_id in pair}
 
     ambiguous_walls: set[str] = set()
     same_groups: list[tuple[str, ...]] = []
@@ -1519,16 +1527,8 @@ def resolve_physical_wall_equivalence(
 
     for component in components:
         component_set = set(component)
-        has_ambiguous = any(
-            frozenset((a, b)) in ambiguous_edges
-            for i, a in enumerate(component)
-            for b in component[i + 1 :]
-        )
-        has_same = any(
-            frozenset((a, b)) in same_edges
-            for i, a in enumerate(component)
-            for b in component[i + 1 :]
-        )
+        has_ambiguous = not component_set.isdisjoint(ambiguous_edge_wall_ids)
+        has_same = not component_set.isdisjoint(same_edge_wall_ids)
         if has_ambiguous:
             ambiguous_walls.update(component_set)
             for wall_id in component:
