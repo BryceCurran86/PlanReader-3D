@@ -176,6 +176,40 @@ def test_exact_production_identity_reconciles_to_verified_v2_object() -> None:
     assert result.unsupported_extra == 0
 
 
+def test_multiple_sealed_quantities_cannot_map_to_one_v2_binding() -> None:
+    first = sealed_quantity()
+    second_payload = dict(sealed_quantity())
+    second_payload.pop("fingerprint", None)
+    second_payload["quantity_id"] = "qty-2"
+    second_payload["semantic_key"] = "different-semantic-key"
+    second = {
+        **second_payload,
+        "fingerprint": _fingerprint(second_payload),
+    }
+    run_payload = {
+        "schema_version": "1.0.0",
+        "run_id": "source_closed_run_duplicate-binding",
+        "project_id": "project-a",
+        "source_sha256s": [SHA],
+        "revision_ids": ["rev-a"],
+        "quantities": [first, second],
+    }
+    run = {
+        **run_payload,
+        "fingerprint": _fingerprint(run_payload),
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="multiple sealed quantities map to one V2 binding",
+    ):
+        reconcile_sealed_run_v2(
+            manifest(),
+            run,
+            identity_map(),
+        )
+
+
 def test_same_number_wrong_identity_is_missed_and_unsupported_extra() -> None:
     produced = reconcile_sealed_run_v2(
         manifest(),
