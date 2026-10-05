@@ -32,6 +32,121 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
         self.assertEqual(by_code["EC2"]["substrate"], "Textureboard Cladding")
         self.assertIn("Dulux Natural White", by_code["PT1"]["finish"])
 
+    def test_schedule_can_define_generic_letter_number_material_codes(self):
+        rows = mat.parse_schedule_text(
+            "FINISH SCHEDULE\nWT1 - Porcelain wall tile\nWM1 - Liquid waterproofing membrane",
+            9,
+            "A900",
+        )
+        by_code = {row["code"]: row for row in rows}
+        self.assertIn("WT1", by_code)
+        self.assertIn("WM1", by_code)
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry(
+                {
+                    **by_code["WT1"],
+                    "status": "Confirmed",
+                }
+            ),
+            "tile",
+        )
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry(
+                {
+                    **by_code["WM1"],
+                    "status": "Confirmed",
+                }
+            ),
+            "membrane",
+        )
+
+    def test_wrapped_schedule_definition_preserves_every_contributing_source_line(self):
+        rows = mat.parse_schedule_text(
+            "FINISH SCHEDULE\nWT1\nPorcelain wall tile\nPT1 Dulux low sheen paint",
+            9,
+            "A900",
+        )
+        by_code = {row["code"]: row for row in rows}
+        self.assertEqual(
+            by_code["WT1"]["source_lines"],
+            ("WT1", "Porcelain wall tile"),
+        )
+        self.assertEqual(by_code["WT1"]["description"], "Porcelain wall tile")
+
+    def test_generic_schedule_code_must_lead_its_definition_row(self):
+        rows = mat.parse_schedule_text(
+            "FINISH SCHEDULE\nRefer drawing A110 for tile details",
+            9,
+            "A900",
+        )
+        self.assertFalse(any(row["code"] == "A110" for row in rows))
+
+    def test_explicit_finish_semantic_beats_substrate_semantic(self):
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry(
+                {
+                    "code": "FC1",
+                    "status": "Confirmed",
+                    "description": "Fibre cement cladding Dulux low sheen paint",
+                    "substrate": "Fibre Cement Cladding",
+                    "finish": "Dulux low sheen paint",
+                }
+            ),
+            "paint",
+        )
+
+    def test_resolved_substrates_support_schedule_defined_generic_codes(self):
+        resolver = {
+            "WT1": {
+                "status": "Confirmed",
+                "substrate": "Ceramic tile",
+            }
+        }
+        token = mat._resolver_context.set(resolver)
+        try:
+            rows = mat.resolved_substrates_from_text(
+                lambda _text: [],
+                "Wall finish WT1",
+            )
+        finally:
+            mat._resolver_context.reset(token)
+        self.assertEqual(rows, [{"code": "WT1", "name": "Ceramic tile"}])
+
+    def test_defined_generic_code_is_found_on_drawing_without_global_code_expansion(self):
+        original = mat.auto._pdf_word_lines
+        try:
+            mat.auto._pdf_word_lines = lambda _app, _page: [
+                {
+                    "text": "Wall finish WT1",
+                    "bbox": [10, 20, 60, 35],
+                    "center": [35, 27],
+                }
+            ]
+            page = {
+                "id": 3,
+                "page_label": "A301",
+                "page_type": "Elevation",
+                "extracted_text": "Wall finish WT1",
+            }
+            rows = mat._page_occurrences(
+                object(),
+                page,
+                {
+                    "WT1": {
+                        "status": "Confirmed",
+                        "substrate": "",
+                        "finish": "",
+                        "semantic_finish": "tile",
+                        "description": "Porcelain wall tile",
+                    }
+                },
+            )
+        finally:
+            mat.auto._pdf_word_lines = original
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["code"], "WT1")
+        self.assertEqual(rows[0]["semantic_finish"], "tile")
+
     def test_authenticated_ip_schedule_normalizes_to_insulated_panel_semantic(self):
         app = _App([
             {
@@ -75,6 +190,42 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
             ),
             "",
         )
+
+    def test_confirmed_schedule_normalizes_supported_trade_semantics(self):
+        cases = [
+            ("PT1", "Dulux low sheen paint system", "paint"),
+            ("WT1", "Porcelain wall tile", "tile"),
+            ("PB1", "13mm plasterboard lining", "plasterboard"),
+            ("FC1", "Fibre cement sheet cladding", "fibre_cement"),
+            ("RS1", "Colorbond metal roofing", "roofing"),
+            ("WM1", "Liquid waterproofing membrane", "membrane"),
+        ]
+        for code, description, expected in cases:
+            with self.subTest(code=code):
+                self.assertEqual(
+                    mat.semantic_finish_from_schedule_entry(
+                        {
+                            "code": code,
+                            "status": "Confirmed",
+                            "description": description,
+                        }
+                    ),
+                    expected,
+                )
+
+    def test_trade_semantic_requires_confirmed_schedule_authority(self):
+        for status in ("Conflict", "Unknown", "Abstained", ""):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    mat.semantic_finish_from_schedule_entry(
+                        {
+                            "code": "PT1",
+                            "status": status,
+                            "description": "Dulux low sheen paint system",
+                        }
+                    ),
+                    "",
+                )
 
     def test_conflicting_schedule_definition_is_not_silently_confirmed(self):
         app = _App([

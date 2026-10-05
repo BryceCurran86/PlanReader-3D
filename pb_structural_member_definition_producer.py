@@ -19,18 +19,35 @@ from pb_structural_member_authority import (
 
 _SECTION = re.compile(
     r"\b(circular\s+hollow\s+sections?|rectangular\s+hollow\s+sections?|"
-    r"square\s+hollow\s+sections?|stone\s+masonry|block\s+masonry|masonry|"
-    r"CHS|RHS|SHS)\b", re.I
+    r"square\s+hollow\s+sections?|universal\s+beams?|universal\s+columns?|"
+    r"parallel\s+flange\s+channels?|welded\s+beams?|"
+    r"stone\s+masonry|block\s+masonry|masonry|"
+    r"CHS|RHS|SHS|UB|UC|PFC|WB)\b", re.I
 )
-_ROLE = re.compile(r"\b(pillars?|columns?|posts?|piers?|stanchions?)\b", re.I)
+_ROLE = re.compile(
+    r"\b(pillars?|columns?|posts?|piers?|stanchions?|beams?|rafters?|"
+    r"lintels?|purlins?|girts?|braces?|bracing)\b",
+    re.I,
+)
 _SIZE = re.compile(
     r"\b\d+(?:\.\d+)?\s*(?:mm\s*(?:dia(?:meter)?\s*)?)?x\s*"
     r"\d+(?:\.\d+)?\s*mm\s*(?:thick)?\b", re.I
+)
+_ROLLED_SECTION = re.compile(
+    r"\b(?:"
+    r"\d{2,4}\s*(?:(?:UB|UC|WB)\s*\d+(?:\.\d+)?|PFC(?:\s*\d+(?:\.\d+)?)?)|"
+    r"(?:C|Z)\d{2,4}(?:\d{2,3})?"
+    r")\b",
+    re.I,
 )
 _CANONICAL_SECTION = {
     "chs": "circular hollow section",
     "rhs": "rectangular hollow section",
     "shs": "square hollow section",
+    "ub": "universal beam",
+    "uc": "universal column",
+    "pfc": "parallel flange channel",
+    "wb": "welded beam",
 }
 
 
@@ -83,12 +100,29 @@ class StructuralDefinitionBinding:
 
 def _section_name(text: str) -> str | None:
     match = _SECTION.search(text)
-    if match is None:
+    if match is not None:
+        name = " ".join(match.group(0).lower().split())
+        if name.endswith(" sections"):
+            name = name[:-1]
+        return _CANONICAL_SECTION.get(name, name)
+
+    rolled = _ROLLED_SECTION.search(text)
+    if rolled is None:
         return None
-    name = " ".join(match.group(0).lower().split())
-    if name.endswith(" sections"):
-        name = name[:-1]
-    return _CANONICAL_SECTION.get(name, name)
+    token = re.sub(r"\s+", "", rolled.group(0)).upper()
+    for abbreviation, name in (
+        ("PFC", "parallel flange channel"),
+        ("UB", "universal beam"),
+        ("UC", "universal column"),
+        ("WB", "welded beam"),
+    ):
+        if abbreviation in token:
+            return name
+    if token.startswith("C"):
+        return "cold formed c section"
+    if token.startswith("Z"):
+        return "cold formed z section"
+    return None
 
 
 def _member_role(text: str) -> str | None:
@@ -96,7 +130,11 @@ def _member_role(text: str) -> str | None:
     if match is None:
         return None
     name = match.group(0).lower()
-    return "stanchion" if name.startswith("stanchion") else name.rstrip("s")
+    if name.startswith("stanchion"):
+        return "stanchion"
+    if name == "bracing":
+        return "brace"
+    return name.rstrip("s")
 
 
 def _compatible_kind(selector_kind: str, role: str) -> bool:
@@ -153,9 +191,18 @@ def parse_structural_member_definitions(
                 member = following
         if role is None or not _compatible_kind(selector.member_kind, role):
             continue
-        size = _SIZE.search(f"{block.text} {member.text}")
+        combined_text = f"{block.text} {member.text}"
+        size = _SIZE.search(combined_text)
+        rolled = _ROLLED_SECTION.search(combined_text)
         size_text = " ".join(size.group(0).lower().split()) if size else ""
-        section_spec = "; ".join(part for part in (section, size_text, role) if part)
+        rolled_text = (
+            re.sub(r"\s+", "", rolled.group(0)).lower()
+            if rolled is not None
+            else ""
+        )
+        section_spec = "; ".join(
+            part for part in (section, rolled_text, size_text, role) if part
+        )
         block_ids = tuple(dict.fromkeys((block.block_id, member.block_id)))
         source_ids = tuple(sorted({
             f"sha256:{selector.source_sha256}:page:{block.page_id}:block:{source_id}"

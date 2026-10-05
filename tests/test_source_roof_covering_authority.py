@@ -62,11 +62,20 @@ def _make_symmetric_gable_segments(
     return diagonals, verts
 
 
+def _scale_denominator_for_span(span_pt: float, span_m: float) -> float:
+    """Return the drawing denominator that makes span_pt represent span_m."""
+    return float(span_m) * 1000.0 * 72.0 / (float(span_pt) * 25.4)
+
+
 def test_valid_symmetric_gable_resolves_accurately() -> None:
     diagonals, verticals = _make_symmetric_gable_segments(
         apex_x=500.0, apex_y=900.0, pitch_deg=20.0, run_pt=100.0, wall_height_pt=80.0
     )
-    evidence, reasons = resolve_gable_apex_in_viewport(diagonals, verticals)
+    evidence, reasons = resolve_gable_apex_in_viewport(
+        diagonals,
+        verticals,
+        source_scale_denominator=_scale_denominator_for_span(200.0, 8.0),
+    )
 
     assert evidence is not None
     assert "authenticated_gable_roofline" in reasons
@@ -237,6 +246,25 @@ def test_source_scaled_gable_span_can_match_long_footprint_axis() -> None:
     )
 
 
+def test_missing_source_scale_does_not_infer_long_axis_roof_area() -> None:
+    diagonals, verticals = _make_symmetric_gable_segments(
+        pitch_deg=20.0,
+        run_pt=100.0,
+    )
+    evidence, _ = resolve_gable_apex_in_viewport(diagonals, verticals)
+    assert evidence is not None
+    result = measure_source_roof_covering(
+        evidence,
+        building_length_m=16.0,
+        building_width_m=8.0,
+        source_sha256="no-scale-test",
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.roof_covering_area_m2 is None
+    assert result.quantity_evidence is None
+    assert result.reason_codes == ("roof_source_scale_unavailable",)
+
+
 def test_flat_roof_or_long_elevation_negative_abstains() -> None:
     """Longitudinal elevations or flat roofs have no opposing diagonals meeting at an apex."""
     diagonals: list[DiagonalSlopeSegment] = []
@@ -303,7 +331,11 @@ def test_missing_wall_post_endpoint_negative_abstains() -> None:
 def test_translation_invariance() -> None:
     """Translating the entire drawing in (x, y) produces the exact same pitch, runs, and area."""
     d_orig, v_orig = _make_symmetric_gable_segments(apex_x=500.0, apex_y=900.0, pitch_deg=18.5, run_pt=110.0)
-    ev_orig, _ = resolve_gable_apex_in_viewport(d_orig, v_orig)
+    ev_orig, _ = resolve_gable_apex_in_viewport(
+        d_orig,
+        v_orig,
+        source_scale_denominator=_scale_denominator_for_span(220.0, 10.0),
+    )
     assert ev_orig is not None
     res_orig = measure_source_roof_covering(
         ev_orig, building_length_m=20.0, building_width_m=10.0, source_sha256="test_sha"
@@ -321,6 +353,7 @@ def test_translation_invariance() -> None:
     ev_trans, _ = resolve_gable_apex_in_viewport(
         [d for d in d_trans if d is not None],
         [v for v in v_trans if v is not None],
+        source_scale_denominator=_scale_denominator_for_span(220.0, 10.0),
     )
     assert ev_trans is not None
     res_trans = measure_source_roof_covering(
@@ -336,7 +369,11 @@ def test_translation_invariance() -> None:
 def test_scale_invariance() -> None:
     """Scaling segment coordinates by k and building dimensions by k scales area by k^2."""
     d1, v1 = _make_symmetric_gable_segments(pitch_deg=19.0, run_pt=100.0)
-    ev1, _ = resolve_gable_apex_in_viewport(d1, v1)
+    ev1, _ = resolve_gable_apex_in_viewport(
+        d1,
+        v1,
+        source_scale_denominator=_scale_denominator_for_span(200.0, 5.0),
+    )
     assert ev1 is not None
     res1 = measure_source_roof_covering(
         ev1, building_length_m=10.0, building_width_m=5.0, source_sha256="test_sha"
@@ -344,7 +381,11 @@ def test_scale_invariance() -> None:
 
     # Invariance: pitch is unchanged regardless of geometric point coordinate scaling
     d2, v2 = _make_symmetric_gable_segments(pitch_deg=19.0, run_pt=200.0)
-    ev2, _ = resolve_gable_apex_in_viewport(d2, v2)
+    ev2, _ = resolve_gable_apex_in_viewport(
+        d2,
+        v2,
+        source_scale_denominator=_scale_denominator_for_span(400.0, 5.0),
+    )
     assert ev2 is not None
     assert abs(ev1.pitch_deg - ev2.pitch_deg) < 1e-4
 
@@ -378,8 +419,13 @@ def test_input_order_invariance() -> None:
 def test_deterministic_replay() -> None:
     """Running calculation twice with identical inputs yields identical contract IDs."""
     diagonals, verticals = _make_symmetric_gable_segments(pitch_deg=18.0, run_pt=100.0)
-    ev1, _ = resolve_gable_apex_in_viewport(diagonals, verticals)
-    ev2, _ = resolve_gable_apex_in_viewport(diagonals, verticals)
+    scale = _scale_denominator_for_span(200.0, 8.0)
+    ev1, _ = resolve_gable_apex_in_viewport(
+        diagonals, verticals, source_scale_denominator=scale
+    )
+    ev2, _ = resolve_gable_apex_in_viewport(
+        diagonals, verticals, source_scale_denominator=scale
+    )
 
     res1 = measure_source_roof_covering(
         ev1, building_length_m=16.0, building_width_m=8.0, source_sha256="fixed_hash"
@@ -448,19 +494,20 @@ def test_real_source_gold_free_lamu_diagnostic() -> None:
         assert 85.0 <= evidence.right_run_pt <= 100.0
         assert 130.0 <= evidence.left_run_pt <= 150.0
 
-        # Building footprint from drawing: length 16.0m (or 16.4m with walls), width 8.2m
-        # Note: We pass the real footprint dimensions, not BOQ expected values
+        # This low-level fixture intentionally does not pass viewport scale.
+        # Physical pitch/run shape alone cannot decide which real-world
+        # footprint axis the elevation spans, so quantity authority must
+        # remain fail-closed.
         result = measure_source_roof_covering(
             evidence,
             building_length_m=16.4,
             building_width_m=8.2,
             source_sha256="fa53c9b72fd35189f11848f9a26ccc3512c8c03b5316e78cad6a4d55c09330f2",
         )
-        assert result.status == EvidenceResolutionStatus.CORROBORATED
-        assert result.roof_covering_area_m2 is not None
-        # Conservative core roof plane area (excluding eaves overhang)
-        assert 135.0 <= result.roof_covering_area_m2 <= 145.0
-        assert result.quantity_evidence is not None
+        assert result.status == EvidenceResolutionStatus.ABSTAINED
+        assert result.roof_covering_area_m2 is None
+        assert result.quantity_evidence is None
+        assert "roof_source_scale_unavailable" in result.reason_codes
     finally:
         doc.close()
 

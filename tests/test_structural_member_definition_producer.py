@@ -125,6 +125,89 @@ def test_masonry_pier_definition_parses_without_minting_instances():
     assert result.members == ()
 
 
+def test_hot_rolled_beam_and_lintel_definitions_are_source_semantics_only():
+    beam_selector = selector(member_kind="beam", decision_scope_id="building-a:frame")
+    blocks = (
+        SourceStructuralTextBlock(
+            page_id="201",
+            view_id="structural-s201",
+            block_id="beam-1",
+            reading_order=1,
+            bbox=(50.0, 50.0, 250.0, 70.0),
+            text="310UB40.4 beam",
+            scope_id="building-a",
+        ),
+        SourceStructuralTextBlock(
+            page_id="201",
+            view_id="structural-s201",
+            block_id="beam-2",
+            reading_order=2,
+            bbox=(50.0, 80.0, 250.0, 100.0),
+            text="200PFC lintel",
+            scope_id="building-a",
+        ),
+    )
+    beam_defs = parse_structural_member_definitions(
+        selector=beam_selector,
+        blocks=blocks,
+    )
+    assert len(beam_defs) == 1
+    assert beam_defs[0].member_role == "beam"
+    assert beam_defs[0].definition.section_spec == (
+        "universal beam; 310ub40.4; beam"
+    )
+
+    lintel_defs = parse_structural_member_definitions(
+        selector=selector(member_kind="lintel", decision_scope_id="building-a:lintels"),
+        blocks=blocks,
+    )
+    assert len(lintel_defs) == 1
+    assert lintel_defs[0].member_role == "lintel"
+    assert lintel_defs[0].definition.section_spec == (
+        "parallel flange channel; 200pfc; lintel"
+    )
+
+    # Definition text remains type evidence only and cannot mint instances.
+    empty = bind_structural_member_definitions(
+        selector=beam_selector,
+        definitions=beam_defs,
+        observations=(),
+        links=(),
+    )
+    result = StructuralMemberProducer.from_authenticated_evidence(
+        selector=beam_selector,
+        definitions=empty.definitions,
+        observations=empty.observations,
+        view_scopes=(),
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.quantity is None
+
+
+def test_cold_formed_purlin_definition_requires_matching_member_kind():
+    block = SourceStructuralTextBlock(
+        page_id="202",
+        view_id="roof-framing",
+        block_id="purlin-1",
+        reading_order=1,
+        bbox=(40.0, 40.0, 240.0, 60.0),
+        text="C15015 purlins",
+        scope_id="building-a",
+    )
+    purlin_defs = parse_structural_member_definitions(
+        selector=selector(member_kind="purlin", decision_scope_id="building-a:roof"),
+        blocks=(block,),
+    )
+    assert len(purlin_defs) == 1
+    assert purlin_defs[0].definition.section_spec == (
+        "cold formed c section; c15015; purlin"
+    )
+    assert parse_structural_member_definitions(
+        selector=selector(member_kind="column", decision_scope_id="building-a:columns"),
+        blocks=(block,),
+    ) == ()
+
+
 def test_masonry_size_without_member_role_or_material_is_not_a_definition():
     material = masonry_pier_blocks()[0]
     assert parse_structural_member_definitions(

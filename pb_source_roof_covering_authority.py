@@ -496,7 +496,9 @@ def measure_source_roof_covering(
     """Compute physical 3D roof covering area from authenticated gable and footprint.
 
     Excludes eaves overhang: uses authenticated structural endpoints as the run.
-    Binds the cross-ridge span to building_width_m (with width <= length guard).
+    Requires the source-scaled structural gable span to match exactly one
+    authenticated footprint axis; footprint aspect ratio alone is never axis
+    authority.
     """
     if building_length_m <= 0.0 or building_width_m <= 0.0:
         return SourceRoofCoveringMeasurement(
@@ -516,27 +518,29 @@ def measure_source_roof_covering(
         building_length_m=building_length_m,
         building_width_m=building_width_m,
     )
-    if axis_match is not None:
-        cross_ridge_span_m, ridge_length_m, matched_axis = axis_match
-    else:
-        # Backward-compatible fallback when the elevation has no trustworthy
-        # physical scale. In standard gable structures the ridge runs along
-        # the long axis; an inverted unsourced footprint remains ambiguous.
-        if building_width_m > building_length_m:
-            return SourceRoofCoveringMeasurement(
-                status=EvidenceResolutionStatus.ABSTAINED,
-                pitch_deg=None,
-                cross_ridge_span_m=None,
-                ridge_length_m=None,
-                slope_length_m=None,
-                roof_covering_area_m2=None,
-                gable_evidence=gable_evidence,
-                quantity_evidence=None,
-                reason_codes=("ambiguous_ridge_axis",),
-            )
-        cross_ridge_span_m = round(building_width_m, 3)
-        ridge_length_m = round(building_length_m, 3)
-        matched_axis = "legacy_long_axis_fallback"
+    if axis_match is None:
+        # Footprint aspect ratio is not measurement authority for which axis an
+        # elevation gable spans. Without a source-scaled structural span that
+        # uniquely matches one footprint axis, real-world roof area is
+        # unresolved. Do not manufacture the conventional "ridge on long axis"
+        # assumption.
+        reason = (
+            "roof_source_scale_unavailable"
+            if gable_evidence.source_scale_denominator is None
+            else "roof_footprint_axis_unresolved"
+        )
+        return SourceRoofCoveringMeasurement(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            pitch_deg=None,
+            cross_ridge_span_m=None,
+            ridge_length_m=None,
+            slope_length_m=None,
+            roof_covering_area_m2=None,
+            gable_evidence=gable_evidence,
+            quantity_evidence=None,
+            reason_codes=(reason,),
+        )
+    cross_ridge_span_m, ridge_length_m, matched_axis = axis_match
 
     pitch_rad = math.radians(gable_evidence.pitch_deg)
     cos_pitch = math.cos(pitch_rad)
