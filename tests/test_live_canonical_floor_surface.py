@@ -20,6 +20,7 @@ from tests.test_source_room_area_bridge_v1 import (
     _authority,
     _context,
     _document,
+    _explicit_area,
     _firm_scale,
     _viewport,
     _write_plan,
@@ -140,7 +141,7 @@ def _floor_composition_from_bridge(published, bridge):
             LiveCanonicalFloorSurfaceObject(
                 canonical_floor_id=f"floor:{room.room_ref}",
                 physical_floor_surface_id=f"floor:{room.room_ref}",
-                room_entity_id=room.room_ref,
+                room_entity_id=f"physical-room:{room.room_ref}",
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256,
@@ -199,8 +200,15 @@ def test_firm_source_room_area_enriches_same_floor_identity(tmp_path) -> None:
         for quantity in bridge.quantities
         if not quantity.abstained
     }
+    entities = {entity.candidate_entity_id: entity for entity in bridge.entities}
     for floor in enriched.floors:
-        quantity = quantities[floor.room_entity_id]
+        source_room_id = next(
+            room_id
+            for room_id, entity in entities.items()
+            if floor.source_room_face_record_id in entity.evidence_ids
+        )
+        quantity = quantities[source_room_id]
+        assert floor.room_entity_id != source_room_id
         assert floor.metric_area_m2 == quantity.value
         assert floor.metric_area_quantity_id == quantity.quantity_id
         assert floor.metric_area_authority == quantity.authority
@@ -208,6 +216,61 @@ def test_firm_source_room_area_enriches_same_floor_identity(tmp_path) -> None:
         assert floor.commercial_quantity_authority is False
         assert floor.finish_descriptor is None
         assert floor.structural_slab_id is None
+
+
+def test_explicit_room_area_without_scale_enriches_physical_room_floor(
+    tmp_path,
+) -> None:
+    path = tmp_path / "metric-floor-explicit-area.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    baseline = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+    )
+    assert baseline.room_index is not None
+    target_room = baseline.room_index.rooms()[0].room_ref
+    evidence = _explicit_area(
+        published,
+        evidence_id="cross-view-explicit-floor-area",
+        value=13.270425,
+    )
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        explicit_area_evidence_by_room_id={target_room: evidence},
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+
+    enriched = enrich_live_canonical_floor_metric_areas(floors, bridge)
+
+    target_entity = next(
+        entity for entity in bridge.entities
+        if entity.candidate_entity_id == target_room
+    )
+    target_floor = next(
+        floor for floor in enriched.floors
+        if floor.source_room_face_record_id in target_entity.evidence_ids
+    )
+    assert target_floor.room_entity_id != target_room
+    assert target_floor.metric_area_m2 == 13.270425
+    assert target_floor.metric_area_quantity_id
+    assert target_floor.metric_area_authority
+
+    other_floors = [
+        floor for floor in enriched.floors
+        if floor.canonical_floor_id != target_floor.canonical_floor_id
+    ]
+    assert other_floors
+    assert all(floor.metric_area_m2 is None for floor in other_floors)
 
 
 def test_missing_scale_keeps_floor_identity_but_metric_area_unresolved(
