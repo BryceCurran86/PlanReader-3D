@@ -472,6 +472,15 @@ class SourceMaterialSemanticProducer:
             _seal=_AUTHORITY_SEAL,
         )
 
+    def published_occurrence_results(
+        self,
+    ) -> tuple[SourceMaterialOccurrenceScopeResult, ...]:
+        """Return immutable source-owned occurrence scopes in deterministic order."""
+        return tuple(
+            self._occurrence_results[key]
+            for key in sorted(self._occurrence_results)
+        )
+
     def _source_bytes(self, revision_id: str) -> tuple[object, Optional[bytes]]:
         published = self._source.published_snapshot_for_revision(revision_id)
         if published is None:
