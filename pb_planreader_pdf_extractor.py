@@ -1600,6 +1600,22 @@ class GenericPlanReaderExtractor:
                 "members": canonical_structural_member_objects,
             }
 
+            # Quantity lineage belongs to the production structural quantity
+            # authority, not to the diagnostic coverage shadow. A shadow
+            # collection failure must never change the live prediction payload.
+            structural_quantity_evidence = None
+            try:
+                from pb_structural_member_quantity import (
+                    build_structural_member_count_quantity,
+                )
+
+                structural_quantity_evidence = (
+                    build_structural_member_count_quantity(structural_support)
+                )
+                _coverage_quantities.append(structural_quantity_evidence)
+            except Exception:
+                structural_quantity_evidence = None
+
             # Structural coverage SHADOW only. It reissues the already-resolved
             # producer-owned member universe and quantity trace. Failure here is
             # diagnostic only and must never change live prediction publication.
@@ -1614,7 +1630,7 @@ class GenericPlanReaderExtractor:
                         registry_run_id=(
                             f"extractor-structural:{structural_source_sha256}"
                         ),
-                        quantity_evidence_sink=_coverage_quantities.append,
+                        quantity_evidence_sink=None,
                     )
                 )
             except Exception:
@@ -1665,20 +1681,18 @@ class GenericPlanReaderExtractor:
                             canonical_structural_member_objects
                         ),
                         "quantity_id": (
-                            self.structural_member_coverage_shadow.get("quantity_id")
-                            if isinstance(
-                                self.structural_member_coverage_shadow,
-                                dict,
+                            getattr(
+                                structural_quantity_evidence,
+                                "quantity_id",
+                                None,
                             )
-                            else None
                         ),
                         "raw_evidence_ref": (
-                            self.structural_member_coverage_shadow.get("quantity_id")
-                            if isinstance(
-                                self.structural_member_coverage_shadow,
-                                dict,
+                            getattr(
+                                structural_quantity_evidence,
+                                "quantity_id",
+                                None,
                             )
-                            else None
                         ),
                         "source_sha256": structural_source_sha256,
                         "zone_type": global_resolved_secondary_support.zone_type,
