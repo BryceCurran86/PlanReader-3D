@@ -1,0 +1,25 @@
+name: TEST ONLY Room Boundary Recovery Export V2
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Record head
+        run: git rev-parse HEAD > ROOM_BOUNDARY_HEAD_SHA.txt
+      - name: Pack checkout
+        run: git archive --format=tar.gz -o room-boundary-runtime-v2.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: room-boundary-runtime-v2
+          path: |
+            room-boundary-runtime-v2.tar.gz
+            ROOM_BOUNDARY_HEAD_SHA.txt
+          retention-days: 1
