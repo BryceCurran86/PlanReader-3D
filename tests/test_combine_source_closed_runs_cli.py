@@ -116,3 +116,36 @@ def test_cli_has_no_benchmark_truth_or_scoring_dependency() -> None:
         "evaluate_project_v2",
     ):
         assert forbidden not in source
+
+
+
+def test_cli_composition_is_independent_of_family_file_order(tmp_path) -> None:
+    q1 = quantity("q1", "room-1", SHA_A)
+    q2 = quantity("q2", "room-2", SHA_B)
+    run1 = seal_source_closed_run(
+        [q1],
+        project_id="project-a",
+        traces_by_quantity_id={"q1": trace("room-1", SHA_A)},
+    )
+    run2 = seal_source_closed_run(
+        [q2],
+        project_id="project-a",
+        traces_by_quantity_id={"q2": trace("room-2", SHA_B)},
+    )
+    p1 = tmp_path / "first.json"
+    p2 = tmp_path / "second.json"
+    p1.write_text(run1.to_json(), encoding="utf-8")
+    p2.write_text(run2.to_json(), encoding="utf-8")
+
+    forward = cli.combine_sealed_run_files(
+        [p1, p2],
+        project_id="project-a",
+    )
+    reverse = cli.combine_sealed_run_files(
+        [p2, p1],
+        project_id="project-a",
+    )
+
+    assert forward.run_id == reverse.run_id
+    assert forward.fingerprint == reverse.fingerprint
+    assert [row.quantity_id for row in forward.quantities] == ["q1", "q2"]
