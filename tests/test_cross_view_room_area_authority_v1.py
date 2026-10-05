@@ -33,10 +33,12 @@ def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
         detail.insert_text((164.0, 77.0), "3600", fontsize=9.0)
 
         # 2.4m vertical span: 100 source points, same figured scale ratio.
-        detail.draw_line((280.0, 100.0), (280.0, 200.0), color=(0, 0, 0), width=1.0)
-        detail.draw_line((268.0, 100.0), (292.0, 100.0), color=(0, 0, 0), width=1.0)
-        detail.draw_line((268.0, 200.0), (292.0, 200.0), color=(0, 0, 0), width=1.0)
-        detail.insert_text((277.0, 167.0), "2400", fontsize=9.0, rotate=90)
+        # Its top witness crosses the horizontal dimension's right witness,
+        # proving one orthogonal source-dimension junction.
+        detail.draw_line((280.0, 80.0), (280.0, 180.0), color=(0, 0, 0), width=1.0)
+        detail.draw_line((250.0, 80.0), (292.0, 80.0), color=(0, 0, 0), width=1.0)
+        detail.draw_line((268.0, 180.0), (292.0, 180.0), color=(0, 0, 0), width=1.0)
+        detail.insert_text((277.0, 147.0), "2400", fontsize=9.0, rotate=90)
 
         if duplicate_dimension_box:
             # A second complete orthogonal box around the same trusted label
@@ -46,10 +48,13 @@ def _payload(*, duplicate_dimension_box: bool = False) -> bytes:
             detail.draw_line((260.0, 218.0), (260.0, 242.0), color=(0, 0, 0), width=1.0)
             detail.insert_text((164.0, 227.0), "4080", fontsize=9.0)
 
-            detail.draw_line((320.0, 90.0), (320.0, 210.0), color=(0, 0, 0), width=1.0)
-            detail.draw_line((308.0, 90.0), (332.0, 90.0), color=(0, 0, 0), width=1.0)
-            detail.draw_line((308.0, 210.0), (332.0, 210.0), color=(0, 0, 0), width=1.0)
-            detail.insert_text((317.0, 167.0), "2880", fontsize=9.0, rotate=90)
+            # 2.88m vertical span: 120 source points, same figured ratio
+            # as the second 4.08m horizontal span. Its bottom witness crosses
+            # the second horizontal dimension's right witness.
+            detail.draw_line((280.0, 120.0), (280.0, 240.0), color=(0, 0, 0), width=1.0)
+            detail.draw_line((268.0, 120.0), (292.0, 120.0), color=(0, 0, 0), width=1.0)
+            detail.draw_line((260.0, 240.0), (292.0, 240.0), color=(0, 0, 0), width=1.0)
+            detail.insert_text((277.0, 197.0), "2880", fontsize=9.0, rotate=90)
 
         # Insert semantic label after figured dimensions so the dimension-token
         # classifier does not see a room-label context immediately before 3600.
