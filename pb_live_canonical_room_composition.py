@@ -255,7 +255,6 @@ def compose_live_canonical_rooms(
                     wall_scope = viewport_wall_authority.resolve_scope(wall_selector)
                     if (
                         wall_scope.status is not EvidenceResolutionStatus.CORROBORATED
-                        or not wall_scope.scope_complete
                         or not wall_scope.records
                     ):
                         reasons.extend(wall_scope.reason_codes)

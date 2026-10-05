@@ -276,3 +276,153 @@ def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewp
     # The fallback does not guess a relationship to page-wide canonical walls.
     assert all(room.canonical_bounding_wall_ids == () for room in result.rooms)
     assert all(room.wall_relationships_complete is False for room in result.rooms)
+
+
+def test_incomplete_viewport_wall_scope_is_delegated_to_room_authority(monkeypatch) -> None:
+    """Let source-room authority decide whether an incomplete wall scope is locally safe."""
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    source, wall_opening = _source(page_partitions=(False,))
+    published = source.published_snapshot_for_revision(wall_opening.revision_id)
+    assert published is not None
+
+    selector = SimpleNamespace(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+        decision_scope_id="wall-source:viewport:1:local-proof",
+    )
+    wall_scope = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=False,
+        records=(object(),),
+        reason_codes=("physical_wall_candidate_scope_bounds_unresolved",),
+        viewport_id="floor-plan-vp",
+    )
+    viewport_wall_authority = SimpleNamespace(
+        selectors_for_authenticated_viewports=lambda **_kwargs: (selector,),
+        resolve_scope=lambda _selector: wall_scope,
+    )
+    viewport_wall_producer = SimpleNamespace(authority=lambda: viewport_wall_authority)
+
+    page_room_authority = SimpleNamespace(
+        resolve_scope=lambda _selector: SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            scope_complete=False,
+            records=(),
+            reason_codes=("page_room_unavailable",),
+            face_universe_complete=False,
+        )
+    )
+    record = SimpleNamespace(
+        face_id="source-room-face-local-proof",
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+        decision_scope_id=selector.decision_scope_id,
+        polygon_pdf_pts=((10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0)),
+        bounding_wall_ids=("w1", "w2", "w3", "w4"),
+        area_page_pts2=100.0,
+        record_id="source-room-face-record-local-proof",
+    )
+    viewport_room_authority = SimpleNamespace(
+        resolve_scope=lambda _selector: SimpleNamespace(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            scope_complete=True,
+            records=(record,),
+            reason_codes=("source_room_face_boundary_local_recovery",),
+            face_universe_complete=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        module.PhysicalWallCandidateProducer,
+        "from_authenticated_viewports",
+        classmethod(lambda cls, *_args, **_kwargs: viewport_wall_producer),
+    )
+    monkeypatch.setattr(
+        module,
+        "build_source_room_face_authority",
+        lambda authority: (
+            viewport_room_authority
+            if authority is viewport_wall_authority
+            else page_room_authority
+        ),
+    )
+
+    result = module.compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED in result.reason_codes
+    assert LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL in result.reason_codes
+    assert result.source_pages == (1,)
+    assert len(result.rooms) == 1
+    assert result.rooms[0].source_room_face_record_id == record.record_id
+    assert result.rooms[0].viewport_id == "floor-plan-vp"
+
+
+def test_incomplete_viewport_wall_scope_cannot_publish_when_room_authority_abstains(monkeypatch) -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    source, wall_opening = _source(page_partitions=(False,))
+    published = source.published_snapshot_for_revision(wall_opening.revision_id)
+    assert published is not None
+
+    selector = SimpleNamespace(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+        decision_scope_id="wall-source:viewport:1:no-room-proof",
+    )
+    wall_scope = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=False,
+        records=(object(),),
+        reason_codes=("physical_wall_candidate_scope_bounds_unresolved",),
+        viewport_id="floor-plan-vp",
+    )
+    viewport_wall_authority = SimpleNamespace(
+        selectors_for_authenticated_viewports=lambda **_kwargs: (selector,),
+        resolve_scope=lambda _selector: wall_scope,
+    )
+    viewport_wall_producer = SimpleNamespace(authority=lambda: viewport_wall_authority)
+    abstaining_room_authority = SimpleNamespace(
+        resolve_scope=lambda _selector: SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            scope_complete=False,
+            records=(),
+            reason_codes=("source_room_face_scope_unavailable",),
+            face_universe_complete=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        module.PhysicalWallCandidateProducer,
+        "from_authenticated_viewports",
+        classmethod(lambda cls, *_args, **_kwargs: viewport_wall_producer),
+    )
+    monkeypatch.setattr(
+        module,
+        "build_source_room_face_authority",
+        lambda _authority: abstaining_room_authority,
+    )
+
+    result = module.compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.rooms == ()
+    assert result.source_pages == ()

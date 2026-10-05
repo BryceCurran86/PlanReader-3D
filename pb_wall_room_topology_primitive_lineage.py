@@ -380,6 +380,68 @@ def sources_for_fragment(
     return [segment for segment in source_segments if fragment_contained_in_segment(fragment, segment)]
 
 
+# Candidate search only; the exact ownership decision remains
+# ``fragment_contained_in_segment``. A source capable of containing a fragment
+# must have an endpoint-expanded bounding box covering both fragment endpoints.
+# Index those boxes once so bucket misses never fall back to a full source scan.
+_CONTAINMENT_GRID_CELL_PT = 64.0
+_CONTAINMENT_GRID_MAX_CELLS_PER_SOURCE = 4096
+
+
+def _containment_grid_cell(point: Tuple[float, float]) -> Tuple[int, int]:
+    return (
+        math.floor(float(point[0]) / _CONTAINMENT_GRID_CELL_PT),
+        math.floor(float(point[1]) / _CONTAINMENT_GRID_CELL_PT),
+    )
+
+
+def _build_source_containment_grid(
+    source_segments: Sequence[Mapping[str, Any]],
+) -> Tuple[Dict[Tuple[int, int], set[int]], set[int]]:
+    grid: Dict[Tuple[int, int], set[int]] = {}
+    global_indexes: set[int] = set()
+    cell = _CONTAINMENT_GRID_CELL_PT
+    tol = _CONTAINMENT_TOL_PT
+    for index, segment in enumerate(source_segments):
+        x1 = float(segment["x1"])
+        y1 = float(segment["y1"])
+        x2 = float(segment["x2"])
+        y2 = float(segment["y2"])
+        min_x = math.floor((min(x1, x2) - tol) / cell)
+        max_x = math.floor((max(x1, x2) + tol) / cell)
+        min_y = math.floor((min(y1, y2) - tol) / cell)
+        max_y = math.floor((max(y1, y2) + tol) / cell)
+        cell_count = (max_x - min_x + 1) * (max_y - min_y + 1)
+        if cell_count > _CONTAINMENT_GRID_MAX_CELLS_PER_SOURCE:
+            # Pathological source spans stay globally eligible rather than being
+            # dropped from the candidate set. This preserves exactness.
+            global_indexes.add(index)
+            continue
+        for cell_x in range(min_x, max_x + 1):
+            for cell_y in range(min_y, max_y + 1):
+                grid.setdefault((cell_x, cell_y), set()).add(index)
+    return grid, global_indexes
+
+
+def _containment_grid_candidates(
+    fragment: SegmentPair,
+    source_segments: Sequence[Mapping[str, Any]],
+    grid: Mapping[Tuple[int, int], set[int]],
+    global_indexes: set[int],
+) -> List[Mapping[str, Any]]:
+    first_cell = _containment_grid_cell(fragment[0])
+    second_cell = _containment_grid_cell(fragment[1])
+    first = grid.get(first_cell, set())
+    second = grid.get(second_cell, set())
+    indexes = (
+        set(first)
+        if first_cell == second_cell
+        else set(first).intersection(second)
+    )
+    indexes.update(global_indexes)
+    return [source_segments[index] for index in sorted(indexes)]
+
+
 def isolated_lineage(payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     return copy.deepcopy(payload) if payload else empty_lineage()
 
@@ -417,6 +479,9 @@ def attach_lineage_to_split_fragments(
     buckets: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
     for segment in source_segments:
         buckets.setdefault(source_line_bucket(segment), []).append(segment)
+    containment_grid, global_containment_indexes = _build_source_containment_grid(
+        source_segments
+    )
 
     out: List[Dict[str, Any]] = []
     for idx, pair in enumerate(split_pairs):
@@ -430,12 +495,22 @@ def attach_lineage_to_split_fragments(
                     continue
                 seen_candidates.add(marker)
                 candidates.append(candidate)
+        # The endpoint grid is conservative and complete for the exact
+        # containment predicate: every true parent must cover both endpoints
+        # within the existing containment tolerance. Union it with the line
+        # buckets, then retain the unchanged exact test below.
+        for candidate in _containment_grid_candidates(
+            pair,
+            source_segments,
+            containment_grid,
+            global_containment_indexes,
+        ):
+            marker = id(candidate)
+            if marker in seen_candidates:
+                continue
+            seen_candidates.add(marker)
+            candidates.append(candidate)
         parents = sources_for_fragment(pair, candidates)
-        if not parents:
-            # Splitter endpoints are rounded to 8 decimals. A fragment can
-            # leave its source's coarse line bucket while still lying on the
-            # source. Scan sources only for that miss — not every fragment.
-            parents = sources_for_fragment(pair, source_segments)
         fragment = {
             "id": f"{id_prefix}_{idx}",
             "x1": p1[0],
