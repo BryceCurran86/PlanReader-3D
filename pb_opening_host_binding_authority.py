@@ -21,7 +21,7 @@ geometry.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
@@ -36,8 +36,11 @@ from pb_physical_opening_authority import (
     PhysicalOpeningExistenceRecord,
 )
 from pb_physical_wall_candidate_authority import (
+    BOUNDARY_EVALUATION_EVALUATED,
+    ExcludedBoundaryPrimitive,
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateRecord,
+    PhysicalWallCandidateScopeResult,
     PhysicalWallCandidateSelector,
 )
 from pb_physical_wall_identity import (
@@ -56,6 +59,12 @@ OPENING_HOST_BINDING_UNAVAILABLE = "opening_host_binding_unavailable"
 HOST_EQUIVALENCE_AMBIGUOUS = "ambiguous_physical_wall_equivalence_for_host"
 HOST_EQUIVALENCE_UNAVAILABLE = "physical_wall_equivalence_required_for_host"
 HOST_BAND_CENTER_MISMATCH = "authenticated_host_wall_band_not_centered_on_opening"
+HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED = (
+    "opening_host_local_boundary_clean_scope_resolved"
+)
+HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE = (
+    "opening_host_local_boundary_scope_unavailable"
+)
 
 _UNIVERSE_PRODUCER_SEAL = object()
 _UNIVERSE_AUTHORITY_SEAL = object()
@@ -283,13 +292,15 @@ class OpeningHostWallUniverseAuthority:
             raise TypeError("physical_wall_candidate_authority must be producer-owned")
         self._wall_authority = physical_wall_candidate_authority
 
-    def resolve_scope(
+    def _resolve_physical_wall_scope(
         self,
         selector: OpeningHostWallUniverseSelector,
-    ) -> OpeningHostWallUniverseResult:
+    ) -> PhysicalWallCandidateScopeResult:
+        """Internal producer-owned wall scope; never exposed as host authority."""
+
         if not isinstance(selector, OpeningHostWallUniverseSelector):
             raise TypeError("selector must be OpeningHostWallUniverseSelector")
-        wall_result = self._wall_authority.resolve_scope(
+        return self._wall_authority.resolve_scope(
             PhysicalWallCandidateSelector(
                 document_id=selector.document_id,
                 revision_id=selector.revision_id,
@@ -299,6 +310,14 @@ class OpeningHostWallUniverseAuthority:
                 decision_scope_id=selector.decision_scope_id,
             )
         )
+
+    def resolve_scope(
+        self,
+        selector: OpeningHostWallUniverseSelector,
+    ) -> OpeningHostWallUniverseResult:
+        if not isinstance(selector, OpeningHostWallUniverseSelector):
+            raise TypeError("selector must be OpeningHostWallUniverseSelector")
+        wall_result = self._resolve_physical_wall_scope(selector)
         if (
             wall_result.status is not EvidenceResolutionStatus.CORROBORATED
             or wall_result.scope_complete is not True
