@@ -1,0 +1,23 @@
+name: TEST ONLY GPT2 PR1405 Isolated Dimension Export
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record SHA
+        run: git rev-parse HEAD > GPT2_PR1405_EXPORT_SHA.txt
+      - name: Pack repo
+        run: git archive --format=tar.gz -o gpt2-pr1405-runtime.tar.gz HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpt2-pr1405-isolated-runtime
+          path: |
+            gpt2-pr1405-runtime.tar.gz
+            GPT2_PR1405_EXPORT_SHA.txt
+          retention-days: 1
