@@ -331,6 +331,73 @@ def test_combines_independent_family_runs_into_one_deterministic_project_run() -
     assert combined_a.fingerprint == combined_b.fingerprint
 
 
+def test_combined_run_rejects_duplicate_physical_semantic_claim_with_new_quantity_id() -> None:
+    first = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-a", semantic_key="room.area")],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-a": trace()},
+    )
+    second = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-b", semantic_key="room.area")],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-b": trace()},
+    )
+
+    with pytest.raises(
+        export.SourceClosedRunConflictError,
+        match="duplicate sealed physical claim",
+    ):
+        export.combine_source_closed_runs([first, second])
+
+
+def test_combined_run_rejects_conflicting_physical_semantic_claim() -> None:
+    first = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-a", semantic_key="room.area", value=13.0)],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-a": trace()},
+    )
+    second = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-b", semantic_key="room.area", value=14.0)],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-b": trace()},
+    )
+
+    with pytest.raises(
+        export.SourceClosedRunConflictError,
+        match="conflicting sealed physical claim",
+    ):
+        export.combine_source_closed_runs([first, second])
+
+
+def test_same_semantic_claim_on_distinct_physical_identities_is_valid() -> None:
+    first = export.seal_source_closed_run(
+        [quantity(quantity_id="qty-a", semantic_key="room.area")],
+        project_id="project-a",
+        traces_by_quantity_id={"qty-a": trace()},
+    )
+    second_quantity = quantity(
+        quantity_id="qty-b",
+        semantic_key="room.area",
+        value=9.0,
+        input_entity_ids=("canonical-floor-2",),
+        evidence_ids=("ev-room-2",),
+    )
+    second = export.seal_source_closed_run(
+        [second_quantity],
+        project_id="project-a",
+        traces_by_quantity_id={
+            "qty-b": trace(
+                evidence_ids=("ev-room-2",),
+                canonical_entity_ids=("canonical-floor-2",),
+            )
+        },
+    )
+
+    combined = export.combine_source_closed_runs([first, second])
+
+    assert [row.quantity_id for row in combined.quantities] == ["qty-a", "qty-b"]
+
+
 def test_combined_run_rejects_duplicate_quantity_identity_across_families() -> None:
     first = export.seal_source_closed_run(
         [quantity(quantity_id="qty-shared")],

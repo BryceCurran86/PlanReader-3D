@@ -348,6 +348,10 @@ def _build_sealed_run(
 
     normalized: list[SealedSourceClosedQuantity] = []
     quantity_ids: set[str] = set()
+    physical_claims: dict[
+        tuple[str, str, tuple[str, ...]],
+        SealedSourceClosedQuantity,
+    ] = {}
     for row in rows:
         if not isinstance(row, SealedSourceClosedQuantity):
             raise TypeError(
@@ -362,6 +366,31 @@ def _build_sealed_run(
                 f"duplicate sealed quantity id: {row.quantity_id}"
             )
         quantity_ids.add(row.quantity_id)
+
+        identities = tuple(
+            sorted({_clean(value) for value in row.object_identity_refs if _clean(value)})
+        )
+        if not row.abstained and identities:
+            claim_key = (
+                _clean(row.family).lower(),
+                _clean(row.semantic_key),
+                identities,
+            )
+            prior = physical_claims.get(claim_key)
+            if prior is not None:
+                same_claim = (
+                    prior.value == row.value
+                    and _clean(prior.unit).lower() == _clean(row.unit).lower()
+                )
+                detail = "duplicate" if same_claim else "conflicting"
+                raise SourceClosedRunConflictError(
+                    f"{detail} sealed physical claim for family "
+                    f"{row.family!r}, semantic key {row.semantic_key!r}, "
+                    f"identities {identities!r}: "
+                    f"{prior.quantity_id!r} vs {row.quantity_id!r}"
+                )
+            physical_claims[claim_key] = row
+
         normalized.append(row)
 
     normalized.sort(key=lambda row: row.quantity_id)
