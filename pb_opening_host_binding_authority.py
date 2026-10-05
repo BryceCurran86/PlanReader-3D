@@ -436,38 +436,86 @@ class OpeningHostBindingProducer:
             return _blocked_binding("opening_host_scope_mismatch")
 
         universe = self._universe.resolve_scope(host_universe_selector)
+        host_records: tuple[PhysicalWallCandidateRecord, ...]
+        host_equivalence: PhysicalWallEquivalenceResolution
+        host_source_observation_ids: tuple[str, ...]
+        binding_resolution_reasons: tuple[str, ...] = ()
+        opening_geometry: Optional[_OpeningGeometry] = None
+
         if (
-            universe.status is not EvidenceResolutionStatus.CORROBORATED
-            or universe.scope_complete is not True
-            or universe.equivalence is None
+            universe.status is EvidenceResolutionStatus.CORROBORATED
+            and universe.scope_complete is True
+            and universe.equivalence is not None
         ):
-            status = (
-                EvidenceResolutionStatus.CONFLICT
-                if universe.status is EvidenceResolutionStatus.CONFLICT
-                else EvidenceResolutionStatus.ABSTAINED
+            # Historical complete-scope path is unchanged.
+            host_records = tuple(universe.records)
+            host_equivalence = universe.equivalence
+            host_source_observation_ids = tuple(universe.source_observation_ids)
+        else:
+            # Do not relax or relabel the public host-wall universe. The sealed
+            # binding producer may recover one opening only when producer-owned
+            # boundary evidence proves this exact host search locally complete.
+            opening_geometry = _opening_geometry(self._opening, opening)
+            if opening_geometry is None:
+                status = (
+                    EvidenceResolutionStatus.CONFLICT
+                    if universe.status is EvidenceResolutionStatus.CONFLICT
+                    else EvidenceResolutionStatus.ABSTAINED
+                )
+                return _blocked_binding(
+                    "complete_authenticated_host_wall_universe_required",
+                    *universe.reason_codes,
+                    "authenticated_opening_geometry_unavailable",
+                    status=status,
+                )
+
+            wall_result = self._universe._resolve_physical_wall_scope(
+                host_universe_selector
             )
-            return _blocked_binding(
-                "complete_authenticated_host_wall_universe_required",
-                *universe.reason_codes,
-                status=status,
+            local_scope, local_reasons = _local_boundary_clean_host_scope(
+                wall_result,
+                opening_geometry,
             )
+            if local_scope is None:
+                status = (
+                    EvidenceResolutionStatus.CONFLICT
+                    if (
+                        universe.status is EvidenceResolutionStatus.CONFLICT
+                        or wall_result.status is EvidenceResolutionStatus.CONFLICT
+                    )
+                    else EvidenceResolutionStatus.ABSTAINED
+                )
+                return _blocked_binding(
+                    "complete_authenticated_host_wall_universe_required",
+                    *universe.reason_codes,
+                    *local_reasons,
+                    status=status,
+                )
+            host_records = local_scope.records
+            host_equivalence = local_scope.equivalence
+            host_source_observation_ids = local_scope.source_observation_ids
+            binding_resolution_reasons = local_reasons
 
         lineage_resolution = _resolve_generic_gap_lineage_host(
             self._opening,
             opening,
-            universe.records,
-            universe.equivalence,
+            host_records,
+            host_equivalence,
         )
         if lineage_resolution is not None:
             band_resolution = lineage_resolution
         else:
-            geometry = _opening_geometry(self._opening, opening)
+            geometry = (
+                opening_geometry
+                if opening_geometry is not None
+                else _opening_geometry(self._opening, opening)
+            )
             if geometry is None:
                 return _blocked_binding("authenticated_opening_geometry_unavailable")
             band_resolution = _resolve_host_bands(
-                universe.records,
+                host_records,
                 geometry,
-                universe.equivalence,
+                host_equivalence,
             )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
@@ -514,7 +562,7 @@ class OpeningHostBindingProducer:
             "member_wall_candidate_ids": band.member_ids,
             "member_candidate_identity_ids": band.member_candidate_identity_ids,
             "member_equivalence_groups": band.member_equivalence_groups,
-            "source_observation_ids": universe.source_observation_ids,
+            "source_observation_ids": host_source_observation_ids,
         }
         record = OpeningHostBindingRecord(
             record_id=stable_contract_id("opening_host_binding_v3", payload, digest_chars=32),
@@ -529,11 +577,14 @@ class OpeningHostBindingProducer:
             member_wall_candidate_ids=band.member_ids,
             member_candidate_identity_ids=band.member_candidate_identity_ids,
             member_equivalence_groups=band.member_equivalence_groups,
-            source_observation_ids=tuple(universe.source_observation_ids),
+            source_observation_ids=tuple(host_source_observation_ids),
         )
         result = OpeningHostBindingResult(
             status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(OPENING_HOST_BINDING_RESOLVED,),
+            reason_codes=(
+                OPENING_HOST_BINDING_RESOLVED,
+                *binding_resolution_reasons,
+            ),
             record=record,
         )
         key = _binding_key(
