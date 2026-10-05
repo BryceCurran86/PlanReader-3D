@@ -1242,6 +1242,7 @@ def _try_physical_net_wall_rows(
     def room_area_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
         """Project only source-closed room areas into AI review rows."""
         from pb_live_floor_area_quantity_publication import (
+            publish_live_canonical_room_area_quantities,
             publish_live_floor_area_quantities,
         )
         from pb_live_room_area_customer_projection import (
@@ -1257,6 +1258,12 @@ def _try_physical_net_wall_rows(
             str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
             quantity
             for quantity in publish_live_floor_area_quantities(claim)
+            if isinstance(quantity.metadata, Mapping)
+        }
+        room_quantities = {
+            str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
+            quantity
+            for quantity in publish_live_canonical_room_area_quantities(claim)
             if isinstance(quantity.metadata, Mapping)
         }
         rows: List[Tuple[Any, ...]] = []
@@ -1280,9 +1287,15 @@ def _try_physical_net_wall_rows(
             if unit == "m2":
                 unit = "m²"
             floor_quantity = floor_quantities.get(quantity_id)
+            room_quantity = room_quantities.get(quantity_id)
             floor_quantity_suffix = (
                 f" · floor_quantity:{floor_quantity.quantity_id}"
                 if floor_quantity is not None
+                else ""
+            )
+            room_quantity_suffix = (
+                f" · canonical_room_quantity:{room_quantity.quantity_id}"
+                if room_quantity is not None
                 else ""
             )
             rows.append(
@@ -1298,6 +1311,7 @@ def _try_physical_net_wall_rows(
                     source_reference=(
                         f"{SOURCE_PREFIX} · room_area_quantity:{quantity_id}"
                         f"{floor_quantity_suffix}"
+                        f"{room_quantity_suffix}"
                     ),
                     confidence="Documented",
                     notes=str(item.get("notes") or ""),
@@ -1343,6 +1357,7 @@ def _try_physical_net_wall_rows(
 
             quantity = claim.publication.quantity_evidence
             from pb_live_floor_area_quantity_publication import (
+                publish_live_canonical_room_area_quantities,
                 publish_live_floor_area_quantities,
             )
 
@@ -1353,6 +1368,7 @@ def _try_physical_net_wall_rows(
                     *getattr(claim, "opening_quantity_evidence", ()),
                     *getattr(claim, "opening_count_quantity_evidence", ()),
                     *getattr(claim, "room_area_quantity_evidence", ()),
+                    *publish_live_canonical_room_area_quantities(claim),
                     *publish_live_floor_area_quantities(claim),
                 )
                 if item is not None
