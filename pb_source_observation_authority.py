@@ -13,7 +13,6 @@ from collections import OrderedDict
 from dataclasses import dataclass, replace
 import hashlib
 import math
-from threading import RLock
 from typing import Any, Mapping, Optional, Sequence
 
 import fitz
@@ -40,19 +39,11 @@ LINEAGE_UNAVAILABLE = "lineage_unavailable"
 PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
 
 
-# Process-local, producer-neutral native PDF decode cache.  The cache stores
-# only immutable page primitives derived from exact source bytes.  Producer
-# method/version, generation, snapshot ids, authority records, and provenance
-# are minted later by each SourceObservationProducer exactly as before.
-#
-# A small bounded page cache is intentional: it captures the repeated live
-# wall/opening/ceiling passes over the same recent sheets without retaining a
-# large portfolio of plan sets in memory.
+# Bounded native PDF decode caches are owned by SourceObservationProducer.
+# They preserve repeated-page performance within one authority run without
+# leaking decoded observations or cache state across independent producers.
 _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
-_NATIVE_PAGE_DECODE_CACHE_LOCK = RLock()
-_NATIVE_PAGE_COUNT_CACHE: "OrderedDict[str, int]" = OrderedDict()
-_NATIVE_PAGE_DECODE_CACHE: "OrderedDict[tuple[str, int], _NativePageDecodeCacheEntry]" = OrderedDict()
 
 
 @dataclass(frozen=True)
@@ -65,46 +56,6 @@ class _NativePageDecodeCacheEntry:
     # other source-owned consumers may reuse this immutable in-process decode
     # instead of asking PyMuPDF to rebuild the same words/drawings again.
     native_page: Optional[Mapping[str, Any]] = None
-
-
-def _cached_page_count(source_sha256: str) -> Optional[int]:
-    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
-        value = _NATIVE_PAGE_COUNT_CACHE.get(source_sha256)
-        if value is not None:
-            _NATIVE_PAGE_COUNT_CACHE.move_to_end(source_sha256)
-        return value
-
-
-def _remember_page_count(source_sha256: str, page_count: int) -> None:
-    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
-        _NATIVE_PAGE_COUNT_CACHE[source_sha256] = int(page_count)
-        _NATIVE_PAGE_COUNT_CACHE.move_to_end(source_sha256)
-        while len(_NATIVE_PAGE_COUNT_CACHE) > _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS:
-            _NATIVE_PAGE_COUNT_CACHE.popitem(last=False)
-
-
-def _cached_native_page(
-    source_sha256: str, page_number: int
-) -> Optional[_NativePageDecodeCacheEntry]:
-    key = (source_sha256, int(page_number))
-    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
-        value = _NATIVE_PAGE_DECODE_CACHE.get(key)
-        if value is not None:
-            _NATIVE_PAGE_DECODE_CACHE.move_to_end(key)
-        return value
-
-
-def _remember_native_page(
-    source_sha256: str,
-    page_number: int,
-    entry: _NativePageDecodeCacheEntry,
-) -> None:
-    key = (source_sha256, int(page_number))
-    with _NATIVE_PAGE_DECODE_CACHE_LOCK:
-        _NATIVE_PAGE_DECODE_CACHE[key] = entry
-        _NATIVE_PAGE_DECODE_CACHE.move_to_end(key)
-        while len(_NATIVE_PAGE_DECODE_CACHE) > _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES:
-            _NATIVE_PAGE_DECODE_CACHE.popitem(last=False)
 
 
 def _decode_native_page_for_cache(
@@ -445,10 +396,49 @@ class SourceObservationProducer:
         self._producer_method = _nonempty(producer_method, "producer_method")
         self._producer_version = _nonempty(producer_version, "producer_version")
         self._store = _SourceObservationStore()
+        self._native_page_count_cache: "OrderedDict[str, int]" = OrderedDict()
+        self._native_page_decode_cache: (
+            "OrderedDict[tuple[str, int], _NativePageDecodeCacheEntry]"
+        ) = OrderedDict()
         # One immutable native-decode scope per revision on this producer.
         # None means the complete source document; a tuple means an explicit
         # page subset. Replaying a revision at a different scope fails closed.
         self._ingest_scope_by_revision: dict[str, tuple[int, ...] | None] = {}
+
+    def _cached_page_count(self, source_sha256: str) -> Optional[int]:
+        key = str(source_sha256)
+        value = self._native_page_count_cache.get(key)
+        if value is not None:
+            self._native_page_count_cache.move_to_end(key)
+        return value
+
+    def _remember_page_count(self, source_sha256: str, page_count: int) -> None:
+        key = str(source_sha256)
+        self._native_page_count_cache[key] = int(page_count)
+        self._native_page_count_cache.move_to_end(key)
+        while len(self._native_page_count_cache) > _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS:
+            self._native_page_count_cache.popitem(last=False)
+
+    def _cached_native_page(
+        self, source_sha256: str, page_number: int
+    ) -> Optional[_NativePageDecodeCacheEntry]:
+        key = (str(source_sha256), int(page_number))
+        value = self._native_page_decode_cache.get(key)
+        if value is not None:
+            self._native_page_decode_cache.move_to_end(key)
+        return value
+
+    def _remember_native_page(
+        self,
+        source_sha256: str,
+        page_number: int,
+        entry: _NativePageDecodeCacheEntry,
+    ) -> None:
+        key = (str(source_sha256), int(page_number))
+        self._native_page_decode_cache[key] = entry
+        self._native_page_decode_cache.move_to_end(key)
+        while len(self._native_page_decode_cache) > _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES:
+            self._native_page_decode_cache.popitem(last=False)
 
     def authority(self) -> "SourceObservationAuthority":
         return SourceObservationAuthority(self._store)
@@ -770,14 +760,14 @@ class SourceObservationProducer:
         failed_pages: list[int] = []
         pdf: Optional[fitz.Document] = None
         try:
-            total_pages = _cached_page_count(digest)
+            total_pages = self._cached_page_count(digest)
             if total_pages is None:
                 try:
                     pdf = fitz.open(stream=immutable_bytes, filetype="pdf")
                 except Exception as exc:
                     raise ValueError(f"{SOURCE_UNAVAILABLE}: PDF decode failed") from exc
                 total_pages = int(pdf.page_count)
-                _remember_page_count(digest, total_pages)
+                self._remember_page_count(digest, total_pages)
 
             all_pages = tuple(range(1, total_pages + 1))
             if page_ids is None:
@@ -828,7 +818,7 @@ class SourceObservationProducer:
 
             partition_ids = tuple(f"page:{i + 1}" for i in range(total_pages))
             for page_number in requested_pages:
-                cached_page = _cached_native_page(digest, page_number)
+                cached_page = self._cached_native_page(digest, page_number)
                 if cached_page is None:
                     if pdf is None:
                         try:
@@ -838,7 +828,7 @@ class SourceObservationProducer:
                                 f"{SOURCE_UNAVAILABLE}: PDF decode failed"
                             ) from exc
                     cached_page = _decode_native_page_for_cache(pdf, page_number)
-                    _remember_native_page(digest, page_number, cached_page)
+                    self._remember_native_page(digest, page_number, cached_page)
                 pending.extend(_pending_dicts_from_cached_page(cached_page))
                 if cached_page.failed:
                     failed_pages.append(page_number)
