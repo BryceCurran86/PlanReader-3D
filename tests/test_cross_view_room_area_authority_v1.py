@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from types import SimpleNamespace
+
 import fitz
 
+import pb_cross_view_room_area_authority as cross_view
 from pb_cross_view_room_area_authority import (
     CROSS_VIEW_ROOM_AREA_CONFLICT,
     CROSS_VIEW_ROOM_AREA_RESOLVED,
@@ -15,6 +19,7 @@ from pb_live_canonical_room_composition import (
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_portable_raster_ocr_authority import MockOCRBackend
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -119,6 +124,144 @@ def _source_and_room(
         rooms=tuple(rooms),
         source_pages=(int(room_page_id),),
     )
+
+
+def _force_dimension_words_to_raster_authority(
+    monkeypatch,
+    source: SourceVisibilityProducer,
+    *,
+    raster_override: dict[str, str] | None = None,
+) -> None:
+    published = source.published_snapshot_for_revision(
+        next(iter(source._producer._store.revisions_by_id))
+    )
+    assert published is not None
+    authority = source.text_integrity_authority()
+    authority_type = type(authority)
+    original_resolve = authority_type.resolve_text
+
+    dimension_words: dict[str, str] = {}
+    for observation_id in published.text_observation_ids:
+        result = original_resolve(
+            authority,
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            ),
+        )
+        receipt = result.receipt
+        if (
+            receipt is not None
+            and str(receipt.page_id) == "2"
+            and str(receipt.raw_text).strip() in {"3600", "2400"}
+        ):
+            dimension_words[str(observation_id)] = str(receipt.raw_text).strip()
+    assert set(dimension_words.values()) == {"3600", "2400"}
+
+    def forced_resolve(self, selector):
+        result = original_resolve(self, selector)
+        if str(selector.observation_id) in dimension_words:
+            return replace(
+                result,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                trusted_text=None,
+                reason_codes=("text_glyph_mapping_unverified",),
+            )
+        return result
+
+    monkeypatch.setattr(authority_type, "resolve_text", forced_resolve)
+
+    readings = dict(dimension_words)
+    if raster_override:
+        readings.update(raster_override)
+
+    class FakeRaster:
+        def publish(self, selector):
+            value = readings.get(str(selector.observation_id))
+            if value is None:
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    record=None,
+                    corroborated_text=None,
+                )
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                record=object(),
+                corroborated_text=value,
+            )
+
+    monkeypatch.setattr(
+        cross_view.RasterTextCorroborationProducer,
+        "from_source_visibility_producer",
+        classmethod(lambda cls, source: FakeRaster()),
+    )
+
+
+def test_cross_view_dimension_text_accepts_independent_raster_corroboration(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    _force_dimension_words_to_raster_authority(monkeypatch, source)
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_evidence.normalized_value == 8.64
+
+
+def test_cross_view_dimension_raster_corroboration_must_match_figured_value(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+
+    published = source.published_snapshot_for_revision(
+        next(iter(source._producer._store.revisions_by_id))
+    )
+    assert published is not None
+    authority = source.text_integrity_authority()
+    wrong_observation_id = None
+    for observation_id in published.text_observation_ids:
+        result = authority.resolve_text(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            result.receipt is not None
+            and str(result.receipt.page_id) == "2"
+            and str(result.receipt.raw_text).strip() == "3600"
+        ):
+            wrong_observation_id = str(observation_id)
+            break
+    assert wrong_observation_id is not None
+
+    _force_dimension_words_to_raster_authority(
+        monkeypatch,
+        source,
+        raster_override={wrong_observation_id: "3601"},
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.records == ()
+    assert result.status in {
+        EvidenceResolutionStatus.ABSTAINED,
+        EvidenceResolutionStatus.CONFLICT,
+    }
 
 
 def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_owned_area():
