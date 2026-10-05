@@ -10,7 +10,10 @@ from benchmarks.frozen_holdout.full_plan_v2.run_exact_project_reconciliation imp
 )
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_closed_run_export import (
+    SourceClosedRunConflictError,
+    seal_source_closed_run,
+)
 
 
 SHA = "a" * 64
@@ -153,7 +156,7 @@ def test_exact_project_report_rejects_tampered_sealed_handoff(tmp_path) -> None:
     payload["quantities"][0]["value"] = 999.0
     sealed.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(Exception, match="fingerprint mismatch"):
+    with pytest.raises(SourceClosedRunConflictError, match="fingerprint mismatch"):
         build_exact_project_report(
             manifest_path=manifest,
             sealed_run_path=sealed,
