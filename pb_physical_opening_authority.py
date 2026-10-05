@@ -1630,6 +1630,17 @@ class PhysicalOpeningAuthority:
                 )
                 self._raster_candidate_gap_box_cache[candidate_id] = gap_box_pt
 
+        for candidate_id in tuple(sorted(discovered)):
+            if (
+                candidate_patterns.get(candidate_id)
+                == RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
+                and self._raster_candidate_gap_box_cache.get(candidate_id)
+                in framed_gap_boxes
+            ):
+                discovered.pop(candidate_id, None)
+                candidate_patterns.pop(candidate_id, None)
+                self._raster_candidate_gap_box_cache.pop(candidate_id, None)
+
         candidates: list[CandidateSemanticOpening] = []
         for candidate_id in sorted(discovered):
             support = tuple(
@@ -1770,6 +1781,19 @@ class PhysicalOpeningAuthority:
                 source_observation=source_result,
             ))
         if len(containing) != 1:
+            page_cache_key = self._visible_page_candidate_key(observation)
+            ambiguous_support = self._raster_swing_ambiguous_support_cache.get(
+                page_cache_key,
+                frozenset(),
+            )
+            if observation.observation_id in ambiguous_support:
+                return cache(PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.CONFLICT,
+                    proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=(RASTER_DOOR_SWING_AMBIGUOUS,),
+                    source_observation=source_result,
+                ))
             return cache(PhysicalOpeningExistenceResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
                 proposition=None,
@@ -1815,12 +1839,12 @@ class PhysicalOpeningAuthority:
             semantic_class="opening",
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=PHYSICAL_OPENING_EXISTS,
-            structural_pattern=RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            structural_pattern=candidate.structural_pattern,
             diagnostic_confidence=1.0,
             blocking_reasons=(),
             structural_reason_codes=(
                 STRUCTURAL_OPENING_EXISTENCE_RESOLVED,
-                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                candidate.structural_pattern,
             ),
             producer_method=source_result.snapshot.producer_method,
             producer_version=source_result.snapshot.producer_version,
@@ -1833,7 +1857,7 @@ class PhysicalOpeningAuthority:
             physical_opening_existence=PHYSICAL_OPENING_EXISTS,
             reason_codes=(
                 STRUCTURAL_OPENING_EXISTENCE_RESOLVED,
-                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                candidate.structural_pattern,
             ),
             source_observation=source_result,
             candidate=candidate,
