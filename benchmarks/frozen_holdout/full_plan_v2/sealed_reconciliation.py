@@ -56,6 +56,33 @@ def _tuple(values: Sequence[object], name: str) -> tuple[str, ...]:
     return clean
 
 
+def _unit_dimension(value: object) -> str | None:
+    unit = _required(value, "unit").strip().lower()
+    if unit in {"m2", "m²", "sqm"}:
+        return "area"
+    if unit in {"ea", "each", "nr", "no", "no.", "number"}:
+        return "count"
+    return None
+
+
+def _reconciled_unit(production_unit: object, benchmark_unit: object) -> str:
+    """Use benchmark notation only for exact physical unit equivalence.
+
+    No numeric conversion is performed. The alias exists solely for notation
+    differences such as production ``ea`` versus independently frozen ``nr``.
+    """
+    production = _required(production_unit, "production unit").strip().lower()
+    benchmark = _required(benchmark_unit, "benchmark unit").strip().lower()
+    if production == benchmark:
+        return benchmark
+    production_dimension = _unit_dimension(production)
+    benchmark_dimension = _unit_dimension(benchmark)
+    if production_dimension is not None and production_dimension == benchmark_dimension:
+        return benchmark
+    raise ValueError(
+        f"bound production unit {production!r} is not equivalent to benchmark unit {benchmark!r}"
+    )
+
 def _canonical_json(value: object) -> str:
     return json.dumps(
         value,
@@ -249,6 +276,7 @@ def reconcile_sealed_run_v2(
         )
 
     produced: list[ProducedTakeoffItemV2] = []
+    matched_quantity_by_item_id: dict[str, str] = {}
 
     for row in rows:
         matches = tuple(
@@ -264,16 +292,34 @@ def reconcile_sealed_run_v2(
         abstained = bool(row.get("abstained", False))
         lineage_ok = bool(row.get("lineage_ok", False))
         value = None if row.get("value") is None else float(row["value"])
-        unit = _required(row.get("unit"), "unit")
+        production_unit = _required(row.get("unit"), "unit")
 
         if len(matches) == 1:
-            item = items[matches[0].benchmark_item_id]
+            binding = matches[0]
+            prior_quantity_id = matched_quantity_by_item_id.get(
+                binding.benchmark_item_id
+            )
+            if prior_quantity_id is not None:
+                raise ValueError(
+                    "multiple sealed quantities map to one V2 binding "
+                    f"{binding.benchmark_item_id}: "
+                    f"{prior_quantity_id} and {row['quantity_id']}"
+                )
+            matched_quantity_by_item_id[binding.benchmark_item_id] = _required(
+                row.get("quantity_id"),
+                "quantity_id",
+            )
+            item = items[binding.benchmark_item_id]
+            reconciled_unit = _reconciled_unit(
+                production_unit,
+                item.unit,
+            )
             produced.append(
                 ProducedTakeoffItemV2(
                     quantity_id=_required(row.get("quantity_id"), "quantity_id"),
                     trade_category=item.trade_category,
                     value=value,
-                    unit=unit,
+                    unit=reconciled_unit,
                     object_refs=item.expected_object_refs,
                     lineage_ok=lineage_ok,
                     abstained=abstained,
@@ -294,7 +340,7 @@ def reconcile_sealed_run_v2(
                     f"production-unmapped:{_required(row.get('family'), 'family')}"
                 ),
                 value=value,
-                unit=unit,
+                unit=production_unit,
                 object_refs=unmapped_refs,
                 lineage_ok=lineage_ok,
                 abstained=abstained,
