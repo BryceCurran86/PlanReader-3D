@@ -57,6 +57,8 @@ LIVE_CEILING_CANONICAL_IDENTITY_CONFLICT = (
 @dataclass(frozen=True)
 class LiveCanonicalCeilingSurfaceObject:
     canonical_ceiling_id: str
+    document_id: str
+    snapshot_id: str
     room_entity_id: str
     source_page: int
     viewport_id: str
@@ -81,6 +83,8 @@ class LiveCanonicalCeilingSurfaceObject:
     def to_dict(self) -> dict:
         return {
             "canonical_ceiling_id": self.canonical_ceiling_id,
+            "document_id": self.document_id,
+            "snapshot_id": self.snapshot_id,
             "room_entity_id": self.room_entity_id,
             "source_page": self.source_page,
             "viewport_id": self.viewport_id,
@@ -476,6 +480,8 @@ def collect_live_ceiling_lining_claims(
                             )
                             ceiling_object = LiveCanonicalCeilingSurfaceObject(
                                 canonical_ceiling_id=canonical_id,
+                                document_id=current.revision.document_id,
+                                snapshot_id=current.snapshot.snapshot_id,
                                 room_entity_id=room_id,
                                 source_page=page_no,
                                 viewport_id=viewport_id,
