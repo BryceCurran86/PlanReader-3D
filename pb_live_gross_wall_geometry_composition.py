@@ -40,7 +40,6 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_host_frame_authority import OpeningHostFrameSelector
 from pb_physical_scale_authority import (
     PhysicalScaleAuthority,
-    PhysicalScaleProducer,
     PhysicalScaleSelector,
 )
 from pb_physical_wall_candidate_authority import (
