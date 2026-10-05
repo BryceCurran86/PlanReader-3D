@@ -1654,6 +1654,22 @@ class GenericPlanReaderExtractor:
                         "canonical_structural_member_objects": (
                             canonical_structural_member_objects
                         ),
+                        "quantity_id": (
+                            self.structural_member_coverage_shadow.get("quantity_id")
+                            if isinstance(
+                                self.structural_member_coverage_shadow,
+                                dict,
+                            )
+                            else None
+                        ),
+                        "raw_evidence_ref": (
+                            self.structural_member_coverage_shadow.get("quantity_id")
+                            if isinstance(
+                                self.structural_member_coverage_shadow,
+                                dict,
+                            )
+                            else None
+                        ),
                         "source_sha256": structural_source_sha256,
                         "zone_type": global_resolved_secondary_support.zone_type,
                         "support_kind": global_resolved_secondary_support.support_kind,
