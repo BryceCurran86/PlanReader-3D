@@ -980,6 +980,25 @@ class CrossViewRoomAreaProducer:
             if not math.isfinite(area_m2) or area_m2 <= 0.0:
                 unresolved.add(str(room.physical_room_id))
                 continue
+
+            horizontal_x = sorted(
+                (
+                    float(horizontal.endpoints_pt[0][0]),
+                    float(horizontal.endpoints_pt[1][0]),
+                )
+            )
+            vertical_y = sorted(
+                (
+                    float(vertical.endpoints_pt[0][1]),
+                    float(vertical.endpoints_pt[1][1]),
+                )
+            )
+            source_dimension_box = (
+                horizontal_x[0],
+                vertical_y[0],
+                horizontal_x[1],
+                vertical_y[1],
+            )
             evidence_id = stable_contract_id(
                 "cross_view_room_area",
                 {
@@ -1022,6 +1041,16 @@ class CrossViewRoomAreaProducer:
                     "source_label_text": line.text,
                     "source_label_observation_ids": list(line.observation_ids),
                     "source_label_receipt_ids": list(line.receipt_ids),
+                    "source_label_bbox_pdf_pts": list(line.bbox),
+                    "source_dimension_box_pdf_pts": list(source_dimension_box),
+                    "horizontal_endpoints_pt": [
+                        list(horizontal.endpoints_pt[0]),
+                        list(horizontal.endpoints_pt[1]),
+                    ],
+                    "vertical_endpoints_pt": [
+                        list(vertical.endpoints_pt[0]),
+                        list(vertical.endpoints_pt[1]),
+                    ],
                     "figured_dimension_ids": [
                         horizontal.dimension_id,
                         vertical.dimension_id,
