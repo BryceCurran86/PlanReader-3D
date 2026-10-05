@@ -49,7 +49,7 @@ _PRODUCERS = {
     LiveCanonicalFloorSurfaceObject: ("floor", "canonical_floor_id", "physical_floor_surface_id", "pb_live_canonical_floor_surface"),
     LiveCanonicalSlabObject: ("slab", "canonical_slab_id", "physical_slab_id", "pb_live_canonical_slab_projection"),
     LiveCanonicalCeilingSurfaceObject: ("ceiling", "canonical_ceiling_id", "canonical_ceiling_id", "pb_live_ceiling_lining_integration"),
-    LiveCanonicalRoofObject: ("roof", "canonical_roof_id", "canonical_roof_id", "pb_live_canonical_roof_projection"),
+    LiveCanonicalRoofObject: ("roof", "canonical_roof_id", "physical_roof_id", "pb_live_canonical_roof_projection"),
     LiveCanonicalWallFinishSurfaceObject: ("finish_surface", "canonical_surface_id", "physical_surface_id", "pb_live_canonical_wall_finish_surface"),
     LiveCanonicalStructuralMemberObject: ("structural_member", "canonical_structural_member_id", "physical_member_id", "pb_live_canonical_structural_member_projection"),
 }
