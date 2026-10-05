@@ -4,6 +4,7 @@ from tests.test_raster_framed_opening_g17_contract import _prepare, _selector
 
 
 def test_diagnose_framed_raster_g17_stage_counts() -> None:
+    # Deliberate failure: expose stage counts in PR CI, then delete this file.
     producer, published = _prepare(frame_lines=2)
     authority = producer.physical_opening_authority()
     visibility = producer.authority()
