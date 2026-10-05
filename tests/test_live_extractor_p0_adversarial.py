@@ -501,6 +501,119 @@ def test_a13_same_page_compatible_claims_distinct_evidence_stay_ambiguous() -> N
         }
 
 
+def test_a13b_nonopening_compatible_claims_on_different_pages_stay_ambiguous() -> None:
+    low = ExtractedPrediction(
+        tag="C01",
+        trade_type="structural",
+        description="column page 1",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.70,
+        source_page=1,
+        dimensions=[200.0, 200.0],
+    )
+    high = ExtractedPrediction(
+        tag="C01",
+        trade_type="structural",
+        description="column page 2",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.99,
+        source_page=2,
+        dimensions=[200.0, 200.0],
+    )
+
+    forward: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(forward, low, merge_source="plan_geometry")
+    merge_extracted_prediction(forward, high, merge_source="plan_geometry")
+
+    backward: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(backward, high, merge_source="plan_geometry")
+    merge_extracted_prediction(backward, low, merge_source="plan_geometry")
+
+    for pred_dict in (forward, backward):
+        blocked = pred_dict["C01"]
+        assert blocked.metadata.get("reconciliation_status") == "ambiguous_unresolved"
+        assert blocked.metadata.get("blocking_reason") == "distinct_source_scope_unresolved"
+        assert blocked.quantity is None
+        assert extracted_prediction_publication_blocked(blocked)
+        assert len(blocked.metadata.get("scoped_claims") or []) == 2
+
+
+def test_a13c_nonopening_compatible_claims_with_distinct_evidence_stay_ambiguous() -> None:
+    left = ExtractedPrediction(
+        tag="P01",
+        trade_type="structural",
+        description="pier A",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.80,
+        source_page=3,
+        dimensions=[300.0, 300.0],
+        bounding_box=[10.0, 10.0, 20.0, 20.0],
+        metadata={"raw_evidence_ref": "pier-a"},
+    )
+    right = ExtractedPrediction(
+        tag="P01",
+        trade_type="structural",
+        description="pier B",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.95,
+        source_page=3,
+        dimensions=[300.0, 300.0],
+        bounding_box=[40.0, 10.0, 50.0, 20.0],
+        metadata={"raw_evidence_ref": "pier-b"},
+    )
+
+    pred_dict: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(pred_dict, left, merge_source="plan_geometry")
+    merge_extracted_prediction(pred_dict, right, merge_source="plan_geometry")
+
+    blocked = pred_dict["P01"]
+    assert blocked.metadata.get("reconciliation_status") == "ambiguous_unresolved"
+    assert blocked.metadata.get("blocking_reason") == "distinct_source_scope_unresolved"
+    assert blocked.quantity is None
+
+
+def test_a13d_nonopening_same_scope_compatible_claim_may_select_representative() -> None:
+    bbox = [1.0, 2.0, 3.0, 4.0]
+    base_meta = {"raw_evidence_ref": "same-column-evidence"}
+    low = ExtractedPrediction(
+        tag="C02",
+        trade_type="structural",
+        description="same column",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.70,
+        source_page=4,
+        dimensions=[250.0, 250.0],
+        bounding_box=bbox,
+        metadata=dict(base_meta),
+    )
+    high = ExtractedPrediction(
+        tag="C02",
+        trade_type="structural",
+        description="same column",
+        quantity=1.0,
+        unit="NO",
+        confidence=0.95,
+        source_page=4,
+        dimensions=[250.0, 250.0],
+        bounding_box=bbox,
+        metadata=dict(base_meta),
+    )
+
+    pred_dict: dict[str, ExtractedPrediction] = {}
+    merge_extracted_prediction(pred_dict, low, merge_source="plan_geometry")
+    merge_extracted_prediction(pred_dict, high, merge_source="plan_geometry")
+
+    merged = pred_dict["C02"]
+    assert merged.quantity == 1.0
+    assert merged.confidence == 0.95
+    assert not extracted_prediction_publication_blocked(merged)
+
+
 def test_a14_proven_same_type_claim_selects_deterministic_representative() -> None:
     """Confidence may select only after PROVEN_SAME evidence identity."""
     base_meta = {"raw_evidence_ref": "schedule-row-D01"}
