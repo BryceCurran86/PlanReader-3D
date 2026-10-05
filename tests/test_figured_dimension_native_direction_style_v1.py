@@ -234,3 +234,53 @@ def test_horizontal_text_can_fall_back_when_only_vertical_geometry_exists() -> N
 
     assert result.status == BindingStatus.WITNESS_BOUND.value
     assert result.dimension_line_id == "dimension-line"
+
+
+def test_endpoint_witness_selection_prefers_actual_line_end_over_nearby_annotation_edge() -> None:
+    observation = _observation(orientation=DimensionOrientation.VERTICAL.value)
+    calibration = DimensionLayoutCalibration(
+        median_word_height_pt=20.0,
+        line_search_distance_pt=40.0,
+        witness_endpoint_distance_pt=30.0,
+        chain_axis_tolerance_pt=5.0,
+    )
+    segments = (
+        _segment(
+            "dimension-line",
+            (106.0, 60.0),
+            (106.0, 140.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "nearby-annotation-edge",
+            (94.0, 42.0),
+            (116.0, 42.0),
+            width=None,
+            color=None,
+        ),
+        _segment(
+            "top-witness",
+            (94.0, 60.0),
+            (116.0, 60.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "bottom-witness",
+            (94.0, 140.0),
+            (116.0, 140.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        calibration,
+    )
+
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.witness_line_ids == ("top-witness", "bottom-witness")
+    assert result.endpoints == ((106.0, 60.0), (106.0, 140.0))
