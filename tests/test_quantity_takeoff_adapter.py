@@ -299,6 +299,60 @@ def test_duplicate_and_conflicting_semantic_claims_fail_closed() -> None:
         )
 
 
+def test_distinct_physical_identities_with_same_semantic_key_both_project() -> None:
+    q1 = quantity(quantity_id="qty-1", input_entity_ids=("entity-1",))
+    q2 = quantity(
+        quantity_id="qty-2",
+        input_entity_ids=("entity-2",),
+        value=13.0,
+    )
+    traces = {
+        "qty-1": source_trace(canonical_entity_ids=("entity-1",)),
+        "qty-2": source_trace(
+            canonical_entity_ids=("entity-2",),
+            source_bbox=(320.0, 20.0, 610.0, 420.0),
+        ),
+    }
+    authorities = {"qty-1": figured(), "qty-2": figured()}
+
+    rows = adapter.quantities_to_takeoff_output_rows(
+        [q1, q2],
+        traces_by_quantity_id=traces,
+        authorities_by_quantity_id=authorities,
+    )
+
+    assert [row["quantity_id"] for row in rows] == ["qty-1", "qty-2"]
+    assert [row["quantity"] for row in rows] == [12.5, 13.0]
+    assert rows[0]["semantic_key"] == rows[1]["semantic_key"] == "wall.area"
+
+
+def test_overlapping_physical_identity_with_same_semantic_key_still_fails_closed() -> None:
+    q1 = quantity(
+        quantity_id="qty-1",
+        input_entity_ids=("entity-1", "shared-parent"),
+    )
+    q2 = quantity(
+        quantity_id="qty-2",
+        input_entity_ids=("entity-2", "shared-parent"),
+    )
+    traces = {
+        "qty-1": source_trace(
+            canonical_entity_ids=("entity-1", "shared-parent"),
+        ),
+        "qty-2": source_trace(
+            canonical_entity_ids=("entity-2", "shared-parent"),
+        ),
+    }
+    authorities = {"qty-1": figured(), "qty-2": figured()}
+
+    with pytest.raises(adapter.CommercialTakeoffConflictError, match="overlapping or unresolved"):
+        adapter.quantities_to_takeoff_output_rows(
+            [q1, q2],
+            traces_by_quantity_id=traces,
+            authorities_by_quantity_id=authorities,
+        )
+
+
 def test_projection_fingerprint_binds_quantity_source_revision_and_authority() -> None:
     q = quantity()
     a = adapter.compute_commercial_projection_fingerprint(
