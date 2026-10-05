@@ -717,10 +717,16 @@ def _trusted_native_dimensions_for_page(
             geometry = geometry_by_segment_id.get(part)
             if geometry is None:
                 return ()
-            matches = source_ids_by_geometry.get(geometry, ())
-            if len(matches) != 1:
+            matches = tuple(
+                dict.fromkeys(source_ids_by_geometry.get(geometry, ()))
+            )
+            if not matches:
                 return ()
-            out.append(matches[0])
+            # Exact coincident source primitives are one unambiguous physical
+            # line geometry. Preserve every producer-owned observation ID
+            # rather than selecting one arbitrarily. No tolerance, containment
+            # or nearest-geometry fallback is permitted here.
+            out.extend(matches)
         return tuple(dict.fromkeys(out))
 
     positive: list[_TrustedBoundDimension] = []
