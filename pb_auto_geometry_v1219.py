@@ -1003,6 +1003,15 @@ def _try_physical_net_wall_rows(
         opening_rows_by_workspace = {}
         app._live_opening_takeoff_rows_by_workspace = opening_rows_by_workspace
     opening_rows_by_workspace[int(workspace_id)] = []
+
+    room_area_rows_by_workspace = getattr(
+        app, "_live_room_area_takeoff_rows_by_workspace", None
+    )
+    if not isinstance(room_area_rows_by_workspace, dict):
+        room_area_rows_by_workspace = {}
+        app._live_room_area_takeoff_rows_by_workspace = room_area_rows_by_workspace
+    room_area_rows_by_workspace[int(workspace_id)] = []
+
     seen_opening_quantity_ids: set[str] = set()
 
     def opening_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
@@ -1124,6 +1133,59 @@ def _try_physical_net_wall_rows(
             seen_opening_quantity_ids.add(quantity.quantity_id)
         return rows
 
+    def room_area_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
+        """Project only source-closed figured room areas into AI review rows."""
+        from pb_live_room_area_customer_projection import (
+            project_live_room_area_customer_rows,
+        )
+
+        projected = project_live_room_area_customer_rows(
+            claim,
+            workspace_id=int(workspace_id),
+            project_id=f"customer-workspace:{int(workspace_id)}",
+        )
+        rows: List[Tuple[Any, ...]] = []
+        for item in projected:
+            if (
+                str(item.get("origin") or "") != "AI"
+                or str(item.get("quantity_status") or "") != "To review"
+                or str(item.get("row_role") or "") != "floor_area"
+            ):
+                raise ValueError("room-area projection bypassed customer review state")
+            required = {
+                name: str(item.get(name) or "").strip()
+                for name in ("section", "element", "location", "substrate")
+            }
+            if not all(required.values()):
+                raise ValueError("room-area projection is missing customer row identity")
+            quantity_id = str(item.get("quantity_id") or "").strip()
+            if not quantity_id:
+                raise ValueError("room-area projection is missing quantity identity")
+            unit = str(item.get("unit") or "").strip().lower()
+            if unit == "m2":
+                unit = "m²"
+            rows.append(
+                _takeoff_row(
+                    workspace_id=int(workspace_id),
+                    section=required["section"],
+                    element=required["element"],
+                    location=required["location"],
+                    substrate=required["substrate"],
+                    quantity=float(item["quantity"]),
+                    status="To review",
+                    source_page=str(item.get("source_page") or "Selected PDF pages"),
+                    source_reference=(
+                        f"{SOURCE_PREFIX} · room_area_quantity:{quantity_id}"
+                    ),
+                    confidence="Documented",
+                    notes=str(item.get("notes") or ""),
+                    row_role="floor_area",
+                    unit=unit,
+                    preserve_quantity=True,
+                )
+            )
+        return rows
+
     def record_coverage(claim: Any, row: Optional[Tuple[Any, ...]] = None) -> None:
         from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 
@@ -1140,6 +1202,7 @@ def _try_physical_net_wall_rows(
                     quantity,
                     *getattr(claim, "opening_quantity_evidence", ()),
                     *getattr(claim, "opening_count_quantity_evidence", ()),
+                    *getattr(claim, "room_area_quantity_evidence", ()),
                 )
                 if item is not None
             ]
@@ -1151,20 +1214,10 @@ def _try_physical_net_wall_rows(
                     value=named["quantity"], unit=named["unit"],
                     source_page=named["source_page"], is_publishable=False,
                 ))
-            for opening_quantity in (
-                *getattr(claim, "opening_quantity_evidence", ()),
-                *getattr(claim, "opening_count_quantity_evidence", ()),
-            ):
-                output_rows.append(
-                    TakeoffOutputRow(
-                        quantity_id=opening_quantity.quantity_id,
-                        description=opening_quantity.semantic_key,
-                        value=float(opening_quantity.value),
-                        unit=opening_quantity.unit,
-                        source_page="Selected PDF pages",
-                        is_publishable=False,
-                    )
-                )
+            # Opening and room rows are written later by the same customer
+            # transaction. Do not invent pre-publication TakeoffOutputRows here:
+            # the runtime lifecycle audit advances PUBLISHED only from the exact
+            # rows actually present in takeoff_rows after insertion.
             summaries, family_gaps = collect_live_canonical_coverage(
                 objects=(*claim.canonical_walls, *claim.canonical_openings,
                          *claim.canonical_rooms, *claim.canonical_floors),
@@ -1259,6 +1312,15 @@ def _try_physical_net_wall_rows(
             opening_rows_by_workspace[int(workspace_id)].extend(
                 opening_rows_for_claim(claim)
             )
+            try:
+                room_area_rows_by_workspace[int(workspace_id)].extend(
+                    room_area_rows_for_claim(claim)
+                )
+            except Exception as room_output_exc:
+                current_coverage["family_gaps"].setdefault("floor", []).append(
+                    "live_room_area_customer_projection_failed:"
+                    f"{type(room_output_exc).__name__}"
+                )
             status_val = getattr(claim.status, "value", str(claim.status))
             source_report.update(status=status_val, quantity_id=claim.quantity_id,
                                  reason_codes=list(getattr(claim, "reason_codes", ())))
@@ -1802,10 +1864,16 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             int(workspace_id), ()
         )
     )
+    room_area_rows = list(
+        getattr(app, "_live_room_area_takeoff_rows_by_workspace", {}).get(
+            int(workspace_id), ()
+        )
+    )
     all_auto_rows = (
         unit_rows
         + facade_rows
         + opening_rows
+        + room_area_rows
         + partition_rows
         + finish_rows
     )
@@ -1840,6 +1908,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "calibrations": calibrations, "footprint": footprint, "units": units, "facades": facades,
             "partitions": partitions, "finishes": finishes,
             "opening_takeoff_rows": len(opening_rows),
+            "room_area_takeoff_rows": len(room_area_rows),
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "coverage_lifecycle": coverage_lifecycle,
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
