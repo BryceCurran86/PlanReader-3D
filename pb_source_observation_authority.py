@@ -644,10 +644,12 @@ class SourceObservationProducer:
                     alpha=False,
                 )
             png_bytes = pix.tobytes("png")
-            if scratch is not None:
-                scratch.close()
         finally:
-            pdf.close()
+            try:
+                if "scratch" in locals() and scratch is not None:
+                    scratch.close()
+            finally:
+                pdf.close()
 
         if include_native_frame:
             assert native_frame is not None
