@@ -81,7 +81,8 @@ def test_positive_binding_becomes_one_noncommercial_canonical_surface():
     surface = result.surfaces[0]
     assert surface.canonical_wall_id == "cw-1"
     assert surface.physical_wall_id == "wall-1"
-    assert surface.physical_face_id == "face-1"
+    assert surface.physical_face_id
+    assert surface.physical_face_id != "face-1"
     assert surface.physical_face_role == "exterior_face"
     assert surface.trade_scope_id == "external_key_pointing"
     assert surface.finish_material == "key_pointing"
@@ -124,23 +125,37 @@ def test_surface_identity_ignores_revision_evidence_and_material_state():
 
     assert first.canonical_surface_id == second.canonical_surface_id
     assert first.physical_wall_id == second.physical_wall_id == "wall-1"
-    assert first.physical_face_id == second.physical_face_id == "face-1"
+    assert first.physical_face_id == second.physical_face_id
+    assert first.physical_face_id != "face-1"
     assert first.finish_material == "key_pointing"
     assert second.finish_material == "paint"
 
 
-def test_surface_identity_changes_only_when_physical_face_or_trade_scope_changes():
+def test_surface_identity_ignores_raw_face_record_but_changes_for_role_or_trade():
     base = project_wall_finish_bindings(
         canonical_walls=(_wall(),),
         bindings=(_binding(),),
     ).surfaces[0]
-    other_face = project_wall_finish_bindings(
+    other_raw_face_record = project_wall_finish_bindings(
         canonical_walls=(_wall(),),
         bindings=(
             _binding(
                 binding_id="bind-face-2",
-                physical_face_id="face-2",
+                physical_face_id="producer-face-record-2",
                 source_evidence_ids=("ann-face-2", "role-1"),
+            ),
+        ),
+    ).surfaces[0]
+    other_role = project_wall_finish_bindings(
+        canonical_walls=(_wall(),),
+        bindings=(
+            _binding(
+                binding_id="bind-interior",
+                physical_face_id="producer-interior-face-record",
+                physical_face_role=PhysicalFaceRole.ROOM_FACING_INTERIOR_FACE,
+                trade_scope_id="internal_paint",
+                finish_material="paint",
+                source_evidence_ids=("ann-interior", "role-1"),
             ),
         ),
     ).surfaces[0]
@@ -155,8 +170,46 @@ def test_surface_identity_changes_only_when_physical_face_or_trade_scope_changes
         ),
     ).surfaces[0]
 
-    assert base.canonical_surface_id != other_face.canonical_surface_id
+    assert base.physical_face_id == other_raw_face_record.physical_face_id
+    assert base.canonical_surface_id == other_raw_face_record.canonical_surface_id
+    assert base.physical_face_id != other_role.physical_face_id
+    assert base.canonical_surface_id != other_role.canonical_surface_id
     assert base.canonical_surface_id != other_trade.canonical_surface_id
+
+
+def test_equivalent_wall_candidates_join_one_canonical_physical_surface():
+    canonical_wall = _wall(
+        canonical_wall_id="wall-representative",
+        physical_wall_id="wall-representative",
+    )
+    second = _binding(
+        binding_id="bind-2",
+        physical_wall_id="wall-candidate-2",
+        physical_face_id="source-face-2",
+        annotation_observation_ids=("ann-2",),
+        source_evidence_ids=("ann-2", "role-1"),
+    )
+    result = project_wall_finish_bindings(
+        canonical_walls=(canonical_wall,),
+        bindings=(
+            _binding(
+                physical_wall_id="wall-candidate-1",
+                physical_face_id="source-face-1",
+            ),
+            second,
+        ),
+        canonical_wall_ids_by_candidate={
+            "wall-candidate-1": "wall-representative",
+            "wall-candidate-2": "wall-representative",
+        },
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.surfaces) == 1
+    surface = result.surfaces[0]
+    assert surface.canonical_wall_id == "wall-representative"
+    assert surface.physical_wall_id == "wall-representative"
+    assert surface.finish_binding_ids == ("bind-1", "bind-2")
 
 
 def test_repeated_source_support_enriches_one_surface_not_duplicate_geometry():
