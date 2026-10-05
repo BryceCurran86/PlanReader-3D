@@ -136,13 +136,14 @@ def collect_live_physical_net_wall_claim(
     document_id = f"live-source:{source_sha[:32]}"
 
     doc = fitz.open(stream=payload, filetype="pdf")
+    page_count = int(doc.page_count)
     try:
-        selected = _selected_page_indices(int(doc.page_count), pages)
+        selected = _selected_page_indices(page_count, pages)
         if topology_pages is None:
             topology_selected = selected
         else:
             topology_selected = _selected_page_indices(
-                int(doc.page_count), topology_pages
+                page_count, topology_pages
             )
             if not set(topology_selected) <= set(selected):
                 raise ValueError("topology_pages must be a subset of pages")
@@ -166,7 +167,7 @@ def collect_live_physical_net_wall_claim(
                     int(page)
                     for page in wall_evidence_pages
                     if isinstance(page, int)
-                    and 0 <= int(page) < int(doc.page_count)
+                    and 0 <= int(page) < page_count
                 }
             )
         )
