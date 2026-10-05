@@ -74,6 +74,21 @@ def _physical_identity_resolved(obj: object) -> bool:
     return True
 
 
+def _declared_quantity_ids(obj: object) -> tuple[str, ...]:
+    """Return producer-owned quantity links already sealed on canonical objects.
+
+    These links never mint or rewrite QuantityEvidence. They only preserve an
+    exact association that the canonical producer has already proven while the
+    original quantity keeps its upstream physical/source input identity.
+    """
+    values: list[str] = []
+    if type(obj) is LiveCanonicalFloorSurfaceObject:
+        values.append(str(obj.metric_area_quantity_id or "").strip())
+    elif type(obj) is LiveCanonicalCeilingSurfaceObject:
+        values.append(str(obj.ceiling_quantity_id or "").strip())
+    return tuple(value for value in values if value)
+
+
 def _metadata(obj: object, category: str, canonical_id: str, quantities: Sequence[QuantityEvidence]) -> dict:
     evidence_ids = getattr(obj, "evidence_ids", getattr(obj, "source_evidence_ids", ()))
     pages = getattr(obj, "page_ids", ()) or (
@@ -111,9 +126,10 @@ def collect_live_canonical_coverage(
 
     None output_rows means the customer/output collection was not enumerated;
     an explicit empty collection means it was enumerated and produced no rows.
-    Separate source snapshots are never combined. Quantities join ONLY through
-    their original input_entity_ids. Equal values, labels, marks or evidence IDs
-    do not create links.
+    Separate source snapshots are never combined. Quantities join through their
+    original input_entity_ids or an exact producer-owned quantity id already
+    sealed on the canonical object. Equal values, labels, marks or evidence IDs
+    never create links.
     """
     if not str(registry_run_scope or "").strip():
         raise ValueError("registry_run_scope is required")
@@ -175,10 +191,36 @@ def collect_live_canonical_coverage(
             admitted_object_ids=tuple(sorted(admitted)), enumeration_status=status,
             reason_codes=tuple(sorted(reasons)),
         )
-        # A dependency is retained even if another input entity was not admitted:
-        # the registry reports that defect, rather than inventing the other ID.
-        linked = tuple(q for q in quantities if set(q.input_entity_ids).intersection(admitted))
+        declared_links = {
+            physical_id: _declared_quantity_ids(obj)
+            for physical_id, obj in admitted.items()
+        }
+        declared_quantity_ids = {
+            quantity_id
+            for quantity_ids in declared_links.values()
+            for quantity_id in quantity_ids
+        }
+        # A dependency is retained if it directly consumes an admitted physical
+        # object OR if the typed canonical producer already sealed the exact
+        # quantity id on that object. Cross-family upstream inputs (for example
+        # a source-room entity feeding a canonical floor area) remain untouched.
+        linked = tuple(
+            q
+            for q in quantities
+            if (
+                set(q.input_entity_ids).intersection(admitted)
+                or q.quantity_id in declared_quantity_ids
+            )
+        )
         quantity_ids = {q.quantity_id for q in linked}
+        declared_links = {
+            physical_id: tuple(
+                quantity_id
+                for quantity_id in quantity_ids_for_object
+                if quantity_id in quantity_ids
+            )
+            for physical_id, quantity_ids_for_object in declared_links.items()
+        }
         rows = tuple(row for row in (output_rows or ()) if row.quantity_id in quantity_ids)
         quantity_snapshot = QuantityEvidenceUniverseSnapshotV1(
             **common, producer=quantity_key[0], source=quantity_key[1],
@@ -196,9 +238,17 @@ def collect_live_canonical_coverage(
             takeoff_rows_by_universe={row_key: rows} if output_rows is not None else None,
             object_metadata_by_id={physical_id: _metadata(
                 obj, category, str(getattr(obj, canonical_field)),
-                tuple(q for q in linked if physical_id in q.input_entity_ids),
+                tuple(
+                    q
+                    for q in linked
+                    if (
+                        physical_id in q.input_entity_ids
+                        or q.quantity_id in declared_links.get(physical_id, ())
+                    )
+                ),
             )
                                    for physical_id, obj in admitted.items()},
+            object_quantity_links=declared_links,
         ))
     return tuple(summaries), {category: sorted(reasons) for category, reasons in sorted(gaps.items())}
 
