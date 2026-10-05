@@ -1,0 +1,31 @@
+name: DIAG Lot16 Host Chain After Raster Face Equivalence v2
+
+on:
+  pull_request:
+    branches:
+      - gpt4/raster-opening-wall-face-equivalence-v1
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run Lot16 host-chain differential
+        run: |
+          PYTHONPATH=. python tools/diag_lot16_raster_host_chain.py | tee lot16-host-chain-after-raster-face-equivalence.json
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-host-chain-after-raster-face-equivalence
+          path: lot16-host-chain-after-raster-face-equivalence.json
+          retention-days: 1
