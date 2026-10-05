@@ -993,6 +993,7 @@ def _try_physical_net_wall_rows(
     current_coverage: Dict[str, Any] = {
         "summaries": [], "family_gaps": {}, "source_sha256s": [],
         "physical_net_document_ids": [], "source_reports": [], "wall_bridge_mode": None,
+        "blocked_commercial_claim_keys": [],
     }
     workspace_coverage[int(workspace_id)] = current_coverage
 
@@ -1309,6 +1310,23 @@ def _try_physical_net_wall_rows(
             claim = collect_live_physical_net_wall_claim(
                 group["path"], **claim_kwargs
             )
+            from pb_takeoff_output_supersedence import blocked_commercial_claim_key
+            for blocked_quantity in (
+                getattr(claim.publication, "quantity_evidence", None),
+                *getattr(claim, "opening_quantity_evidence", ()),
+                *getattr(claim, "opening_count_quantity_evidence", ()),
+                *getattr(claim, "room_area_quantity_evidence", ()),
+            ):
+                if blocked_quantity is None:
+                    continue
+                blocked_key = blocked_commercial_claim_key(
+                    blocked_quantity,
+                    source_sha256=sha256,
+                )
+                if blocked_key is not None:
+                    current_coverage["blocked_commercial_claim_keys"].append(
+                        blocked_key
+                    )
             opening_rows_by_workspace[int(workspace_id)].extend(
                 opening_rows_for_claim(claim)
             )
@@ -1896,6 +1914,51 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             conflicts,
         )
 
+    # Preserve only an earlier, fully source-closed commercial draft when this
+    # exact source + semantic claim + physical identity is explicitly blocked
+    # by the current run. A changed source, disappeared object, unmatched
+    # identity, reviewed row or legacy heuristic row is replaced normally.
+    preserved_source_closed_rows: List[Tuple[Any, ...]] = []
+    coverage = getattr(app, "_ag09_family_coverage_by_workspace", {}).get(
+        int(workspace_id), {}
+    )
+    blocked_claim_keys = (
+        coverage.get("blocked_commercial_claim_keys", ())
+        if isinstance(coverage, Mapping)
+        else ()
+    )
+    if blocked_claim_keys:
+        try:
+            from pb_takeoff_output_supersedence import (
+                select_prior_commercial_rows_to_preserve,
+            )
+
+            prior_rows = app.lquery(
+                f"""SELECT {','.join(TAKEOFF_ROW_FIELDS)}
+                    FROM takeoff_rows
+                    WHERE workspace_id=? AND source_reference LIKE ?
+                    ORDER BY id""",
+                (int(workspace_id), SOURCE_PREFIX + "%"),
+            )
+            replacement_rows = [
+                dict(zip(TAKEOFF_ROW_FIELDS, row))
+                for row in all_auto_rows
+            ]
+            preserved = select_prior_commercial_rows_to_preserve(
+                [dict(row) for row in prior_rows],
+                blocked_claim_keys=blocked_claim_keys,
+                replacement_rows=replacement_rows,
+            )
+            preserved_source_closed_rows = [
+                takeoff_contract.values_from_mapping(row, TAKEOFF_ROW_FIELDS)
+                for row in preserved
+            ]
+            all_auto_rows = all_auto_rows + preserved_source_closed_rows
+        except Exception:
+            # Preservation is an optional safety net. Never let an inability to
+            # prove exact prior lineage block the current transaction.
+            preserved_source_closed_rows = []
+
     # Rows, envelope and report are one publication: all commit or none do.
     with _auto_publication(app, int(workspace_id), all_auto_rows) as publication:
         mass_id = _refresh_auto_model(publication, int(workspace_id), footprint, facades)
@@ -1909,6 +1972,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             "partitions": partitions, "finishes": finishes,
             "opening_takeoff_rows": len(opening_rows),
             "room_area_takeoff_rows": len(room_area_rows),
+            "preserved_source_closed_rows": len(preserved_source_closed_rows),
             "semantic_conflicts": [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in conflicts],
             "coverage_lifecycle": coverage_lifecycle,
             "auto_takeoff_rows": len(all_auto_rows), "model_mass_id": mass_id,
