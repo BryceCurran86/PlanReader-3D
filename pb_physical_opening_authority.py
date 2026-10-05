@@ -38,6 +38,7 @@ from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
     RASTER_PDF_VISIBLE_SEGMENT,
     VISIBILITY_RECEIPT_UNAVAILABLE,
+    RASTER_OPENING_PRIMITIVE_RENDER_DPI,
     SourceVisibilityAuthority,
 )
 from pb_raster_opening_source_primitives import (
@@ -76,6 +77,7 @@ RASTER_FRAME_MIN_COVERAGE = 0.80
 RASTER_FRAME_MIN_INNER_RUNS = 2
 RASTER_MIN_OPENING_GAP_PT = 8.0
 RASTER_MIN_GAP_TO_WALL_THICKNESS = 2.0
+RASTER_GEOMETRY_EQ_TOL_PT = 72.0 / float(RASTER_OPENING_PRIMITIVE_RENDER_DPI)
 GAP_CORROBORATED_DOOR_JAMB_LEAF = "gap_corroborated_door_jamb_leaf"
 GAP_CORROBORATED_WINDOW_JAMB_PAIR = "gap_corroborated_window_jamb_pair"
 WALL_FACE_INTERRUPTION_KIND = "wall_face_interruption"
@@ -555,11 +557,15 @@ def _raster_frame_run_relation(
         return None
 
     if (
-        abs(run_offset - low) <= _COORD_EQ_ABS_TOL
-        or abs(run_offset - high) <= _COORD_EQ_ABS_TOL
+        abs(run_offset - low) <= RASTER_GEOMETRY_EQ_TOL_PT
+        or abs(run_offset - high) <= RASTER_GEOMETRY_EQ_TOL_PT
     ):
         return "face"
-    if low + _COORD_EQ_ABS_TOL < run_offset < high - _COORD_EQ_ABS_TOL:
+    if (
+        low + RASTER_GEOMETRY_EQ_TOL_PT
+        < run_offset
+        < high - RASTER_GEOMETRY_EQ_TOL_PT
+    ):
         return "inner"
     return None
 
@@ -955,7 +961,7 @@ class PhysicalOpeningAuthority:
                 breaks.append(found)
 
         discovered: dict[
-            tuple[object, ...], tuple[SourceObservationRecord, ...]
+            str, dict[str, SourceObservationRecord]
         ] = {}
         for index, first_break in enumerate(breaks):
             for second_break in breaks[index + 1:]:
@@ -1046,18 +1052,6 @@ class PhysicalOpeningAuthority:
                         aperture = _raster_candidate_aperture_geometry(support)
                         if len(aperture) != 4:
                             continue
-                        support_ids = tuple(
-                            sorted(item.observation_id for item in support)
-                        )
-                        root_ids = tuple(
-                            sorted(
-                                {
-                                    parent
-                                    for item in support
-                                    for parent in item.derivation_parent_ids
-                                }
-                            )
-                        )
                         payload = {
                             "document_id": seed.document_id,
                             "revision_id": seed.revision_id,
@@ -1066,42 +1060,37 @@ class PhysicalOpeningAuthority:
                             "structural_pattern": RASTER_FRAMED_WALL_BAND_INTERRUPTION,
                             "aperture_geometry": aperture,
                         }
-                        candidate = CandidateSemanticOpening(
-                            candidate_id=stable_contract_id(
-                                "physical_opening_candidate",
-                                payload,
-                                digest_chars=32,
-                            ),
-                            source_observation_ids=support_ids,
-                            source_lineage_root_ids=root_ids,
-                            document_id=seed.document_id,
-                            revision_id=seed.revision_id,
-                            source_sha256=seed.source_sha256,
-                            snapshot_id=seed.snapshot_id,
-                            page_id=seed.page_id,
-                            viewport_id=None,
-                            structural_pattern=RASTER_FRAMED_WALL_BAND_INTERRUPTION,
-                            status=EvidenceResolutionStatus.CANDIDATE,
-                            reason_codes=(
-                                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
-                                VISIBLE_WALL_CONTINUATION_REQUIRED,
-                            ),
+                        candidate_id = stable_contract_id(
+                            "physical_opening_candidate",
+                            payload,
+                            digest_chars=32,
                         )
-                        discovered[(candidate.candidate_id, support_ids)] = support
+                        evidence = discovered.setdefault(candidate_id, {})
+                        for item in support:
+                            evidence[item.observation_id] = item
 
-        candidates = tuple(
-            CandidateSemanticOpening(
-                candidate_id=key[0],
-                source_observation_ids=key[1],
-                source_lineage_root_ids=tuple(
-                    sorted(
-                        {
-                            parent
-                            for item in support
-                            for parent in item.derivation_parent_ids
-                        }
-                    )
-                ),
+        candidates: list[CandidateSemanticOpening] = []
+        for candidate_id in sorted(discovered):
+            support = tuple(
+                discovered[candidate_id][observation_id]
+                for observation_id in sorted(discovered[candidate_id])
+            )
+            source_observation_ids = tuple(
+                item.observation_id for item in support
+            )
+            source_lineage_root_ids = tuple(
+                sorted(
+                    {
+                        parent
+                        for item in support
+                        for parent in item.derivation_parent_ids
+                    }
+                )
+            )
+            candidates.append(CandidateSemanticOpening(
+                candidate_id=candidate_id,
+                source_observation_ids=source_observation_ids,
+                source_lineage_root_ids=source_lineage_root_ids,
                 document_id=seed.document_id,
                 revision_id=seed.revision_id,
                 source_sha256=seed.source_sha256,
@@ -1114,9 +1103,8 @@ class PhysicalOpeningAuthority:
                     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
                     VISIBLE_WALL_CONTINUATION_REQUIRED,
                 ),
-            )
-            for key, support in sorted(discovered.items(), key=lambda row: repr(row[0]))
-        )
+            ))
+        candidates = tuple(candidates)
         self._raster_framed_candidate_cache[cache_key] = candidates
         return candidates
 
