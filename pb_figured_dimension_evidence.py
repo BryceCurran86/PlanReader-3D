@@ -104,6 +104,8 @@ class ObservedGeometrySegment:
     coordinate_space: str = CoordinateSpace.PDF_POINTS.value
     view_id: str = ""
     source_path_index: Optional[int] = None
+    stroke_width_pt: Optional[float] = None
+    stroke_color_rgb: Optional[tuple[float, float, float]] = None
 
     @property
     def dx(self) -> float:
@@ -363,6 +365,44 @@ def _native_words(page: Any) -> tuple:
     return words
 
 
+def _native_word_orientations(page: Any) -> dict[tuple[int, int], str]:
+    """Return exact native text-line orientations keyed by word block/line.
+
+    PyMuPDF word tuples carry block/line indices while the native text dict
+    carries the corresponding source text direction. This is stronger than
+    inferring orientation from an axis-aligned bbox, especially on rotated
+    architectural sheets.
+    """
+    cache = _page_native_parse_cache(page)
+    if isinstance(cache, dict) and "word_orientations" in cache:
+        return cache["word_orientations"]
+    out: dict[tuple[int, int], str] = {}
+    try:
+        data = page.get_text("dict") or {}
+    except Exception:
+        data = {}
+    for block_index, block in enumerate(data.get("blocks", []) or []):
+        if int(block.get("type", 0)) != 0:
+            continue
+        for line_index, line in enumerate(block.get("lines", []) or []):
+            direction = line.get("dir")
+            if not isinstance(direction, (tuple, list)) or len(direction) < 2:
+                continue
+            try:
+                dx, dy = float(direction[0]), float(direction[1])
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(dx) or not math.isfinite(dy):
+                continue
+            if abs(dx) >= abs(dy) * 4.0:
+                out[(block_index, line_index)] = DimensionOrientation.HORIZONTAL.value
+            elif abs(dy) >= abs(dx) * 4.0:
+                out[(block_index, line_index)] = DimensionOrientation.VERTICAL.value
+    if isinstance(cache, dict):
+        cache["word_orientations"] = out
+    return out
+
+
 def _native_drawings(page: Any) -> tuple:
     cache = _page_native_parse_cache(page)
     if isinstance(cache, dict) and "drawings" in cache:
@@ -438,6 +478,17 @@ def extract_vector_segments(
                         end=end,
                         view_id=view_id,
                         source_path_index=path_index,
+                        stroke_width_pt=(
+                            float(path.get("width"))
+                            if path.get("width") is not None
+                            else None
+                        ),
+                        stroke_color_rgb=(
+                            tuple(float(value) for value in path.get("color")[:3])
+                            if isinstance(path.get("color"), (tuple, list))
+                            and len(path.get("color")) >= 3
+                            else None
+                        ),
                     )
                 )
             elif kind == "re" and len(item) >= 2:
@@ -458,6 +509,17 @@ def extract_vector_segments(
                                 end=end,
                                 view_id=view_id,
                                 source_path_index=path_index,
+                                stroke_width_pt=(
+                                    float(path.get("width"))
+                                    if path.get("width") is not None
+                                    else None
+                                ),
+                                stroke_color_rgb=(
+                                    tuple(float(value) for value in path.get("color")[:3])
+                                    if isinstance(path.get("color"), (tuple, list))
+                                    and len(path.get("color")) >= 3
+                                    else None
+                                ),
                             )
                         )
     return segments
@@ -582,10 +644,65 @@ def _merge_text_split_line_fragments(
     )
 
 
+def _segment_source_luminance(
+    segment: ObservedGeometrySegment,
+) -> Optional[float]:
+    color = segment.stroke_color_rgb
+    if color is None or len(color) != 3:
+        return None
+    if not all(math.isfinite(float(value)) for value in color):
+        return None
+    return (float(color[0]) + float(color[1]) + float(color[2])) / 3.0
+
+
+def _strict_style_dominator(
+    candidates: Sequence[ObservedGeometrySegment],
+) -> Optional[ObservedGeometrySegment]:
+    """Return one strict darker+thicker source-graphic-state winner.
+
+    This is deliberately a tie-breaker, never a primary dimension detector.
+    Equal, missing, or mixed source style remains ambiguous.
+    """
+    if len(candidates) < 2:
+        return candidates[0] if candidates else None
+    winners: list[ObservedGeometrySegment] = []
+    for candidate in candidates:
+        width = candidate.stroke_width_pt
+        luminance = _segment_source_luminance(candidate)
+        if (
+            width is None
+            or not math.isfinite(float(width))
+            or float(width) <= 0.0
+            or luminance is None
+        ):
+            continue
+        dominates = True
+        for other in candidates:
+            if other is candidate:
+                continue
+            other_width = other.stroke_width_pt
+            other_luminance = _segment_source_luminance(other)
+            if (
+                other_width is None
+                or not math.isfinite(float(other_width))
+                or float(other_width) <= 0.0
+                or other_luminance is None
+                or not (float(width) > float(other_width) + 1e-9)
+                or not (luminance < other_luminance - 1e-9)
+            ):
+                dominates = False
+                break
+        if dominates:
+            winners.append(candidate)
+    return winners[0] if len(winners) == 1 else None
+
+
 def bind_observation_to_vector_geometry(
     observation: DimensionObservation,
     segments: Sequence[ObservedGeometrySegment],
     calibration: DimensionLayoutCalibration,
+    *,
+    text_orientation_hint: Optional[str] = None,
 ) -> DimensionAnchorBinding:
     """Bind one figured dimension to a unique nearby dimension/witness-line system."""
     if observation.bbox is None:
@@ -606,35 +723,76 @@ def bind_observation_to_vector_geometry(
     if not candidates:
         return DimensionAnchorBinding(observation.dimension_id, BindingStatus.UNSUPPORTED.value, notes=["no nearby axis-aligned vector dimension line"])
 
+    tie_tolerance = calibration.median_word_height_pt * 0.25
+    if text_orientation_hint in (
+        DimensionOrientation.HORIZONTAL.value,
+        DimensionOrientation.VERTICAL.value,
+    ):
+        hinted = [
+            candidate
+            for candidate in candidates
+            if candidate.orientation == text_orientation_hint
+        ]
+        if len(hinted) >= 2:
+            hinted.sort(key=lambda s: (_axis_distance(center, s), -s.length, s.segment_id))
+            hinted_best = _axis_distance(center, hinted[0])
+            hinted_tied = [
+                candidate
+                for candidate in hinted
+                if abs(_axis_distance(center, candidate) - hinted_best) <= tie_tolerance
+            ]
+            # Native text direction is a tie-break hint only. It may narrow the
+            # universe when same-orientation source geometry is itself ambiguous
+            # and source graphic state independently proves one strict winner.
+            # It must never create a binding by suppressing one perpendicular
+            # nearby primitive.
+            if (
+                len(hinted_tied) >= 2
+                and _strict_style_dominator(hinted_tied) is not None
+            ):
+                candidates = hinted
+
     candidates.sort(key=lambda s: (_axis_distance(center, s), -s.length, s.segment_id))
     best = candidates[0]
     if len(candidates) > 1:
         d0 = _axis_distance(center, candidates[0])
-        d1 = _axis_distance(center, candidates[1])
-        # If two different line candidates are spatially indistinguishable at
-        # the page's own text-height resolution, do not choose by arbitrary ID.
-        if abs(d1 - d0) <= calibration.median_word_height_pt * 0.25:
-            # Before declaring ambiguity: a dimension line is frequently
-            # exported as two collinear vector fragments split by the
-            # observation's own figured-dimension text sitting on top of it
-            # (the line is drawn up to the text bbox on each side). That is
-            # one logical line, not two competing ones -- merge it narrowly
-            # (same orientation, same axis coordinate, gap bracketing this
-            # observation's own text only) and keep using it as `best`.
-            merged = _merge_text_split_line_fragments(
-                observation.bbox,
-                candidates[0],
-                candidates[1],
-                axis_tolerance=calibration.chain_axis_tolerance_pt,
-                text_margin=calibration.median_word_height_pt,
-            )
-            if merged is None:
-                return DimensionAnchorBinding(
-                    observation.dimension_id,
-                    BindingStatus.AMBIGUOUS.value,
-                    notes=[f"multiple equally plausible dimension lines: {candidates[0].segment_id}, {candidates[1].segment_id}"],
+        tied = [
+            candidate
+            for candidate in candidates
+            if abs(_axis_distance(center, candidate) - d0) <= tie_tolerance
+        ]
+        if len(tied) > 1:
+            # A dimension line is frequently exported as two collinear vector
+            # fragments split by its own text. Preserve that exact special case.
+            merged = (
+                _merge_text_split_line_fragments(
+                    observation.bbox,
+                    tied[0],
+                    tied[1],
+                    axis_tolerance=calibration.chain_axis_tolerance_pt,
+                    text_margin=calibration.median_word_height_pt,
                 )
-            best = merged
+                if len(tied) == 2
+                else None
+            )
+            if merged is not None:
+                best = merged
+            else:
+                # Native graphic state may prove that one near-tied line is a
+                # foreground drafting primitive while every competitor is both
+                # lighter and thinner. This is only a strict tie-break; absent
+                # unanimous dominance, preserve the historical abstention.
+                style_winner = _strict_style_dominator(tied)
+                if style_winner is None:
+                    return DimensionAnchorBinding(
+                        observation.dimension_id,
+                        BindingStatus.AMBIGUOUS.value,
+                        notes=[
+                            "multiple equally plausible dimension lines: "
+                            + ", ".join(item.segment_id for item in tied)
+                        ],
+                    )
+                best = style_winner
 
     witness_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
     for segment in same_scope:
@@ -1005,10 +1163,34 @@ def extract_dimension_evidence_bundle(
         view_id=view_id,
         view_type=view_type,
     )
+    native_words = list(_native_words(page))
+    word_orientations = _native_word_orientations(page)
+    orientation_hints: dict[str, str] = {}
+    prefix = f"native_dim_p{page_num}_"
+    for observation in native:
+        if not observation.dimension_id.startswith(prefix):
+            continue
+        try:
+            word_index = int(observation.dimension_id[len(prefix):])
+            word = native_words[word_index]
+            hint = word_orientations.get((int(word[5]), int(word[6])))
+        except (IndexError, TypeError, ValueError):
+            hint = None
+        if hint in (
+            DimensionOrientation.HORIZONTAL.value,
+            DimensionOrientation.VERTICAL.value,
+        ):
+            orientation_hints[observation.dimension_id] = hint
+
     bindings: list[DimensionAnchorBinding] = []
     bound_native: list[DimensionObservation] = []
     for observation in native:
-        binding = bind_observation_to_vector_geometry(observation, segments, layout)
+        binding = bind_observation_to_vector_geometry(
+            observation,
+            segments,
+            layout,
+            text_orientation_hint=orientation_hints.get(observation.dimension_id),
+        )
         bindings.append(binding)
         bound_native.append(apply_anchor_binding(observation, binding))
 
