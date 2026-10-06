@@ -1,0 +1,114 @@
+name: TEST GPT2 Maryborough Composite Room Production
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Validate composite-room production chain
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-composite-room
+          git rev-parse HEAD > artifacts/gpt2-maryborough-composite-room/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-composite-room/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-maryborough-composite-room/result.json
+          import json
+          from pathlib import Path
+
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          claim = collect_live_physical_net_wall_claim(
+              source,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+
+          def norm(value):
+              return " ".join(str(value or "").strip().upper().split())
+
+          rooms = [
+              {
+                  "canonical_room_id": room.canonical_room_id,
+                  "label": norm(room.room_label),
+                  "decision_scope_id": room.decision_scope_id,
+                  "source_room_face_record_id": room.source_room_face_record_id,
+                  "area_page_pts2": room.area_page_pts2,
+                  "evidence_ids": list(room.evidence_ids),
+              }
+              for room in claim.canonical_rooms
+              if norm(room.room_label)
+          ]
+          labels = sorted({row["label"] for row in rooms})
+
+          firm = [
+              {
+                  "label": norm(dict(q.metadata or {}).get("room_label")),
+                  "value": float(q.value),
+                  "unit": q.unit,
+                  "authority": q.authority,
+                  "quantity_id": q.quantity_id,
+              }
+              for q in claim.room_area_quantity_evidence
+              if not q.abstained
+          ]
+          firm_by_label = {}
+          for row in firm:
+              firm_by_label.setdefault(row["label"], []).append(row)
+
+          required_present = {"POS COUNTER", "FOOD SERVICE", "FOOD PREP", "COLD ROOM"}
+          forbidden_labels = {"DRY STORE", "WASH UP", "TRUCK DRIVER LOUNGE"}
+          missing = sorted(required_present - set(labels))
+          forbidden_present = sorted(forbidden_labels & set(labels))
+
+          assert not missing, f"required labels missing: {missing}"
+          assert not forbidden_present, f"fail-closed labels unexpectedly published: {forbidden_present}"
+
+          assert len(firm_by_label.get("FOOD PREP", ())) == 1
+          assert abs(firm_by_label["FOOD PREP"][0]["value"] - 13.270425) < 1e-9
+          assert len(firm_by_label.get("COLD ROOM", ())) == 1
+          assert abs(firm_by_label["COLD ROOM"][0]["value"] - 25.37875) < 1e-9
+
+          for label in ("POS COUNTER", "FOOD SERVICE", "FREEZER", "DRY STORE", "WASH UP", "TRUCK DRIVER LOUNGE"):
+              assert label not in firm_by_label, f"{label} must not gain manufactured firm area"
+
+          composite = [
+              row for row in rooms
+              if row["label"] in {"POS COUNTER", "FOOD SERVICE"}
+          ]
+          assert len(composite) == 2
+          assert all(
+              str(row["source_room_face_record_id"]).startswith("composite_source_room_face_record_")
+              for row in composite
+          )
+
+          print(json.dumps({
+              "status": getattr(claim.status, "value", str(claim.status)),
+              "reason_codes": list(claim.reason_codes),
+              "canonical_room_count": len(claim.canonical_rooms),
+              "canonical_floor_count": len(claim.canonical_floors),
+              "labels": labels,
+              "composite_rooms": composite,
+              "firm_room_areas": firm,
+          }, indent=2, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-composite-room
+          path: artifacts/gpt2-maryborough-composite-room
+          retention-days: 1
