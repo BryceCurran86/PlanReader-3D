@@ -1,0 +1,147 @@
+name: DIAG GPT2 Maryborough AMB Support Authority
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace M-AMB and F-AMB support authority
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-amb-support-authority
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from collections import defaultdict
+          from pathlib import Path
+          import fitz
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_raster_text_corroboration_authority import (
+              RasterTextCorroborationProducer,
+              RasterTextCorroborationSelector,
+          )
+          from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          PAGE_IDS=("27","28")
+          TARGETS={"M-AMB","F-AMB"}
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          doc=fitz.open(SOURCE)
+          try:
+              scope=source_floor_plan_topology_scope(SOURCE,tuple(range(doc.page_count)))
+              decisions={d.page_index:d for d in scope.decisions}
+              page_meta={
+                  str(page_no):{
+                      "title":decisions[page_no-1].title,
+                      "classification":decisions[page_no-1].classification,
+                      "view_types":list(decisions[page_no-1].view_types),
+                      "is_topology_page":(page_no-1) in set(scope.topology_page_indices() or ()),
+                      "is_evidence_page":(page_no-1) in set(scope.evidence_page_indices),
+                  }
+                  for page_no in (27,28)
+              }
+          finally:
+              doc.close()
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-amb-support-authority",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-amb-support-authority",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=PAGE_IDS,
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          text_auth=source.text_integrity_authority()
+          raster=RasterTextCorroborationProducer.from_source_visibility_producer(source)
+
+          rows={page_id:{target:[] for target in TARGETS} for page_id in PAGE_IDS}
+          for oid in current.text_observation_ids:
+              selector=ObservationSelector(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  observation_id=oid,
+              )
+              result=text_auth.resolve_text(selector)
+              receipt=result.receipt
+              if receipt is None or str(receipt.page_id) not in PAGE_IDS:
+                  continue
+              raw=norm(receipt.raw_text)
+              if raw not in TARGETS:
+                  continue
+              rr=raster.publish(RasterTextCorroborationSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  observation_id=selector.observation_id,
+              ))
+              rows[str(receipt.page_id)][raw].append({
+                  "observation_id":oid,
+                  "raw_text":receipt.raw_text,
+                  "geometry":list(receipt.geometry),
+                  "native_status":getattr(result.status,"value",str(result.status)),
+                  "native_reason_codes":list(result.reason_codes),
+                  "native_trusted_text":result.trusted_text,
+                  "raster_status":getattr(rr.status,"value",str(rr.status)),
+                  "raster_reason_codes":list(rr.reason_codes),
+                  "raster_text":rr.corroborated_text,
+                  "raster_record_id":None if rr.record is None else rr.record.record_id,
+              })
+
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=PAGE_IDS
+          )
+          wall_auth=wall_producer.authority()
+          floor_selectors={}
+          for page_id in PAGE_IDS:
+              selectors=wall_auth.selectors_for_authenticated_viewports(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  page_id=page_id,
+                  view_type=DrawingViewType.FLOOR_PLAN.value,
+              )
+              floor_selectors[page_id]=[
+                  {
+                      "decision_scope_id":s.decision_scope_id,
+                      "page_id":s.page_id,
+                  }
+                  for s in selectors
+              ]
+
+          print(json.dumps({
+              "page_meta":page_meta,
+              "label_authority":rows,
+              "authenticated_floor_plan_selectors":floor_selectors,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-amb-support-authority
+          path: artifacts/gpt2-amb-support-authority
+          retention-days: 2
