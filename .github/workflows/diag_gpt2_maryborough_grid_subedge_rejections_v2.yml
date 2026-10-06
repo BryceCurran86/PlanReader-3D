@@ -29,7 +29,10 @@ jobs:
 
           from pb_drawing_evidence_binding import DrawingViewType
           from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
-          from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+          )
           from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
           from pb_source_room_label_authority import SourceRoomLabelProducer, SourceRoomLabelSelector
           from pb_source_visibility_authority import SourceVisibilityProducer
@@ -58,15 +61,19 @@ jobs:
               evidence_page_ids=(),
           )
           current=source.published_snapshot_for_revision(published.revision.revision_id)
-          selector=PhysicalWallCandidateSelector(
+          wall_auth=live.physical_wall_candidate_authority
+          viewport_selectors=wall_auth.selectors_for_authenticated_viewports(
               document_id=current.revision.document_id,
               revision_id=current.revision.revision_id,
               source_sha256=current.revision.source_sha256,
               snapshot_id=current.snapshot.snapshot_id,
               page_id="7",
-              decision_scope_id="wall-source:page-7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
           )
-          wall_auth=live.physical_wall_candidate_authority
+          assert len(viewport_selectors)==1, [
+              s.decision_scope_id for s in viewport_selectors
+          ]
+          selector=viewport_selectors[0]
           wall_scope=wall_auth.resolve_scope(selector)
           room_auth=build_source_room_face_authority(wall_auth)
           room_selector=SourceRoomFaceSelector(
