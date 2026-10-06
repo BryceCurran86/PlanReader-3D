@@ -11,7 +11,9 @@ from pb_live_ceiling_lining_integration import (
     LiveCanonicalCeilingSurfaceObject,
     LiveCeilingLiningResult,
 )
+from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_takeoff_coverage_audit_adapter import build_runtime_coverage_publication
 
 
 SOURCE_SHA = "a" * 64
@@ -161,3 +163,33 @@ def test_quantity_identity_is_deterministic() -> None:
     assert len(first) == len(second) == 1
     assert first[0].to_dict() == second[0].to_dict()
     assert first[0].quantity_id == second[0].quantity_id
+
+
+def test_canonical_ceiling_reaches_quantified_without_customer_row() -> None:
+    result = _result()
+    quantities = publish_live_ceiling_area_quantities(result)
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=result.canonical_ceilings,
+        quantities=quantities,
+        output_rows=(),
+        registry_run_scope="canonical-ceiling-quantity",
+    )
+
+    assert gaps == {}
+    assert len(summaries) == 1
+    record = summaries[0].object_records[0]
+    assert record.object_id == "canonical-ceiling-1"
+    assert record.quantity_ids == (quantities[0].quantity_id,)
+
+    report = build_runtime_coverage_publication(
+        summaries,
+        family_gaps=gaps,
+    )
+    family = report["family_reports"]["ceiling"]
+    assert family["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 1,
+        "PUBLISHED": 0,
+    }
