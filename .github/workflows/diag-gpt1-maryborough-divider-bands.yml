@@ -1,0 +1,121 @@
+name: DIAG GPT1 Maryborough Divider Bands
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect repeated gray divider coordinate bands
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, math
+          from collections import Counter, defaultdict
+          from pathlib import Path
+          import fitz
+          from pb_vector_geometry_v130 import extract_native_page
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(path)
+          try:
+              page=doc[6]
+              native=extract_native_page(page)
+          finally:
+              doc.close()
+
+          segments=[dict(row) for row in (native.get("segments") or ())]
+          path_counts=Counter(row.get("path_index") for row in segments)
+
+          def gray_style(row):
+              if str(row.get("kind") or "")!="line": return False
+              if path_counts.get(row.get("path_index"),0)!=1: return False
+              if bool(row.get("fill_present",False)): return False
+              if not bool(row.get("stroke_present",False)): return False
+              try:
+                  width=float(row.get("width"))
+              except Exception:
+                  return False
+              if abs(width-0.24)>0.03: return False
+              stroke=row.get("stroke")
+              if not isinstance(stroke,(tuple,list)) or len(stroke)<3: return False
+              vals=[float(stroke[i]) for i in range(3)]
+              return max(vals)-min(vals)<=0.03 and 0.45<=sum(vals)/3<=0.55
+
+          rows=[]
+          for row in segments:
+              if not gray_style(row): continue
+              x1,y1,x2,y2=[float(row[k]) for k in ("x1","y1","x2","y2")]
+              dx,dy=x2-x1,y2-y1
+              length=math.hypot(dx,dy)
+              if length<20: continue
+              if abs(dy)<=0.2:
+                  rows.append(("H",(y1+y2)/2,min(x1,x2),max(x1,x2),length,row.get("id")))
+              elif abs(dx)<=0.2:
+                  rows.append(("V",(x1+x2)/2,min(y1,y2),max(y1,y2),length,row.get("id")))
+
+          out={}
+          for axis in ("H","V"):
+              arr=[r for r in rows if r[0]==axis]
+              coords=sorted({round(r[1],2) for r in arr})
+              diffs=[round(b-a,2) for a,b in zip(coords,coords[1:]) if b-a>0.5]
+              hist=Counter(round(d,1) for d in diffs)
+              top=hist.most_common(20)
+
+              # For the most common positive spacing, find runs of >=5 coordinates.
+              runs=[]
+              if top:
+                  spacing=top[0][0]
+                  tol=max(0.75,spacing*0.03)
+                  current=[coords[0]] if coords else []
+                  for c in coords[1:]:
+                      if current and abs((c-current[-1])-spacing)<=tol:
+                          current.append(c)
+                      else:
+                          if len(current)>=5: runs.append(current)
+                          current=[c]
+                  if len(current)>=5: runs.append(current)
+              else:
+                  spacing=None
+
+              by_coord=defaultdict(list)
+              for row in arr: by_coord[round(row[1],2)].append(row)
+              run_payload=[]
+              for run in runs[:30]:
+                  members=[]
+                  for coord in run:
+                      segs=by_coord[coord]
+                      members.append({
+                          "coord":coord,
+                          "segment_count":len(segs),
+                          "max_length":round(max(s[4] for s in segs),2),
+                          "total_length":round(sum(s[4] for s in segs),2),
+                          "ids":[s[5] for s in segs[:8]],
+                      })
+                  run_payload.append(members)
+
+              out[axis]={
+                  "line_count":len(arr),
+                  "unique_coordinate_count":len(coords),
+                  "top_spacing_histogram":top,
+                  "dominant_spacing":spacing,
+                  "regular_runs":run_payload,
+              }
+
+          print(json.dumps({
+              "source_sha256":__import__("hashlib").sha256(path.read_bytes()).hexdigest(),
+              "gray_long_orthogonal_line_count":len(rows),
+              "axes":out,
+          },indent=2,sort_keys=True))
+          PY
