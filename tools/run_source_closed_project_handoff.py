@@ -37,9 +37,6 @@ from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
 )
 from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
-from pb_live_floor_finish_area_source_closed_export import (
-    seal_live_floor_finish_area_run,
-)
 from pb_migration_contracts import QuantityEvidence
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
@@ -173,18 +170,16 @@ def generate_project_handoff(
     )
 
     if topology_restricted:
-        source_owned_execution_pages = tuple(
-            sorted(set(topology_pages) | set(room_area_support_pages))
-        )
+        # Match the customer runtime contract: every selected source page
+        # remains available as evidence, while only positively classified
+        # floor-plan pages may participate in topology. Room-area measurement
+        # remains narrower still and receives only explicitly approved support
+        # plans. This lets schedules/legends/elevations corroborate semantics
+        # without allowing them to mint wall/room/opening topology.
+        execution_pages = all_pages
         if clean_family_group == "core":
-            execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
         else:
-            execution_pages = (
-                source_owned_execution_pages
-                if source_owned_execution_pages
-                else tuple(topology_pages)
-            )
             execution_room_support_pages = (
                 room_area_support_pages
                 if room_area_support_pages
@@ -274,27 +269,6 @@ def generate_project_handoff(
             (
                 "floor_area",
                 seal_live_floor_area_run(
-                    claim,
-                    workspace_id=int(workspace_id),
-                    project_id=project_id,
-                ),
-            )
-        )
-
-    if clean_family_group in {"all", "surfaces"}:
-        floor_finish_quantities = _non_abstained(
-            getattr(claim, "floor_finish_quantity_evidence", ())
-        )
-    else:
-        floor_finish_quantities = ()
-    summary["family_counts"]["floor_finish_area"] = len(
-        floor_finish_quantities
-    )
-    if floor_finish_quantities:
-        family_runs.append(
-            (
-                "floor_finish_area",
-                seal_live_floor_finish_area_run(
                     claim,
                     workspace_id=int(workspace_id),
                     project_id=project_id,
