@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_observation_authority import ObservationSelector
 from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
 from pb_source_room_label_authority import (
@@ -110,6 +112,98 @@ def main():
             "face_matches":matches,
         })
 
+    viewport_scopes=[]
+    viewport_wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+        source,page_ids=(PAGE_ID,)
+    )
+    viewport_wall_auth=viewport_wall_producer.authority()
+    viewport_current=source.published_snapshot_for_revision(published.revision.revision_id)
+    if viewport_current is not None:
+        selectors=viewport_wall_auth.selectors_for_authenticated_viewports(
+            document_id=viewport_current.revision.document_id,
+            revision_id=viewport_current.revision.revision_id,
+            source_sha256=viewport_current.revision.source_sha256,
+            snapshot_id=viewport_current.snapshot.snapshot_id,
+            page_id=PAGE_ID,
+            view_type=DrawingViewType.FLOOR_PLAN.value,
+        )
+        viewport_room_auth=build_source_room_face_authority(viewport_wall_auth)
+        try:
+            viewport_label_auth=SourceRoomLabelProducer.from_authorities(
+                source,viewport_room_auth,page_ids=(PAGE_ID,)
+            ).authority()
+        except Exception:
+            viewport_label_auth=None
+        for selector in selectors:
+            vroom=viewport_room_auth.resolve_scope(SourceRoomFaceSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+            ))
+            vlabel=None
+            if viewport_label_auth is not None:
+                vlabel=viewport_label_auth.resolve_scope(SourceRoomLabelSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    page_id=selector.page_id,
+                    decision_scope_id=selector.decision_scope_id,
+                ))
+            vtargets=[]
+            for row in target_rows:
+                if row["center"] is None:
+                    continue
+                point=tuple(row["center"])
+                matches=[
+                    {
+                        "face_id":str(record.face_id),
+                        "record_id":str(record.record_id),
+                        "area_page_pts2":float(record.area_page_pts2),
+                    }
+                    for record in vroom.records
+                    if _point_in_polygon(point,record.polygon_pdf_pts)
+                ]
+                vtargets.append({
+                    "raw_text":row["raw_text"],
+                    "trusted_text":row["trusted_text"],
+                    "text_status":row["status"],
+                    "text_reason_codes":row["reason_codes"],
+                    "face_match_count":len(matches),
+                    "face_matches":matches,
+                })
+            viewport_scopes.append({
+                "decision_scope_id":selector.decision_scope_id,
+                "room_status":getattr(vroom.status,"value",str(vroom.status)),
+                "room_reason_codes":list(vroom.reason_codes),
+                "room_face_count":len(vroom.records),
+                "room_face_universe_complete":bool(vroom.face_universe_complete),
+                "label_status":None if vlabel is None else getattr(vlabel.status,"value",str(vlabel.status)),
+                "label_reason_codes":[] if vlabel is None else list(vlabel.reason_codes),
+                "published_targets":[] if vlabel is None else [
+                    {
+                        "label":record.label,
+                        "face_id":record.face_id,
+                        "source_room_face_record_id":record.source_room_face_record_id,
+                    }
+                    for record in vlabel.records
+                    if norm(record.label) in TARGETS
+                ],
+                "split_targets":[] if vlabel is None else [
+                    {
+                        "label":candidate.label,
+                        "word_face_ids":list(candidate.word_face_ids),
+                        "source_room_face_record_ids":list(candidate.source_room_face_record_ids),
+                    }
+                    for candidate in vlabel.split_face_candidates
+                    if norm(candidate.label) in TARGETS
+                ],
+                "target_rows":vtargets,
+            })
+
     print(json.dumps({
         "source_sha256":sha,
         "wall_scope_status":getattr(wall_scope.status,"value",str(wall_scope.status)),
@@ -141,6 +235,8 @@ def main():
             if norm(candidate.label) in TARGETS
         ],
         "target_rows":target_rows,
+        "viewport_scope_count":len(viewport_scopes),
+        "viewport_scopes":viewport_scopes,
     },indent=2,sort_keys=True))
     return 0
 
