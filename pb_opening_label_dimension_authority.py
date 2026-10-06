@@ -1001,6 +1001,15 @@ class OpeningLabelDimensionProducer:
             == opening.record_id
             else None
         )
+        authenticated_label_source_ids = {
+            str(value)
+            for value in (
+                getattr(semantic_evidence, "source_text_observation_ids", ())
+                if authenticated_label_kind is not None
+                else ()
+            )
+            if str(value)
+        }
         if semantic_result.status is EvidenceResolutionStatus.CONFLICT:
             return self._store(
                 key,
@@ -1045,13 +1054,21 @@ class OpeningLabelDimensionProducer:
             semantic_kind = (
                 authenticated_kinds[0] if authenticated_kinds else None
             )
+            line_source_ids = {
+                str(value)
+                for value in line.observation_ids
+                if str(value)
+            }
+            semantic_evidence_owns_line = (
+                authenticated_label_kind is not None
+                and bool(authenticated_label_source_ids)
+                and authenticated_label_source_ids.issubset(line_source_ids)
+            )
             owned_values = _resolve_owned_dimension_values_mm(
                 parsed,
                 opening_record_id=opening.record_id,
                 semantic_kind=semantic_kind,
-                authenticated_semantic_evidence=(
-                    authenticated_label_kind is not None
-                ),
+                authenticated_semantic_evidence=semantic_evidence_owns_line,
             )
             if owned_values is None:
                 continue
