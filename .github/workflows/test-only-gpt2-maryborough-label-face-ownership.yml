@@ -1,0 +1,172 @@
+name: TEST ONLY GPT2 Maryborough label face ownership
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  label_face_ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe exact A110 label to room-face ownership
+        run: |
+          mkdir -p artifacts/gpt2-label-face-ownership
+          git rev-parse HEAD > artifacts/gpt2-label-face-ownership/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-label-face-ownership/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt2-label-face-ownership/run.log
+          import json
+          from collections import defaultdict
+          from pathlib import Path
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import _point_in_polygon
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          targets={
+              "SALES","POS COUNTER","FOOD SERVICE","WASH UP",
+              "TRUCK DRIVER LOUNGE","WC & SHOWER","DRY STORE",
+              "M-AMB","F-AMB",
+          }
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-label-face-ownership",
+              producer_version="1.0",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt2-label-face-ownership",
+              source_bytes=path.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          # Build the same authenticated viewport wall/room path used live.
+          compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+          )
+          vp_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,
+              page_ids=("7",),
+          )
+          vp_authority=vp_producer.authority()
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert current is not None
+          selectors=vp_authority.selectors_for_authenticated_viewports(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          assert len(selectors)==1, len(selectors)
+          selector=selectors[0]
+          wall_scope=vp_authority.resolve_scope(selector)
+          room_auth=build_source_room_face_authority(vp_authority)
+          room_scope=room_auth.resolve_scope(SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          ))
+
+          text_auth=source.text_integrity_authority()
+          grouped=defaultdict(list)
+          for oid in current.text_observation_ids:
+              result=text_auth.resolve_text(ObservationSelector(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  observation_id=oid,
+              ))
+              receipt=result.receipt
+              if (
+                  receipt is None or str(receipt.page_id)!="7"
+                  or receipt.block_no is None or receipt.line_no is None
+                  or receipt.word_no is None
+              ):
+                  continue
+              grouped[
+                  (str(receipt.source_partition_id),int(receipt.block_no),int(receipt.line_no))
+              ].append((oid,result,receipt))
+
+          rows=[]
+          for key,items in sorted(grouped.items()):
+              items=sorted(items,key=lambda x:int(x[2].word_no))
+              line=" ".join(str(x[2].raw_text or "").strip() for x in items if str(x[2].raw_text or "").strip())
+              normalized=" ".join(line.upper().split())
+              if normalized not in targets:
+                  continue
+              word_rows=[]
+              common=None
+              valid=True
+              for oid,result,receipt in items:
+                  g=tuple(float(v) for v in receipt.geometry)
+                  center=((g[0]+g[2])/2.0,(g[1]+g[3])/2.0)
+                  matches=[
+                      {
+                          "face_id":r.face_id,
+                          "record_id":r.record_id,
+                          "area_page_pts2":r.area_page_pts2,
+                          "polygon_bbox":[
+                              min(p[0] for p in r.polygon_pdf_pts),
+                              min(p[1] for p in r.polygon_pdf_pts),
+                              max(p[0] for p in r.polygon_pdf_pts),
+                              max(p[1] for p in r.polygon_pdf_pts),
+                          ],
+                      }
+                      for r in room_scope.records
+                      if _point_in_polygon(center,r.polygon_pdf_pts)
+                  ]
+                  ids=[m["face_id"] for m in matches]
+                  if len(ids)!=1:
+                      valid=False
+                  elif common is None:
+                      common=ids[0]
+                  elif common!=ids[0]:
+                      valid=False
+                  word_rows.append({
+                      "raw":str(receipt.raw_text or ""),
+                      "center":center,
+                      "native_status":getattr(result.status,"value",str(result.status)),
+                      "native_reason_codes":list(result.reason_codes),
+                      "face_matches":matches,
+                  })
+              rows.append({
+                  "line":normalized,
+                  "key":key,
+                  "all_words_exactly_one_same_face":bool(valid and common is not None),
+                  "common_face_id":common if valid else None,
+                  "words":word_rows,
+              })
+          print(json.dumps({
+              "source_sha256":current.revision.source_sha256,
+              "room_face_count":len(room_scope.records),
+              "room_scope_status":getattr(room_scope.status,"value",str(room_scope.status)),
+              "rows":rows,
+          },sort_keys=True),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-label-face-ownership
+          path: artifacts/gpt2-label-face-ownership
+          retention-days: 1
