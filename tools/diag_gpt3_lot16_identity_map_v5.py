@@ -186,11 +186,33 @@ def main():
         # published snapshot at the exact immutable opening snapshot so the
         # page-level trusted-text helper sees the same source universe that
         # minted the sealed measurement record.
-        store=getattr(source,"_store",None)
-        if store is None:
-            raise SystemExit("captured source store unavailable")
-        prior_snapshot=store.source_snapshot_by_revision.get(canonical.revision_id)
-        store.source_snapshot_by_revision[canonical.revision_id]=canonical.snapshot_id
+        producer=getattr(source,"_producer",None)
+        store=getattr(producer,"_store",None)
+        published_cache=getattr(source,"_published_by_revision",None)
+        if store is None or published_cache is None:
+            raise SystemExit("captured source internals unavailable")
+        historical_snapshot=store.snapshots.get(canonical.snapshot_id)
+        current_published=published_cache.get(canonical.revision_id)
+        if historical_snapshot is None or current_published is None:
+            raise SystemExit(
+                f"{qid}: canonical source snapshot unavailable: {canonical.snapshot_id}"
+            )
+        # Diagnostic-only immutable snapshot replay. The text observation ids
+        # are source-native and remain stable across derived snapshots; the
+        # snapshot id controls the receipt/integrity lookup used by production.
+        historical_published=type(current_published)(
+            revision=current_published.revision,
+            coverage=current_published.coverage,
+            snapshot=historical_snapshot,
+            base_source_snapshot_id=current_published.base_source_snapshot_id,
+            visible_observation_ids=current_published.visible_observation_ids,
+            text_observation_ids=current_published.text_observation_ids,
+            ocr_tag_observation_ids=current_published.ocr_tag_observation_ids,
+            raster_opening_primitive_observation_ids=(
+                current_published.raster_opening_primitive_observation_ids
+            ),
+        )
+        published_cache[canonical.revision_id]=historical_published
         try:
             scope=SimpleNamespace(
                 document_id=canonical.document_id,
@@ -201,10 +223,7 @@ def main():
             )
             trusted_lines=_trusted_text_lines(source,scope)
         finally:
-            if prior_snapshot is None:
-                store.source_snapshot_by_revision.pop(canonical.revision_id,None)
-            else:
-                store.source_snapshot_by_revision[canonical.revision_id]=prior_snapshot
+            published_cache[canonical.revision_id]=current_published
 
         evidence_matches=[]
         for line in trusted_lines:
