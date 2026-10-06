@@ -1,0 +1,32 @@
+name: DIAG GPT2 Maryborough Ambulant Schedule Rows
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Inspect trusted ambulant schedule rows
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-ambulant-schedule-rows
+          git rev-parse HEAD > artifacts/gpt2-ambulant-schedule-rows/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-ambulant-schedule-rows/source_sha256.txt
+          PYTHONPATH=. python -u tools/diag_maryborough_ambulant_schedule_rows.py \
+            | tee artifacts/gpt2-ambulant-schedule-rows/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-ambulant-schedule-rows
+          path: artifacts/gpt2-ambulant-schedule-rows
+          retention-days: 1
