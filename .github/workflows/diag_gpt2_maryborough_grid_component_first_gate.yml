@@ -1,0 +1,280 @@
+name: DIAG GPT2 Maryborough Grid Component First Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - gpt2/maryborough-grid-component-completion-v1
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace exact composite first gates
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-grid-component-first-gate
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import hashlib,json
+          from collections import Counter
+          from pathlib import Path
+          from shapely.geometry import Polygon
+          from shapely.ops import unary_union
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
+          from pb_source_room_label_authority import SourceRoomLabelProducer, SourceRoomLabelSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_composite_room_face_authority import (
+              _candidate_record,
+              _fully_grid_opposed_wall_evidence,
+              _grid_connected_component,
+              _room_faces_by_wall,
+              compose_grid_separated_room_faces,
+          )
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          EXPECTED="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          PAGE_ID="7"
+          TARGETS={"POS COUNTER","FOOD SERVICE","WASH UP","TRUCK DRIVER LOUNGE","DRY STORE"}
+
+          payload=SOURCE.read_bytes()
+          actual=hashlib.sha256(payload).hexdigest()
+          assert actual==EXPECTED
+          source=SourceVisibilityProducer(
+              producer_method="diag-grid-component-first-gate",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag-maryborough:{actual[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=(PAGE_ID,),
+          )
+          composition=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=(PAGE_ID,),
+          )
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=(PAGE_ID,)
+          )
+          wall_auth=wall_producer.authority()
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert current is not None
+          selectors=wall_auth.selectors_for_authenticated_viewports(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id=PAGE_ID,
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          assert len(selectors)==1, len(selectors)
+          selector=selectors[0]
+          wall_scope=wall_auth.resolve_scope(selector)
+
+          room_auth=build_source_room_face_authority(wall_auth)
+          room_selector=SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          )
+          room_scope=room_auth.resolve_scope(room_selector)
+          label_auth=SourceRoomLabelProducer.from_authorities(
+              source,room_auth,page_ids=(PAGE_ID,)
+          ).authority()
+          label_selector=SourceRoomLabelSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          )
+          label_scope=label_auth.resolve_scope(label_selector)
+
+          fully_grid,evidence_by_wall=_fully_grid_opposed_wall_evidence(wall_scope)
+          faces_by_wall=_room_faces_by_wall(room_scope)
+          room_by_face={str(r.face_id):r for r in room_scope.records}
+          normal_label_by_face={
+              str(r.face_id):str(r.label)
+              for r in label_scope.records
+          }
+          split_by_id={
+              str(r.record_id):r for r in label_scope.split_face_candidates
+          }
+
+          rows={}
+          for candidate in label_scope.split_face_candidates:
+              label=" ".join(str(candidate.label or "").strip().upper().split())
+              if label not in TARGETS:
+                  continue
+              seeds=tuple(str(v) for v in candidate.word_face_ids)
+              component=_grid_connected_component(
+                  seeds,
+                  room_scope=room_scope,
+                  fully_grid_wall_ids=fully_grid,
+              )
+              direct=[]
+              for left_id,right_id in zip(seeds,seeds[1:]):
+                  left=room_by_face.get(left_id)
+                  right=room_by_face.get(right_id)
+                  shared=() if left is None or right is None else tuple(sorted(
+                      set(str(v) for v in left.bounding_wall_ids)
+                      & set(str(v) for v in right.bounding_wall_ids)
+                  ))
+                  direct.append({
+                      "left":left_id,
+                      "right":right_id,
+                      "shared_wall_ids":list(shared),
+                      "shared_wall_grid_flags":{
+                          wall_id:(wall_id in fully_grid) for wall_id in shared
+                      },
+                  })
+
+              component_faces=tuple(component or ())
+              component_set=set(component_faces)
+              normal_conflicts=[
+                  {"face_id":face_id,"label":normal_label_by_face[face_id]}
+                  for face_id in sorted(component_set & set(normal_label_by_face))
+              ]
+              split_conflicts=[]
+              for other_id,other in split_by_id.items():
+                  if other_id==str(candidate.record_id):
+                      continue
+                  overlap=sorted(component_set & {str(v) for v in other.word_face_ids})
+                  if overlap:
+                      split_conflicts.append({
+                          "record_id":other_id,
+                          "label":str(other.label),
+                          "overlap_face_ids":overlap,
+                      })
+
+              union_info=None
+              wall_info=None
+              if component_faces:
+                  polygons=[Polygon(room_by_face[f].polygon_pdf_pts) for f in component_faces]
+                  merged=unary_union(polygons)
+                  counts=Counter(
+                      str(w)
+                      for face_id in component_faces
+                      for w in room_by_face[face_id].bounding_wall_ids
+                  )
+                  separators=sorted(
+                      wall_id for wall_id in fully_grid
+                      if len(faces_by_wall.get(wall_id,()))==2
+                      and set(faces_by_wall[wall_id]).issubset(component_set)
+                  )
+                  external=sorted(set(counts)-set(separators))
+                  union_info={
+                      "geom_type":merged.geom_type,
+                      "valid":bool(merged.is_valid),
+                      "empty":bool(merged.is_empty),
+                      "area":float(merged.area),
+                      "hole_count":(
+                          len(tuple(merged.interiors))
+                          if merged.geom_type=="Polygon" else None
+                      ),
+                  }
+                  wall_info={
+                      "separator_wall_ids":separators,
+                      "external_wall_count":len(external),
+                      "external_grid_wall_ids":[w for w in external if w in fully_grid],
+                      "one_sided_grid_wall_ids":[
+                          w for w in sorted(fully_grid & set(counts))
+                          if len(faces_by_wall.get(w,())) != 2
+                      ],
+                  }
+
+              seed_grid_neighbours={}
+              for seed in seeds:
+                  rec=room_by_face.get(seed)
+                  neigh=[]
+                  if rec is not None:
+                      for wall_id in rec.bounding_wall_ids:
+                          wall_id=str(wall_id)
+                          if wall_id not in fully_grid:
+                              continue
+                          neigh.append({
+                              "wall_id":wall_id,
+                              "owner_face_ids":list(faces_by_wall.get(wall_id,())),
+                          })
+                  seed_grid_neighbours[seed]=neigh
+
+              record=_candidate_record(
+                  candidate,
+                  wall_scope=wall_scope,
+                  room_scope=room_scope,
+                  label_scope=label_scope,
+                  fully_grid_wall_ids=fully_grid,
+                  grid_evidence_by_wall=evidence_by_wall,
+              )
+              rows[label]={
+                  "candidate_record_id":str(candidate.record_id),
+                  "seed_face_ids":list(seeds),
+                  "direct_seed_transitions":direct,
+                  "component_face_ids":list(component_faces),
+                  "component_face_count":len(component_faces),
+                  "normal_label_conflicts":normal_conflicts,
+                  "split_label_conflicts":split_conflicts,
+                  "seed_grid_neighbours":seed_grid_neighbours,
+                  "union":union_info,
+                  "walls":wall_info,
+                  "candidate_record_published":record is not None,
+              }
+
+          composite=compose_grid_separated_room_faces(
+              wall_scope=wall_scope,
+              room_scope=room_scope,
+              label_scope=label_scope,
+          )
+          print(json.dumps({
+              "source_sha256":actual,
+              "wall_scope_status":getattr(wall_scope.status,"value",str(wall_scope.status)),
+              "wall_scope_complete":bool(wall_scope.scope_complete),
+              "room_scope_status":getattr(room_scope.status,"value",str(room_scope.status)),
+              "room_scope_complete":bool(room_scope.scope_complete),
+              "room_face_count":len(room_scope.records),
+              "fully_grid_wall_count":len(fully_grid),
+              "normal_label_count":len(label_scope.records),
+              "split_label_count":len(label_scope.split_face_candidates),
+              "composite_status":getattr(composite.status,"value",str(composite.status)),
+              "composite_reason_codes":list(composite.reason_codes),
+              "published_composites":[
+                  {
+                      "label":r.label,
+                      "constituent_face_ids":list(r.constituent_face_ids),
+                      "separator_wall_ids":list(r.separator_wall_ids),
+                      "bounding_wall_ids":list(r.bounding_wall_ids),
+                      "area_page_pts2":r.area_page_pts2,
+                  }
+                  for r in composite.records
+              ],
+              "targets":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-grid-component-first-gate
+          path: artifacts/gpt2-grid-component-first-gate
+          retention-days: 1
