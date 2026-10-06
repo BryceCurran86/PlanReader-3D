@@ -48,13 +48,14 @@ from pb_physical_wall_identity import (
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import (
     RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+    RASTER_PDF_VISIBLE_SEGMENT,
     RASTER_RENDER_DPI,
     SourceVisibilityAuthority,
 )
 from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 
 
-OPENING_HOST_BINDING_SCHEMA_VERSION = "3.2.0"
+OPENING_HOST_BINDING_SCHEMA_VERSION = "3.3.0"
 OPENING_HOST_UNIVERSE_RESOLVED = "opening_host_wall_universe_resolved"
 OPENING_HOST_BINDING_RESOLVED = "opening_host_binding_resolved"
 OPENING_HOST_BINDING_UNAVAILABLE = "opening_host_binding_unavailable"
@@ -66,6 +67,10 @@ MULTIPLE_RASTER_WHOLE_WALL_HOSTS = "multiple_authenticated_raster_whole_wall_hos
 RASTER_SPLIT_CENTERLINE_HOST_RESOLVED = "raster_split_centerline_host_resolved"
 MULTIPLE_RASTER_SPLIT_CENTERLINE_HOSTS = (
     "multiple_authenticated_raster_split_centerline_hosts"
+)
+RASTER_SOURCE_PRIMITIVE_HOST_RESOLVED = "raster_source_primitive_host_resolved"
+MULTIPLE_RASTER_SOURCE_PRIMITIVE_HOSTS = (
+    "multiple_authenticated_raster_source_primitive_hosts"
 )
 
 _UNIVERSE_PRODUCER_SEAL = object()
@@ -480,6 +485,19 @@ class OpeningHostBindingProducer:
                         geometry,
                         universe.equivalence,
                     )
+                    if (
+                        band_resolution.status
+                        is EvidenceResolutionStatus.CORROBORATED
+                        and not band_resolution.bands
+                    ):
+                        band_resolution = _resolve_raster_source_primitive_host(
+                            self._opening,
+                            opening,
+                            universe.records,
+                            geometry,
+                            universe.equivalence,
+                            universe.source_observation_ids,
+                        )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
                 *band_resolution.reason_codes,
@@ -1585,6 +1603,183 @@ def _resolve_raster_split_centerline_host(
         status=EvidenceResolutionStatus.CORROBORATED,
         bands=resolved,
         reason_codes=(RASTER_SPLIT_CENTERLINE_HOST_RESOLVED,),
+    )
+
+
+def _source_line_axis_data(
+    line: Sequence[float],
+    opening: _OpeningGeometry,
+) -> Optional[tuple[float, float, float]]:
+    unit = _canonical_unit(line)
+    if unit is None or abs(_cross(unit, opening.axis)) > _PARALLEL_TOL:
+        return None
+    points = _endpoints(line)
+    along = tuple(_project(point, opening.origin, opening.axis) for point in points)
+    offsets = tuple(_project(point, opening.origin, opening.normal) for point in points)
+    if max(offsets) - min(offsets) > _RASTER_WHOLE_WALL_CENTER_TOL_PT:
+        return None
+    return (min(along), max(along), sum(offsets) / len(offsets))
+
+
+def _resolve_raster_source_primitive_host_from_lines(
+    records: Sequence[PhysicalWallCandidateRecord],
+    opening: _OpeningGeometry,
+    equivalence: PhysicalWallEquivalenceResolution,
+    source_lines_by_primitive: Mapping[str, Sequence[float]],
+) -> _HostBandResolution:
+    """Recover a W4 host from its own exact straight raster source primitive.
+
+    W4 can legitimately assemble a straight raster wall primitive together
+    with adjacent slightly turning segments. The assembled candidate then
+    ceases to be a straight host representation even though its immutable
+    physical identity still carries the exact producer-owned straight source
+    primitive through the G17 aperture.
+
+    This fallback never uses nearest-wall proximity. A candidate is eligible
+    only when one of its own authenticated raster source primitives:
+    - is parallel to the sealed G17 aperture axis;
+    - spans beyond both aperture edges;
+    - lies on the G17 wall-band center within the existing cross-render
+      pixel-equality allowance; and
+    - belongs to a usable, equivalence-safe W4 physical identity.
+    """
+
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    candidates: list[tuple[float, PhysicalWallCandidateRecord]] = []
+    for record in records:
+        identity = record.physical_identity
+        if not identity.usable or not identity.candidate_identity_id:
+            continue
+        offsets: list[float] = []
+        for primitive_id in identity.source_primitive_ids:
+            line = source_lines_by_primitive.get(str(primitive_id))
+            if line is None:
+                continue
+            data = _source_line_axis_data(line, opening)
+            if data is None:
+                continue
+            along_min, along_max, offset = data
+            if (
+                along_min >= -edge_tol
+                or along_max <= opening.length + edge_tol
+                or abs(offset) > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+            ):
+                continue
+            offsets.append(float(offset))
+        if not offsets:
+            continue
+        if max(offsets) - min(offsets) > _RASTER_WHOLE_WALL_CENTER_TOL_PT:
+            continue
+        candidates.append((sum(offsets) / len(offsets), record))
+
+    if not candidates:
+        return _HostBandResolution(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            bands=(),
+        )
+
+    status, normalized, reasons = _normalize_role_candidates(
+        candidates,
+        equivalence,
+        _RASTER_WHOLE_WALL_CENTER_TOL_PT,
+    )
+    if status is not EvidenceResolutionStatus.CORROBORATED:
+        return _HostBandResolution(status, (), reasons)
+    if len(normalized) != 1:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.CONFLICT,
+            (),
+            (MULTIPLE_RASTER_SOURCE_PRIMITIVE_HOSTS,),
+        )
+
+    role = normalized[0]
+    identity_id = str(
+        role.record.physical_identity.candidate_identity_id or ""
+    ).strip()
+    if not identity_id:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_EQUIVALENCE_UNAVAILABLE,),
+        )
+    return _HostBandResolution(
+        EvidenceResolutionStatus.CORROBORATED,
+        (
+            _HostBand(
+                member_ids=(str(role.record.wall_candidate_id),),
+                member_candidate_identity_ids=(identity_id,),
+                member_equivalence_groups=(tuple(role.candidate_group),),
+                center_offset=float(role.offset),
+            ),
+        ),
+        (RASTER_SOURCE_PRIMITIVE_HOST_RESOLVED,),
+    )
+
+
+def _authenticated_raster_source_lines(
+    authority: PhysicalOpeningAuthority,
+    opening: PhysicalOpeningExistenceRecord,
+    source_observation_ids: Sequence[str],
+) -> dict[str, tuple[float, float, float, float]]:
+    """Return exact producer-authenticated raster lines keyed by raw primitive."""
+
+    visibility = authority.source_visibility_authority()
+    if type(visibility) is not SourceVisibilityAuthority:
+        return {}
+    lines: dict[str, tuple[float, float, float, float]] = {}
+    conflicted: set[str] = set()
+    for observation_id in source_observation_ids:
+        result = visibility.resolve_visible(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=str(observation_id),
+            )
+        )
+        observation = result.observation
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or observation is None
+            or observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
+            or str(observation.page_id) != str(opening.page_id)
+        ):
+            continue
+        primitive_ref = str(observation.source_primitive_ref or "")
+        if not primitive_ref.startswith("visible:"):
+            continue
+        primitive_id = primitive_ref[len("visible:") :]
+        line = _line(observation)
+        if not primitive_id or line is None:
+            continue
+        prior = lines.get(primitive_id)
+        if prior is not None and prior != line:
+            conflicted.add(primitive_id)
+            continue
+        lines[primitive_id] = line
+    for primitive_id in conflicted:
+        lines.pop(primitive_id, None)
+    return lines
+
+
+def _resolve_raster_source_primitive_host(
+    authority: PhysicalOpeningAuthority,
+    opening_record: PhysicalOpeningExistenceRecord,
+    records: Sequence[PhysicalWallCandidateRecord],
+    opening: _OpeningGeometry,
+    equivalence: PhysicalWallEquivalenceResolution,
+    source_observation_ids: Sequence[str],
+) -> _HostBandResolution:
+    return _resolve_raster_source_primitive_host_from_lines(
+        records,
+        opening,
+        equivalence,
+        _authenticated_raster_source_lines(
+            authority,
+            opening_record,
+            source_observation_ids,
+        ),
     )
 
 
