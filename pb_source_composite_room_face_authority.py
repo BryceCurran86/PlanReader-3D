@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Mapping
 
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -149,74 +149,85 @@ def _fully_grid_opposed_wall_evidence(
     return fully, evidence_by_wall
 
 
-def _room_faces_by_wall(
-    room_scope: SourceRoomFaceScopeResult,
-) -> Mapping[str, tuple[str, ...]]:
-    faces_by_wall: dict[str, list[str]] = defaultdict(list)
-    for record in room_scope.records:
-        face_id = str(record.face_id)
-        for wall_id in tuple(str(value) for value in record.bounding_wall_ids):
-            faces_by_wall[wall_id].append(face_id)
-    return {
-        wall_id: tuple(sorted(dict.fromkeys(face_ids)))
-        for wall_id, face_ids in faces_by_wall.items()
-    }
-
-
-def _faces_share_positive_boundary_on_wall(left, right, wall_record) -> bool:
-    """Require a shared edge that lies on the cited grid wall itself."""
+def _edge_key(value) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Normalize one producer-owned planarized edge without adding tolerance."""
 
     try:
-        shared = Polygon(left.polygon_pdf_pts).boundary.intersection(
-            Polygon(right.polygon_pdf_pts).boundary
-        )
-        points = tuple(
-            (float(point[0]), float(point[1]))
-            for point in wall_record.wall_candidate.centerline_pts
-        )
-        if len(points) < 2:
-            return False
-        wall_line = LineString(points)
-        on_wall = shared.intersection(wall_line)
-    except Exception:
-        return False
-    return not on_wall.is_empty and float(on_wall.length) > 1e-6
+        first = (float(value[0][0]), float(value[0][1]))
+        second = (float(value[1][0]), float(value[1][1]))
+    except (IndexError, TypeError, ValueError):
+        return None
+    if first == second:
+        return None
+    return (first, second) if first <= second else (second, first)
+
+
+def _local_edge_owners(
+    room_scope: SourceRoomFaceScopeResult,
+) -> Mapping[
+    tuple[str, tuple[tuple[float, float], tuple[float, float]]],
+    tuple[str, ...],
+]:
+    """Exact (W4 wall id, planarized subedge) ownership from room authority."""
+
+    owners: dict[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]],
+        set[str],
+    ] = defaultdict(set)
+    for record in room_scope.records:
+        face_id = str(record.face_id)
+        for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
+            try:
+                wall_id = str(item[0])
+                edge = _edge_key(item[1])
+            except (IndexError, TypeError):
+                continue
+            if wall_id and edge is not None:
+                owners[(wall_id, edge)].add(face_id)
+    return {
+        key: tuple(sorted(face_ids))
+        for key, face_ids in owners.items()
+    }
 
 
 def _grid_local_adjacency(
     room_scope: SourceRoomFaceScopeResult,
-    wall_scope: PhysicalWallCandidateScopeResult,
     fully_grid_wall_ids: set[str],
-) -> Mapping[str, tuple[tuple[str, str], ...]]:
-    """Return local face neighbours proven across a grid wall.
+) -> Mapping[
+    str,
+    tuple[
+        tuple[
+            str,
+            str,
+            tuple[tuple[float, float], tuple[float, float]],
+        ],
+        ...,
+    ],
+]:
+    """Return neighbours sharing the exact same grid-owned planarized subedge.
 
-    One W4 wall candidate may span many drafting cells, so global owner count is
-    not a valid adjacency test. Two faces are neighbours only when they both
-    cite the same fully-grid wall *and* their exact polygons share a positive-
-    length boundary segment.
+    A W4 wall may span many room cells, so whole-wall owner counts are not
+    adjacency evidence. The SourceRoomFace producer already proved a unique
+    wall owner for every published face subedge; exactly two published faces
+    owning the same (wall, subedge) is the local two-sided separator proof.
     """
 
-    room_by_face = {str(record.face_id): record for record in room_scope.records}
-    faces_by_wall = _room_faces_by_wall(room_scope)
-    wall_record_by_id = {
-        str(record.wall_candidate_id): record for record in wall_scope.records
-    }
-    adjacency: dict[str, set[tuple[str, str]]] = defaultdict(set)
-    for wall_id in sorted(fully_grid_wall_ids):
-        wall_record = wall_record_by_id.get(wall_id)
-        if wall_record is None:
+    adjacency: dict[
+        str,
+        set[
+            tuple[
+                str,
+                str,
+                tuple[tuple[float, float], tuple[float, float]],
+            ]
+        ],
+    ] = defaultdict(set)
+    for (wall_id, edge), face_ids in _local_edge_owners(room_scope).items():
+        if wall_id not in fully_grid_wall_ids or len(face_ids) != 2:
             continue
-        owners = faces_by_wall.get(wall_id, ())
-        for index, left_id in enumerate(owners):
-            left = room_by_face[left_id]
-            for right_id in owners[index + 1 :]:
-                right = room_by_face[right_id]
-                if not _faces_share_positive_boundary_on_wall(
-                    left, right, wall_record
-                ):
-                    continue
-                adjacency[left_id].add((right_id, wall_id))
-                adjacency[right_id].add((left_id, wall_id))
+        left_id, right_id = face_ids
+        adjacency[left_id].add((right_id, wall_id, edge))
+        adjacency[right_id].add((left_id, wall_id, edge))
     return {
         face_id: tuple(sorted(values))
         for face_id, values in adjacency.items()
@@ -227,24 +238,21 @@ def _grid_connected_component(
     seed_face_ids: tuple[str, ...],
     *,
     room_scope: SourceRoomFaceScopeResult,
-    wall_scope: PhysicalWallCandidateScopeResult,
     fully_grid_wall_ids: set[str],
 ) -> tuple[str, ...] | None:
-    """Complete one room through locally-proven drafting-grid separators."""
+    """Complete one room through exact two-sided grid-owned subedges."""
 
     room_by_face = {str(record.face_id): record for record in room_scope.records}
     seeds = tuple(dict.fromkeys(str(value) for value in seed_face_ids))
     if len(seeds) < 2 or any(face_id not in room_by_face for face_id in seeds):
         return None
 
-    adjacency = _grid_local_adjacency(
-        room_scope, wall_scope, fully_grid_wall_ids
-    )
+    adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
     visited: set[str] = {seeds[0]}
     pending = [seeds[0]]
     while pending:
         face_id = pending.pop()
-        for neighbour, _wall_id in adjacency.get(face_id, ()):
+        for neighbour, _wall_id, _edge in adjacency.get(face_id, ()):
             if neighbour not in visited:
                 visited.add(neighbour)
                 pending.append(neighbour)
@@ -252,26 +260,6 @@ def _grid_connected_component(
     if any(seed not in visited for seed in seeds):
         return None
     return tuple(sorted(visited))
-
-
-def _grid_wall_persists_on_union_boundary(
-    wall_record,
-    merged: Polygon,
-) -> bool:
-    """Whether source-proven grid centerline remains on the composite exterior."""
-
-    try:
-        points = tuple(
-            (float(point[0]), float(point[1]))
-            for point in wall_record.wall_candidate.centerline_pts
-        )
-        if len(points) < 2:
-            return True
-        line = LineString(points)
-        overlap = merged.boundary.intersection(line)
-    except Exception:
-        return True
-    return not overlap.is_empty and float(overlap.length) > 1e-6
 
 
 def _component_has_conflicting_label(
@@ -311,7 +299,6 @@ def _candidate_record(
     constituent_face_ids = _grid_connected_component(
         seed_face_ids,
         room_scope=room_scope,
-        wall_scope=wall_scope,
         fully_grid_wall_ids=fully_grid_wall_ids,
     )
     if constituent_face_ids is None:
@@ -344,47 +331,60 @@ def _candidate_record(
     if len(polygon) < 3:
         return None
 
-    wall_counts = Counter(
-        str(wall_id)
-        for record in constituent
-        for wall_id in record.bounding_wall_ids
-    )
     component_face_set = set(constituent_face_ids)
-    adjacency = _grid_local_adjacency(
-        room_scope, wall_scope, fully_grid_wall_ids
-    )
-    separator_wall_ids = {
-        wall_id
-        for face_id in component_face_set
-        for neighbour, wall_id in adjacency.get(face_id, ())
-        if neighbour in component_face_set
-    }
-    if not separator_wall_ids:
+    edge_owners = _local_edge_owners(room_scope)
+    component_edge_counts: Counter[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]]
+    ] = Counter()
+    for record in constituent:
+        for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
+            try:
+                wall_id = str(item[0])
+                edge = _edge_key(item[1])
+            except (IndexError, TypeError):
+                return None
+            if not wall_id or edge is None:
+                return None
+            component_edge_counts[(wall_id, edge)] += 1
+
+    if not component_edge_counts or any(count > 2 for count in component_edge_counts.values()):
         return None
 
-    # Preserve #1683 using actual source wall geometry rather than wall-owner
-    # counts. A long grid candidate may separate multiple local cells, but it
-    # cannot remain coincident with any positive-length segment of the final
-    # room exterior.
-    wall_record_by_id = {
-        str(record.wall_candidate_id): record for record in wall_scope.records
-    }
-    for wall_id in fully_grid_wall_ids:
-        wall_record = wall_record_by_id.get(wall_id)
-        if wall_record is None:
-            continue
-        if _grid_wall_persists_on_union_boundary(wall_record, merged):
+    separator_keys: set[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]]
+    ] = set()
+    external_keys: set[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]]
+    ] = set()
+    for key, count in component_edge_counts.items():
+        wall_id, _edge = key
+        global_owners = edge_owners.get(key, ())
+        if count == 2:
+            # An internal boundary may disappear only when the exact local
+            # subedge is globally two-sided and its W4 wall is fully grid.
+            if (
+                wall_id not in fully_grid_wall_ids
+                or len(global_owners) != 2
+                or not set(global_owners).issubset(component_face_set)
+            ):
+                return None
+            separator_keys.add(key)
+        elif count == 1:
+            external_keys.add(key)
+        else:
             return None
 
-    # Non-grid walls remain physical boundary candidates even when the same
-    # long wall id bounds several constituent cells.
-    external_walls = tuple(
-        sorted(
-            wall_id
-            for wall_id in wall_counts
-            if wall_id not in separator_wall_ids
-        )
-    )
+    if not separator_keys or not external_keys:
+        return None
+
+    # Preserve the #1683 hardening at subedge resolution. A long grid wall can
+    # be internal at one cell and external at another; any grid-owned external
+    # subedge means the room component is still incomplete and must abstain.
+    if any(wall_id in fully_grid_wall_ids for wall_id, _edge in external_keys):
+        return None
+
+    separator_wall_ids = {wall_id for wall_id, _edge in separator_keys}
+    external_walls = tuple(sorted({wall_id for wall_id, _edge in external_keys}))
     if not external_walls:
         return None
 
@@ -472,7 +472,6 @@ def _candidate_record(
         grid_evidence_ids=grid_ids,
         evidence_ids=evidence_ids,
     )
-
 
 def compose_grid_separated_room_faces(
     *,
