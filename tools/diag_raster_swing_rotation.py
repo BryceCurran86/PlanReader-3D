@@ -47,7 +47,18 @@ def _pdf(gray: np.ndarray) -> bytes:
         doc.close()
 
 
-def _run(gray: np.ndarray, label: str):
+def _run(
+    gray: np.ndarray,
+    label: str,
+    *,
+    band_max_thickness_override_pt: float | None = None,
+):
+    original_band_max = g17.RASTER_BAND_MAX_THICKNESS_PT
+    if band_max_thickness_override_pt is not None:
+        g17.RASTER_BAND_MAX_THICKNESS_PT = float(
+            band_max_thickness_override_pt
+        )
+
     source = SourceVisibilityProducer(
         producer_method=f"diag-swing-{label}",
         producer_version="1",
@@ -266,6 +277,7 @@ def _run(gray: np.ndarray, label: str):
         g17._raster_door_swing_solutions = original
         g17._raster_band_boxes = original_band_boxes
         g17._raster_pair_flanks = original_pair_flanks
+        g17.RASTER_BAND_MAX_THICKNESS_PT = original_band_max
 
     return {
         "label": label,
@@ -288,6 +300,11 @@ def main() -> None:
     print(json.dumps({
         "base": _run(base, "base"),
         "rotated": _run(rotated, "rotated"),
+        "rotated_band_cap_13_5": _run(
+            rotated,
+            "rotated-band-cap-13.5",
+            band_max_thickness_override_pt=13.5,
+        ),
     }, indent=2, sort_keys=True))
 
 
