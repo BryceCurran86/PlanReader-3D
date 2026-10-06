@@ -67,6 +67,7 @@ from pb_physical_scale_authority import (
     PhysicalScaleSelector,
 )
 from pb_physical_scale_calibration_bridge import build_physical_scale_calibration
+from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_area_bridge import build_source_room_area_bridge
 from pb_source_room_face_authority import SourceRoomFaceSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
