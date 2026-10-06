@@ -26,7 +26,13 @@ jobs:
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
-          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+          from pb_cross_view_room_area_authority import (
+              CrossViewRoomAreaProducer,
+              _norm_label,
+              _trusted_lines_for_page,
+              _trusted_native_dimensions_for_page,
+          )
+          from collections import Counter
 
           pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
@@ -34,8 +40,10 @@ jobs:
           assert actual==expected
 
           captured=[]
+          captured_producers=[]
           _orig_publish=CrossViewRoomAreaProducer.publish
           def _capture_publish(self):
+              captured_producers.append(self)
               result=_orig_publish(self)
               captured.append(result)
               return result
@@ -48,6 +56,83 @@ jobs:
           )
           CrossViewRoomAreaProducer.publish=_orig_publish
           cross=captured[-1] if captured else None
+          cross_producer=captured_producers[-1] if captured_producers else None
+          cross_debug={}
+          if cross_producer is not None:
+              producer_rooms=tuple(cross_producer._rooms.rooms)
+              eligible_rooms=[
+                  r for r in producer_rooms
+                  if r.geometry_complete
+                  and str(r.physical_room_id or "").strip()
+                  and str(r.source_room_face_record_id or "").strip()
+                  and _norm_label(r.room_label)
+                  and str(r.room_label_binding_record_id or "").strip()
+                  and bool(r.room_label_evidence_ids)
+              ]
+              label_counts=Counter(_norm_label(r.room_label) for r in eligible_rooms)
+              office_rooms=[
+                  {
+                      "room_label":r.room_label,
+                      "page_id":r.page_id,
+                      "physical_room_id":r.physical_room_id,
+                      "source_room_face_record_id":r.source_room_face_record_id,
+                      "room_label_binding_record_id":r.room_label_binding_record_id,
+                      "label_evidence_count":len(r.room_label_evidence_ids),
+                  }
+                  for r in eligible_rooms
+                  if _norm_label(r.room_label)=="office"
+              ]
+              published=cross_producer._source.published_snapshot_for_revision(
+                  producer_rooms[0].revision_id
+              ) if producer_rooms else None
+              office_pages=[]
+              if published is not None:
+                  for page_number in tuple(published.coverage.decoded_pages):
+                      page_id=str(int(page_number))
+                      trusted=_trusted_lines_for_page(
+                          cross_producer._source,
+                          revision_id=producer_rooms[0].revision_id,
+                          page_id=page_id,
+                          candidate_labels=("office",),
+                      )
+                      if trusted:
+                          dims=_trusted_native_dimensions_for_page(
+                              cross_producer._source,
+                              revision_id=producer_rooms[0].revision_id,
+                              page_id=page_id,
+                              candidate_lines=trusted,
+                          )
+                          office_pages.append({
+                              "page_id":page_id,
+                              "trusted_lines":[
+                                  {
+                                      "text":line.text,
+                                      "bbox":list(line.bbox),
+                                      "block_no":line.block_no,
+                                      "line_no":line.line_no,
+                                  } for line in trusted
+                              ],
+                              "dimensions":[
+                                  {
+                                      "value_mm":d.value_mm,
+                                      "orientation":d.orientation,
+                                      "endpoints_pt":[list(d.endpoints_pt[0]),list(d.endpoints_pt[1])],
+                                      "text_block_no":d.text_block_no,
+                                      "text_line_no":d.text_line_no,
+                                      "text_word_no":d.text_word_no,
+                                  } for d in dims
+                              ],
+                          })
+              cross_debug={
+                  "producer_room_count":len(producer_rooms),
+                  "eligible_room_count":len(eligible_rooms),
+                  "unique_label_count":sum(1 for n in label_counts.values() if n==1),
+                  "duplicate_label_count":sum(1 for n in label_counts.values() if n>1),
+                  "office_label_count":label_counts.get("office",0),
+                  "office_rooms":office_rooms,
+                  "decoded_pages":[] if published is None else list(published.coverage.decoded_pages),
+                  "office_pages":office_pages,
+              }
           room_by_id={r.canonical_room_id:r for r in claim.canonical_rooms}
           room_by_physical={r.physical_room_id:r for r in claim.canonical_rooms}
           floor_by_id={f.canonical_floor_id:f for f in claim.canonical_floors}
@@ -103,6 +188,7 @@ jobs:
               "cross_view_reason_codes":[] if cross is None else list(cross.reason_codes),
               "cross_view_record_count":0 if cross is None else len(cross.records),
               "cross_view_unresolved_count":0 if cross is None else len(cross.unresolved_physical_room_ids),
+              "cross_debug":cross_debug,
               "cross_view_records":[] if cross is None else [{"room_label":r.room_label,"physical_room_id":r.physical_room_id,"source_room_face_record_id":r.source_room_face_record_id,"source_dimension_page_id":r.source_dimension_page_id,"horizontal_dimension_id":r.horizontal_dimension_id,"vertical_dimension_id":r.vertical_dimension_id,"area_value":r.area_evidence.value,"area_unit":r.area_evidence.unit} for r in cross.records],
               "room_quantity_count":len(rooms),
               "room_quantities":rooms,
