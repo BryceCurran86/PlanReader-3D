@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Mapping
 
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -163,38 +163,68 @@ def _room_faces_by_wall(
     }
 
 
+def _faces_share_positive_boundary(left, right) -> bool:
+    """Require real edge adjacency, never point-touch or wall-id reuse alone."""
+
+    try:
+        shared = Polygon(left.polygon_pdf_pts).boundary.intersection(
+            Polygon(right.polygon_pdf_pts).boundary
+        )
+    except Exception:
+        return False
+    return not shared.is_empty and float(shared.length) > 1e-6
+
+
+def _grid_local_adjacency(
+    room_scope: SourceRoomFaceScopeResult,
+    fully_grid_wall_ids: set[str],
+) -> Mapping[str, tuple[tuple[str, str], ...]]:
+    """Return local face neighbours proven across a grid wall.
+
+    One W4 wall candidate may span many drafting cells, so global owner count is
+    not a valid adjacency test. Two faces are neighbours only when they both
+    cite the same fully-grid wall *and* their exact polygons share a positive-
+    length boundary segment.
+    """
+
+    room_by_face = {str(record.face_id): record for record in room_scope.records}
+    faces_by_wall = _room_faces_by_wall(room_scope)
+    adjacency: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for wall_id in sorted(fully_grid_wall_ids):
+        owners = faces_by_wall.get(wall_id, ())
+        for index, left_id in enumerate(owners):
+            left = room_by_face[left_id]
+            for right_id in owners[index + 1 :]:
+                right = room_by_face[right_id]
+                if not _faces_share_positive_boundary(left, right):
+                    continue
+                adjacency[left_id].add((right_id, wall_id))
+                adjacency[right_id].add((left_id, wall_id))
+    return {
+        face_id: tuple(sorted(values))
+        for face_id, values in adjacency.items()
+    }
+
+
 def _grid_connected_component(
     seed_face_ids: tuple[str, ...],
     *,
     room_scope: SourceRoomFaceScopeResult,
     fully_grid_wall_ids: set[str],
 ) -> tuple[str, ...] | None:
-    """Complete one room component through source-proven drafting-grid walls.
-
-    Traversal is deliberately stricter than generic graph connectivity. A grid
-    wall may connect faces only when the complete SourceRoomFace scope proves
-    exactly two owners for that wall. One-sided, missing, or three-way ownership
-    remains a boundary/ambiguity and is never traversed.
-    """
+    """Complete one room through locally-proven drafting-grid separators."""
 
     room_by_face = {str(record.face_id): record for record in room_scope.records}
     seeds = tuple(dict.fromkeys(str(value) for value in seed_face_ids))
     if len(seeds) < 2 or any(face_id not in room_by_face for face_id in seeds):
         return None
 
-    faces_by_wall = _room_faces_by_wall(room_scope)
+    adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
     visited: set[str] = {seeds[0]}
     pending = [seeds[0]]
     while pending:
         face_id = pending.pop()
-        record = room_by_face[face_id]
-        for wall_id in tuple(str(value) for value in record.bounding_wall_ids):
-            if wall_id not in fully_grid_wall_ids:
-                continue
-            owners = faces_by_wall.get(wall_id, ())
-            if len(owners) != 2 or face_id not in owners:
-                continue
-            neighbour = owners[0] if owners[1] == face_id else owners[1]
+        for neighbour, _wall_id in adjacency.get(face_id, ()):
             if neighbour not in visited:
                 visited.add(neighbour)
                 pending.append(neighbour)
@@ -202,6 +232,26 @@ def _grid_connected_component(
     if any(seed not in visited for seed in seeds):
         return None
     return tuple(sorted(visited))
+
+
+def _grid_wall_persists_on_union_boundary(
+    wall_record,
+    merged: Polygon,
+) -> bool:
+    """Whether source-proven grid centerline remains on the composite exterior."""
+
+    try:
+        points = tuple(
+            (float(point[0]), float(point[1]))
+            for point in wall_record.wall_candidate.centerline_pts
+        )
+        if len(points) < 2:
+            return True
+        line = LineString(points)
+        overlap = merged.boundary.intersection(line)
+    except Exception:
+        return True
+    return not overlap.is_empty and float(overlap.length) > 1e-6
 
 
 def _component_has_conflicting_label(
@@ -278,31 +328,41 @@ def _candidate_record(
         for record in constituent
         for wall_id in record.bounding_wall_ids
     )
-    faces_by_wall = _room_faces_by_wall(room_scope)
     component_face_set = set(constituent_face_ids)
+    adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
     separator_wall_ids = {
         wall_id
-        for wall_id in fully_grid_wall_ids
-        if len(faces_by_wall.get(wall_id, ())) == 2
-        and set(faces_by_wall[wall_id]).issubset(component_face_set)
+        for face_id in component_face_set
+        for neighbour, wall_id in adjacency.get(face_id, ())
+        if neighbour in component_face_set
     }
     if not separator_wall_ids:
         return None
 
-    # A long physical boundary candidate may legitimately bound several grid
-    # cells along the same side of the room. Keep every non-separator wall as
-    # external regardless of occurrence count; only exact two-owner grid walls
-    # are removed from the composite boundary.
+    # Preserve #1683 using actual source wall geometry rather than wall-owner
+    # counts. A long grid candidate may separate multiple local cells, but it
+    # cannot remain coincident with any positive-length segment of the final
+    # room exterior.
+    wall_record_by_id = {
+        str(record.wall_candidate_id): record for record in wall_scope.records
+    }
+    for wall_id in fully_grid_wall_ids:
+        wall_record = wall_record_by_id.get(wall_id)
+        if wall_record is None:
+            continue
+        if _grid_wall_persists_on_union_boundary(wall_record, merged):
+            return None
+
+    # Non-grid walls remain physical boundary candidates even when the same
+    # long wall id bounds several constituent cells.
     external_walls = tuple(
-        sorted(wall_id for wall_id in wall_counts if wall_id not in separator_wall_ids)
+        sorted(
+            wall_id
+            for wall_id in wall_counts
+            if wall_id not in separator_wall_ids
+        )
     )
     if not external_walls:
-        return None
-    # Keep the #1683 hardening as the final completeness gate. If a completed
-    # component still exposes a source-proven drafting-grid wall externally,
-    # the room footprint is still only a fragment of a larger unresolved grid
-    # region and must remain unpublished.
-    if any(wall_id in fully_grid_wall_ids for wall_id in external_walls):
         return None
 
     grid_evidence_ids: set[str] = set()
