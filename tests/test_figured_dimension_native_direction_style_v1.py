@@ -454,13 +454,6 @@ def test_unique_span_bracketing_witness_candidate_breaks_same_orientation_tie() 
             width=0.48,
             color=(0.0, 0.0, 0.0),
         ),
-        _segment(
-            "short-right-witness",
-            (112.0, 88.0),
-            (112.0, 116.0),
-            width=0.48,
-            color=(0.0, 0.0, 0.0),
-        ),
     )
 
     result = bind_observation_to_vector_geometry(
