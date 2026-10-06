@@ -26,18 +26,28 @@ jobs:
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
 
           pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
           actual=hashlib.sha256(pdf.read_bytes()).hexdigest()
           assert actual==expected
 
+          captured=[]
+          _orig_publish=CrossViewRoomAreaProducer.publish
+          def _capture_publish(self):
+              result=_orig_publish(self)
+              captured.append(result)
+              return result
+          CrossViewRoomAreaProducer.publish=_capture_publish
           claim=collect_live_physical_net_wall_claim(
               pdf,
               pages=(6,8,10,29,30),
               topology_pages=(6,29,30),
               room_area_support_pages=(8,10),
           )
+          CrossViewRoomAreaProducer.publish=_orig_publish
+          cross=captured[-1] if captured else None
           room_by_id={r.canonical_room_id:r for r in claim.canonical_rooms}
           room_by_physical={r.physical_room_id:r for r in claim.canonical_rooms}
           floor_by_id={f.canonical_floor_id:f for f in claim.canonical_floors}
@@ -89,6 +99,11 @@ jobs:
               "reason_codes":list(claim.reason_codes),
               "canonical_room_count":len(claim.canonical_rooms),
               "canonical_floor_count":len(claim.canonical_floors),
+              "cross_view_status":None if cross is None else getattr(cross.status,"value",str(cross.status)),
+              "cross_view_reason_codes":[] if cross is None else list(cross.reason_codes),
+              "cross_view_record_count":0 if cross is None else len(cross.records),
+              "cross_view_unresolved_count":0 if cross is None else len(cross.unresolved_physical_room_ids),
+              "cross_view_records":[] if cross is None else [{"room_label":r.room_label,"physical_room_id":r.physical_room_id,"source_room_face_record_id":r.source_room_face_record_id,"source_dimension_page_id":r.source_dimension_page_id,"horizontal_dimension_id":r.horizontal_dimension_id,"vertical_dimension_id":r.vertical_dimension_id,"area_value":r.area_evidence.value,"area_unit":r.area_evidence.unit} for r in cross.records],
               "room_quantity_count":len(rooms),
               "room_quantities":rooms,
               "floor_quantity_count":len(floors),
