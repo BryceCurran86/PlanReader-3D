@@ -1,0 +1,189 @@
+name: DIAG GPT2 Maryborough Grid Component Rejections
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace component rejections
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-grid-component-rejections
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from collections import Counter
+          from pathlib import Path
+          from shapely.geometry import Polygon
+          from shapely.ops import unary_union
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
+          from pb_source_room_label_authority import SourceRoomLabelProducer, SourceRoomLabelSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          import pb_source_composite_room_face_authority as comp
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          TARGETS={"POS COUNTER","FOOD SERVICE","TRUCK DRIVER LOUNGE","DRY STORE","WASH UP"}
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-grid-component-rejections",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-grid-component-rejections",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(source,page_ids=("7",))
+          wall_auth=wall_producer.authority()
+          selectors=wall_auth.selectors_for_authenticated_viewports(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          assert len(selectors)==1, len(selectors)
+          selector=selectors[0]
+          wall_scope=wall_auth.resolve_scope(selector)
+          room_auth=build_source_room_face_authority(wall_auth)
+          room_selector=SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          )
+          room_scope=room_auth.resolve_scope(room_selector)
+          label_scope=SourceRoomLabelProducer.from_authorities(
+              source,room_auth,page_ids=("7",)
+          ).authority().resolve_scope(SourceRoomLabelSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          ))
+
+          fully,evidence=comp._fully_grid_opposed_wall_evidence(wall_scope)
+          faces_by_wall=comp._room_faces_by_wall(room_scope)
+          room_by_face={str(r.face_id):r for r in room_scope.records}
+          normal_labels={str(r.face_id):norm(r.label) for r in label_scope.records}
+          split_by_label={}
+          for candidate in label_scope.split_face_candidates:
+              split_by_label.setdefault(norm(candidate.label),[]).append(candidate)
+
+          out={}
+          for target in sorted(TARGETS):
+              rows=[]
+              for candidate in split_by_label.get(target,[]):
+                  seeds=tuple(str(v) for v in candidate.word_face_ids)
+                  component=comp._grid_connected_component(
+                      seeds,room_scope=room_scope,fully_grid_wall_ids=fully
+                  )
+                  conflict=None if component is None else comp._component_has_conflicting_label(
+                      component,candidate,label_scope=label_scope
+                  )
+                  detail={
+                      "candidate_id":candidate.record_id,
+                      "seeds":list(seeds),
+                      "component":None if component is None else list(component),
+                      "component_size":0 if component is None else len(component),
+                      "conflict":conflict,
+                  }
+                  if component is not None:
+                      constituent=[room_by_face[x] for x in component]
+                      wall_counts=Counter(
+                          str(w)
+                          for rec in constituent
+                          for w in rec.bounding_wall_ids
+                      )
+                      component_set=set(component)
+                      separators={
+                          wall_id for wall_id in fully
+                          if len(faces_by_wall.get(wall_id,()))==2
+                          and set(faces_by_wall[wall_id]).issubset(component_set)
+                      }
+                      external=sorted(w for w in wall_counts if w not in separators)
+                      merged=unary_union([Polygon(rec.polygon_pdf_pts) for rec in constituent])
+                      overlapping_normals=[
+                          {"face_id":face_id,"label":label}
+                          for face_id,label in sorted(normal_labels.items())
+                          if face_id in component_set
+                      ]
+                      overlapping_splits=[
+                          {
+                              "candidate_id":other.record_id,
+                              "label":norm(other.label),
+                              "seed_faces":[str(v) for v in other.word_face_ids],
+                          }
+                          for other in label_scope.split_face_candidates
+                          if str(other.record_id)!=str(candidate.record_id)
+                          and component_set.intersection(str(v) for v in other.word_face_ids)
+                      ]
+                      detail.update({
+                          "separators":sorted(separators),
+                          "external_walls":external,
+                          "external_grid_walls":sorted(w for w in external if w in fully),
+                          "normal_labels_in_component":overlapping_normals,
+                          "other_split_labels_in_component":overlapping_splits,
+                          "merged_type":merged.geom_type,
+                          "merged_valid":bool(merged.is_valid),
+                          "merged_area":float(merged.area),
+                          "merged_holes":(
+                              len(tuple(merged.interiors))
+                              if merged.geom_type=="Polygon" else None
+                          ),
+                          "candidate_record_created":comp._candidate_record(
+                              candidate,
+                              wall_scope=wall_scope,
+                              room_scope=room_scope,
+                              label_scope=label_scope,
+                              fully_grid_wall_ids=fully,
+                              grid_evidence_by_wall=evidence,
+                          ) is not None,
+                      })
+                  rows.append(detail)
+              out[target]=rows
+
+          print(json.dumps({
+              "wall_scope_complete":wall_scope.scope_complete,
+              "room_scope_complete":room_scope.scope_complete,
+              "split_candidate_count":len(label_scope.split_face_candidates),
+              "fully_grid_wall_count":len(fully),
+              "targets":out,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-grid-component-rejections
+          path: artifacts/gpt2-grid-component-rejections
+          retention-days: 2
