@@ -1736,6 +1736,448 @@ class CrossViewRoomAreaProducer:
         )
 
 
+SAME_VIEW_ROOM_AREA_SCHEMA_VERSION = "1.0.0"
+SAME_VIEW_ROOM_AREA_RESOLVED = "same_view_room_area_resolved"
+SAME_VIEW_ROOM_AREA_PARTIAL = "same_view_room_area_partial"
+SAME_VIEW_ROOM_AREA_UNAVAILABLE = "same_view_room_area_unavailable"
+SAME_VIEW_ROOM_AREA_CONFLICT = "same_view_room_area_conflict"
+SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = (
+    "authenticated_same_view_room_area"
+)
+_SAME_VIEW_RECORD_SEAL = object()
+
+
+@dataclass(frozen=True)
+class SameViewRoomAreaRecord:
+    physical_room_id: str
+    source_room_face_record_id: str
+    room_label: str
+    source_dimension_page_id: str
+    source_label_observation_ids: tuple[str, ...]
+    source_label_receipt_ids: tuple[str, ...]
+    horizontal_dimension_id: str
+    vertical_dimension_id: str
+    area_evidence: EvidenceAtom
+    schema_version: str = SAME_VIEW_ROOM_AREA_SCHEMA_VERSION
+    _seal: object = None
+
+    def __post_init__(self) -> None:
+        if self._seal is not _SAME_VIEW_RECORD_SEAL:
+            raise TypeError("SameViewRoomAreaRecord is producer-owned")
+
+
+@dataclass(frozen=True)
+class SameViewRoomAreaResult:
+    status: EvidenceResolutionStatus
+    reason_codes: tuple[str, ...]
+    records: tuple[SameViewRoomAreaRecord, ...]
+    unresolved_physical_room_ids: tuple[str, ...]
+    schema_version: str = SAME_VIEW_ROOM_AREA_SCHEMA_VERSION
+
+    @property
+    def evidence_by_source_room_face_record_id(
+        self,
+    ) -> Mapping[str, EvidenceAtom]:
+        return MappingProxyType(
+            {
+                record.source_room_face_record_id: record.area_evidence
+                for record in self.records
+            }
+        )
+
+
+def _point_inside_polygon(
+    x: float,
+    y: float,
+    polygon: Sequence[Sequence[object]],
+) -> bool:
+    points: list[tuple[float, float]] = []
+    for raw in polygon:
+        if len(raw) < 2:
+            return False
+        try:
+            point = (float(raw[0]), float(raw[1]))
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not all(math.isfinite(value) for value in point):
+            return False
+        points.append(point)
+    if len(points) < 3:
+        return False
+
+    inside = False
+    previous = points[-1]
+    for current in points:
+        x1, y1 = previous
+        x2, y2 = current
+        # Points on an edge are accepted. The tolerance is numeric only and
+        # carries no page/project scale assumption.
+        cross = (x - x1) * (y2 - y1) - (y - y1) * (x2 - x1)
+        if abs(cross) <= 1e-9 and (
+            min(x1, x2) - 1e-9 <= x <= max(x1, x2) + 1e-9
+            and min(y1, y2) - 1e-9 <= y <= max(y1, y2) + 1e-9
+        ):
+            return True
+        if (y1 > y) != (y2 > y):
+            intersect_x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < intersect_x:
+                inside = not inside
+        previous = current
+    return inside
+
+
+def _line_inside_room(
+    line: _TrustedLine,
+    room: LiveCanonicalRoomObject,
+) -> bool:
+    x0, y0, x1, y1 = line.bbox
+    return _point_inside_polygon(
+        (x0 + x1) / 2.0,
+        (y0 + y1) / 2.0,
+        room.polygon_pdf_pts,
+    )
+
+
+class SameViewRoomAreaProducer:
+    """Authenticate figured room area on the room's own source plan view.
+
+    This is intentionally distinct from CrossViewRoomAreaProducer. Same-view
+    proof requires the independently trusted exact room label to lie inside the
+    already source-owned canonical room polygon, plus exactly one witnessed
+    orthogonal figured-dimension pair that contains that label. Figured values
+    remain independent of page-scale authority.
+    """
+
+    def __init__(
+        self,
+        *,
+        source: SourceVisibilityProducer,
+        rooms: LiveCanonicalRoomComposition,
+        _seal: object = None,
+    ) -> None:
+        if _seal is not _PRODUCER_SEAL:
+            raise TypeError(
+                "SameViewRoomAreaProducer must be obtained from a classmethod"
+            )
+        if type(source) is not SourceVisibilityProducer:
+            raise TypeError("source must be exact SourceVisibilityProducer")
+        if type(rooms) is not LiveCanonicalRoomComposition:
+            raise TypeError("rooms must be exact LiveCanonicalRoomComposition")
+        self._source = source
+        self._rooms = rooms
+
+    @classmethod
+    def from_source(
+        cls,
+        *,
+        source: SourceVisibilityProducer,
+        rooms: LiveCanonicalRoomComposition,
+    ) -> "SameViewRoomAreaProducer":
+        return cls(source=source, rooms=rooms, _seal=_PRODUCER_SEAL)
+
+    def publish(self) -> SameViewRoomAreaResult:
+        rooms = tuple(self._rooms.rooms)
+        if not rooms:
+            return SameViewRoomAreaResult(
+                EvidenceResolutionStatus.ABSTAINED,
+                (SAME_VIEW_ROOM_AREA_UNAVAILABLE,),
+                (),
+                (),
+            )
+
+        revision_ids = {str(room.revision_id) for room in rooms}
+        document_ids = {str(room.document_id) for room in rooms}
+        source_hashes = {str(room.source_sha256).lower() for room in rooms}
+        if (
+            len(revision_ids) != 1
+            or len(document_ids) != 1
+            or len(source_hashes) != 1
+        ):
+            return SameViewRoomAreaResult(
+                EvidenceResolutionStatus.CONFLICT,
+                (CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
+                (),
+                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+            )
+        revision_id = next(iter(revision_ids))
+        published = self._source.published_snapshot_for_revision(revision_id)
+        if (
+            published is None
+            or published.revision.document_id != next(iter(document_ids))
+            or published.revision.source_sha256.lower()
+            != next(iter(source_hashes))
+        ):
+            return SameViewRoomAreaResult(
+                EvidenceResolutionStatus.CONFLICT,
+                (CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
+                (),
+                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+            )
+
+        eligible = tuple(
+            room
+            for room in rooms
+            if room.geometry_complete
+            and str(room.physical_room_id or "").strip()
+            and str(room.source_room_face_record_id or "").strip()
+            and _norm_label(room.room_label)
+            and str(room.room_label_binding_record_id or "").strip()
+            and bool(room.room_label_evidence_ids)
+        )
+        labels: dict[str, list[LiveCanonicalRoomObject]] = {}
+        for room in eligible:
+            labels.setdefault(_norm_label(room.room_label), []).append(room)
+        duplicate_room_ids = {
+            str(room.physical_room_id)
+            for group in labels.values()
+            if len(group) != 1
+            for room in group
+        }
+
+        records: list[SameViewRoomAreaRecord] = []
+        unresolved: set[str] = {
+            str(room.physical_room_id)
+            for room in rooms
+            if room not in eligible
+        }
+        unresolved.update(duplicate_room_ids)
+        conflict_seen = bool(duplicate_room_ids)
+
+        for label, grouped_rooms in sorted(labels.items()):
+            if len(grouped_rooms) != 1:
+                continue
+            room = grouped_rooms[0]
+            page_id = str(room.page_id)
+            trusted_lines = tuple(
+                line
+                for line in _trusted_lines_for_page(
+                    self._source,
+                    revision_id=revision_id,
+                    page_id=page_id,
+                    candidate_labels=(label,),
+                )
+                if _norm_label(line.text) == label
+                and _line_inside_room(line, room)
+            )
+            if not trusted_lines:
+                unresolved.add(str(room.physical_room_id))
+                continue
+
+            trusted_dimensions = _trusted_native_dimensions_for_page(
+                self._source,
+                revision_id=revision_id,
+                page_id=page_id,
+                candidate_lines=trusted_lines,
+            )
+            horizontals = tuple(
+                item
+                for item in trusted_dimensions
+                if item.orientation == DimensionOrientation.HORIZONTAL.value
+            )
+            verticals = tuple(
+                item
+                for item in trusted_dimensions
+                if item.orientation == DimensionOrientation.VERTICAL.value
+            )
+            matches: list[
+                tuple[_TrustedLine, _TrustedBoundDimension, _TrustedBoundDimension]
+            ] = []
+            seen_pairs: set[tuple[str, str, str]] = set()
+            for line in trusted_lines:
+                for horizontal in horizontals:
+                    for vertical in verticals:
+                        if (
+                            not _line_inside_dimension_pair(
+                                line, horizontal, vertical
+                            )
+                            or not _figured_pair_scale_consistent(
+                                page_id=page_id,
+                                horizontal=horizontal,
+                                vertical=vertical,
+                            )
+                            or not _witness_systems_intersect(
+                                horizontal, vertical
+                            )
+                        ):
+                            continue
+                        key = (
+                            "|".join(line.receipt_ids),
+                            horizontal.dimension_id,
+                            vertical.dimension_id,
+                        )
+                        if key in seen_pairs:
+                            continue
+                        seen_pairs.add(key)
+                        matches.append((line, horizontal, vertical))
+
+            if len(matches) != 1:
+                unresolved.add(str(room.physical_room_id))
+                if len(matches) > 1:
+                    conflict_seen = True
+                continue
+
+            line, horizontal, vertical = matches[0]
+            area_m2 = round(
+                float(horizontal.value_mm)
+                * float(vertical.value_mm)
+                / 1_000_000.0,
+                6,
+            )
+            if not math.isfinite(area_m2) or area_m2 <= 0.0:
+                unresolved.add(str(room.physical_room_id))
+                continue
+
+            horizontal_x = sorted(
+                (
+                    float(horizontal.endpoints_pt[0][0]),
+                    float(horizontal.endpoints_pt[1][0]),
+                )
+            )
+            vertical_y = sorted(
+                (
+                    float(vertical.endpoints_pt[0][1]),
+                    float(vertical.endpoints_pt[1][1]),
+                )
+            )
+            source_dimension_box = (
+                horizontal_x[0],
+                vertical_y[0],
+                horizontal_x[1],
+                vertical_y[1],
+            )
+            evidence_id = stable_contract_id(
+                "same_view_room_area",
+                {
+                    "document_id": room.document_id,
+                    "physical_room_id": room.physical_room_id,
+                    "source_room_face_record_id": room.source_room_face_record_id,
+                    "dimension_page_id": page_id,
+                    "label_receipt_ids": line.receipt_ids,
+                    "horizontal_dimension_id": horizontal.dimension_id,
+                    "vertical_dimension_id": vertical.dimension_id,
+                    "area_m2": area_m2,
+                },
+                digest_chars=32,
+            )
+            area_evidence = EvidenceAtom(
+                evidence_id=evidence_id,
+                document_id=str(room.document_id),
+                page_id=page_id,
+                viewport_id=room.viewport_id,
+                kind="explicit_room_area",
+                method="authenticated_same_view_figured_dimensions",
+                normalized_value=area_m2,
+                unit="m2",
+                confidence=1.0,
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=(SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED,),
+                metadata={
+                    "physical_room_id": str(room.physical_room_id),
+                    "source_room_face_record_id": str(
+                        room.source_room_face_record_id
+                    ),
+                    "room_label_binding_record_id": str(
+                        room.room_label_binding_record_id
+                    ),
+                    "room_label_evidence_ids": list(
+                        room.room_label_evidence_ids
+                    ),
+                    "source_dimension_page_id": page_id,
+                    "source_dimension_snapshot_id": str(
+                        published.snapshot.snapshot_id
+                    ),
+                    "source_label_text": line.text,
+                    "source_label_observation_ids": list(
+                        line.observation_ids
+                    ),
+                    "source_label_receipt_ids": list(line.receipt_ids),
+                    "source_label_bbox_pdf_pts": list(line.bbox),
+                    "source_label_support_mode": (
+                        "same_view_room_polygon_bound_label"
+                    ),
+                    "source_dimension_box_pdf_pts": list(
+                        source_dimension_box
+                    ),
+                    "horizontal_endpoints_pt": [
+                        list(horizontal.endpoints_pt[0]),
+                        list(horizontal.endpoints_pt[1]),
+                    ],
+                    "vertical_endpoints_pt": [
+                        list(vertical.endpoints_pt[0]),
+                        list(vertical.endpoints_pt[1]),
+                    ],
+                    "figured_dimension_ids": [
+                        horizontal.dimension_id,
+                        vertical.dimension_id,
+                    ],
+                    "horizontal_dimension_id": horizontal.dimension_id,
+                    "horizontal_text_observation_id": (
+                        horizontal.text_observation_id
+                    ),
+                    "horizontal_value_mm": int(horizontal.value_mm),
+                    "horizontal_dimension_line_observation_ids": list(
+                        horizontal.dimension_line_observation_ids
+                    ),
+                    "horizontal_witness_observation_ids": list(
+                        horizontal.witness_observation_ids
+                    ),
+                    "vertical_dimension_id": vertical.dimension_id,
+                    "vertical_text_observation_id": (
+                        vertical.text_observation_id
+                    ),
+                    "vertical_value_mm": int(vertical.value_mm),
+                    "vertical_dimension_line_observation_ids": list(
+                        vertical.dimension_line_observation_ids
+                    ),
+                    "vertical_witness_observation_ids": list(
+                        vertical.witness_observation_ids
+                    ),
+                    "room_revision_id": str(room.revision_id),
+                    "room_snapshot_id": str(room.snapshot_id),
+                    "source_sha256": str(room.source_sha256),
+                },
+            )
+            records.append(
+                SameViewRoomAreaRecord(
+                    physical_room_id=str(room.physical_room_id),
+                    source_room_face_record_id=str(
+                        room.source_room_face_record_id
+                    ),
+                    room_label=str(room.room_label),
+                    source_dimension_page_id=page_id,
+                    source_label_observation_ids=tuple(
+                        line.observation_ids
+                    ),
+                    source_label_receipt_ids=tuple(line.receipt_ids),
+                    horizontal_dimension_id=horizontal.dimension_id,
+                    vertical_dimension_id=vertical.dimension_id,
+                    area_evidence=area_evidence,
+                    _seal=_SAME_VIEW_RECORD_SEAL,
+                )
+            )
+
+        records.sort(key=lambda item: item.physical_room_id)
+        unresolved_ids = tuple(sorted(unresolved))
+        if records and not unresolved_ids:
+            status = EvidenceResolutionStatus.CORROBORATED
+            reasons = (SAME_VIEW_ROOM_AREA_RESOLVED,)
+        elif records:
+            status = EvidenceResolutionStatus.CANDIDATE
+            reasons = (SAME_VIEW_ROOM_AREA_PARTIAL,)
+        elif conflict_seen:
+            status = EvidenceResolutionStatus.CONFLICT
+            reasons = (SAME_VIEW_ROOM_AREA_CONFLICT,)
+        else:
+            status = EvidenceResolutionStatus.ABSTAINED
+            reasons = (SAME_VIEW_ROOM_AREA_UNAVAILABLE,)
+        return SameViewRoomAreaResult(
+            status=status,
+            reason_codes=reasons,
+            records=tuple(records),
+            unresolved_physical_room_ids=unresolved_ids,
+        )
+
+
 __all__ = [
     "CROSS_VIEW_ROOM_AREA_CONFLICT",
     "CROSS_VIEW_ROOM_AREA_DIMENSIONS_UNAVAILABLE",
@@ -1749,4 +2191,13 @@ __all__ = [
     "CrossViewRoomAreaProducer",
     "CrossViewRoomAreaRecord",
     "CrossViewRoomAreaResult",
+    "SAME_VIEW_ROOM_AREA_CONFLICT",
+    "SAME_VIEW_ROOM_AREA_EVIDENCE_RESOLVED",
+    "SAME_VIEW_ROOM_AREA_PARTIAL",
+    "SAME_VIEW_ROOM_AREA_RESOLVED",
+    "SAME_VIEW_ROOM_AREA_SCHEMA_VERSION",
+    "SAME_VIEW_ROOM_AREA_UNAVAILABLE",
+    "SameViewRoomAreaProducer",
+    "SameViewRoomAreaRecord",
+    "SameViewRoomAreaResult",
 ]
