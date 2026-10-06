@@ -39,11 +39,21 @@ def _face(face_id, record_id, polygon, walls):
 
 
 def _wall_record(wall_id, *edge_ids):
+    centerlines = {
+        "w_sep": ((10.0, 0.0), (10.0, 10.0)),
+        "w_lm": ((10.0, 0.0), (10.0, 10.0)),
+        "w_mr": ((20.0, 0.0), (20.0, 10.0)),
+        "w_left": ((0.0, 0.0), (0.0, 10.0)),
+        "w_right": ((30.0, 0.0), (30.0, 10.0)),
+    }
     return SimpleNamespace(
         wall_candidate_id=wall_id,
         wall_candidate=SimpleNamespace(
             face_a_segment_ids=tuple(edge_ids),
             face_b_segment_ids=None,
+            centerline_pts=centerlines.get(
+                wall_id, ((1000.0, 1000.0), (1001.0, 1001.0))
+            ),
         ),
     )
 
@@ -407,3 +417,93 @@ def test_grid_component_completion_preserves_repeated_physical_outer_wall():
     assert record.separator_wall_ids == ("w_lm", "w_mr")
     assert "w_top" in record.bounding_wall_ids
     assert "w_bottom" in record.bounding_wall_ids
+
+
+def test_long_grid_wall_with_more_than_two_global_owners_uses_local_adjacency():
+    top_left = _face(
+        "top_left",
+        "record_top_left",
+        ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
+        ("w_outer_left_top", "w_long_grid", "w_top_left", "w_mid_left"),
+    )
+    top_right = _face(
+        "top_right",
+        "record_top_right",
+        ((10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)),
+        ("w_long_grid", "w_outer_right_top", "w_top_right", "w_mid_right"),
+    )
+    bottom_left = _face(
+        "bottom_left",
+        "record_bottom_left",
+        ((0.0, 10.0), (10.0, 10.0), (10.0, 20.0), (0.0, 20.0)),
+        ("w_outer_left_bottom", "w_long_grid", "w_mid_left", "w_bottom_left"),
+    )
+    bottom_right = _face(
+        "bottom_right",
+        "record_bottom_right",
+        ((10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0)),
+        ("w_long_grid", "w_outer_right_bottom", "w_mid_right", "w_bottom_right"),
+    )
+    room_scope = SourceRoomFaceScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(top_left, top_right, bottom_left, bottom_right),
+        reason_codes=("source_room_face_scope_resolved",),
+        **LINEAGE,
+    )
+    wall_scope = PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(
+            SimpleNamespace(
+                wall_candidate_id="w_long_grid",
+                wall_candidate=SimpleNamespace(
+                    face_a_segment_ids=("e_long_grid",),
+                    face_b_segment_ids=None,
+                    centerline_pts=((10.0, 0.0), (10.0, 20.0)),
+                ),
+            ),
+        ),
+        source_observation_ids=(),
+        reason_codes=("physical_wall_candidate_scope_resolved",),
+        typed_semantic_evidence_atoms=(
+            _grid_atom("e_long_grid", "ev_long_grid"),
+        ),
+        **LINEAGE,
+    )
+    candidate = SimpleNamespace(
+        record_id="split_label_top",
+        document_id=LINEAGE["document_id"],
+        revision_id=LINEAGE["revision_id"],
+        source_sha256=LINEAGE["source_sha256"],
+        snapshot_id=LINEAGE["snapshot_id"],
+        page_id=LINEAGE["page_id"],
+        decision_scope_id=LINEAGE["decision_scope_id"],
+        label="GENERIC TWO WORD",
+        observation_ids=("obs_top_left", "obs_top_right"),
+        word_evidence=(
+            SimpleNamespace(authority_record_id="text_top_left"),
+            SimpleNamespace(authority_record_id="text_top_right"),
+        ),
+        word_face_ids=("top_left", "top_right"),
+        source_room_face_record_ids=("record_top_left", "record_top_right"),
+    )
+    label_scope = SourceRoomLabelScopeResult(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        reason_codes=("source_room_label_position_unresolved",),
+        records=(),
+        split_face_candidates=(candidate,),
+        **LINEAGE,
+    )
+
+    result = compose_grid_separated_room_faces(
+        wall_scope=wall_scope,
+        room_scope=room_scope,
+        label_scope=label_scope,
+    )
+
+    # The long grid wall connects each left/right pair locally, but the top
+    # pair is not allowed to consume the bottom pair through point contact.
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].constituent_face_ids == ("top_left", "top_right")
