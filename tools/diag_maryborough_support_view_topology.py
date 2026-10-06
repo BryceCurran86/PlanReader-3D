@@ -47,14 +47,14 @@ def _summarize_claim(claim) -> dict:
     )
     labelled_rooms = [
         {
-            "room_entity_id": room.room_entity_id,
+            "canonical_room_id": room.canonical_room_id,
             "physical_room_id": room.physical_room_id,
             "room_label": _norm(room.room_label),
             "source_room_face_record_id": room.source_room_face_record_id,
-            "source_page_id": room.source_page_id,
+            "source_page_id": room.page_id,
             "decision_scope_id": room.decision_scope_id,
             "geometry_complete": room.geometry_complete,
-            "polygon_vertex_count": len(room.polygon or ()),
+            "polygon_vertex_count": len(room.polygon_pdf_pts or ()),
         }
         for room in claim.canonical_rooms
         if _norm(room.room_label)
