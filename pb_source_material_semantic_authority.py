@@ -26,6 +26,14 @@ from pb_material_schedule_v1222 import (
     semantic_finish_from_schedule_entry,
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import (
@@ -261,6 +269,7 @@ def _trusted_words_by_page(
     """Resolve the producer-owned PDF text-integrity receipt for every word."""
 
     authority = source.text_integrity_authority()
+    raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)
     rows: dict[str, list[_TrustedTextWord]] = {}
     for observation_id in tuple(
         getattr(published, "text_observation_ids", ()) or ()
@@ -289,21 +298,64 @@ def _trusted_words_by_page(
             or bbox[3] <= bbox[1]
         ):
             raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+        trusted_text = (
+            str(result.trusted_text)
+            if (
+                result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.trusted_text is not None
+            )
+            else None
+        )
+        authority_reasons = tuple(result.reason_codes or ())
+        if trusted_text is None:
+            reason_set = set(authority_reasons)
+            admissible = {
+                TEXT_GLYPH_MAPPING_UNVERIFIED,
+                TEXT_CLIP_STATE_UNRESOLVED,
+            }
+            if (
+                result.status is EvidenceResolutionStatus.ABSTAINED
+                and not bool(receipt.trusted)
+                and TEXT_GLYPH_MAPPING_UNVERIFIED in reason_set
+                and reason_set.issubset(admissible)
+                and tuple(receipt.reason_codes or ()) == authority_reasons
+            ):
+                raster_result = raster.publish(
+                    RasterTextCorroborationSelector(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=str(observation_id),
+                    )
+                )
+                if (
+                    raster_result.status is EvidenceResolutionStatus.CORROBORATED
+                    and raster_result.record is not None
+                    and str(raster_result.corroborated_text or "").strip()
+                ):
+                    trusted_text = str(raster_result.corroborated_text)
+                    authority_reasons = tuple(
+                        dict.fromkeys(
+                            (
+                                *authority_reasons,
+                                "raster_text_corroborated",
+                            )
+                        )
+                    )
+
         page_id = str(receipt.page_id)
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
                 observation_id=str(observation_id),
                 page_id=page_id,
-                text=str(result.trusted_text or receipt.raw_text or ""),
+                text=str(trusted_text or receipt.raw_text or ""),
                 bbox=bbox,
                 block_no=int(receipt.block_no or 0),
                 line_no=int(receipt.line_no or 0),
                 word_no=int(receipt.word_no or 0),
-                trusted=(
-                    result.status is EvidenceResolutionStatus.CORROBORATED
-                    and result.trusted_text is not None
-                ),
-                reason_codes=tuple(result.reason_codes or ()),
+                trusted=trusted_text is not None,
+                reason_codes=authority_reasons,
             )
         )
     return {
