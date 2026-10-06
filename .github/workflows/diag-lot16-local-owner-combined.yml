@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - gptmax/raster-source-primitive-local-owner-v2
 
 jobs:
   validate:
