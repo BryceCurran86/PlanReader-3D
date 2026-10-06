@@ -1,0 +1,67 @@
+name: DIAG GPT1 Maryborough Core Sealed
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify source and seal core families
+        run: |
+          mkdir -p artifacts/maryborough-core
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          print({"source_sha256":actual,"verified":actual==expected})
+          if actual != expected:
+              raise SystemExit("source SHA mismatch")
+          PY
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py             --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"             --project-id au_qld_maryborough_service_station             --workspace-id 1             --family-group core             --output-dir artifacts/maryborough-core             | tee artifacts/maryborough-core/handoff.stdout.json
+      - name: Print sealed core inventory
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/maryborough-core")
+          summary=root/"production_summary.json"
+          if summary.exists():
+              print("SUMMARY")
+              print(summary.read_text())
+          sealed=root/"au_qld_maryborough_service_station.core.json"
+          if sealed.exists():
+              data=json.loads(sealed.read_text())
+              print(json.dumps({
+                  "run_id":data.get("run_id"),
+                  "source_sha256s":data.get("source_sha256s"),
+                  "quantity_count":len(data.get("quantities",[])),
+                  "quantities":[{
+                      "quantity_id":q.get("quantity_id"),
+                      "family":q.get("family"),
+                      "value":q.get("value"),
+                      "unit":q.get("unit"),
+                      "object_identity_refs":q.get("object_identity_refs"),
+                      "lineage_ok":q.get("lineage_ok"),
+                      "abstained":q.get("abstained"),
+                  } for q in data.get("quantities",[])]
+              },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-core-sealed
+          path: artifacts/maryborough-core
+          retention-days: 3
