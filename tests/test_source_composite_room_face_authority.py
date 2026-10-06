@@ -274,6 +274,7 @@ def _three_cell_room_scope():
         **LINEAGE,
     )
 
+
 def _three_cell_label_scope(*, middle_label=False, competing_split=False):
     candidate = SimpleNamespace(
         record_id="split_label_primary",
@@ -472,24 +473,48 @@ def test_long_grid_wall_with_more_than_two_global_owners_uses_local_adjacency():
         "record_top_left",
         ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
         ("w_outer_left_top", "w_long_grid", "w_top_left", "w_mid_left"),
+        (
+            ("w_top_left", ((0.0, 0.0), (10.0, 0.0))),
+            ("w_long_grid", ((10.0, 0.0), (10.0, 10.0))),
+            ("w_mid_left", ((0.0, 10.0), (10.0, 10.0))),
+            ("w_outer_left_top", ((0.0, 0.0), (0.0, 10.0))),
+        ),
     )
     top_right = _face(
         "top_right",
         "record_top_right",
         ((10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)),
         ("w_long_grid", "w_outer_right_top", "w_top_right", "w_mid_right"),
+        (
+            ("w_top_right", ((10.0, 0.0), (20.0, 0.0))),
+            ("w_outer_right_top", ((20.0, 0.0), (20.0, 10.0))),
+            ("w_mid_right", ((10.0, 10.0), (20.0, 10.0))),
+            ("w_long_grid", ((10.0, 0.0), (10.0, 10.0))),
+        ),
     )
     bottom_left = _face(
         "bottom_left",
         "record_bottom_left",
         ((0.0, 10.0), (10.0, 10.0), (10.0, 20.0), (0.0, 20.0)),
         ("w_outer_left_bottom", "w_long_grid", "w_mid_left", "w_bottom_left"),
+        (
+            ("w_mid_left", ((0.0, 10.0), (10.0, 10.0))),
+            ("w_long_grid", ((10.0, 10.0), (10.0, 20.0))),
+            ("w_bottom_left", ((0.0, 20.0), (10.0, 20.0))),
+            ("w_outer_left_bottom", ((0.0, 10.0), (0.0, 20.0))),
+        ),
     )
     bottom_right = _face(
         "bottom_right",
         "record_bottom_right",
         ((10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0)),
         ("w_long_grid", "w_outer_right_bottom", "w_mid_right", "w_bottom_right"),
+        (
+            ("w_mid_right", ((10.0, 10.0), (20.0, 10.0))),
+            ("w_outer_right_bottom", ((20.0, 10.0), (20.0, 20.0))),
+            ("w_bottom_right", ((10.0, 20.0), (20.0, 20.0))),
+            ("w_long_grid", ((10.0, 10.0), (10.0, 20.0))),
+        ),
     )
     room_scope = SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
