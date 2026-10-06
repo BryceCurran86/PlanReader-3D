@@ -1,0 +1,32 @@
+name: DIAG Lot16 2124 Leader Source
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect 2124 leader source
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_2124_leader_source.py | tee lot16-2124-leader-source.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-2124-leader-source
+          path: lot16-2124-leader-source.json
+          retention-days: 1
