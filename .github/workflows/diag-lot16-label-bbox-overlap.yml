@@ -1,0 +1,58 @@
+name: DIAG Lot16 Label Bbox Overlap
+
+on:
+  pull_request:
+    branches:
+      - gpt4/opening-label-bbox-overlap-v1
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused label ownership tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_opening_label_bbox_gap_ownership.py \
+            tests/test_opening_label_dimension_authority.py \
+            tests/test_opening_label_semantic_authority.py
+      - name: Run exact Lot16 opening dropout matrix
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_opening_dropout_matrix.py | tee lot16-label-bbox-overlap.json
+      - name: Report source-derived opening area gains
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path("lot16-label-bbox-overlap.json").read_text())
+          rows=data.get("published_area_quantities",[])
+          values=sorted(float(row["value"]) for row in rows)
+          print(json.dumps({
+              "published_area_quantity_count":len(rows),
+              "published_area_values":values,
+              "canonical_kind":data.get("canonical_kind"),
+              "canonical_area_basis":data.get("canonical_area_basis"),
+              "opening_bindings":data.get("opening_bindings"),
+              "area_gate_combinations":data.get("area_gate_combinations"),
+          },indent=2,sort_keys=True))
+          if len(rows) < 6:
+              raise SystemExit("opening-area non-regression failed")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-label-bbox-overlap
+          path: lot16-label-bbox-overlap.json
+          retention-days: 1
