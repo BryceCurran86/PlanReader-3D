@@ -50,6 +50,7 @@ from pb_pdf_text_integrity_authority import (
     classify_native_word_integrity,
 )
 from pb_source_observation_authority import (
+    NativePageImagePlacement,
     OBSERVATION_UNAVAILABLE,
     PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
     PRODUCER_INTEGRITY_FAILURE,
@@ -759,6 +760,80 @@ class SourceVisibilityProducer:
             replace(page_parent),
             native_frame,
             RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+        )
+
+    @staticmethod
+    def _registration_scale_from_image_placements(
+        placements: Sequence[NativePageImagePlacement],
+    ) -> tuple[float, float] | None:
+        """Return one page-wide anisotropy descriptor when tiles agree.
+
+        This helper is registration evidence only. Raster primitive extraction
+        remains page-coordinate based and does not depend on page-wide
+        agreement; swing G17 consumes placement transforms locally per aperture.
+        """
+
+        factors: list[tuple[float, float]] = []
+        for placement in placements:
+            x0, y0, x1, y1 = placement.bbox_pt
+            sx = (float(x1) - float(x0)) / float(placement.pixel_width)
+            sy = (float(y1) - float(y0)) / float(placement.pixel_height)
+            if (
+                not math.isfinite(sx)
+                or not math.isfinite(sy)
+                or sx <= 0.0
+                or sy <= 0.0
+            ):
+                continue
+            reference = math.sqrt(sx * sy)
+            factors.append((sx / reference, sy / reference))
+        if not factors:
+            return None
+        first_x, first_y = factors[0]
+        if any(
+            not (
+                math.isclose(x, first_x, rel_tol=1e-4, abs_tol=1e-6)
+                and math.isclose(y, first_y, rel_tol=1e-4, abs_tol=1e-6)
+            )
+            for x, y in factors[1:]
+        ):
+            return None
+        return (float(first_x), float(first_y))
+
+    def raster_opening_image_placements(
+        self,
+        revision_id: str,
+        page_id: str,
+    ) -> tuple[NativePageImagePlacement, ...]:
+        """Return producer-owned embedded-image registration evidence."""
+
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        clean_page_id = str(page_id).strip()
+        if not clean_page_id:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        return self._producer.native_page_image_placements(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id=clean_page_id,
+        )
+
+    def raster_opening_registration_scale(
+        self,
+        revision_id: str,
+        page_id: str,
+    ) -> tuple[float, float] | None:
+        """Return page-wide registration only when every image tile agrees.
+
+        This is intentionally not a prerequisite for primitive publication.
+        Local swing candidates use raster_opening_image_placements() instead.
+        """
+
+        return self._registration_scale_from_image_placements(
+            self.raster_opening_image_placements(revision_id, page_id)
         )
 
     def physical_opening_authority(self):
