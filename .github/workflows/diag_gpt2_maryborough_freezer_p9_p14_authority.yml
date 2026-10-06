@@ -1,0 +1,34 @@
+name: DIAG GPT2 Maryborough Freezer P9 P14 Authority
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Probe Freezer authority on pages 9 and 14
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-freezer-p9-p14
+          git rev-parse HEAD > artifacts/gpt2-freezer-p9-p14/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-freezer-p9-p14/source_sha256.txt
+          PYTHONPATH=. python -u tools/diag_maryborough_freezer_p9_p14_authority.py \
+            | tee artifacts/gpt2-freezer-p9-p14/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-freezer-p9-p14
+          path: artifacts/gpt2-freezer-p9-p14
+          retention-days: 1
