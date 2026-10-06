@@ -20,7 +20,7 @@ import numpy as np
 
 
 RASTER_OPENING_PRIMITIVE_SCHEMA_VERSION = "1.1.0"
-RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION = "raster_opening_source_primitives_v3"
+RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION = "raster_opening_source_primitives_v4"
 
 RASTER_WALL_BAND_FACE = "raster_wall_band_face"
 RASTER_WALL_BAND_END = "raster_wall_band_end"
@@ -51,6 +51,40 @@ class RasterOpeningSourcePrimitive:
 
 def _px(value_pt: float, dpi: int, *, minimum: int = 1) -> int:
     return max(int(minimum), int(round(float(value_pt) * float(dpi) / 72.0)))
+
+
+def _scaled_px(
+    value_pt: float,
+    dpi: int,
+    scale: float,
+    *,
+    minimum: int = 1,
+) -> int:
+    if not math.isfinite(float(scale)) or float(scale) <= 0.0:
+        raise ValueError("registration scale must be positive and finite")
+    return max(
+        int(minimum),
+        int(round(float(value_pt) * float(dpi) / 72.0 * float(scale))),
+    )
+
+
+def _axis_registration_scales(
+    axis: str,
+    registration_scale: tuple[float, float],
+) -> tuple[float, float]:
+    sx, sy = (float(value) for value in registration_scale)
+    if (
+        not math.isfinite(sx)
+        or not math.isfinite(sy)
+        or sx <= 0.0
+        or sy <= 0.0
+    ):
+        raise ValueError("registration_scale must contain positive finite values")
+    if axis == "horizontal":
+        return sx, sy
+    if axis == "vertical":
+        return sy, sx
+    raise ValueError("axis must be horizontal or vertical")
 
 
 def _odd(value: int) -> int:
@@ -94,17 +128,22 @@ def _band_boxes(
     *,
     dpi: int,
     axis: str,
+    registration_scale: tuple[float, float] = (1.0, 1.0),
 ) -> tuple[tuple[int, int, int, int], ...]:
     work = thick if axis == "horizontal" else np.ascontiguousarray(thick.T)
-    run = _odd(_px(BAND_MIN_RUN_PT, dpi))
+    along_scale, cross_scale = _axis_registration_scales(
+        axis,
+        registration_scale,
+    )
+    run = _odd(_scaled_px(BAND_MIN_RUN_PT, dpi, along_scale))
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (run, 1))
     band = cv2.morphologyEx(work, cv2.MORPH_OPEN, kernel)
     count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
         band,
         connectivity=8,
     )
-    solid = _px(POCHE_MIN_PT, dpi)
-    tmax = _px(BAND_MAX_THICKNESS_PT, dpi)
+    solid = _scaled_px(POCHE_MIN_PT, dpi, cross_scale)
+    tmax = _scaled_px(BAND_MAX_THICKNESS_PT, dpi, cross_scale)
     boxes: list[tuple[int, int, int, int]] = []
     for index in range(1, int(count)):
         x = int(stats[index, cv2.CC_STAT_LEFT])
@@ -114,7 +153,8 @@ def _band_boxes(
         if (
             height < solid
             or height > tmax
-            or width < BAND_MIN_ASPECT * height
+            or (width / along_scale)
+            < BAND_MIN_ASPECT * (height / cross_scale)
         ):
             continue
         box = (x, y, x + width - 1, y + height - 1)
@@ -128,9 +168,15 @@ def _band_edge_primitives(
     thick: np.ndarray,
     *,
     dpi: int,
+    registration_scale: tuple[float, float] = (1.0, 1.0),
 ) -> Iterable[RasterOpeningSourcePrimitive]:
     for axis in ("horizontal", "vertical"):
-        for x0, y0, x1, y1 in _band_boxes(thick, dpi=dpi, axis=axis):
+        for x0, y0, x1, y1 in _band_boxes(
+            thick,
+            dpi=dpi,
+            axis=axis,
+            registration_scale=registration_scale,
+        ):
             if axis == "horizontal":
                 faces = (
                     (x0, y0, x1, y0),
@@ -161,6 +207,7 @@ def _raw_axis_line_run_primitives(
     dpi: int,
     axis: str,
     exclude_mask: np.ndarray | None = None,
+    registration_scale: tuple[float, float] = (1.0, 1.0),
 ) -> Iterable[RasterOpeningSourcePrimitive]:
     """Publish neutral axis-line evidence without re-publishing thick poche.
 
@@ -193,7 +240,11 @@ def _raw_axis_line_run_primitives(
         work = (source_work & (excluded_work == 0)).astype(np.uint8)
     else:
         work = source_work
-    minimum = _px(THIN_RUN_MIN_PT, dpi)
+    along_scale, _cross_scale = _axis_registration_scales(
+        axis,
+        registration_scale,
+    )
+    minimum = _scaled_px(THIN_RUN_MIN_PT, dpi, along_scale)
     for row_index, row in enumerate(work):
         padded = np.pad(row.astype(np.int8, copy=False), (1, 1))
         transitions = np.diff(padded)
@@ -231,16 +282,25 @@ def _axis_run_primitives(
     *,
     dpi: int,
     axis: str,
+    registration_scale: tuple[float, float] = (1.0, 1.0),
 ) -> Iterable[RasterOpeningSourcePrimitive]:
     work = thin_mask if axis == "horizontal" else np.ascontiguousarray(thin_mask.T)
-    run = _odd(_px(THIN_RUN_MIN_PT, dpi))
+    along_scale, cross_scale = _axis_registration_scales(
+        axis,
+        registration_scale,
+    )
+    run = _odd(_scaled_px(THIN_RUN_MIN_PT, dpi, along_scale))
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (run, 1))
     opened = cv2.morphologyEx(work, cv2.MORPH_OPEN, kernel)
     count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
         opened,
         connectivity=8,
     )
-    max_thickness = _px(THIN_RUN_MAX_THICKNESS_PT, dpi)
+    max_thickness = _scaled_px(
+        THIN_RUN_MAX_THICKNESS_PT,
+        dpi,
+        cross_scale,
+    )
     for index in range(1, int(count)):
         x = int(stats[index, cv2.CC_STAT_LEFT])
         y = int(stats[index, cv2.CC_STAT_TOP])
@@ -259,6 +319,7 @@ def detect_raster_opening_source_primitives(
     png_bytes: bytes,
     *,
     dpi: int,
+    registration_scale: tuple[float, float] = (1.0, 1.0),
 ) -> tuple[RasterOpeningSourcePrimitive, ...]:
     """Extract perception-only raster primitives from an images-only PNG render."""
 
@@ -275,22 +336,39 @@ def detect_raster_opening_source_primitives(
 
     mass = (gray < MASS_THRESHOLD).astype(np.uint8)
     line_mask = (gray < LINE_THRESHOLD).astype(np.uint8)
-    solid = _odd(_px(POCHE_MIN_PT, dpi))
+    sx, sy = (float(value) for value in registration_scale)
+    if (
+        not math.isfinite(sx)
+        or not math.isfinite(sy)
+        or sx <= 0.0
+        or sy <= 0.0
+    ):
+        raise ValueError("registration_scale must contain positive finite values")
+    solid_x = _odd(_scaled_px(POCHE_MIN_PT, dpi, sx))
+    solid_y = _odd(_scaled_px(POCHE_MIN_PT, dpi, sy))
     thick = cv2.morphologyEx(
         mass,
         cv2.MORPH_OPEN,
-        cv2.getStructuringElement(cv2.MORPH_RECT, (solid, solid)),
+        cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (solid_x, solid_y),
+        ),
     )
     halo = cv2.dilate(thick, np.ones((3, 3), np.uint8))
     thin_mask = (line_mask & (halo == 0)).astype(np.uint8)
 
-    primitives = set(_band_edge_primitives(thick, dpi=dpi))
+    primitives = set(_band_edge_primitives(
+        thick,
+        dpi=dpi,
+        registration_scale=registration_scale,
+    ))
     primitives.update(
         _raw_axis_line_run_primitives(
             line_mask,
             dpi=dpi,
             axis="horizontal",
             exclude_mask=thick,
+            registration_scale=registration_scale,
         )
     )
     primitives.update(
@@ -299,13 +377,24 @@ def detect_raster_opening_source_primitives(
             dpi=dpi,
             axis="vertical",
             exclude_mask=thick,
+            registration_scale=registration_scale,
         )
     )
     # Preserve the stricter hairline primitive for later swing evidence. It is
     # intentionally distinct from RASTER_LINE_RUN, which is the neutral source
     # evidence required by framed-opening G17 review.
-    primitives.update(_axis_run_primitives(thin_mask, dpi=dpi, axis="horizontal"))
-    primitives.update(_axis_run_primitives(thin_mask, dpi=dpi, axis="vertical"))
+    primitives.update(_axis_run_primitives(
+        thin_mask,
+        dpi=dpi,
+        axis="horizontal",
+        registration_scale=registration_scale,
+    ))
+    primitives.update(_axis_run_primitives(
+        thin_mask,
+        dpi=dpi,
+        axis="vertical",
+        registration_scale=registration_scale,
+    ))
     if len(primitives) > MAX_PRIMITIVES:
         raise ValueError("raster opening primitive count exceeds safety bound")
 
