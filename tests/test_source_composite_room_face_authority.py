@@ -187,3 +187,177 @@ def test_disconnected_faces_do_not_merge_even_with_grid_evidence():
 
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.records == ()
+
+
+def _three_cell_wall_scope(atoms):
+    return PhysicalWallCandidateScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(
+            _wall_record("w_lm", "e_lm"),
+            _wall_record("w_mr", "e_mr"),
+            _wall_record("w_left", "e_left"),
+            _wall_record("w_right", "e_right"),
+        ),
+        source_observation_ids=(),
+        reason_codes=("physical_wall_candidate_scope_resolved",),
+        typed_semantic_evidence_atoms=tuple(atoms),
+        **LINEAGE,
+    )
+
+
+def _three_cell_room_scope():
+    left = _face(
+        "face_left",
+        "record_left",
+        ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
+        ("w_left", "w_lm", "w_top_left", "w_bottom_left"),
+    )
+    middle = _face(
+        "face_middle",
+        "record_middle",
+        ((10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)),
+        ("w_lm", "w_mr", "w_top_middle", "w_bottom_middle"),
+    )
+    right = _face(
+        "face_right",
+        "record_right",
+        ((20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)),
+        ("w_mr", "w_right", "w_top_right", "w_bottom_right"),
+    )
+    return SourceRoomFaceScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(left, middle, right),
+        reason_codes=("source_room_face_scope_resolved",),
+        **LINEAGE,
+    )
+
+
+def _three_cell_label_scope(*, middle_label=False, competing_split=False):
+    candidate = SimpleNamespace(
+        record_id="split_label_primary",
+        document_id=LINEAGE["document_id"],
+        revision_id=LINEAGE["revision_id"],
+        source_sha256=LINEAGE["source_sha256"],
+        snapshot_id=LINEAGE["snapshot_id"],
+        page_id=LINEAGE["page_id"],
+        decision_scope_id=LINEAGE["decision_scope_id"],
+        label="GENERIC ROOM",
+        observation_ids=("obs_left", "obs_right"),
+        word_evidence=(
+            SimpleNamespace(authority_record_id="text_left"),
+            SimpleNamespace(authority_record_id="text_right"),
+        ),
+        word_face_ids=("face_left", "face_right"),
+        source_room_face_record_ids=("record_left", "record_right"),
+    )
+    split_candidates = [candidate]
+    if competing_split:
+        split_candidates.append(
+            SimpleNamespace(
+                record_id="split_label_competing",
+                document_id=LINEAGE["document_id"],
+                revision_id=LINEAGE["revision_id"],
+                source_sha256=LINEAGE["source_sha256"],
+                snapshot_id=LINEAGE["snapshot_id"],
+                page_id=LINEAGE["page_id"],
+                decision_scope_id=LINEAGE["decision_scope_id"],
+                label="OTHER ROOM",
+                observation_ids=("obs_middle", "obs_other"),
+                word_evidence=(
+                    SimpleNamespace(authority_record_id="text_middle"),
+                    SimpleNamespace(authority_record_id="text_other"),
+                ),
+                word_face_ids=("face_middle", "face_right"),
+                source_room_face_record_ids=("record_middle", "record_right"),
+            )
+        )
+    records = (
+        (SimpleNamespace(face_id="face_middle", label="OTHER ROOM"),)
+        if middle_label
+        else ()
+    )
+    return SourceRoomLabelScopeResult(
+        status=EvidenceResolutionStatus.CANDIDATE,
+        reason_codes=("source_room_label_position_unresolved",),
+        records=records,
+        split_face_candidates=tuple(split_candidates),
+        **LINEAGE,
+    )
+
+
+def test_grid_component_completion_recovers_unlabelled_intervening_face():
+    result = compose_grid_separated_room_faces(
+        wall_scope=_three_cell_wall_scope(
+            (
+                _grid_atom("e_lm", "ev_lm"),
+                _grid_atom("e_mr", "ev_mr"),
+            )
+        ),
+        room_scope=_three_cell_room_scope(),
+        label_scope=_three_cell_label_scope(),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.constituent_face_ids == (
+        "face_left",
+        "face_middle",
+        "face_right",
+    )
+    assert record.separator_wall_ids == ("w_lm", "w_mr")
+    assert record.area_page_pts2 == 300.0
+    assert record.grid_evidence_ids == ("ev_lm", "ev_mr")
+    assert "w_lm" not in record.bounding_wall_ids
+    assert "w_mr" not in record.bounding_wall_ids
+
+
+def test_grid_component_completion_requires_all_label_seed_faces_connected():
+    result = compose_grid_separated_room_faces(
+        wall_scope=_three_cell_wall_scope((_grid_atom("e_lm", "ev_lm"),)),
+        room_scope=_three_cell_room_scope(),
+        label_scope=_three_cell_label_scope(),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.unresolved_label_candidate_ids == ("split_label_primary",)
+
+
+def test_grid_component_completion_blocks_authenticated_label_conflict():
+    result = compose_grid_separated_room_faces(
+        wall_scope=_three_cell_wall_scope(
+            (
+                _grid_atom("e_lm", "ev_lm"),
+                _grid_atom("e_mr", "ev_mr"),
+            )
+        ),
+        room_scope=_three_cell_room_scope(),
+        label_scope=_three_cell_label_scope(middle_label=True),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.unresolved_label_candidate_ids == ("split_label_primary",)
+
+
+def test_grid_component_completion_blocks_competing_split_label():
+    result = compose_grid_separated_room_faces(
+        wall_scope=_three_cell_wall_scope(
+            (
+                _grid_atom("e_lm", "ev_lm"),
+                _grid_atom("e_mr", "ev_mr"),
+            )
+        ),
+        room_scope=_three_cell_room_scope(),
+        label_scope=_three_cell_label_scope(competing_split=True),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert set(result.unresolved_label_candidate_ids) == {
+        "split_label_primary",
+        "split_label_competing",
+    }
