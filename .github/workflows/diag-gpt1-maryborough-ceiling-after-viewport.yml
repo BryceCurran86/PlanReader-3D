@@ -1,0 +1,103 @@
+name: DIAG GPT1 Maryborough Ceiling After Viewport
+
+on:
+  pull_request:
+    branches:
+      - gpt1/room-area-viewport-ownership-v1
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove Maryborough room viewport and ceiling handoff
+        run: |
+          mkdir -p artifacts/maryborough-ceiling-viewport
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/maryborough-ceiling-viewport/result.json
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+          from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
+          from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          room_q=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floor_q=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          ceiling=collect_live_ceiling_lining_claims(
+              path,
+              pages=(6,),
+              authoritative_room_area_quantities=tuple(claim.room_area_quantity_evidence),
+          )
+          ceiling_q=[
+              q for q in publish_live_ceiling_area_quantities(ceiling)
+              if not q.abstained and q.value is not None
+          ]
+          sealed=None
+          if ceiling_q:
+              sealed=seal_live_ceiling_area_run(
+                  ceiling,
+                  workspace_id=1,
+                  project_id="au_qld_maryborough_service_station",
+              )
+          payload={
+              "room_quantities":[{
+                  "label":dict(q.metadata or {}).get("room_label"),
+                  "value":q.value,
+                  "authority":q.authority,
+                  "page_no":dict(q.metadata or {}).get("page_no"),
+                  "viewport_id":dict(q.metadata or {}).get("viewport_id"),
+                  "figured_dimension_ids":dict(q.metadata or {}).get("figured_dimension_ids"),
+              } for q in room_q],
+              "floor_quantities":[{
+                  "value":q.value,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "viewport_id":dict(q.metadata or {}).get("viewport_id"),
+              } for q in floor_q],
+              "ceiling_result_status":getattr(ceiling.status,"value",str(ceiling.status)),
+              "ceiling_reason_codes":list(ceiling.reason_codes),
+              "ceiling_claim_count":len(ceiling.claims),
+              "canonical_ceiling_count":len(ceiling.canonical_ceilings),
+              "ceiling_quantity_count":len(ceiling_q),
+              "ceiling_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "room_entity_id":dict(q.metadata or {}).get("room_entity_id"),
+                  "viewport_id":dict(q.metadata or {}).get("viewport_id"),
+                  "figured_dimension_ids":dict(q.metadata or {}).get("figured_dimension_ids"),
+              } for q in ceiling_q],
+              "sealed_ceiling_quantity_count":0 if sealed is None else len(sealed.quantities),
+              "sealed_run_id":None if sealed is None else sealed.run_id,
+          }
+          print(json.dumps(payload,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-ceiling-after-viewport
+          path: artifacts/maryborough-ceiling-viewport
+          retention-days: 2
