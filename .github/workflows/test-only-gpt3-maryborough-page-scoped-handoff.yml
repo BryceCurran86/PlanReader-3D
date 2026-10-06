@@ -24,10 +24,20 @@ jobs:
         run: |
           PYTHONPATH=. python - <<'PY'
           from pathlib import Path
+          import fitz
           from tools.run_source_closed_project_handoff import _source_topology_pages
+          from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
           path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           pages, count = _source_topology_pages(path)
+          scope = source_floor_plan_topology_scope(path, tuple(range(count)))
           print({"page_count": count, "topology_pages_1_based": [p + 1 for p in pages]})
+          print({
+              "scope": None if scope is None else scope.to_dict(),
+              "evidence_pages_1_based": (
+                  [] if scope is None
+                  else [p + 1 for p in scope.evidence_page_indices]
+              ),
+          })
           PY
       - name: Run Maryborough handoff
         continue-on-error: true
