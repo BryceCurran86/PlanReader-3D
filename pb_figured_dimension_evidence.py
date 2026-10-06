@@ -938,20 +938,11 @@ def bind_observation_to_vector_geometry(
                     calibration=calibration,
                 )
                 style_winner = _strict_style_dominator(tied)
-                if (
-                    orientation_winner is not None
-                    and style_winner is not None
-                    and orientation_winner.segment_id != style_winner.segment_id
-                ):
-                    return DimensionAnchorBinding(
-                        observation.dimension_id,
-                        BindingStatus.AMBIGUOUS.value,
-                        notes=[
-                            "native orientation+witness proof conflicts with "
-                            "source graphic-state tie-break"
-                        ],
-                    )
-                winner = orientation_winner or style_winner
+                # Preserve historical strict graphic-state authority.
+                # Orientation+witness is additive only: it may recover a case
+                # that previously abstained, but it must not veto or replace an
+                # already source-proven style winner.
+                winner = style_winner or orientation_winner
                 if winner is None:
                     return DimensionAnchorBinding(
                         observation.dimension_id,
