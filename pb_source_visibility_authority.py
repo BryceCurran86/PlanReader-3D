@@ -762,6 +762,46 @@ class SourceVisibilityProducer:
             RASTER_OPENING_PRIMITIVE_RENDER_DPI,
         )
 
+    @staticmethod
+    def _registration_scale_from_image_placements(
+        placements: Sequence[NativePageImagePlacement],
+    ) -> tuple[float, float] | None:
+        """Return one page-wide anisotropy normalization for raster evidence.
+
+        Each embedded image contributes its X/Y page-point scale per intrinsic
+        source pixel. We normalize around the geometric-mean scale so a source
+        quarter-turn swaps X/Y factors instead of changing the paper-unit
+        morphology contract. A full-page raster detector may use the result
+        only when every covering image agrees on the same normalized transform.
+        """
+
+        factors: list[tuple[float, float]] = []
+        for placement in placements:
+            x0, y0, x1, y1 = placement.bbox_pt
+            sx = (float(x1) - float(x0)) / float(placement.pixel_width)
+            sy = (float(y1) - float(y0)) / float(placement.pixel_height)
+            if (
+                not math.isfinite(sx)
+                or not math.isfinite(sy)
+                or sx <= 0.0
+                or sy <= 0.0
+            ):
+                continue
+            reference = math.sqrt(sx * sy)
+            factors.append((sx / reference, sy / reference))
+        if not factors:
+            return None
+        first_x, first_y = factors[0]
+        if any(
+            not (
+                math.isclose(x, first_x, rel_tol=1e-4, abs_tol=1e-6)
+                and math.isclose(y, first_y, rel_tol=1e-4, abs_tol=1e-6)
+            )
+            for x, y in factors[1:]
+        ):
+            return None
+        return (float(first_x), float(first_y))
+
     def raster_opening_image_placements(
         self,
         revision_id: str,
@@ -782,6 +822,16 @@ class SourceVisibilityProducer:
             snapshot_id=published.snapshot.snapshot_id,
             page_id=clean_page_id,
         )
+
+    def raster_opening_registration_scale(
+        self,
+        revision_id: str,
+        page_id: str,
+    ) -> tuple[float, float] | None:
+        """Return producer-owned page-wide X/Y raster normalization factors."""
+
+        placements = self.raster_opening_image_placements(revision_id, page_id)
+        return self._registration_scale_from_image_placements(placements)
 
     def physical_opening_authority(self):
         """Return one cached opening authority bound to this producer.
