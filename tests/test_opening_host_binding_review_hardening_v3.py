@@ -316,3 +316,112 @@ def test_generic_gap_host_conflicts_when_one_source_role_has_multiple_unproved_o
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.bands == ()
     assert host.HOST_GAP_LINEAGE_AMBIGUOUS in result.reason_codes
+
+
+def _jamb_two_face_source_records():
+    return (
+        _source_obs((-100.0, -5.0, 0.0, -5.0), "source:left-top"),
+        _source_obs((40.0, -5.0, 140.0, -5.0), "source:right-top"),
+        _source_obs((-100.0, 5.0, 0.0, 5.0), "source:left-bottom"),
+        _source_obs((40.0, 5.0, 140.0, 5.0), "source:right-bottom"),
+        _source_obs((0.0, -5.0, 0.0, 5.0), "source:left-jamb"),
+        _source_obs((40.0, -5.0, 40.0, 5.0), "source:right-jamb"),
+    )
+
+
+def test_jamb_two_face_host_binds_four_exact_source_wall_roles() -> None:
+    left_top = _record("left-top", ((-100.0, -5.0), (0.0, -5.0)))
+    right_top = _record("right-top", ((40.0, -5.0), (140.0, -5.0)))
+    left_bottom = _record("left-bottom", ((-100.0, 5.0), (0.0, 5.0)))
+    right_bottom = _record("right-bottom", ((40.0, 5.0), (140.0, 5.0)))
+    unrelated = _record("unrelated", ((-5.0, 0.0), (45.0, 0.0)))
+    records = (
+        left_top,
+        right_top,
+        left_bottom,
+        right_bottom,
+        unrelated,
+    )
+
+    result = host._resolve_jamb_two_face_lineage_host_from_records(
+        _jamb_two_face_source_records(),
+        records,
+        _equivalence(records),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.bands) == 1
+    assert result.bands[0].member_ids == (
+        "left-bottom",
+        "left-top",
+        "right-bottom",
+        "right-top",
+    )
+    assert "unrelated" not in result.bands[0].member_ids
+    assert (
+        host.JAMB_TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED
+        in result.reason_codes
+    )
+
+
+def test_jamb_two_face_host_abstains_when_one_wall_lineage_is_unmapped() -> None:
+    left_top = _record("left-top", ((-100.0, -5.0), (0.0, -5.0)))
+    right_top = _record("right-top", ((40.0, -5.0), (140.0, -5.0)))
+    left_bottom = _record("left-bottom", ((-100.0, 5.0), (0.0, 5.0)))
+    records = (left_top, right_top, left_bottom)
+
+    result = host._resolve_jamb_two_face_lineage_host_from_records(
+        _jamb_two_face_source_records(),
+        records,
+        _equivalence(records),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.bands == ()
+    assert host.HOST_GAP_LINEAGE_UNMAPPED in result.reason_codes
+
+
+def test_jamb_two_face_host_conflicts_on_ambiguous_wall_equivalence() -> None:
+    left_top = _record("left-top", ((-100.0, -5.0), (0.0, -5.0)))
+    right_top = _record("right-top", ((40.0, -5.0), (140.0, -5.0)))
+    left_bottom = _record("left-bottom", ((-100.0, 5.0), (0.0, 5.0)))
+    right_bottom = _record("right-bottom", ((40.0, 5.0), (140.0, 5.0)))
+    records = (left_top, right_top, left_bottom, right_bottom)
+    equivalence = replace(
+        _equivalence(records),
+        ambiguous_wall_ids=("left-top",),
+    )
+
+    result = host._resolve_jamb_two_face_lineage_host_from_records(
+        _jamb_two_face_source_records(),
+        records,
+        equivalence,
+    )
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.bands == ()
+    assert host.HOST_GAP_LINEAGE_AMBIGUOUS in result.reason_codes
+    assert host.HOST_EQUIVALENCE_AMBIGUOUS in result.reason_codes
+
+
+def test_jamb_two_face_host_abstains_when_two_face_topology_is_not_reproved() -> None:
+    malformed = (
+        _source_obs((-100.0, -5.0, 0.0, -5.0), "source:left-top"),
+        _source_obs((40.0, -5.0, 140.0, -5.0), "source:right-top"),
+        _source_obs((0.0, -5.0, 0.0, 5.0), "source:left-jamb"),
+        _source_obs((40.0, -5.0, 40.0, 5.0), "source:right-jamb"),
+    )
+    records = (
+        _record("left-top", ((-100.0, -5.0), (0.0, -5.0))),
+        _record("right-top", ((40.0, -5.0), (140.0, -5.0))),
+    )
+
+    result = host._resolve_jamb_two_face_lineage_host_from_records(
+        malformed,
+        records,
+        _equivalence(records),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.bands == ()
+    assert host.HOST_GAP_LINEAGE_UNAVAILABLE in result.reason_codes
