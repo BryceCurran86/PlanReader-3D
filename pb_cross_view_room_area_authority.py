@@ -1478,7 +1478,10 @@ class CrossViewRoomAreaProducer:
                 if any(
                     member in unique_labels
                     and str(unique_labels[member].page_id) != page_id
-                    for member in line.label_members
+                    for member in (
+                        line.label_members
+                        or (_norm_label(line.text),)
+                    )
                 )
             )
 
