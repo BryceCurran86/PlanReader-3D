@@ -32,6 +32,7 @@ def _record(wall_id: str, *, offset: float = 0.0):
         wall_candidate=SimpleNamespace(
             is_curved=False,
             centerline_pts=((20.0, 55.0 + offset), (220.0, 55.0 + offset)),
+            reason_codes=(),
         ),
         physical_identity=SimpleNamespace(
             candidate_identity_id=f"candidate:{wall_id}",
