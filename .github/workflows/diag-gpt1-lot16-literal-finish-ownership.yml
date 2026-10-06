@@ -1,0 +1,100 @@
+name: DIAG GPT1 Lot16 Literal Finish Ownership
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace literal finish ownership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          import fitz
+          from shapely.geometry import Point, Polygon
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import _trusted_words_by_page
+
+          pdf=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          source_bytes=pdf.read_bytes()
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          actual=hashlib.sha256(source_bytes).hexdigest()
+          assert actual==expected
+
+          claim=collect_live_physical_net_wall_claim(
+              pdf,
+              pages=(2,),
+              topology_pages=(2,),
+              room_area_support_pages=None,
+          )
+
+          source=SourceVisibilityProducer(
+              producer_method="diag_gpt1_lot16_literal_finish_ownership",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt1-lot16-literal-finish-ownership",
+              source_bytes=source_bytes,
+              source_locator=str(pdf),
+              page_ids=("3",),
+          )
+          words=_trusted_words_by_page(source,published).get("3",())
+          literals={"VINYL":"vinyl","EPOXY":"epoxy","TILE":"tile","TILES":"tile"}
+          floors=[]
+          for floor in claim.canonical_floors:
+              pts=tuple(floor.polygon_pdf_pts or ())
+              if len(pts)<3:
+                  continue
+              try:
+                  poly=Polygon(pts)
+              except Exception:
+                  continue
+              if not poly.is_valid or poly.area<=0:
+                  continue
+              floors.append((floor,poly))
+
+          rows=[]
+          for word in words:
+              raw=" ".join(str(word.text or "").upper().split())
+              semantic=literals.get(raw)
+              if not semantic or not word.trusted:
+                  continue
+              x0,y0,x1,y1=word.bbox
+              center=Point((x0+x1)/2.0,(y0+y1)/2.0)
+              owners=[
+                  floor for floor,poly in floors
+                  if poly.covers(center)
+              ]
+              rows.append({
+                  "text":raw,
+                  "semantic_finish":semantic,
+                  "bbox":list(word.bbox),
+                  "observation_id":word.observation_id,
+                  "owner_count":len(owners),
+                  "owner_floor_ids":[f.canonical_floor_id for f in owners],
+                  "owner_room_ids":[f.room_entity_id for f in owners],
+              })
+          print(json.dumps({
+              "source_sha256":actual,
+              "canonical_floor_count":len(claim.canonical_floors),
+              "literal_occurrence_count":len(rows),
+              "unique_owned_count":sum(1 for row in rows if row["owner_count"]==1),
+              "ambiguous_owned_count":sum(1 for row in rows if row["owner_count"]>1),
+              "unowned_count":sum(1 for row in rows if row["owner_count"]==0),
+              "occurrences":rows,
+          },indent=2,sort_keys=True))
+          PY
