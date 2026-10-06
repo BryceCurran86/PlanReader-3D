@@ -1,0 +1,90 @@
+name: DIAG GPT1 Maryborough Floor Finish Scope
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace material definitions and drawing occurrences
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf.read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          doc=fitz.open(stream=payload,filetype="pdf")
+          try:
+              page_ids=tuple(str(i+1) for i in range(doc.page_count))
+          finally:
+              doc.close()
+
+          source=SourceVisibilityProducer(
+              producer_method="gpt1-maryborough-floor-finish-scope-diag",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag-maryborough:{sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=page_ids,
+          )
+          revision_id=published.revision.revision_id
+          producer=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          producer.publish(revision_id)
+
+          defs=[]
+          for key,result in sorted(producer._definition_results.items()):
+              r=result.record
+              defs.append({
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "code":None if r is None else r.code,
+                  "description":None if r is None else r.description,
+                  "substrate":None if r is None else r.substrate,
+                  "finish":None if r is None else r.finish,
+                  "semantic_finish":None if r is None else r.semantic_finish,
+                  "source_page_ids":[] if r is None else list(r.source_page_ids),
+                  "source_viewport_ids":[] if r is None else list(r.source_viewport_ids),
+              })
+
+          occurrences=[]
+          for scope in producer.published_occurrence_results():
+              for r in scope.records:
+                  occurrences.append({
+                      "scope_status":getattr(scope.status,"value",str(scope.status)),
+                      "scope_complete":scope.scope_complete,
+                      "scope_reason_codes":list(scope.reason_codes),
+                      "page_id":r.page_id,
+                      "viewport_id":r.viewport_id,
+                      "code":r.code,
+                      "semantic_finish":r.semantic_finish,
+                      "raw_text":r.raw_text,
+                      "bbox_pdf_pts":list(r.bbox_pdf_pts),
+                      "definition_record_id":r.definition_record_id,
+                  })
+
+          print(json.dumps({
+              "source_sha256":sha,
+              "decoded_pages":list(published.coverage.decoded_pages),
+              "definition_count":len(defs),
+              "definitions":defs,
+              "occurrence_count":len(occurrences),
+              "occurrences":occurrences,
+          },indent=2,sort_keys=True))
+          PY
