@@ -59,6 +59,9 @@ SOURCE_ROOM_FACE_BOUNDARY_LOCAL_RECOVERY = "source_room_face_boundary_local_reco
 SOURCE_ROOM_FACE_DUPLICATE_EDGE = "source_room_face_duplicate_edge_ownership"
 SOURCE_ROOM_FACE_DEGENERATE = "source_room_face_tiny_or_degenerate"
 SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS = "source_room_face_component_ambiguous"
+SOURCE_ROOM_FACE_GRID_COMPOSITE_RESOLVED = (
+    "source_room_face_grid_composite_resolved"
+)
 
 # Shadow per-face boundary-ownership evaluation (descriptive; never a decision).
 OWNERSHIP_EVALUATION_NOT_EVALUATED = "not_evaluated"
@@ -408,6 +411,14 @@ class SourceRoomFaceRecord:
     polygon_pdf_pts: tuple[Point, ...]
     bounding_wall_ids: tuple[str, ...]
     area_page_pts2: float
+    composite_constituent_face_ids: tuple[str, ...] = ()
+    composite_constituent_record_ids: tuple[str, ...] = ()
+    composite_grid_evidence_ids: tuple[str, ...] = ()
+    room_label: str | None = None
+    room_label_binding_record_id: str | None = None
+    room_label_evidence_ids: tuple[str, ...] = ()
+    room_label_reason_codes: tuple[str, ...] = ()
+    wall_relationships_complete: bool = True
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
 
 
@@ -1231,6 +1242,360 @@ def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
     return replace(result, ownership_evaluation=_shadow_ownership_evaluation(scope))
 
 
+def _composite_polygon_union(
+    records: Iterable[SourceRoomFaceRecord],
+) -> tuple[Point, ...]:
+    """Union adjacent source faces by cancelling exact shared planar edges.
+
+    All source-room faces originate from one quantized planar graph, so an
+    internal face edge must appear exactly twice. The remaining degree-two
+    exterior graph must form exactly one closed cycle; holes, disjoint unions,
+    T-junction leftovers, or quantization disagreement fail closed.
+    """
+    rows = tuple(records)
+    if len(rows) < 2:
+        return ()
+    edge_counts: dict[Edge, int] = defaultdict(int)
+    for record in rows:
+        polygon = tuple(record.polygon_pdf_pts)
+        if len(polygon) < 3:
+            return ()
+        for index, first in enumerate(polygon):
+            second = polygon[(index + 1) % len(polygon)]
+            edge_counts[_edge(first, second)] += 1
+    exterior = tuple(
+        edge for edge, count in edge_counts.items() if count == 1
+    )
+    if not exterior or any(count > 2 for count in edge_counts.values()):
+        return ()
+
+    adjacency: dict[Point, list[Point]] = defaultdict(list)
+    for first, second in exterior:
+        adjacency[first].append(second)
+        adjacency[second].append(first)
+    if not adjacency or any(len(neighbours) != 2 for neighbours in adjacency.values()):
+        return ()
+
+    start = min(adjacency)
+    cycles: list[tuple[Point, ...]] = []
+    for first_next in sorted(adjacency[start]):
+        path = [start]
+        previous: Point | None = None
+        current = start
+        next_point = first_next
+        used: set[Edge] = set()
+        while True:
+            edge = _edge(current, next_point)
+            if edge in used:
+                break
+            used.add(edge)
+            previous, current = current, next_point
+            if current == start:
+                if len(used) == len(exterior):
+                    cycles.append(tuple(path))
+                break
+            path.append(current)
+            choices = [
+                value for value in adjacency[current]
+                if value != previous
+            ]
+            if len(choices) != 1:
+                break
+            next_point = choices[0]
+    if not cycles:
+        return ()
+    polygon = _canonical_polygon(cycles[0])
+    if not polygon:
+        return ()
+    expected_area = sum(float(record.area_page_pts2) for record in rows)
+    actual_area = _polygon_area(polygon)
+    tolerance = max(1e-6, expected_area * 1e-9)
+    if abs(actual_area - expected_area) > tolerance:
+        return ()
+    return polygon
+
+
+def build_grid_composite_source_room_face_authority(
+    base_authority: SourceRoomFaceAuthority,
+    label_producer: object,
+) -> SourceRoomFaceAuthority:
+    """Replace only label-split faces proven separated by grid-opposed walls.
+
+    The label producer must be the exact producer that authenticated the source
+    text against this base room-face authority. Caller labels, polygons, wall
+    ids, grid flags, or quantities are never accepted.
+    """
+    from pb_source_room_label_authority import SourceRoomLabelProducer
+
+    if type(base_authority) is not SourceRoomFaceAuthority:
+        raise TypeError("base_authority must be producer-owned SourceRoomFaceAuthority")
+    if type(label_producer) is not SourceRoomLabelProducer:
+        raise TypeError("label_producer must be exact SourceRoomLabelProducer")
+    if getattr(label_producer, "_room_faces", None) is not base_authority:
+        raise ValueError("label producer must own the exact base room-face authority")
+
+    base_label_authority = label_producer.authority()
+    results: dict[_ScopeKey, SourceRoomFaceScopeResult] = {}
+
+    for key, scope in base_authority._results.items():
+        candidates = tuple(
+            getattr(label_producer, "_authenticated_candidate_lines", {}).get(
+                (
+                    str(scope.document_id),
+                    str(scope.revision_id),
+                    str(scope.source_sha256),
+                    str(scope.snapshot_id),
+                    str(scope.page_id),
+                    str(scope.decision_scope_id),
+                ),
+                (),
+            )
+        )
+        if (
+            scope.status is not EvidenceResolutionStatus.CORROBORATED
+            or not scope.scope_complete
+            or not scope.records
+            or not candidates
+        ):
+            results[key] = scope
+            continue
+
+        by_face = {record.face_id: record for record in scope.records}
+        grid_walls = set(scope.fully_grid_opposed_wall_ids)
+        grid_evidence_by_wall = dict(scope.grid_opposition_evidence_ids_by_wall)
+        label_scope = base_label_authority.resolve_scope(
+            SourceRoomFaceSelector(
+                document_id=scope.document_id,
+                revision_id=scope.revision_id,
+                source_sha256=scope.source_sha256,
+                snapshot_id=scope.snapshot_id,
+                page_id=scope.page_id,
+                decision_scope_id=scope.decision_scope_id,
+            )
+        )
+        already_labeled_faces = {
+            str(record.face_id) for record in label_scope.records
+        }
+
+        proposals: list[tuple[frozenset[str], SourceRoomFaceRecord]] = []
+        for candidate in candidates:
+            word_face_ids: list[str] = []
+            position_ok = True
+            for word in candidate.word_evidence:
+                x0, y0, x1, y1 = word.geometry
+                centre = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+                matches = [
+                    record.face_id
+                    for record in scope.records
+                    if _point_in_polygon_local(centre, record.polygon_pdf_pts)
+                ]
+                if len(matches) != 1:
+                    position_ok = False
+                    break
+                word_face_ids.append(str(matches[0]))
+            if not position_ok:
+                continue
+            ordered_face_ids = tuple(dict.fromkeys(word_face_ids))
+            if len(ordered_face_ids) < 2:
+                continue
+            if any(face_id in already_labeled_faces for face_id in ordered_face_ids):
+                continue
+
+            transition_walls: set[str] = set()
+            transition_evidence: set[str] = set()
+            transitions_ok = True
+            compressed: list[str] = []
+            for face_id in word_face_ids:
+                if not compressed or compressed[-1] != face_id:
+                    compressed.append(face_id)
+            for left_id, right_id in zip(compressed, compressed[1:]):
+                if left_id == right_id:
+                    continue
+                left = by_face.get(left_id)
+                right = by_face.get(right_id)
+                if left is None or right is None:
+                    transitions_ok = False
+                    break
+                shared = set(left.bounding_wall_ids) & set(right.bounding_wall_ids)
+                if not shared or not shared <= grid_walls:
+                    transitions_ok = False
+                    break
+                transition_walls.update(shared)
+                for wall_id in shared:
+                    transition_evidence.update(
+                        grid_evidence_by_wall.get(wall_id, ())
+                    )
+            if not transitions_ok or not transition_walls or not transition_evidence:
+                continue
+
+            constituent_records = tuple(
+                by_face[face_id] for face_id in ordered_face_ids
+            )
+            polygon = _composite_polygon_union(constituent_records)
+            if not polygon:
+                continue
+            area = _polygon_area(polygon)
+            constituent_record_ids = tuple(
+                record.record_id for record in constituent_records
+            )
+            evidence_ids = tuple(
+                sorted(
+                    {
+                        *transition_evidence,
+                        *(
+                            str(word.observation_id)
+                            for word in candidate.word_evidence
+                        ),
+                        *(
+                            str(word.authority_record_id)
+                            for word in candidate.word_evidence
+                        ),
+                    }
+                )
+            )
+            payload = {
+                "document_id": scope.document_id,
+                "revision_id": scope.revision_id,
+                "source_sha256": scope.source_sha256,
+                "snapshot_id": scope.snapshot_id,
+                "page_id": scope.page_id,
+                "decision_scope_id": scope.decision_scope_id,
+                "constituent_record_ids": constituent_record_ids,
+                "polygon": polygon,
+                "label": candidate.label,
+                "grid_evidence_ids": tuple(sorted(transition_evidence)),
+            }
+            face_id = stable_contract_id(
+                "source_grid_composite_room_face",
+                payload,
+                digest_chars=32,
+            )
+            record_id = stable_contract_id(
+                "source_grid_composite_room_face_record",
+                payload,
+                digest_chars=32,
+            )
+            label_binding_id = stable_contract_id(
+                "source_grid_composite_room_label_binding",
+                {
+                    **payload,
+                    "authority_record_ids": tuple(
+                        word.authority_record_id
+                        for word in candidate.word_evidence
+                    ),
+                },
+                digest_chars=32,
+            )
+            proposals.append(
+                (
+                    frozenset(ordered_face_ids),
+                    SourceRoomFaceRecord(
+                        record_id=record_id,
+                        face_id=face_id,
+                        document_id=scope.document_id,
+                        revision_id=scope.revision_id,
+                        source_sha256=scope.source_sha256,
+                        snapshot_id=scope.snapshot_id,
+                        page_id=scope.page_id,
+                        decision_scope_id=scope.decision_scope_id,
+                        polygon_pdf_pts=polygon,
+                        bounding_wall_ids=(),
+                        area_page_pts2=area,
+                        composite_constituent_face_ids=tuple(
+                            sorted(ordered_face_ids)
+                        ),
+                        composite_constituent_record_ids=tuple(
+                            sorted(constituent_record_ids)
+                        ),
+                        composite_grid_evidence_ids=tuple(
+                            sorted(transition_evidence)
+                        ),
+                        room_label=str(candidate.label),
+                        room_label_binding_record_id=label_binding_id,
+                        room_label_evidence_ids=evidence_ids,
+                        room_label_reason_codes=(
+                            SOURCE_ROOM_FACE_GRID_COMPOSITE_RESOLVED,
+                        ),
+                        wall_relationships_complete=False,
+                    ),
+                )
+            )
+
+        if not proposals:
+            results[key] = scope
+            continue
+
+        # Any competing proposal over the same source face fails closed. Only
+        # disjoint composite replacements can change the face universe.
+        face_use_count: dict[str, int] = defaultdict(int)
+        proposal_set_count: dict[frozenset[str], int] = defaultdict(int)
+        for face_set, _record in proposals:
+            proposal_set_count[face_set] += 1
+            for face_id in face_set:
+                face_use_count[face_id] += 1
+        accepted = [
+            (face_set, record)
+            for face_set, record in proposals
+            if proposal_set_count[face_set] == 1
+            and all(face_use_count[face_id] == 1 for face_id in face_set)
+        ]
+        if not accepted:
+            results[key] = scope
+            continue
+
+        consumed = {
+            face_id for face_set, _record in accepted for face_id in face_set
+        }
+        transformed = [
+            record for record in scope.records if record.face_id not in consumed
+        ]
+        transformed.extend(record for _face_set, record in accepted)
+        results[key] = replace(
+            scope,
+            records=tuple(
+                sorted(transformed, key=lambda record: record.face_id)
+            ),
+            reason_codes=tuple(
+                dict.fromkeys(
+                    (
+                        *scope.reason_codes,
+                        SOURCE_ROOM_FACE_GRID_COMPOSITE_RESOLVED,
+                    )
+                )
+            ),
+        )
+
+    return SourceRoomFaceAuthority(results, _seal=_AUTHORITY_SEAL)
+
+
+def _point_in_polygon_local(
+    point: Point,
+    polygon: Iterable[Iterable[float]],
+) -> bool:
+    x, y = point
+    pts = tuple(_point(value) for value in polygon)
+    if len(pts) < 3:
+        return False
+    inside = False
+    for index, (x1, y1) in enumerate(pts):
+        x2, y2 = pts[(index + 1) % len(pts)]
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length > 0.0:
+            cross = abs((x - x1) * dy - (y - y1) * dx) / length
+            if cross <= 1e-6 and (
+                min(x1, x2) - 1e-6 <= x <= max(x1, x2) + 1e-6
+                and min(y1, y2) - 1e-6 <= y <= max(y1, y2) + 1e-6
+            ):
+                return True
+        if (y1 > y) == (y2 > y):
+            continue
+        crossing_x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+        if crossing_x > x:
+            inside = not inside
+    return inside
+
+
 def build_source_room_face_authority(
     physical_wall_candidate_authority: PhysicalWallCandidateAuthority,
 ) -> SourceRoomFaceAuthority:
@@ -1265,6 +1630,7 @@ __all__ = [
     "OWNERSHIP_EVALUATION_UNAVAILABLE",
     "SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED",
     "SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS",
+    "SOURCE_ROOM_FACE_GRID_COMPOSITE_RESOLVED",
     "SOURCE_ROOM_FACE_DEGENERATE",
     "SOURCE_ROOM_FACE_DUPLICATE_EDGE",
     "SOURCE_ROOM_FACE_EDGE_OWNER_COMPETING",
@@ -1282,4 +1648,5 @@ __all__ = [
     "SourceRoomFaceScopeResult",
     "SourceRoomFaceSelector",
     "build_source_room_face_authority",
+    "build_grid_composite_source_room_face_authority",
 ]
