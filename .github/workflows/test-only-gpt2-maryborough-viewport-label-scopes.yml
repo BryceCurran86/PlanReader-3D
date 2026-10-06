@@ -14,6 +14,7 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - run: pip install -r requirements.txt
       - name: Probe exact Maryborough viewport label scopes
         run: |
@@ -59,6 +60,10 @@ jobs:
               page_ids=("7",),
           )
           viewport_wall_authority = viewport_wall_producer.authority()
+          viewport_published = source.published_snapshot_for_revision(
+              published.revision.revision_id
+          )
+          assert viewport_published is not None
           viewport_room_authority = build_source_room_face_authority(viewport_wall_authority)
           viewport_label_authority = SourceRoomLabelProducer.from_authorities(
               source,
@@ -70,7 +75,7 @@ jobs:
               document_id=published.revision.document_id,
               revision_id=published.revision.revision_id,
               source_sha256=published.revision.source_sha256,
-              snapshot_id=published.snapshot.snapshot_id,
+              snapshot_id=viewport_published.snapshot.snapshot_id,
               page_id="7",
               view_type=DrawingViewType.FLOOR_PLAN.value,
           )
