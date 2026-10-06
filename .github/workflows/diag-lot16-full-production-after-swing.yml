@@ -41,6 +41,12 @@ jobs:
             --family-group all \
             --output-dir artifacts/lot16-full \
             | tee artifacts/lot16-full/handoff.stdout.json
+      - name: Audit opening authority dropouts
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_opening_dropout_matrix.py | tee artifacts/lot16-full/opening-dropout-matrix.json
       - name: Print production and sealed inventory
         if: always()
         run: |
