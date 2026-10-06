@@ -1,0 +1,160 @@
+name: DIAG GPT1 Maryborough Support Viewport Ownership
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Audit viewport ownership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              assign_bbox_to_viewport,
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+              is_segment_page_viewports_product,
+          )
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          targets={"FREEZER","SALES","FOOD SERVICE","POS COUNTER","FOOD PREP","COLD ROOM"}
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(producer_method="gpt1-support-viewport-ownership",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-support-viewport-ownership",
+              source_bytes=path.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          labels={}
+          for room in rooms.rooms:
+              label=norm(room.room_label)
+              if label in targets:
+                  labels.setdefault(label,[]).append(room)
+          unique={k:v[0] for k,v in labels.items() if len(v)==1}
+
+          doc=fitz.open(path)
+          try:
+              page=doc[10]
+              viewports=segment_page_viewports(page,page_number=11)
+          finally:
+              doc.close()
+          usable=[
+              v for v in viewports
+              if is_segment_page_viewports_product(v)
+              and v.bounding_box is not None
+              and v.status in ("resolved","derived")
+          ]
+          trusted_lines=cv._trusted_lines_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_labels=tuple(unique),
+          )
+          text_authority=source.text_integrity_authority()
+          out={
+              "viewports":[{
+                  "view_id":v.view_id,
+                  "status":v.status,
+                  "view_type":v.view_type,
+                  "label":v.label,
+                  "bbox":list(v.bounding_box) if v.bounding_box else None,
+                  "boundary_source":v.boundary_source,
+              } for v in viewports],
+              "non_overlapping":validate_non_overlapping_viewports(viewports),
+              "labels":{},
+          }
+          for label,room in sorted(unique.items()):
+              relevant=tuple(x for x in trusted_lines if norm(x.text)==label)
+              dims=cv._trusted_native_dimensions_for_page(
+                  source,
+                  revision_id=published.revision.revision_id,
+                  page_id="11",
+                  candidate_lines=relevant,
+              ) if relevant else ()
+              label_rows=[]
+              for line in relevant:
+                  vp=assign_bbox_to_viewport(line.bbox,viewports,allow_derived=True)
+                  label_rows.append({
+                      "bbox":list(line.bbox),
+                      "partition":line.source_partition_id,
+                      "block":line.block_no,
+                      "line":line.line_no,
+                      "viewport_id":None if vp is None else vp.view_id,
+                      "viewport_status":None if vp is None else vp.status,
+                      "viewport_type":None if vp is None else vp.view_type,
+                  })
+              dim_rows=[]
+              for d in dims:
+                  result=text_authority.resolve_text(ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=d.text_observation_id,
+                  ))
+                  receipt=result.receipt
+                  bbox=None
+                  vp=None
+                  if receipt is not None and len(tuple(receipt.geometry))>=4:
+                      bbox=tuple(float(x) for x in tuple(receipt.geometry)[:4])
+                      vp=assign_bbox_to_viewport(bbox,viewports,allow_derived=True)
+                  dim_rows.append({
+                      "id":d.dimension_id,
+                      "orientation":d.orientation,
+                      "value_mm":d.value_mm,
+                      "text_bbox":None if bbox is None else list(bbox),
+                      "text_partition":d.text_source_partition_id,
+                      "text_block":d.text_block_no,
+                      "text_line":d.text_line_no,
+                      "text_word":d.text_word_no,
+                      "viewport_id":None if vp is None else vp.view_id,
+                      "viewport_status":None if vp is None else vp.status,
+                      "viewport_type":None if vp is None else vp.view_type,
+                      "endpoints":[list(d.endpoints_pt[0]),list(d.endpoints_pt[1])],
+                  })
+              out["labels"][label]={
+                  "physical_room_id":room.physical_room_id,
+                  "support_lines":label_rows,
+                  "dimensions":dim_rows,
+              }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
