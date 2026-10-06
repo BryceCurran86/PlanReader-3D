@@ -10,6 +10,7 @@ from pb_live_opening_count_quantity_publication import (
 )
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -54,6 +55,44 @@ def main() -> None:
     universe = wall_opening.opening_universe_result
     universe_record = universe.record
 
+    physical = wall_opening.physical_opening_authority
+    visibility = source.authority()
+
+    def observation_row(observation_id: str) -> dict:
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=str(observation_id),
+        )
+        visible = visibility.resolve_visible(selector)
+        observation = visible.observation
+        disposition = physical.classify_disposition(selector)
+        return {
+            "observation_id": str(observation_id),
+            "visible_status": visible.status.value,
+            "observation_kind": None if observation is None else observation.observation_kind,
+            "geometry": None if observation is None else list(observation.geometry),
+            "source_primitive_ref": None if observation is None else observation.source_primitive_ref,
+            "disposition_status": disposition.status.value,
+            "disposition": disposition.disposition,
+            "disposition_reasons": list(disposition.reason_codes),
+            "candidate_ids": list(disposition.candidate_ids),
+        }
+
+    residual_rows = []
+    conflict_rows = []
+    if semantic_record is not None:
+        residual_rows = [
+            observation_row(observation_id)
+            for observation_id in semantic_record.residual_visible_observation_ids
+        ]
+        conflict_rows = [
+            observation_row(observation_id)
+            for observation_id in semantic_record.conflict_observation_ids
+        ]
+
     payload = {
         "source_sha256": source_sha,
         "semantic_status": semantic.status.value,
@@ -73,6 +112,10 @@ def main() -> None:
         "area_resolved_count": sum(1 for x in opening_composition.canonical_openings if x.area_m2 is not None),
         "opening_area_quantity_count": len(area_quantities),
         "opening_count_quantity_count": len(count_quantities),
+        "residual_visible_count": len(residual_rows),
+        "conflict_visible_count": len(conflict_rows),
+        "residual_visible_rows": residual_rows,
+        "conflict_visible_rows": conflict_rows,
         "opening_count_quantities": [
             {
                 "quantity_id": q.quantity_id,
