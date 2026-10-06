@@ -361,3 +361,104 @@ def test_singleton_motif_geometry_is_computed_once(monkeypatch) -> None:
     )
 
     assert calls == {"length": len(lines), "angle": len(lines)}
+
+
+
+def _local_gray_lattice(
+    *,
+    count: int = 10,
+    spacing: float = 34.0,
+    stroke=(0.5, 0.5, 0.5),
+    horizontal_only: bool = False,
+) -> list[dict]:
+    rows: list[dict] = []
+    path_index = 40_000
+    start = 100.0
+    finish = start + spacing * (count - 1)
+    for index in range(count):
+        coordinate = start + spacing * index
+        rows.append(
+            _line(
+                f"lattice-h-{index}",
+                start,
+                coordinate,
+                finish,
+                coordinate,
+                path_index=path_index,
+                stroke=stroke,
+                width=0.24,
+            )
+        )
+        path_index += 1
+    if not horizontal_only:
+        for index in range(count):
+            coordinate = start + spacing * index
+            rows.append(
+                _line(
+                    f"lattice-v-{index}",
+                    coordinate,
+                    start,
+                    coordinate,
+                    finish,
+                    path_index=path_index,
+                    stroke=stroke,
+                    width=0.24,
+                )
+            )
+            path_index += 1
+    return rows
+
+
+def test_dense_local_low_contrast_two_axis_lattice_is_excluded() -> None:
+    lattice = _local_gray_lattice()
+    assert _filter(lattice) == ()
+
+
+def test_dense_local_black_wall_grid_is_preserved() -> None:
+    walls = _local_gray_lattice(stroke=(0.0, 0.0, 0.0))
+    assert _filter(walls) == tuple(walls)
+
+
+def test_dense_low_contrast_one_axis_family_is_preserved() -> None:
+    lines = _local_gray_lattice(horizontal_only=True)
+    assert _filter(lines) == tuple(lines)
+
+
+def test_sparse_low_contrast_orthogonal_grid_is_preserved() -> None:
+    lines = _local_gray_lattice(count=6)
+    assert _filter(lines) == tuple(lines)
+
+
+def test_irregular_low_contrast_orthogonal_grid_is_preserved() -> None:
+    coords = (100.0, 134.0, 171.0, 214.0, 263.0, 319.0, 382.0, 452.0, 529.0, 613.0)
+    rows: list[dict] = []
+    path_index = 50_000
+    for index, coordinate in enumerate(coords):
+        rows.append(
+            _line(
+                f"irregular-h-{index}",
+                100.0,
+                coordinate,
+                613.0,
+                coordinate,
+                path_index=path_index,
+                stroke=(0.5, 0.5, 0.5),
+                width=0.24,
+            )
+        )
+        path_index += 1
+    for index, coordinate in enumerate(coords):
+        rows.append(
+            _line(
+                f"irregular-v-{index}",
+                coordinate,
+                100.0,
+                coordinate,
+                613.0,
+                path_index=path_index,
+                stroke=(0.5, 0.5, 0.5),
+                width=0.24,
+            )
+        )
+        path_index += 1
+    assert _filter(rows) == tuple(rows)
