@@ -1,0 +1,90 @@
+name: DIAG GPT3 Lot16 Authoritative Failure Ledger
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Download authoritative Lot16 exact artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gpt3-lot16-map-only-v5
+          path: artifacts/lot16-authoritative
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 37464408630
+      - name: Prepare selected-scoreboard inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/lot16-selected/sealed artifacts/lot16-selected/maps artifacts/lot16-selected/out
+          cp artifacts/lot16-authoritative/au_qld_lot16_power.json \
+            artifacts/lot16-selected/sealed/au_qld_lot16_power.json
+          cp artifacts/lot16-authoritative/lot16.identity-map.json \
+            artifacts/lot16-selected/maps/au_qld_lot16_power.identity_map.json
+      - name: Run exact selected-project scoreboard and failure ledger
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u benchmarks/frozen_holdout/full_plan_v2/run_selected_project_scoreboard.py \
+            --project-id au_qld_lot16_power \
+            --sealed-dir artifacts/lot16-selected/sealed \
+            --identity-map-dir artifacts/lot16-selected/maps \
+            --output artifacts/lot16-selected/out/scoreboard.json \
+            --failure-ledger-output artifacts/lot16-selected/out/failure-ledger.json \
+            | tee artifacts/lot16-selected/out/scoreboard.stdout.json
+          cat artifacts/lot16-selected/out/failure-ledger.json
+      - name: Assert authoritative Lot16 baseline
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/lot16-selected/out")
+          score=json.loads((root/"scoreboard.json").read_text())
+          ledger=json.loads((root/"failure-ledger.json").read_text())
+          assert score["source_closed_truth_items"]==27, score
+          assert score["matched_within_tolerance"]==8, score
+          assert score["matched_outside_tolerance"]==0, score
+          assert score["missed"]==19, score
+          assert score["partial"]==0, score
+          assert score["unresolved"]==0, score
+          assert score["hallucinations"]==0, score
+          assert score["lineage_conflicts"]==0, score
+          assert abs(score["development_accuracy"]-(8/27))<1e-12, score
+          assert abs(score["precision_adjusted_accuracy"]-(8/27))<1e-12, score
+          assert len(ledger["failure_items"])==19, ledger
+          assert ledger["unsupported_outputs"]==[], ledger
+          assert ledger["missing_execution_project_ids"]==[], ledger
+          print(json.dumps({
+            "matched":score["matched_within_tolerance"],
+            "denominator":score["source_closed_truth_items"],
+            "accuracy":score["development_accuracy"],
+            "failure_items":len(ledger["failure_items"]),
+          },indent=2))
+          PY
+      - name: Upload authoritative ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-lot16-authoritative-failure-ledger
+          path: artifacts/lot16-selected/out
+          retention-days: 3
