@@ -361,3 +361,96 @@ def test_singleton_motif_geometry_is_computed_once(monkeypatch) -> None:
     )
 
     assert calls == {"length": len(lines), "angle": len(lines)}
+
+
+
+def _local_divider_band(
+    *,
+    stroke=(0.5, 0.5, 0.5),
+    width: float = 0.24,
+    spacing: float = 34.0,
+    count: int = 8,
+) -> list[dict]:
+    rows: list[dict] = []
+    path_index = 6000
+    for index in range(count):
+        y = 300.0 + index * spacing
+        rows.append(
+            _line(
+                f"band-h-{index}",
+                200.0,
+                y,
+                900.0,
+                y,
+                path_index=path_index,
+                stroke=stroke,
+                width=width,
+            )
+        )
+        path_index += 1
+    for index in range(count):
+        x = 400.0 + index * spacing
+        rows.append(
+            _line(
+                f"band-v-{index}",
+                x,
+                150.0,
+                x,
+                950.0,
+                path_index=path_index,
+                stroke=stroke,
+                width=width,
+            )
+        )
+        path_index += 1
+    return rows
+
+
+def test_repeated_two_axis_neutral_hairline_divider_band_is_excluded() -> None:
+    band = _local_divider_band()
+    assert _filter(band) == ()
+
+
+def test_repeated_one_axis_neutral_hairlines_are_preserved() -> None:
+    horizontal = _local_divider_band()[:8]
+    assert _filter(horizontal) == tuple(horizontal)
+
+
+def test_irregular_two_axis_neutral_hairlines_are_preserved() -> None:
+    coords = (300.0, 337.0, 382.0, 439.0, 509.0, 594.0, 696.0, 817.0)
+    rows: list[dict] = []
+    path_index = 7000
+    for index, y in enumerate(coords):
+        rows.append(
+            _line(
+                f"irregular-band-h-{index}",
+                200.0,
+                y,
+                900.0,
+                y,
+                path_index=path_index,
+                stroke=(0.5, 0.5, 0.5),
+                width=0.24,
+            )
+        )
+        path_index += 1
+    for index, x in enumerate(coords):
+        rows.append(
+            _line(
+                f"irregular-band-v-{index}",
+                x,
+                150.0,
+                x,
+                950.0,
+                path_index=path_index,
+                stroke=(0.5, 0.5, 0.5),
+                width=0.24,
+            )
+        )
+        path_index += 1
+    assert _filter(rows) == tuple(rows)
+
+
+def test_repeated_dark_wall_like_band_is_preserved_without_neutral_drafting_proof() -> None:
+    band = _local_divider_band(stroke=(0.0, 0.0, 0.0))
+    assert _filter(band) == tuple(band)
