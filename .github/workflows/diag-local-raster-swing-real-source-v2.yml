@@ -1,0 +1,73 @@
+name: DIAG Local Raster Swing Real Source V2
+
+on:
+  pull_request:
+    branches:
+      - gpt4/raster-swing-local-registration-v1
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run frozen swing + registration tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_raster_door_swing_g17_contract.py \
+            tests/test_raster_swing_registration_authority.py \
+            tests/test_raster_framed_opening_g17_contract.py \
+            tests/test_raster_opening_primitive_compaction.py
+      - name: Diagnose quarter-turn swing
+        run: |
+          PYTHONPATH=. python tools/diag_raster_swing_quarter_turn.py
+      - name: Run real-source swing census
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python tools/diag_raster_swing_real_source.py | tee raster-swing-real-source.json
+      - name: Enforce Lot16 framed preservation and negative controls
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          text = Path("raster-swing-real-source.json").read_text(encoding="utf-8")
+          marker = "FINAL_JSON\n"
+          if marker not in text:
+              raise SystemExit("missing FINAL_JSON marker")
+          payload = json.loads(text.split(marker, 1)[1])
+          if not payload.get("lot16_sha_found"):
+              raise SystemExit("Lot16 source SHA not found exactly once")
+          lot16 = payload["lot16"]
+          page3 = lot16.get("pages", {}).get("3", {})
+          if page3.get("framed_count") != 14:
+              raise SystemExit(f"Lot16 page 3 framed regression: {page3.get('framed_count')} != 14")
+          if payload.get("non_lot16_swing_positives"):
+              raise SystemExit(
+                  "unexpected non-Lot16 swing positives: "
+                  + json.dumps(payload["non_lot16_swing_positives"], sort_keys=True)
+              )
+          print(json.dumps({
+              "lot16_primitive_count": lot16["raster_primitive_count"],
+              "lot16_framed_count": lot16["framed_count"],
+              "lot16_swing_count": lot16["swing_count"],
+              "lot16_page3_framed_count": page3["framed_count"],
+              "non_lot16_swing_positives": 0,
+          }, indent=2, sort_keys=True))
+          PY
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-raster-swing-real-source-v2
+          path: raster-swing-real-source.json
+          retention-days: 1
