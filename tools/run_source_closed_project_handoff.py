@@ -32,7 +32,10 @@ from pb_live_opening_source_closed_export import (
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
-from pb_live_room_area_source_closed_export import seal_live_room_area_run
+from pb_live_floor_area_quantity_publication import (
+    publish_live_floor_area_quantities,
+)
+from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
 from pb_migration_contracts import QuantityEvidence
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
@@ -216,15 +219,15 @@ def generate_project_handoff(
 
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
-    room_quantities = _non_abstained(
-        getattr(claim, "room_area_quantity_evidence", ())
+    floor_quantities = _non_abstained(
+        publish_live_floor_area_quantities(claim)
     )
-    summary["family_counts"]["room_area"] = len(room_quantities)
-    if room_quantities:
+    summary["family_counts"]["floor_area"] = len(floor_quantities)
+    if floor_quantities:
         family_runs.append(
             (
-                "room_area",
-                seal_live_room_area_run(
+                "floor_area",
+                seal_live_floor_area_run(
                     claim,
                     workspace_id=int(workspace_id),
                     project_id=project_id,
