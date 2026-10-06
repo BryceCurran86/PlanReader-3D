@@ -15,6 +15,7 @@ from pb_opening_label_dimension_authority import (
 )
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_source_observation_authority import ObservationSelector
+from pb_source_plan_opening_callout import classify_compact_source_opening_text
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 OPENING_LABEL_SEMANTIC_SCHEMA_VERSION = "1.0.0"
@@ -242,10 +243,30 @@ class OpeningLabelSemanticProducer:
             if not _label_matches_gap(line, gap):
                 continue
             direct_kind, direct_conflict = _explicit_word_kind(line.text)
-            if direct_conflict:
-                return OpeningLabelSemanticResult(EvidenceResolutionStatus.CONFLICT, (OPENING_LABEL_SEMANTIC_CONFLICT,))
+            compact_kind, compact_conflict = classify_compact_source_opening_text(
+                line.text
+            )
+            if direct_conflict or compact_conflict:
+                return OpeningLabelSemanticResult(
+                    EvidenceResolutionStatus.CONFLICT,
+                    (OPENING_LABEL_SEMANTIC_CONFLICT,),
+                )
+            direct_kinds = {
+                kind
+                for kind in (direct_kind, compact_kind)
+                if kind is not None
+            }
+            if len(direct_kinds) > 1:
+                return OpeningLabelSemanticResult(
+                    EvidenceResolutionStatus.CONFLICT,
+                    (OPENING_LABEL_SEMANTIC_CONFLICT,),
+                )
             if direct_kind is not None:
                 candidates.append((direct_kind, line, (), "explicit_phrase"))
+            if compact_kind is not None:
+                candidates.append(
+                    (compact_kind, line, (), "compact_source_descriptor")
+                )
             tokens = {m.group(0).upper() for m in _LABEL_CODE_TOKEN_RE.finditer(line.text or "")}
             if tokens & legend_conflicts:
                 return OpeningLabelSemanticResult(EvidenceResolutionStatus.CONFLICT, (OPENING_LABEL_SEMANTIC_CONFLICT,))
