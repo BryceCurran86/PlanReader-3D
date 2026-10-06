@@ -707,3 +707,74 @@ def test_physical_room_identity_keeps_distinct_rooms_and_documents_distinct() ->
             other_view.physical_room_id,
         }
     ) == 4
+
+
+def test_batch_room_label_failure_falls_back_per_page_without_erasing_valid_labels(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    source, wall_opening = _source(page_partitions=(True, True))
+
+    class _FakeLabelAuthority:
+        def __init__(self, room_faces):
+            self._room_faces = room_faces
+
+        def resolve_scope(self, selector):
+            face_result = self._room_faces.resolve_scope(
+                SourceRoomFaceSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    page_id=selector.page_id,
+                    decision_scope_id=selector.decision_scope_id,
+                )
+            )
+            if not face_result.records:
+                return SimpleNamespace(records=(), split_face_candidates=())
+            face = face_result.records[0]
+            label = SimpleNamespace(
+                face_id=face.face_id,
+                record_id=f"label:{face.record_id}",
+                label="OFFICE",
+                observation_ids=(f"label-observation:{face.record_id}",),
+                word_evidence=(),
+                reason_codes=("source_room_label_scope_resolved",),
+            )
+            return SimpleNamespace(
+                records=(label,),
+                split_face_candidates=(),
+            )
+
+    def _fake_from_authorities(
+        cls,
+        source_arg,
+        room_faces,
+        *,
+        page_ids=None,
+    ):
+        selected = tuple(page_ids or ())
+        if len(selected) > 1:
+            raise RuntimeError("synthetic batch-only label failure")
+        return SimpleNamespace(
+            authority=lambda: _FakeLabelAuthority(room_faces)
+        )
+
+    monkeypatch.setattr(
+        module.SourceRoomLabelProducer,
+        "from_authorities",
+        classmethod(_fake_from_authorities),
+    )
+
+    result = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    labelled = [room for room in result.rooms if room.room_label == "OFFICE"]
+    assert len(labelled) == 2
+    assert {room.page_id for room in labelled} == {"1", "2"}
+    assert all(room.room_label_binding_record_id for room in labelled)
+    assert all(room.room_label_evidence_ids for room in labelled)
