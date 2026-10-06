@@ -1,0 +1,67 @@
+name: TEST ONLY GPT2 Office Area On Dimension Tie Fix
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  office:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run exact Maryborough Office proof
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-office-area-proof
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json, time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          def norm(v):
+              return " ".join(str(v or "").strip().upper().split())
+          firm={
+              norm(dict(q.metadata or {}).get("room_label")):float(q.value)
+              for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          }
+          assert abs(firm["FOOD PREP"]-13.270425) < 1e-9
+          assert abs(firm["COLD ROOM"]-25.37875) < 1e-9
+          assert abs(firm["OFFICE"]-9.05352) < 1e-9
+          print(json.dumps({
+              "elapsed_seconds":time.perf_counter()-started,
+              "firm_room_areas":firm,
+              "office_rows":[
+                  q.to_dict() for q in claim.room_area_quantity_evidence
+                  if norm(dict(q.metadata or {}).get("room_label"))=="OFFICE"
+              ],
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-office-area-proof
+          path: artifacts/gpt2-office-area-proof
+          retention-days: 2
