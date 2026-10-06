@@ -82,3 +82,35 @@ jobs:
 
       - name: Smoke test (envelope, quotes, copy, reconcile, publish)
         run: python tests/ci_smoke.py
+
+
+  lot16-room-viewport-proof:
+    if: github.event_name == 'pull_request' && github.head_ref == 'gpt3/room-incomplete-universe-viewport-fallback-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused room regressions
+        run: |
+          PYTHONPATH=. pytest -q tests/test_live_canonical_room_composition.py tests/test_source_room_viewport_scope_v1.py
+      - name: Run real Lot16 room viewport proof
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_room_viewport_after_incomplete_fallback.py \
+            | tee lot16-room-viewport-after-incomplete-fallback.json
+      - name: Upload proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-room-viewport-after-incomplete-fallback
+          path: lot16-room-viewport-after-incomplete-fallback.json
+          retention-days: 2
