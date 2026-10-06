@@ -278,18 +278,23 @@ def _candidate_record(
         for record in constituent
         for wall_id in record.bounding_wall_ids
     )
-    internal_shared = {
-        wall_id for wall_id, count in wall_counts.items() if count > 1
+    faces_by_wall = _room_faces_by_wall(room_scope)
+    component_face_set = set(constituent_face_ids)
+    separator_wall_ids = {
+        wall_id
+        for wall_id in fully_grid_wall_ids
+        if len(faces_by_wall.get(wall_id, ())) == 2
+        and set(faces_by_wall[wall_id]).issubset(component_face_set)
     }
-    if (
-        not internal_shared
-        or any(wall_counts[wall_id] != 2 for wall_id in internal_shared)
-        or any(wall_id not in fully_grid_wall_ids for wall_id in internal_shared)
-    ):
+    if not separator_wall_ids:
         return None
 
+    # A long physical boundary candidate may legitimately bound several grid
+    # cells along the same side of the room. Keep every non-separator wall as
+    # external regardless of occurrence count; only exact two-owner grid walls
+    # are removed from the composite boundary.
     external_walls = tuple(
-        sorted(wall_id for wall_id, count in wall_counts.items() if count == 1)
+        sorted(wall_id for wall_id in wall_counts if wall_id not in separator_wall_ids)
     )
     if not external_walls:
         return None
@@ -300,7 +305,6 @@ def _candidate_record(
     if any(wall_id in fully_grid_wall_ids for wall_id in external_walls):
         return None
 
-    separator_wall_ids = set(internal_shared)
     grid_evidence_ids: set[str] = set()
     for wall_id in separator_wall_ids:
         grid_evidence_ids.update(grid_evidence_by_wall.get(wall_id, ()))
