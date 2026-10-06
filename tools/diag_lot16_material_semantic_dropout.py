@@ -6,9 +6,16 @@ from pathlib import Path
 
 import fitz
 
-from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+from pb_source_material_semantic_authority import (
+    SourceMaterialSemanticProducer,
+    _trusted_words_by_page,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
-from pb_viewport_segmentation import segment_page_viewports
+from pb_viewport_segmentation import (
+    calibrate_viewport_layout,
+    extract_vector_frames,
+    segment_page_viewports,
+)
 
 PDF = Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
 EXPECTED_SHA = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
@@ -54,6 +61,36 @@ def main() -> None:
     )
     producer = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
     producer.publish(published.revision.revision_id)
+
+    trusted_by_page = _trusted_words_by_page(source, published)
+    page3_words = tuple(trusted_by_page.get("3", ()))
+    line_groups = {}
+    for word in page3_words:
+        line_groups.setdefault((word.block_no, word.line_no), []).append(word)
+    page3_lines = []
+    for (block_no, line_no), words in sorted(line_groups.items()):
+        ordered = sorted(words, key=lambda word: (word.word_no, word.bbox))
+        text_value = " ".join(str(word.text) for word in ordered).strip()
+        if not text_value:
+            continue
+        xs = [coord for word in ordered for coord in (word.bbox[0], word.bbox[2])]
+        ys = [coord for word in ordered for coord in (word.bbox[1], word.bbox[3])]
+        page3_lines.append({
+            "block_no": block_no,
+            "line_no": line_no,
+            "text": text_value,
+            "bbox": [min(xs), min(ys), max(xs), max(ys)],
+            "trusted": all(bool(word.trusted) for word in ordered),
+            "reason_codes": sorted({
+                reason for word in ordered for reason in tuple(word.reason_codes or ())
+            }),
+            "observation_ids": [word.observation_id for word in ordered],
+        })
+
+    with fitz.open(str(PDF)) as doc:
+        page3 = doc[2]
+        calibration = calibrate_viewport_layout(page3)
+        page3_frames = [list(frame) for frame in extract_vector_frames(page3, calibration)]
 
     definitions = []
     for key, result in sorted(producer._definition_results.items()):
@@ -105,6 +142,8 @@ def main() -> None:
         "definitions": definitions,
         "occurrence_scopes": scopes,
         "page_viewports": viewport_rows,
+        "page3_trusted_lines": page3_lines,
+        "page3_vector_frames": page3_frames,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
 
