@@ -61,6 +61,70 @@ def _wall_geometry_rows(walls, equivalence, geometry):
         if row["u1"] > geometry.length + edge_tol
         and abs(row["u0"] - geometry.length) <= edge_tol
     ]
+    pair_lookup = host._pair_lookup(equivalence)
+    raw_by_id = {record.wall_candidate_id: record for record in walls}
+    left_raw = [
+        (row["offset"], raw_by_id[row["id"]])
+        for row in left
+    ]
+    right_raw = [
+        (row["offset"], raw_by_id[row["id"]])
+        for row in right
+    ]
+    axis_tol = max(0.5, geometry.thickness * 0.05)
+    left_status, left_normalized, left_reasons = host._normalize_role_candidates(
+        left_raw,
+        equivalence,
+        axis_tol,
+        pair_lookup=pair_lookup,
+        group_lookup=group_lookup,
+    )
+    right_status, right_normalized, right_reasons = host._normalize_role_candidates(
+        right_raw,
+        equivalence,
+        axis_tol,
+        pair_lookup=pair_lookup,
+        group_lookup=group_lookup,
+    )
+
+    face_breaks = []
+    if (
+        left_status.value == "corroborated"
+        and right_status.value == "corroborated"
+    ):
+        for left_role in left_normalized:
+            for right_role in right_normalized:
+                delta = abs(right_role.offset - left_role.offset)
+                if delta <= axis_tol:
+                    face_breaks.append({
+                        "left_id": left_role.record.wall_candidate_id,
+                        "right_id": right_role.record.wall_candidate_id,
+                        "left_offset": left_role.offset,
+                        "right_offset": right_role.offset,
+                        "axis_delta": delta,
+                        "left_group": list(left_role.candidate_group),
+                        "right_group": list(right_role.candidate_group),
+                    })
+
+    thickness_tol = max(0.75, geometry.thickness * 0.15)
+    band_pairs = []
+    for index, first in enumerate(face_breaks):
+        for second in face_breaks[index + 1:]:
+            separation = abs(second["left_offset"] - first["left_offset"])
+            center_offset = (
+                first["left_offset"] + second["left_offset"]
+            ) / 2.0
+            band_pairs.append({
+                "first": [first["left_id"], first["right_id"]],
+                "second": [second["left_id"], second["right_id"]],
+                "separation": separation,
+                "thickness_error": abs(separation - geometry.thickness),
+                "within_thickness_tolerance": (
+                    abs(separation - geometry.thickness) <= thickness_tol
+                ),
+                "center_offset": center_offset,
+            })
+
     return {
         "axis_candidate_count": len(candidates),
         "left_termination_count": len(left),
@@ -68,6 +132,32 @@ def _wall_geometry_rows(walls, equivalence, geometry):
         "spanning_count": len(spanning),
         "centered_spanning_count": len(centered),
         "center_tol": center_tol,
+        "axis_tol": axis_tol,
+        "thickness_tol": thickness_tol,
+        "left_normalization_status": left_status.value,
+        "left_normalization_reasons": list(left_reasons),
+        "right_normalization_status": right_status.value,
+        "right_normalization_reasons": list(right_reasons),
+        "left_normalized": [
+            {
+                "id": item.record.wall_candidate_id,
+                "offset": item.offset,
+                "group": list(item.candidate_group),
+            }
+            for item in left_normalized
+        ],
+        "right_normalized": [
+            {
+                "id": item.record.wall_candidate_id,
+                "offset": item.offset,
+                "group": list(item.candidate_group),
+            }
+            for item in right_normalized
+        ],
+        "face_break_count": len(face_breaks),
+        "face_breaks": face_breaks,
+        "band_pair_count": len(band_pairs),
+        "band_pairs": band_pairs,
         "centered_spanning": sorted(
             centered, key=lambda row: (abs(row["offset"]), row["id"])
         )[:20],
