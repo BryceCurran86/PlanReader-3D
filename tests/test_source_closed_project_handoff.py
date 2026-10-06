@@ -343,7 +343,7 @@ def test_project_handoff_forwards_only_source_classified_room_support(
     monkeypatch.setattr(
         handoff,
         "_source_page_scopes",
-        lambda path: ((0,), (1, 2), 3),
+        lambda path: ((0,), (2,), 5),
     )
 
     claim = SimpleNamespace(
@@ -387,11 +387,12 @@ def test_project_handoff_forwards_only_source_classified_room_support(
         output_dir=tmp_path / "out",
     )
 
-    assert seen["pages"] == (0, 1, 2)
+    assert seen["pages"] == (0, 2)
     assert seen["topology_pages"] == (0,)
-    assert seen["room_area_support_pages"] == (1, 2)
+    assert seen["room_area_support_pages"] == (2,)
     assert summary["topology_pages"] == [1]
-    assert summary["room_area_support_pages"] == [2, 3]
+    assert summary["room_area_support_pages"] == [3]
+    assert summary["execution_pages"] == [1, 3]
     assert summary["topology_mode"] == "source_classified_scope"
 
 
