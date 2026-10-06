@@ -470,3 +470,65 @@ def test_unique_span_bracketing_witness_candidate_breaks_same_orientation_tie() 
         "full-right-witness",
     )
     assert result.endpoints == ((80.0, 100.0), (132.0, 100.0))
+
+
+def test_existing_strict_style_winner_is_not_vetoed_by_new_orientation_fallback() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "historical-style-winner",
+            (106.0, 60.0),
+            (106.0, 140.0),
+            width=0.60,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "orientation-fallback",
+            (80.0, 100.0),
+            (132.0, 100.0),
+            width=0.24,
+            color=(0.6, 0.6, 0.6),
+        ),
+        _segment(
+            "vertical-top-witness",
+            (94.0, 60.0),
+            (116.0, 60.0),
+            width=0.60,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "vertical-bottom-witness",
+            (94.0, 140.0),
+            (116.0, 140.0),
+            width=0.60,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "horizontal-left-witness",
+            (80.0, 82.0),
+            (80.0, 118.0),
+            width=0.24,
+            color=(0.6, 0.6, 0.6),
+        ),
+        _segment(
+            "horizontal-right-witness",
+            (132.0, 82.0),
+            (132.0, 118.0),
+            width=0.24,
+            color=(0.6, 0.6, 0.6),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.dimension_line_id == "historical-style-winner"
+    assert set(result.witness_line_ids) == {
+        "vertical-top-witness",
+        "vertical-bottom-witness",
+    }
