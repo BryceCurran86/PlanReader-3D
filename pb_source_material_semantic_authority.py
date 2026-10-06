@@ -298,20 +298,59 @@ def _trusted_words_by_page(
         ):
             raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
         page_id = str(receipt.page_id)
+        trusted_text = (
+            str(result.trusted_text)
+            if (
+                result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.trusted_text is not None
+            )
+            else None
+        )
+        reason_codes = tuple(result.reason_codes or ())
+        trusted = trusted_text is not None
+        if (
+            not trusted
+            and result.status is EvidenceResolutionStatus.ABSTAINED
+            and set(reason_codes)
+            and set(reason_codes).issubset(
+                {
+                    TEXT_GLYPH_MAPPING_UNVERIFIED,
+                    TEXT_CLIP_STATE_UNRESOLVED,
+                }
+            )
+            and TEXT_GLYPH_MAPPING_UNVERIFIED in set(reason_codes)
+        ):
+            raster = source._material_text_raster.publish(
+                RasterTextCorroborationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=str(observation_id),
+                )
+            )
+            if (
+                raster.status is EvidenceResolutionStatus.CORROBORATED
+                and raster.record is not None
+                and raster.corroborated_text
+                and str(raster.corroborated_text).strip()
+                == str(receipt.raw_text or "").strip()
+            ):
+                trusted_text = str(raster.corroborated_text)
+                trusted = True
+                reason_codes = tuple(raster.reason_codes or ())
+
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
                 observation_id=str(observation_id),
                 page_id=page_id,
-                text=str(result.trusted_text or receipt.raw_text or ""),
+                text=str(trusted_text or receipt.raw_text or ""),
                 bbox=bbox,
                 block_no=int(receipt.block_no or 0),
                 line_no=int(receipt.line_no or 0),
                 word_no=int(receipt.word_no or 0),
-                trusted=(
-                    result.status is EvidenceResolutionStatus.CORROBORATED
-                    and result.trusted_text is not None
-                ),
-                reason_codes=tuple(result.reason_codes or ()),
+                trusted=trusted,
+                reason_codes=reason_codes,
             )
         )
     return {
@@ -547,6 +586,9 @@ class SourceMaterialSemanticProducer:
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
+        self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
         self._definition_results: dict[
             tuple[str, str, str, str, str], SourceMaterialDefinitionResult
         ] = {}
@@ -614,6 +656,10 @@ class SourceMaterialSemanticProducer:
         ] = []
         schedule_universe_complete = True
         schedule_universe_reasons: list[str] = []
+        # Keep the raster corroboration producer attached to the same
+        # SourceVisibilityProducer instance so provenance and render ownership
+        # remain source-bound.
+        self._source._material_text_raster = self._raster
         trusted_words = _trusted_words_by_page(self._source, published)
         raster = RasterTextCorroborationProducer.from_source_visibility_producer(
             self._source
