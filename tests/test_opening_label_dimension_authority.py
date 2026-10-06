@@ -410,7 +410,7 @@ def test_owned_generic_compact_descriptors_unlock_source_dimensions_without_lege
     expected_area: float,
 ) -> None:
     source, published = _ingest(
-        _pdf(labels=((105.0, 124.0, label),)),
+        _pdf(labels=((88.0, 124.0, label),)),
         "compact-owned-generic-" + label.lower().replace(" ", "-"),
     )
     selector = _opening_selector(source, published)
