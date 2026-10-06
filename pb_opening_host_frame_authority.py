@@ -32,6 +32,7 @@ from pb_opening_host_binding_authority import (
 )
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
 )
 from pb_physical_wall_candidate_authority import (
@@ -470,6 +471,138 @@ class OpeningHostFrameProducer:
             return None
         return min(projected_u), max(projected_u), sum(projected_n) / len(projected_n)
 
+    def _raster_whole_wall_frame(
+        self,
+        *,
+        binding,
+        opening,
+        geometry,
+    ) -> _WholeWallFrame | None:
+        """Build one source-space frame from a re-proven raster whole-wall host."""
+
+        if (
+            opening.structural_pattern != RASTER_FRAMED_WALL_BAND_INTERRUPTION
+            or len(tuple(binding.member_wall_candidate_ids)) != 1
+        ):
+            return None
+
+        wall_scope = self._walls.resolve_scope(
+            PhysicalWallCandidateSelector(
+                document_id=binding.document_id,
+                revision_id=binding.revision_id,
+                source_sha256=binding.source_sha256,
+                snapshot_id=binding.snapshot_id,
+                page_id=binding.page_id,
+                decision_scope_id=binding.decision_scope_id,
+            )
+        )
+        if (
+            wall_scope.status is not EvidenceResolutionStatus.CORROBORATED
+            or not wall_scope.scope_complete
+            or wall_scope.proposition != PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED
+            or wall_scope.equivalence is None
+        ):
+            return None
+
+        host_resolution = host_geometry._resolve_raster_whole_wall_host(
+            wall_scope.records,
+            geometry,
+            wall_scope.equivalence,
+        )
+        if (
+            host_resolution.status is not EvidenceResolutionStatus.CORROBORATED
+            or len(host_resolution.bands) != 1
+        ):
+            return None
+        host_band = host_resolution.bands[0]
+        if tuple(host_band.member_ids) != tuple(binding.member_wall_candidate_ids):
+            return None
+
+        records_by_id = {
+            str(record.wall_candidate_id): record
+            for record in wall_scope.records
+        }
+        wall_id = str(binding.member_wall_candidate_ids[0])
+        record = records_by_id.get(wall_id)
+        if record is None:
+            return None
+
+        axis = (float(geometry.axis[0]), float(geometry.axis[1]))
+        normal = (float(geometry.normal[0]), float(geometry.normal[1]))
+        projection = self._record_projection(record, axis, normal)
+        if projection is None:
+            return None
+        host_min_u, host_max_u, center_n = projection
+        host_length = host_max_u - host_min_u
+        if host_length <= _COORD_TOL:
+            return None
+
+        origin = _point_from_basis(host_min_u, center_n, axis, normal)
+        opening_start = (float(geometry.origin[0]), float(geometry.origin[1]))
+        opening_end = (
+            opening_start[0] + axis[0] * float(geometry.length),
+            opening_start[1] + axis[1] * float(geometry.length),
+        )
+        u0 = _dot(
+            (opening_start[0] - origin[0], opening_start[1] - origin[1]),
+            axis,
+        )
+        u1 = _dot(
+            (opening_end[0] - origin[0], opening_end[1] - origin[1]),
+            axis,
+        )
+        if (
+            u0 < -_COORD_TOL
+            or u1 - u0 <= _COORD_TOL
+            or u1 > host_length + _COORD_TOL
+        ):
+            return None
+        if abs(u0) <= _COORD_TOL:
+            u0 = 0.0
+        if abs(u1 - host_length) <= _COORD_TOL:
+            u1 = host_length
+
+        wall_thickness = float(geometry.thickness)
+        if not math.isfinite(wall_thickness) or wall_thickness <= _COORD_TOL:
+            return None
+
+        frame_payload = {
+            "document_id": binding.document_id,
+            "revision_id": binding.revision_id,
+            "source_sha256": binding.source_sha256,
+            "snapshot_id": binding.snapshot_id,
+            "page_id": binding.page_id,
+            "decision_scope_id": binding.decision_scope_id,
+            "opening_identity_id": opening.record_id,
+            "host_binding_record_id": binding.record_id,
+            "whole_wall_candidate_ids": (wall_id,),
+            "origin_pt": tuple(round(float(value), 9) for value in origin),
+            "axis_unit": tuple(round(float(value), 12) for value in axis),
+            "normal_unit": tuple(round(float(value), 12) for value in normal),
+            "wall_thickness_pt": round(wall_thickness, 9),
+            "whole_wall_length_pt": round(float(host_length), 9),
+        }
+        frame_id = stable_contract_id(
+            "opening_host_raster_whole_wall_frame_v1",
+            frame_payload,
+            digest_chars=32,
+        )
+        return _WholeWallFrame(
+            origin=origin,
+            axis=axis,
+            normal=normal,
+            u0=float(u0),
+            u1=float(u1),
+            wall_thickness=wall_thickness,
+            whole_wall_length=float(host_length),
+            frame_id=frame_id,
+            candidate_ids=(wall_id,),
+            source_observation_ids=tuple(
+                sorted(str(value) for value in opening.source_observation_ids)
+            ),
+        )
+
+
     def _shared_host_frame(self, *, binding, geometry) -> _WholeWallFrame | None:
         wall_scope = self._walls.resolve_scope(
             PhysicalWallCandidateSelector(
@@ -738,7 +871,13 @@ class OpeningHostFrameProducer:
                 OPENING_HOST_FRAME_GEOMETRY_INVALID,
             )
 
-        frame = self._shared_host_frame(binding=binding, geometry=geometry)
+        frame = self._raster_whole_wall_frame(
+            binding=binding,
+            opening=opening,
+            geometry=geometry,
+        )
+        if frame is None:
+            frame = self._shared_host_frame(binding=binding, geometry=geometry)
         if frame is None:
             return _blocked(
                 EvidenceResolutionStatus.ABSTAINED,
