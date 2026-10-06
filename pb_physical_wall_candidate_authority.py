@@ -81,6 +81,12 @@ from pb_wall_room_topology_stage_a import (
     is_structural_candidate_segment,
 )
 from pb_wall_room_topology_wall_assembly import assemble_wall_topology
+from pb_wall_room_topology_typed_negative_evidence import (
+    KIND_GRID,
+    POLARITY_OPPOSING,
+    collect_typed_semantic_evidence,
+)
+
 
 
 PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.2.0"
@@ -269,6 +275,14 @@ class PhysicalWallScopeBoundaryEvaluation:
 
 
 @dataclass(frozen=True)
+class PhysicalWallGridOppositionRecord:
+    wall_candidate_id: str
+    edge_ids: tuple[str, ...]
+    grid_evidence_ids: tuple[str, ...]
+    fully_grid_opposed: bool
+
+
+@dataclass(frozen=True)
 class PhysicalWallCandidateScopeResult:
     status: EvidenceResolutionStatus
     scope_complete: bool
@@ -296,6 +310,15 @@ class PhysicalWallCandidateScopeResult:
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
     boundary_evaluation: Optional[PhysicalWallScopeBoundaryEvaluation] = None
     source_metadata_table: Optional[PhysicalWallSourceMetadataScopeTable] = None
+    grid_opposition_records: tuple[PhysicalWallGridOppositionRecord, ...] = ()
+
+    @property
+    def fully_grid_opposed_wall_candidate_ids(self) -> tuple[str, ...]:
+        return tuple(
+            record.wall_candidate_id
+            for record in self.grid_opposition_records
+            if record.fully_grid_opposed
+        )
 
 
 @dataclass(frozen=True)
@@ -2703,6 +2726,73 @@ def _apply_trusted_relation_overrides(
     )
 
 
+def _physical_wall_grid_opposition_records(
+    *,
+    graph: Mapping[str, object],
+    records: Sequence[PhysicalWallCandidateRecord],
+    document_id: str,
+    page_id: str,
+    decision_scope_id: str,
+) -> tuple[PhysicalWallGridOppositionRecord, ...]:
+    """Describe exact source-lineage grid opposition for existing walls.
+
+    This is additive metadata only. It never removes geometry, changes
+    equivalence, alters scope completeness, or makes a wall non-physical.
+    """
+    atoms = collect_typed_semantic_evidence(
+        graph,
+        document_id=str(document_id),
+        page_id=str(page_id),
+        viewport_id=str(decision_scope_id),
+    )
+    grid_evidence_by_edge: dict[str, list[str]] = defaultdict(list)
+    for atom in atoms:
+        metadata = dict(atom.metadata or {})
+        if (
+            atom.kind != KIND_GRID
+            or str(metadata.get("polarity") or "") != POLARITY_OPPOSING
+            or "source_lineage_dense_orthogonal_lattice"
+            not in tuple(atom.reason_codes or ())
+        ):
+            continue
+        edge_id = str(metadata.get("target_edge_id") or "").strip()
+        if edge_id:
+            grid_evidence_by_edge[edge_id].append(str(atom.evidence_id))
+
+    out: list[PhysicalWallGridOppositionRecord] = []
+    for record in records:
+        wall = record.wall_candidate
+        edge_ids = tuple(
+            dict.fromkeys(
+                (
+                    *tuple(str(v) for v in (wall.face_a_segment_ids or ())),
+                    *tuple(str(v) for v in (wall.face_b_segment_ids or ())),
+                )
+            )
+        )
+        grid_ids = tuple(
+            sorted(
+                {
+                    evidence_id
+                    for edge_id in edge_ids
+                    for evidence_id in grid_evidence_by_edge.get(edge_id, ())
+                }
+            )
+        )
+        fully = bool(edge_ids) and all(
+            edge_id in grid_evidence_by_edge for edge_id in edge_ids
+        )
+        out.append(
+            PhysicalWallGridOppositionRecord(
+                wall_candidate_id=str(record.wall_candidate_id),
+                edge_ids=edge_ids,
+                grid_evidence_ids=grid_ids,
+                fully_grid_opposed=fully,
+            )
+        )
+    return tuple(sorted(out, key=lambda item: item.wall_candidate_id))
+
+
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2788,6 +2878,18 @@ def _assemble_scope_result(
             decision_scope_id=scope_id,
             reason_code=f"source_metadata_shadow_error:{type(exc).__name__}",
         )
+
+    try:
+        grid_opposition_records = _physical_wall_grid_opposition_records(
+            graph=graph,
+            records=tuple(records),
+            document_id=published.revision.document_id,
+            page_id=page_id,
+            decision_scope_id=scope_id,
+        )
+    except Exception:
+        # Additive metadata cannot break physical-wall authority.
+        grid_opposition_records = ()
 
     baseline_equivalence = resolve_physical_wall_equivalence(
         tuple(ordered_identities),
@@ -2936,6 +3038,7 @@ def _assemble_scope_result(
         ),
         boundary_evaluation=boundary_evaluation,
         source_metadata_table=source_metadata_table,
+        grid_opposition_records=grid_opposition_records,
     )
 
 
