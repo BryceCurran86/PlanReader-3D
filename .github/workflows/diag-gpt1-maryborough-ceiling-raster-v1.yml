@@ -1,0 +1,109 @@
+name: DIAG GPT1 Maryborough Ceiling Raster Recovery
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace recovered ceiling finish candidates
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+          from pb_source_ceiling_finish_evidence import collect_source_owned_ceiling_finish_candidates
+          from pb_migration_contracts import ViewportEvidence, ViewportResolutionStatus
+          from pb_migration_provider_envelope import ProviderContext
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf.read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          doc=fitz.open(stream=payload,filetype="pdf")
+          try:
+              page_ids=tuple(str(i+1) for i in range(doc.page_count))
+          finally:
+              doc.close()
+          source=SourceVisibilityProducer(
+              producer_method="gpt1-maryborough-ceiling-raster-diag",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag-maryborough:{sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=page_ids,
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          rows=[]
+          doc=fitz.open(stream=payload,filetype="pdf")
+          try:
+              for index in range(doc.page_count):
+                  page_no=index+1
+                  for segmented in authoritative_floor_plan_viewports(doc[index],page_number=page_no):
+                      if segmented.bounding_box is None:
+                          continue
+                      viewport_id=str(segmented.view_id or "").strip()
+                      viewport=ViewportEvidence(
+                          viewport_id=viewport_id,
+                          document_id=current.revision.document_id,
+                          page_id=str(page_no),
+                          bbox=tuple(float(v) for v in segmented.bounding_box),
+                          view_type="floor_plan",
+                          status=ViewportResolutionStatus.RESOLVED,
+                          evidence_ids=(),
+                          confidence=float(segmented.confidence),
+                      )
+                      context=ProviderContext(
+                          run_id=f"diag:{page_no}:{viewport_id}",
+                          workspace_id="diag",
+                          project_id="diag",
+                          document_id=current.revision.document_id,
+                          source_sha256=current.revision.source_sha256,
+                          revision_id=current.revision.revision_id,
+                          current_revision_id=current.revision.revision_id,
+                          selected_pages=(index,),
+                          owned_viewport_ids=(viewport_id,),
+                          evidence_snapshot_id=current.snapshot.snapshot_id,
+                          owned_page_numbers=(page_no,),
+                          viewport_page_ownership=((viewport_id,page_no),),
+                      )
+                      atoms=collect_source_owned_ceiling_finish_candidates(
+                          source_visibility_producer=source,
+                          context=context,
+                          viewport=viewport,
+                          page_no=page_no,
+                      )
+                      rows.append({
+                          "page_no":page_no,
+                          "viewport_id":viewport_id,
+                          "candidate_count":len(atoms),
+                          "candidates":[{
+                              "raw_text":a.raw_text,
+                              "normalized_value":a.normalized_value,
+                              "bbox":list(a.bbox or ()),
+                              "metadata":dict(a.metadata or {}),
+                          } for a in atoms],
+                      })
+          finally:
+              doc.close()
+          print(json.dumps({
+              "source_sha256":sha,
+              "floor_plan_viewports":rows,
+              "candidate_count":sum(r["candidate_count"] for r in rows),
+          },indent=2,sort_keys=True))
+          PY
