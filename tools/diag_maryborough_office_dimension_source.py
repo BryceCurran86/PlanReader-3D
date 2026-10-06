@@ -163,8 +163,22 @@ def main() -> int:
         first=nearest(start_coord)
         last=nearest(end_coord)
         witness_bound=first is not None and last is not None and first[1] != last[1]
+        same_path_segments = [
+            segment for segment in bundle.observed_geometry
+            if segment.source_path_index == candidate.source_path_index
+        ] if candidate.source_path_index is not None else []
+        path_x = [point for segment in same_path_segments for point in (segment.start[0], segment.end[0])]
+        path_y = [point for segment in same_path_segments for point in (segment.start[1], segment.end[1])]
+        path_bounds = None if not path_x else [
+            min(path_x), min(path_y), max(path_x), max(path_y)
+        ]
         return {
             "segment_id":candidate.segment_id,
+            "source_path_index":candidate.source_path_index,
+            "source_path_segment_count":len(same_path_segments),
+            "source_path_bounds":path_bounds,
+            "stroke_width_pt":candidate.stroke_width_pt,
+            "stroke_color_rgb":candidate.stroke_color_rgb,
             "orientation":candidate.orientation,
             "start":list(candidate.start),
             "end":list(candidate.end),
