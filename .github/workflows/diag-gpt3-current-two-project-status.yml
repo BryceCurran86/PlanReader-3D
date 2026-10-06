@@ -1,0 +1,47 @@
+name: DIAG GPT3 Current Two Project Status
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Download authoritative Lot16 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gpt3-lot16-map-only-v5
+          path: artifacts/gpt3-current-two-project/lot16
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 37464408630
+      - name: Build exact current two-project status
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_current_two_project_status.py \
+            | tee artifacts/gpt3-current-two-project/status.stdout.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-current-two-project-status
+          path: artifacts/gpt3-current-two-project
+          retention-days: 3
