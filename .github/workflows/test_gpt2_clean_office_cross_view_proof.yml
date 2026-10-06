@@ -1,0 +1,120 @@
+name: TEST ONLY GPT2 Clean Office Cross View Proof
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  office:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove Office cross-view and quantity chain
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-clean-office-proof
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          TARGET="OFFICE"
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-clean-office-cross-view-proof",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt2-clean-office-cross-view-proof",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          cross=cv.CrossViewRoomAreaProducer.from_source(source=source,rooms=rooms).publish()
+          office_cross=[
+              {
+                  "record_id":r.record_id,
+                  "label":r.room_label,
+                  "area_m2":r.area_evidence.normalized_value,
+                  "page_id":r.source_dimension_page_id,
+                  "horizontal_id":r.horizontal_dimension_id,
+                  "vertical_id":r.vertical_dimension_id,
+                  "horizontal_mm":r.horizontal_dimension_mm,
+                  "vertical_mm":r.vertical_dimension_mm,
+                  "evidence_ids":list(r.evidence_ids),
+              }
+              for r in cross.records if norm(r.room_label)==TARGET
+          ]
+
+          claim=collect_live_physical_net_wall_claim(
+              SOURCE,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          office_quantities=[
+              q.to_dict() for q in claim.room_area_quantity_evidence
+              if norm(dict(q.metadata or {}).get("room_label"))==TARGET
+          ]
+          firm={
+              norm(dict(q.metadata or {}).get("room_label")):float(q.value)
+              for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          }
+
+          payload={
+              "cross_status":getattr(cross.status,"value",str(cross.status)),
+              "cross_reason_codes":list(cross.reason_codes),
+              "office_cross_records":office_cross,
+              "office_quantities":office_quantities,
+              "firm_room_areas":firm,
+          }
+          print(json.dumps(payload,indent=2,sort_keys=True),flush=True)
+
+          assert len(office_cross)==1, office_cross
+          assert abs(float(office_cross[0]["area_m2"])-9.05352) < 1e-9
+          assert abs(firm["FOOD PREP"]-13.270425) < 1e-9
+          assert abs(firm["COLD ROOM"]-25.37875) < 1e-9
+          assert abs(firm["OFFICE"]-9.05352) < 1e-9
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-clean-office-proof
+          path: artifacts/gpt2-clean-office-proof
+          retention-days: 2
