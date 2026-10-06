@@ -307,6 +307,7 @@ def _array_nominations(
     host: Mapping[str, Any],
     context: Sequence[Mapping[str, Any]],
     family_len_by_id: Optional[Mapping[str, float]] = None,
+    family_hosts: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     host_len = host["length"]
     if host_len <= 1e-6:
@@ -392,13 +393,23 @@ def _array_nominations(
             }
         )
     # Grid evidence must be invariant to Stage-A rechunking at crossings.
-    # Use the reconstructed collinear family length (the same source-owned
-    # family measure already used by ticks/hatch/mullion nominations) rather
-    # than each split edge's local fragment length.
+    # Compare reconstructed collinear family hosts, not each split local edge.
+    # Using raw split edges duplicates the same parallel offset many times and
+    # makes regular-spacing evidence depend on where crossings happened.
+    grid_context = list(family_hosts or ())
+    if grid_context:
+        host_member_ids = set(host.get("member_ids") or ())
+        grid_context = [
+            item
+            for item in grid_context
+            if not host_member_ids.intersection(set(item.get("member_ids") or ()))
+        ]
+    else:
+        grid_context = others
     grid = [
         item
-        for item in others
-        if family_len_by_id.get(item["id"], item["length"]) / host_len >= 0.5
+        for item in grid_context
+        if item["length"] / host_len >= 0.5
         and _angle_delta(item["angle"], host["angle"]) <= _PARALLEL_DEG
     ]
     grid_offsets = [
@@ -650,28 +661,40 @@ def collect_typed_semantic_evidence(
     families: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
     for target in retained:
         families[_line_family_key(target)].append(target)
+    family_hosts = tuple(_family_host(members) for members in families.values())
     family_len_by_id = {
-        item["id"]: _family_host(members)["length"]
-        for members in families.values()
+        item["id"]: host["length"]
+        for members, host in zip(families.values(), family_hosts)
         for item in members
     }
-    for members in families.values():
-        host = _family_host(members)
-        for nomination in _array_nominations(host, context, family_len_by_id):
+    for members, host in zip(families.values(), family_hosts):
+        for nomination in _array_nominations(
+            host,
+            context,
+            family_len_by_id,
+            family_hosts=family_hosts,
+        ):
             for member in members:
                 family_noms[member["id"]].append(nomination)
     excluded_families: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
     for target in excluded:
         excluded_families[_line_family_key(target)].append(target)
+    excluded_family_hosts = tuple(
+        _family_host(members) for members in excluded_families.values()
+    )
     excluded_family_len = {
-        item["id"]: _family_host(members)["length"]
-        for members in excluded_families.values()
+        item["id"]: host["length"]
+        for members, host in zip(excluded_families.values(), excluded_family_hosts)
         for item in members
     }
     excluded_family_noms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for members in excluded_families.values():
-        host = _family_host(members)
-        for nomination in _array_nominations(host, context, excluded_family_len):
+    for members, host in zip(excluded_families.values(), excluded_family_hosts):
+        for nomination in _array_nominations(
+            host,
+            context,
+            excluded_family_len,
+            family_hosts=excluded_family_hosts,
+        ):
             for member in members:
                 excluded_family_noms[member["id"]].append(nomination)
     atoms: List[EvidenceAtom] = []
