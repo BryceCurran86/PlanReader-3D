@@ -3,7 +3,7 @@ name: DIAG Floor Finish Live Impact
 on:
   pull_request:
     branches:
-      - main
+      - gpt4/wire-floor-finish-quantity-live-v2
 
 jobs:
   lot16:
