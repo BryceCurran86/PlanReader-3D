@@ -39,7 +39,6 @@ jobs:
                   "view_type":row.view_type,
                   "status":row.status,
                   "bbox":None if row.bounding_box is None else list(row.bounding_box),
-                  "reason_codes":list(row.reason_codes),
                   "producer_product":bool(is_segment_page_viewports_product(row)),
                   "authoritative_derived":bool(is_authoritative_derived_viewport(row)),
               })
