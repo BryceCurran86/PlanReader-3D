@@ -63,6 +63,10 @@ HOST_EQUIVALENCE_UNAVAILABLE = "physical_wall_equivalence_required_for_host"
 HOST_BAND_CENTER_MISMATCH = "authenticated_host_wall_band_not_centered_on_opening"
 RASTER_WHOLE_WALL_HOST_RESOLVED = "raster_whole_wall_host_resolved"
 MULTIPLE_RASTER_WHOLE_WALL_HOSTS = "multiple_authenticated_raster_whole_wall_hosts"
+RASTER_SPLIT_CENTERLINE_HOST_RESOLVED = "raster_split_centerline_host_resolved"
+MULTIPLE_RASTER_SPLIT_CENTERLINE_HOSTS = (
+    "multiple_authenticated_raster_split_centerline_hosts"
+)
 
 _UNIVERSE_PRODUCER_SEAL = object()
 _UNIVERSE_AUTHORITY_SEAL = object()
@@ -467,6 +471,15 @@ class OpeningHostBindingProducer:
                     geometry,
                     universe.equivalence,
                 )
+                if (
+                    band_resolution.status is EvidenceResolutionStatus.CORROBORATED
+                    and not band_resolution.bands
+                ):
+                    band_resolution = _resolve_raster_split_centerline_host(
+                        universe.records,
+                        geometry,
+                        universe.equivalence,
+                    )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
                 *band_resolution.reason_codes,
@@ -1415,6 +1428,163 @@ def _resolve_raster_whole_wall_host(
         status=EvidenceResolutionStatus.CORROBORATED,
         bands=(band,),
         reason_codes=(RASTER_WHOLE_WALL_HOST_RESOLVED,),
+    )
+
+
+def _resolve_raster_split_centerline_host(
+    records: Sequence[PhysicalWallCandidateRecord],
+    opening: _OpeningGeometry,
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> _HostBandResolution:
+    """Resolve one raster wall centerline split by the proven aperture.
+
+    W4 can preserve one authenticated raster source segment as separate left
+    and right physical-wall candidates around an opening. This fallback is
+    intentionally narrower than geometric proximity:
+    - both fragments must terminate at opposite aperture edges;
+    - each must lie on the sealed G17 wall-band center within the existing
+      cross-render pixel equality allowance;
+    - both must carry usable physical identities;
+    - both must share at least one *exact* source primitive id;
+    - role ambiguity/equivalence remains fail-closed;
+    - multiple valid fragment pairs conflict instead of ranking.
+    """
+
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    left_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
+    right_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
+    for record in records:
+        data = _candidate_axis_data(record, opening)
+        if data is None:
+            continue
+        along_min, along_max, offset = data
+        if abs(offset) > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL:
+            continue
+        if along_min < -edge_tol and abs(along_max) <= edge_tol:
+            left_raw.append((offset, record))
+        if (
+            along_max > opening.length + edge_tol
+            and abs(along_min - opening.length) <= edge_tol
+        ):
+            right_raw.append((offset, record))
+
+    if not left_raw or not right_raw:
+        return _HostBandResolution(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            bands=(),
+        )
+
+    pair_lookup = _pair_lookup(equivalence)
+    group_lookup = _equivalence_group_lookup(equivalence)
+    left_status, left_candidates, left_reasons = _normalize_role_candidates(
+        left_raw,
+        equivalence,
+        _RASTER_WHOLE_WALL_CENTER_TOL_PT,
+        pair_lookup=pair_lookup,
+        group_lookup=group_lookup,
+    )
+    if left_status is not EvidenceResolutionStatus.CORROBORATED:
+        return _HostBandResolution(left_status, (), left_reasons)
+    right_status, right_candidates, right_reasons = _normalize_role_candidates(
+        right_raw,
+        equivalence,
+        _RASTER_WHOLE_WALL_CENTER_TOL_PT,
+        pair_lookup=pair_lookup,
+        group_lookup=group_lookup,
+    )
+    if right_status is not EvidenceResolutionStatus.CORROBORATED:
+        return _HostBandResolution(right_status, (), right_reasons)
+
+    bands: list[_HostBand] = []
+    for left in left_candidates:
+        left_identity = left.record.physical_identity
+        if not left_identity.usable or not left_identity.candidate_identity_id:
+            continue
+        left_sources = {
+            str(value)
+            for value in left_identity.source_primitive_ids
+            if str(value).strip()
+        }
+        if not left_sources:
+            continue
+        for right in right_candidates:
+            if (
+                abs(right.offset - left.offset)
+                > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+            ):
+                continue
+            center_offset = (left.offset + right.offset) / 2.0
+            if (
+                abs(center_offset)
+                > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+            ):
+                continue
+
+            right_identity = right.record.physical_identity
+            if not right_identity.usable or not right_identity.candidate_identity_id:
+                continue
+            right_sources = {
+                str(value)
+                for value in right_identity.source_primitive_ids
+                if str(value).strip()
+            }
+            if not (left_sources & right_sources):
+                continue
+
+            member_ids = tuple(sorted(
+                (
+                    str(left.record.wall_candidate_id),
+                    str(right.record.wall_candidate_id),
+                )
+            ))
+            if len(set(member_ids)) != 2:
+                continue
+            candidate_identity_ids = tuple(sorted(
+                (
+                    str(left_identity.candidate_identity_id),
+                    str(right_identity.candidate_identity_id),
+                )
+            ))
+            groups = tuple(sorted(
+                {
+                    tuple(sorted(left.candidate_group)),
+                    tuple(sorted(right.candidate_group)),
+                }
+            ))
+            bands.append(_HostBand(
+                member_ids=member_ids,
+                member_candidate_identity_ids=candidate_identity_ids,
+                member_equivalence_groups=groups,
+                center_offset=float(center_offset),
+            ))
+
+    unique: dict[
+        tuple[tuple[str, ...], tuple[tuple[str, ...], ...]], _HostBand
+    ] = {}
+    for band in bands:
+        unique.setdefault(
+            (band.member_ids, band.member_equivalence_groups),
+            band,
+        )
+    resolved = tuple(sorted(
+        unique.values(),
+        key=lambda item: (item.member_ids, item.member_equivalence_groups),
+    ))
+    if not resolved:
+        return _HostBandResolution(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            bands=(),
+        )
+    if len(resolved) != 1:
+        return _HostBandResolution(
+            status=EvidenceResolutionStatus.CONFLICT,
+            bands=(),
+            reason_codes=(MULTIPLE_RASTER_SPLIT_CENTERLINE_HOSTS,),
+        )
+    return _HostBandResolution(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        bands=resolved,
+        reason_codes=(RASTER_SPLIT_CENTERLINE_HOST_RESOLVED,),
     )
 
 
