@@ -361,3 +361,49 @@ def test_grid_component_completion_blocks_competing_split_label():
         "split_label_primary",
         "split_label_competing",
     }
+
+
+def test_grid_component_completion_preserves_repeated_physical_outer_wall():
+    left = _face(
+        "face_left",
+        "record_left",
+        ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
+        ("w_left", "w_lm", "w_top", "w_bottom"),
+    )
+    middle = _face(
+        "face_middle",
+        "record_middle",
+        ((10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)),
+        ("w_lm", "w_mr", "w_top", "w_bottom"),
+    )
+    right = _face(
+        "face_right",
+        "record_right",
+        ((20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)),
+        ("w_mr", "w_right", "w_top", "w_bottom"),
+    )
+    room_scope = SourceRoomFaceScopeResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(left, middle, right),
+        reason_codes=("source_room_face_scope_resolved",),
+        **LINEAGE,
+    )
+
+    result = compose_grid_separated_room_faces(
+        wall_scope=_three_cell_wall_scope(
+            (
+                _grid_atom("e_lm", "ev_lm"),
+                _grid_atom("e_mr", "ev_mr"),
+            )
+        ),
+        room_scope=room_scope,
+        label_scope=_three_cell_label_scope(),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.separator_wall_ids == ("w_lm", "w_mr")
+    assert "w_top" in record.bounding_wall_ids
+    assert "w_bottom" in record.bounding_wall_ids
