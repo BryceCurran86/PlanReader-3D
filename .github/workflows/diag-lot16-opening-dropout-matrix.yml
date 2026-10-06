@@ -3,7 +3,7 @@ name: DIAG Lot16 Opening Dropout Matrix
 on:
   pull_request:
     branches:
-      - main
+      - gpt4/opening-compact-descriptors-current-main
 
 jobs:
   diagnose:
