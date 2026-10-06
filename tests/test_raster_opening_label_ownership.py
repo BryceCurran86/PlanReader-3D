@@ -16,6 +16,7 @@ from pb_opening_label_semantic_authority import OpeningLabelSemanticProducer
 from pb_physical_opening_authority import (
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -110,6 +111,18 @@ def test_raster_physical_opening_can_own_native_semantic_and_dimension_label() -
     assert dimension.evidence.dimension_values_mm == (1500.0, 1800.0)
     assert dimension.evidence.area_m2 == pytest.approx(2.7)
     assert dimension.evidence.source_text_observation_ids
+
+
+def test_swing_raster_aperture_bbox_can_own_source_label_spatially() -> None:
+    source, _published, (_selector, opening) = _prepare("STACKER")
+    swing = replace(
+        opening,
+        structural_pattern=RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    )
+    gap = _gap_span_for_opening(source, swing)
+    assert gap is not None
+    assert gap.along_max > gap.along_min
+    assert gap.cross_spread > 0.0
 
 
 def test_raster_aperture_bbox_is_spatial_ownership_only_for_g17_raster_pattern() -> None:
