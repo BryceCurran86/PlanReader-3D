@@ -869,11 +869,27 @@ def _trusted_text_lines(
 
 def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
     x0, y0, x1, y1 = label.bbox
-    center = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
-    along = _dot(center, gap.axis)
-    if along < gap.along_min - _COORD_TOL or along > gap.along_max + _COORD_TOL:
+    corners = (
+        (x0, y0),
+        (x0, y1),
+        (x1, y0),
+        (x1, y1),
+    )
+    along_values = tuple(_dot(point, gap.axis) for point in corners)
+    label_along_min = min(along_values)
+    label_along_max = max(along_values)
+    # Spatial ownership belongs to the actual authenticated text bbox, not
+    # only its centre point. A drafting label may straddle a jamb or be
+    # leader-placed so its centre falls just outside the sealed aperture.
+    # Mere proximity still cannot bind: the projected bbox must physically
+    # overlap the gap on the opening axis.
+    if (
+        label_along_max < gap.along_min - _COORD_TOL
+        or label_along_min > gap.along_max + _COORD_TOL
+    ):
         return False
 
+    center = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
     cross = _dot(center, gap.normal)
     glyph_height = max(_COORD_TOL, min(abs(x1 - x0), abs(y1 - y0)))
     cross_allowance = max(3.0 * glyph_height, 2.0 * gap.cross_spread)
