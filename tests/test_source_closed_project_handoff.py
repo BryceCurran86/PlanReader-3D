@@ -175,7 +175,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     source_sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
     project_id = "project-a"
 
-    room_q = _quantity("q-room", "room_area")
+    floor_q = _quantity("q-floor", "floor_area")
     opening_q = _quantity("q-opening", "opening_area")
     count_q = _quantity("q-count", "opening_count")
     claim = SimpleNamespace(
@@ -186,7 +186,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
         canonical_rooms=(1,),
         canonical_floors=(1,),
         canonical_spaces=(1,),
-        room_area_quantity_evidence=(room_q,),
+        room_area_quantity_evidence=(),
         opening_quantity_evidence=(opening_q,),
         opening_count_quantity_evidence=(count_q,),
     )
@@ -205,12 +205,17 @@ def test_project_handoff_combines_only_available_source_closed_families(
     )
     monkeypatch.setattr(
         handoff,
-        "seal_live_room_area_run",
+        "publish_live_floor_area_quantities",
+        lambda claim: (floor_q,),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_floor_area_run",
         lambda *args, **kwargs: _run(
             project_id=project_id,
             source_sha256=source_sha,
-            family="room_area",
-            quantity_id="sealed-room",
+            family="floor_area",
+            quantity_id="sealed-floor",
         ),
     )
     monkeypatch.setattr(
@@ -257,7 +262,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     assert summary["topology_pages"] == [1]
     assert summary["topology_mode"] == "live_authority_all_pages_fallback"
     assert summary["family_counts"] == {
-        "room_area": 1,
+        "floor_area": 1,
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_lining": 1,
@@ -303,6 +308,11 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
         handoff,
         "collect_ceiling_lining_review_candidates",
         lambda *args, **kwargs: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
     )
 
     summary = handoff.generate_project_handoff(
@@ -363,6 +373,11 @@ def test_project_handoff_forwards_only_source_classified_room_support(
         "collect_ceiling_lining_review_candidates",
         lambda *args, **kwargs: (),
     )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
 
     summary = handoff.generate_project_handoff(
         pdf_path=pdf,
@@ -385,7 +400,7 @@ def test_project_handoff_rejects_family_run_from_different_source(
 ) -> None:
     pdf = tmp_path / "source.pdf"
     pdf.write_bytes(b"source-bytes")
-    room_q = _quantity("q-room", "room_area")
+    floor_q = _quantity("q-floor", "floor_area")
     claim = SimpleNamespace(
         status=SimpleNamespace(value="corroborated"),
         reason_codes=(),
@@ -394,7 +409,7 @@ def test_project_handoff_rejects_family_run_from_different_source(
         canonical_rooms=(1,),
         canonical_floors=(1,),
         canonical_spaces=(1,),
-        room_area_quantity_evidence=(room_q,),
+        room_area_quantity_evidence=(),
         opening_quantity_evidence=(),
         opening_count_quantity_evidence=(),
     )
@@ -412,12 +427,22 @@ def test_project_handoff_rejects_family_run_from_different_source(
     )
     monkeypatch.setattr(
         handoff,
-        "seal_live_room_area_run",
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (floor_q,),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_floor_area_run",
         lambda *args, **kwargs: _run(
             project_id="project-a",
             source_sha256="f" * 64,
-            family="room_area",
-            quantity_id="sealed-room",
+            family="floor_area",
+            quantity_id="sealed-floor",
         ),
     )
 
@@ -442,7 +467,7 @@ def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
     pdf.write_bytes(b"source-bytes")
     source_sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
     project_id = "project-a"
-    room_q = _quantity("q-room", "room_area")
+    floor_q = _quantity("q-floor", "floor_area")
     claim = SimpleNamespace(
         status=SimpleNamespace(value="corroborated"),
         reason_codes=(),
@@ -469,12 +494,22 @@ def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
     )
     monkeypatch.setattr(
         handoff,
-        "seal_live_room_area_run",
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (floor_q,),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_floor_area_run",
         lambda *args, **kwargs: _run(
             project_id=project_id,
             source_sha256=source_sha,
-            family="room_area",
-            quantity_id="sealed-room",
+            family="floor_area",
+            quantity_id="sealed-floor",
         ),
     )
 
@@ -534,3 +569,53 @@ def test_project_handoff_persists_production_failure_summary_before_reraise(
         "production_extraction_error:ValueError"
     ]
     assert summary["combined_run_file"] is None
+
+
+
+def test_project_handoff_does_not_seal_upstream_room_area_as_final_family(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    upstream_room = _quantity("q-room", "room_area")
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="corroborated"),
+        reason_codes=(),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(1,),
+        canonical_floors=(1,),
+        canonical_spaces=(1,),
+        room_area_quantity_evidence=(upstream_room,),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        lambda *args, **kwargs: claim,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_ceiling_lining_review_candidates",
+        lambda *args, **kwargs: (),
+    )
+
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-a",
+        workspace_id=1,
+        output_dir=tmp_path / "out",
+    )
+
+    assert summary["family_counts"]["floor_area"] == 0
+    assert "room_area" not in summary["family_counts"]
+    assert summary["combined_quantity_count"] == 0
+    assert summary["status"] == "no_sealable_quantities"
