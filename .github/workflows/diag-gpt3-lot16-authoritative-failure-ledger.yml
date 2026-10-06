@@ -81,6 +81,12 @@ jobs:
             "failure_items":len(ledger["failure_items"]),
           },indent=2))
           PY
+      - name: Route exact failures by first production stage
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_first_failure_routing.py \
+            | tee artifacts/lot16-selected/out/first-failure-routing.stdout.json
       - name: Upload authoritative ledger
         if: always()
         uses: actions/upload-artifact@v4
