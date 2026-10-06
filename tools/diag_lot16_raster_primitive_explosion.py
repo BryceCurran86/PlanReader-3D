@@ -140,9 +140,10 @@ def main() -> None:
         page_ids=page_ids,
     )
 
+    source_observation_producer = producer._producer
     rows = []
     for page_id in page_ids:
-        image_regions = producer.native_page_image_regions(
+        image_regions = source_observation_producer.native_page_image_regions(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256,
@@ -151,7 +152,7 @@ def main() -> None:
         )
         if not image_regions:
             continue
-        png_bytes, _page_parent = producer.render_native_page_png(
+        png_bytes, _page_parent = source_observation_producer.render_native_page_png(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256,
