@@ -111,6 +111,22 @@ _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION = 0.03
 _REPEATED_MOTIF_NON_ORTHOGONAL_SPAN_FRACTION = 0.10
 _REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION = 0.006
 _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG = 2.0
+
+# Some CAD exports contain a paper-space drafting lattice encoded as long,
+# neutral hairline singleton paths. Unlike legitimate sparse wall geometry,
+# these lines repeat at nearly identical coordinate spacing in BOTH axes.
+# Exclusion requires a local run in each axis with matching spacing; one-axis
+# repetition, irregular coordinates, non-neutral strokes, filled paths, and
+# non-singleton source paths remain fail-closed and are preserved.
+_DRAFTING_DIVIDER_MIN_RUN_COORDINATES = 5
+_DRAFTING_DIVIDER_MIN_LENGTH_FRACTION = 0.01
+_DRAFTING_DIVIDER_MAX_WIDTH_PT = 0.30
+_DRAFTING_DIVIDER_GRAY_CHANNEL_TOLERANCE = 0.05
+_DRAFTING_DIVIDER_GRAY_MIN = 0.20
+_DRAFTING_DIVIDER_GRAY_MAX = 0.80
+_DRAFTING_DIVIDER_SPACING_ABS_TOLERANCE_PT = 0.75
+_DRAFTING_DIVIDER_SPACING_REL_TOLERANCE = 0.03
+
 PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
     "physical_wall_candidate_source_integrity_failure"
 )
@@ -688,6 +704,171 @@ def _is_proven_annotation_mask_edge(
         and segment.get("participates_in_source_physical_object") is False
     )
 
+def _drafting_divider_style_key(
+    segment: Mapping[str, object],
+) -> Optional[tuple[float, float, float, float]]:
+    """Return exact neutral hairline style eligible for repeated-band proof."""
+    if bool(segment.get("fill_present", False)):
+        return None
+    if not bool(segment.get("stroke_present", False)):
+        return None
+    dashes = str(segment.get("dashes") or "").strip()
+    if dashes not in ("", "[]", "[] 0"):
+        return None
+    try:
+        width = float(segment.get("width"))
+    except (TypeError, ValueError):
+        return None
+    if (
+        not math.isfinite(width)
+        or width <= 0.0
+        or width > _DRAFTING_DIVIDER_MAX_WIDTH_PT
+    ):
+        return None
+    stroke = segment.get("stroke")
+    if not isinstance(stroke, (tuple, list)) or len(stroke) < 3:
+        return None
+    try:
+        channels = tuple(float(stroke[index]) for index in range(3))
+    except (TypeError, ValueError):
+        return None
+    if any(not math.isfinite(value) for value in channels):
+        return None
+    if max(channels) - min(channels) > _DRAFTING_DIVIDER_GRAY_CHANNEL_TOLERANCE:
+        return None
+    gray = sum(channels) / 3.0
+    if gray < _DRAFTING_DIVIDER_GRAY_MIN or gray > _DRAFTING_DIVIDER_GRAY_MAX:
+        return None
+    return (
+        round(channels[0], 2),
+        round(channels[1], 2),
+        round(channels[2], 2),
+        round(width, 2),
+    )
+
+
+def _dominant_regular_coordinate_run(
+    coordinates: Sequence[float],
+) -> tuple[float, tuple[float, ...]]:
+    """Return one strong local translated-coordinate run, else no proof."""
+    values = tuple(sorted({round(float(value), 2) for value in coordinates}))
+    if len(values) < _DRAFTING_DIVIDER_MIN_RUN_COORDINATES:
+        return (0.0, ())
+    diffs = tuple(
+        right - left
+        for left, right in zip(values, values[1:])
+        if right - left > _COORD_TOL
+    )
+    if len(diffs) < _DRAFTING_DIVIDER_MIN_RUN_COORDINATES - 1:
+        return (0.0, ())
+
+    # Cluster adjacent-coordinate spacings at source-PDF precision. A genuine
+    # drafting lattice produces the same translated spacing many times; a
+    # sparse or irregular wall layout does not.
+    buckets: dict[float, list[float]] = defaultdict(list)
+    for diff in diffs:
+        buckets[round(diff, 1)].append(diff)
+    spacing_key, members = max(
+        buckets.items(),
+        key=lambda item: (len(item[1]), item[0]),
+    )
+    if len(members) < _DRAFTING_DIVIDER_MIN_RUN_COORDINATES - 1:
+        return (0.0, ())
+    spacing = sum(members) / len(members)
+    tolerance = max(
+        _DRAFTING_DIVIDER_SPACING_ABS_TOLERANCE_PT,
+        spacing * _DRAFTING_DIVIDER_SPACING_REL_TOLERANCE,
+    )
+
+    best: tuple[float, ...] = ()
+    current: list[float] = [values[0]]
+    for value in values[1:]:
+        gap = value - current[-1]
+        if abs(gap - spacing) <= tolerance:
+            current.append(value)
+        else:
+            if len(current) > len(best):
+                best = tuple(current)
+            current = [value]
+    if len(current) > len(best):
+        best = tuple(current)
+    if len(best) < _DRAFTING_DIVIDER_MIN_RUN_COORDINATES:
+        return (0.0, ())
+    return (spacing, best)
+
+
+def _repeated_drafting_divider_band_ids(
+    singleton_lines: Sequence[Mapping[str, object]],
+    *,
+    motif_by_segment_id: Mapping[
+        int, tuple[float, float, tuple[object, ...], tuple[object, ...], float]
+    ],
+    page_width: float,
+    page_height: float,
+) -> set[int]:
+    """Return source segment ids only for proven two-axis drafting bands."""
+    page_span = min(float(page_width), float(page_height))
+    if not math.isfinite(page_span) or page_span <= 0.0:
+        return set()
+    min_length = page_span * _DRAFTING_DIVIDER_MIN_LENGTH_FRACTION
+
+    groups: dict[
+        tuple[float, float, float, float],
+        dict[str, list[tuple[Mapping[str, object], float]]],
+    ] = defaultdict(lambda: {"horizontal": [], "vertical": []})
+
+    for segment in singleton_lines:
+        style = _drafting_divider_style_key(segment)
+        if style is None:
+            continue
+        cached = motif_by_segment_id.get(id(segment))
+        if cached is None:
+            continue
+        length, angle = cached[0], cached[1]
+        if length < min_length:
+            continue
+        x1, y1, x2, y2 = _segment_geometry(segment)
+        if min(abs(angle), abs(angle - 180.0)) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG:
+            groups[style]["horizontal"].append(
+                (segment, (y1 + y2) / 2.0)
+            )
+        elif abs(angle - 90.0) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG:
+            groups[style]["vertical"].append(
+                (segment, (x1 + x2) / 2.0)
+            )
+
+    excluded: set[int] = set()
+    for families in groups.values():
+        h_spacing, h_run = _dominant_regular_coordinate_run(
+            tuple(value for _segment, value in families["horizontal"])
+        )
+        v_spacing, v_run = _dominant_regular_coordinate_run(
+            tuple(value for _segment, value in families["vertical"])
+        )
+        if not h_run or not v_run:
+            continue
+        tolerance = max(
+            _DRAFTING_DIVIDER_SPACING_ABS_TOLERANCE_PT,
+            max(h_spacing, v_spacing) * _DRAFTING_DIVIDER_SPACING_REL_TOLERANCE,
+        )
+        if abs(h_spacing - v_spacing) > tolerance:
+            continue
+
+        h_coords = set(h_run)
+        v_coords = set(v_run)
+        excluded.update(
+            id(segment)
+            for segment, coordinate in families["horizontal"]
+            if round(float(coordinate), 2) in h_coords
+        )
+        excluded.update(
+            id(segment)
+            for segment, coordinate in families["vertical"]
+            if round(float(coordinate), 2) in v_coords
+        )
+    return excluded
+
+
 def _filter_repeated_non_physical_drafting_primitives(
     segments: Sequence[dict],
     *,
@@ -749,6 +930,12 @@ def _filter_repeated_non_physical_drafting_primitives(
             for count in angle_counts.values()
         ) >= _REPEATED_MOTIF_MULTI_ANGLE_COUNT_MIN
     }
+    drafting_divider_ids = _repeated_drafting_divider_band_ids(
+        singleton_lines,
+        motif_by_segment_id=motif_by_segment_id,
+        page_width=page_width,
+        page_height=page_height,
+    )
 
     page_span = min(float(page_width), float(page_height))
     orthogonal_span = page_span * _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION
@@ -767,6 +954,8 @@ def _filter_repeated_non_physical_drafting_primitives(
             continue
         if id(segment) not in singleton_ids:
             kept.append(segment)
+            continue
+        if id(segment) in drafting_divider_ids:
             continue
         length, angle, signature, style_length, angle_key = motif_by_segment_id[
             id(segment)
