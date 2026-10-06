@@ -4,11 +4,16 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
+import fitz
 import pytest
 
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_floor_plan_page_scope import (
+    SourceFloorPlanPageDecision,
+    SourceFloorPlanPageScope,
+)
 from tools import run_source_closed_project_handoff as handoff
 
 
@@ -60,6 +65,107 @@ def _run(
     )
 
 
+def _three_page_pdf(path) -> None:
+    doc = fitz.open()
+    try:
+        for _ in range(3):
+            doc.new_page(width=200.0, height=100.0)
+        doc.save(path)
+    finally:
+        doc.close()
+
+
+def test_source_topology_pages_reuses_production_bound_title_scope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    _three_page_pdf(pdf)
+    scope = SourceFloorPlanPageScope(
+        decisions=(
+            SourceFloorPlanPageDecision(
+                0,
+                "not_floor_plan",
+                "not_floor_plan_bound_title",
+                "COVER SHEET",
+                (),
+            ),
+            SourceFloorPlanPageDecision(
+                1,
+                "floor_plan",
+                "floor_plan_bound_title",
+                "FLOOR PLAN",
+                ("floor_plan",),
+            ),
+            SourceFloorPlanPageDecision(
+                2,
+                "not_floor_plan",
+                "not_floor_plan_bound_title",
+                "ELEVATIONS",
+                ("elevation",),
+            ),
+        ),
+        selected_page_indices=(0, 1, 2),
+        floor_plan_page_indices=(1,),
+        other_drawing_page_indices=(0, 2),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "source_floor_plan_topology_scope",
+        lambda path, selected: scope,
+    )
+
+    topology, support, page_count = handoff._source_page_scopes(pdf)
+
+    assert page_count == 3
+    assert topology == (1,)
+    assert support == (0, 2)
+
+
+def test_source_topology_pages_preserves_full_scope_when_unrestricted(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    _three_page_pdf(pdf)
+    scope = SourceFloorPlanPageScope(
+        decisions=(
+            SourceFloorPlanPageDecision(
+                0,
+                "unproven",
+                "floor_plan_page_unproven",
+            ),
+            SourceFloorPlanPageDecision(
+                1,
+                "floor_plan",
+                "floor_plan_bound_title",
+                "FLOOR PLAN",
+                ("floor_plan",),
+            ),
+            SourceFloorPlanPageDecision(
+                2,
+                "unproven",
+                "floor_plan_page_unproven",
+            ),
+        ),
+        selected_page_indices=(0, 1, 2),
+        floor_plan_page_indices=(1,),
+        other_drawing_page_indices=(),
+    )
+    assert scope.topology_page_indices() is None
+    monkeypatch.setattr(
+        handoff,
+        "source_floor_plan_topology_scope",
+        lambda path, selected: scope,
+    )
+
+    topology, support, page_count = handoff._source_page_scopes(pdf)
+
+    assert page_count == 3
+    assert topology == (0, 1, 2)
+    assert support == ()
+
+
 def test_project_handoff_combines_only_available_source_closed_families(
     tmp_path,
     monkeypatch,
@@ -86,7 +192,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     )
     ceiling_candidate = SimpleNamespace(promoted_quantity=_quantity("q-ceiling", "ceiling_lining"))
 
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((0,), 1))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
     monkeypatch.setattr(
         handoff,
         "collect_live_physical_net_wall_claim",
@@ -149,7 +255,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     assert summary["status"] == "sealed"
     assert summary["source_sha256"] == source_sha
     assert summary["topology_pages"] == [1]
-    assert summary["topology_mode"] == "source_viewport_hints"
+    assert summary["topology_mode"] == "live_authority_all_pages_fallback"
     assert summary["family_counts"] == {
         "room_area": 1,
         "opening_area": 1,
@@ -157,7 +263,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
         "ceiling_lining": 1,
     }
     assert summary["combined_quantity_count"] == 4
-    assert (output / f"{project_id}.sealed.json").is_file()
+    assert (output / f"{project_id}.json").is_file()
     assert (output / "production_summary.json").is_file()
     assert sorted((output / "family_runs").glob("*.sealed.json"))
 
@@ -168,7 +274,7 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
 ) -> None:
     pdf = tmp_path / "source.pdf"
     pdf.write_bytes(b"source-bytes")
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((), 3))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0, 1, 2), (), 3))
 
     claim = SimpleNamespace(
         status=SimpleNamespace(value="abstained"),
@@ -208,12 +314,69 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
 
     assert seen["pages"] == (0, 1, 2)
     assert seen["topology_pages"] is None
-    assert seen["room_area_support_pages"] == (0, 1, 2)
+    assert seen["room_area_support_pages"] is None
     assert summary["status"] == "no_sealable_quantities"
-    assert summary["topology_pages"] == []
+    assert summary["topology_pages"] == [1, 2, 3]
+    assert summary["room_area_support_pages"] == []
     assert summary["topology_mode"] == "live_authority_all_pages_fallback"
     assert summary["claim_reason_codes"] == ["live-authority-unavailable"]
     assert summary["combined_run_file"] is None
+
+
+def test_project_handoff_forwards_only_source_classified_room_support(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    monkeypatch.setattr(
+        handoff,
+        "_source_page_scopes",
+        lambda path: ((0,), (1, 2), 3),
+    )
+
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="abstained"),
+        reason_codes=("resolved-scope",),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_spaces=(),
+        room_area_quantity_evidence=(),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+    seen = {}
+
+    def _collect(*args, **kwargs):
+        seen.update(kwargs)
+        return claim
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        _collect,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_ceiling_lining_review_candidates",
+        lambda *args, **kwargs: (),
+    )
+
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-a",
+        workspace_id=1,
+        output_dir=tmp_path / "out",
+    )
+
+    assert seen["pages"] == (0, 1, 2)
+    assert seen["topology_pages"] == (0,)
+    assert seen["room_area_support_pages"] == (1, 2)
+    assert summary["topology_pages"] == [1]
+    assert summary["room_area_support_pages"] == [2, 3]
+    assert summary["topology_mode"] == "source_classified_scope"
 
 
 def test_project_handoff_rejects_family_run_from_different_source(
@@ -236,7 +399,7 @@ def test_project_handoff_rejects_family_run_from_different_source(
         opening_count_quantity_evidence=(),
     )
 
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((0,), 1))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
     monkeypatch.setattr(
         handoff,
         "collect_live_physical_net_wall_claim",
@@ -268,3 +431,106 @@ def test_project_handoff_rejects_family_run_from_different_source(
             workspace_id=1,
             output_dir=tmp_path / "out",
         )
+
+
+
+def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    source_sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    project_id = "project-a"
+    room_q = _quantity("q-room", "room_area")
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="corroborated"),
+        reason_codes=(),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(1,),
+        canonical_floors=(1,),
+        canonical_spaces=(1,),
+        room_area_quantity_evidence=(room_q,),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        lambda *args, **kwargs: claim,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_ceiling_lining_review_candidates",
+        lambda *args, **kwargs: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_room_area_run",
+        lambda *args, **kwargs: _run(
+            project_id=project_id,
+            source_sha256=source_sha,
+            family="room_area",
+            quantity_id="sealed-room",
+        ),
+    )
+
+    output = tmp_path / "sealed"
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id=project_id,
+        workspace_id=1,
+        output_dir=output,
+    )
+
+    assert summary["combined_run_file"] == str(output / f"{project_id}.json")
+    assert (output / f"{project_id}.json").is_file()
+    assert not (output / f"{project_id}.sealed.json").exists()
+
+
+def test_project_handoff_persists_production_failure_summary_before_reraise(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    output = tmp_path / "out"
+
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0, 1), (), 2))
+
+    def _fail(*args, **kwargs):
+        raise ValueError("raster opening primitive count exceeds safety bound")
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        _fail,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="raster opening primitive count exceeds safety bound",
+    ):
+        handoff.generate_project_handoff(
+            pdf_path=pdf,
+            project_id="project-a",
+            workspace_id=1,
+            output_dir=output,
+        )
+
+    summary = __import__("json").loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["status"] == "production_failed"
+    assert summary["topology_mode"] == "live_authority_all_pages_fallback"
+    assert summary["production_error_type"] == "ValueError"
+    assert summary["production_error_message"] == (
+        "raster opening primitive count exceeds safety bound"
+    )
+    assert summary["claim_reason_codes"] == [
+        "production_extraction_error:ValueError"
+    ]
+    assert summary["combined_run_file"] is None
