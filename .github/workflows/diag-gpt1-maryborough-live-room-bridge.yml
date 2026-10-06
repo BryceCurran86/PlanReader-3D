@@ -1,0 +1,141 @@
+name: DIAG GPT1 Maryborough Live Room Bridge
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Audit live room binding gate
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_room_face_authority import SourceRoomFaceSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="gpt1-live-room-bridge-audit",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-live-room-bridge-audit",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=("11",),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          cross=CrossViewRoomAreaProducer.from_source(source=source,rooms=rooms).publish()
+
+          def norm(v):
+              return " ".join(str(v or "").strip().upper().split())
+
+          grouped=defaultdict(list)
+          for room in rooms.rooms:
+              grouped[(str(room.page_id),str(room.snapshot_id),str(room.decision_scope_id))].append(room)
+
+          scope_rows=[]
+          for key, scope_rooms in sorted(grouped.items()):
+              bindings=[rooms.room_face_authority_binding_for(room) for room in scope_rooms]
+              nonnull=[b for b in bindings if b is not None]
+              scope_rows.append({
+                  "scope":list(key),
+                  "room_count":len(scope_rooms),
+                  "binding_none_count":sum(b is None for b in bindings),
+                  "binding_nonnull_count":len(nonnull),
+                  "unique_binding_object_count":len({id(b) for b in nonnull}),
+                  "old_gate_would_continue":(
+                      not bindings
+                      or bindings[0] is None
+                      or any(b is not bindings[0] for b in bindings[1:])
+                  ),
+                  "labels":[norm(r.room_label) for r in scope_rooms if norm(r.room_label)],
+              })
+
+          cross_rows=[]
+          for record in cross.records:
+              matches=[
+                  room for room in rooms.rooms
+                  if str(room.physical_room_id)==str(record.physical_room_id)
+                  and str(room.source_room_face_record_id)==str(record.source_room_face_record_id)
+              ]
+              assert len(matches)==1, (record.room_label,len(matches))
+              room=matches[0]
+              binding=rooms.room_face_authority_binding_for(room)
+              resolved=None
+              if binding is not None:
+                  selector=SourceRoomFaceSelector(
+                      document_id=room.document_id,
+                      revision_id=room.revision_id,
+                      source_sha256=room.source_sha256,
+                      snapshot_id=room.snapshot_id,
+                      page_id=room.page_id,
+                      decision_scope_id=room.decision_scope_id,
+                  )
+                  result=binding.authority.resolve_scope(selector)
+                  resolved={
+                      "status":getattr(result.status,"value",str(result.status)),
+                      "scope_complete":bool(result.scope_complete),
+                      "face_universe_complete":bool(result.face_universe_complete),
+                      "record_count":len(result.records),
+                      "record_id_present":sum(
+                          1 for row in result.records
+                          if str(row.record_id)==str(room.source_room_face_record_id)
+                      ),
+                  }
+              cross_rows.append({
+                  "room_label":record.room_label,
+                  "physical_room_id":record.physical_room_id,
+                  "source_room_face_record_id":record.source_room_face_record_id,
+                  "area_value":record.area_evidence.normalized_value,
+                  "binding_present":binding is not None,
+                  "binding_viewport_id":None if binding is None else binding.viewport_id,
+                  "binding_record_count":0 if binding is None else len(binding.source_room_face_record_ids),
+                  "resolved_scope":resolved,
+              })
+
+          print(json.dumps({
+              "wall_status":getattr(wo.status,"value",str(wo.status)),
+              "canonical_room_status":getattr(rooms.status,"value",str(rooms.status)),
+              "canonical_room_count":len(rooms.rooms),
+              "cross_view_status":getattr(cross.status,"value",str(cross.status)),
+              "cross_view_record_count":len(cross.records),
+              "scope_rows":scope_rows,
+              "cross_view_rows":cross_rows,
+          },indent=2,sort_keys=True))
+          PY
