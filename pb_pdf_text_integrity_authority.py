@@ -168,6 +168,14 @@ def _rect_tuple(value: Sequence[object]) -> tuple[float, float, float, float]:
     return out  # type: ignore[return-value]
 
 
+# Native word bboxes are slightly taller than text-trace paint bboxes in
+# PyMuPDF. Adjacent baselines can therefore overlap by a hairline even though
+# they are distinct source text rows. Require meaningful geometric ownership
+# before a trace span becomes a competing candidate. This is an inclusion gate,
+# never a ranking rule: multiple substantial candidates still fail closed.
+PDF_TEXT_TRACE_OWNERSHIP_MIN_OVERLAP = 0.10
+
+
 def _intersection_ratio(
     subject: Sequence[object], other: Sequence[object]
 ) -> float:
@@ -913,7 +921,10 @@ def _matching_trace_spans(
             continue
         text = _trace_text(span)
         overlap = _intersection_ratio(bbox, span.get("bbox") or ())
-        if overlap <= 0.0 or raw_text not in text:
+        if (
+            overlap < PDF_TEXT_TRACE_OWNERSHIP_MIN_OVERLAP
+            or raw_text not in text
+        ):
             continue
         candidates.append((span, text))
     if len(candidates) == 1:
