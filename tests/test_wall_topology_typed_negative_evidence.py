@@ -334,6 +334,178 @@ class TestInvarianceIsolationAndGates:
         assert results["publishability"][0] is False
 
 
+
+class TestSourceLineageGridRecall:
+    @staticmethod
+    def _lattice(
+        *,
+        coordinates=(0.0, 10.0, 20.0, 30.0, 40.0),
+        width: float = 0.24,
+        layer: str = "",
+        include_second_width: bool = True,
+        transform=None,
+    ) -> List[Dict[str, Any]]:
+        transform = transform or (lambda x, y: (x, y))
+        rows: List[Dict[str, Any]] = []
+        path_index = 1000
+        lo = min(coordinates)
+        hi = max(coordinates)
+        for index, value in enumerate(coordinates):
+            x1, y1 = transform(lo, value)
+            x2, y2 = transform(hi, value)
+            rows.append(
+                _seg(
+                    f"source-grid-h-{index}",
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    path_index=path_index,
+                    width=width,
+                    stroke=(0.5, 0.5, 0.5),
+                    fill=None,
+                    layer=layer,
+                    dashes="[] 0",
+                )
+            )
+            path_index += 1
+        for index, value in enumerate(coordinates):
+            x1, y1 = transform(value, lo)
+            x2, y2 = transform(value, hi)
+            rows.append(
+                _seg(
+                    f"source-grid-v-{index}",
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    path_index=path_index,
+                    width=width,
+                    stroke=(0.5, 0.5, 0.5),
+                    fill=None,
+                    layer=layer,
+                    dashes="[] 0",
+                )
+            )
+            path_index += 1
+        if include_second_width:
+            x1, y1 = transform(100.0, 100.0)
+            x2, y2 = transform(140.0, 100.0)
+            rows.append(
+                _seg(
+                    "source-thick-unrelated",
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    path_index=path_index,
+                    width=width * 2.0,
+                    stroke=(0.0, 0.0, 0.0),
+                    fill=None,
+                    layer="WALL",
+                    dashes="[] 0",
+                )
+            )
+        return rows
+
+    @staticmethod
+    def _source_grid_atoms(segments: List[Dict[str, Any]]):
+        graph = build_wall_graph_for_viewport(segments)
+        before = copy.deepcopy(graph)
+        atoms = collect_typed_semantic_evidence(
+            graph,
+            document_id="doc",
+            page_id="page_1",
+            viewport_id="vp1",
+        )
+        assert graph == before
+        return graph, [
+            atom
+            for atom in atoms
+            if atom.kind == KIND_GRID
+            and "source_lineage_dense_orthogonal_lattice" in atom.reason_codes
+        ]
+
+    def test_split_native_lattice_recovers_existing_grid_role(self) -> None:
+        graph, atoms = self._source_grid_atoms(self._lattice())
+
+        # The source 5x5 lattice is split at crossings into short W2 fragments.
+        assert len(graph["edges"]) > 10
+        assert atoms
+        assert all(atom.status is EvidenceResolutionStatus.CANDIDATE for atom in atoms)
+        assert all(
+            (atom.metadata or {}).get("polarity") == "opposing"
+            for atom in atoms
+        )
+        assert all(
+            (atom.metadata or {})
+            .get("feature_basis", {})
+            .get("source_lineage_grid_proof")
+            for atom in atoms
+        )
+
+    def test_source_lineage_grid_requires_drawing_relative_thinness(self) -> None:
+        _graph, atoms = self._source_grid_atoms(
+            self._lattice(include_second_width=False)
+        )
+        assert atoms == []
+
+    def test_source_lineage_grid_rejects_wall_named_source_family(self) -> None:
+        _graph, atoms = self._source_grid_atoms(
+            self._lattice(layer="A-WALL-PARTITION")
+        )
+        assert atoms == []
+
+    def test_source_lineage_grid_rejects_irregular_spacing(self) -> None:
+        _graph, atoms = self._source_grid_atoms(
+            self._lattice(coordinates=(0.0, 7.0, 19.0, 34.0, 55.0))
+        )
+        assert atoms == []
+
+    def test_source_lineage_grid_is_translation_rotation_scale_invariant(self) -> None:
+        _base_graph, base_atoms = self._source_grid_atoms(self._lattice())
+        assert base_atoms
+
+        def transformed(x: float, y: float):
+            # Uniform 3x scale, quarter turn, then translation.
+            return (-3.0 * y + 137.0, 3.0 * x - 41.0)
+
+        _changed_graph, changed_atoms = self._source_grid_atoms(
+            self._lattice(width=0.72, transform=transformed)
+        )
+        assert len(changed_atoms) == len(base_atoms)
+
+    def test_source_lineage_grid_keeps_geometry_shadow_only(self) -> None:
+        segments = self._lattice()
+        raw = build_wall_graph_for_viewport(segments)
+        attached = attach_typed_semantic_evidence(
+            raw,
+            document_id="doc",
+            page_id="page_1",
+            viewport_id="vp1",
+        )
+        assert len(attached["edges"]) == len(raw["edges"])
+        assert [
+            (
+                edge["id"],
+                edge["x1"],
+                edge["y1"],
+                edge["x2"],
+                edge["y2"],
+            )
+            for edge in attached["edges"]
+        ] == [
+            (
+                edge["id"],
+                edge["x1"],
+                edge["y1"],
+                edge["x2"],
+                edge["y2"],
+            )
+            for edge in raw["edges"]
+        ]
+
+
 class TestFixtureCensusGuard:
     def test_baghau_sample_does_not_mark_every_edge_as_table(self) -> None:
         from tests.test_u1_lineage_architecture_review import (
