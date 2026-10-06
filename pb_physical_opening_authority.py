@@ -3125,6 +3125,154 @@ class PhysicalOpeningAuthority:
             ),
         )
 
+    def assess_raster_candidate_closure(
+        self,
+        selector: ObservationSelector,
+    ) -> PhysicalOpeningCandidateClosureResult:
+        """Assess producer-owned closure of raster opening candidates on one page.
+
+        Raster primitives are a detector input universe, not opening candidates
+        themselves. Closure is established only when the registered raster
+        detector has enumerated every candidate on the authenticated page and
+        each emitted candidate independently re-proves one physical opening.
+        Ambiguous swing evidence, viewport-scope rejection, primitive integrity
+        failure, or an unresolved candidate keeps the universe fail-closed.
+        """
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        if self._source_visibility_authority is None:
+            return PhysicalOpeningCandidateClosureResult(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                page_id=None,
+                candidate_universe_complete=False,
+                raw_candidate_count=0,
+                resolved_candidate_count=0,
+                unresolved_candidate_ids=(),
+                unresolved_observation_ids=(),
+                reason_codes=(VISIBLE_SOURCE_AUTHORITY_REQUIRED,),
+            )
+
+        visibility = self._source_visibility_authority
+        source_result = visibility.resolve_raster_opening_primitive(selector)
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or source_result.observation is None
+        ):
+            return PhysicalOpeningCandidateClosureResult(
+                status=_source_failure_status(source_result),
+                page_id=None,
+                candidate_universe_complete=False,
+                raw_candidate_count=0,
+                resolved_candidate_count=0,
+                unresolved_candidate_ids=(),
+                unresolved_observation_ids=(),
+                reason_codes=_dedupe_reason_codes(source_result.reason_codes),
+            )
+
+        records, failures = self._raster_primitive_snapshot_records(source_result)
+        if failures:
+            return PhysicalOpeningCandidateClosureResult(
+                status=_source_failure_status(*failures),
+                page_id=str(source_result.observation.page_id),
+                candidate_universe_complete=False,
+                raw_candidate_count=0,
+                resolved_candidate_count=0,
+                unresolved_candidate_ids=(),
+                unresolved_observation_ids=(),
+                reason_codes=_dedupe_reason_codes(
+                    (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,),
+                    *tuple(result.reason_codes for result in failures),
+                ),
+            )
+
+        seed = source_result.observation
+        raw_candidates = self._raster_framed_candidates_for(seed, records)
+        scoped_candidates = self._viewport_scoped_raster_candidates_for(
+            seed,
+            records,
+            raw_candidates,
+        )
+        scoped_by_id = {
+            candidate.candidate_id: candidate for candidate in scoped_candidates
+        }
+        page_cache_key = self._visible_page_candidate_key(seed)
+        ambiguous_support = set(
+            self._raster_swing_ambiguous_support_cache.get(
+                page_cache_key,
+                frozenset(),
+            )
+        )
+
+        unresolved_candidate_ids: list[str] = []
+        unresolved_observation_ids: set[str] = set(ambiguous_support)
+        resolved_count = 0
+
+        for candidate in raw_candidates:
+            scoped_candidate = scoped_by_id.get(candidate.candidate_id)
+            if scoped_candidate is None:
+                unresolved_candidate_ids.append(candidate.candidate_id)
+                unresolved_observation_ids.update(
+                    candidate.source_observation_ids
+                )
+                continue
+
+            resolved = False
+            for observation_id in scoped_candidate.source_observation_ids:
+                candidate_selector = ObservationSelector(
+                    document_id=seed.document_id,
+                    revision_id=seed.revision_id,
+                    source_sha256=seed.source_sha256,
+                    snapshot_id=seed.snapshot_id,
+                    observation_id=observation_id,
+                )
+                primitive_result = visibility.resolve_raster_opening_primitive(
+                    candidate_selector
+                )
+                existence = self._prove_raster_framed_existence(
+                    candidate_selector,
+                    primitive_result,
+                )
+                if (
+                    existence.status is EvidenceResolutionStatus.CORROBORATED
+                    and existence.existence_record is not None
+                    and existence.candidate is not None
+                    and existence.candidate.candidate_id
+                    == scoped_candidate.candidate_id
+                ):
+                    resolved = True
+                    break
+
+            if resolved:
+                resolved_count += 1
+            else:
+                unresolved_candidate_ids.append(candidate.candidate_id)
+                unresolved_observation_ids.update(
+                    candidate.source_observation_ids
+                )
+
+        complete = (
+            not unresolved_candidate_ids
+            and not unresolved_observation_ids
+        )
+        return PhysicalOpeningCandidateClosureResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            page_id=str(seed.page_id),
+            candidate_universe_complete=complete,
+            raw_candidate_count=len(raw_candidates),
+            resolved_candidate_count=resolved_count,
+            unresolved_candidate_ids=tuple(
+                sorted(unresolved_candidate_ids)
+            ),
+            unresolved_observation_ids=tuple(
+                sorted(unresolved_observation_ids)
+            ),
+            reason_codes=(
+                (PHYSICAL_OPENING_CANDIDATE_CLOSURE_RESOLVED,)
+                if complete
+                else (PHYSICAL_OPENING_CANDIDATE_CLOSURE_UNRESOLVED,)
+            ),
+        )
+
     @staticmethod
     def _single_raw_candidate(
         observation: SourceObservationRecord,

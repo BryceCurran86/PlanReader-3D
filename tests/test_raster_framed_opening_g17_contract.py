@@ -7,6 +7,11 @@ import numpy as np
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_source_observation_authority import ObservationSelector
+from pb_semantic_opening_enumeration_authority import (
+    SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE,
+    SEMANTIC_OPENING_RASTER_CANDIDATE_CLOSURE_UNPROVEN,
+    SemanticOpeningEnumerationProducer,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -142,3 +147,96 @@ def test_face_continuation_blocks_frame_lookalike() -> None:
         continue_faces=True,
     )
     assert _corroborated_records(producer, published) == ()
+
+
+def test_raster_candidate_closure_resolves_one_framed_opening() -> None:
+    producer, published = _prepare(frame_lines=2)
+    authority = producer.physical_opening_authority()
+    selector = _selector(
+        published,
+        published.raster_opening_primitive_observation_ids[0],
+    )
+
+    closure = authority.assess_raster_candidate_closure(selector)
+
+    assert closure.status is EvidenceResolutionStatus.CORROBORATED
+    assert closure.candidate_universe_complete is True
+    assert closure.raw_candidate_count == 1
+    assert closure.resolved_candidate_count == 1
+    assert closure.unresolved_candidate_ids == ()
+    assert closure.unresolved_observation_ids == ()
+
+
+def test_raster_candidate_closure_disposes_primitives_with_no_opening_candidate() -> None:
+    producer, published = _prepare(frame_lines=0)
+    authority = producer.physical_opening_authority()
+    selector = _selector(
+        published,
+        published.raster_opening_primitive_observation_ids[0],
+    )
+
+    closure = authority.assess_raster_candidate_closure(selector)
+
+    assert closure.status is EvidenceResolutionStatus.CORROBORATED
+    assert closure.candidate_universe_complete is True
+    assert closure.raw_candidate_count == 0
+    assert closure.resolved_candidate_count == 0
+    assert closure.unresolved_candidate_ids == ()
+    assert closure.unresolved_observation_ids == ()
+
+
+def test_semantic_enumeration_accepts_proven_raster_candidate_closure() -> None:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=320.0, height=180.0)
+        page.insert_image(
+            page.rect,
+            stream=_png(_sheet(frame_lines=2)),
+            keep_proportion=False,
+        )
+        # One independent vector sentinel gives the semantic enumerator an
+        # authenticated visible universe while the opening remains raster-owned.
+        page.draw_line(
+            fitz.Point(10.0, 20.0),
+            fitz.Point(40.0, 20.0),
+            color=(0, 0, 0),
+            width=1,
+        )
+        payload = bytes(doc.tobytes(garbage=4, deflate=True))
+    finally:
+        doc.close()
+
+    producer = SourceVisibilityProducer(
+        producer_method="raster-closure-semantic-contract",
+        producer_version="1",
+    )
+    published = producer.ingest_native_pdf_bytes(
+        document_id="raster-closure-semantic-contract",
+        source_bytes=payload,
+        source_locator="memory://raster-closure-semantic-contract.pdf",
+        page_ids=("1",),
+    )
+    published = producer.augment_with_raster_opening_primitives(
+        published.revision.revision_id,
+        page_ids=("1",),
+    )
+    semantic = SemanticOpeningEnumerationProducer.from_source_visibility_producer(
+        producer
+    ).publish_page_scope(
+        revision_id=published.revision.revision_id,
+        decision_scope_id="semantic-opening-enumeration:raster-closure",
+        page_ids=("1",),
+    )
+
+    assert semantic.status is EvidenceResolutionStatus.CORROBORATED
+    assert semantic.record is not None
+    assert len(semantic.record.physical_opening_record_ids) == 1
+    assert semantic.record.physical_opening_universe_complete is True
+    assert (
+        SEMANTIC_OPENING_RASTER_CANDIDATE_CLOSURE_UNPROVEN
+        not in semantic.record.reason_codes
+    )
+    assert (
+        SEMANTIC_OPENING_CANDIDATE_UNIVERSE_COMPLETE
+        in semantic.record.reason_codes
+    )
