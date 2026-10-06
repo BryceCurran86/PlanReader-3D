@@ -1,0 +1,97 @@
+name: DIAG GPT1 Lot16 Literal Finish Role
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Audit literal finish role authority
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          import fitz
+
+          from pb_source_floor_plan_page_scope import classify_source_floor_plan_pages
+          from pb_source_visibility_authority import SourceVisibilityProducer, ObservationSelector
+
+          PDF=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          source_bytes=PDF.read_bytes()
+          actual=hashlib.sha256(source_bytes).hexdigest()
+          assert actual==expected
+
+          with fitz.open(str(PDF)) as doc:
+              scope=classify_source_floor_plan_pages(doc, tuple(range(doc.page_count)))
+              page_count=doc.page_count
+          decisions={d.page_index+1:d for d in scope.decisions}
+
+          source=SourceVisibilityProducer(
+              producer_method="diag_lot16_literal_finish_role",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-lot16-literal-finish-role",
+              source_bytes=source_bytes,
+              source_locator=str(PDF),
+              page_ids=tuple(str(i+1) for i in range(page_count)),
+          )
+          text_authority=source.text_integrity_authority()
+          literals={"EPOXY","VINYL","TILE","TILES","CARPET"}
+          rows=[]
+          for observation_id in published.text_observation_ids:
+              result=text_authority.resolve_text(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+              )
+              receipt=result.receipt
+              text=" ".join(str(result.trusted_text or "").strip().upper().split())
+              if receipt is None or result.trusted_text is None or text not in literals:
+                  continue
+              page_number=int(receipt.page_id)
+              d=decisions.get(page_number)
+              rows.append({
+                  "text":text,
+                  "page_number":page_number,
+                  "bbox":list(receipt.geometry),
+                  "observation_id":observation_id,
+                  "classification":None if d is None else d.classification,
+                  "reason_code":None if d is None else d.reason_code,
+                  "title":None if d is None else d.title,
+                  "view_types":[] if d is None else list(d.view_types),
+              })
+          print(json.dumps({
+              "source_sha256":actual,
+              "scope_restricts":scope.restricts,
+              "floor_plan_pages":[i+1 for i in scope.floor_plan_page_indices],
+              "other_drawing_pages":[i+1 for i in scope.other_drawing_page_indices],
+              "room_area_support_pages":[i+1 for i in scope.room_area_support_page_indices],
+              "decisions":[{
+                  "page_number":d.page_index+1,
+                  "classification":d.classification,
+                  "reason_code":d.reason_code,
+                  "title":d.title,
+                  "view_types":list(d.view_types),
+              } for d in scope.decisions],
+              "literal_finish_count":len(rows),
+              "literal_finishes":rows,
+          },indent=2,sort_keys=True))
+          PY
