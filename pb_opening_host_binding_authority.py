@@ -46,7 +46,11 @@ from pb_physical_wall_identity import (
     PhysicalWallEquivalenceResolution,
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
-from pb_source_visibility_authority import SourceVisibilityAuthority
+from pb_source_visibility_authority import (
+    RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+    RASTER_RENDER_DPI,
+    SourceVisibilityAuthority,
+)
 from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 
 
@@ -57,6 +61,8 @@ OPENING_HOST_BINDING_UNAVAILABLE = "opening_host_binding_unavailable"
 HOST_EQUIVALENCE_AMBIGUOUS = "ambiguous_physical_wall_equivalence_for_host"
 HOST_EQUIVALENCE_UNAVAILABLE = "physical_wall_equivalence_required_for_host"
 HOST_BAND_CENTER_MISMATCH = "authenticated_host_wall_band_not_centered_on_opening"
+RASTER_WHOLE_WALL_HOST_RESOLVED = "raster_whole_wall_host_resolved"
+MULTIPLE_RASTER_WHOLE_WALL_HOSTS = "multiple_authenticated_raster_whole_wall_hosts"
 
 _UNIVERSE_PRODUCER_SEAL = object()
 _UNIVERSE_AUTHORITY_SEAL = object()
@@ -64,6 +70,13 @@ _BINDING_PRODUCER_SEAL = object()
 _BINDING_AUTHORITY_SEAL = object()
 _COORD_TOL = 1e-6
 _PARALLEL_TOL = math.sin(math.radians(5.0))
+# Same physical source, two producer-owned raster renderings. This is an
+# equality allowance only: at most one pixel from each render may separate the
+# G17 wall-band center and the W4 whole-wall centerline.
+_RASTER_WHOLE_WALL_CENTER_TOL_PT = (
+    72.0 / float(RASTER_RENDER_DPI)
+    + 72.0 / float(RASTER_OPENING_PRIMITIVE_RENDER_DPI)
+)
 Point = tuple[float, float]
 
 
@@ -444,6 +457,16 @@ class OpeningHostBindingProducer:
                 geometry,
                 universe.equivalence,
             )
+            if (
+                opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                and band_resolution.status is EvidenceResolutionStatus.CORROBORATED
+                and not band_resolution.bands
+            ):
+                band_resolution = _resolve_raster_whole_wall_host(
+                    universe.records,
+                    geometry,
+                    universe.equivalence,
+                )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
                 *band_resolution.reason_codes,
@@ -508,7 +531,10 @@ class OpeningHostBindingProducer:
         )
         result = OpeningHostBindingResult(
             status=EvidenceResolutionStatus.CORROBORATED,
-            reason_codes=(OPENING_HOST_BINDING_RESOLVED,),
+            reason_codes=(
+                OPENING_HOST_BINDING_RESOLVED,
+                *band_resolution.reason_codes,
+            ),
             record=record,
         )
         key = _binding_key(
@@ -1310,6 +1336,86 @@ def _normalize_role_candidates(
 
     normalized.sort(key=lambda item: (item.offset, item.record.wall_candidate_id))
     return EvidenceResolutionStatus.CORROBORATED, tuple(normalized), ()
+
+
+def _resolve_raster_whole_wall_host(
+    records: Sequence[PhysicalWallCandidateRecord],
+    opening: _OpeningGeometry,
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> _HostBandResolution:
+    """Resolve a uniquely centered W4 wall that spans a G17 raster aperture.
+
+    W4 may assemble one continuous wall candidate through an opening instead of
+    splitting each wall face at the jambs. G17 has already proved that the
+    raster wall band contains a real physical opening. This path therefore asks
+    only whether the complete W4 wall universe contains exactly one
+    equivalence-safe straight wall representation that spans both aperture
+    edges and is centered on the G17 wall band within cross-render pixel
+    equality. It never selects a nearest wall.
+    """
+
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    centered: list[tuple[float, PhysicalWallCandidateRecord]] = []
+    for record in records:
+        data = _candidate_axis_data(record, opening)
+        if data is None:
+            continue
+        along_min, along_max, offset = data
+        if (
+            along_min >= -edge_tol
+            or along_max <= opening.length + edge_tol
+            or abs(offset) > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+        ):
+            continue
+        centered.append((offset, record))
+
+    if not centered:
+        return _HostBandResolution(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            bands=(),
+        )
+
+    status, normalized, reasons = _normalize_role_candidates(
+        centered,
+        equivalence,
+        _RASTER_WHOLE_WALL_CENTER_TOL_PT,
+    )
+    if status is not EvidenceResolutionStatus.CORROBORATED:
+        return _HostBandResolution(
+            status=status,
+            bands=(),
+            reason_codes=reasons,
+        )
+    if len(normalized) != 1:
+        return _HostBandResolution(
+            status=EvidenceResolutionStatus.CONFLICT,
+            bands=(),
+            reason_codes=(MULTIPLE_RASTER_WHOLE_WALL_HOSTS,),
+        )
+
+    role = normalized[0]
+    record = role.record
+    candidate_identity_id = str(
+        record.physical_identity.candidate_identity_id or ""
+    ).strip()
+    if not candidate_identity_id:
+        return _HostBandResolution(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            bands=(),
+            reason_codes=(HOST_EQUIVALENCE_UNAVAILABLE,),
+        )
+
+    band = _HostBand(
+        member_ids=(str(record.wall_candidate_id),),
+        member_candidate_identity_ids=(candidate_identity_id,),
+        member_equivalence_groups=(tuple(role.candidate_group),),
+        center_offset=float(role.offset),
+    )
+    return _HostBandResolution(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        bands=(band,),
+        reason_codes=(RASTER_WHOLE_WALL_HOST_RESOLVED,),
+    )
 
 
 def _resolve_host_bands(
