@@ -1,0 +1,25 @@
+name: DIAG GPT1 Focused Room Label Contracts V7
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+      - name: Run focused GPT1 contracts
+        run: |
+          pytest -q \
+            tests/test_figured_dimension_native_direction_style_v1.py \
+            tests/test_room_area_quantity_v2.py \
+            tests/test_cross_view_room_area_authority_v1.py \
+            tests/test_live_canonical_room_composition.py
