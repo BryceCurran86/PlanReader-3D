@@ -3,7 +3,7 @@ name: DIAG General Evidence Live Impact V2
 on:
   pull_request:
     branches:
-      - gpt4/wire-floor-finish-quantity-live-v2
+      - gpt4/handoff-general-evidence-pages-v2
 
 jobs:
   lot16:
