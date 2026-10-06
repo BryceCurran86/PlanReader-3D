@@ -1,0 +1,66 @@
+name: DIAG Lot16 Local Owner Combined
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run exact opening dropout matrix
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_opening_dropout_matrix.py | tee lot16-local-owner-matrix.json
+      - name: Run real all-family handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/lot16-local-owner
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --project-id au_qld_lot16_power \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/lot16-local-owner \
+            | tee artifacts/lot16-local-owner/handoff.stdout.json
+      - name: Assert combined opening gains
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("artifacts/lot16-local-owner/au_qld_lot16_power.json")
+          payload=json.loads(p.read_text())
+          rows=[q for q in payload.get("quantities",[]) if q.get("family")=="opening_area" and not q.get("abstained",False)]
+          vals=sorted(round(float(q["value"]),6) for q in rows)
+          required={0.54,0.9,1.26,1.8,2.16,5.67,10.08}
+          if len(rows) < 8:
+              raise SystemExit(f"expected >=8 opening areas, got {len(rows)} {vals}")
+          missing=sorted(required-set(vals))
+          if missing:
+              raise SystemExit(f"missing required opening areas {missing}; got {vals}")
+          if vals.count(2.16) < 2:
+              raise SystemExit(f"expected duplicate independent 2.16 openings; got {vals}")
+          print(json.dumps({"opening_area_count":len(rows),"opening_areas":vals},indent=2))
+          PY
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-local-owner-combined
+          path: |
+            lot16-local-owner-matrix.json
+            artifacts/lot16-local-owner
+          retention-days: 2
