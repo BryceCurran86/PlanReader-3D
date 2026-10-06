@@ -15,7 +15,7 @@ def main():
         PDF,
         pages=tuple(range(page_count)),
         topology_pages=topology,
-        room_area_support_pages=support,
+        room_area_support_pages=(support if support else None),
     )
     rows=[]
     for q in claim.room_area_quantity_evidence:
