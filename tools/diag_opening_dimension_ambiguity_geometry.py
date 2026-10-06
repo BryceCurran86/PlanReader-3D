@@ -9,6 +9,7 @@ from pb_opening_label_dimension_authority import (
     _label_matches_gap,
     _trusted_text_lines,
 )
+from pb_opening_label_semantic_authority import _trusted_native_lines
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -64,6 +65,7 @@ def main() -> None:
     opening = next(iter(found.values()))
     gap = _gap_span_for_opening(source, opening)
     lines = _trusted_text_lines(source, opening)
+    native_lines = _trusted_native_lines(source, opening)
     print(json.dumps({
         "opening_id": opening.record_id,
         "gap": None if gap is None else {
@@ -74,6 +76,16 @@ def main() -> None:
             "cross_center": gap.cross_center,
             "cross_spread": gap.cross_spread,
         },
+        "native_lines": [
+            {
+                "block_no": block_no,
+                "line_no": line_no,
+                "text": line.text,
+                "bbox": line.bbox,
+                "observation_ids": line.observation_ids,
+            }
+            for block_no, line_no, line in native_lines
+        ],
         "lines": [
             {
                 "text": line.text,
