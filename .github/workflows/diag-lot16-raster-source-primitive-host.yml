@@ -1,0 +1,79 @@
+name: DIAG Lot16 Raster Source Primitive Host
+
+on:
+  pull_request:
+    branches:
+      - gptmax/raster-source-primitive-host-v1
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused host regressions
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_raster_opening_source_primitive_host.py \
+            tests/test_raster_opening_whole_wall_host.py \
+            tests/test_raster_opening_split_centerline_host.py
+      - name: Run exact Lot16 dropout matrix
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_opening_dropout_matrix.py | tee lot16-source-primitive-host-matrix.json
+      - name: Run exact all-family handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/lot16-source-primitive-host
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"             --project-id au_qld_lot16_power             --workspace-id 1             --family-group all             --output-dir artifacts/lot16-source-primitive-host             | tee artifacts/lot16-source-primitive-host/handoff.stdout.json
+      - name: Enforce sealed non-regression and report gains
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/lot16-source-primitive-host")
+          summary=json.loads((root/"production_summary.json").read_text())
+          if summary.get("status")!="sealed":
+              raise SystemExit(f"handoff not sealed: {summary.get('status')}")
+          if "raster opening primitive count exceeds safety bound" in str(summary.get("production_error_message") or ""):
+              raise SystemExit("primitive safety-bound blocker regressed")
+          sealed=json.loads((root/"au_qld_lot16_power.json").read_text())
+          rows=[
+              q for q in sealed.get("quantities",[])
+              if str(q.get("family") or "")=="opening_area"
+              and not bool(q.get("abstained",False))
+          ]
+          values=sorted(round(float(q["value"]),6) for q in rows)
+          if len(rows)<6:
+              raise SystemExit(f"opening-area regression: expected >=6, got {len(rows)}")
+          print("SOURCE_PRIMITIVE_HOST_SUMMARY")
+          print(json.dumps({
+              "status":summary.get("status"),
+              "claim_status":summary.get("claim_status"),
+              "combined_quantity_count":summary.get("combined_quantity_count"),
+              "family_counts":summary.get("family_counts"),
+              "opening_area_count":len(rows),
+              "opening_areas":values,
+              "has_1_26":1.26 in values,
+              "source_sha256":summary.get("source_sha256"),
+          },indent=2,sort_keys=True))
+          PY
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-raster-source-primitive-host
+          path: |
+            lot16-source-primitive-host-matrix.json
+            artifacts/lot16-source-primitive-host
+          retention-days: 2
