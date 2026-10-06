@@ -152,15 +152,22 @@ def generate_project_handoff(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    claim = collect_live_physical_net_wall_claim(
-        pdf_path,
-        pages=all_pages,
-        topology_pages=(topology_pages if topology_pages else None),
-        # Enable source-owned cross-view room measurement using the complete
-        # source package. The producer itself remains responsible for deciding
-        # which pages/evidence are authoritative.
-        room_area_support_pages=all_pages,
-    )
+    try:
+        claim = collect_live_physical_net_wall_claim(
+            pdf_path,
+            pages=all_pages,
+            topology_pages=(topology_pages if topology_pages else None),
+            # Enable source-owned cross-view room measurement using the complete
+            # source package. The producer itself remains responsible for deciding
+            # which pages/evidence are authoritative.
+            room_area_support_pages=all_pages,
+        )
+    except Exception as exc:
+        summary["status"] = "production_extraction_failed"
+        summary["extraction_error_type"] = type(exc).__name__
+        summary["extraction_error"] = str(exc)
+        _write_json(output_dir / "production_summary.json", summary)
+        raise
     summary["claim_status"] = getattr(
         getattr(claim, "status", None),
         "value",
