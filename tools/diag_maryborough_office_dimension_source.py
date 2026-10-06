@@ -7,7 +7,19 @@ from pathlib import Path
 
 import fitz
 
-from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+from pb_figured_dimension_evidence import (
+    DimensionOrientation,
+    _axis_distance,
+    _bbox_center,
+    _intersection_with_perpendicular,
+    _projection_contains,
+    calibrate_dimension_layout,
+    extract_dimension_evidence_bundle,
+)
+from pb_cross_view_room_area_authority import (
+    _isolated_dimension_numeric_corroboration,
+)
+from pb_portable_raster_ocr_authority import select_production_ocr_backend
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -47,6 +59,7 @@ def main() -> int:
             page,
             page_num=int(PAGE_ID),
         )
+        layout = calibrate_dimension_layout(page)
     finally:
         pdf.close()
 
@@ -99,11 +112,136 @@ def main() -> int:
         )
 
     binding_by_id = {binding.observation_id: binding for binding in bundle.bindings}
+    segment_by_id = {segment.segment_id: segment for segment in bundle.observed_geometry}
+
+    def candidate_witness_status(observation, candidate):
+        same_scope = [
+            segment for segment in bundle.observed_geometry
+            if segment.source_page == observation.source_page
+            and segment.orientation != DimensionOrientation.UNKNOWN.value
+        ]
+        hits = []
+        for segment in same_scope:
+            if segment.segment_id == candidate.segment_id:
+                continue
+            point = _intersection_with_perpendicular(
+                candidate,
+                segment,
+                layout.witness_endpoint_distance_pt,
+            )
+            if point is not None:
+                hits.append((segment, point))
+        unique = []
+        for segment, point in sorted(
+            hits,
+            key=lambda item: (item[1][0], item[1][1], item[0].segment_id),
+        ):
+            if not any(
+                ((point[0]-prior[1][0])**2 + (point[1]-prior[1][1])**2) ** 0.5 <= 1e-3
+                for prior in unique
+            ):
+                unique.append((segment, point))
+        if candidate.orientation == DimensionOrientation.HORIZONTAL.value:
+            start_coord, end_coord = sorted((candidate.start[0], candidate.end[0]))
+            along = lambda hit: hit[1][0]
+        else:
+            start_coord, end_coord = sorted((candidate.start[1], candidate.end[1]))
+            along = lambda hit: hit[1][1]
+
+        def nearest(target):
+            eligible = [
+                hit for hit in unique
+                if abs(along(hit)-target) <= layout.witness_endpoint_distance_pt
+            ]
+            if not eligible:
+                return None
+            eligible.sort(key=lambda hit:(abs(along(hit)-target),hit[0].segment_id))
+            return eligible[0]
+
+        first=nearest(start_coord)
+        last=nearest(end_coord)
+        witness_bound=first is not None and last is not None and first[1] != last[1]
+        return {
+            "segment_id":candidate.segment_id,
+            "orientation":candidate.orientation,
+            "start":list(candidate.start),
+            "end":list(candidate.end),
+            "length":candidate.length,
+            "witness_bound":witness_bound,
+            "first_witness":None if first is None else {
+                "segment_id":first[0].segment_id,
+                "point":list(first[1]),
+            },
+            "last_witness":None if last is None else {
+                "segment_id":last[0].segment_id,
+                "point":list(last[1]),
+            },
+        }
+
+    ocr_backend, _ocr_reason = select_production_ocr_backend()
+    text_result_by_raw = {}
+    selector_by_raw = {}
+    for observation_id in current.text_observation_ids:
+        result = text_authority.resolve_text(
+            ObservationSelector(
+                document_id=current.revision.document_id,
+                revision_id=current.revision.revision_id,
+                source_sha256=current.revision.source_sha256,
+                snapshot_id=current.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        receipt = result.receipt
+        if receipt is None or str(receipt.page_id) != PAGE_ID:
+            continue
+        raw = _norm(receipt.raw_text)
+        if raw in TARGET_RAW:
+            text_result_by_raw[raw] = result
+            selector_by_raw[raw] = ObservationSelector(
+                document_id=current.revision.document_id,
+                revision_id=current.revision.revision_id,
+                source_sha256=current.revision.source_sha256,
+                snapshot_id=current.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+
     dimension_hits = []
     for observation in bundle.observations:
         if _norm(observation.raw_text) not in TARGET_RAW:
             continue
         binding = binding_by_id.get(observation.dimension_id)
+        bbox = observation.bbox
+        centre = None if bbox is None else _bbox_center(bbox)
+        tied_status = []
+        if bbox is not None and centre is not None:
+            candidates = [
+                segment
+                for segment in bundle.observed_geometry
+                if segment.source_page == observation.source_page
+                and segment.orientation != DimensionOrientation.UNKNOWN.value
+                and _axis_distance(centre, segment) <= layout.line_search_distance_pt
+                and _projection_contains(centre, segment, layout.line_search_distance_pt)
+            ]
+            if candidates:
+                candidates.sort(key=lambda s:(_axis_distance(centre,s),-s.length,s.segment_id))
+                d0=_axis_distance(centre,candidates[0])
+                tie_tolerance=layout.median_word_height_pt*0.25
+                tied=[
+                    segment for segment in candidates
+                    if abs(_axis_distance(centre,segment)-d0) <= tie_tolerance
+                ]
+                tied_status=[candidate_witness_status(observation,segment) for segment in tied]
+
+        raw=_norm(observation.raw_text)
+        raster_corroboration=None
+        if raw in text_result_by_raw and raw in selector_by_raw:
+            raster_corroboration=_isolated_dimension_numeric_corroboration(
+                source,
+                published=current,
+                selector=selector_by_raw[raw],
+                text_result=text_result_by_raw[raw],
+                backend=ocr_backend,
+            )
         dimension_hits.append(
             {
                 "dimension_id": observation.dimension_id,
@@ -121,6 +259,11 @@ def main() -> int:
                 "binding_notes": [] if binding is None else list(binding.notes),
                 "dimension_line_id": None if binding is None else binding.dimension_line_id,
                 "witness_line_ids": [] if binding is None else list(binding.witness_line_ids),
+                "tied_candidate_witness_status": tied_status,
+                "witness_bound_tied_candidate_count": sum(
+                    1 for row in tied_status if row["witness_bound"]
+                ),
+                "isolated_two_render_numeric_corroboration": raster_corroboration,
             }
         )
 
