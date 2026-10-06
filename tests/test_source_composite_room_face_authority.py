@@ -97,6 +97,12 @@ def _room_scope(*, disconnected=False):
         "record_left",
         ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
         ("w_left", "w_sep", "w_top_left", "w_bottom_left"),
+        (
+            ("w_bottom_left", ((0.0, 0.0), (10.0, 0.0))),
+            ("w_sep", ((10.0, 0.0), (10.0, 10.0))),
+            ("w_top_left", ((0.0, 10.0), (10.0, 10.0))),
+            ("w_left", ((0.0, 0.0), (0.0, 10.0))),
+        ),
     )
     x0 = 11.0 if disconnected else 10.0
     right = _face(
@@ -104,6 +110,12 @@ def _room_scope(*, disconnected=False):
         "record_right",
         ((x0, 0.0), (20.0, 0.0), (20.0, 10.0), (x0, 10.0)),
         ("w_sep", "w_right", "w_top_right", "w_bottom_right"),
+        (
+            ("w_bottom_right", ((x0, 0.0), (20.0, 0.0))),
+            ("w_right", ((20.0, 0.0), (20.0, 10.0))),
+            ("w_top_right", ((x0, 10.0), (20.0, 10.0))),
+            ("w_sep", ((x0, 0.0), (x0, 10.0))),
+        ),
     )
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
