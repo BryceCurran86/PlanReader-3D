@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_source_observation_authority import ObservationSelector
 from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
 from pb_source_room_label_authority import (
@@ -35,14 +35,16 @@ def main():
         source_locator="memory://maryborough.pdf",
         page_ids=(PAGE_ID,),
     )
+    composition=compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=(PAGE_ID,),
+    )
     current=source.published_snapshot_for_revision(published.revision.revision_id)
     if current is None:
         raise RuntimeError("snapshot unavailable")
 
-    wall_producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
-        source,page_ids=(PAGE_ID,)
-    )
-    wall_auth=wall_producer.authority()
+    wall_auth=composition.physical_wall_candidate_authority
     wall_selector_kwargs=dict(
         document_id=current.revision.document_id,
         revision_id=current.revision.revision_id,
