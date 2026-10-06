@@ -77,6 +77,7 @@ def main() -> None:
         if record.structural_pattern == RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
     )
     payload = {
+        "registration_mode": "page-unanimous-or-page-coordinate-fallback",
         "source_sha256": actual_sha,
         "page_id": PAGE_ID,
         "primitive_count": primitive_count,
