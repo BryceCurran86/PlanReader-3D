@@ -638,7 +638,8 @@ def test_repeated_exact_label_annotation_blocks_can_supply_orthogonal_dimensions
     monkeypatch.setattr(
         cross_view,
         "_trusted_lines_for_page",
-        lambda source_arg, *, revision_id, page_id, candidate_labels: (
+        lambda source_arg, *, revision_id, page_id, candidate_labels,
+        allow_compound_annotations=False: (
             horizontal_line,
             vertical_line,
         ) if str(page_id) == "2" else (),
