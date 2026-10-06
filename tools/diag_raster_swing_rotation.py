@@ -8,6 +8,7 @@ import fitz
 import numpy as np
 
 import pb_physical_opening_authority as g17
+import pb_raster_opening_source_primitives as raster_primitives
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -54,10 +55,11 @@ def _run(
     band_max_thickness_override_pt: float | None = None,
 ):
     original_band_max = g17.RASTER_BAND_MAX_THICKNESS_PT
+    original_primitive_band_max = raster_primitives.BAND_MAX_THICKNESS_PT
     if band_max_thickness_override_pt is not None:
-        g17.RASTER_BAND_MAX_THICKNESS_PT = float(
-            band_max_thickness_override_pt
-        )
+        override = float(band_max_thickness_override_pt)
+        g17.RASTER_BAND_MAX_THICKNESS_PT = override
+        raster_primitives.BAND_MAX_THICKNESS_PT = override
 
     source = SourceVisibilityProducer(
         producer_method=f"diag-swing-{label}",
@@ -278,6 +280,7 @@ def _run(
         g17._raster_band_boxes = original_band_boxes
         g17._raster_pair_flanks = original_pair_flanks
         g17.RASTER_BAND_MAX_THICKNESS_PT = original_band_max
+        raster_primitives.BAND_MAX_THICKNESS_PT = original_primitive_band_max
 
     return {
         "label": label,
