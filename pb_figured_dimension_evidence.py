@@ -778,7 +778,7 @@ def _unique_orientation_witness_winner(
         DimensionOrientation.VERTICAL.value,
     ):
         return None
-    proven = [
+    witness_complete = [
         candidate
         for candidate in candidates
         if candidate.orientation == text_orientation_hint
@@ -787,14 +787,20 @@ def _unique_orientation_witness_winner(
             same_scope,
             calibration,
         )
-        and _candidate_brackets_text_span(
-            candidate,
-            observation_bbox,
-            text_orientation_hint=text_orientation_hint,
-            calibration=calibration,
-        )
     ]
-    return proven[0] if len(proven) == 1 else None
+    # More than one complete same-orientation dimension system is real source
+    # ambiguity. Text-span proximity/bracketing must not rank between them.
+    if len(witness_complete) != 1:
+        return None
+    candidate = witness_complete[0]
+    if not _candidate_brackets_text_span(
+        candidate,
+        observation_bbox,
+        text_orientation_hint=text_orientation_hint,
+        calibration=calibration,
+    ):
+        return None
+    return candidate
 
 
 def _strict_style_dominator(
