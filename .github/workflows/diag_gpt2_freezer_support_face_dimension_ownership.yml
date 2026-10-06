@@ -1,0 +1,176 @@
+name: DIAG GPT2 Freezer Support Face Dimension Ownership
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Audit source-owned Freezer dimension ownership
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-freezer-support-face-dimension
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          from shapely.geometry import LineString, Polygon, Point
+
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-freezer-support-face-dimension-ownership",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-freezer-support-face-dimension-ownership",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+
+          support_wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("11",),
+              evidence_page_ids=(),
+          )
+          support_walls=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=support_wo,
+          )
+          support_rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=support_wo,
+              canonical_wall_ids_by_candidate=support_walls.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=support_walls.unresolved_wall_candidate_ids,
+          )
+
+          def norm(v):
+              return " ".join(str(v or "").strip().upper().split())
+
+          freezer_rooms=[
+              room for room in support_rooms.rooms
+              if norm(room.room_label)=="FREEZER" and room.geometry_complete
+          ]
+          assert len(freezer_rooms)==1, len(freezer_rooms)
+          room=freezer_rooms[0]
+          polygon=Polygon(room.polygon_pdf_pts)
+          assert polygon.is_valid and not polygon.is_empty
+          boundary=polygon.boundary
+
+          lines=cv._trusted_lines_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_labels=("FREEZER",),
+          )
+          freezer_lines=tuple(line for line in lines if norm(line.text)=="FREEZER")
+          dims=cv._trusted_native_dimensions_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_lines=freezer_lines,
+          )
+
+          def intersections(segment):
+              geom=LineString(((float(segment[0]),float(segment[1])),(float(segment[2]),float(segment[3]))))
+              hit=geom.intersection(boundary)
+              pts=[]
+              def collect(g):
+                  if g.is_empty:
+                      return
+                  if g.geom_type=="Point":
+                      pts.append((round(float(g.x),6),round(float(g.y),6)))
+                  elif g.geom_type=="MultiPoint":
+                      for p in g.geoms:
+                          collect(p)
+                  elif g.geom_type in ("LineString","LinearRing"):
+                      coords=list(g.coords)
+                      if coords:
+                          pts.append((round(float(coords[0][0]),6),round(float(coords[0][1]),6)))
+                          pts.append((round(float(coords[-1][0]),6),round(float(coords[-1][1]),6)))
+                  elif hasattr(g,"geoms"):
+                      for item in g.geoms:
+                          collect(item)
+              collect(hit)
+              return sorted(set(pts))
+
+          rows=[]
+          for d in dims:
+              witness_hits=[intersections(seg) for seg in d.witness_geometries]
+              hit_union=sorted({p for group in witness_hits for p in group})
+              immediate=[
+                  {
+                      "bbox":list(line.bbox),
+                      "block":line.block_no,
+                      "line":line.line_no,
+                  }
+                  for line in freezer_lines
+                  if cv._dimension_is_immediate_label_annotation(line,d)
+              ]
+              rows.append({
+                  "dimension_id":d.dimension_id,
+                  "orientation":d.orientation,
+                  "value_mm":d.value_mm,
+                  "endpoints_pt":[list(d.endpoints_pt[0]),list(d.endpoints_pt[1])],
+                  "span_pt":cv._dimension_span_pt(d),
+                  "text_block_no":d.text_block_no,
+                  "text_line_no":d.text_line_no,
+                  "text_word_no":d.text_word_no,
+                  "immediate_freezer_annotation":immediate,
+                  "witness_geometries":[list(x) for x in d.witness_geometries],
+                  "witness_boundary_hits":witness_hits,
+                  "unique_room_boundary_hits":hit_union,
+                  "unique_room_boundary_hit_count":len(hit_union),
+              })
+
+          coords=list(polygon.exterior.coords)
+          print(json.dumps({
+              "support_room":{
+                  "physical_room_id":room.physical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "polygon":[list(x) for x in room.polygon_pdf_pts],
+                  "bbox":list(polygon.bounds),
+                  "area_page_pts2":room.area_page_pts2,
+                  "bounding_wall_ids":list(room.bounding_wall_ids),
+                  "label_binding_record_id":room.room_label_binding_record_id,
+              },
+              "freezer_label_lines":[
+                  {
+                      "bbox":list(line.bbox),
+                      "block":line.block_no,
+                      "line":line.line_no,
+                      "partition":line.source_partition_id,
+                      "observation_ids":list(line.observation_ids),
+                  }
+                  for line in freezer_lines
+              ],
+              "dimensions":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-freezer-support-face-dimension
+          path: artifacts/gpt2-freezer-support-face-dimension
+          retention-days: 2
