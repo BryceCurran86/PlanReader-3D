@@ -323,6 +323,68 @@ def test_local_host_scope_blocks_tainted_raster_spanning_candidate() -> None:
     assert "host_relevant_wall_boundary_tainted" in reasons
 
 
+def test_local_host_scope_blocks_excluded_raster_spanning_primitive() -> None:
+    spanning = _record(
+        "clean-raster-spanning-host",
+        ((-100.0, 0.0), (140.0, 0.0)),
+        source_primitive_ids=(),
+    )
+    excluded = ExcludedBoundaryPrimitive(
+        category="crosses_scope_boundary",
+        source_observation_id="obs:excluded-raster-span",
+        x1=-100.0,
+        y1=0.0,
+        x2=140.0,
+        y2=0.0,
+    )
+    scope = _incomplete_scope(
+        (spanning,),
+        excluded_primitives=(excluded,),
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(
+        scope,
+        OPENING,
+        include_spanning_raster_candidates=True,
+    )
+
+    assert local is None
+    assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
+    assert "host_relevant_excluded_boundary_primitive" in reasons
+
+
+def test_local_host_scope_ignores_excluded_span_outside_raster_wall_band() -> None:
+    spanning = _record(
+        "clean-raster-spanning-host",
+        ((-100.0, 0.0), (140.0, 0.0)),
+        source_primitive_ids=(),
+    )
+    excluded = ExcludedBoundaryPrimitive(
+        category="crosses_scope_boundary",
+        source_observation_id="obs:excluded-raster-span-unrelated",
+        x1=-100.0,
+        y1=40.0,
+        x2=140.0,
+        y2=40.0,
+    )
+    scope = _incomplete_scope(
+        (spanning,),
+        excluded_primitives=(excluded,),
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(
+        scope,
+        OPENING,
+        include_spanning_raster_candidates=True,
+    )
+
+    assert local is not None
+    assert reasons == (host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,)
+    assert tuple(record.wall_candidate_id for record in local.records) == (
+        spanning.wall_candidate_id,
+    )
+
+
 def test_local_host_scope_abstains_when_relevant_wall_is_boundary_tainted() -> None:
     host_records = _band_records(center_offset=0.0)
     tainted = host_records[0].wall_candidate_id
