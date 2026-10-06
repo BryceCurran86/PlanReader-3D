@@ -1740,6 +1740,13 @@ class SourceVisibilityProducer:
             if not image_regions:
                 self._raster_opening_primitive_attempted_pages.add(attempt_key)
                 continue
+            registration_scale = self.raster_opening_registration_scale(
+                published.revision.revision_id,
+                page_id,
+            )
+            if registration_scale is None:
+                self._raster_opening_primitive_attempted_pages.add(attempt_key)
+                continue
 
             png_bytes, page_parent, native_frame = self._producer.render_native_page_png(
                 document_id=published.revision.document_id,
@@ -1758,6 +1765,7 @@ class SourceVisibilityProducer:
             primitives = detect_raster_opening_source_primitives(
                 png_bytes,
                 dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                registration_scale=registration_scale,
             )
             if not primitives:
                 continue
