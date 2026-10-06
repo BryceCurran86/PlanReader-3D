@@ -131,3 +131,36 @@ GPT-1 may continue helping only by:
 5. adding regression tests that preserve ABSTAIN / CONFLICT behavior.
 
 Do not reopen extraction, identity, customer-output, or scoring ownership unless the lane assignment is explicitly changed.
+
+
+## Post-closure support audit — opening quantity stack
+
+Support audit performed after GPT-4 host-frame work.
+
+Observed diagnostic state:
+- canonical opening count: 81;
+- canonical openings with resolved area: 2;
+- published opening-area QuantityEvidence: 1.
+
+This is **not** a GPT-1 quantity-generation dropout.
+
+The two area-resolved canonical doors were:
+
+1. **10.08 m² figured opening**
+   - opening kind: door;
+   - figured area record present;
+   - host wall: unavailable;
+   - host frame: unavailable;
+   - QuantityEvidence: correctly **not** published.
+
+2. **5.67 m² figured opening**
+   - opening kind: door;
+   - figured area record present;
+   - authenticated host wall present;
+   - QuantityEvidence: published.
+
+Conclusion:
+
+The remaining 10.08 m² opening is blocked upstream by authenticated host topology / physical identity authority, not by measurement or quantity publication. The existing opening QuantityEvidence publisher is behaving correctly and must remain fail-closed.
+
+Ownership remains outside GPT-1 unless a future canonical opening satisfies the full publisher contract and still fails to produce QuantityEvidence.
