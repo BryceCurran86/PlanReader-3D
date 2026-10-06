@@ -1,0 +1,71 @@
+name: TEST ONLY GPT2 Maryborough label hardening source
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough_labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt
+      - name: Run exact A110 labels
+        run: |
+          mkdir -p artifacts/gpt2-label-hardening-source
+          git rev-parse HEAD > artifacts/gpt2-label-hardening-source/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-label-hardening-source/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt2-label-hardening-source/run.log
+          import json,time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          start=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=None,
+          )
+          rows=sorted(
+              [
+                  {
+                      "label":" ".join(str(room.room_label or "").strip().upper().split()),
+                      "physical_room_id":room.physical_room_id,
+                      "source_room_face_record_id":room.source_room_face_record_id,
+                      "page_id":room.page_id,
+                      "viewport_id":room.viewport_id,
+                      "label_reason_codes":list(room.room_label_reason_codes),
+                  }
+                  for room in claim.canonical_rooms
+                  if str(room.room_label or "").strip()
+              ],
+              key=lambda row:(row["label"],row["physical_room_id"]),
+          )
+          labels=sorted({row["label"] for row in rows})
+          print(json.dumps({
+              "elapsed_seconds":time.perf_counter()-start,
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+              "room_count":len(claim.canonical_rooms),
+              "labelled_room_count":len(rows),
+              "labels":labels,
+              "rows":rows,
+              "dry_store_present":"DRY STORE" in labels,
+              "m_amb_present":"M-AMB" in labels,
+              "f_amb_present":"F-AMB" in labels,
+          },sort_keys=True),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-label-hardening-source
+          path: artifacts/gpt2-label-hardening-source
+          retention-days: 1
