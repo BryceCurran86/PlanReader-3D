@@ -1,0 +1,90 @@
+name: DIAG GPT3 Lot16 Map Only V5
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Restore previously sealed Lot16 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt3-lot16-exact-v4
+          gh api repos/${{ github.repository }}/actions/artifacts/11404175383/zip > /tmp/lot16-v4.zip
+          unzip -q /tmp/lot16-v4.zip -d artifacts/gpt3-lot16-exact-v4
+          test -f artifacts/gpt3-lot16-exact-v4/au_qld_lot16_power.json
+          test -f artifacts/gpt3-lot16-exact-v4/family_runs/opening_area.sealed.json
+      - name: Verify restored seal source and quantity integrity
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-lot16-exact-v4")
+          combined=json.loads((root/"au_qld_lot16_power.json").read_text())
+          family=json.loads((root/"family_runs/opening_area.sealed.json").read_text())
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert combined["source_sha256s"] == [expected], combined["source_sha256s"]
+          assert len(combined["quantities"]) == 8
+          assert len(family["quantities"]) == 8
+          assert all(q.get("lineage_ok") for q in family["quantities"])
+          assert all(not q.get("abstained",False) for q in family["quantities"])
+          print({"sealed_quantities":8,"source_sha256":expected})
+          PY
+      - name: Build measurement-hash identity bindings
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_identity_map_v5.py \
+            | tee artifacts/gpt3-lot16-exact-v4/identity-map-v5.stdout.json
+      - name: Require exact bindings for every sealed Lot16 quantity
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-lot16-exact-v4")
+          sealed=json.loads((root/"au_qld_lot16_power.json").read_text())
+          identity=json.loads((root/"lot16.identity-map.json").read_text())
+          q=[x for x in sealed["quantities"] if not x.get("abstained",False)]
+          if len(identity["bindings"]) != len(q):
+              raise SystemExit(f"identity binding incomplete: {len(identity['bindings'])}/{len(q)}")
+          print({"sealed_quantities":len(q),"bindings":len(identity["bindings"])})
+          PY
+      - name: Run exact frozen V2 reconciliation
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py \
+            --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json \
+            --sealed-run artifacts/gpt3-lot16-exact-v4/au_qld_lot16_power.json \
+            --identity-map artifacts/gpt3-lot16-exact-v4/lot16.identity-map.json \
+            --output artifacts/gpt3-lot16-exact-v4/lot16.exact-report-v5.json
+          cat artifacts/gpt3-lot16-exact-v4/lot16.exact-report-v5.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-lot16-map-only-v5
+          path: artifacts/gpt3-lot16-exact-v4
+          retention-days: 3
