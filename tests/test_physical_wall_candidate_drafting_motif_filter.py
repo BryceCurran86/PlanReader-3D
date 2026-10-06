@@ -361,3 +361,101 @@ def test_singleton_motif_geometry_is_computed_once(monkeypatch) -> None:
     )
 
     assert calls == {"length": len(lines), "angle": len(lines)}
+
+
+
+def _dense_lattice(
+    *,
+    stroke=(0.5, 0.5, 0.5),
+    width: float = 0.24,
+    spacing: float = 40.0,
+    count: int = 10,
+) -> list[dict]:
+    lines: list[dict] = []
+    path_index = 1000
+    for index in range(count):
+        coordinate = 100.0 + float(index) * spacing
+        lines.append(
+            _line(
+                f"grid-h-{index}",
+                50.0,
+                coordinate,
+                950.0,
+                coordinate,
+                path_index=path_index,
+                stroke=stroke,
+                width=width,
+            )
+        )
+        path_index += 1
+    for index in range(count):
+        coordinate = 100.0 + float(index) * spacing
+        lines.append(
+            _line(
+                f"grid-v-{index}",
+                coordinate,
+                50.0,
+                coordinate,
+                950.0,
+                path_index=path_index,
+                stroke=stroke,
+                width=width,
+            )
+        )
+        path_index += 1
+    return lines
+
+
+def test_dense_low_contrast_hairline_lattice_is_excluded() -> None:
+    lattice = _dense_lattice()
+    assert _filter(lattice) == ()
+
+
+def test_sparse_orthogonal_wall_grid_is_preserved() -> None:
+    sparse = _dense_lattice(count=4)
+    assert _filter(sparse) == tuple(sparse)
+
+
+def test_dense_black_wall_lattice_is_preserved_without_low_contrast_proof() -> None:
+    black = _dense_lattice(stroke=(0.0, 0.0, 0.0))
+    assert _filter(black) == tuple(black)
+
+
+def test_one_axis_repeated_hairlines_are_preserved() -> None:
+    horizontal = _dense_lattice()[:10]
+    assert _filter(horizontal) == tuple(horizontal)
+
+
+def test_irregular_low_contrast_crossing_grid_is_preserved() -> None:
+    irregular: list[dict] = []
+    path_index = 2000
+    coordinates = (100.0, 137.0, 183.0, 242.0, 309.0, 391.0, 488.0, 602.0, 731.0, 877.0)
+    for index, coordinate in enumerate(coordinates):
+        irregular.append(
+            _line(
+                f"irregular-h-{index}",
+                50.0,
+                coordinate,
+                950.0,
+                coordinate,
+                path_index=path_index,
+                stroke=(0.5, 0.5, 0.5),
+                width=0.24,
+            )
+        )
+        path_index += 1
+    for index, coordinate in enumerate(coordinates):
+        irregular.append(
+            _line(
+                f"irregular-v-{index}",
+                coordinate,
+                50.0,
+                coordinate,
+                950.0,
+                path_index=path_index,
+                stroke=(0.5, 0.5, 0.5),
+                width=0.24,
+            )
+        )
+        path_index += 1
+    assert _filter(irregular) == tuple(irregular)
