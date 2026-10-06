@@ -37,6 +37,9 @@ from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
 )
 from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+from pb_live_floor_finish_area_source_closed_export import (
+    seal_live_floor_finish_area_run,
+)
 from pb_migration_contracts import QuantityEvidence
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
@@ -271,6 +274,27 @@ def generate_project_handoff(
             (
                 "floor_area",
                 seal_live_floor_area_run(
+                    claim,
+                    workspace_id=int(workspace_id),
+                    project_id=project_id,
+                ),
+            )
+        )
+
+    if clean_family_group in {"all", "surfaces"}:
+        floor_finish_quantities = _non_abstained(
+            getattr(claim, "floor_finish_quantity_evidence", ())
+        )
+    else:
+        floor_finish_quantities = ()
+    summary["family_counts"]["floor_finish_area"] = len(
+        floor_finish_quantities
+    )
+    if floor_finish_quantities:
+        family_runs.append(
+            (
+                "floor_finish_area",
+                seal_live_floor_finish_area_run(
                     claim,
                     workspace_id=int(workspace_id),
                     project_id=project_id,
