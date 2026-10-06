@@ -280,3 +280,47 @@ def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> No
     assert result.records == ()
     assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes
 
+
+
+
+def test_room_face_scope_retains_grid_opposition_sidecar_without_geometry_change() -> None:
+    def record(wall_id: str, first, second):
+        return SimpleNamespace(
+            wall_candidate_id=wall_id,
+            wall_candidate=SimpleNamespace(centerline_pts=(first, second)),
+        )
+
+    grid_record = SimpleNamespace(
+        wall_candidate_id="partition",
+        grid_evidence_ids=("ev-grid-a", "ev-grid-b"),
+        fully_grid_opposed=True,
+    )
+    scope = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(
+            record("top", (0.0, 0.0), (10.0, 0.0)),
+            record("right", (10.0, 0.0), (10.0, 10.0)),
+            record("bottom", (10.0, 10.0), (0.0, 10.0)),
+            record("left", (0.0, 10.0), (0.0, 0.0)),
+            record("partition", (5.0, 0.0), (5.0, 10.0)),
+        ),
+        document_id="doc-grid-sidecar",
+        revision_id="rev-grid-sidecar",
+        source_sha256="c" * 64,
+        snapshot_id="snap-grid-sidecar",
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+        fully_grid_opposed_wall_candidate_ids=("partition",),
+        grid_opposition_records=(grid_record,),
+    )
+
+    result = _derive_scope(scope)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 2
+    assert result.fully_grid_opposed_wall_ids == ("partition",)
+    assert result.grid_opposition_evidence_ids_by_wall == (
+        ("partition", ("ev-grid-a", "ev-grid-b")),
+    )
+    assert all("partition" in row.bounding_wall_ids for row in result.records)
