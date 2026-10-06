@@ -55,7 +55,7 @@ from pb_source_visibility_authority import (
 from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 
 
-OPENING_HOST_BINDING_SCHEMA_VERSION = "3.3.0"
+OPENING_HOST_BINDING_SCHEMA_VERSION = "3.4.0"
 OPENING_HOST_UNIVERSE_RESOLVED = "opening_host_wall_universe_resolved"
 OPENING_HOST_BINDING_RESOLVED = "opening_host_binding_resolved"
 OPENING_HOST_BINDING_UNAVAILABLE = "opening_host_binding_unavailable"
@@ -1621,6 +1621,63 @@ def _source_line_axis_data(
     return (min(along), max(along), sum(offsets) / len(offsets))
 
 
+def _candidate_locally_owns_opening_span(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+    *,
+    edge_tol: float,
+) -> bool:
+    """Require one local W4 chain segment to own the aperture's axis span.
+
+    A long raw raster primitive may be split into several disconnected W4
+    candidates while every fragment retains the same immutable source primitive
+    id. Source-primitive lineage therefore proves common source ownership, but
+    not which fragment owns this local opening.
+
+    This predicate is topology/locality evidence, not nearest-wall ranking. One
+    consecutive candidate segment must:
+    - be locally parallel to the sealed aperture axis;
+    - cover both aperture edges (within the existing edge equality allowance);
+    - remain inside the physical wall-band thickness plus the existing
+      cross-render pixel-equality allowance.
+
+    Remote fragments of the same long source primitive cannot satisfy the local
+    span requirement.
+    """
+
+    wall = record.wall_candidate
+    if wall.is_curved or len(wall.centerline_pts) < 2:
+        return False
+    points = tuple((float(x), float(y)) for x, y in wall.centerline_pts)
+    if any(not (math.isfinite(x) and math.isfinite(y)) for x, y in points):
+        return False
+
+    cross_limit = (
+        opening.thickness / 2.0
+        + _RASTER_WHOLE_WALL_CENTER_TOL_PT
+        + _COORD_TOL
+    )
+    for start, end in zip(points, points[1:]):
+        segment = (start[0], start[1], end[0], end[1])
+        unit = _canonical_unit(segment)
+        if unit is None or abs(_cross(unit, opening.axis)) > _PARALLEL_TOL:
+            continue
+        along = (
+            _project(start, opening.origin, opening.axis),
+            _project(end, opening.origin, opening.axis),
+        )
+        if min(along) > edge_tol or max(along) < opening.length - edge_tol:
+            continue
+        offsets = (
+            _project(start, opening.origin, opening.normal),
+            _project(end, opening.origin, opening.normal),
+        )
+        if max(abs(value) for value in offsets) > cross_limit:
+            continue
+        return True
+    return False
+
+
 def _resolve_raster_source_primitive_host_from_lines(
     records: Sequence[PhysicalWallCandidateRecord],
     opening: _OpeningGeometry,
@@ -1640,7 +1697,9 @@ def _resolve_raster_source_primitive_host_from_lines(
     - is parallel to the sealed G17 aperture axis;
     - spans beyond both aperture edges;
     - lies on the G17 wall-band center within the existing cross-render
-      pixel-equality allowance; and
+      pixel-equality allowance;
+    - is carried by a W4 candidate whose own local chain segment spans this
+      aperture inside the proven wall band; and
     - belongs to a usable, equivalence-safe W4 physical identity.
     """
 
@@ -1649,6 +1708,12 @@ def _resolve_raster_source_primitive_host_from_lines(
     for record in records:
         identity = record.physical_identity
         if not identity.usable or not identity.candidate_identity_id:
+            continue
+        if not _candidate_locally_owns_opening_span(
+            record,
+            opening,
+            edge_tol=edge_tol,
+        ):
             continue
         offsets: list[float] = []
         for primitive_id in identity.source_primitive_ids:
