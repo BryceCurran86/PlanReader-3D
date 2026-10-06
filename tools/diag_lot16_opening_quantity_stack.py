@@ -86,7 +86,7 @@ def main() -> None:
                 "quantity_published": quantity is not None,
                 "quantity_value": None if quantity is None else quantity.value,
                 "quantity_unit": None if quantity is None else quantity.unit,
-                "quantity_record_id": None if quantity is None else quantity.evidence_id,
+                "quantity_evidence_ids": None if quantity is None else list(quantity.evidence_ids),
             }
         )
 
