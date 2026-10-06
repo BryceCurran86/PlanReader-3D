@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import fitz
@@ -7,7 +8,7 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
-from pb_portable_raster_ocr_authority import MockOCRBackend
+from pb_portable_raster_ocr_authority import MockOCRBackend, OCRLine
 from pb_source_room_face_authority import build_source_room_face_authority
 from pb_source_room_label_authority import (
     SOURCE_ROOM_LABEL_CONFLICT,
@@ -18,6 +19,7 @@ from pb_source_room_label_authority import (
     _line_groups,
     _normalized_room_line,
 )
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -50,6 +52,9 @@ def test_whole_line_semantics_accept_room_labels_not_embedded_equipment_notes() 
     assert _normalized_room_line("COLD ROOM") == "COLD ROOM"
     assert _normalized_room_line("FREEZER") == "FREEZER"
     assert _normalized_room_line("PWD") == "PWD"
+    assert _normalized_room_line("M-AMB") == "M-AMB"
+    assert _normalized_room_line("F-AMB") == "F-AMB"
+    assert _normalized_room_line("POS COUNTER") == "POS COUNTER"
     assert _normalized_room_line("WC & SHOWER") == "WC & SHOWER"
     assert (
         _normalized_room_line(
@@ -59,6 +64,8 @@ def test_whole_line_semantics_accept_room_labels_not_embedded_equipment_notes() 
     )
     assert _normalized_room_line("LAUNDRY TUB") is None
     assert _normalized_room_line("OFFICE 1") is None
+    assert _normalized_room_line("M-AMB FIXTURE NOTE") is None
+    assert _normalized_room_line("POS COUNTER 1") is None
 
 
 def test_line_grouping_uses_exact_source_block_line_and_word_order() -> None:
@@ -283,3 +290,183 @@ def test_room_looking_token_inside_long_note_is_never_cherry_picked(
     assert {
         record.label for record in _records(producer)
     } == {"COLD ROOM"}
+
+
+def _line_backend(readings):
+    values = iter(readings)
+
+    def responder(_image, _dpi):
+        try:
+            value = next(values)
+        except StopIteration:
+            return ()
+        if value is None:
+            return ()
+        return (
+            OCRLine(
+                text=value,
+                confidence=1.0,
+                bbox_px=(1.0, 1.0, 30.0, 10.0),
+                bbox_pt=(1.0, 1.0, 30.0, 10.0),
+            ),
+        )
+
+    return MockOCRBackend(responder=responder)
+
+
+def test_whole_line_two_render_fallback_can_authenticate_closed_room(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "line-fallback.pdf"
+    _write_two_room_pdf(
+        path,
+        left_lines=("SALES",),
+        right_lines=(),
+    )
+    source, room_faces = _setup(path)
+
+    # Force the integration down the whole-line path. The fallback independently
+    # revalidates native source ownership/text integrity before it may use OCR.
+    monkeypatch.setattr(
+        SourceRoomLabelProducer,
+        "_authorize_word",
+        lambda *_args, **_kwargs: None,
+    )
+    producer = SourceRoomLabelProducer.from_authorities_for_tests(
+        source,
+        room_faces,
+        _line_backend(("SALES", "SALES")),
+        page_ids=("1",),
+    )
+
+    records = _records(producer)
+    assert {record.label for record in records} == {"SALES"}
+    assert records[0].word_evidence[0].authority_kind == (
+        "raster_text_line_corroboration"
+    )
+
+
+def test_whole_line_fallback_requires_both_renders_to_match_exact_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "line-mismatch.pdf"
+    _write_two_room_pdf(
+        path,
+        left_lines=("SALES",),
+        right_lines=(),
+    )
+    source, room_faces = _setup(path)
+    monkeypatch.setattr(
+        SourceRoomLabelProducer,
+        "_authorize_word",
+        lambda *_args, **_kwargs: None,
+    )
+    producer = SourceRoomLabelProducer.from_authorities_for_tests(
+        source,
+        room_faces,
+        _line_backend(("SALES", "SAILS")),
+        page_ids=("1",),
+    )
+
+    assert _records(producer) == []
+    assert any(
+        SOURCE_ROOM_LABEL_REQUIRED_WORD_UNRESOLVED
+        in result.reason_codes
+        for result in producer.published_results()
+    )
+
+
+def test_whole_line_fallback_does_not_bypass_text_trace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "trace-unavailable.pdf"
+    _write_two_room_pdf(
+        path,
+        left_lines=("SALES",),
+        right_lines=(),
+    )
+    source, room_faces = _setup(path)
+    authority = source.text_integrity_authority()
+    authority_type = type(authority)
+    original_resolve = authority_type.resolve_text
+
+    def forced_trace_failure(self, selector):
+        result = original_resolve(self, selector)
+        receipt = result.receipt
+        if (
+            receipt is not None
+            and str(receipt.raw_text or "").strip() == "SALES"
+        ):
+            reasons = ("text_trace_unavailable",)
+            return replace(
+                result,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                trusted_text=None,
+                receipt=replace(
+                    receipt,
+                    trusted=False,
+                    reason_codes=reasons,
+                ),
+                reason_codes=reasons,
+            )
+        return result
+
+    monkeypatch.setattr(authority_type, "resolve_text", forced_trace_failure)
+    monkeypatch.setattr(
+        SourceRoomLabelProducer,
+        "_authorize_word",
+        lambda *_args, **_kwargs: None,
+    )
+    producer = SourceRoomLabelProducer.from_authorities_for_tests(
+        source,
+        room_faces,
+        _line_backend(("SALES", "SALES")),
+        page_ids=("1",),
+    )
+
+    assert _records(producer) == []
+
+
+def test_authenticated_whole_line_still_requires_all_words_in_same_room_face(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "split-face-line.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=300.0, height=200.0)
+    for first, second in (
+        ((50.0, 50.0), (250.0, 50.0)),
+        ((250.0, 50.0), (250.0, 150.0)),
+        ((250.0, 150.0), (50.0, 150.0)),
+        ((50.0, 150.0), (50.0, 50.0)),
+        ((150.0, 50.0), (150.0, 150.0)),
+    ):
+        page.draw_line(
+            fitz.Point(*first),
+            fitz.Point(*second),
+            color=(0, 0, 0),
+            width=1.0,
+        )
+    # The whole source line is a valid room semantic, but the physical divider
+    # deliberately splits its two word centres across two source-room faces.
+    page.insert_text((130.0, 95.0), "FOOD SERVICE", fontsize=9.0)
+    doc.save(path)
+    doc.close()
+
+    source, room_faces = _setup(path)
+    monkeypatch.setattr(
+        SourceRoomLabelProducer,
+        "_authorize_word",
+        lambda *_args, **_kwargs: None,
+    )
+    producer = SourceRoomLabelProducer.from_authorities_for_tests(
+        source,
+        room_faces,
+        _line_backend(("FOOD SERVICE", "FOOD SERVICE")),
+        page_ids=("1",),
+    )
+
+    assert _records(producer) == []
