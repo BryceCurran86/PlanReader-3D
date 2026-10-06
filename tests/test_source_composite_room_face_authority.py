@@ -235,18 +235,36 @@ def _three_cell_room_scope():
         "record_left",
         ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
         ("w_left", "w_lm", "w_top_left", "w_bottom_left"),
+        (
+            ("w_bottom_left", ((0.0, 0.0), (10.0, 0.0))),
+            ("w_lm", ((10.0, 0.0), (10.0, 10.0))),
+            ("w_top_left", ((0.0, 10.0), (10.0, 10.0))),
+            ("w_left", ((0.0, 0.0), (0.0, 10.0))),
+        ),
     )
     middle = _face(
         "face_middle",
         "record_middle",
         ((10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)),
         ("w_lm", "w_mr", "w_top_middle", "w_bottom_middle"),
+        (
+            ("w_bottom_middle", ((10.0, 0.0), (20.0, 0.0))),
+            ("w_mr", ((20.0, 0.0), (20.0, 10.0))),
+            ("w_top_middle", ((10.0, 10.0), (20.0, 10.0))),
+            ("w_lm", ((10.0, 0.0), (10.0, 10.0))),
+        ),
     )
     right = _face(
         "face_right",
         "record_right",
         ((20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)),
         ("w_mr", "w_right", "w_top_right", "w_bottom_right"),
+        (
+            ("w_bottom_right", ((20.0, 0.0), (30.0, 0.0))),
+            ("w_right", ((30.0, 0.0), (30.0, 10.0))),
+            ("w_top_right", ((20.0, 10.0), (30.0, 10.0))),
+            ("w_mr", ((20.0, 0.0), (20.0, 10.0))),
+        ),
     )
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
@@ -255,7 +273,6 @@ def _three_cell_room_scope():
         reason_codes=("source_room_face_scope_resolved",),
         **LINEAGE,
     )
-
 
 def _three_cell_label_scope(*, middle_label=False, competing_split=False):
     candidate = SimpleNamespace(
