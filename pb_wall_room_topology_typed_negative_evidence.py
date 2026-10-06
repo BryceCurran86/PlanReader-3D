@@ -150,6 +150,379 @@ def _gaps_regular(values: Sequence[float]) -> bool:
     return max(gaps) / mid <= 2.4 and min(gaps) / mid >= 0.4
 
 
+
+_SOURCE_GRID_REASON = "source_lineage_dense_orthogonal_lattice"
+_SOURCE_GRID_COORD_TOL = 1e-6
+_SOURCE_GRID_MIN_GAP_SUPPORT = 3
+_SOURCE_GRID_MIN_PERPENDICULAR_INTERSECTIONS = 2
+
+
+def _stable_source_grid_value(value: Any) -> Any:
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return str(value)
+        return round(value, 9)
+    if isinstance(value, (list, tuple)):
+        return tuple(_stable_source_grid_value(item) for item in value)
+    if isinstance(value, Mapping):
+        return tuple(
+            sorted(
+                (str(key), _stable_source_grid_value(item))
+                for key, item in value.items()
+            )
+        )
+    return value
+
+
+def _source_grid_record_key(record: Mapping[str, Any]) -> Tuple[Any, ...]:
+    return tuple(
+        _stable_source_grid_value(record.get(key))
+        for key in (
+            "id",
+            "kind",
+            "kind_present",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "page_coords_present",
+            "path_index",
+            "width",
+            "width_present",
+            "stroke",
+            "stroke_present",
+            "fill",
+            "fill_present",
+            "layer",
+            "layer_present",
+            "dashes",
+            "dashes_present",
+        )
+    )
+
+
+def _source_grid_orientation(record: Mapping[str, Any]) -> Optional[str]:
+    if not bool(record.get("page_coords_present")):
+        return None
+    try:
+        x1 = float(record["x1"])
+        y1 = float(record["y1"])
+        x2 = float(record["x2"])
+        y2 = float(record["y2"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
+        return None
+    if abs(y2 - y1) <= _SOURCE_GRID_COORD_TOL and abs(x2 - x1) > _SOURCE_GRID_COORD_TOL:
+        return "horizontal"
+    if abs(x2 - x1) <= _SOURCE_GRID_COORD_TOL and abs(y2 - y1) > _SOURCE_GRID_COORD_TOL:
+        return "vertical"
+    return None
+
+
+def _source_grid_solid_dashes(value: object) -> bool:
+    return " ".join(str(value or "").strip().split()) in {"", "[]", "[] 0", "[ ] 0"}
+
+
+def _source_grid_style(record: Mapping[str, Any]) -> Optional[Tuple[Any, ...]]:
+    if not bool(record.get("kind_present")) or str(record.get("kind") or "") != "line":
+        return None
+    if _source_grid_orientation(record) is None:
+        return None
+    if not bool(record.get("width_present")) or not bool(record.get("stroke_present")):
+        return None
+    if bool(record.get("fill_present")):
+        return None
+    if bool(record.get("layer_present")) and "wall" in str(record.get("layer") or "").lower():
+        return None
+    if bool(record.get("dashes_present")) and not _source_grid_solid_dashes(record.get("dashes")):
+        return None
+    try:
+        width = float(record.get("width"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(width) or width <= 0.0:
+        return None
+    return (
+        round(width, 9),
+        _stable_source_grid_value(record.get("stroke")),
+        _source_grid_solid_dashes(record.get("dashes")),
+    )
+
+
+def _source_grid_axis_coordinate(record: Mapping[str, Any], orientation: str) -> float:
+    if orientation == "horizontal":
+        return round((float(record["y1"]) + float(record["y2"])) * 0.5, 6)
+    return round((float(record["x1"]) + float(record["x2"])) * 0.5, 6)
+
+
+def _source_grid_interval(
+    record: Mapping[str, Any], orientation: str
+) -> Tuple[float, float]:
+    if orientation == "horizontal":
+        values = (float(record["x1"]), float(record["x2"]))
+    else:
+        values = (float(record["y1"]), float(record["y2"]))
+    return tuple(sorted(values))
+
+
+def _source_grid_spacing(
+    coordinates: Sequence[float],
+    *,
+    tolerance: float,
+) -> Tuple[float, int]:
+    values = tuple(sorted({round(float(value), 6) for value in coordinates}))
+    gaps = tuple(
+        right - left
+        for left, right in zip(values, values[1:])
+        if right - left > _SOURCE_GRID_COORD_TOL
+    )
+    if not gaps:
+        return 0.0, 0
+    best_spacing = 0.0
+    best_support = 0
+    for candidate in gaps:
+        support = sum(abs(value - candidate) <= tolerance for value in gaps)
+        if support > best_support or (
+            support == best_support
+            and (best_spacing <= 0.0 or candidate < best_spacing)
+        ):
+            best_spacing = candidate
+            best_support = support
+    return best_spacing, best_support
+
+
+def _source_grid_candidate_on_spacing(
+    record: Mapping[str, Any],
+    *,
+    orientation: str,
+    coordinates: Sequence[float],
+    spacing: float,
+    tolerance: float,
+) -> bool:
+    if spacing <= 0.0:
+        return False
+    values = tuple(sorted({round(float(value), 6) for value in coordinates}))
+    coordinate = _source_grid_axis_coordinate(record, orientation)
+    try:
+        index = values.index(coordinate)
+    except ValueError:
+        return False
+    gaps = []
+    if index > 0:
+        gaps.append(coordinate - values[index - 1])
+    if index + 1 < len(values):
+        gaps.append(values[index + 1] - coordinate)
+    return any(abs(value - spacing) <= tolerance for value in gaps)
+
+
+def _source_grid_perpendicular_intersections(
+    record: Mapping[str, Any],
+    *,
+    orientation: str,
+    perpendicular: Sequence[Mapping[str, Any]],
+) -> int:
+    start, end = _source_grid_interval(record, orientation)
+    fixed = _source_grid_axis_coordinate(record, orientation)
+    crossings = set()
+    for other in perpendicular:
+        other_orientation = "vertical" if orientation == "horizontal" else "horizontal"
+        other_fixed = _source_grid_axis_coordinate(other, other_orientation)
+        other_start, other_end = _source_grid_interval(other, other_orientation)
+        if (
+            start - _SOURCE_GRID_COORD_TOL
+            <= other_fixed
+            <= end + _SOURCE_GRID_COORD_TOL
+            and other_start - _SOURCE_GRID_COORD_TOL
+            <= fixed
+            <= other_end + _SOURCE_GRID_COORD_TOL
+        ):
+            crossings.add(round(other_fixed, 6))
+    return len(crossings)
+
+
+def _source_lineage_grid_nominations(
+    context: Sequence[Mapping[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Recover grid opposition from immutable U1 native-source lineage.
+
+    Stage A splits long crossing source lines at every intersection. The legacy
+    U2 grid heuristic intentionally reads W2 fragment geometry, so a dense source
+    lattice can become many short fragments that no longer look like long
+    parallels. This helper reconstructs only the original producer-owned source
+    line records already carried by U1. It emits the existing KIND_GRID role;
+    it never deletes geometry or raises authority.
+
+    Positive nomination is deliberately source-relative and fail-closed:
+    - exact native line coordinates and singleton source paths;
+    - explicit solid stroke/width, no fill, and no wall-named layer;
+    - more than one explicit source width, with only the thinnest family eligible;
+    - the same graphic-state family present on both orthogonal axes;
+    - repeated source-coordinate spacing; and
+    - at least two perpendicular intersections for the nominated source line.
+    """
+
+    records_by_id: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
+    for item in context:
+        raw = item.get("raw")
+        if not isinstance(raw, Mapping):
+            continue
+        lineage = raw.get(LINEAGE_KEY)
+        if not isinstance(lineage, Mapping):
+            continue
+        for source_record in lineage.get("source_records") or ():
+            if not isinstance(source_record, Mapping):
+                continue
+            source_id = str(source_record.get("id") or "").strip()
+            if source_id:
+                records_by_id[source_id].append(source_record)
+
+    unique_records: Dict[str, Mapping[str, Any]] = {}
+    for source_id, candidates in records_by_id.items():
+        keys = {_source_grid_record_key(record) for record in candidates}
+        if len(keys) == 1:
+            unique_records[source_id] = candidates[0]
+
+    explicit_widths = set()
+    for record in unique_records.values():
+        if not bool(record.get("width_present")):
+            continue
+        try:
+            width = float(record.get("width"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(width) and width > 0.0:
+            explicit_widths.add(round(width, 9))
+    if len(explicit_widths) < 2:
+        return {}
+    minimum_width = min(explicit_widths)
+
+    path_members: Dict[object, set[str]] = defaultdict(set)
+    for source_id, record in unique_records.items():
+        path_index = record.get("path_index")
+        if path_index is not None:
+            path_members[path_index].add(source_id)
+
+    families: Dict[Tuple[Any, ...], Dict[str, List[Mapping[str, Any]]]] = defaultdict(
+        lambda: {"horizontal": [], "vertical": []}
+    )
+    record_id_by_key: Dict[Tuple[Any, ...], str] = {}
+    for source_id, record in unique_records.items():
+        style = _source_grid_style(record)
+        orientation = _source_grid_orientation(record)
+        path_index = record.get("path_index")
+        if (
+            style is None
+            or orientation is None
+            or float(style[0]) != minimum_width
+            or path_index is None
+            or len(path_members.get(path_index, ())) != 1
+        ):
+            continue
+        families[style][orientation].append(record)
+        record_id_by_key[_source_grid_record_key(record)] = source_id
+
+    proven: Dict[str, Dict[str, Any]] = {}
+    for style, axes in families.items():
+        horizontal = tuple(axes["horizontal"])
+        vertical = tuple(axes["vertical"])
+        if not horizontal or not vertical:
+            continue
+        tolerance = max(float(style[0]), _SOURCE_GRID_COORD_TOL)
+        summaries = {}
+        for orientation, records in (
+            ("horizontal", horizontal),
+            ("vertical", vertical),
+        ):
+            coordinates = tuple(
+                _source_grid_axis_coordinate(record, orientation)
+                for record in records
+            )
+            spacing, support = _source_grid_spacing(
+                coordinates,
+                tolerance=tolerance,
+            )
+            summaries[orientation] = (coordinates, spacing, support)
+
+        for orientation, records, perpendicular in (
+            ("horizontal", horizontal, vertical),
+            ("vertical", vertical, horizontal),
+        ):
+            coordinates, spacing, support = summaries[orientation]
+            if support < _SOURCE_GRID_MIN_GAP_SUPPORT:
+                continue
+            for record in records:
+                if not _source_grid_candidate_on_spacing(
+                    record,
+                    orientation=orientation,
+                    coordinates=coordinates,
+                    spacing=spacing,
+                    tolerance=tolerance,
+                ):
+                    continue
+                intersections = _source_grid_perpendicular_intersections(
+                    record,
+                    orientation=orientation,
+                    perpendicular=perpendicular,
+                )
+                if intersections < _SOURCE_GRID_MIN_PERPENDICULAR_INTERSECTIONS:
+                    continue
+                source_id = record_id_by_key.get(_source_grid_record_key(record))
+                if not source_id:
+                    continue
+                proven[source_id] = {
+                    "source_primitive_id": source_id,
+                    "orientation": orientation,
+                    "family_width_pt": float(style[0]),
+                    "parallel_coordinate_count": len(set(coordinates)),
+                    "perpendicular_coordinate_count": len(
+                        {
+                            _source_grid_axis_coordinate(
+                                other,
+                                "vertical" if orientation == "horizontal" else "horizontal",
+                            )
+                            for other in perpendicular
+                        }
+                    ),
+                    "repeated_parallel_gap_count": support,
+                    "perpendicular_intersection_count": intersections,
+                    "representative_spacing_pt": round(spacing, 6),
+                }
+
+    nominations: Dict[str, Dict[str, Any]] = {}
+    for target in context:
+        raw = target.get("raw")
+        if not isinstance(raw, Mapping):
+            continue
+        lineage = raw.get(LINEAGE_KEY)
+        if not isinstance(lineage, Mapping):
+            continue
+        source_ids = tuple(
+            sorted(
+                {
+                    str(record.get("id") or "").strip()
+                    for record in lineage.get("source_records") or ()
+                    if isinstance(record, Mapping)
+                    and str(record.get("id") or "").strip()
+                }
+            )
+        )
+        if not source_ids or any(source_id not in proven for source_id in source_ids):
+            continue
+        feature_rows = [proven[source_id] for source_id in source_ids]
+        nominations[target["id"]] = {
+            "kind": KIND_GRID,
+            "polarity": POLARITY_OPPOSING,
+            "confidence": 0.6,
+            "reason_codes": (_SOURCE_GRID_REASON,),
+            "feature_basis": {
+                "source_primitive_ids": list(source_ids),
+                "source_lineage_grid_proof": feature_rows,
+            },
+        }
+    return nominations
+
+
 def _as_geom(item: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     try:
         x1 = float(item["x1"])
@@ -642,6 +1015,7 @@ def collect_typed_semantic_evidence(
     excluded = [item for item in context if not item.get("retained")]
     by_id = {item["id"]: item for item in context if item["id"]}
     loops = _rectangle_loops(graph, by_id)
+    source_grid_noms = _source_lineage_grid_nominations(context)
     family_noms: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     families: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
     for target in retained:
@@ -673,6 +1047,9 @@ def collect_typed_semantic_evidence(
     atoms: List[EvidenceAtom] = []
     for target in retained:
         nominations = list(family_noms.get(target["id"]) or [])
+        source_grid = source_grid_noms.get(target["id"])
+        if source_grid is not None:
+            nominations.append(source_grid)
         nominations.extend(
             _nominations_for_target(target, context, words=words, loops=loops, by_id=by_id)
         )
@@ -687,6 +1064,9 @@ def collect_typed_semantic_evidence(
         )
     for target in excluded:
         nominations = list(excluded_family_noms.get(target["id"]) or [])
+        source_grid = source_grid_noms.get(target["id"])
+        if source_grid is not None:
+            nominations.append(source_grid)
         nominations.extend(_exclusion_hint_nominations(target))
         nominations.extend(
             _nominations_for_target(target, context, words=words, loops=loops, by_id=by_id)
