@@ -1,0 +1,99 @@
+name: DIAG GPT2 Maryborough Opening Schedule Semantic Census
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Census authenticated opening schedule rows
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-opening-schedule-semantic-census
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          import pb_schedule_opening_instance_binding_authority as bind
+
+          source_path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-opening-schedule-semantic-census",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt2-opening-schedule-semantic-census",
+              source_bytes=source_path.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          integrity=source.text_integrity_authority()
+          by_page={}
+          for oid in current.text_observation_ids:
+              result=integrity.resolve_text(ObservationSelector(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  observation_id=oid,
+              ))
+              if (
+                  result.status is not EvidenceResolutionStatus.CORROBORATED
+                  or result.trusted_text is None
+                  or result.receipt is None
+              ):
+                  continue
+              r=result.receipt
+              by_page.setdefault(str(r.page_id),[]).append((
+                  oid,
+                  result.trusted_text,
+                  tuple(float(x) for x in r.geometry),
+              ))
+
+          rows=[]
+          for page_id,words in sorted(by_page.items(),key=lambda kv:int(kv[0])):
+              grouped=bind._row_groups_for_page(words)
+              try: page_no=int(page_id)
+              except ValueError: continue
+              for entry,ids in bind._schedule_entries_for_page(grouped,page_no):
+                  rows.append({
+                      "page_id":page_id,
+                      "type_mark":entry.type_mark,
+                      "width_mm":entry.width_mm,
+                      "height_mm":entry.height_mm,
+                      "description":entry.description,
+                      "count":entry.count,
+                      "count_explicit":entry.count_explicit,
+                      "dimension_basis":entry.dimension_basis,
+                      "basis_source":entry.basis_source,
+                      "parse_source":entry.parse_source,
+                      "source_observation_ids":list(ids),
+                  })
+
+          rows.sort(key=lambda r:(r["type_mark"],int(r["page_id"])))
+          print(json.dumps({
+              "row_count":len(rows),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-opening-schedule-semantic-census
+          path: artifacts/gpt2-opening-schedule-semantic-census
+          retention-days: 2
