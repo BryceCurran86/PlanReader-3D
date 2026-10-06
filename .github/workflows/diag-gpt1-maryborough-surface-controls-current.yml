@@ -1,0 +1,162 @@
+name: DIAG GPT1 Maryborough Surface Controls Current
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace Maryborough surface controls
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          actual=hashlib.sha256(pdf.read_bytes()).hexdigest()
+          assert actual==expected
+
+          pages=(6,8,10,29,30)
+          topology=(6,29,30)
+          support=(8,10)
+          claim=collect_live_physical_net_wall_claim(
+              pdf,
+              pages=pages,
+              topology_pages=topology,
+              room_area_support_pages=support,
+          )
+
+          rooms_by_id={r.canonical_room_id:r for r in claim.canonical_rooms}
+          rooms_by_physical={r.physical_room_id:r for r in claim.canonical_rooms}
+          floors_by_id={f.canonical_floor_id:f for f in claim.canonical_floors}
+
+          room_q=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floor_q=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+
+          def room_for_quantity(q):
+              for entity_id in q.input_entity_ids:
+                  if entity_id in rooms_by_id:
+                      return rooms_by_id[entity_id]
+                  if entity_id in rooms_by_physical:
+                      return rooms_by_physical[entity_id]
+              return None
+
+          def floor_for_quantity(q):
+              for entity_id in q.input_entity_ids:
+                  if entity_id in floors_by_id:
+                      return floors_by_id[entity_id]
+              return None
+
+          room_rows=[]
+          for q in room_q:
+              room=room_for_quantity(q)
+              room_rows.append({
+                  "room_label":None if room is None else room.room_label,
+                  "physical_room_id":None if room is None else room.physical_room_id,
+                  "canonical_room_id":None if room is None else room.canonical_room_id,
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "evidence_ids":list(q.evidence_ids),
+                  "metadata":dict(q.metadata or {}),
+              })
+
+          floor_rows=[]
+          for q in floor_q:
+              floor=floor_for_quantity(q)
+              room=None
+              if floor is not None:
+                  room=rooms_by_id.get(floor.room_entity_id) or rooms_by_physical.get(floor.room_entity_id)
+              floor_rows.append({
+                  "room_label":None if room is None else room.room_label,
+                  "canonical_floor_id":None if floor is None else floor.canonical_floor_id,
+                  "physical_floor_surface_id":None if floor is None else floor.physical_floor_surface_id,
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "evidence_ids":list(q.evidence_ids),
+                  "metadata":dict(q.metadata or {}),
+              })
+
+          finish_q=[
+              q for q in getattr(claim,"floor_finish_quantity_evidence",())
+              if not q.abstained and q.value is not None
+          ]
+
+          # Ceiling review/quantity path is measured independently from floor quantities.
+          ceiling=collect_live_ceiling_lining_claims(
+              pdf,
+              pages=pages,
+              topology_pages=topology,
+              room_area_support_pages=support,
+          )
+          ceiling_q=[
+              q for q in publish_live_ceiling_area_quantities(ceiling)
+              if not q.abstained and q.value is not None
+          ]
+
+          labels=sorted({
+              " ".join(str(r.room_label or "").strip().upper().split())
+              for r in claim.canonical_rooms if str(r.room_label or "").strip()
+          })
+
+          print(json.dumps({
+              "source_sha256":actual,
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "room_labels":labels,
+              "room_area_quantity_count":len(room_rows),
+              "room_area_quantities":room_rows,
+              "floor_area_quantity_count":len(floor_rows),
+              "floor_area_quantities":floor_rows,
+              "floor_finish_quantity_count":len(finish_q),
+              "floor_finish_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "metadata":dict(q.metadata or {}),
+              } for q in finish_q],
+              "canonical_ceiling_count":len(ceiling.canonical_ceilings),
+              "ceiling_status":getattr(ceiling.status,"value",str(ceiling.status)),
+              "ceiling_reason_codes":list(ceiling.reason_codes),
+              "ceiling_quantity_count":len(ceiling_q),
+              "ceiling_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "metadata":dict(q.metadata or {}),
+              } for q in ceiling_q],
+          },indent=2,sort_keys=True))
+          PY
