@@ -138,6 +138,25 @@ def test_word_split_across_consecutive_whole_spans_is_owned_and_trusted() -> Non
     assert decision.trace_sequence_numbers[1] == decision.trace_sequence_numbers[0] + 1
 
 
+def test_adjacent_repeated_tokens_ignore_hairline_trace_bleed() -> None:
+    # PyMuPDF native word bboxes are taller than their text-trace paint bboxes.
+    # With close baselines, repeated tokens on the lower row can geometrically
+    # touch the upper trace by ~0.5% of the word area. That bleed is not source
+    # ownership and must not turn the lower line into TEXT_TRACE_AMBIGUOUS.
+    pdf = _pdf(
+        "BT /F1 7 Tf 88 99 Td (900 - 1200 asw) Tj ET "
+        "BT /F1 7 Tf 88 90 Td (1000 - 1200 asw) Tj ET"
+    )
+    words = _word_texts(pdf)
+    assert words == [
+        "900", "-", "1200", "asw",
+        "1000", "-", "1200", "asw",
+    ]
+    for index, text in enumerate(words):
+        decision = _classify(pdf, index=index)
+        assert decision.trusted, (index, text, decision.reason_codes)
+
+
 def test_two_single_spans_with_unequal_overlap_are_ambiguous_not_ranked() -> None:
     # Two independent paints both contain the same word and overlap the same
     # extracted word box, but by different amounts. A geometric score would
