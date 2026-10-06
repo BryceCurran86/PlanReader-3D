@@ -408,6 +408,11 @@ class SourceRoomFaceRecord:
     polygon_pdf_pts: tuple[Point, ...]
     bounding_wall_ids: tuple[str, ...]
     area_page_pts2: float
+    # Exact producer-owned mapping from each planarized face subedge to its
+    # uniquely authenticated W4 wall owner. This is additive provenance: it
+    # does not change room identity or geometry and lets downstream topology
+    # distinguish one long wall chain from the local edge shared by two cells.
+    boundary_wall_edges: tuple[tuple[str, Edge], ...] = ()
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
 
 
@@ -912,6 +917,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                 polygon_pdf_pts=polygon,
                 bounding_wall_ids=face_walls[face_id],
                 area_page_pts2=face_areas[face_id],
+                boundary_wall_edges=face_wall_edges[face_id],
             )
         )
 
