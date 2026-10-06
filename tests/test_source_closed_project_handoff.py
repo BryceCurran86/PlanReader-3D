@@ -428,11 +428,6 @@ def test_project_handoff_rejects_family_run_from_different_source(
     monkeypatch.setattr(
         handoff,
         "publish_live_floor_area_quantities",
-        lambda claim: (),
-    )
-    monkeypatch.setattr(
-        handoff,
-        "publish_live_floor_area_quantities",
         lambda claim: (floor_q,),
     )
     monkeypatch.setattr(
@@ -476,7 +471,7 @@ def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
         canonical_rooms=(1,),
         canonical_floors=(1,),
         canonical_spaces=(1,),
-        room_area_quantity_evidence=(room_q,),
+        room_area_quantity_evidence=(),
         opening_quantity_evidence=(),
         opening_count_quantity_evidence=(),
     )
@@ -491,11 +486,6 @@ def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
         handoff,
         "collect_ceiling_lining_review_candidates",
         lambda *args, **kwargs: (),
-    )
-    monkeypatch.setattr(
-        handoff,
-        "publish_live_floor_area_quantities",
-        lambda claim: (),
     )
     monkeypatch.setattr(
         handoff,
