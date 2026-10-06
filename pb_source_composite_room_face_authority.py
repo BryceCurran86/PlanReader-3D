@@ -163,20 +163,29 @@ def _room_faces_by_wall(
     }
 
 
-def _faces_share_positive_boundary(left, right) -> bool:
-    """Require real edge adjacency, never point-touch or wall-id reuse alone."""
+def _faces_share_positive_boundary_on_wall(left, right, wall_record) -> bool:
+    """Require a shared edge that lies on the cited grid wall itself."""
 
     try:
         shared = Polygon(left.polygon_pdf_pts).boundary.intersection(
             Polygon(right.polygon_pdf_pts).boundary
         )
+        points = tuple(
+            (float(point[0]), float(point[1]))
+            for point in wall_record.wall_candidate.centerline_pts
+        )
+        if len(points) < 2:
+            return False
+        wall_line = LineString(points)
+        on_wall = shared.intersection(wall_line)
     except Exception:
         return False
-    return not shared.is_empty and float(shared.length) > 1e-6
+    return not on_wall.is_empty and float(on_wall.length) > 1e-6
 
 
 def _grid_local_adjacency(
     room_scope: SourceRoomFaceScopeResult,
+    wall_scope: PhysicalWallCandidateScopeResult,
     fully_grid_wall_ids: set[str],
 ) -> Mapping[str, tuple[tuple[str, str], ...]]:
     """Return local face neighbours proven across a grid wall.
@@ -189,14 +198,22 @@ def _grid_local_adjacency(
 
     room_by_face = {str(record.face_id): record for record in room_scope.records}
     faces_by_wall = _room_faces_by_wall(room_scope)
+    wall_record_by_id = {
+        str(record.wall_candidate_id): record for record in wall_scope.records
+    }
     adjacency: dict[str, set[tuple[str, str]]] = defaultdict(set)
     for wall_id in sorted(fully_grid_wall_ids):
+        wall_record = wall_record_by_id.get(wall_id)
+        if wall_record is None:
+            continue
         owners = faces_by_wall.get(wall_id, ())
         for index, left_id in enumerate(owners):
             left = room_by_face[left_id]
             for right_id in owners[index + 1 :]:
                 right = room_by_face[right_id]
-                if not _faces_share_positive_boundary(left, right):
+                if not _faces_share_positive_boundary_on_wall(
+                    left, right, wall_record
+                ):
                     continue
                 adjacency[left_id].add((right_id, wall_id))
                 adjacency[right_id].add((left_id, wall_id))
@@ -210,6 +227,7 @@ def _grid_connected_component(
     seed_face_ids: tuple[str, ...],
     *,
     room_scope: SourceRoomFaceScopeResult,
+    wall_scope: PhysicalWallCandidateScopeResult,
     fully_grid_wall_ids: set[str],
 ) -> tuple[str, ...] | None:
     """Complete one room through locally-proven drafting-grid separators."""
@@ -219,7 +237,9 @@ def _grid_connected_component(
     if len(seeds) < 2 or any(face_id not in room_by_face for face_id in seeds):
         return None
 
-    adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
+    adjacency = _grid_local_adjacency(
+        room_scope, wall_scope, fully_grid_wall_ids
+    )
     visited: set[str] = {seeds[0]}
     pending = [seeds[0]]
     while pending:
@@ -291,6 +311,7 @@ def _candidate_record(
     constituent_face_ids = _grid_connected_component(
         seed_face_ids,
         room_scope=room_scope,
+        wall_scope=wall_scope,
         fully_grid_wall_ids=fully_grid_wall_ids,
     )
     if constituent_face_ids is None:
@@ -329,7 +350,9 @@ def _candidate_record(
         for wall_id in record.bounding_wall_ids
     )
     component_face_set = set(constituent_face_ids)
-    adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
+    adjacency = _grid_local_adjacency(
+        room_scope, wall_scope, fully_grid_wall_ids
+    )
     separator_wall_ids = {
         wall_id
         for face_id in component_face_set
