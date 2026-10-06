@@ -131,6 +131,7 @@ def generate_project_handoff(
     project_id: str,
     workspace_id: int,
     output_dir: Path,
+    family_group: str = "all",
 ) -> dict[str, Any]:
     if not pdf_path.is_file():
         raise FileNotFoundError(pdf_path)
@@ -139,6 +140,12 @@ def generate_project_handoff(
         raise ValueError("project_id must be non-empty")
     if isinstance(workspace_id, bool) or int(workspace_id) <= 0:
         raise ValueError("workspace_id must be a positive integer")
+
+    clean_family_group = str(family_group or "").strip().lower()
+    if clean_family_group not in {"all", "core", "surfaces"}:
+        raise ValueError(
+            "family_group must be one of: all, core, surfaces"
+        )
 
     source_sha256 = _sha256(pdf_path)
     topology_pages, room_area_support_pages, page_count = _source_page_scopes(
@@ -154,6 +161,17 @@ def generate_project_handoff(
         else "live_authority_all_pages_fallback"
     )
 
+    if clean_family_group == "core" and topology_restricted:
+        execution_pages = tuple(topology_pages)
+        execution_room_support_pages = None
+    else:
+        execution_pages = all_pages
+        execution_room_support_pages = (
+            room_area_support_pages
+            if room_area_support_pages
+            else None
+        )
+
     summary: dict[str, Any] = {
         "schema_version": "1.0.0",
         "project_id": project_id,
@@ -165,6 +183,9 @@ def generate_project_handoff(
             page + 1 for page in room_area_support_pages
         ],
         "topology_mode": topology_mode,
+        "family_group": clean_family_group,
+        "complete_project_handoff": clean_family_group == "all",
+        "execution_pages": [page + 1 for page in execution_pages],
         "status": "unavailable",
         "family_counts": {},
         "family_run_ids": {},
@@ -181,16 +202,12 @@ def generate_project_handoff(
     try:
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
-            pages=all_pages,
+            pages=execution_pages,
             topology_pages=(topology_pages if topology_restricted else None),
-            # Mirror customer runtime: only source-classified evidence pages may
-            # activate cross-view room-area measurement. An empty support scope
-            # means "do not add cross-view metric authority", never "scan all".
-            room_area_support_pages=(
-                room_area_support_pages
-                if room_area_support_pages
-                else None
-            ),
+            # Core-family execution never activates cross-view room-area
+            # measurement. Surface/all execution retains the source-classified
+            # support-page contract.
+            room_area_support_pages=execution_room_support_pages,
         )
     except Exception as exc:
         summary["status"] = "production_failed"
@@ -219,9 +236,12 @@ def generate_project_handoff(
 
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
-    floor_quantities = _non_abstained(
-        publish_live_floor_area_quantities(claim)
-    )
+    if clean_family_group in {"all", "surfaces"}:
+        floor_quantities = _non_abstained(
+            publish_live_floor_area_quantities(claim)
+        )
+    else:
+        floor_quantities = ()
     summary["family_counts"]["floor_area"] = len(floor_quantities)
     if floor_quantities:
         family_runs.append(
@@ -235,9 +255,12 @@ def generate_project_handoff(
             )
         )
 
-    opening_area_quantities = _non_abstained(
-        getattr(claim, "opening_quantity_evidence", ())
-    )
+    if clean_family_group in {"all", "core"}:
+        opening_area_quantities = _non_abstained(
+            getattr(claim, "opening_quantity_evidence", ())
+        )
+    else:
+        opening_area_quantities = ()
     summary["family_counts"]["opening_area"] = len(
         opening_area_quantities
     )
@@ -253,9 +276,12 @@ def generate_project_handoff(
             )
         )
 
-    opening_count_quantities = _non_abstained(
-        getattr(claim, "opening_count_quantity_evidence", ())
-    )
+    if clean_family_group in {"all", "core"}:
+        opening_count_quantities = _non_abstained(
+            getattr(claim, "opening_count_quantity_evidence", ())
+        )
+    else:
+        opening_count_quantities = ()
     summary["family_counts"]["opening_count"] = len(
         opening_count_quantities
     )
@@ -271,15 +297,18 @@ def generate_project_handoff(
             )
         )
 
-    ceiling_candidates = collect_ceiling_lining_review_candidates(
-        pdf_path,
-        pages=(topology_pages if topology_pages else all_pages),
-        workspace_id=int(workspace_id),
-        project_id=project_id,
-        authoritative_area_quantities=tuple(
-            getattr(claim, "room_area_quantity_evidence", ()) or ()
-        ),
-    )
+    if clean_family_group in {"all", "surfaces"}:
+        ceiling_candidates = collect_ceiling_lining_review_candidates(
+            pdf_path,
+            pages=(topology_pages if topology_pages else all_pages),
+            workspace_id=int(workspace_id),
+            project_id=project_id,
+            authoritative_area_quantities=tuple(
+                getattr(claim, "room_area_quantity_evidence", ()) or ()
+            ),
+        )
+    else:
+        ceiling_candidates = ()
     summary["family_counts"]["ceiling_lining"] = len(ceiling_candidates)
     if ceiling_candidates:
         family_runs.append(
@@ -307,7 +336,12 @@ def generate_project_handoff(
             tuple(run for _, run in family_runs),
             project_id=project_id,
         )
-        combined_path = output_dir / f"{project_id}.json"
+        combined_filename = (
+            f"{project_id}.json"
+            if clean_family_group == "all"
+            else f"{project_id}.{clean_family_group}.json"
+        )
+        combined_path = output_dir / combined_filename
         combined_path.write_text(combined.to_json(), encoding="utf-8")
         summary["combined_run_file"] = str(combined_path)
         summary["combined_run_id"] = combined.run_id
@@ -328,6 +362,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--pdf", required=True, type=Path)
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--workspace-id", type=int, default=1)
+    parser.add_argument(
+        "--family-group",
+        choices=("all", "core", "surfaces"),
+        default="all",
+        help=(
+            "Families to seal: all=current behavior, "
+            "core=opening area/count only, surfaces=floor/ceiling only"
+        ),
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser
 
@@ -339,6 +382,7 @@ def main() -> int:
         project_id=args.project_id,
         workspace_id=args.workspace_id,
         output_dir=args.output_dir,
+        family_group=args.family_group,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
