@@ -117,9 +117,7 @@ def collect_source_owned_ceiling_finish_candidates(
         return ()
 
     authority = source_visibility_producer.text_integrity_authority()
-    raster = RasterTextCorroborationProducer.from_source_visibility_producer(
-        source_visibility_producer
-    )
+    raster = None
     line_results: dict[
         tuple[str, int, int],
         list[tuple[int, object, object]],
@@ -200,6 +198,10 @@ def collect_source_owned_ceiling_finish_candidates(
                 ):
                     line_failed = True
                     break
+                if raster is None:
+                    raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+                        source_visibility_producer
+                    )
                 raster_result = raster.publish(
                     RasterTextCorroborationSelector(
                         document_id=published.revision.document_id,
