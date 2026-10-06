@@ -1,0 +1,118 @@
+name: DIAG GPT1 Surface Ceiling Scope
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      matrix:
+        project:
+          - lot16
+          - maryborough
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect surface/ceiling scope
+        env:
+          PROJECT_NAME: \${{ matrix.project }}
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, os
+          from pathlib import Path
+          import fitz
+
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+          from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
+          from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+
+          project=os.environ["PROJECT_NAME"]
+          if project=="lot16":
+              path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+              pages=(2,)
+              topology=(2,)
+              support=()
+          else:
+              path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+              pages=(6,8,10,29,30)
+              topology=(6,29,30)
+              support=(8,10)
+
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=pages,
+              topology_pages=topology,
+              room_area_support_pages=support,
+          )
+          floor_q=publish_live_floor_area_quantities(claim)
+          authoritative_room=tuple(
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          )
+          ceiling=collect_live_ceiling_lining_claims(
+              path,
+              pages=topology,
+              authoritative_room_area_quantities=authoritative_room,
+          )
+          ceiling_q=publish_live_ceiling_area_quantities(ceiling)
+
+          doc=fitz.open(path)
+          viewport_rows=[]
+          try:
+              for index in topology:
+                  page=doc[index]
+                  vps=authoritative_floor_plan_viewports(page,page_number=index+1)
+                  viewport_rows.extend([
+                      {
+                          "page_no":index+1,
+                          "viewport_id":vp.view_id,
+                          "view_type":vp.view_type,
+                          "status":vp.status,
+                          "bbox":list(vp.bounding_box) if vp.bounding_box else None,
+                      }
+                      for vp in vps
+                  ])
+          finally:
+              doc.close()
+
+          payload={
+              "project":project,
+              "canonical_floor_count":len(claim.canonical_floors),
+              "metric_floor_count":sum(
+                  1 for f in claim.canonical_floors
+                  if getattr(f,"metric_area_m2",None) not in (None,0)
+              ),
+              "floor_quantity_count":len([
+                  q for q in floor_q if not q.abstained and q.value is not None
+              ]),
+              "room_area_quantity_count":len(authoritative_room),
+              "room_area_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "metadata":dict(q.metadata or {}),
+              } for q in authoritative_room],
+              "authoritative_floor_plan_viewports":viewport_rows,
+              "ceiling_status":getattr(ceiling.status,"value",str(ceiling.status)),
+              "ceiling_reason_codes":list(ceiling.reason_codes),
+              "canonical_ceiling_count":len(ceiling.canonical_ceilings),
+              "ceiling_shadow_quantity_count":len(ceiling.quantity_evidence),
+              "ceiling_final_quantity_count":len(ceiling_q),
+              "canonical_ceilings":[c.to_dict() for c in ceiling.canonical_ceilings],
+              "ceiling_quantities":[q.to_dict() for q in ceiling_q],
+          }
+          print(json.dumps(payload,indent=2,sort_keys=True,default=str))
+          PY
