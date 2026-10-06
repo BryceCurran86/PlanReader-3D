@@ -3,7 +3,7 @@ name: DIAG Lot16 Hosted Kindless Labels
 on:
   pull_request:
     branches:
-      - gpt4/raster-registration-detector-integration
+      - main
 
 jobs:
   diagnose:
