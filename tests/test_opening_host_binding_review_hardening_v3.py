@@ -252,6 +252,69 @@ def test_local_host_scope_ignores_unrelated_boundary_taint() -> None:
     assert len(resolved.bands) == 1
 
 
+def test_local_host_scope_includes_clean_raster_spanning_candidate() -> None:
+    spanning = _record(
+        "raster-spanning-host",
+        ((-100.0, 0.0), (140.0, 0.0)),
+    )
+    scope = _incomplete_scope((spanning,))
+
+    local, reasons = host._local_boundary_clean_host_scope(
+        scope,
+        OPENING,
+        include_spanning_raster_candidates=True,
+    )
+
+    assert local is not None
+    assert reasons == (host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,)
+    assert tuple(record.wall_candidate_id for record in local.records) == (
+        spanning.wall_candidate_id,
+    )
+    resolved = host._resolve_raster_whole_wall_host(
+        local.records,
+        OPENING,
+        local.equivalence,
+    )
+    assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(resolved.bands) == 1
+    assert resolved.bands[0].member_ids == (spanning.wall_candidate_id,)
+
+
+def test_local_host_scope_does_not_add_spanning_candidate_outside_raster_mode() -> None:
+    spanning = _record(
+        "non-raster-spanning-wall",
+        ((-100.0, 0.0), (140.0, 0.0)),
+    )
+    scope = _incomplete_scope((spanning,))
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
+    assert "no_local_host_wall_candidates" in reasons
+
+
+def test_local_host_scope_blocks_tainted_raster_spanning_candidate() -> None:
+    spanning = _record(
+        "tainted-raster-spanning-host",
+        ((-100.0, 0.0), (140.0, 0.0)),
+    )
+    scope = _incomplete_scope(
+        (spanning,),
+        tainted_ids=(spanning.wall_candidate_id,),
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(
+        scope,
+        OPENING,
+        include_spanning_raster_candidates=True,
+    )
+
+    assert local is None
+    assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
+    assert "host_relevant_wall_boundary_tainted" in reasons
+
+
 def test_local_host_scope_abstains_when_relevant_wall_is_boundary_tainted() -> None:
     host_records = _band_records(center_offset=0.0)
     tainted = host_records[0].wall_candidate_id
