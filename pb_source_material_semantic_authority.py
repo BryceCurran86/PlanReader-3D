@@ -265,6 +265,8 @@ def _bbox_intersects(
 def _trusted_words_by_page(
     source: SourceVisibilityProducer,
     published: object,
+    *,
+    raster: RasterTextCorroborationProducer,
 ) -> dict[str, tuple[_TrustedTextWord, ...]]:
     """Resolve the producer-owned PDF text-integrity receipt for every word."""
 
@@ -320,7 +322,7 @@ def _trusted_words_by_page(
             )
             and TEXT_GLYPH_MAPPING_UNVERIFIED in set(reason_codes)
         ):
-            raster = source._material_text_raster.publish(
+            raster_result = raster.publish(
                 RasterTextCorroborationSelector(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
@@ -330,15 +332,15 @@ def _trusted_words_by_page(
                 )
             )
             if (
-                raster.status is EvidenceResolutionStatus.CORROBORATED
-                and raster.record is not None
-                and raster.corroborated_text
-                and str(raster.corroborated_text).strip()
+                raster_result.status is EvidenceResolutionStatus.CORROBORATED
+                and raster_result.record is not None
+                and raster_result.corroborated_text
+                and str(raster_result.corroborated_text).strip()
                 == str(receipt.raw_text or "").strip()
             ):
-                trusted_text = str(raster.corroborated_text)
+                trusted_text = str(raster_result.corroborated_text)
                 trusted = True
-                reason_codes = tuple(raster.reason_codes or ())
+                reason_codes = tuple(raster_result.reason_codes or ())
 
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
@@ -656,11 +658,11 @@ class SourceMaterialSemanticProducer:
         ] = []
         schedule_universe_complete = True
         schedule_universe_reasons: list[str] = []
-        # Keep the raster corroboration producer attached to the same
-        # SourceVisibilityProducer instance so provenance and render ownership
-        # remain source-bound.
-        self._source._material_text_raster = self._raster
-        trusted_words = _trusted_words_by_page(self._source, published)
+        trusted_words = _trusted_words_by_page(
+            self._source,
+            published,
+            raster=self._raster,
+        )
         raster = RasterTextCorroborationProducer.from_source_visibility_producer(
             self._source
         )
