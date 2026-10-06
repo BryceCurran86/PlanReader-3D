@@ -52,6 +52,7 @@ from pb_raster_opening_source_primitives import (
     MASS_THRESHOLD as RASTER_MASS_THRESHOLD,
     POCHE_MIN_PT as RASTER_POCHE_MIN_PT,
     RASTER_LINE_RUN,
+    RASTER_THIN_INK_RUN,
     RASTER_WALL_BAND_END,
     RASTER_WALL_BAND_FACE,
 )
