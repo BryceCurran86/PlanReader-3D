@@ -1329,10 +1329,10 @@ def _try_physical_net_wall_rows(
     ) -> List[Tuple[Any, ...]]:
         """Project only explicit ceiling-review promotions into customer rows."""
         from pb_ceiling_lining_review_promotion import (
-            collect_ceiling_lining_review_candidates,
+            collect_ceiling_lining_review_bundle,
         )
 
-        candidates = collect_ceiling_lining_review_candidates(
+        bundle = collect_ceiling_lining_review_bundle(
             source_path,
             pages=tuple(claim_pages),
             workspace_id=int(workspace_id),
@@ -1341,9 +1341,35 @@ def _try_physical_net_wall_rows(
                 getattr(claim, "room_area_quantity_evidence", ())
             ),
         )
+        if bundle.canonical_ceilings:
+            try:
+                from pb_live_canonical_coverage_registry import (
+                    collect_live_canonical_coverage,
+                )
+
+                summaries, family_gaps = collect_live_canonical_coverage(
+                    objects=bundle.canonical_ceilings,
+                    quantities=(),
+                    output_rows=(),
+                    registry_run_scope=(
+                        f"customer_workspace:{int(workspace_id)}:ceiling"
+                    ),
+                )
+                current_coverage["summaries"].extend(summaries)
+                for category, reasons in family_gaps.items():
+                    current_coverage["family_gaps"].setdefault(
+                        category, []
+                    ).extend(reasons)
+            except Exception as exc:
+                current_coverage["family_gaps"].setdefault(
+                    "ceiling", []
+                ).append(
+                    "live_ceiling_coverage_collection_failed:"
+                    f"{type(exc).__name__}"
+                )
         return _ceiling_review_rows_from_candidates(
             int(workspace_id),
-            candidates,
+            bundle.candidates,
         )
 
     def record_coverage(claim: Any, row: Optional[Tuple[Any, ...]] = None) -> None:
