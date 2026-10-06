@@ -47,6 +47,7 @@ def _record(
     points: tuple[tuple[float, float], ...],
     *,
     reason_codes: tuple[str, ...] = (),
+    source_primitive_ids: tuple[str, ...] | None = None,
 ) -> PhysicalWallCandidateRecord:
     wall = WallCandidate(
         candidate_id=wall_id,
@@ -73,7 +74,11 @@ def _record(
         viewport_id=wall.viewport_id,
         candidate_identity_id=f"candidate-identity:{wall_id}",
         path_fingerprint=(points[0], points[-1]),
-        source_primitive_ids=(f"source:{wall_id}",),
+        source_primitive_ids=(
+            (f"source:{wall_id}",)
+            if source_primitive_ids is None
+            else source_primitive_ids
+        ),
         edge_ids=(f"edge:{wall_id}",),
         status=EvidenceResolutionStatus.CORROBORATED,
     )
@@ -253,9 +258,12 @@ def test_local_host_scope_ignores_unrelated_boundary_taint() -> None:
 
 
 def test_local_host_scope_includes_clean_raster_spanning_candidate() -> None:
+    # Whole-wall host resolution itself does not require raw source-primitive
+    # lineage. Local-scope admission must therefore not require it either.
     spanning = _record(
         "raster-spanning-host",
         ((-100.0, 0.0), (140.0, 0.0)),
+        source_primitive_ids=(),
     )
     scope = _incomplete_scope((spanning,))
 
