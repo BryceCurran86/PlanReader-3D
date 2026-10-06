@@ -1,0 +1,80 @@
+name: DIAG GPT1 Maryborough Aggregate Lattice Proof
+
+on:
+  pull_request:
+    branches:
+      - gpt1/maryborough-generic-drafting-lattice-v1
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused lattice tests
+        run: |
+          PYTHONPATH=. pytest -q tests/test_physical_wall_candidate_drafting_motif_filter.py
+      - name: Run Maryborough focused room claim
+        run: |
+          mkdir -p artifacts
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/result.json
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,10),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          room_q=tuple(
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          )
+          floor_q=tuple(
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          )
+          print(json.dumps({
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "canonical_space_count":len(claim.canonical_spaces),
+              "room_area_quantity_count":len(room_q),
+              "room_area_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "room_label":dict(q.metadata or {}).get("room_label"),
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "figured_dimension_ids":dict(q.metadata or {}).get("figured_dimension_ids"),
+              } for q in room_q],
+              "floor_area_quantity_count":len(floor_q),
+              "floor_area_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+              } for q in floor_q],
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-aggregate-lattice-proof
+          path: artifacts
+          retention-days: 2
