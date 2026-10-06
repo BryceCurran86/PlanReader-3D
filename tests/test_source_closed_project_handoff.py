@@ -1,6 +1,7 @@
 """Generic project source-closed handoff orchestration tests."""
 from __future__ import annotations
 
+import json
 import hashlib
 from types import SimpleNamespace
 
@@ -268,3 +269,45 @@ def test_project_handoff_rejects_family_run_from_different_source(
             workspace_id=1,
             output_dir=tmp_path / "out",
         )
+
+
+
+def test_project_handoff_persists_blocked_summary_before_extraction_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((), 2))
+
+    def _blocked(*args, **kwargs):
+        raise ValueError("raster opening primitive count exceeds safety bound")
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        _blocked,
+    )
+
+    output = tmp_path / "out"
+    with pytest.raises(
+        ValueError,
+        match="raster opening primitive count exceeds safety bound",
+    ):
+        handoff.generate_project_handoff(
+            pdf_path=pdf,
+            project_id="project-a",
+            workspace_id=1,
+            output_dir=output,
+        )
+
+    summary = json.loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["status"] == "production_extraction_failed"
+    assert summary["extraction_error_type"] == "ValueError"
+    assert (
+        summary["extraction_error"]
+        == "raster opening primitive count exceeds safety bound"
+    )
+    assert summary["combined_run_file"] is None
