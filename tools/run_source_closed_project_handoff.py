@@ -52,12 +52,17 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
-    """Reuse the customer runtime's source-owned topology page scope.
+def _source_page_scopes(
+    path: Path,
+) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+    """Return production topology + cross-view support scopes from source evidence.
 
-    Bound drawing titles and F.07 viewport evidence can narrow topology only
-    when the production page-scope authority has positive evidence on both
-    sides. Otherwise the existing full page universe is retained unchanged.
+    This mirrors the customer runtime contract:
+    - topology narrows only when source classification positively proves it;
+    - cross-view room-area support receives only positively classified evidence
+      pages;
+    - when scope is unavailable/unproven, topology remains the full universe and
+      no extra room-area support pages are invented.
     """
     doc = fitz.open(path)
     try:
@@ -67,16 +72,23 @@ def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
 
     selected = tuple(range(page_count))
     if not selected:
-        return (), page_count
+        return (), (), page_count
 
     scope = source_floor_plan_topology_scope(path, selected)
     if scope is None:
-        return selected, page_count
+        return selected, (), page_count
 
     topology = scope.topology_page_indices()
+    support = tuple(getattr(scope, "evidence_page_indices", ()) or ())
     if topology is None:
-        return selected, page_count
-    return tuple(topology), page_count
+        return selected, (), page_count
+    return tuple(topology), support, page_count
+
+
+def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
+    """Compatibility helper for diagnostics that need only topology pages."""
+    topology, _support, page_count = _source_page_scopes(path)
+    return topology, page_count
 
 
 def _non_abstained(
@@ -126,7 +138,9 @@ def generate_project_handoff(
         raise ValueError("workspace_id must be a positive integer")
 
     source_sha256 = _sha256(pdf_path)
-    topology_pages, page_count = _source_topology_pages(pdf_path)
+    topology_pages, room_area_support_pages, page_count = _source_page_scopes(
+        pdf_path
+    )
     all_pages = tuple(range(page_count))
     topology_mode = (
         "source_classified_scope"
@@ -141,6 +155,9 @@ def generate_project_handoff(
         "source_sha256": source_sha256,
         "page_count": page_count,
         "topology_pages": [page + 1 for page in topology_pages],
+        "room_area_support_pages": [
+            page + 1 for page in room_area_support_pages
+        ],
         "topology_mode": topology_mode,
         "status": "unavailable",
         "family_counts": {},
@@ -160,10 +177,14 @@ def generate_project_handoff(
             pdf_path,
             pages=all_pages,
             topology_pages=(topology_pages if topology_pages else None),
-            # Enable source-owned cross-view room measurement using the complete
-            # source package. The producer itself remains responsible for deciding
-            # which pages/evidence are authoritative.
-            room_area_support_pages=all_pages,
+            # Mirror customer runtime: only source-classified evidence pages may
+            # activate cross-view room-area measurement. An empty support scope
+            # means "do not add cross-view metric authority", never "scan all".
+            room_area_support_pages=(
+                room_area_support_pages
+                if room_area_support_pages
+                else None
+            ),
         )
     except Exception as exc:
         summary["status"] = "production_failed"
