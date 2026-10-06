@@ -1,0 +1,55 @@
+name: DIAG Lot16 Parallel Plan Support
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  slab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Probe slab plan
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_one_support_plan.py --support-index 7 --title "SLAB PLAN" | tee slab.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-slab-support
+          path: slab.json
+          retention-days: 1
+
+  electrical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Probe electrical plan
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_one_support_plan.py --support-index 8 --title "ELECTRICAL & LIGHTING PLAN" | tee electrical.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-electrical-support
+          path: electrical.json
+          retention-days: 1
