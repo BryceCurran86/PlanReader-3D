@@ -1,0 +1,91 @@
+name: DIAG GPT1 Lot16 Surfaces Post1732
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run Lot16 surfaces handoff
+        run: |
+          mkdir -p artifacts/lot16
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"             --project-id au_qld_lot16_power             --workspace-id 1             --family-group surfaces             --output-dir artifacts/lot16             | tee artifacts/lot16/stdout.json
+      - name: Inspect material semantic authority
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+
+          pdf=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          source_bytes=pdf.read_bytes()
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          actual=hashlib.sha256(source_bytes).hexdigest()
+          assert actual==expected
+          with fitz.open(str(pdf)) as doc:
+              page_ids=tuple(str(i+1) for i in range(doc.page_count))
+          source=SourceVisibilityProducer(
+              producer_method="diag_gpt1_lot16_surfaces_post1732",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt1-lot16-surfaces-post1732",
+              source_bytes=source_bytes,
+              source_locator=str(pdf),
+              page_ids=page_ids,
+          )
+          producer=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          authority=producer.publish(published.revision.revision_id)
+          definitions=[]
+          for result in producer._definition_results.values():
+              record=result.record
+              if record is not None:
+                  definitions.append({
+                      "code":record.code,
+                      "description":record.description,
+                      "finish":record.finish,
+                      "semantic_finish":record.semantic_finish,
+                      "source_page_ids":list(record.source_page_ids),
+                  })
+          occurrences=[]
+          for result in producer._occurrence_results.values():
+              for record in result.records:
+                  occurrences.append({
+                      "page_id":record.page_id,
+                      "viewport_id":record.viewport_id,
+                      "code":record.code,
+                      "semantic_finish":record.semantic_finish,
+                      "raw_text":record.raw_text,
+                  })
+          print(json.dumps({
+              "source_sha256":actual,
+              "material_authority_status":getattr(authority.status,"value",str(authority.status)),
+              "definition_count":len(definitions),
+              "occurrence_count":len(occurrences),
+              "definitions":definitions,
+              "occurrences":occurrences[:100],
+          },indent=2,sort_keys=True))
+          PY
+      - name: Print production summary
+        if: always()
+        run: cat artifacts/lot16/production_summary.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-lot16-surfaces-post1732
+          path: artifacts/lot16
+          retention-days: 2
