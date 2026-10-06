@@ -1,0 +1,36 @@
+name: DIAG GPTMAX Lot16 Same View Room Area Proof
+
+on:
+  pull_request:
+    branches:
+      - gpt1/same-view-room-area-authority-v1
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run same-view contract tests
+        run: |
+          PYTHONPATH=. pytest -q tests/test_same_view_room_area_authority_v1.py
+      - name: Run real Lot16 proof
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_lot16_same_view_room_area_proof.py | tee lot16-same-view-room-area-proof.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-same-view-room-area-proof
+          path: lot16-same-view-room-area-proof.json
+          retention-days: 2
