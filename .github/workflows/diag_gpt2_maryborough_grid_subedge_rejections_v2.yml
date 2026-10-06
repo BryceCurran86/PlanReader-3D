@@ -25,7 +25,10 @@ jobs:
           mkdir -p "$OUT"
           PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
           import json
+          from collections import Counter
           from pathlib import Path
+          from shapely.geometry import Polygon
+          from shapely.ops import unary_union
 
           from pb_drawing_evidence_binding import DrawingViewType
           from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
@@ -157,6 +160,68 @@ jobs:
                       room_scope=room_scope,
                       fully_grid_wall_ids=fully,
                   )
+                  final_gate={}
+                  if component is not None:
+                      component_set=set(component)
+                      constituent=[room_by_face[face_id] for face_id in component]
+                      polygons=[Polygon(rec.polygon_pdf_pts) for rec in constituent]
+                      merged=unary_union(polygons)
+                      edge_counts=Counter()
+                      for rec in constituent:
+                          for wall_id,edge in tuple(
+                              getattr(rec,"boundary_wall_edges",()) or ()
+                          ):
+                              key=(str(wall_id),comp._edge_key(edge))
+                              edge_counts[key]+=1
+                      separator_keys=[]
+                      external_keys=[]
+                      invalid_internal_keys=[]
+                      for key,count in sorted(
+                          edge_counts.items(),
+                          key=lambda item:(item[0][0],item[0][1]),
+                      ):
+                          wall_id,edge=key
+                          global_owners=owners.get(key,())
+                          row={
+                              "wall_id":wall_id,
+                              "edge":edge_json(edge),
+                              "grid":wall_id in fully,
+                              "component_count":count,
+                              "global_owners":list(global_owners),
+                          }
+                          if count==2:
+                              if (
+                                  wall_id in fully
+                                  and len(global_owners)==2
+                                  and set(global_owners).issubset(component_set)
+                              ):
+                                  separator_keys.append(row)
+                              else:
+                                  invalid_internal_keys.append(row)
+                          elif count==1:
+                              external_keys.append(row)
+                          else:
+                              invalid_internal_keys.append(row)
+                      external_grid=[
+                          row for row in external_keys if row["grid"]
+                      ]
+                      final_gate={
+                          "merged_type":merged.geom_type,
+                          "merged_empty":bool(merged.is_empty),
+                          "merged_valid":bool(merged.is_valid),
+                          "merged_area":float(merged.area),
+                          "merged_hole_count":(
+                              len(tuple(merged.interiors))
+                              if merged.geom_type=="Polygon" else None
+                          ),
+                          "separator_subedge_count":len(separator_keys),
+                          "external_subedge_count":len(external_keys),
+                          "external_grid_subedge_count":len(external_grid),
+                          "external_grid_subedges":external_grid,
+                          "invalid_internal_subedge_count":
+                              len(invalid_internal_keys),
+                          "invalid_internal_subedges":invalid_internal_keys,
+                      }
                   rows.append({
                       "candidate_id":cand.record_id,
                       "seeds":list(seeds),
@@ -168,6 +233,7 @@ jobs:
                               component,cand,label_scope=label_scope
                           )
                       ),
+                      "final_gate":final_gate,
                       "candidate_record_created":(
                           comp._candidate_record(
                               cand,
