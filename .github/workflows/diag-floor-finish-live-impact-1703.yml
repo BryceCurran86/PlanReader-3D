@@ -1,0 +1,133 @@
+name: DIAG Floor Finish Live Impact 1703
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify Maryborough source SHA
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          print({"sha256":actual,"verified":actual==expected})
+          if actual != expected:
+              raise SystemExit("Maryborough source SHA mismatch")
+          PY
+      - name: Run Maryborough all-family handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/maryborough
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/maryborough \
+            | tee artifacts/maryborough/stdout.json
+      - name: Print Maryborough floor-finish result
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/maryborough")
+          summary=root/"production_summary.json"
+          if summary.exists():
+              data=json.loads(summary.read_text())
+              print("SUMMARY",json.dumps(data,indent=2,sort_keys=True))
+          sealed=root/"au_qld_maryborough_service_station.json"
+          rows=[]
+          if sealed.exists():
+              payload=json.loads(sealed.read_text())
+              rows=[q for q in payload.get("quantities",[]) if q.get("family")=="floor_finish_area"]
+          print("FLOOR_FINISH_ROWS",json.dumps(rows,indent=2,sort_keys=True))
+          print("FLOOR_FINISH_COUNT",len(rows))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: floor-finish-impact-maryborough
+          path: artifacts/maryborough
+          retention-days: 2
+
+  lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify Lot16 source SHA
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          print({"sha256":actual,"verified":actual==expected})
+          if actual != expected:
+              raise SystemExit("Lot16 source SHA mismatch")
+          PY
+      - name: Run Lot16 all-family handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/lot16
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --project-id au_qld_lot16_power \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/lot16 \
+            | tee artifacts/lot16/stdout.json
+      - name: Print Lot16 floor-finish result
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/lot16")
+          summary=root/"production_summary.json"
+          if summary.exists():
+              data=json.loads(summary.read_text())
+              print("SUMMARY",json.dumps(data,indent=2,sort_keys=True))
+          sealed=root/"au_qld_lot16_power.json"
+          rows=[]
+          if sealed.exists():
+              payload=json.loads(sealed.read_text())
+              rows=[q for q in payload.get("quantities",[]) if q.get("family")=="floor_finish_area"]
+          print("FLOOR_FINISH_ROWS",json.dumps(rows,indent=2,sort_keys=True))
+          print("FLOOR_FINISH_COUNT",len(rows))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: floor-finish-impact-lot16
+          path: artifacts/lot16
+          retention-days: 2
