@@ -520,8 +520,18 @@ def compose_live_canonical_rooms(
                     reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
             label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
             label_result = None
-            if page_label_authority is not None:
-                label_result = page_label_authority.resolve_scope(
+            scoped_label_authority = page_label_authority
+            if scoped_label_authority is None:
+                try:
+                    scoped_label_authority = SourceRoomLabelProducer.from_authorities(
+                        source_visibility_producer,
+                        authority,
+                        page_ids=(str(page_id),),
+                    ).authority()
+                except Exception:
+                    scoped_label_authority = None
+            if scoped_label_authority is not None:
+                label_result = scoped_label_authority.resolve_scope(
                     SourceRoomLabelSelector(
                         document_id=selector.document_id,
                         revision_id=selector.revision_id,
@@ -664,8 +674,20 @@ def compose_live_canonical_rooms(
 
                     label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
                     label_result = None
-                    if viewport_label_authority is not None:
-                        label_result = viewport_label_authority.resolve_scope(
+                    scoped_viewport_label_authority = viewport_label_authority
+                    if scoped_viewport_label_authority is None:
+                        try:
+                            scoped_viewport_label_authority = (
+                                SourceRoomLabelProducer.from_authorities(
+                                    source_visibility_producer,
+                                    viewport_room_authority,
+                                    page_ids=(str(page_id),),
+                                ).authority()
+                            )
+                        except Exception:
+                            scoped_viewport_label_authority = None
+                    if scoped_viewport_label_authority is not None:
+                        label_result = scoped_viewport_label_authority.resolve_scope(
                             SourceRoomLabelSelector(
                                 document_id=wall_selector.document_id,
                                 revision_id=wall_selector.revision_id,
