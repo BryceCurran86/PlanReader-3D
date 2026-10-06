@@ -31,9 +31,7 @@ jobs:
           from shapely.geometry import LineString, Polygon, Point
 
           import pb_cross_view_room_area_authority as cv
-          from pb_live_canonical_room_composition import compose_live_canonical_rooms
-          from pb_live_canonical_wall_composition import compose_live_canonical_walls
-          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from pb_source_visibility_authority import SourceVisibilityProducer
 
           SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
@@ -48,30 +46,29 @@ jobs:
               page_ids=("7","11"),
           )
 
-          support_wo=compose_live_wall_opening_authority(
-              source_visibility_producer=source,
-              revision_id=published.revision.revision_id,
-              page_ids=("11",),
-              evidence_page_ids=(),
-          )
-          support_walls=compose_live_canonical_walls(
-              source_visibility_producer=source,
-              wall_opening_composition=support_wo,
-          )
-          support_rooms=compose_live_canonical_rooms(
-              source_visibility_producer=source,
-              wall_opening_composition=support_wo,
-              canonical_wall_ids_by_candidate=support_walls.candidate_to_canonical_wall_id,
-              unresolved_wall_candidate_ids=support_walls.unresolved_wall_candidate_ids,
-          )
-
           def norm(v):
               return " ".join(str(v or "").strip().upper().split())
 
+          # Use the exact live support-view topology composition. Page numbers
+          # in this public integration API are zero-based; A140 is index 10.
+          support_claim=collect_live_physical_net_wall_claim(
+              SOURCE,
+              pages=(10,),
+              topology_pages=(10,),
+              room_area_support_pages=(10,),
+          )
           freezer_rooms=[
-              room for room in support_rooms.rooms
+              room for room in support_claim.canonical_rooms
               if norm(room.room_label)=="FREEZER" and room.geometry_complete
           ]
+          print(json.dumps({
+              "stage":"support_room_candidates",
+              "count":len(freezer_rooms),
+              "labels":sorted({
+                  norm(r.room_label) for r in support_claim.canonical_rooms
+                  if norm(r.room_label)
+              }),
+          },sort_keys=True),flush=True)
           assert len(freezer_rooms)==1, len(freezer_rooms)
           room=freezer_rooms[0]
           polygon=Polygon(room.polygon_pdf_pts)
