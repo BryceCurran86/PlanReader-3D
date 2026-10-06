@@ -22,6 +22,7 @@ permission to delete or demote a physical wall candidate.
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 import math
@@ -215,12 +216,12 @@ def _spacing_support(
     if not gaps:
         return 0.0, 0
 
+    ordered_gaps = tuple(sorted(float(value) for value in gaps))
     candidates = []
-    for gap in gaps:
-        support = sum(
-            1 for other in gaps if abs(float(other) - float(gap)) <= tolerance
-        )
-        candidates.append((support, float(gap)))
+    for gap in ordered_gaps:
+        left = bisect_left(ordered_gaps, gap - tolerance)
+        right = bisect_right(ordered_gaps, gap + tolerance)
+        candidates.append((right - left, gap))
     support, representative = max(
         candidates,
         key=lambda item: (item[0], -item[1]),
@@ -345,11 +346,36 @@ def evaluate_physical_wall_dense_lattice_shadow(
     style_groups: dict[
         tuple[object, ...], dict[str, list[Mapping[str, Any]]]
     ] = defaultdict(lambda: {"horizontal": [], "vertical": []})
+    eligible_source_ids: set[str] = set()
     for segment in eligible_segments:
         style = _style_key(segment)
         orientation = _orientation(segment)
+        raw_id = str(segment.get("id") or "").strip()
         if style is not None and orientation is not None:
             style_groups[style][orientation].append(segment)
+            if raw_id:
+                eligible_source_ids.add(raw_id)
+
+    # Family geometry and spacing are source-scope facts, not candidate facts.
+    # Compute them once per graphic-state family/orientation so a dense sheet
+    # does not repeat the same O(N) census for every W4 candidate.
+    family_summaries: dict[
+        tuple[object, ...],
+        dict[str, tuple[tuple[float, ...], float, int]],
+    ] = {}
+    for style, family in style_groups.items():
+        tolerance = max(float(style[0]), _COORD_TOL)
+        summary: dict[str, tuple[tuple[float, ...], float, int]] = {}
+        for orientation in ("horizontal", "vertical"):
+            coordinates = _distinct_coordinates(
+                tuple(family[orientation]), orientation
+            )
+            spacing, support = _spacing_support(
+                coordinates,
+                tolerance=tolerance,
+            )
+            summary[orientation] = (coordinates, spacing, support)
+        family_summaries[style] = summary
 
     evaluated_ids: list[str] = []
     findings: list[PhysicalWallDenseLatticeFinding] = []
@@ -407,28 +433,22 @@ def evaluate_physical_wall_dense_lattice_shadow(
         if float(style[0]) != minimum_width:
             continue
         if any(
-            segment not in eligible_segments
+            str(segment.get("id") or "") not in eligible_source_ids
             for segment in candidate_segments
         ):
             continue
 
         family = style_groups.get(style)
-        if not family:
+        summary = family_summaries.get(style)
+        if not family or not summary:
             continue
         perpendicular = "vertical" if orientation == "horizontal" else "horizontal"
-        parallel_segments = tuple(family[orientation])
         perpendicular_segments = tuple(family[perpendicular])
-        parallel_coordinates = _distinct_coordinates(
-            parallel_segments, orientation
+        parallel_coordinates, representative_spacing, spacing_support = (
+            summary[orientation]
         )
-        perpendicular_coordinates = _distinct_coordinates(
-            perpendicular_segments, perpendicular
-        )
+        perpendicular_coordinates = summary[perpendicular][0]
         width_tolerance = max(float(style[0]), _COORD_TOL)
-        representative_spacing, spacing_support = _spacing_support(
-            parallel_coordinates,
-            tolerance=width_tolerance,
-        )
         if spacing_support < _MIN_PARALLEL_GAP_SUPPORT:
             continue
         if not _candidate_on_repeated_spacing(
