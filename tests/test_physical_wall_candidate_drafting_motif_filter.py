@@ -459,3 +459,94 @@ def test_irregular_low_contrast_crossing_grid_is_preserved() -> None:
         )
         path_index += 1
     assert _filter(irregular) == tuple(irregular)
+
+
+
+def _fragmented_dense_lattice(
+    *,
+    stroke=(0.5, 0.5, 0.5),
+    width: float = 0.24,
+    spacing: float = 40.0,
+    count: int = 10,
+) -> list[dict]:
+    """One visual lattice line split into several singleton source paths."""
+    lines: list[dict] = []
+    path_index = 3000
+    # 1000pt page: each aggregate line spans 700pt and covers 600pt.
+    horizontal_parts = ((100.0, 300.0), (350.0, 550.0), (600.0, 800.0))
+    vertical_parts = horizontal_parts
+    for index in range(count):
+        coordinate = 120.0 + float(index) * spacing
+        for part, (start, end) in enumerate(horizontal_parts):
+            lines.append(
+                _line(
+                    f"fragmented-h-{index}-{part}",
+                    start,
+                    coordinate,
+                    end,
+                    coordinate,
+                    path_index=path_index,
+                    stroke=stroke,
+                    width=width,
+                )
+            )
+            path_index += 1
+    for index in range(count):
+        coordinate = 120.0 + float(index) * spacing
+        for part, (start, end) in enumerate(vertical_parts):
+            lines.append(
+                _line(
+                    f"fragmented-v-{index}-{part}",
+                    coordinate,
+                    start,
+                    coordinate,
+                    end,
+                    path_index=path_index,
+                    stroke=stroke,
+                    width=width,
+                )
+            )
+            path_index += 1
+    return lines
+
+
+def test_fragmented_dense_low_contrast_lattice_is_excluded() -> None:
+    lattice = _fragmented_dense_lattice()
+    assert _filter(lattice) == ()
+
+
+def test_large_extent_but_low_coverage_ticks_are_preserved() -> None:
+    lines: list[dict] = []
+    path_index = 4000
+    for index in range(10):
+        coordinate = 120.0 + index * 40.0
+        # Two tiny fragments very far apart: huge extent, negligible coverage.
+        for suffix, (start, end) in enumerate(((100.0, 102.0), (798.0, 800.0))):
+            lines.append(
+                _line(
+                    f"ticks-h-{index}-{suffix}",
+                    start,
+                    coordinate,
+                    end,
+                    coordinate,
+                    path_index=path_index,
+                    stroke=(0.5, 0.5, 0.5),
+                    width=0.24,
+                )
+            )
+            path_index += 1
+        for suffix, (start, end) in enumerate(((100.0, 102.0), (798.0, 800.0))):
+            lines.append(
+                _line(
+                    f"ticks-v-{index}-{suffix}",
+                    coordinate,
+                    start,
+                    coordinate,
+                    end,
+                    path_index=path_index,
+                    stroke=(0.5, 0.5, 0.5),
+                    width=0.24,
+                )
+            )
+            path_index += 1
+    assert _filter(lines) == tuple(lines)
