@@ -1,0 +1,77 @@
+name: TEST ONLY GPT2 Maryborough Core Host Scope Proof
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run isolated Maryborough core handoff
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-maryborough-core-host-scope
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --family-group core \
+            --workspace-id 1 \
+            --output-dir "$OUT/run"
+          cat "$OUT/run/production_summary.json"
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          root=Path("artifacts/gpt2-maryborough-core-host-scope/run")
+          summary=json.loads((root/"production_summary.json").read_text())
+          print(json.dumps({
+              "claim_status":summary.get("claim_status"),
+              "claim_reason_codes":summary.get("claim_reason_codes",[]),
+              "canonical_counts":summary.get("canonical_counts",{}),
+              "family_counts":summary.get("family_counts",{}),
+              "family_run_files":summary.get("family_run_files",{}),
+              "combined_run_file":summary.get("combined_run_file"),
+          },indent=2,sort_keys=True))
+          for family in ("opening_area","opening_count"):
+              path=root/"family_runs"/f"{family}.sealed.json"
+              if not path.exists():
+                  print(json.dumps({"family":family,"sealed":False},sort_keys=True))
+                  continue
+              data=json.loads(path.read_text())
+              quantities=data.get("quantities") or data.get("quantity_evidence") or []
+              ids=[]
+              lineage=[]
+              for row in quantities:
+                  if not isinstance(row,dict): continue
+                  ids.append(str(row.get("quantity_id") or row.get("id") or ""))
+                  lineage.append(tuple(row.get("input_entity_ids") or row.get("source_entity_ids") or ()))
+              duplicates=[k for k,v in Counter(ids).items() if k and v>1]
+              lineage_dupes=[list(k) for k,v in Counter(lineage).items() if k and v>1 and k]
+              print(json.dumps({
+                  "family":family,
+                  "sealed":True,
+                  "quantity_count":len(quantities),
+                  "duplicate_quantity_ids":duplicates,
+                  "duplicate_lineage_keys":lineage_dupes,
+              },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-core-host-scope
+          path: artifacts/gpt2-maryborough-core-host-scope
+          retention-days: 1
