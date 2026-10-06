@@ -54,7 +54,7 @@ def _pdf_bytes(*, include_scale_bar: bool) -> bytes:
         # Ratio text exists in both fixtures. It may corroborate a graphic bar,
         # but it must never mint FIRM scale by itself.
         page.insert_text(
-            fitz.Point(390.0, 285.0),
+            fitz.Point(280.0, 220.0),
             "SCALE 1:100",
             fontsize=7.0,
         )
