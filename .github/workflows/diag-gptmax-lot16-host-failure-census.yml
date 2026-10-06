@@ -1,0 +1,33 @@
+name: DIAG GPTMAX Lot16 Host Failure Census
+
+on:
+  pull_request:
+    branches:
+      - gptmax/raster-candidate-closure-current-main
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run Lot16 host failure census
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_lot16_host_failure_census.py | tee lot16-host-failure-census.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-host-failure-census
+          path: lot16-host-failure-census.json
+          retention-days: 2
