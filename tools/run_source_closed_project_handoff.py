@@ -170,18 +170,16 @@ def generate_project_handoff(
     )
 
     if topology_restricted:
-        source_owned_execution_pages = tuple(
-            sorted(set(topology_pages) | set(room_area_support_pages))
-        )
+        # Match the customer runtime contract: every selected source page
+        # remains available as evidence, while only positively classified
+        # floor-plan pages may participate in topology. Room-area measurement
+        # remains narrower still and receives only explicitly approved support
+        # plans. This lets schedules/legends/elevations corroborate semantics
+        # without allowing them to mint wall/room/opening topology.
+        execution_pages = all_pages
         if clean_family_group == "core":
-            execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
         else:
-            execution_pages = (
-                source_owned_execution_pages
-                if source_owned_execution_pages
-                else tuple(topology_pages)
-            )
             execution_room_support_pages = (
                 room_area_support_pages
                 if room_area_support_pages
