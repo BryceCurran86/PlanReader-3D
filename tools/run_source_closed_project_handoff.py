@@ -18,11 +18,12 @@ from typing import Any, Iterable
 
 import fitz
 
-from pb_ceiling_lining_review_promotion import (
-    collect_ceiling_lining_review_candidates,
+from pb_live_ceiling_area_quantity_publication import (
+    publish_live_ceiling_area_quantities,
 )
+from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
+from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
 from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
-from pb_live_ceiling_source_closed_export import seal_live_ceiling_review_run
 from pb_live_opening_count_source_closed_export import (
     seal_live_opening_count_run,
 )
@@ -298,24 +299,27 @@ def generate_project_handoff(
         )
 
     if clean_family_group in {"all", "surfaces"}:
-        ceiling_candidates = collect_ceiling_lining_review_candidates(
+        ceiling_result = collect_live_ceiling_lining_claims(
             pdf_path,
             pages=(topology_pages if topology_pages else all_pages),
-            workspace_id=int(workspace_id),
-            project_id=project_id,
-            authoritative_area_quantities=tuple(
+            authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
         )
+        ceiling_quantities = _non_abstained(
+            publish_live_ceiling_area_quantities(ceiling_result)
+        )
     else:
-        ceiling_candidates = ()
-    summary["family_counts"]["ceiling_lining"] = len(ceiling_candidates)
-    if ceiling_candidates:
+        ceiling_result = None
+        ceiling_quantities = ()
+    summary["family_counts"]["ceiling_area"] = len(ceiling_quantities)
+    if ceiling_quantities and ceiling_result is not None:
         family_runs.append(
             (
-                "ceiling_lining",
-                seal_live_ceiling_review_run(
-                    ceiling_candidates,
+                "ceiling_area",
+                seal_live_ceiling_area_run(
+                    ceiling_result,
+                    workspace_id=int(workspace_id),
                     project_id=project_id,
                 ),
             )
