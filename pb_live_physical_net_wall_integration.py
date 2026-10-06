@@ -61,6 +61,7 @@ from pb_migration_contracts import (
 )
 from pb_migration_provider_envelope import ProviderContext
 from pb_physical_scale_authority import (
+    PHYSICAL_SCALE_VIEWPORT_REQUIRED,
     PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE,
     PhysicalScaleProducer,
     PhysicalScaleSelector,
@@ -447,6 +448,81 @@ def collect_live_physical_net_wall_claim(
             )
             scale_result = scale_producer.publish_scope(scale_selector)
             selected_scale_selector = scale_selector
+
+            # Page-wide room geometry may coexist with one authenticated
+            # drawing viewport. PhysicalScaleAuthority correctly refuses a
+            # page-wide calibration in that case. Bridge only through the
+            # existing producer-owned floor-plan viewport universe when there
+            # is exactly one corroborated viewport whose bbox fully contains
+            # every room polygon in this exact room scope.
+            if (
+                scale_viewport_id is None
+                and scale_result.reason_codes == (
+                    PHYSICAL_SCALE_VIEWPORT_REQUIRED,
+                )
+            ):
+                viewport_wall_producer = (
+                    PhysicalWallCandidateProducer.from_authenticated_viewports(
+                        source,
+                        page_ids=(page_id,),
+                    )
+                )
+                viewport_wall_authority = viewport_wall_producer.authority()
+                viewport_selectors = (
+                    viewport_wall_authority.selectors_for_authenticated_viewports(
+                        document_id=scope_rooms[0].document_id,
+                        revision_id=scope_rooms[0].revision_id,
+                        source_sha256=scope_rooms[0].source_sha256,
+                        snapshot_id=snapshot_id,
+                        page_id=page_id,
+                        view_type=DrawingViewType.FLOOR_PLAN.value,
+                    )
+                )
+                containing_viewports = []
+                for viewport_wall_selector in viewport_selectors:
+                    viewport_wall_scope = viewport_wall_authority.resolve_scope(
+                        viewport_wall_selector
+                    )
+                    bbox = getattr(viewport_wall_scope, "viewport_bbox", None)
+                    viewport_candidate_id = getattr(
+                        viewport_wall_scope, "viewport_id", None
+                    )
+                    if (
+                        viewport_wall_scope.status
+                        is not EvidenceResolutionStatus.CORROBORATED
+                        or not viewport_candidate_id
+                        or bbox is None
+                    ):
+                        continue
+                    try:
+                        x0, y0, x1, y1 = tuple(float(value) for value in bbox)
+                    except (TypeError, ValueError):
+                        continue
+                    if x1 <= x0 or y1 <= y0:
+                        continue
+                    if all(
+                        all(
+                            x0 <= float(point[0]) <= x1
+                            and y0 <= float(point[1]) <= y1
+                            for point in room.polygon_pdf_pts
+                        )
+                        for room in scope_rooms
+                    ):
+                        containing_viewports.append(str(viewport_candidate_id))
+                if len(set(containing_viewports)) == 1:
+                    resolved_viewport_id = next(iter(set(containing_viewports)))
+                    selected_scale_selector = PhysicalScaleSelector(
+                        document_id=scope_rooms[0].document_id,
+                        revision_id=scope_rooms[0].revision_id,
+                        source_sha256=scope_rooms[0].source_sha256,
+                        snapshot_id=snapshot_id,
+                        page_id=page_id,
+                        viewport_id=resolved_viewport_id,
+                    )
+                    scale_result = scale_producer.publish_scope(
+                        selected_scale_selector
+                    )
+
             if scale_result.reason_codes == (
                 PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE,
             ):
