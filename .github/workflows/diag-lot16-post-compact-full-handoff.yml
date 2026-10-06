@@ -1,0 +1,66 @@
+name: DIAG Lot16 Post Compact Full Handoff
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run exact Lot16 all-family source-closed handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/lot16-post-compact
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"             --project-id au_qld_lot16_power             --workspace-id 1             --family-group all             --output-dir artifacts/lot16-post-compact             | tee artifacts/lot16-post-compact/handoff.stdout.json
+      - name: Freeze sealed baseline
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/lot16-post-compact")
+          summary=json.loads((root/"production_summary.json").read_text())
+          if summary.get("status")!="sealed":
+              raise SystemExit(f"handoff not sealed: {summary.get('status')}")
+          if "raster opening primitive count exceeds safety bound" in str(summary.get("production_error_message") or ""):
+              raise SystemExit("primitive safety-bound blocker regressed")
+          sealed=json.loads((root/"au_qld_lot16_power.json").read_text())
+          rows=[
+              q for q in sealed.get("quantities",[])
+              if str(q.get("family") or "")=="opening_area"
+              and not bool(q.get("abstained",False))
+          ]
+          if len(rows) < 5:
+              raise SystemExit(f"expected at least 5 sealed opening areas after merged compact semantics, got {len(rows)}")
+          print("POST_COMPACT_SUMMARY")
+          print(json.dumps({
+              "status":summary.get("status"),
+              "claim_status":summary.get("claim_status"),
+              "canonical_counts":summary.get("canonical_counts"),
+              "family_counts":summary.get("family_counts"),
+              "combined_quantity_count":summary.get("combined_quantity_count"),
+              "source_sha256":summary.get("source_sha256"),
+              "opening_area_count":len(rows),
+              "opening_areas":sorted(float(q["value"]) for q in rows),
+              "opening_identity_refs":[q.get("object_identity_refs") for q in rows],
+          },indent=2,sort_keys=True))
+          PY
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-post-compact-full-handoff
+          path: artifacts/lot16-post-compact
+          retention-days: 2
