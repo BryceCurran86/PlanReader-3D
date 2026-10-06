@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_measurement_input_authority import scale_calibration_fingerprint
 from pb_migration_contracts import (
     DocumentEvidence,
