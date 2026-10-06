@@ -1,0 +1,110 @@
+name: DIAG GPT1 Maryborough Office Annotation Authority
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  office-annotation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Probe Office annotation ownership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_cross_view_room_area_authority import (
+              _trusted_lines_for_page,
+              _trusted_native_dimensions_for_page,
+              _dimension_is_immediate_label_annotation,
+              _figured_pair_scale_consistent,
+              _norm_label,
+          )
+          from pb_dimension_graph_constraint_engine import DimensionOrientation
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="gpt1-office-annotation-probe",
+              producer_version="1.0",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"probe:{hashlib.sha256(payload).hexdigest()[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("11",),
+          )
+          revision_id=published.revision.revision_id
+          exact=_trusted_lines_for_page(
+              source,
+              revision_id=revision_id,
+              page_id="11",
+              candidate_labels=("office",),
+          )
+          annotation=_trusted_lines_for_page(
+              source,
+              revision_id=revision_id,
+              page_id="11",
+              candidate_labels=("office",),
+              allow_compound_annotations=True,
+          )
+          dims=_trusted_native_dimensions_for_page(
+              source,
+              revision_id=revision_id,
+              page_id="11",
+              candidate_lines=exact,
+          )
+          office_lines=tuple(
+              line for line in annotation
+              if _norm_label(line.text)=="office" or "office" in line.label_members
+          )
+          h=tuple(d for d in dims if d.orientation==DimensionOrientation.HORIZONTAL.value)
+          v=tuple(d for d in dims if d.orientation==DimensionOrientation.VERTICAL.value)
+          pairs=[]
+          for line_h in office_lines:
+              for hd in h:
+                  if not _dimension_is_immediate_label_annotation(line_h,hd):
+                      continue
+                  for line_v in office_lines:
+                      for vd in v:
+                          if not _dimension_is_immediate_label_annotation(line_v,vd):
+                              continue
+                          if not any(_norm_label(x.text)=="office" for x in (line_h,line_v)):
+                              continue
+                          pairs.append({
+                              "h":hd.value_mm,
+                              "v":vd.value_mm,
+                              "h_owner":line_h.text,
+                              "v_owner":line_v.text,
+                              "scale_consistent":_figured_pair_scale_consistent(
+                                  page_id="11",horizontal=hd,vertical=vd
+                              ),
+                          })
+          print(json.dumps({
+              "exact_lines":[{
+                  "text":x.text,"block":x.block_no,"line":x.line_no,
+                  "members":list(x.label_members),"bbox":list(x.bbox)
+              } for x in exact],
+              "annotation_lines":[{
+                  "text":x.text,"block":x.block_no,"line":x.line_no,
+                  "members":list(x.label_members),"bbox":list(x.bbox)
+              } for x in annotation],
+              "dimensions":[{
+                  "value_mm":d.value_mm,"orientation":d.orientation,
+                  "block":d.text_block_no,"line":d.text_line_no,
+                  "bbox":None if d.text_bbox is None else list(d.text_bbox),
+              } for d in dims],
+              "owned_pairs":pairs,
+          },indent=2,sort_keys=True))
+          PY
