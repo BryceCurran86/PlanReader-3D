@@ -78,17 +78,21 @@ def _publish_one(
     ):
         return None
 
+    meta = source.metadata if isinstance(source.metadata, Mapping) else {}
     if (
         source.abstained
         or source.value is None
         or source.blocking_reasons
         or _clean(source.quantity_id) != _clean(ceiling.ceiling_quantity_id)
         or _clean(source.family) != "ceiling_lining"
+        or _clean(source.status) != AuthorityStatus.PROVISIONAL.value
+        or _clean(source.authority) != MeasurementAuthorityType.MODEL_DERIVED.value
         or tuple(source.input_entity_ids) != (_clean(ceiling.room_entity_id),)
+        or meta.get("shadow_only") is not True
+        or meta.get("commercial_projection_allowed") is not False
     ):
         return None
 
-    meta = source.metadata if isinstance(source.metadata, Mapping) else {}
     if (
         _clean(meta.get("upstream_area_quantity_id"))
         != _clean(ceiling.room_area_quantity_id)
