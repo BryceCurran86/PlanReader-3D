@@ -36,7 +36,11 @@ def exact_native_lines(page):
 def pair_payload(h,v):
     return {
         "h_id":str(h.dimension_id),"h_mm":float(h.value_mm),
+        "h_endpoints_pt":[list(h.endpoints_pt[0]),list(h.endpoints_pt[1])],
+        "h_witness_geometries":[list(row) for row in h.witness_geometries],
         "v_id":str(v.dimension_id),"v_mm":float(v.value_mm),
+        "v_endpoints_pt":[list(v.endpoints_pt[0]),list(v.endpoints_pt[1])],
+        "v_witness_geometries":[list(row) for row in v.witness_geometries],
         "area_m2_if_owned":round(float(h.value_mm)*float(v.value_mm)/1_000_000.0,9),
     }
 
@@ -166,6 +170,7 @@ def main():
                 "vertical_dimension_count":len(vs),
                 "spatial_pair_count":len(spatial),
                 "scale_consistent_pair_count":len(scaled),
+                "scale_consistent_pairs":scaled,
                 "witness_pair_count":len(witness),
                 "witness_pairs":witness,
                 "annotation_horizontal_count":len(owned_h),
