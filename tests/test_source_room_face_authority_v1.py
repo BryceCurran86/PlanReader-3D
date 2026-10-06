@@ -15,6 +15,7 @@ from pb_source_room_face_authority import (
     SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS,
     SOURCE_ROOM_FACE_SCOPE_RESOLVED,
     SourceRoomFaceSelector,
+    _canonical_polygon,
     _derive_scope,
     _edge,
     _edge_contains_edge,
@@ -83,6 +84,62 @@ def _scope(path: Path):
     )
     return room_authority.resolve_scope(room_selector)
 
+
+
+def test_canonical_polygon_collapses_only_exact_retraced_spur() -> None:
+    clean = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+    with_exact_spur = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (10.0, 8.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+
+    assert _canonical_polygon(with_exact_spur) == _canonical_polygon(clean)
+
+
+def test_canonical_polygon_does_not_collapse_near_backtrack() -> None:
+    near_backtrack = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (10.0, 8.0),
+        (10.000001, 10.0),
+        (0.0, 10.0),
+    )
+
+    result = _canonical_polygon(near_backtrack)
+
+    assert len(result) == 6
+    assert result != _canonical_polygon(
+        ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0))
+    )
+
+
+def test_canonical_polygon_collapses_exact_spur_across_ring_start() -> None:
+    clean = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+    wrapped_spur = (
+        (10.0, 8.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+    )
+
+    assert _canonical_polygon(wrapped_spur) == _canonical_polygon(clean)
 
 def test_two_room_source_plan_publishes_exact_room_faces(tmp_path: Path) -> None:
     path = tmp_path / "two-room.pdf"
