@@ -184,6 +184,7 @@ def generate_project_handoff(
         ],
         "topology_mode": topology_mode,
         "family_group": clean_family_group,
+        "complete_project_handoff": clean_family_group == "all",
         "execution_pages": [page + 1 for page in execution_pages],
         "status": "unavailable",
         "family_counts": {},
@@ -335,7 +336,12 @@ def generate_project_handoff(
             tuple(run for _, run in family_runs),
             project_id=project_id,
         )
-        combined_path = output_dir / f"{project_id}.json"
+        combined_filename = (
+            f"{project_id}.json"
+            if clean_family_group == "all"
+            else f"{project_id}.{clean_family_group}.json"
+        )
+        combined_path = output_dir / combined_filename
         combined_path.write_text(combined.to_json(), encoding="utf-8")
         summary["combined_run_file"] = str(combined_path)
         summary["combined_run_id"] = combined.run_id
