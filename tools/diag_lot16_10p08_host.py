@@ -186,7 +186,8 @@ def main() -> None:
         if geometry is not None:
             row["geometry"] = {
                 "origin": list(geometry.origin),
-                "direction": list(geometry.direction),
+                "axis": list(geometry.axis),
+                "normal": list(geometry.normal),
                 "length": geometry.length,
                 "thickness": geometry.thickness,
             }
