@@ -39,6 +39,13 @@ def _pdf_bytes(*, include_scale_bar: bool) -> bytes:
                 width=1.0,
             )
 
+        page.insert_text(
+            fitz.Point(92.0, 122.0),
+            "CEILING FINISH: CHIPBOARD",
+            fontsize=7.0,
+            color=(0, 0, 0),
+        )
+
         if include_scale_bar:
             span = POINTS_PER_METRE_AT_1_1 / 100.0
             x0, x1, y = 95.0, 95.0 + span, 205.0
@@ -51,10 +58,10 @@ def _pdf_bytes(*, include_scale_bar: bool) -> bytes:
             page.insert_text(fitz.Point(x0 - 2.0, y + 18.0), "0", fontsize=7.0)
             page.insert_text(fitz.Point(x1 - 4.0, y + 18.0), "1m", fontsize=7.0)
 
-        # Ratio text exists in both fixtures. It may corroborate a graphic bar,
-        # but it must never mint FIRM scale by itself.
+        # Ratio text exists in both fixtures. It keeps drawing classification
+        # positive, but it must never mint FIRM scale by itself.
         page.insert_text(
-            fitz.Point(280.0, 220.0),
+            fitz.Point(390.0, 285.0),
             "SCALE 1:100",
             fontsize=7.0,
         )
