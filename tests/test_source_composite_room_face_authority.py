@@ -23,7 +23,7 @@ LINEAGE = dict(
 )
 
 
-def _face(face_id, record_id, polygon, walls):
+def _face(face_id, record_id, polygon, walls, boundary_wall_edges=()):
     area = 0.0
     for index, first in enumerate(polygon):
         second = polygon[(index + 1) % len(polygon)]
@@ -34,6 +34,7 @@ def _face(face_id, record_id, polygon, walls):
         polygon_pdf_pts=tuple(polygon),
         bounding_wall_ids=tuple(walls),
         area_page_pts2=abs(area) * 0.5,
+        boundary_wall_edges=tuple(boundary_wall_edges),
         **LINEAGE,
     )
 
