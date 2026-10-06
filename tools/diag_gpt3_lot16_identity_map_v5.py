@@ -6,11 +6,9 @@ from types import SimpleNamespace
 
 from pb_migration_contracts import stable_contract_id
 from pb_opening_label_dimension_authority import (
-    OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
-    _resolve_owned_dimension_values_mm,
-    _trusted_text_lines,
-    parse_opening_label_dimensions,
+    OpeningLabelDimensionProducer,
 )
+from pb_source_observation_authority import ObservationSelector
 
 
 PROJECT="au_qld_lot16_power"
@@ -34,45 +32,6 @@ def measurement_record_id(row):
             f"expected exactly one opening-label measurement id for {row.get('quantity_id')}: {matches}"
         )
     return matches[0]
-
-
-def candidate_evidence_ids(*, line, physical_id, page_id, viewport_id):
-    parsed=parse_opening_label_dimensions(line.text)
-    if parsed is None:
-        return ()
-    out=[]
-    for semantic_kind in (None,"door","window"):
-        for authenticated_semantic in (False,True):
-            owned=_resolve_owned_dimension_values_mm(
-                parsed,
-                opening_record_id=physical_id,
-                semantic_kind=semantic_kind,
-                authenticated_semantic_evidence=authenticated_semantic,
-            )
-            if owned is None:
-                continue
-            values,compact_used=owned
-            payload={
-                "schema_version":OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
-                "opening_record_id":physical_id,
-                "page_id":page_id,
-                "viewport_id":viewport_id,
-                "source_text_observation_ids":tuple(sorted(line.observation_ids)),
-                "raw_text":parsed.raw_text,
-                "dimension_values_mm":values,
-                "compact_hundreds_used":compact_used,
-                "semantic_kind":semantic_kind,
-            }
-            evidence_id=stable_contract_id(
-                "opening_label_dimension",
-                payload,
-                digest_chars=32,
-            )
-            out.append((evidence_id,payload))
-    unique={}
-    for evidence_id,payload in out:
-        unique.setdefault(evidence_id,payload)
-    return tuple(unique.items())
 
 
 def main():
@@ -181,11 +140,6 @@ def main():
                 f"{target_measurement} != {canonical.figured_area_record_id}"
             )
 
-        # Production may advance the revision to newer derived snapshots after
-        # this opening was canonicalised. Temporarily point the producer's
-        # published snapshot at the exact immutable opening snapshot so the
-        # page-level trusted-text helper sees the same source universe that
-        # minted the sealed measurement record.
         producer=getattr(source,"_producer",None)
         store=getattr(producer,"_store",None)
         published_cache=getattr(source,"_published_by_revision",None)
@@ -197,9 +151,7 @@ def main():
             raise SystemExit(
                 f"{qid}: canonical source snapshot unavailable: {canonical.snapshot_id}"
             )
-        # Diagnostic-only immutable snapshot replay. The text observation ids
-        # are source-native and remain stable across derived snapshots; the
-        # snapshot id controls the receipt/integrity lookup used by production.
+
         historical_published=type(current_published)(
             revision=current_published.revision,
             coverage=current_published.coverage,
@@ -212,34 +164,62 @@ def main():
                 current_published.raster_opening_primitive_observation_ids
             ),
         )
+
         published_cache[canonical.revision_id]=historical_published
         try:
-            scope=SimpleNamespace(
+            selector=ObservationSelector(
                 document_id=canonical.document_id,
                 revision_id=canonical.revision_id,
                 source_sha256=canonical.source_sha256,
                 snapshot_id=canonical.snapshot_id,
-                page_id=canonical.page_id,
+                observation_id=canonical.representative_observation_id,
             )
-            trusted_lines=_trusted_text_lines(source,scope)
+            label_result=(
+                OpeningLabelDimensionProducer
+                .from_source_visibility_producer(source)
+                .publish_scope(selector)
+            )
+            evidence=getattr(label_result,"evidence",None)
+            evidence_matches=[]
+            if (
+                evidence is not None
+                and str(evidence.evidence_id)==target_measurement
+                and tuple(evidence.source_text_observation_ids)
+            ):
+                integrity=source.text_integrity_authority()
+                boxes=[]
+                for observation_id in evidence.source_text_observation_ids:
+                    resolved=integrity.resolve_text(
+                        ObservationSelector(
+                            document_id=canonical.document_id,
+                            revision_id=canonical.revision_id,
+                            source_sha256=canonical.source_sha256,
+                            snapshot_id=canonical.snapshot_id,
+                            observation_id=str(observation_id),
+                        )
+                    )
+                    receipt=getattr(resolved,"receipt",None)
+                    if receipt is None:
+                        continue
+                    geom=tuple(float(v) for v in receipt.geometry)
+                    if len(geom)==4:
+                        boxes.append(geom)
+                if len(boxes)==len(tuple(evidence.source_text_observation_ids)):
+                    bbox=(
+                        min(b[0] for b in boxes),
+                        min(b[1] for b in boxes),
+                        max(b[2] for b in boxes),
+                        max(b[3] for b in boxes),
+                    )
+                    evidence_matches.append({
+                        "measurement_record_id":str(evidence.evidence_id),
+                        "bbox":bbox,
+                        "source_text_observation_ids":tuple(
+                            str(x) for x in evidence.source_text_observation_ids
+                        ),
+                    })
         finally:
             published_cache[canonical.revision_id]=current_published
-
-        evidence_matches=[]
-        for line in trusted_lines:
-            for evidence_id,payload_candidate in candidate_evidence_ids(
-                line=line,
-                physical_id=physical_id,
-                page_id=str(canonical.page_id),
-                viewport_id=canonical.viewport_id,
-            ):
-                if evidence_id == target_measurement:
-                    evidence_matches.append({
-                        "measurement_record_id":evidence_id,
-                        "bbox":tuple(float(v) for v in line.bbox),
-                        "source_text_observation_ids":tuple(line.observation_ids),
-                        "payload":payload_candidate,
-                    })
 
         # A sealed measurement record must resolve to exactly one source label
         # claim. Anything else remains unresolved instead of guessing.
