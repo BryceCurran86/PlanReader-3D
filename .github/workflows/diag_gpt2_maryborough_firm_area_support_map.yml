@@ -1,0 +1,32 @@
+name: DIAG GPT2 Maryborough Firm Area Support Map
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  navigate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Map room labels across classified support views
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-firm-area-support-map
+          git rev-parse HEAD > artifacts/gpt2-maryborough-firm-area-support-map/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-firm-area-support-map/source_sha256.txt
+          PYTHONPATH=. python -u tools/diag_maryborough_firm_area_support_map.py \
+            | tee artifacts/gpt2-maryborough-firm-area-support-map/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-firm-area-support-map
+          path: artifacts/gpt2-maryborough-firm-area-support-map
+          retention-days: 1
