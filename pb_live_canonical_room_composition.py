@@ -14,11 +14,18 @@ from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
-from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateProducer,
+    PhysicalWallCandidateSelector,
+)
 from pb_source_room_face_authority import (
     SourceRoomFaceAuthority,
     SourceRoomFaceSelector,
     build_source_room_face_authority,
+)
+from pb_source_composite_room_face_authority import (
+    SOURCE_COMPOSITE_ROOM_FACE_RESOLVED,
+    compose_grid_separated_room_faces,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_source_room_label_authority import (
@@ -36,6 +43,9 @@ LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL = "live_canonical_room_face_universe_p
 LIVE_CANONICAL_ROOM_UNAVAILABLE = "live_canonical_room_composition_unavailable"
 LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED = (
     "live_canonical_room_viewport_fallback_resolved"
+)
+LIVE_CANONICAL_ROOM_GRID_COMPOSITE_RESOLVED = (
+    "live_canonical_room_grid_composite_resolved"
 )
 
 _ROOM_FACE_AUTHORITY_BINDING_SEAL = object()
@@ -388,6 +398,58 @@ def _room_object_from_record(
     )
 
 
+def _room_object_from_composite_record(
+    record,
+    *,
+    viewport_id: Optional[str],
+    canonical_wall_ids_by_candidate: Optional[Mapping[str, str]],
+    unresolved_wall_candidate_ids: Optional[Collection[str]],
+) -> LiveCanonicalRoomObject:
+    canonical_boundary_ids: tuple[str, ...] = ()
+    wall_relationships_complete = False
+    if canonical_wall_ids_by_candidate is not None:
+        mapped = [
+            str(canonical_wall_ids_by_candidate.get(wall_id) or "")
+            for wall_id in record.bounding_wall_ids
+        ]
+        if mapped and all(mapped):
+            canonical_boundary_ids = tuple(dict.fromkeys(mapped))
+            unresolved_ids = {
+                str(value)
+                for value in (unresolved_wall_candidate_ids or ())
+                if str(value)
+            }
+            wall_relationships_complete = not any(
+                wall_id in unresolved_ids for wall_id in record.bounding_wall_ids
+            )
+
+    physical_room_id = _physical_room_id(record, viewport_id=viewport_id)
+    return LiveCanonicalRoomObject(
+        canonical_room_id=physical_room_id,
+        physical_room_id=physical_room_id,
+        document_id=record.document_id,
+        revision_id=record.revision_id,
+        source_sha256=record.source_sha256,
+        snapshot_id=record.snapshot_id,
+        page_id=record.page_id,
+        viewport_id=viewport_id,
+        decision_scope_id=record.decision_scope_id,
+        polygon_pdf_pts=record.polygon_pdf_pts,
+        bounding_wall_ids=record.bounding_wall_ids,
+        canonical_bounding_wall_ids=canonical_boundary_ids,
+        wall_relationships_complete=wall_relationships_complete,
+        area_page_pts2=float(record.area_page_pts2),
+        source_room_face_record_id=record.record_id,
+        evidence_ids=tuple(record.evidence_ids),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        room_label=str(record.label),
+        room_label_binding_record_id=str(record.label_candidate_record_id),
+        room_label_evidence_ids=tuple(record.label_evidence_ids),
+        room_label_reason_codes=(SOURCE_COMPOSITE_ROOM_FACE_RESOLVED,),
+    )
+
+
 def compose_live_canonical_rooms(
     *,
     source_visibility_producer: SourceVisibilityProducer,
@@ -457,6 +519,7 @@ def compose_live_canonical_rooms(
                 else:
                     reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
             label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
+            label_result = None
             if page_label_authority is not None:
                 label_result = page_label_authority.resolve_scope(
                     SourceRoomLabelSelector(
@@ -472,6 +535,29 @@ def compose_live_canonical_rooms(
                     str(label.face_id): label for label in label_result.records
                 }
 
+            composite_records = ()
+            if label_result is not None and label_result.split_face_candidates:
+                wall_scope = (
+                    wall_opening_composition.physical_wall_candidate_authority.resolve_scope(
+                        PhysicalWallCandidateSelector(
+                            document_id=selector.document_id,
+                            revision_id=selector.revision_id,
+                            source_sha256=selector.source_sha256,
+                            snapshot_id=selector.snapshot_id,
+                            page_id=selector.page_id,
+                            decision_scope_id=selector.decision_scope_id,
+                        )
+                    )
+                )
+                composite_result = compose_grid_separated_room_faces(
+                    wall_scope=wall_scope,
+                    room_scope=result,
+                    label_scope=label_result,
+                )
+                composite_records = composite_result.records
+                if composite_records:
+                    reasons.append(LIVE_CANONICAL_ROOM_GRID_COMPOSITE_RESOLVED)
+
             binding = _authority_binding(authority, selector, result.records)
             if binding is not None:
                 authority_bindings.append(binding)
@@ -485,6 +571,15 @@ def compose_live_canonical_rooms(
                     room_label_record=label_records_by_face.get(str(record.face_id)),
                 )
                 for record in result.records
+            )
+            rooms.extend(
+                _room_object_from_composite_record(
+                    record,
+                    viewport_id=None,
+                    canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
+                    unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
+                )
+                for record in composite_records
             )
         else:
             reasons.extend(result.reason_codes)
@@ -568,6 +663,7 @@ def compose_live_canonical_rooms(
                         continue
 
                     label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
+                    label_result = None
                     if viewport_label_authority is not None:
                         label_result = viewport_label_authority.resolve_scope(
                             SourceRoomLabelSelector(
@@ -583,6 +679,19 @@ def compose_live_canonical_rooms(
                             str(label.face_id): label
                             for label in label_result.records
                         }
+
+                    composite_records = ()
+                    if label_result is not None and label_result.split_face_candidates:
+                        composite_result = compose_grid_separated_room_faces(
+                            wall_scope=wall_scope,
+                            room_scope=room_result,
+                            label_scope=label_result,
+                        )
+                        composite_records = composite_result.records
+                        if composite_records:
+                            reasons.append(
+                                LIVE_CANONICAL_ROOM_GRID_COMPOSITE_RESOLVED
+                            )
 
                     room_selector = SourceRoomFaceSelector(
                         document_id=wall_selector.document_id,
@@ -614,6 +723,15 @@ def compose_live_canonical_rooms(
                             room_label_record=label_records_by_face.get(str(record.face_id)),
                         )
                         for record in room_result.records
+                    )
+                    rooms.extend(
+                        _room_object_from_composite_record(
+                            record,
+                            viewport_id=wall_scope.viewport_id,
+                            canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
+                            unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
+                        )
+                        for record in composite_records
                     )
                     page_resolved = True
                     if not room_result.face_universe_complete:
@@ -673,6 +791,7 @@ __all__ = [
     "LIVE_CANONICAL_ROOM_SCHEMA_VERSION",
     "LIVE_CANONICAL_ROOM_UNAVAILABLE",
     "LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED",
+    "LIVE_CANONICAL_ROOM_GRID_COMPOSITE_RESOLVED",
     "LIVE_PHYSICAL_ROOM_IDENTITY_SCHEMA_VERSION",
     "LiveCanonicalRoomComposition",
     "LiveCanonicalRoomObject",
