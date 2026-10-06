@@ -49,6 +49,10 @@ from pb_live_wall_opening_authority_composition import (
     compose_live_wall_opening_authority,
 )
 from pb_live_whole_wall_role_composition import compose_live_whole_wall_roles
+from pb_cross_view_floor_finish_authority import (
+    CrossViewFloorFinishProducer,
+    enrich_live_canonical_floor_finishes,
+)
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_migration_contracts import (
@@ -113,6 +117,7 @@ class LivePhysicalNetWallClaim:
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    floor_finish_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -348,6 +353,8 @@ def collect_live_physical_net_wall_claim(
     )
 
     room_area_quantity_evidence: list[QuantityEvidence] = []
+    floor_finish_quantity_evidence: list[QuantityEvidence] = []
+    cross_view_area = None
     if canonical_rooms.rooms:
         evidence_by_record = {}
         if room_area_support_selected:
@@ -659,6 +666,24 @@ def collect_live_physical_net_wall_claim(
             )
             room_area_quantity_evidence.extend(bridge.quantities)
 
+    # Floor-finish authority is a downstream consumer of already-authenticated
+    # documented room areas. It must not remeasure or infer a finish. When a
+    # cross-view room area exists, replay the merged source material semantic
+    # authority, bind exactly one explicit floor-role occurrence inside the
+    # proven dimension box, and retain that FIRM quantity on the same canonical
+    # floor identity.
+    if cross_view_area is not None and cross_view_area.records:
+        floor_finishes = CrossViewFloorFinishProducer.from_source(
+            source=source,
+            room_areas=cross_view_area,
+            floors=canonical_floors,
+        ).publish()
+        canonical_floors = enrich_live_canonical_floor_finishes(
+            canonical_floors,
+            floor_finishes,
+        )
+        floor_finish_quantity_evidence.extend(floor_finishes.quantities)
+
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
@@ -750,6 +775,7 @@ def collect_live_physical_net_wall_claim(
             opening_quantity_evidence=opening_quantity_evidence,
             opening_count_quantity_evidence=opening_count_quantity_evidence,
             room_area_quantity_evidence=tuple(room_area_quantity_evidence),
+            floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
         )
 
     return LivePhysicalNetWallClaim(
@@ -787,6 +813,7 @@ def collect_live_physical_net_wall_claim(
         opening_quantity_evidence=opening_quantity_evidence,
         opening_count_quantity_evidence=opening_count_quantity_evidence,
         room_area_quantity_evidence=tuple(room_area_quantity_evidence),
+        floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
     )
 
 
