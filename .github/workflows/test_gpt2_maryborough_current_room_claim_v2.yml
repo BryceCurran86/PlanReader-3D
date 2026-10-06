@@ -1,0 +1,98 @@
+name: TEST ONLY GPT2 Maryborough Current Room Claim V2
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt
+      - name: Run current Maryborough A110 A140 production claim
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-current-room-claim
+          git rev-parse HEAD > artifacts/gpt2-maryborough-current-room-claim/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-current-room-claim/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt2-maryborough-current-room-claim/result.json
+          import json, time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          labels=sorted({
+              " ".join(str(room.room_label or "").strip().upper().split())
+              for room in claim.canonical_rooms
+              if str(room.room_label or "").strip()
+          })
+          firm=[
+              {
+                  "quantity_id":q.quantity_id,
+                  "room_label":dict(q.metadata or {}).get("room_label"),
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "status":q.status,
+                  "evidence_ids":list(q.evidence_ids or ()),
+                  "figured_dimension_ids":list(dict(q.metadata or {}).get("figured_dimension_ids") or ()),
+                  "resolved_scale_id":dict(q.metadata or {}).get("resolved_scale_id"),
+                  "scale_status":dict(q.metadata or {}).get("scale_status"),
+                  "input_entity_ids":list(q.input_entity_ids or ()),
+              }
+              for q in claim.room_area_quantity_evidence
+              if not q.abstained
+          ]
+          floors=[
+              {
+                  "canonical_floor_id":f.canonical_floor_id,
+                  "room_entity_id":f.room_entity_id,
+                  "metric_area_m2":f.metric_area_m2,
+                  "metric_area_quantity_id":f.metric_area_quantity_id,
+                  "metric_area_authority":f.metric_area_authority,
+              }
+              for f in claim.canonical_floors
+              if f.metric_area_m2 is not None
+          ]
+          targets=("FOOD PREP","COLD ROOM","FREEZER","DRY STORE","SALES","WASH UP","FOOD SERVICE","POS COUNTER","M-AMB","F-AMB","TRUCK DRIVER LOUNGE","PWD","AIRLOCK","LAUNDRY","OFFICE")
+          target_rows={}
+          for name in targets:
+              target_rows[name]={
+                  "label_present":name in labels,
+                  "firm_areas":[row for row in firm if " ".join(str(row.get("room_label") or "").strip().upper().split())==name],
+              }
+          print(json.dumps({
+              "elapsed_seconds":time.perf_counter()-started,
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "label_count":len(labels),
+              "labels":labels,
+              "firm_room_area_count":len(firm),
+              "firm_room_areas":firm,
+              "metric_floor_count":len(floors),
+              "metric_floors":floors,
+              "targets":target_rows,
+          },indent=2,sort_keys=True),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-current-room-claim
+          path: artifacts/gpt2-maryborough-current-room-claim
+          retention-days: 1
