@@ -521,6 +521,10 @@ class SourceRoomFaceScopeResult:
     ownership_evaluation: SourceRoomFaceOwnershipEvaluation = field(
         default_factory=SourceRoomFaceOwnershipEvaluation
     )
+    fully_grid_opposed_wall_ids: tuple[str, ...] = ()
+    grid_opposition_evidence_ids_by_wall: tuple[
+        tuple[str, tuple[str, ...]], ...
+    ] = ()
 
     @property
     def face_universe_complete(self) -> bool:
@@ -958,6 +962,33 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         page_id=scope.page_id,
         decision_scope_id=scope.decision_scope_id,
         abstained_faces=abstained,
+        fully_grid_opposed_wall_ids=tuple(
+            sorted(
+                str(value)
+                for value in tuple(
+                    getattr(
+                        scope,
+                        "fully_grid_opposed_wall_candidate_ids",
+                        (),
+                    )
+                    or ()
+                )
+                if str(value)
+            )
+        ),
+        grid_opposition_evidence_ids_by_wall=tuple(
+            sorted(
+                (
+                    str(record.wall_candidate_id),
+                    tuple(sorted(str(v) for v in record.grid_evidence_ids)),
+                )
+                for record in tuple(
+                    getattr(scope, "grid_opposition_records", ()) or ()
+                )
+                if bool(getattr(record, "fully_grid_opposed", False))
+                and str(getattr(record, "wall_candidate_id", ""))
+            )
+        ),
     )
 
 
