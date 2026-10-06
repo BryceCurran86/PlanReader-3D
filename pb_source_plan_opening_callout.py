@@ -79,13 +79,65 @@ def _round_bbox(box: BBox) -> tuple[float, float, float, float]:
     return tuple(round(float(value), 6) for value in box)  # type: ignore[return-value]
 
 
-def _classify_descriptor(tokens: tuple[str, ...]) -> str | None:
-    normalized = {_clean_token(token) for token in tokens}
+def classify_source_opening_descriptor(
+    tokens: Iterable[str],
+) -> tuple[str | None, bool]:
+    """Classify generic opening descriptors without creating an opening.
+
+    The result is syntax/semantic evidence only. A positive kind still requires
+    a separate physical-opening owner before it can affect production output.
+    Conflicting door/window descriptors are reported explicitly so downstream
+    authorities can fail closed instead of selecting one.
+    """
+
+    normalized = {
+        _clean_token(token)
+        for token in tokens
+        if _clean_token(token)
+    }
     has_window = bool(normalized & _WINDOW_TOKENS)
     has_door = bool(normalized & _DOOR_TOKENS)
-    if has_window == has_door:
-        return None
-    return "window" if has_window else "door"
+    if has_window and has_door:
+        return None, True
+    if has_window:
+        return "window", False
+    if has_door:
+        return "door", False
+    return None, False
+
+
+def _classify_descriptor(tokens: tuple[str, ...]) -> str | None:
+    kind, conflict = classify_source_opening_descriptor(tokens)
+    return None if conflict else kind
+
+
+def classify_compact_source_opening_text(
+    text: str,
+) -> tuple[str | None, bool]:
+    """Resolve kind only for one plausible HHWW + descriptor source callout."""
+
+    tokens = tuple(
+        token
+        for token in str(text or "").strip().split()
+        if str(token).strip()
+    )
+    code_indexes = [
+        index
+        for index, token in enumerate(tokens)
+        if _CODE_RE.fullmatch(token)
+    ]
+    if len(code_indexes) != 1:
+        return None, False
+    code_index = code_indexes[0]
+    descriptor_tokens = tuple(
+        token for index, token in enumerate(tokens) if index != code_index
+    )
+    kind, conflict = classify_source_opening_descriptor(descriptor_tokens)
+    if conflict:
+        return None, True
+    if kind is None or _compact_dimensions_mm(tokens[code_index], kind) is None:
+        return None, False
+    return kind, False
 
 
 def _compact_dimensions_mm(
@@ -336,5 +388,7 @@ __all__ = [
     "SOURCE_PLAN_OPENING_CALLOUT_SCHEMA_VERSION",
     "SOURCE_PLAN_OPENING_CALLOUT_UNAVAILABLE",
     "SourcePlanOpeningCallout",
+    "classify_compact_source_opening_text",
+    "classify_source_opening_descriptor",
     "extract_source_plan_opening_callouts",
 ]

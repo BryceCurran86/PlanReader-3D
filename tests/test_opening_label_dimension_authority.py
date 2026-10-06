@@ -385,6 +385,75 @@ def test_producer_expands_compact_dimensions_only_after_physical_ownership() -> 
     assert result.evidence.opening_record_id
     assert result.evidence.source_text_observation_ids
 
+@pytest.mark.parametrize(
+    ("label", "expected_kind", "expected_values", "expected_area"),
+    (
+        ("1218 SGW", "window", (1200.0, 1800.0), 2.16),
+        ("0630 FG", "window", (600.0, 3000.0), 1.8),
+        ("2124 CORNER STACK", "door", (2100.0, 2400.0), 5.04),
+        ("2148 PANEL LIFT", "door", (2100.0, 4800.0), 10.08),
+    ),
+)
+def test_owned_compact_source_descriptors_unlock_dimensions_via_semantics(
+    label: str,
+    expected_kind: str,
+    expected_values: tuple[float, float],
+    expected_area: float,
+) -> None:
+    source, published = _ingest(
+        _pdf(labels=((88.0, 124.0, label),)),
+        "compact-source-descriptor-" + label.lower().replace(" ", "-"),
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.semantic_kind == expected_kind
+    assert result.evidence.dimension_values_mm == expected_values
+    assert result.evidence.area_m2 == pytest.approx(expected_area)
+    assert result.evidence.opening_record_id
+    assert result.evidence.source_text_observation_ids
+
+
+def test_conflicting_compact_descriptor_remains_fail_closed() -> None:
+    source, published = _ingest(
+        _pdf(labels=((88.0, 124.0, "1218 SGW DOOR"),)),
+        "compact-source-descriptor-conflict",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.evidence is None
+
+
+def test_compact_semantic_evidence_only_unlocks_its_owned_source_line() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (88.0, 121.0, "0630 FG"),
+                (88.0, 130.0, "2110 UNKNOWN"),
+            )
+        ),
+        "compact-semantic-line-ownership",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.raw_text == "0630 FG"
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.dimension_values_mm == (600.0, 3000.0)
+    assert result.evidence.area_m2 == pytest.approx(1.8)
+
+
 def test_owned_legend_semantics_unlock_four_digit_compact_dimensions() -> None:
     payload = _pdf(
         labels=(
