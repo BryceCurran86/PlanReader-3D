@@ -1,0 +1,115 @@
+name: DIAG GPT1 Maryborough Partition Ownership
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Audit source partition ownership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          targets={"FREEZER","SALES","FOOD SERVICE","POS COUNTER","FOOD PREP","COLD ROOM"}
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(producer_method="gpt1-partition-ownership",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-partition-ownership",
+              source_bytes=path.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          labels={}
+          for room in rooms.rooms:
+              label=norm(room.room_label)
+              if label in targets:
+                  labels.setdefault(label,[]).append(room)
+          unique={k:v[0] for k,v in labels.items() if len(v)==1}
+
+          trusted_lines=cv._trusted_lines_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_labels=tuple(unique),
+          )
+          out={"canonical_room_count":len(rooms.rooms),"labels":{}}
+          for label,room in sorted(unique.items()):
+              relevant=tuple(x for x in trusted_lines if norm(x.text)==label)
+              dims=cv._trusted_native_dimensions_for_page(
+                  source,
+                  revision_id=published.revision.revision_id,
+                  page_id="11",
+                  candidate_lines=relevant,
+              ) if relevant else ()
+              rows=[]
+              for d in dims:
+                  rows.append({
+                      "id":d.dimension_id,
+                      "orientation":d.orientation,
+                      "value_mm":d.value_mm,
+                      "text_partition":d.text_source_partition_id,
+                      "text_block":d.text_block_no,
+                      "text_line":d.text_line_no,
+                      "text_word":d.text_word_no,
+                      "endpoints":[list(d.endpoints_pt[0]),list(d.endpoints_pt[1])],
+                      "immediate_to":[
+                          {
+                              "label_partition":line.source_partition_id,
+                              "label_block":line.block_no,
+                              "label_line":line.line_no,
+                          }
+                          for line in relevant
+                          if cv._dimension_is_immediate_label_annotation(line,d)
+                      ],
+                  })
+              out["labels"][label]={
+                  "physical_room_id":room.physical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "support_lines":[{
+                      "bbox":list(line.bbox),
+                      "partition":line.source_partition_id,
+                      "block":line.block_no,
+                      "line":line.line_no,
+                      "receipt_ids":list(line.receipt_ids),
+                  } for line in relevant],
+                  "dimensions":rows,
+              }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
