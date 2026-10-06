@@ -655,6 +655,113 @@ def _segment_source_luminance(
     return (float(color[0]) + float(color[1]) + float(color[2])) / 3.0
 
 
+def _candidate_has_complete_witness_system(
+    candidate: ObservedGeometrySegment,
+    same_scope: Sequence[ObservedGeometrySegment],
+    calibration: DimensionLayoutCalibration,
+) -> bool:
+    """True only when both physical endpoints have distinct witness support.
+
+    This is a tie-break proof only. It does not create dimension semantics or
+    measurement authority by itself; the figured-text observation already owns
+    those semantics. Coincident witness fragments are collapsed at exact source
+    geometry tolerance, matching the final binder's endpoint logic.
+    """
+    witness_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
+    for segment in same_scope:
+        if segment.segment_id == candidate.segment_id:
+            continue
+        intersection = _intersection_with_perpendicular(
+            candidate,
+            segment,
+            calibration.witness_endpoint_distance_pt,
+        )
+        if intersection is not None:
+            witness_hits.append((segment, intersection))
+
+    coincidence_tolerance = 1e-3
+    unique_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
+    for segment, point in sorted(
+        witness_hits,
+        key=lambda hit: (hit[1][0], hit[1][1], hit[0].segment_id),
+    ):
+        if not any(
+            math.hypot(point[0] - prior[0], point[1] - prior[1])
+            <= coincidence_tolerance
+            for _, prior in unique_hits
+        ):
+            unique_hits.append((segment, point))
+
+    if candidate.orientation == DimensionOrientation.HORIZONTAL.value:
+        start_coord, end_coord = sorted((candidate.start[0], candidate.end[0]))
+        along = lambda hit: hit[1][0]
+    elif candidate.orientation == DimensionOrientation.VERTICAL.value:
+        start_coord, end_coord = sorted((candidate.start[1], candidate.end[1]))
+        along = lambda hit: hit[1][1]
+    else:
+        return False
+
+    def nearest(target: float):
+        eligible = [
+            hit
+            for hit in unique_hits
+            if abs(along(hit) - target)
+            <= calibration.witness_endpoint_distance_pt
+        ]
+        if not eligible:
+            return None
+        return min(
+            eligible,
+            key=lambda hit: (
+                abs(along(hit) - target),
+                hit[0].segment_id,
+            ),
+        )
+
+    first = nearest(start_coord)
+    last = nearest(end_coord)
+    return (
+        first is not None
+        and last is not None
+        and first[1] != last[1]
+    )
+
+
+def _unique_orientation_witness_winner(
+    candidates: Sequence[ObservedGeometrySegment],
+    *,
+    text_orientation_hint: Optional[str],
+    same_scope: Sequence[ObservedGeometrySegment],
+    calibration: DimensionLayoutCalibration,
+) -> Optional[ObservedGeometrySegment]:
+    """Return one source-proven orientation winner from an otherwise tied set.
+
+    Native text orientation is never sufficient alone. The winner must be the
+    only tied candidate with the same native orientation AND must independently
+    prove a complete two-endpoint witness system.
+    """
+    if text_orientation_hint not in (
+        DimensionOrientation.HORIZONTAL.value,
+        DimensionOrientation.VERTICAL.value,
+    ):
+        return None
+    hinted = [
+        candidate
+        for candidate in candidates
+        if candidate.orientation == text_orientation_hint
+    ]
+    if len(hinted) != 1:
+        return None
+    candidate = hinted[0]
+    if not _candidate_has_complete_witness_system(
+        candidate,
+        same_scope,
+        calibration,
+    ):
+        return None
+    return candidate
+
+
 def _strict_style_dominator(
     candidates: Sequence[ObservedGeometrySegment],
 ) -> Optional[ObservedGeometrySegment]:
@@ -782,8 +889,28 @@ def bind_observation_to_vector_geometry(
                 # foreground drafting primitive while every competitor is both
                 # lighter and thinner. This is only a strict tie-break; absent
                 # unanimous dominance, preserve the historical abstention.
+                orientation_winner = _unique_orientation_witness_winner(
+                    tied,
+                    text_orientation_hint=text_orientation_hint,
+                    same_scope=same_scope,
+                    calibration=calibration,
+                )
                 style_winner = _strict_style_dominator(tied)
-                if style_winner is None:
+                if (
+                    orientation_winner is not None
+                    and style_winner is not None
+                    and orientation_winner.segment_id != style_winner.segment_id
+                ):
+                    return DimensionAnchorBinding(
+                        observation.dimension_id,
+                        BindingStatus.AMBIGUOUS.value,
+                        notes=[
+                            "native orientation+witness proof conflicts with "
+                            "source graphic-state tie-break"
+                        ],
+                    )
+                winner = orientation_winner or style_winner
+                if winner is None:
                     return DimensionAnchorBinding(
                         observation.dimension_id,
                         BindingStatus.AMBIGUOUS.value,
@@ -792,7 +919,7 @@ def bind_observation_to_vector_geometry(
                             + ", ".join(item.segment_id for item in tied)
                         ],
                     )
-                best = style_winner
+                best = winner
 
     witness_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
     for segment in same_scope:
