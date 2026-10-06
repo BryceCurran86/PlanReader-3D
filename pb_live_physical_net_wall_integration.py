@@ -479,7 +479,9 @@ def collect_live_physical_net_wall_claim(
                         view_type=DrawingViewType.FLOOR_PLAN.value,
                     )
                 )
-                containing_viewports = []
+                containing_viewports: dict[
+                    str, tuple[float, float, float, float]
+                ] = {}
                 for viewport_wall_selector in viewport_selectors:
                     viewport_wall_scope = viewport_wall_authority.resolve_scope(
                         viewport_wall_selector
@@ -509,9 +511,13 @@ def collect_live_physical_net_wall_claim(
                         )
                         for room in scope_rooms
                     ):
-                        containing_viewports.append(str(viewport_candidate_id))
-                if len(set(containing_viewports)) == 1:
-                    resolved_viewport_id = next(iter(set(containing_viewports)))
+                        containing_viewports[str(viewport_candidate_id)] = (
+                            x0, y0, x1, y1
+                        )
+                if len(containing_viewports) == 1:
+                    resolved_viewport_id, resolved_viewport_bbox = next(
+                        iter(containing_viewports.items())
+                    )
                     selected_scale_selector = PhysicalScaleSelector(
                         document_id=scope_rooms[0].document_id,
                         revision_id=scope_rooms[0].revision_id,
@@ -523,6 +529,49 @@ def collect_live_physical_net_wall_claim(
                     scale_result = scale_producer.publish_scope(
                         selected_scale_selector
                     )
+                    if (
+                        scale_result.status
+                        is EvidenceResolutionStatus.CORROBORATED
+                    ):
+                        viewport = ViewportEvidence(
+                            viewport_id=resolved_viewport_id,
+                            document_id=scope_rooms[0].document_id,
+                            page_id=page_id,
+                            bbox=resolved_viewport_bbox,
+                            view_type=DrawingViewType.FLOOR_PLAN.value,
+                            status=ViewportResolutionStatus.RESOLVED,
+                            evidence_ids=(),
+                            confidence=1.0,
+                            reason_codes=(
+                                "producer_owned_authenticated_floor_plan_viewport",
+                            ),
+                        )
+                        context = ProviderContext(
+                            run_id=stable_contract_id(
+                                "live_room_area_run",
+                                {
+                                    "document_id": scope_rooms[0].document_id,
+                                    "revision_id": scope_rooms[0].revision_id,
+                                    "snapshot_id": snapshot_id,
+                                    "page_id": page_id,
+                                    "decision_scope_id": decision_scope_id,
+                                    "viewport_id": resolved_viewport_id,
+                                },
+                            ),
+                            workspace_id="live-extractor",
+                            project_id="live-extractor",
+                            document_id=scope_rooms[0].document_id,
+                            source_sha256=scope_rooms[0].source_sha256,
+                            revision_id=scope_rooms[0].revision_id,
+                            current_revision_id=scope_rooms[0].revision_id,
+                            selected_pages=(page_no - 1,),
+                            owned_viewport_ids=(resolved_viewport_id,),
+                            evidence_snapshot_id=snapshot_id,
+                            owned_page_numbers=(page_no,),
+                            viewport_page_ownership=(
+                                (resolved_viewport_id, page_no),
+                            ),
+                        )
 
             if scale_result.reason_codes == (
                 PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE,
