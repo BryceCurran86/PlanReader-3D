@@ -64,16 +64,17 @@ _COMPACT_CODE_RE = re.compile(
     re.IGNORECASE,
 )
 _WINDOW_TOKEN_RE = re.compile(
-    r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|WINDOWS?)\b",
+    r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|SGW|FG|WINDOWS?)\b",
     re.IGNORECASE,
 )
 _DOOR_TOKEN_RE = re.compile(
-    r"\b(?:ASD|ASSD|VSD|CS)\b|\b(?:PANEL\s+LIFT\s+)?DOORS?\b",
+    r"\b(?:ASD|ASSD|VSD|CS|STACK|STACKER)\b|"
+    r"\bPANEL[\s-]+LIFT(?:\s+DOOR)?\b|\bDOORS?\b",
     re.IGNORECASE,
 )
 _OPENING_MODIFIER_TOKEN_RE = re.compile(
-    r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|ASD|ASSD|VSD|CS|OBS|"
-    r"PANEL|LIFT|DOOR|WINDOW)\b",
+    r"\b(?:ASW|AAW|ADH|ADHW|ASHW|AFW|ALW|SGW|FG|ASD|ASSD|VSD|CS|"
+    r"STACK|STACKER|OBS|PANEL|LIFT|DOOR|WINDOW)\b",
     re.IGNORECASE,
 )
 _ALLOWED_TAIL_RE = re.compile(
