@@ -727,39 +727,74 @@ def _candidate_has_complete_witness_system(
     )
 
 
+def _candidate_brackets_text_span(
+    candidate: ObservedGeometrySegment,
+    observation_bbox: Sequence[float],
+    *,
+    text_orientation_hint: Optional[str],
+    calibration: DimensionLayoutCalibration,
+) -> bool:
+    """Whether one source line spans beyond both ends of its figured text.
+
+    This is only a positive tie-break witness. A nearby same-orientation line
+    does not win unless it independently encloses the native text extent along
+    the dimension axis with a small producer-derived margin.
+    """
+    if len(observation_bbox) < 4:
+        return False
+    margin = calibration.median_word_height_pt * 0.25
+    if text_orientation_hint == DimensionOrientation.HORIZONTAL.value:
+        lo, hi = sorted((float(candidate.start[0]), float(candidate.end[0])))
+        return (
+            lo <= float(observation_bbox[0]) - margin
+            and hi >= float(observation_bbox[2]) + margin
+        )
+    if text_orientation_hint == DimensionOrientation.VERTICAL.value:
+        lo, hi = sorted((float(candidate.start[1]), float(candidate.end[1])))
+        return (
+            lo <= float(observation_bbox[1]) - margin
+            and hi >= float(observation_bbox[3]) + margin
+        )
+    return False
+
+
 def _unique_orientation_witness_winner(
     candidates: Sequence[ObservedGeometrySegment],
     *,
+    observation_bbox: Sequence[float],
     text_orientation_hint: Optional[str],
     same_scope: Sequence[ObservedGeometrySegment],
     calibration: DimensionLayoutCalibration,
 ) -> Optional[ObservedGeometrySegment]:
-    """Return one source-proven orientation winner from an otherwise tied set.
+    """Return one source-proven orientation+witness+span winner.
 
-    Native text orientation is never sufficient alone. The winner must be the
-    only tied candidate with the same native orientation AND must independently
-    prove a complete two-endpoint witness system.
+    Native text orientation is never sufficient alone. The winner must match
+    native text orientation, independently prove a complete two-endpoint
+    witness system, and physically bracket the native text span. If more than
+    one tied candidate satisfies all three source predicates, remain ambiguous.
     """
     if text_orientation_hint not in (
         DimensionOrientation.HORIZONTAL.value,
         DimensionOrientation.VERTICAL.value,
     ):
         return None
-    hinted = [
+    proven = [
         candidate
         for candidate in candidates
         if candidate.orientation == text_orientation_hint
+        and _candidate_has_complete_witness_system(
+            candidate,
+            same_scope,
+            calibration,
+        )
+        and _candidate_brackets_text_span(
+            candidate,
+            observation_bbox,
+            text_orientation_hint=text_orientation_hint,
+            calibration=calibration,
+        )
     ]
-    if len(hinted) != 1:
-        return None
-    candidate = hinted[0]
-    if not _candidate_has_complete_witness_system(
-        candidate,
-        same_scope,
-        calibration,
-    ):
-        return None
-    return candidate
+    return proven[0] if len(proven) == 1 else None
 
 
 def _strict_style_dominator(
@@ -891,6 +926,7 @@ def bind_observation_to_vector_geometry(
                 # unanimous dominance, preserve the historical abstention.
                 orientation_winner = _unique_orientation_witness_winner(
                     tied,
+                    observation_bbox=observation.bbox,
                     text_orientation_hint=text_orientation_hint,
                     same_scope=same_scope,
                     calibration=calibration,
