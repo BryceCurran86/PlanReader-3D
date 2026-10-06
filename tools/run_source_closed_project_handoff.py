@@ -347,7 +347,11 @@ def generate_project_handoff(
     if clean_family_group in {"all", "surfaces"}:
         ceiling_result = collect_live_ceiling_lining_claims(
             pdf_path,
-            pages=(topology_pages if topology_pages else all_pages),
+            # Keep the complete source evidence universe available to ceiling
+            # semantics. The collector still mints room/ceiling geometry only
+            # from positively resolved floor-plan viewports, so evidence pages
+            # do not become topology.
+            pages=execution_pages,
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
