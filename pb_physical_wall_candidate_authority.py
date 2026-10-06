@@ -798,6 +798,7 @@ def _dense_drafting_lattice_segment_ids(
     *,
     page_width: float,
     page_height: float,
+    precomputed_angles: Optional[Mapping[int, float]] = None,
 ) -> set[int]:
     """Prove long low-contrast orthogonal source lattices as non-wall drafting.
 
@@ -833,7 +834,12 @@ def _dense_drafting_lattice_segment_ids(
         x1, y1, x2, y2 = _segment_geometry(segment)
         dx = abs(x2 - x1)
         dy = abs(y2 - y1)
-        angle = _segment_angle_deg(segment)
+        angle = (
+            float(precomputed_angles[id(segment)])
+            if precomputed_angles is not None
+            and id(segment) in precomputed_angles
+            else _segment_angle_deg(segment)
+        )
         if min(abs(angle), abs(angle - 180.0)) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG:
             if dx < page_width * _DRAFTING_LATTICE_MIN_AXIS_SPAN_FRACTION:
                 continue
@@ -909,12 +915,6 @@ def _filter_repeated_non_physical_drafting_primitives(
         and path_counts.get(segment.get("path_index"), 0) == 1
     )
     singleton_ids = {id(segment) for segment in singleton_lines}
-    drafting_lattice_ids = _dense_drafting_lattice_segment_ids(
-        singleton_lines,
-        page_width=page_width,
-        page_height=page_height,
-    )
-
     # Dense CAD pages can contain tens of thousands of singleton primitives.
     # Length, angle and the two motif keys are pure functions of one immutable
     # source segment, so compute them once and reuse them in every census and
@@ -944,6 +944,16 @@ def _filter_repeated_non_physical_drafting_primitives(
         )
         signature_counts[signature] += 1
         by_style_length[style_length][angle_key] += 1
+
+    drafting_lattice_ids = _dense_drafting_lattice_segment_ids(
+        singleton_lines,
+        page_width=page_width,
+        page_height=page_height,
+        precomputed_angles={
+            segment_id: values[1]
+            for segment_id, values in motif_by_segment_id.items()
+        },
+    )
 
     multi_angle_styles = {
         style
