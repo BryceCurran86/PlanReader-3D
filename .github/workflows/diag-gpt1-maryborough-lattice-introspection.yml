@@ -1,0 +1,115 @@
+name: DIAG GPT1 Maryborough Lattice Introspection
+
+on:
+  pull_request:
+    branches:
+      - gpt1/maryborough-generic-drafting-lattice-v1
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect page source lattice structure
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+          import fitz
+
+          import pb_physical_wall_candidate_authority as wall
+          from pb_vector_geometry_v130 import extract_native_page
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(path)
+          try:
+              page=doc[6]
+              native=extract_native_page(page)
+              width=float(page.rect.width)
+              height=float(page.rect.height)
+          finally:
+              doc.close()
+
+          segments=[dict(row) for row in (native.get("segments") or ())]
+          path_counts=Counter(row.get("path_index") for row in segments)
+          singleton=[
+              row for row in segments
+              if str(row.get("kind") or "")=="line"
+              and path_counts.get(row.get("path_index"),0)==1
+          ]
+          low=[]
+          for row in singleton:
+              key=wall._drafting_lattice_stroke_key(row)
+              if key is not None:
+                  x1,y1,x2,y2=wall._segment_geometry(row)
+                  length=wall._segment_length(row)
+                  angle=wall._segment_angle_deg(row)
+                  low.append({
+                      "id":row.get("id"),
+                      "path_index":row.get("path_index"),
+                      "style":key,
+                      "length":round(length,3),
+                      "angle":round(angle,3),
+                      "x1":round(x1,3),"y1":round(y1,3),
+                      "x2":round(x2,3),"y2":round(y2,3),
+                      "stroke_present":row.get("stroke_present"),
+                      "width_present":row.get("width_present"),
+                  })
+          lattice_ids=wall._dense_drafting_lattice_segment_ids(
+              singleton,page_width=width,page_height=height
+          )
+          filtered=wall._filter_repeated_non_physical_drafting_primitives(
+              segments,page_width=width,page_height=height
+          )
+
+          style_stats={}
+          grouped=defaultdict(lambda:{"h":[],"v":[],"other":[]})
+          for row in low:
+              style=tuple(row["style"])
+              a=row["angle"]
+              if min(abs(a),abs(a-180.0))<=2.0:
+                  grouped[style]["h"].append(row)
+              elif abs(a-90.0)<=2.0:
+                  grouped[style]["v"].append(row)
+              else:
+                  grouped[style]["other"].append(row)
+          for style,fams in grouped.items():
+              style_stats[str(style)]={
+                  "horizontal_count":len(fams["h"]),
+                  "vertical_count":len(fams["v"]),
+                  "other_count":len(fams["other"]),
+                  "horizontal_length_minmax":(
+                      [min(r["length"] for r in fams["h"]),max(r["length"] for r in fams["h"])]
+                      if fams["h"] else []
+                  ),
+                  "vertical_length_minmax":(
+                      [min(r["length"] for r in fams["v"]),max(r["length"] for r in fams["v"])]
+                      if fams["v"] else []
+                  ),
+                  "horizontal_y_sample":[r["y1"] for r in fams["h"][:30]],
+                  "vertical_x_sample":[r["x1"] for r in fams["v"][:30]],
+              }
+
+          payload={
+              "page_width":width,
+              "page_height":height,
+              "raw_segment_count":len(segments),
+              "singleton_line_count":len(singleton),
+              "low_contrast_hairline_count":len(low),
+              "lattice_excluded_count":len(lattice_ids),
+              "filtered_count":len(filtered),
+              "style_stats":style_stats,
+              "sample_low_contrast":low[:100],
+          }
+          print(json.dumps(payload,indent=2,sort_keys=True))
+          PY
