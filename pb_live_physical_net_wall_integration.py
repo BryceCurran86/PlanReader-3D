@@ -136,6 +136,71 @@ def _selected_page_indices(
     return selected
 
 
+def _unique_authenticated_containing_floor_plan_viewport(
+    *,
+    source: SourceVisibilityProducer,
+    scope_rooms: Sequence[LiveCanonicalRoomObject],
+    page_id: str,
+    snapshot_id: str,
+) -> Optional[tuple[str, tuple[float, float, float, float]]]:
+    """Return one producer-owned floor-plan viewport that owns the whole room scope.
+
+    Page-scoped room faces can be valid even when viewport segmentation was not
+    needed to mint them. Downstream surface families, however, require exact
+    viewport identity. Reuse that identity only when the existing authenticated
+    viewport authority proves exactly one floor-plan viewport whose bounds
+    contain every polygon in this room scope. Zero or multiple owners remain
+    unresolved.
+    """
+    if not scope_rooms:
+        return None
+    first = scope_rooms[0]
+    viewport_wall_producer = (
+        PhysicalWallCandidateProducer.from_authenticated_viewports(
+            source,
+            page_ids=(str(page_id),),
+        )
+    )
+    viewport_wall_authority = viewport_wall_producer.authority()
+    selectors = viewport_wall_authority.selectors_for_authenticated_viewports(
+        document_id=first.document_id,
+        revision_id=first.revision_id,
+        source_sha256=first.source_sha256,
+        snapshot_id=str(snapshot_id),
+        page_id=str(page_id),
+        view_type=DrawingViewType.FLOOR_PLAN.value,
+    )
+    containing: dict[str, tuple[float, float, float, float]] = {}
+    for viewport_selector in selectors:
+        scope = viewport_wall_authority.resolve_scope(viewport_selector)
+        bbox = getattr(scope, "viewport_bbox", None)
+        viewport_id = getattr(scope, "viewport_id", None)
+        if (
+            scope.status is not EvidenceResolutionStatus.CORROBORATED
+            or not viewport_id
+            or bbox is None
+        ):
+            continue
+        try:
+            x0, y0, x1, y1 = tuple(float(value) for value in bbox)
+        except (TypeError, ValueError):
+            continue
+        if x1 <= x0 or y1 <= y0:
+            continue
+        if all(
+            all(
+                x0 <= float(point[0]) <= x1
+                and y0 <= float(point[1]) <= y1
+                for point in room.polygon_pdf_pts
+            )
+            for room in scope_rooms
+        ):
+            containing[str(viewport_id)] = (x0, y0, x1, y1)
+    if len(containing) != 1:
+        return None
+    return next(iter(containing.items()))
+
+
 def collect_live_physical_net_wall_claim(
     pdf_path: Path | str,
     *,
@@ -379,21 +444,37 @@ def collect_live_physical_net_wall_claim(
                 )
                 scale_viewport_id = viewport_id
             else:
-                viewport_id = stable_contract_id(
-                    "room_area_page_scope",
-                    {
-                        "document_id": scope_rooms[0].document_id,
-                        "page_id": page_id,
-                        "decision_scope_id": decision_scope_id,
-                    },
-                    digest_chars=24,
+                containing_viewport = (
+                    _unique_authenticated_containing_floor_plan_viewport(
+                        source=source,
+                        scope_rooms=scope_rooms,
+                        page_id=page_id,
+                        snapshot_id=snapshot_id,
+                    )
                 )
-                viewport_bbox = (0.0, 0.0, extent[0], extent[1])
-                viewport_status = ViewportResolutionStatus.DERIVED
-                viewport_reason_codes = (
-                    "producer_owned_full_page_room_area_scope",
-                )
-                scale_viewport_id = None
+                if containing_viewport is not None:
+                    viewport_id, viewport_bbox = containing_viewport
+                    viewport_status = ViewportResolutionStatus.RESOLVED
+                    viewport_reason_codes = (
+                        "producer_owned_authenticated_floor_plan_viewport",
+                    )
+                    scale_viewport_id = viewport_id
+                else:
+                    viewport_id = stable_contract_id(
+                        "room_area_page_scope",
+                        {
+                            "document_id": scope_rooms[0].document_id,
+                            "page_id": page_id,
+                            "decision_scope_id": decision_scope_id,
+                        },
+                        digest_chars=24,
+                    )
+                    viewport_bbox = (0.0, 0.0, extent[0], extent[1])
+                    viewport_status = ViewportResolutionStatus.DERIVED
+                    viewport_reason_codes = (
+                        "producer_owned_full_page_room_area_scope",
+                    )
+                    scale_viewport_id = None
 
             viewport = ViewportEvidence(
                 viewport_id=viewport_id,
@@ -462,61 +543,17 @@ def collect_live_physical_net_wall_claim(
                     PHYSICAL_SCALE_VIEWPORT_REQUIRED,
                 )
             ):
-                viewport_wall_producer = (
-                    PhysicalWallCandidateProducer.from_authenticated_viewports(
-                        source,
-                        page_ids=(page_id,),
-                    )
-                )
-                viewport_wall_authority = viewport_wall_producer.authority()
-                viewport_selectors = (
-                    viewport_wall_authority.selectors_for_authenticated_viewports(
-                        document_id=scope_rooms[0].document_id,
-                        revision_id=scope_rooms[0].revision_id,
-                        source_sha256=scope_rooms[0].source_sha256,
-                        snapshot_id=snapshot_id,
+                containing_viewport = (
+                    _unique_authenticated_containing_floor_plan_viewport(
+                        source=source,
+                        scope_rooms=scope_rooms,
                         page_id=page_id,
-                        view_type=DrawingViewType.FLOOR_PLAN.value,
+                        snapshot_id=snapshot_id,
                     )
                 )
-                containing_viewports: dict[
-                    str, tuple[float, float, float, float]
-                ] = {}
-                for viewport_wall_selector in viewport_selectors:
-                    viewport_wall_scope = viewport_wall_authority.resolve_scope(
-                        viewport_wall_selector
-                    )
-                    bbox = getattr(viewport_wall_scope, "viewport_bbox", None)
-                    viewport_candidate_id = getattr(
-                        viewport_wall_scope, "viewport_id", None
-                    )
-                    if (
-                        viewport_wall_scope.status
-                        is not EvidenceResolutionStatus.CORROBORATED
-                        or not viewport_candidate_id
-                        or bbox is None
-                    ):
-                        continue
-                    try:
-                        x0, y0, x1, y1 = tuple(float(value) for value in bbox)
-                    except (TypeError, ValueError):
-                        continue
-                    if x1 <= x0 or y1 <= y0:
-                        continue
-                    if all(
-                        all(
-                            x0 <= float(point[0]) <= x1
-                            and y0 <= float(point[1]) <= y1
-                            for point in room.polygon_pdf_pts
-                        )
-                        for room in scope_rooms
-                    ):
-                        containing_viewports[str(viewport_candidate_id)] = (
-                            x0, y0, x1, y1
-                        )
-                if len(containing_viewports) == 1:
-                    resolved_viewport_id, resolved_viewport_bbox = next(
-                        iter(containing_viewports.items())
+                if containing_viewport is not None:
+                    resolved_viewport_id, resolved_viewport_bbox = (
+                        containing_viewport
                     )
                     selected_scale_selector = PhysicalScaleSelector(
                         document_id=scope_rooms[0].document_id,

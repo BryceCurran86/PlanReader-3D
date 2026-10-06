@@ -6,6 +6,7 @@ import inspect
 import fitz
 import pytest
 
+from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
 import pb_live_room_area_customer_projection as customer_projection
 import pb_live_room_area_source_closed_export as export
 import pb_live_floor_area_source_closed_export as floor_export
@@ -92,6 +93,69 @@ def _cross_view_room_area_pdf() -> bytes:
         return doc.tobytes()
     finally:
         doc.close()
+
+
+def _framed_cross_view_room_area_pdf() -> bytes:
+    doc = fitz.open(stream=_cross_view_room_area_pdf(), filetype="pdf")
+    try:
+        plan = doc[0]
+        # Producer-owned closed drawing frame plus explicit in-view title.
+        # All source-room polygons sit wholly inside this one plan viewport.
+        plan.draw_rect(
+            fitz.Rect(20.0, 20.0, 280.0, 180.0),
+            color=(0, 0, 0),
+            width=0.8,
+        )
+        plan.insert_text((92.0, 35.0), "GROUND FLOOR PLAN", fontsize=8.0)
+        return doc.tobytes(garbage=4, deflate=True)
+    finally:
+        doc.close()
+
+
+def test_documented_room_area_inherits_unique_authenticated_plan_viewport(
+    tmp_path,
+) -> None:
+    path = tmp_path / "framed-cross-view-room-area.pdf"
+    path.write_bytes(_framed_cross_view_room_area_pdf())
+
+    doc = fitz.open(path)
+    try:
+        viewports = authoritative_floor_plan_viewports(
+            doc[0],
+            page_number=1,
+        )
+    finally:
+        doc.close()
+    resolved = tuple(
+        viewport
+        for viewport in viewports
+        if viewport.bounding_box is not None
+    )
+    assert len(resolved) == 1
+    expected_viewport_id = str(resolved[0].view_id)
+
+    claim = collect_live_physical_net_wall_claim(
+        path,
+        pages=(0,),
+        room_area_support_pages=(1,),
+    )
+    firm = tuple(
+        quantity
+        for quantity in claim.room_area_quantity_evidence
+        if not quantity.abstained and quantity.value is not None
+    )
+    assert firm
+    documented = tuple(
+        quantity
+        for quantity in firm
+        if quantity.authority == "documented_dimension"
+    )
+    assert documented
+    assert all(
+        str(quantity.metadata.get("viewport_id") or "")
+        == expected_viewport_id
+        for quantity in documented
+    )
 
 
 @pytest.fixture(scope="module")
