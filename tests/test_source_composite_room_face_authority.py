@@ -409,18 +409,36 @@ def test_grid_component_completion_preserves_repeated_physical_outer_wall():
         "record_left",
         ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)),
         ("w_left", "w_lm", "w_top", "w_bottom"),
+        (
+            ("w_bottom", ((0.0, 0.0), (10.0, 0.0))),
+            ("w_lm", ((10.0, 0.0), (10.0, 10.0))),
+            ("w_top", ((0.0, 10.0), (10.0, 10.0))),
+            ("w_left", ((0.0, 0.0), (0.0, 10.0))),
+        ),
     )
     middle = _face(
         "face_middle",
         "record_middle",
         ((10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)),
         ("w_lm", "w_mr", "w_top", "w_bottom"),
+        (
+            ("w_bottom", ((10.0, 0.0), (20.0, 0.0))),
+            ("w_mr", ((20.0, 0.0), (20.0, 10.0))),
+            ("w_top", ((10.0, 10.0), (20.0, 10.0))),
+            ("w_lm", ((10.0, 0.0), (10.0, 10.0))),
+        ),
     )
     right = _face(
         "face_right",
         "record_right",
         ((20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)),
         ("w_mr", "w_right", "w_top", "w_bottom"),
+        (
+            ("w_bottom", ((20.0, 0.0), (30.0, 0.0))),
+            ("w_right", ((30.0, 0.0), (30.0, 10.0))),
+            ("w_top", ((20.0, 10.0), (30.0, 10.0))),
+            ("w_mr", ((20.0, 0.0), (20.0, 10.0))),
+        ),
     )
     room_scope = SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
@@ -447,7 +465,6 @@ def test_grid_component_completion_preserves_repeated_physical_outer_wall():
     assert record.separator_wall_ids == ("w_lm", "w_mr")
     assert "w_top" in record.bounding_wall_ids
     assert "w_bottom" in record.bounding_wall_ids
-
 
 def test_long_grid_wall_with_more_than_two_global_owners_uses_local_adjacency():
     top_left = _face(
