@@ -64,7 +64,49 @@ def _run(gray: np.ndarray, label: str):
     )
 
     calls = []
+    band_calls = []
+    pair_calls = []
     original = g17._raster_door_swing_solutions
+    original_band_boxes = g17._raster_band_boxes
+    original_pair_flanks = g17._raster_pair_flanks
+
+    def wrapped_band_boxes(thick, *, dpi, axis):
+        boxes = original_band_boxes(thick, dpi=dpi, axis=axis)
+        band_calls.append({
+            "axis": axis,
+            "mask_shape": list(thick.shape),
+            "boxes": [list(box) for box in boxes],
+            "box_count": len(boxes),
+            "thickness_pt": [
+                (
+                    (box[3]-box[1]+1) * 72.0 / float(dpi)
+                    if axis == "horizontal"
+                    else (box[2]-box[0]+1) * 72.0 / float(dpi)
+                )
+                for box in boxes
+            ],
+        })
+        return boxes
+
+    def wrapped_pair_flanks(thick, boxes, *, dpi):
+        pairs = original_pair_flanks(thick, boxes, dpi=dpi)
+        pair_calls.append({
+            "mask_shape": list(thick.shape),
+            "box_count": len(boxes),
+            "pairs": [
+                {
+                    "a": list(p.a),
+                    "b": list(p.b),
+                    "row0": int(p.row0),
+                    "row1": int(p.row1),
+                    "gap_x0": int(p.gap_x0),
+                    "gap_x1": int(p.gap_x1),
+                    "reasons": list(p.reasons),
+                }
+                for p in pairs
+            ],
+        })
+        return pairs
 
     def wrapped(thin_mask, pair, *, dpi):
         sols = original(thin_mask, pair, dpi=dpi)
@@ -154,6 +196,8 @@ def _run(gray: np.ndarray, label: str):
         return sols
 
     g17._raster_door_swing_solutions = wrapped
+    g17._raster_band_boxes = wrapped_band_boxes
+    g17._raster_pair_flanks = wrapped_pair_flanks
     try:
         physical = source.physical_opening_authority()
         results = []
@@ -182,6 +226,8 @@ def _run(gray: np.ndarray, label: str):
                 }
     finally:
         g17._raster_door_swing_solutions = original
+        g17._raster_band_boxes = original_band_boxes
+        g17._raster_pair_flanks = original_pair_flanks
 
     return {
         "label": label,
@@ -189,6 +235,8 @@ def _run(gray: np.ndarray, label: str):
         "primitive_count": len(published.raster_opening_primitive_observation_ids),
         "records": list(records.values()),
         "calls": calls,
+        "band_calls": band_calls,
+        "pair_calls": pair_calls,
         "result_reason_counts": {
             reason: sum(reason in row["reasons"] for row in results)
             for reason in sorted({r for row in results for r in row["reasons"]})
