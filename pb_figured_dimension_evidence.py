@@ -788,17 +788,55 @@ def _unique_orientation_witness_winner(
             calibration,
         )
     ]
-    # More than one complete same-orientation dimension system is real source
-    # ambiguity. Text-span proximity/bracketing must not rank between them.
-    if len(witness_complete) != 1:
+    if len(witness_complete) == 1:
+        candidate = witness_complete[0]
+        if not _candidate_brackets_text_span(
+            candidate,
+            observation_bbox,
+            text_orientation_hint=text_orientation_hint,
+            calibration=calibration,
+        ):
+            return None
+        return candidate
+
+    # Some PDFs expose one closed/native path as several axis-aligned edge
+    # fragments. Those fragments can each look witness-complete even though
+    # they are siblings from one source path rather than independent dimension
+    # systems. A single bracketing candidate may win only when its source path
+    # is unique and every other complete competitor belongs to a repeated
+    # source-path fragment family. Distinct complete source paths remain
+    # ambiguous.
+    bracketing = [
+        candidate
+        for candidate in witness_complete
+        if _candidate_brackets_text_span(
+            candidate,
+            observation_bbox,
+            text_orientation_hint=text_orientation_hint,
+            calibration=calibration,
+        )
+    ]
+    if len(bracketing) != 1:
         return None
-    candidate = witness_complete[0]
-    if not _candidate_brackets_text_span(
-        candidate,
-        observation_bbox,
-        text_orientation_hint=text_orientation_hint,
-        calibration=calibration,
-    ):
+    candidate = bracketing[0]
+    if candidate.source_path_index is None:
+        return None
+    path_counts: dict[int, int] = {}
+    for item in witness_complete:
+        if item.source_path_index is None:
+            return None
+        path_counts[int(item.source_path_index)] = (
+            path_counts.get(int(item.source_path_index), 0) + 1
+        )
+    winner_path = int(candidate.source_path_index)
+    if path_counts.get(winner_path) != 1:
+        return None
+    competitor_counts = [
+        count
+        for path_index, count in path_counts.items()
+        if path_index != winner_path
+    ]
+    if not competitor_counts or not all(count > 1 for count in competitor_counts):
         return None
     return candidate
 
