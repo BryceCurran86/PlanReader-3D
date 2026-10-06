@@ -1,0 +1,121 @@
+name: DIAG GPT1 Lot16 Floor Finish Frame
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Compare finish labels to canonical floor geometry
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from shapely.geometry import Point, Polygon
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import _trusted_words_by_page
+
+          pdf=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=pdf.read_bytes()
+          claim=collect_live_physical_net_wall_claim(
+              pdf,
+              pages=(2,),
+              topology_pages=(2,),
+              room_area_support_pages=(),
+          )
+          floors=[]
+          for floor in claim.canonical_floors:
+              pts=tuple(floor.polygon_pdf_pts or ())
+              if len(pts)<3:
+                  continue
+              poly=Polygon(pts)
+              if not poly.is_valid or poly.area<=0:
+                  continue
+              floors.append((floor,poly))
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-floor-finish-frame",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt1-floor-finish-frame",
+              source_bytes=payload,
+              source_locator=str(pdf),
+              page_ids=("3",),
+          )
+          words=_trusted_words_by_page(source,published).get("3",())
+          literals={"VINYL","EPOXY","TILE","TILES","CARPET"}
+
+          floor_bounds=[poly.bounds for _,poly in floors]
+          if floor_bounds:
+              union_bounds=[
+                  min(b[0] for b in floor_bounds),
+                  min(b[1] for b in floor_bounds),
+                  max(b[2] for b in floor_bounds),
+                  max(b[3] for b in floor_bounds),
+              ]
+          else:
+              union_bounds=None
+
+          rows=[]
+          for word in words:
+              raw=" ".join(str(word.text or "").upper().split())
+              if raw not in literals or not word.trusted:
+                  continue
+              x0,y0,x1,y1=word.bbox
+              center=Point((x0+x1)/2.0,(y0+y1)/2.0)
+              distances=sorted(
+                  (
+                      (poly.distance(center), floor.canonical_floor_id, poly.bounds)
+                      for floor,poly in floors
+                  ),
+                  key=lambda row: row[0],
+              )
+              rows.append({
+                  "text":raw,
+                  "bbox":list(word.bbox),
+                  "center":[center.x,center.y],
+                  "nearest_floors":[
+                      {
+                          "distance_pt":round(d,6),
+                          "canonical_floor_id":fid,
+                          "floor_bounds":[round(v,3) for v in bounds],
+                      }
+                      for d,fid,bounds in distances[:5]
+                  ],
+              })
+
+          sample_floors=[
+              {
+                  "canonical_floor_id":floor.canonical_floor_id,
+                  "room_entity_id":floor.room_entity_id,
+                  "page_id":floor.page_id,
+                  "viewport_id":floor.viewport_id,
+                  "polygon_bounds":[round(v,3) for v in poly.bounds],
+                  "polygon_area_pts2":round(poly.area,3),
+                  "metric_area_m2":floor.metric_area_m2,
+              }
+              for floor,poly in floors[:20]
+          ]
+
+          print(json.dumps({
+              "canonical_floor_count":len(claim.canonical_floors),
+              "valid_floor_polygon_count":len(floors),
+              "floor_union_bounds":union_bounds,
+              "sample_floors":sample_floors,
+              "finish_occurrences":rows,
+          },indent=2,sort_keys=True))
+          PY
