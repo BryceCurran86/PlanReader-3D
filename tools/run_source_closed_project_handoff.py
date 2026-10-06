@@ -21,7 +21,7 @@ import fitz
 from pb_ceiling_lining_review_promotion import (
     collect_ceiling_lining_review_candidates,
 )
-from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
 from pb_live_ceiling_source_closed_export import seal_live_ceiling_review_run
 from pb_live_opening_count_source_closed_export import (
     seal_live_opening_count_run,
@@ -52,28 +52,43 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
-    """Return zero-based pages that source authority recognizes as floor plans."""
+def _source_page_scopes(
+    path: Path,
+) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+    """Return production topology + cross-view support scopes from source evidence.
+
+    This mirrors the customer runtime contract:
+    - topology narrows only when source classification positively proves it;
+    - cross-view room-area support receives only positively classified evidence
+      pages;
+    - when scope is unavailable/unproven, topology remains the full universe and
+      no extra room-area support pages are invented.
+    """
     doc = fitz.open(path)
     try:
         page_count = int(doc.page_count)
-        selected: list[int] = []
-        for index in range(page_count):
-            try:
-                candidates = authoritative_floor_plan_viewports(
-                    doc[index],
-                    page_number=index + 1,
-                )
-            except Exception:
-                continue
-            if any(
-                getattr(candidate, "bounding_box", None) is not None
-                for candidate in candidates
-            ):
-                selected.append(index)
-        return tuple(selected), page_count
     finally:
         doc.close()
+
+    selected = tuple(range(page_count))
+    if not selected:
+        return (), (), page_count
+
+    scope = source_floor_plan_topology_scope(path, selected)
+    if scope is None:
+        return selected, (), page_count
+
+    topology = scope.topology_page_indices()
+    support = tuple(getattr(scope, "evidence_page_indices", ()) or ())
+    if topology is None:
+        return selected, (), page_count
+    return tuple(topology), support, page_count
+
+
+def _source_topology_pages(path: Path) -> tuple[tuple[int, ...], int]:
+    """Compatibility helper for diagnostics that need only topology pages."""
+    topology, _support, page_count = _source_page_scopes(path)
+    return topology, page_count
 
 
 def _non_abstained(
@@ -123,11 +138,13 @@ def generate_project_handoff(
         raise ValueError("workspace_id must be a positive integer")
 
     source_sha256 = _sha256(pdf_path)
-    topology_pages, page_count = _source_topology_pages(pdf_path)
+    topology_pages, room_area_support_pages, page_count = _source_page_scopes(
+        pdf_path
+    )
     all_pages = tuple(range(page_count))
     topology_mode = (
-        "source_viewport_hints"
-        if topology_pages
+        "source_classified_scope"
+        if topology_pages and tuple(topology_pages) != tuple(all_pages)
         else "live_authority_all_pages_fallback"
     )
 
@@ -138,6 +155,9 @@ def generate_project_handoff(
         "source_sha256": source_sha256,
         "page_count": page_count,
         "topology_pages": [page + 1 for page in topology_pages],
+        "room_area_support_pages": [
+            page + 1 for page in room_area_support_pages
+        ],
         "topology_mode": topology_mode,
         "status": "unavailable",
         "family_counts": {},
@@ -152,15 +172,29 @@ def generate_project_handoff(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    claim = collect_live_physical_net_wall_claim(
-        pdf_path,
-        pages=all_pages,
-        topology_pages=(topology_pages if topology_pages else None),
-        # Enable source-owned cross-view room measurement using the complete
-        # source package. The producer itself remains responsible for deciding
-        # which pages/evidence are authoritative.
-        room_area_support_pages=all_pages,
-    )
+    try:
+        claim = collect_live_physical_net_wall_claim(
+            pdf_path,
+            pages=all_pages,
+            topology_pages=(topology_pages if topology_pages else None),
+            # Mirror customer runtime: only source-classified evidence pages may
+            # activate cross-view room-area measurement. An empty support scope
+            # means "do not add cross-view metric authority", never "scan all".
+            room_area_support_pages=(
+                room_area_support_pages
+                if room_area_support_pages
+                else None
+            ),
+        )
+    except Exception as exc:
+        summary["status"] = "production_failed"
+        summary["production_error_type"] = type(exc).__name__
+        summary["production_error_message"] = str(exc)
+        summary["claim_reason_codes"] = [
+            f"production_extraction_error:{type(exc).__name__}"
+        ]
+        _write_json(output_dir / "production_summary.json", summary)
+        raise
     summary["claim_status"] = getattr(
         getattr(claim, "status", None),
         "value",
@@ -267,7 +301,7 @@ def generate_project_handoff(
             tuple(run for _, run in family_runs),
             project_id=project_id,
         )
-        combined_path = output_dir / f"{project_id}.sealed.json"
+        combined_path = output_dir / f"{project_id}.json"
         combined_path.write_text(combined.to_json(), encoding="utf-8")
         summary["combined_run_file"] = str(combined_path)
         summary["combined_run_id"] = combined.run_id
