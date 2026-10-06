@@ -82,7 +82,7 @@ from pb_wall_room_topology_stage_a import (
 )
 from pb_wall_room_topology_wall_assembly import assemble_wall_topology
 from pb_wall_room_topology_typed_negative_evidence import (
-    collect_typed_semantic_evidence,
+    collect_source_lineage_grid_evidence,
 )
 
 
@@ -2751,7 +2751,7 @@ def _assemble_scope_result(
     graph = build_wall_graph_for_viewport(graph_segments)
     try:
         typed_semantic_evidence_atoms = tuple(
-            collect_typed_semantic_evidence(
+            collect_source_lineage_grid_evidence(
                 graph,
                 document_id=published.revision.document_id,
                 page_id=page_id,
