@@ -574,8 +574,9 @@ def test_long_grid_wall_with_more_than_two_global_owners_uses_local_adjacency():
         label_scope=label_scope,
     )
 
-    # The long grid wall connects each left/right pair locally, but the top
-    # pair is not allowed to consume the bottom pair through point contact.
+    # One long W4 grid chain owns two disjoint local separator subedges.
+    # Starting in the top pair must traverse only the exact shared top subedge;
+    # point contact with the lower pair is not room adjacency.
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.records) == 1
     assert result.records[0].constituent_face_ids == ("top_left", "top_right")
