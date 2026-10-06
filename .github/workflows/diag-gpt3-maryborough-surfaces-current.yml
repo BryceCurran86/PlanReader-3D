@@ -1,0 +1,87 @@
+name: DIAG GPT3 Maryborough Surfaces Current
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  surfaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Run Maryborough surfaces handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt3-maryborough-surfaces
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group surfaces \
+            --output-dir artifacts/gpt3-maryborough-surfaces \
+            | tee artifacts/gpt3-maryborough-surfaces/handoff.stdout.json
+      - name: Audit surfaces result
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-maryborough-surfaces")
+          summary=json.loads((root/"production_summary.json").read_text())
+          combined=root/"au_qld_maryborough_service_station.surfaces.json"
+          out={
+            "source_sha256":summary["source_sha256"],
+            "status":summary["status"],
+            "claim_status":summary["claim_status"],
+            "claim_reason_codes":summary["claim_reason_codes"],
+            "canonical_counts":summary["canonical_counts"],
+            "family_counts":summary["family_counts"],
+            "combined_quantity_count":summary.get("combined_quantity_count",0),
+            "combined_run_file_exists":combined.is_file(),
+            "execution_pages":summary["execution_pages"],
+            "topology_pages":summary["topology_pages"],
+            "room_area_support_pages":summary["room_area_support_pages"],
+          }
+          if combined.is_file():
+            run=json.loads(combined.read_text())
+            qs=run.get("quantities") or []
+            out.update({
+              "quantity_count":len(qs),
+              "lineage_conflicts":sum(not bool(q.get("lineage_ok",False)) for q in qs),
+              "abstained_outputs":sum(bool(q.get("abstained",False)) for q in qs),
+              "duplicate_quantity_ids":len(qs)-len({q.get("quantity_id") for q in qs}),
+              "quantities":[{
+                "quantity_id":q.get("quantity_id"),
+                "family":q.get("family"),
+                "semantic_key":q.get("semantic_key"),
+                "value":q.get("value"),
+                "unit":q.get("unit"),
+                "object_identity_refs":q.get("object_identity_refs") or [],
+                "authority":q.get("authority"),
+                "lineage_ok":q.get("lineage_ok"),
+              } for q in qs],
+            })
+          print(json.dumps(out,indent=2,sort_keys=True))
+          (root/"surfaces-audit.json").write_text(json.dumps(out,indent=2,sort_keys=True)+"\n")
+          PY
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-maryborough-surfaces-current
+          path: artifacts/gpt3-maryborough-surfaces
+          retention-days: 3
