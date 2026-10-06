@@ -186,11 +186,35 @@ jobs:
           }
           print(json.dumps(payload,indent=2,sort_keys=True),flush=True)
 
-          assert len(office_cross)==1, office_cross
-          assert abs(float(office_cross[0]["area_m2"])-9.05352) < 1e-9
+          # This PR owns the figured-dimension ambiguity defect only.
+          # Prove the formerly-ambiguous Office dimensions are now present with
+          # authenticated orientation, while preserving the downstream
+          # fail-closed ownership gate. A separate support-room-face lane owns
+          # any future area publication.
+          assert any(
+              d.orientation==cv.DimensionOrientation.HORIZONTAL.value
+              and abs(float(d.value_mm)-2536.0) < 1e-9
+              for d in office_dims
+          ), office_dims
+          assert any(
+              d.orientation==cv.DimensionOrientation.VERTICAL.value
+              and abs(float(d.value_mm)-3570.0) < 1e-9
+              for d in office_dims
+          ), office_dims
+          desired_pairs=[
+              row for row in pair_census
+              if abs(float(row["horizontal_mm"])-2536.0) < 1e-9
+              and abs(float(row["vertical_mm"])-3570.0) < 1e-9
+              and row["spatial"]
+              and row["scale_consistent"]
+          ]
+          assert desired_pairs, pair_census
+          assert all(not row["witness_intersects"] for row in desired_pairs)
+          assert office_cross == []
+          assert office_quantities == []
+          assert "OFFICE" not in firm
           assert abs(firm["FOOD PREP"]-13.270425) < 1e-9
           assert abs(firm["COLD ROOM"]-25.37875) < 1e-9
-          assert abs(firm["OFFICE"]-9.05352) < 1e-9
           PY
       - uses: actions/upload-artifact@v4
         if: always()
