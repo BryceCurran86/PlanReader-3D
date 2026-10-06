@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+import pb_live_ceiling_area_source_closed_export as ceiling_export
 from pb_live_ceiling_area_quantity_publication import (
     LIVE_CEILING_AREA_QUANTITY_RESOLVED,
     publish_live_ceiling_area_quantities,
@@ -163,6 +164,69 @@ def test_quantity_identity_is_deterministic() -> None:
     assert len(first) == len(second) == 1
     assert first[0].to_dict() == second[0].to_dict()
     assert first[0].quantity_id == second[0].quantity_id
+
+
+def test_canonical_ceiling_seals_on_exact_canonical_identity() -> None:
+    result = _result()
+    quantity = publish_live_ceiling_area_quantities(result)[0]
+
+    traces = ceiling_export.build_live_ceiling_area_source_traces(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    trace = traces[quantity.quantity_id]
+    assert trace.canonical_entity_ids == ("canonical-ceiling-1",)
+    assert trace.source_sha256 == SOURCE_SHA
+    assert trace.revision_id == "rev-1"
+    assert trace.current_revision_id == "rev-1"
+    assert trace.viewport_id == "vp-1"
+    assert trace.source_page == "1"
+    assert set(quantity.evidence_ids).issubset(set(trace.evidence_ids))
+
+    run = ceiling_export.seal_live_ceiling_area_run(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    assert len(run.quantities) == 1
+    row = run.quantities[0]
+    assert row.quantity_id == quantity.quantity_id
+    assert row.family == "ceiling_lining"
+    assert row.value == 13.270425
+    assert row.object_identity_refs == ("canonical-ceiling-1",)
+    assert row.trace_canonical_entity_ids == ("canonical-ceiling-1",)
+    assert row.lineage_ok is True
+
+
+def test_canonical_ceiling_sealing_is_deterministic() -> None:
+    result = _result()
+    first = ceiling_export.seal_live_ceiling_area_run(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    second = ceiling_export.seal_live_ceiling_area_run(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert first.run_id == second.run_id
+    assert first.fingerprint == second.fingerprint
+    assert first.to_json() == second.to_json()
+
+
+def test_canonical_ceiling_sealing_rejects_trace_identity_mismatch() -> None:
+    bad = replace(
+        _ceiling(),
+        canonical_ceiling_id="canonical-ceiling-other",
+    )
+    result = _result(ceiling=bad)
+
+    assert publish_live_ceiling_area_quantities(result)[0].input_entity_ids == (
+        "canonical-ceiling-other",
+    )
 
 
 def test_canonical_ceiling_reaches_quantified_without_customer_row() -> None:

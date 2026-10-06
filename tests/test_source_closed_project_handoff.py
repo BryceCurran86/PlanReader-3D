@@ -190,7 +190,8 @@ def test_project_handoff_combines_only_available_source_closed_families(
         opening_quantity_evidence=(opening_q,),
         opening_count_quantity_evidence=(count_q,),
     )
-    ceiling_candidate = SimpleNamespace(promoted_quantity=_quantity("q-ceiling", "ceiling_lining"))
+    ceiling_result = SimpleNamespace()
+    ceiling_q = _quantity("q-ceiling", "ceiling_lining")
 
     monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
     monkeypatch.setattr(
@@ -200,8 +201,13 @@ def test_project_handoff_combines_only_available_source_closed_families(
     )
     monkeypatch.setattr(
         handoff,
-        "collect_ceiling_lining_review_candidates",
-        lambda *args, **kwargs: (ceiling_candidate,),
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: ceiling_result,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (ceiling_q,),
     )
     monkeypatch.setattr(
         handoff,
@@ -240,7 +246,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     )
     monkeypatch.setattr(
         handoff,
-        "seal_live_ceiling_review_run",
+        "seal_live_ceiling_area_run",
         lambda *args, **kwargs: _run(
             project_id=project_id,
             source_sha256=source_sha,
@@ -266,7 +272,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
         "floor_area": 1,
         "opening_area": 1,
         "opening_count": 1,
-        "ceiling_lining": 1,
+        "ceiling_area": 1,
     }
     assert summary["combined_quantity_count"] == 4
     assert (output / f"{project_id}.json").is_file()
@@ -307,8 +313,13 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
     )
     monkeypatch.setattr(
         handoff,
-        "collect_ceiling_lining_review_candidates",
-        lambda *args, **kwargs: (),
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
     )
     monkeypatch.setattr(
         handoff,
@@ -371,8 +382,13 @@ def test_project_handoff_forwards_only_source_classified_room_support(
     )
     monkeypatch.setattr(
         handoff,
-        "collect_ceiling_lining_review_candidates",
-        lambda *args, **kwargs: (),
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
     )
     monkeypatch.setattr(
         handoff,
@@ -423,8 +439,13 @@ def test_project_handoff_rejects_family_run_from_different_source(
     )
     monkeypatch.setattr(
         handoff,
-        "collect_ceiling_lining_review_candidates",
-        lambda *args, **kwargs: (),
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
     )
     monkeypatch.setattr(
         handoff,
@@ -485,8 +506,13 @@ def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
     )
     monkeypatch.setattr(
         handoff,
-        "collect_ceiling_lining_review_candidates",
-        lambda *args, **kwargs: (),
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
     )
     monkeypatch.setattr(
         handoff,
@@ -595,8 +621,13 @@ def test_project_handoff_does_not_seal_upstream_room_area_as_final_family(
     )
     monkeypatch.setattr(
         handoff,
-        "collect_ceiling_lining_review_candidates",
-        lambda *args, **kwargs: (),
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
     )
 
     summary = handoff.generate_project_handoff(
@@ -664,7 +695,12 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
     )
     monkeypatch.setattr(
         handoff,
-        "collect_ceiling_lining_review_candidates",
+        "collect_live_ceiling_lining_claims",
+        _surface_forbidden,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
         _surface_forbidden,
     )
     monkeypatch.setattr(
@@ -707,7 +743,7 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
         "floor_area": 0,
         "opening_area": 1,
         "opening_count": 1,
-        "ceiling_lining": 0,
+        "ceiling_area": 0,
     }
     assert summary["combined_quantity_count"] == 2
     assert summary["status"] == "sealed"
