@@ -1,0 +1,39 @@
+name: DIAG GPT2 Maryborough Support Role Isolation
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        support_page: [9, 11, 14, 28]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run isolated support role
+        run: |
+          set -o pipefail
+          mkdir -p "artifacts/support-${{ matrix.support_page }}"
+          git rev-parse HEAD > "artifacts/support-${{ matrix.support_page }}/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "artifacts/support-${{ matrix.support_page }}/source_sha256.txt"
+          PYTHONPATH=. python -u tools/diag_maryborough_support_role_isolation.py \
+            --support-page "${{ matrix.support_page }}" \
+            | tee "artifacts/support-${{ matrix.support_page }}/result.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: "gpt2-maryborough-support-${{ matrix.support_page }}"
+          path: "artifacts/support-${{ matrix.support_page }}"
+          retention-days: 1
