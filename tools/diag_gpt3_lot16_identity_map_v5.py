@@ -107,6 +107,15 @@ def main():
                 "bbox":tuple(float(v) for v in bbox),
             })
 
+    by_qid={q["quantity_id"]:q for q in family.get("quantities",())}
+    combined_ids={
+        q["quantity_id"]
+        for q in combined.get("quantities",())
+        if not q.get("abstained",False)
+    }
+    if combined_ids != set(by_qid):
+        raise SystemExit("combined/family opening-area quantity mismatch")
+
     # Capture the exact producer instance created by the production claim.
     # This keeps every derived snapshot minted by the real wall/opening chain.
     import pb_live_physical_net_wall_integration as live
@@ -148,15 +157,6 @@ def main():
         str(o.physical_opening_id):o
         for o in (getattr(claim,"canonical_openings",()) or ())
     }
-
-    by_qid={q["quantity_id"]:q for q in family.get("quantities",())}
-    combined_ids={
-        q["quantity_id"]
-        for q in combined.get("quantities",())
-        if not q.get("abstained",False)
-    }
-    if combined_ids != set(by_qid):
-        raise SystemExit("combined/family opening-area quantity mismatch")
 
     bindings=[]
     audit=[]
