@@ -24,6 +24,10 @@ jobs:
           import fitz
           from pb_source_visibility_authority import SourceVisibilityProducer
           from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+          from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+          from pb_source_ceiling_finish_evidence import collect_source_owned_ceiling_finish_candidates
+          from pb_migration_contracts import ViewportEvidence, ViewportResolutionStatus
+          from pb_migration_provider_envelope import ProviderContext
 
           pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           payload=pdf.read_bytes()
@@ -79,6 +83,64 @@ jobs:
                       "definition_record_id":r.definition_record_id,
                   })
 
+          current=source.published_snapshot_for_revision(revision_id)
+          ceiling_scopes=[]
+          doc=fitz.open(stream=payload,filetype="pdf")
+          try:
+              for index in range(doc.page_count):
+                  page_no=index+1
+                  for segmented in authoritative_floor_plan_viewports(doc[index],page_number=page_no):
+                      if segmented.bounding_box is None:
+                          continue
+                      viewport_id=str(segmented.view_id or "").strip()
+                      if not viewport_id:
+                          continue
+                      viewport=ViewportEvidence(
+                          viewport_id=viewport_id,
+                          document_id=current.revision.document_id,
+                          page_id=str(page_no),
+                          bbox=tuple(float(v) for v in segmented.bounding_box),
+                          view_type="floor_plan",
+                          status=ViewportResolutionStatus.RESOLVED,
+                          evidence_ids=(),
+                          confidence=float(segmented.confidence),
+                      )
+                      context=ProviderContext(
+                          run_id=f"diag-ceiling:{page_no}:{viewport_id}",
+                          workspace_id="diag",
+                          project_id="diag",
+                          document_id=current.revision.document_id,
+                          source_sha256=current.revision.source_sha256,
+                          revision_id=current.revision.revision_id,
+                          current_revision_id=current.revision.revision_id,
+                          selected_pages=(index,),
+                          owned_viewport_ids=(viewport_id,),
+                          evidence_snapshot_id=current.snapshot.snapshot_id,
+                          owned_page_numbers=(page_no,),
+                          viewport_page_ownership=((viewport_id,page_no),),
+                      )
+                      candidates=collect_source_owned_ceiling_finish_candidates(
+                          source_visibility_producer=source,
+                          context=context,
+                          viewport=viewport,
+                          page_no=page_no,
+                      )
+                      ceiling_scopes.append({
+                          "page_no":page_no,
+                          "viewport_id":viewport_id,
+                          "bbox":list(segmented.bounding_box),
+                          "candidate_count":len(candidates),
+                          "candidates":[{
+                              "evidence_id":a.evidence_id,
+                              "raw_text":a.raw_text,
+                              "normalized_value":a.normalized_value,
+                              "bbox":list(a.bbox or ()),
+                              "method":a.method,
+                          } for a in candidates],
+                      })
+          finally:
+              doc.close()
+
           print(json.dumps({
               "source_sha256":sha,
               "decoded_pages":list(published.coverage.decoded_pages),
@@ -86,5 +148,6 @@ jobs:
               "definitions":defs,
               "occurrence_count":len(occurrences),
               "occurrences":occurrences,
+              "ceiling_viewport_scopes":ceiling_scopes,
           },indent=2,sort_keys=True))
           PY
