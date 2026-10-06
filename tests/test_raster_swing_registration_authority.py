@@ -140,3 +140,46 @@ def test_page_registration_scale_is_quarter_turn_symmetric() -> None:
     assert rotated_scale[0] == pytest.approx(1.0 / rotated_scale[1])
     assert rotated_scale[0] > 1.0
     assert rotated_scale[1] < 1.0
+
+
+def test_page_registration_accepts_matching_tile_transforms() -> None:
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    placements = (
+        NativePageImagePlacement(
+            bbox_pt=(0.0, 0.0, 160.0, 180.0),
+            pixel_width=320,
+            pixel_height=360,
+        ),
+        NativePageImagePlacement(
+            bbox_pt=(160.0, 0.0, 320.0, 180.0),
+            pixel_width=320,
+            pixel_height=360,
+        ),
+    )
+    assert SourceVisibilityProducer._registration_scale_from_image_placements(
+        placements
+    ) == pytest.approx((1.0, 1.0))
+
+
+def test_page_registration_rejects_competing_tile_transforms() -> None:
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    placements = (
+        NativePageImagePlacement(
+            bbox_pt=(0.0, 0.0, 160.0, 180.0),
+            pixel_width=320,
+            pixel_height=360,
+        ),
+        NativePageImagePlacement(
+            bbox_pt=(160.0, 0.0, 320.0, 180.0),
+            pixel_width=160,
+            pixel_height=360,
+        ),
+    )
+    assert (
+        SourceVisibilityProducer._registration_scale_from_image_placements(
+            placements
+        )
+        is None
+    )
