@@ -258,6 +258,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     )
 
     assert summary["status"] == "sealed"
+    assert summary["complete_project_handoff"] is True
     assert summary["source_sha256"] == source_sha
     assert summary["topology_pages"] == [1]
     assert summary["topology_mode"] == "live_authority_all_pages_fallback"
@@ -700,6 +701,7 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
     assert seen["topology_pages"] == (1,)
     assert seen["room_area_support_pages"] is None
     assert summary["family_group"] == "core"
+    assert summary["complete_project_handoff"] is False
     assert summary["execution_pages"] == [2]
     assert summary["family_counts"] == {
         "floor_area": 0,
@@ -709,7 +711,11 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
     }
     assert summary["combined_quantity_count"] == 2
     assert summary["status"] == "sealed"
-    assert (output / f"{project_id}.json").is_file()
+    assert summary["combined_run_file"] == str(
+        output / f"{project_id}.core.json"
+    )
+    assert (output / f"{project_id}.core.json").is_file()
+    assert not (output / f"{project_id}.json").exists()
 
 
 def test_invalid_family_group_fails_before_source_scope_resolution(
