@@ -1001,6 +1001,106 @@ def _emit_atoms_for_target(
     return atoms
 
 
+def _generic_family_grid_nominations(
+    context: Sequence[Mapping[str, Any]],
+    *,
+    retained: bool,
+) -> Dict[str, Dict[str, Any]]:
+    """Return only the legacy family-grid nominations used for KIND_GRID dedup.
+
+    This is the exact KIND_GRID slice of _array_nominations(). It exists so the
+    source-lineage grid fastpath can preserve full-U2 same-kind precedence
+    without evaluating unrelated dimension/hatch/glazing/table/furniture rules.
+    """
+    selected = [item for item in context if bool(item.get("retained")) is bool(retained)]
+    families: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
+    for target in selected:
+        families[_line_family_key(target)].append(target)
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for members in families.values():
+        host = _family_host(members)
+        host_len = host["length"]
+        if host_len <= 1e-6:
+            continue
+        member_ids = set(host.get("member_ids") or [host["id"]])
+        others = [item for item in context if item["id"] not in member_ids]
+        grid = [
+            item
+            for item in others
+            if item["length"] / host_len >= 0.5
+            and _angle_delta(item["angle"], host["angle"]) <= _PARALLEL_DEG
+        ]
+        grid_offsets = [
+            (item["mid"][0] - host["mid"][0]) * math.sin(math.radians(host["angle"]))
+            - (item["mid"][1] - host["mid"][1]) * math.cos(math.radians(host["angle"]))
+            for item in grid
+        ]
+        if len(grid) < 3 or not _gaps_regular(grid_offsets):
+            continue
+        nomination = {
+            "kind": KIND_GRID,
+            "polarity": POLARITY_OPPOSING,
+            "confidence": 0.5,
+            "reason_codes": ("regular_long_parallels",),
+            "feature_basis": {"parallel_count": len(grid)},
+        }
+        for member in members:
+            out[member["id"]] = nomination
+    return out
+
+
+def collect_source_lineage_grid_evidence(
+    graph: Mapping[str, Any],
+    *,
+    document_id: str,
+    page_id: str,
+    viewport_id: Optional[str] = None,
+) -> Tuple[EvidenceAtom, ...]:
+    """Collect only source-lineage KIND_GRID atoms with full-U2 identity semantics.
+
+    Physical-wall composite-room consumers need one narrow U2 signal:
+    source_lineage_dense_orthogonal_lattice. Running the complete U2
+    classifier here is unnecessary and expensive on dense CAD pages.
+
+    The collector preserves the full classifier's same-kind precedence: when a
+    target would already receive legacy regular_long_parallels KIND_GRID, that
+    legacy nomination sorts first and suppresses the source-lineage grid
+    nomination in full U2, so this fastpath also omits it.
+    """
+    context = _context_items(graph)
+    source_grid = _source_lineage_grid_nominations(context)
+    if not source_grid:
+        return ()
+
+    retained_grid = _generic_family_grid_nominations(context, retained=True)
+    excluded_grid = _generic_family_grid_nominations(context, retained=False)
+    atoms: List[EvidenceAtom] = []
+    for target in context:
+        nomination = source_grid.get(target["id"])
+        if nomination is None:
+            continue
+        generic = (
+            retained_grid.get(target["id"])
+            if target.get("retained")
+            else excluded_grid.get(target["id"])
+        )
+        if generic is not None:
+            # Full U2 sorts by (kind, reason_codes); regular_long_parallels
+            # wins over source_lineage_* for KIND_GRID.
+            continue
+        atoms.extend(
+            _emit_atoms_for_target(
+                target=target,
+                nominations=(nomination,),
+                document_id=document_id,
+                page_id=page_id,
+                viewport_id=viewport_id,
+            )
+        )
+    atoms.sort(key=lambda atom: atom.evidence_id)
+    return tuple(atoms)
+
 def collect_typed_semantic_evidence(
     graph: Mapping[str, Any],
     *,
