@@ -149,6 +149,23 @@ def test_grid_only_internal_separator_composes_one_room_face():
     assert record.grid_evidence_ids == ("ev_grid",)
 
 
+def test_grid_opposed_external_boundary_stays_fail_closed():
+    result = compose_grid_separated_room_faces(
+        wall_scope=_wall_scope(
+            (
+                _grid_atom("e_sep", "ev_sep"),
+                _grid_atom("e_left", "ev_outer"),
+            )
+        ),
+        room_scope=_room_scope(),
+        label_scope=_label_scope(),
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.unresolved_label_candidate_ids == ("split_label_1",)
+
+
 def test_non_grid_separator_stays_fail_closed():
     result = compose_grid_separated_room_faces(
         wall_scope=_wall_scope(()),
