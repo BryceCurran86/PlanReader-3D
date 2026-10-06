@@ -182,3 +182,53 @@ def test_proven_same_source_primitive_representations_collapse() -> None:
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.bands) == 1
     assert result.bands[0].member_equivalence_groups == (("wall:a", "wall:b"),)
+
+
+def test_shared_long_source_primitive_uses_only_local_chain_owner() -> None:
+    local = _record("wall:local", source_ids=("raster:long",))
+    remote = _record("wall:remote", source_ids=("raster:long",))
+    local.wall_candidate.centerline_pts = (
+        (95.0, 54.0),
+        (145.0, 55.0),
+        (180.0, 55.0),
+    )
+    remote.wall_candidate.centerline_pts = (
+        (200.0, 55.0),
+        (260.0, 55.0),
+    )
+    records = (local, remote)
+    pair = (
+        "wall:local",
+        "wall:remote",
+        PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value,
+    )
+
+    result = host._resolve_raster_source_primitive_host_from_lines(
+        records,
+        OPENING,
+        _equivalence(records, pair_classifications=(pair,)),
+        {"raster:long": (20.0, 55.0, 300.0, 55.0)},
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.reason_codes == (host.RASTER_SOURCE_PRIMITIVE_HOST_RESOLVED,)
+    assert len(result.bands) == 1
+    assert result.bands[0].member_ids == ("wall:local",)
+
+
+def test_local_owner_must_stay_inside_proven_wall_band() -> None:
+    record = _record("wall:host", source_ids=("raster:long",))
+    record.wall_candidate.centerline_pts = (
+        (95.0, 80.0),
+        (145.0, 80.0),
+    )
+
+    result = host._resolve_raster_source_primitive_host_from_lines(
+        (record,),
+        OPENING,
+        _equivalence((record,)),
+        {"raster:long": (20.0, 55.0, 300.0, 55.0)},
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.bands == ()
