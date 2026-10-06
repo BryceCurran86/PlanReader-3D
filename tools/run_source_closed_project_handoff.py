@@ -161,9 +161,24 @@ def generate_project_handoff(
         else "live_authority_all_pages_fallback"
     )
 
-    if clean_family_group == "core" and topology_restricted:
-        execution_pages = tuple(topology_pages)
-        execution_room_support_pages = None
+    if topology_restricted:
+        source_owned_execution_pages = tuple(
+            sorted(set(topology_pages) | set(room_area_support_pages))
+        )
+        if clean_family_group == "core":
+            execution_pages = tuple(topology_pages)
+            execution_room_support_pages = None
+        else:
+            execution_pages = (
+                source_owned_execution_pages
+                if source_owned_execution_pages
+                else tuple(topology_pages)
+            )
+            execution_room_support_pages = (
+                room_area_support_pages
+                if room_area_support_pages
+                else None
+            )
     else:
         execution_pages = all_pages
         execution_room_support_pages = (
