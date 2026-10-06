@@ -1,0 +1,33 @@
+name: DIAG Raster Swing Competing Tiles
+
+on:
+  pull_request:
+    branches:
+      - gpt4/raster-swing-current-main-v2
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run competing-tile fallback audit
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_raster_swing_competing_tiles.py | tee raster-swing-competing-tiles.json
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raster-swing-competing-tiles
+          path: raster-swing-competing-tiles.json
+          retention-days: 1
