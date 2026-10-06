@@ -72,11 +72,49 @@ def _run(gray: np.ndarray, label: str):
 
     def wrapped_band_boxes(thick, *, dpi, axis):
         boxes = original_band_boxes(thick, dpi=dpi, axis=axis)
+
+        work = thick if axis == "horizontal" else np.ascontiguousarray(thick.T)
+        run = g17._raster_odd(g17._raster_px(g17.RASTER_BAND_MIN_RUN_PT, dpi))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (run, 1))
+        band = cv2.morphologyEx(work, cv2.MORPH_OPEN, kernel)
+        count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+            band,
+            connectivity=8,
+        )
+        solid = g17._raster_px(g17.RASTER_POCHE_MIN_PT, dpi)
+        tmax = g17._raster_px(g17.RASTER_BAND_MAX_THICKNESS_PT, dpi)
+        components = []
+        for index in range(1, int(count)):
+            x = int(stats[index, cv2.CC_STAT_LEFT])
+            y = int(stats[index, cv2.CC_STAT_TOP])
+            width = int(stats[index, cv2.CC_STAT_WIDTH])
+            height = int(stats[index, cv2.CC_STAT_HEIGHT])
+            reasons = []
+            if height < solid:
+                reasons.append("below_solid_min")
+            if height > tmax:
+                reasons.append("above_band_max_thickness")
+            if width < g17.RASTER_BAND_MIN_ASPECT * height:
+                reasons.append("below_band_min_aspect")
+            components.append({
+                "analysis_box": [x, y, x + width - 1, y + height - 1],
+                "width_px": width,
+                "height_px": height,
+                "width_pt": width * 72.0 / float(dpi),
+                "height_pt": height * 72.0 / float(dpi),
+                "solid_min_px": int(solid),
+                "max_thickness_px": int(tmax),
+                "min_aspect": float(g17.RASTER_BAND_MIN_ASPECT),
+                "aspect": float(width) / float(max(height, 1)),
+                "reasons": reasons,
+            })
+
         band_calls.append({
             "axis": axis,
             "mask_shape": list(thick.shape),
             "boxes": [list(box) for box in boxes],
             "box_count": len(boxes),
+            "components": components,
             "thickness_pt": [
                 (
                     (box[3]-box[1]+1) * 72.0 / float(dpi)
