@@ -1,0 +1,31 @@
+name: DIAG Lot16 Raster Primitive Explosion
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Count Lot16 raster primitive classes
+        run: |
+          PYTHONPATH=. python tools/diag_lot16_raster_primitive_explosion.py | tee lot16-raster-primitive-explosion.json
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-raster-primitive-explosion
+          path: lot16-raster-primitive-explosion.json
+          retention-days: 1
