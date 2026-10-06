@@ -22,16 +22,30 @@ matching, or benchmark-aware vocabulary.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 import math
 import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
+from PIL import Image, ImageOps
+
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
-from pb_portable_raster_ocr_authority import MockOCRBackend
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
+from pb_portable_raster_ocr_authority import (
+    MockOCRBackend,
+    TesseractOCRBackend,
+)
 from pb_raster_text_corroboration_authority import (
+    RASTER_TEXT_CORROBORATION_DPIS,
     RasterTextCorroborationProducer,
     RasterTextCorroborationSelector,
+    _lossless_rotate,
+    _producer_owned_ocr_target,
+    normalize_reading,
 )
 from pb_room_face_takeoff import KNOWN_ROOM_PHRASES, ROOM_LABEL_EXACT
 from pb_source_observation_authority import ObservationSelector
@@ -65,7 +79,9 @@ _COMMERCIAL_ROOM_EXACT = frozenset(
         "cleaner",
         "coolroom",
         "freezer",
+        "f-amb",
         "kiosk",
+        "m-amb",
         "lobby",
         "prep",
         "preparation",
@@ -90,6 +106,7 @@ _COMMERCIAL_ROOM_PHRASES = frozenset(
         "food preparation",
         "food service",
         "male amenities",
+        "pos counter",
         "staff room",
         "staff change",
         "truck driver lounge",
@@ -98,6 +115,7 @@ _COMMERCIAL_ROOM_PHRASES = frozenset(
     }
 )
 _MAX_ROOM_LABEL_WORDS = 4
+_ROOM_LABEL_OCR_BLANK_MARGIN_MM = 1.0
 
 
 @dataclass(frozen=True)
@@ -283,6 +301,53 @@ def _line_groups(words: Sequence[_Word]) -> tuple[tuple[_Word, ...], ...]:
     return tuple(out)
 
 
+def _single_isolated_line_reading(
+    backend,
+    image: Image.Image,
+    *,
+    dpi: int,
+) -> Optional[str]:
+    """Read one already-isolated producer-owned source text line.
+
+    Tesseract receives single-line page segmentation only after the exact
+    producer-owned line crop has been rendered. Other selected backends use
+    their normal extraction entrypoint. There is no backend retry or image
+    preprocessing preference.
+    """
+
+    if not backend.is_available():
+        return None
+
+    if type(backend) is TesseractOCRBackend:
+        try:
+            import pytesseract
+
+            command = backend._resolved_cmd()
+            if not command:
+                return None
+            pytesseract.pytesseract.tesseract_cmd = command
+            raw = pytesseract.image_to_string(image, config="--psm 7")
+        except Exception:
+            return None
+        readings = tuple(
+            normalize_reading(line)
+            for line in str(raw or "").splitlines()
+            if normalize_reading(line)
+        )
+        return readings[0] if len(readings) == 1 else None
+
+    try:
+        lines = tuple(backend.extract_lines(image, dpi=int(dpi)))
+    except Exception:
+        return None
+    readings = tuple(
+        normalize_reading(getattr(line, "text", ""))
+        for line in lines
+        if normalize_reading(getattr(line, "text", ""))
+    )
+    return readings[0] if len(readings) == 1 else None
+
+
 class SourceRoomLabelAuthority:
     def __init__(
         self,
@@ -445,6 +510,233 @@ class SourceRoomLabelProducer:
             )
         return None
 
+    def _authorize_line_fallback(
+        self,
+        published,
+        line: Sequence[_Word],
+        raw_line: str,
+    ) -> Optional[tuple[SourceRoomLabelWordEvidence, ...]]:
+        """Authenticate one exact room-label line by two isolated renders.
+
+        This fallback is deliberately narrower than generic OCR. The source
+        line must already be a whole-line room semantic candidate and every
+        word must be producer-owned native text. Any untrusted word must have
+        only the same glyph/clip reasons admitted by RasterTextCorroboration.
+        Text-trace failures and all other integrity failures remain fail-closed.
+
+        The union of producer-derived word raster targets is rendered at both
+        authority DPIs. Blank margin is added only after rendering, so no
+        neighbouring source pixels can enter the proof. Both views must read
+        exactly the raw native whole line.
+        """
+
+        claim = normalize_reading(raw_line)
+        backend = getattr(self._raster, "_backend", None)
+        if not claim or not line or backend is None or not backend.is_available():
+            return None
+
+        admissible = {
+            TEXT_GLYPH_MAPPING_UNVERIFIED,
+            TEXT_CLIP_STATE_UNRESOLVED,
+        }
+        targets: list[tuple[float, float, float, float]] = []
+        rotations: set[int] = set()
+        source_partitions: set[str] = set()
+        source_page_ids: set[str] = set()
+        observation_ids: list[str] = []
+
+        for word in line:
+            selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=word.observation_id,
+            )
+            text_result = self._source.text_integrity_authority().resolve_text(
+                selector
+            )
+            receipt = text_result.receipt
+            if (
+                receipt is None
+                or str(receipt.receipt_id) != str(word.receipt_id)
+                or str(receipt.page_id) == ""
+                or tuple(float(value) for value in receipt.geometry)
+                != tuple(float(value) for value in word.geometry)
+            ):
+                return None
+
+            if (
+                text_result.status is EvidenceResolutionStatus.CORROBORATED
+                and text_result.trusted_text
+            ):
+                if normalize_reading(text_result.trusted_text) != normalize_reading(
+                    word.raw_text
+                ):
+                    return None
+            else:
+                receipt_reasons = tuple(receipt.reason_codes or ())
+                reason_set = set(receipt_reasons)
+                if (
+                    text_result.status is not EvidenceResolutionStatus.ABSTAINED
+                    or bool(receipt.trusted)
+                    or TEXT_GLYPH_MAPPING_UNVERIFIED not in reason_set
+                    or not reason_set.issubset(admissible)
+                    or tuple(text_result.reason_codes) != receipt_reasons
+                ):
+                    return None
+
+            source_result = self._source._producer.authority().resolve(selector)
+            observation = source_result.observation
+            if (
+                source_result.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+                or observation.observation_kind != "native_pdf_word"
+                or observation.origin_kind != "native"
+                or observation.viewport_id is not None
+                or observation.document_id != published.revision.document_id
+                or observation.revision_id != published.revision.revision_id
+                or observation.source_sha256 != published.revision.source_sha256
+                or str(observation.page_id) != str(receipt.page_id)
+                or str(observation.source_partition_id)
+                != str(word.source_partition_id)
+                or tuple(float(value) for value in observation.geometry)
+                != tuple(float(value) for value in word.geometry)
+                or normalize_reading(observation.raw_text)
+                != normalize_reading(word.raw_text)
+            ):
+                return None
+
+            raster_bbox, rotation = _producer_owned_ocr_target(
+                self._source._producer,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                page_id=str(observation.page_id),
+                receipt=receipt,
+                word_bbox=tuple(float(value) for value in word.geometry),
+                raw_text=str(observation.raw_text),
+            )
+            targets.append(raster_bbox)
+            rotations.add(int(rotation))
+            source_partitions.add(str(observation.source_partition_id))
+            source_page_ids.add(str(observation.page_id))
+            observation_ids.append(str(observation.observation_id))
+
+        if (
+            len(rotations) != 1
+            or len(source_partitions) != 1
+            or len(source_page_ids) != 1
+            or not targets
+        ):
+            return None
+        rotation = next(iter(rotations))
+        source_partition_id = next(iter(source_partitions))
+        source_page_id = next(iter(source_page_ids))
+        raster_bbox = (
+            min(value[0] for value in targets),
+            min(value[1] for value in targets),
+            max(value[2] for value in targets),
+            max(value[3] for value in targets),
+        )
+
+        readings: list[str] = []
+        parent_ids: set[tuple[str, str, str]] = set()
+        for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+            try:
+                png_bytes, page_parent = (
+                    self._source._producer.render_native_page_png(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        page_id=source_page_id,
+                        dpi=float(dpi),
+                        clip_pt=raster_bbox,
+                    )
+                )
+            except Exception:
+                return None
+
+            if (
+                page_parent.document_id != published.revision.document_id
+                or page_parent.revision_id != published.revision.revision_id
+                or page_parent.source_sha256 != published.revision.source_sha256
+                or str(page_parent.source_partition_id) != source_partition_id
+                or str(page_parent.page_id) != source_page_id
+            ):
+                return None
+            parent_ids.add(
+                (
+                    str(page_parent.observation_id),
+                    str(page_parent.source_partition_id),
+                    str(page_parent.page_id),
+                )
+            )
+            try:
+                rendered = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                normalized = _lossless_rotate(rendered, rotation)
+            except Exception:
+                return None
+            margin_px = max(
+                1,
+                int(
+                    round(
+                        float(dpi)
+                        * _ROOM_LABEL_OCR_BLANK_MARGIN_MM
+                        / 25.4
+                    )
+                ),
+            )
+            isolated = ImageOps.expand(
+                normalized,
+                border=margin_px,
+                fill="white",
+            )
+            reading = _single_isolated_line_reading(
+                backend,
+                isolated,
+                dpi=int(dpi),
+            )
+            if reading is None or normalize_reading(reading) != claim:
+                return None
+            readings.append(reading)
+
+        if (
+            len(parent_ids) != 1
+            or len(readings) != len(RASTER_TEXT_CORROBORATION_DPIS)
+            or len({normalize_reading(value) for value in readings}) != 1
+        ):
+            return None
+
+        authority_record_id = stable_contract_id(
+            "source_room_label_line_raster_corroboration",
+            {
+                "document_id": published.revision.document_id,
+                "revision_id": published.revision.revision_id,
+                "source_sha256": published.revision.source_sha256,
+                "snapshot_id": published.snapshot.snapshot_id,
+                "source_partition_id": source_partition_id,
+                "observation_ids": tuple(observation_ids),
+                "raw_line": claim,
+                "render_dpis": tuple(RASTER_TEXT_CORROBORATION_DPIS),
+                "backend_name": str(getattr(backend, "name", "")),
+                "backend_version": str(getattr(backend, "version", "")),
+            },
+            digest_chars=32,
+        )
+        return tuple(
+            SourceRoomLabelWordEvidence(
+                observation_id=word.observation_id,
+                receipt_id=word.receipt_id,
+                trusted_text=word.raw_text,
+                authority_kind="raster_text_line_corroboration",
+                authority_record_id=authority_record_id,
+                geometry=word.geometry,
+                word_no=word.word_no,
+            )
+            for word in line
+        )
+
     def _build(self, *, page_ids: Optional[Sequence[str]]) -> None:
         selected = (
             None
@@ -582,8 +874,15 @@ class SourceRoomLabelProducer:
                         break
                     evidence.append(authorized)
                 if unresolved:
-                    required_word_unresolved = True
-                    continue
+                    fallback = self._authorize_line_fallback(
+                        published,
+                        line,
+                        raw_line,
+                    )
+                    if fallback is None:
+                        required_word_unresolved = True
+                        continue
+                    evidence = list(fallback)
 
                 label = " ".join(
                     item.trusted_text.strip()
