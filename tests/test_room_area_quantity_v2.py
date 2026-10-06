@@ -142,9 +142,10 @@ def _explicit_area(
     *,
     status=EvidenceResolutionStatus.CORROBORATED,
     metadata=None,
+    evidence_id: str = "area-ev",
 ) -> EvidenceAtom:
     return EvidenceAtom(
-        evidence_id="area-ev",
+        evidence_id=evidence_id,
         document_id="doc",
         page_id="page-1",
         viewport_id="vp",
@@ -481,6 +482,34 @@ def test_duplicate_face_unique_explicit_owner_can_publish_while_sibling_abstains
     )
     assert by_key["room_area:r2"].abstained is True
     assert "duplicate_room_face" in by_key["room_area:r2"].blocking_reasons
+
+
+def test_duplicate_face_multiple_explicit_owners_remain_blocked() -> None:
+    scale = _scale()
+    pts = _square(scale)
+    reordered = (pts[2], pts[3], pts[0], pts[1])
+    r1 = _room("r1", points=pts)
+    r2 = _room("r2", points=reordered)
+    out = build_room_area_quantities(
+        rooms=(r1, r2),
+        entities_by_room_id={
+            "r1": _entity("r1", ids=("room-ev", "area-1")),
+            "r2": _entity("r2", ids=("room-ev", "area-2")),
+        },
+        context=_context(),
+        document=_document(ids=("room-ev", "area-1", "area-2")),
+        viewport=_viewport(),
+        page_no=1,
+        scale_calibration=scale,
+        explicit_area_evidence_by_room_id={
+            "r1": _explicit_area(25.0, evidence_id="area-1"),
+            "r2": _explicit_area(25.0, evidence_id="area-2"),
+        },
+    )
+
+    assert len(out) == 2
+    assert all(q.abstained for q in out)
+    assert all("duplicate_room_face" in q.blocking_reasons for q in out)
 
 
 def test_quantity_identity_is_deterministic_and_scale_sensitive() -> None:
