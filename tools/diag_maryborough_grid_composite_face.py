@@ -392,13 +392,49 @@ def main() -> int:
             face_id for face_id in face_ids if face_id
         ))
         composite = None
+        union_diagnostics = None
         composite_ok = transition_ok and len(constituent_ids) >= 2
         if composite_ok:
             polygons = [
                 Polygon(room_by_face[face_id].polygon_pdf_pts)
                 for face_id in constituent_ids
             ]
+            pairwise = []
+            for left_index, left in enumerate(polygons):
+                for right_index, right in enumerate(polygons[left_index + 1 :], start=left_index + 1):
+                    intersection = left.intersection(right)
+                    pairwise.append({
+                        "left_face_id": constituent_ids[left_index],
+                        "right_face_id": constituent_ids[right_index],
+                        "distance": float(left.distance(right)),
+                        "touches": bool(left.touches(right)),
+                        "intersects": bool(left.intersects(right)),
+                        "intersection_geom_type": intersection.geom_type,
+                        "intersection_area": float(intersection.area),
+                        "intersection_length": float(intersection.length),
+                    })
             merged = unary_union(polygons)
+            union_diagnostics = {
+                "constituent_face_ids": list(constituent_ids),
+                "constituent_polygons": [
+                    {
+                        "face_id": face_id,
+                        "is_valid": bool(polygon.is_valid),
+                        "area_page_pts2": float(polygon.area),
+                        "bounds": list(polygon.bounds),
+                        "polygon_pdf_pts": [
+                            [float(x), float(y)]
+                            for x, y in tuple(polygon.exterior.coords)[:-1]
+                        ],
+                    }
+                    for face_id, polygon in zip(constituent_ids, polygons)
+                ],
+                "pairwise": pairwise,
+                "union_geom_type": merged.geom_type,
+                "union_is_empty": bool(merged.is_empty),
+                "union_is_valid": bool(merged.is_valid),
+                "union_area_page_pts2": float(merged.area),
+            }
             if (
                 merged.geom_type != "Polygon"
                 or merged.is_empty
@@ -422,6 +458,7 @@ def main() -> int:
             "word_faces": word_rows,
             "transitions": transitions,
             "composite": composite,
+            "union_diagnostics": union_diagnostics,
         })
 
     print(json.dumps({
