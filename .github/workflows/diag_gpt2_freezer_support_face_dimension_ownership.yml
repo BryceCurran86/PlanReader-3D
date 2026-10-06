@@ -29,6 +29,7 @@ jobs:
           import json
           from pathlib import Path
           from shapely.geometry import LineString, Polygon, Point
+          from shapely.validation import explain_validity
 
           import pb_cross_view_room_area_authority as cv
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
@@ -72,6 +73,18 @@ jobs:
           assert len(freezer_rooms)==1, len(freezer_rooms)
           room=freezer_rooms[0]
           polygon=Polygon(room.polygon_pdf_pts)
+          print(json.dumps({
+              "stage":"support_room_polygon",
+              "physical_room_id":room.physical_room_id,
+              "source_room_face_record_id":room.source_room_face_record_id,
+              "polygon_pdf_pts":[list(p) for p in room.polygon_pdf_pts],
+              "vertex_count":len(room.polygon_pdf_pts),
+              "area_page_pts2":room.area_page_pts2,
+              "shapely_area":float(polygon.area),
+              "is_empty":bool(polygon.is_empty),
+              "is_valid":bool(polygon.is_valid),
+              "validity_reason":explain_validity(polygon),
+          },sort_keys=True),flush=True)
           assert polygon.is_valid and not polygon.is_empty
           boundary=polygon.boundary
 
