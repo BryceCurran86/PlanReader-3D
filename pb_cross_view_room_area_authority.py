@@ -65,6 +65,7 @@ from pb_raster_text_corroboration_authority import (
     normalize_reading,
 )
 from pb_source_observation_authority import ObservationSelector
+from pb_source_room_label_authority import _normalized_room_line
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
     SourceVisibilityProducer,
@@ -117,6 +118,7 @@ class _TrustedLine:
     source_partition_id: str
     block_no: int
     line_no: int
+    label_members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,7 @@ class _TrustedBoundDimension:
     witness_geometries: tuple[
         tuple[float, float, float, float], ...
     ]
+    text_bbox: Optional[tuple[float, float, float, float]] = None
 
 
 @dataclass(frozen=True)
