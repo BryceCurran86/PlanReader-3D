@@ -20,16 +20,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Run focused authority regressions
+        id: focused
+        continue-on-error: true
         run: |
           PYTHONPATH=. pytest -q \
             tests/test_source_plan_opening_callout.py \
             tests/test_opening_label_semantic_authority.py \
             tests/test_opening_label_dimension_authority.py
       - name: Run exact Lot16 dropout matrix
+        if: always()
         shell: bash
         run: |
           set -o pipefail
           PYTHONPATH=. python -u tools/diag_lot16_opening_dropout_matrix.py | tee lot16-owned-compact-semantic.json
+      - name: Report focused regression status
+        if: always()
+        run: echo "focused_outcome=${{ steps.focused.outcome }}"
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
