@@ -1,0 +1,39 @@
+name: DIAG Registered Raster Swing Real Source
+
+on:
+  pull_request:
+    branches:
+      - gpt4/raster-swing-registration-v2
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run frozen swing + registration tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_raster_door_swing_g17_contract.py \
+            tests/test_raster_swing_registration_authority.py \
+            tests/test_raster_framed_opening_g17_contract.py
+      - name: Run real-source swing census
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python tools/diag_raster_swing_real_source.py | tee raster-swing-real-source.json
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registered-raster-swing-real-source
+          path: raster-swing-real-source.json
+          retention-days: 1
