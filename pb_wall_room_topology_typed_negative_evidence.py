@@ -391,10 +391,14 @@ def _array_nominations(
                 "feature_basis": {"mullion_count": len(mullion_pool)},
             }
         )
+    # Grid evidence must be invariant to Stage-A rechunking at crossings.
+    # Use the reconstructed collinear family length (the same source-owned
+    # family measure already used by ticks/hatch/mullion nominations) rather
+    # than each split edge's local fragment length.
     grid = [
         item
         for item in others
-        if item["length"] / host_len >= 0.5
+        if family_len_by_id.get(item["id"], item["length"]) / host_len >= 0.5
         and _angle_delta(item["angle"], host["angle"]) <= _PARALLEL_DEG
     ]
     grid_offsets = [
