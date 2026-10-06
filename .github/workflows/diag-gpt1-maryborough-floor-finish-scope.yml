@@ -32,6 +32,7 @@ jobs:
           from pb_source_observation_authority import ObservationSelector
           from pb_migration_contracts import EvidenceResolutionStatus
           from pb_source_room_label_authority import _normalized_room_line
+          from pb_viewport_segmentation import segment_page_viewports
 
           pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           payload=pdf.read_bytes()
@@ -161,11 +162,21 @@ jobs:
                       "normalized_room_label":room_label,
                   })
 
+          segmented_viewports=[]
           ceiling_scopes=[]
           doc=fitz.open(stream=payload,filetype="pdf")
           try:
               for index in range(doc.page_count):
                   page_no=index+1
+                  for raw_view in segment_page_viewports(doc[index],page_number=page_no):
+                      segmented_viewports.append({
+                          "page_no":page_no,
+                          "view_id":raw_view.view_id,
+                          "view_type":raw_view.view_type,
+                          "status":raw_view.status,
+                          "label":raw_view.label,
+                          "bbox":None if raw_view.bounding_box is None else list(raw_view.bounding_box),
+                      })
                   for segmented in authoritative_floor_plan_viewports(doc[index],page_number=page_no):
                       if segmented.bounding_box is None:
                           continue
@@ -228,5 +239,6 @@ jobs:
               "ceiling_viewport_scopes":ceiling_scopes,
               "pagewide_authenticated_room_and_ceiling_semantics":pagewide_semantics,
               "raw_ceiling_semantics":raw_ceiling_semantics,
+              "segmented_viewports":segmented_viewports,
           },indent=2,sort_keys=True))
           PY
