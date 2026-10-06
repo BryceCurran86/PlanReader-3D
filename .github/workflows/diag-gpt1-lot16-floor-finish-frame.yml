@@ -34,7 +34,7 @@ jobs:
               pdf,
               pages=(2,),
               topology_pages=(2,),
-              room_area_support_pages=(),
+              room_area_support_pages=None,
           )
           floors=[]
           for floor in claim.canonical_floors:
