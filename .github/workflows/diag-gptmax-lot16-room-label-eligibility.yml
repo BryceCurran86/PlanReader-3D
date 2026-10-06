@@ -1,0 +1,33 @@
+name: DIAG GPTMAX Lot16 Room Label Eligibility
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect real Lot16 room labels
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_lot16_room_label_eligibility.py | tee lot16-room-label-eligibility.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-room-label-eligibility
+          path: lot16-room-label-eligibility.json
+          retention-days: 2
