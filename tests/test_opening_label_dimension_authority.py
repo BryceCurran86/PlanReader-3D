@@ -352,19 +352,28 @@ def test_compact_expansion_requires_authenticated_owned_opening() -> None:
     )
     assert resolved == ((1800.0, 900.0), True)
 
-    opaque = parse_opening_label_dimensions("1218 SGW")
-    assert opaque is not None
+    compact_window = parse_opening_label_dimensions("1218 SGW")
+    assert compact_window is not None
+    # An explicit generic opening descriptor can unlock compact units only
+    # after a physical opening is independently authenticated.
     assert _resolve_owned_dimension_values_mm(
-        opaque,
-        opening_record_id="owned-opening",
+        compact_window,
+        opening_record_id="",
         semantic_kind="window",
     ) is None
     assert _resolve_owned_dimension_values_mm(
-        opaque,
+        compact_window,
         opening_record_id="owned-opening",
         semantic_kind="window",
-        authenticated_semantic_evidence=True,
     ) == ((1200.0, 1800.0), True)
+
+    unknown = parse_opening_label_dimensions("1218 UNKNOWN")
+    assert unknown is not None
+    assert _resolve_owned_dimension_values_mm(
+        unknown,
+        opening_record_id="owned-opening",
+        semantic_kind="window",
+    ) is None
 
 
 def test_producer_expands_compact_dimensions_only_after_physical_ownership() -> None:
@@ -384,6 +393,39 @@ def test_producer_expands_compact_dimensions_only_after_physical_ownership() -> 
     assert result.evidence.area_m2 == pytest.approx(1.62)
     assert result.evidence.opening_record_id
     assert result.evidence.source_text_observation_ids
+
+@pytest.mark.parametrize(
+    ("label", "expected_kind", "expected_values", "expected_area"),
+    (
+        ("1218 SGW", "window", (1200.0, 1800.0), 2.16),
+        ("0630 FG", "window", (600.0, 3000.0), 1.8),
+        ("2124 CORNER STACK", "door", (2100.0, 2400.0), 5.04),
+        ("2148 PANEL LIFT", "door", (2100.0, 4800.0), 10.08),
+    ),
+)
+def test_owned_generic_compact_descriptors_unlock_source_dimensions_without_legend(
+    label: str,
+    expected_kind: str,
+    expected_values: tuple[float, float],
+    expected_area: float,
+) -> None:
+    source, published = _ingest(
+        _pdf(labels=((105.0, 124.0, label),)),
+        "compact-owned-generic-" + label.lower().replace(" ", "-"),
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.semantic_kind == expected_kind
+    assert result.evidence.dimension_values_mm == expected_values
+    assert result.evidence.area_m2 == pytest.approx(expected_area)
+    assert result.evidence.opening_record_id
+    assert result.evidence.source_text_observation_ids
+
 
 def test_owned_legend_semantics_unlock_four_digit_compact_dimensions() -> None:
     payload = _pdf(
