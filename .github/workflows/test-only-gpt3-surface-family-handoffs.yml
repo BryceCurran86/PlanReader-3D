@@ -1,0 +1,74 @@
+name: TEST ONLY GPT3 Surface Family Handoffs
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  surfaces:
+    name: surfaces ${{ matrix.project_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project_id: au_qld_maryborough_service_station
+            pdf: documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+          - project_id: au_qld_lot16_power
+            pdf: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Run surface source-closed handoff
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p "artifacts/${{ matrix.project_id }}"
+          git rev-parse HEAD > "artifacts/${{ matrix.project_id }}/head_sha.txt"
+          sha256sum "${{ matrix.pdf }}" > "artifacts/${{ matrix.project_id }}/source_sha256.txt"
+          set +e
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "${{ matrix.pdf }}" \
+            --project-id "${{ matrix.project_id }}" \
+            --workspace-id 1 \
+            --family-group surfaces \
+            --output-dir "artifacts/${{ matrix.project_id }}" \
+            > "artifacts/${{ matrix.project_id }}/run.log" 2>&1
+          code=$?
+          echo "$code" > "artifacts/${{ matrix.project_id }}/exit_code.txt"
+          cat "artifacts/${{ matrix.project_id }}/run.log"
+          exit 0
+
+      - name: Show summary
+        if: always()
+        shell: bash
+        run: |
+          find "artifacts/${{ matrix.project_id }}" -maxdepth 3 -type f -print || true
+          echo "=== exit ==="
+          cat "artifacts/${{ matrix.project_id }}/exit_code.txt" 2>/dev/null || true
+          echo "=== summary ==="
+          cat "artifacts/${{ matrix.project_id }}/production_summary.json" 2>/dev/null || true
+          echo "=== tail ==="
+          tail -n 180 "artifacts/${{ matrix.project_id }}/run.log" 2>/dev/null || true
+
+      - name: Upload surface handoff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-surfaces-${{ matrix.project_id }}
+          path: artifacts/${{ matrix.project_id }}
+          retention-days: 1
+          if-no-files-found: warn
