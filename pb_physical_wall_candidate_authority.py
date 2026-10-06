@@ -56,6 +56,11 @@ from pb_physical_wall_source_metadata_shadow import (
     build_physical_wall_source_metadata_scope_table,
     unavailable_physical_wall_source_metadata_scope_table,
 )
+from pb_physical_wall_dense_lattice_shadow import (
+    PhysicalWallDenseLatticeShadowEvaluation,
+    evaluate_physical_wall_dense_lattice_shadow,
+    unavailable_physical_wall_dense_lattice_shadow,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
@@ -296,6 +301,7 @@ class PhysicalWallCandidateScopeResult:
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
     boundary_evaluation: Optional[PhysicalWallScopeBoundaryEvaluation] = None
     source_metadata_table: Optional[PhysicalWallSourceMetadataScopeTable] = None
+    dense_lattice_evaluation: Optional[PhysicalWallDenseLatticeShadowEvaluation] = None
 
 
 @dataclass(frozen=True)
@@ -2789,6 +2795,24 @@ def _assemble_scope_result(
             reason_code=f"source_metadata_shadow_error:{type(exc).__name__}",
         )
 
+    # Shadow-only typed negative evidence for dense orthogonal source lattices.
+    # This evaluation consumes the already-produced wall records plus immutable
+    # source primitives and cannot alter topology, equivalence, completeness,
+    # reason codes or any downstream live decision.
+    try:
+        dense_lattice_evaluation = evaluate_physical_wall_dense_lattice_shadow(
+            records=tuple(records),
+            source_segments=tuple(segments),
+            page_id=page_id,
+            decision_scope_id=scope_id,
+        )
+    except Exception as exc:  # pragma: no cover - shadow evidence must fail open
+        dense_lattice_evaluation = unavailable_physical_wall_dense_lattice_shadow(
+            page_id=page_id,
+            decision_scope_id=scope_id,
+            reason_code=f"dense_lattice_shadow_error:{type(exc).__name__}",
+        )
+
     baseline_equivalence = resolve_physical_wall_equivalence(
         tuple(ordered_identities),
         walls_by_id={wall.candidate_id: wall for wall in ordered_walls},
@@ -2936,6 +2960,7 @@ def _assemble_scope_result(
         ),
         boundary_evaluation=boundary_evaluation,
         source_metadata_table=source_metadata_table,
+        dense_lattice_evaluation=dense_lattice_evaluation,
     )
 
 
