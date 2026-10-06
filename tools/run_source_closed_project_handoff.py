@@ -83,7 +83,14 @@ def _source_page_scopes(
         return selected, (), page_count
 
     topology = scope.topology_page_indices()
-    support = tuple(getattr(scope, "evidence_page_indices", ()) or ())
+    support = tuple(
+        getattr(
+            scope,
+            "room_area_support_page_indices",
+            getattr(scope, "evidence_page_indices", ()),
+        )
+        or ()
+    )
     if topology is None:
         return selected, (), page_count
     return tuple(topology), support, page_count

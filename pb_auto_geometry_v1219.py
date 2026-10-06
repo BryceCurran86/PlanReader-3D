@@ -1500,7 +1500,12 @@ def _try_physical_net_wall_rows(
                 if topology_pages is not None:
                     claim_kwargs["topology_pages"] = topology_pages
                 support_pages = tuple(
-                    getattr(page_scope, "evidence_page_indices", ()) or ()
+                    getattr(
+                        page_scope,
+                        "room_area_support_page_indices",
+                        getattr(page_scope, "evidence_page_indices", ()),
+                    )
+                    or ()
                 )
                 if support_pages:
                     claim_kwargs["room_area_support_pages"] = support_pages

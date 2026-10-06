@@ -52,6 +52,31 @@ _MIN_TITLE_SCORE = 60.0
 _MIN_PAGE_TYPE_CONFIDENCE = 60
 _TITLE_SPLIT_RE = re.compile(r"\s*(?:&|/|\+|,|;|\band\b)\s*", re.IGNORECASE)
 
+# Room-area cross-view support must be plan-like source evidence rather than
+# every positively non-floor-plan sheet. These roles are generic architectural
+# drawing titles: they commonly repeat room labels and plan dimensions while
+# schedules/specifications/roof/details/elevations do not establish horizontal
+# room extents. Missing/unknown titles remain fail-closed and are not promoted.
+_ROOM_AREA_SUPPORT_TITLE_PATTERNS = (
+    re.compile(r"\breflected\s+ceiling\s+plan\b", re.IGNORECASE),
+    re.compile(r"\bceiling\s+plan\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:floor\s+)?finish(?:es)?\s*(?:(?:&|and|/|\+)\s*)?"
+        r"partition(?:s)?\s+plan\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bfloor\s+finish(?:es)?\s+plan\b", re.IGNORECASE),
+    re.compile(r"\bpartition(?:s)?\s+plan\b", re.IGNORECASE),
+)
+
+
+def _is_room_area_support_title(title: object) -> bool:
+    clean = " ".join(str(title or "").strip().split())
+    return bool(
+        clean
+        and any(pattern.search(clean) for pattern in _ROOM_AREA_SUPPORT_TITLE_PATTERNS)
+    )
+
 
 @dataclass(frozen=True)
 class SourceFloorPlanPageDecision:
@@ -85,6 +110,26 @@ class SourceFloorPlanPageScope:
         """Pages that only supply cross-sheet evidence (empty unless ``restricts``)."""
         return self.other_drawing_page_indices if self.restricts else ()
 
+    @property
+    def room_area_support_page_indices(self) -> tuple[int, ...]:
+        """Plan-like evidence pages eligible for cross-view room-area support.
+
+        This is deliberately narrower than `evidence_page_indices`. It never
+        changes topology classification and never removes evidence from other
+        families; it only prevents room-area measurement from replaying every
+        positively non-floor-plan sheet.
+        """
+        if not self.restricts:
+            return ()
+        other = set(self.other_drawing_page_indices)
+        return tuple(
+            decision.page_index
+            for decision in self.decisions
+            if decision.page_index in other
+            and decision.classification == NOT_FLOOR_PLAN
+            and _is_room_area_support_title(decision.title)
+        )
+
     def topology_page_indices(self) -> Optional[tuple[int, ...]]:
         """Pages to use as topology scope, or ``None`` meaning "no restriction"."""
         if not self.restricts:
@@ -99,6 +144,9 @@ class SourceFloorPlanPageScope:
             "floor_plan_page_indices": list(self.floor_plan_page_indices),
             "other_drawing_page_indices": list(self.other_drawing_page_indices),
             "evidence_page_indices": list(self.evidence_page_indices),
+            "room_area_support_page_indices": list(
+                self.room_area_support_page_indices
+            ),
             "restricts": self.restricts,
             "decisions": [
                 {

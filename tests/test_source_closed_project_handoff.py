@@ -119,7 +119,9 @@ def test_source_topology_pages_reuses_production_bound_title_scope(
 
     assert page_count == 3
     assert topology == (1,)
-    assert support == (0, 2)
+    # COVER SHEET and ELEVATIONS remain general evidence but are not
+    # horizontal room-area support plans.
+    assert support == ()
 
 
 def test_source_topology_pages_preserves_full_scope_when_unrestricted(
