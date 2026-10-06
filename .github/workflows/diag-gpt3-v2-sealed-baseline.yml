@@ -1,0 +1,59 @@
+name: DIAG GPT3 V2 Sealed Baseline
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Check frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Run Maryborough sealed handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt3-v2-baseline
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/gpt3-v2-baseline \
+            | tee artifacts/gpt3-v2-baseline/maryborough.stdout.json
+      - name: Run Lot16 sealed handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --project-id au_qld_lot16_power \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/gpt3-v2-baseline \
+            | tee artifacts/gpt3-v2-baseline/lot16.stdout.json
+      - name: Audit sealed output integrity
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_v2_sealed_baseline.py | tee artifacts/gpt3-v2-baseline/sealed-audit.json
+      - name: Upload baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-v2-sealed-baseline
+          path: artifacts/gpt3-v2-baseline
+          retention-days: 3
