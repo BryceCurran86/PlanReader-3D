@@ -25,6 +25,7 @@ from pb_wall_room_topology_typed_negative_evidence import (
     KIND_UNKNOWN,
     attach_typed_semantic_evidence,
     bundle_status,
+    collect_source_lineage_grid_evidence,
     collect_typed_semantic_evidence,
 )
 from pb_wall_topology_diagnostics import collect_topology_from_segments, diagnose_wall_topology
@@ -425,6 +426,39 @@ class TestSourceLineageGridRecall:
             if atom.kind == KIND_GRID
             and "source_lineage_dense_orthogonal_lattice" in atom.reason_codes
         ]
+
+    def test_grid_only_fastpath_matches_full_u2_source_grid_atoms(self) -> None:
+        fixtures = (
+            self._lattice(),
+            self._lattice(include_second_width=False),
+            self._lattice(layer="A-WALL-PARTITION"),
+            self._lattice(coordinates=(0.0, 7.0, 19.0, 34.0, 55.0)),
+        )
+        for segments in fixtures:
+            graph = build_wall_graph_for_viewport(segments)
+            full = [
+                atom
+                for atom in collect_typed_semantic_evidence(
+                    graph,
+                    document_id="doc",
+                    page_id="page_1",
+                    viewport_id="vp1",
+                )
+                if atom.kind == KIND_GRID
+                and "source_lineage_dense_orthogonal_lattice"
+                in atom.reason_codes
+            ]
+            fast = list(
+                collect_source_lineage_grid_evidence(
+                    graph,
+                    document_id="doc",
+                    page_id="page_1",
+                    viewport_id="vp1",
+                )
+            )
+            assert [atom.to_dict() for atom in fast] == [
+                atom.to_dict() for atom in full
+            ]
 
     def test_split_native_lattice_recovers_existing_grid_role(self) -> None:
         graph, atoms = self._source_grid_atoms(self._lattice())
