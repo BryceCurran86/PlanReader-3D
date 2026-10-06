@@ -192,7 +192,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     )
     ceiling_candidate = SimpleNamespace(promoted_quantity=_quantity("q-ceiling", "ceiling_lining"))
 
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((0,), 1))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
     monkeypatch.setattr(
         handoff,
         "collect_live_physical_net_wall_claim",
@@ -274,7 +274,7 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
 ) -> None:
     pdf = tmp_path / "source.pdf"
     pdf.write_bytes(b"source-bytes")
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((), 3))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0, 1, 2), (), 3))
 
     claim = SimpleNamespace(
         status=SimpleNamespace(value="abstained"),
@@ -398,7 +398,7 @@ def test_project_handoff_rejects_family_run_from_different_source(
         opening_count_quantity_evidence=(),
     )
 
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((0,), 1))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
     monkeypatch.setattr(
         handoff,
         "collect_live_physical_net_wall_claim",
@@ -455,7 +455,7 @@ def test_project_handoff_combined_filename_matches_suite_scoreboard_contract(
         opening_count_quantity_evidence=(),
     )
 
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((0,), 1))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
     monkeypatch.setattr(
         handoff,
         "collect_live_physical_net_wall_claim",
@@ -498,7 +498,7 @@ def test_project_handoff_persists_production_failure_summary_before_reraise(
     pdf.write_bytes(b"source-bytes")
     output = tmp_path / "out"
 
-    monkeypatch.setattr(handoff, "_source_topology_pages", lambda path: ((), 2))
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0, 1), (), 2))
 
     def _fail(*args, **kwargs):
         raise ValueError("raster opening primitive count exceeds safety bound")
