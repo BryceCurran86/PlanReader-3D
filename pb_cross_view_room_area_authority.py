@@ -1125,22 +1125,43 @@ def _dimension_is_immediate_label_annotation(
     line: _TrustedLine,
     dimension: _TrustedBoundDimension,
 ) -> bool:
-    """Return whether a figured dimension is the next source text line.
+    """Return whether native text structure owns one figured dimension.
 
-    Some plan sheets repeat a unique room label in explicit dimension annotation
-    blocks, with one figured dimension on the immediately following native text
-    line. This source structure is stronger than proximity: the label and value
-    share one producer-owned text partition/block and there is no intervening
-    native text line. The dimension still has to satisfy all normal numeric,
-    vector-line, witness and source-visibility authority before reaching here.
+    The historical same-block next-line relation remains authoritative.
+    A second form handles PDF producers that split one visual label/value
+    annotation into consecutive native text blocks. That form is accepted only
+    when both records are line zero, the numeric word is word zero, and the
+    native text bboxes overlap along the dimension axis. No nearest-text search
+    or free-distance ranking is used.
     """
-    return (
-        bool(line.source_partition_id)
-        and line.source_partition_id == dimension.text_source_partition_id
-        and dimension.text_block_no == line.block_no
+    if (
+        not line.source_partition_id
+        or line.source_partition_id != dimension.text_source_partition_id
+        or dimension.text_block_no is None
+        or dimension.text_line_no is None
+        or dimension.text_word_no != 0
+    ):
+        return False
+    if (
+        dimension.text_block_no == line.block_no
         and dimension.text_line_no == line.line_no + 1
-        and dimension.text_word_no == 0
-    )
+    ):
+        return True
+    if (
+        dimension.text_block_no != line.block_no + 1
+        or line.line_no != 0
+        or dimension.text_line_no != 0
+        or dimension.text_bbox is None
+    ):
+        return False
+
+    lx0, ly0, lx1, ly1 = line.bbox
+    dx0, dy0, dx1, dy1 = dimension.text_bbox
+    if dimension.orientation == DimensionOrientation.HORIZONTAL.value:
+        return min(lx1, dx1) - max(lx0, dx0) > 0.0
+    if dimension.orientation == DimensionOrientation.VERTICAL.value:
+        return min(ly1, dy1) - max(ly0, dy0) > 0.0
+    return False
 
 
 def _segment_orientation_value(
