@@ -143,25 +143,24 @@ def main() -> int:
         if record is None:
             return {"wall_candidate_id": wall_id, "record_unavailable": True}
         candidate = record.wall_candidate
-        source_result = source._producer.authority().resolve(
-            ObservationSelector(
-                document_id=current.revision.document_id,
-                revision_id=current.revision.revision_id,
-                source_sha256=current.revision.source_sha256,
-                snapshot_id=current.snapshot.snapshot_id,
-                observation_id=record.source_observation_id,
-            )
+        table = wall_scope.source_metadata_table
+        descriptor = (
+            None
+            if table is None
+            else table.descriptor_for(wall_id)
         )
-        observation = source_result.observation
-        primitive_ref = (
-            "" if observation is None else str(observation.source_primitive_ref)
+        primitive_ids = (
+            ()
+            if descriptor is None
+            else tuple(descriptor.matched_source_primitive_ids)
         )
-        segment_id = primitive_ref.removeprefix("segment:")
-        segment = native_segments.get(segment_id)
+        native_rows = [
+            native_segments[primitive_id]
+            for primitive_id in primitive_ids
+            if primitive_id in native_segments
+        ]
         return {
             "wall_candidate_id": wall_id,
-            "record_source_observation_id": record.source_observation_id,
-            "source_primitive_ref": primitive_ref,
             "candidate_representation": candidate.representation,
             "candidate_reason_codes": list(candidate.reason_codes),
             "centerline_pts": [list(p) for p in candidate.centerline_pts],
@@ -171,10 +170,47 @@ def main() -> int:
                 if candidate.face_b_segment_ids is None
                 else list(candidate.face_b_segment_ids)
             ),
-            "native_segment": (
-                None
-                if segment is None
-                else {
+            "source_metadata_status": (
+                None if descriptor is None else "available"
+            ),
+            "source_primitive_ids": (
+                []
+                if descriptor is None
+                else list(descriptor.source_primitive_ids)
+            ),
+            "matched_source_primitive_ids": list(primitive_ids),
+            "missing_source_primitive_ids": (
+                []
+                if descriptor is None
+                else list(descriptor.missing_source_primitive_ids)
+            ),
+            "source_width_values_pt": (
+                []
+                if descriptor is None
+                else list(descriptor.width_values_pt)
+            ),
+            "source_stroke_values": (
+                []
+                if descriptor is None
+                else list(descriptor.stroke_values)
+            ),
+            "source_fill_values": (
+                []
+                if descriptor is None
+                else list(descriptor.fill_values)
+            ),
+            "source_layer_values": (
+                []
+                if descriptor is None
+                else list(descriptor.layer_values)
+            ),
+            "source_dashes_values": (
+                []
+                if descriptor is None
+                else list(descriptor.dashes_values)
+            ),
+            "native_segments": [
+                {
                     key: segment.get(key)
                     for key in (
                         "id",
@@ -190,7 +226,8 @@ def main() -> int:
                         "dashes",
                     )
                 }
-            ),
+                for segment in native_rows
+            ],
         }
 
     rows = []
