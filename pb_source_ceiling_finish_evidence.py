@@ -32,6 +32,14 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
+from pb_raster_text_corroboration_authority import (
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -109,6 +117,9 @@ def collect_source_owned_ceiling_finish_candidates(
         return ()
 
     authority = source_visibility_producer.text_integrity_authority()
+    raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+        source_visibility_producer
+    )
     line_results: dict[
         tuple[str, int, int],
         list[tuple[int, object, object]],
@@ -154,23 +165,73 @@ def collect_source_owned_ceiling_finish_candidates(
         ):
             continue
 
-        # Reject the WHOLE native line if any word is not trusted. Otherwise
-        # omission of an unsafe word could fabricate a semantic phrase.
-        if any(
-            result.status is not EvidenceResolutionStatus.CORROBORATED
-            or not _clean(result.trusted_text)
-            for _, result, _ in ordered
-        ):
+        # Reject the WHOLE native line unless every word is independently
+        # source-authenticated. Native text remains preferred. For the same
+        # narrow glyph/clip failures already admitted by room-label authority,
+        # reuse producer-owned RasterTextCorroborationAuthority; arbitrary
+        # integrity failures remain fail-closed.
+        trusted_entries: list[tuple[str, object, object, Optional[str]]] = []
+        line_failed = False
+        admissible = {
+            TEXT_GLYPH_MAPPING_UNVERIFIED,
+            TEXT_CLIP_STATE_UNRESOLVED,
+        }
+        for _, result, receipt in ordered:
+            trusted_text = (
+                _clean(result.trusted_text)
+                if (
+                    result.status is EvidenceResolutionStatus.CORROBORATED
+                    and _clean(result.trusted_text)
+                )
+                else ""
+            )
+            raster_record_id: Optional[str] = None
+            if not trusted_text:
+                reasons = tuple(result.reason_codes or ())
+                reason_set = set(reasons)
+                parent_observation_id = _clean(receipt.parent_observation_id)
+                if not (
+                    result.status is EvidenceResolutionStatus.ABSTAINED
+                    and not bool(receipt.trusted)
+                    and parent_observation_id
+                    and TEXT_GLYPH_MAPPING_UNVERIFIED in reason_set
+                    and reason_set.issubset(admissible)
+                    and tuple(receipt.reason_codes or ()) == reasons
+                ):
+                    line_failed = True
+                    break
+                raster_result = raster.publish(
+                    RasterTextCorroborationSelector(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=published.snapshot.snapshot_id,
+                        observation_id=parent_observation_id,
+                    )
+                )
+                if (
+                    raster_result.status is not EvidenceResolutionStatus.CORROBORATED
+                    or raster_result.record is None
+                    or not _clean(raster_result.corroborated_text)
+                ):
+                    line_failed = True
+                    break
+                trusted_text = _clean(raster_result.corroborated_text)
+                raster_record_id = _clean(raster_result.record.record_id)
+            trusted_entries.append(
+                (trusted_text, result, receipt, raster_record_id)
+            )
+        if line_failed or len(trusted_entries) != len(ordered):
             continue
 
-        boxes = [_bbox(receipt.geometry) for _, _, receipt in ordered]
+        boxes = [_bbox(receipt.geometry) for _, _, receipt, _ in trusted_entries]
         if any(box is None for box in boxes):
             continue
         trusted_boxes = tuple(box for box in boxes if box is not None)
         if any(not _inside(box, viewport_bbox) for box in trusted_boxes):
             continue
 
-        texts = [_clean(result.trusted_text) for _, result, _ in ordered]
+        texts = [text for text, _, _, _ in trusted_entries]
         line_text = " ".join(texts)
         matches = iter_explicit_ceiling_finish_matches(line_text)
         if not matches:
@@ -207,12 +268,18 @@ def collect_source_owned_ceiling_finish_candidates(
                 max(box[3] for box in selected_boxes),
             )
             parent_ids = tuple(
-                ordered[index][2].parent_observation_id
+                trusted_entries[index][2].parent_observation_id
                 for index in selected_indexes
             )
             receipt_ids = tuple(
-                ordered[index][2].receipt_id
+                trusted_entries[index][2].receipt_id
                 for index in selected_indexes
+            )
+            raster_record_ids = tuple(
+                record_id
+                for index in selected_indexes
+                for record_id in (trusted_entries[index][3],)
+                if record_id
             )
             candidates = collect_unscoped_ceiling_finish_candidates(
                 page_text=raw_match,
@@ -235,6 +302,7 @@ def collect_source_owned_ceiling_finish_candidates(
                         "native_line_no": key[2],
                         "source_text_observation_ids": parent_ids,
                         "text_integrity_receipt_ids": receipt_ids,
+                        "raster_text_corroboration_record_ids": raster_record_ids,
                     }
                 )
                 evidence_id = stable_contract_id(
@@ -252,6 +320,7 @@ def collect_source_owned_ceiling_finish_candidates(
                         "bbox": candidate.bbox,
                         "parent_observation_ids": parent_ids,
                         "receipt_ids": receipt_ids,
+                        "raster_record_ids": raster_record_ids,
                     },
                 )
                 atoms.append(
