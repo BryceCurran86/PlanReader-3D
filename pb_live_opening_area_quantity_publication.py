@@ -51,8 +51,6 @@ def _opening_quantity(
         not canonical_id
         or canonical_id != physical_id
         or not viewport_id
-        or not host_wall_id
-        or not (host_binding_record_id or host_frame_record_id)
         or opening_kind not in {"door", "window"}
         or not basis
         or opening.area_m2 is None
@@ -78,24 +76,52 @@ def _opening_quantity(
     if not evidence_ids:
         return None
 
+    host_identity_proven = bool(
+        host_wall_id and (host_binding_record_id or host_frame_record_id)
+    )
+    plan_tag_identity_proven = bool(
+        str(opening.type_mark or "").strip()
+        and str(opening.tag_observation_id or "").strip()
+        and str(opening.tag_observation_id).strip() in evidence_ids
+        and str(opening.representative_observation_id or "").strip()
+        and tuple(
+            value
+            for value in opening.source_observation_ids
+            if str(value or "").strip()
+        )
+    )
+
     measurement_record_id = None
     quantity_authority = None
     if basis == "figured_opening_label":
+        if not host_identity_proven:
+            return None
         measurement_record_id = str(opening.figured_area_record_id or "").strip()
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
         quantity_authority = LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
     elif basis == "resolved_opening_geometry":
+        if not host_identity_proven:
+            return None
         measurement_record_id = str(opening.opening_void_record_id or "").strip()
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
         quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
     elif basis == "authenticated_elevation_frame":
+        # Gross framed opening area is source-measured on a marked elevation and
+        # does not depend mathematically on wall-host geometry. Permit this
+        # narrow host-independent publication only when the canonical physical
+        # opening retains an independently authenticated plan tag. Net-wall
+        # deductions remain governed by the physical void/host authority.
+        if not host_identity_proven and not plan_tag_identity_proven:
+            return None
         measurement_record_id = str(opening.figured_area_record_id or "").strip()
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
         quantity_authority = LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY
     elif basis == "authenticated_frame_schedule":
+        if not host_identity_proven:
+            return None
         measurement_record_id = str(opening.schedule_binding_record_id or "").strip()
         if (
             not measurement_record_id
