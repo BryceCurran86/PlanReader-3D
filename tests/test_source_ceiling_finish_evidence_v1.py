@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import fitz
+from dataclasses import replace
+from types import SimpleNamespace
 
+import pb_source_ceiling_finish_evidence as ceiling_source
 from pb_migration_contracts import ViewportEvidence, ViewportResolutionStatus
 from pb_migration_provider_envelope import ProviderContext
 from pb_source_ceiling_finish_evidence import (
@@ -167,3 +170,69 @@ def test_finish_line_outside_owned_viewport_is_ignored() -> None:
         page_no=1,
     )
     assert atoms == ()
+
+
+def test_admissible_glyph_clip_failure_can_use_raster_text_corroboration(
+    monkeypatch,
+) -> None:
+    producer, published = _ingest(
+        _pdf_bytes(first="CEILING FINISH: 12mm gypsum plasterboard")
+    )
+    real = producer.text_integrity_authority()
+
+    class _GlyphClipIntegrity:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            if result.receipt is None:
+                return result
+            reasons = (
+                ceiling_source.TEXT_GLYPH_MAPPING_UNVERIFIED,
+                ceiling_source.TEXT_CLIP_STATE_UNRESOLVED,
+            )
+            return SimpleNamespace(
+                status=ceiling_source.EvidenceResolutionStatus.ABSTAINED,
+                trusted_text=None,
+                reason_codes=reasons,
+                receipt=replace(
+                    result.receipt,
+                    trusted=False,
+                    reason_codes=reasons,
+                ),
+            )
+
+    class _FakeRasterProducer:
+        @classmethod
+        def from_source_visibility_producer(cls, _source):
+            return cls()
+
+        def publish(self, selector):
+            source_result = producer._producer.authority().resolve(selector)
+            raw = source_result.observation.raw_text
+            return SimpleNamespace(
+                status=ceiling_source.EvidenceResolutionStatus.CORROBORATED,
+                record=SimpleNamespace(record_id=f"raster:{selector.observation_id}"),
+                corroborated_text=raw,
+            )
+
+    monkeypatch.setattr(
+        producer,
+        "text_integrity_authority",
+        lambda: _GlyphClipIntegrity(),
+    )
+    monkeypatch.setattr(
+        ceiling_source,
+        "RasterTextCorroborationProducer",
+        _FakeRasterProducer,
+    )
+
+    atoms = collect_source_owned_ceiling_finish_candidates(
+        source_visibility_producer=producer,
+        context=_context(published),
+        viewport=_viewport(published),
+        page_no=1,
+    )
+
+    assert len(atoms) == 1
+    atom = atoms[0]
+    assert atom.metadata["raster_text_corroboration_record_ids"]
+    assert atom.raw_text.lower().startswith("ceiling finish")
