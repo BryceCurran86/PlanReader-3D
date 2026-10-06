@@ -1,0 +1,32 @@
+name: DIAG GPT2 Maryborough Office Dimension Source
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Trace Office A140 source dimensions
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-office-dimension-source
+          git rev-parse HEAD > artifacts/gpt2-office-dimension-source/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-office-dimension-source/source_sha256.txt
+          PYTHONPATH=. python -u tools/diag_maryborough_office_dimension_source.py \
+            | tee artifacts/gpt2-office-dimension-source/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-office-dimension-source
+          path: artifacts/gpt2-office-dimension-source
+          retention-days: 1
