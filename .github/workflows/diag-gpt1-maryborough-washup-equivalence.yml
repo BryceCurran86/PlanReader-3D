@@ -1,0 +1,148 @@
+name: DIAG GPT1 Maryborough WashUp Equivalence
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Audit Wash Up shared wall physical equivalence
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
+          from pb_source_room_label_authority import SourceRoomLabelProducer, SourceRoomLabelSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          PAGE_ID="7"
+          TARGET="WASH UP"
+
+          def norm(v):
+              return " ".join(str(v or "").strip().upper().split())
+
+          payload=SOURCE.read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-washup-equivalence",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag-maryborough:{sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=(PAGE_ID,),
+          )
+          compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=(PAGE_ID,),
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert current is not None
+
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=(PAGE_ID,)
+          )
+          wall_auth=wall_producer.authority()
+          selectors=wall_auth.selectors_for_authenticated_viewports(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id=PAGE_ID,
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          assert len(selectors)==1, selectors
+          selector=selectors[0]
+          wall_scope=wall_auth.resolve_scope(selector)
+
+          room_auth=build_source_room_face_authority(wall_auth)
+          room_selector=SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          )
+          room_scope=room_auth.resolve_scope(room_selector)
+          label_auth=SourceRoomLabelProducer.from_authorities(
+              source, room_auth, page_ids=(PAGE_ID,)
+          ).authority()
+          label_scope=label_auth.resolve_scope(
+              SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              )
+          )
+          candidates=[
+              c for c in label_scope.split_face_candidates
+              if norm(c.label)==TARGET
+          ]
+          assert len(candidates)==1, len(candidates)
+          candidate=candidates[0]
+          face_by_id={str(r.face_id):r for r in room_scope.records}
+          face_ids=tuple(str(x) for x in candidate.word_face_ids)
+          shared=sorted(
+              set(str(x) for x in face_by_id[face_ids[0]].bounding_wall_ids)
+              & set(str(x) for x in face_by_id[face_ids[1]].bounding_wall_ids)
+          )
+
+          eq=wall_scope.equivalence
+          record_by_id={str(r.wall_candidate_id):r for r in wall_scope.records}
+          groups=[] if eq is None else [list(g) for g in eq.equivalence_groups]
+          pairs=[] if eq is None else [
+              [a,b,c] for a,b,c in eq.pair_classifications
+              if a in shared and b in shared
+          ]
+          rows=[]
+          for wall_id in shared:
+              rec=record_by_id[wall_id]
+              ident=rec.physical_identity
+              group=next((g for g in groups if wall_id in g),None)
+              rows.append({
+                  "wall_id":wall_id,
+                  "equivalence_group":group,
+                  "representative":None if eq is None else wall_id in eq.representative_wall_ids,
+                  "ambiguous":None if eq is None else wall_id in eq.ambiguous_wall_ids,
+                  "blockers":[] if eq is None else list(eq.blockers_for(wall_id)),
+                  "candidate_identity_id":ident.candidate_identity_id,
+                  "path_fingerprint":ident.path_fingerprint,
+                  "source_primitive_ids":list(ident.source_primitive_ids),
+                  "edge_ids":list(ident.edge_ids),
+                  "centerline_pts":[list(x) for x in rec.wall_candidate.centerline_pts],
+              })
+
+          print(json.dumps({
+              "source_sha256":sha,
+              "wall_scope_status":getattr(wall_scope.status,"value",str(wall_scope.status)),
+              "scope_complete":wall_scope.scope_complete,
+              "wash_up_face_ids":list(face_ids),
+              "shared_wall_ids":shared,
+              "equivalence_groups_touching_shared":[g for g in groups if set(g)&set(shared)],
+              "pair_classifications_within_shared":pairs,
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
