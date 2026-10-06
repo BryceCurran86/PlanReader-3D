@@ -20,17 +20,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Run frozen swing + registration tests
+        id: contracts
+        continue-on-error: true
         run: |
           PYTHONPATH=. pytest -q \
             tests/test_raster_door_swing_g17_contract.py \
             tests/test_raster_swing_registration_authority.py \
             tests/test_raster_framed_opening_g17_contract.py \
             tests/test_raster_opening_primitive_compaction.py
+      - name: Diagnose quarter-turn swing
+        if: always()
+        run: |
+          PYTHONPATH=. python tools/diag_raster_swing_quarter_turn.py
       - name: Run real-source swing census
+        if: always()
         shell: bash
         run: |
           set -o pipefail
           PYTHONPATH=. python tools/diag_raster_swing_real_source.py | tee raster-swing-real-source.json
+      - name: Enforce frozen contract result
+        if: always()
+        run: |
+          test "${{ steps.contracts.outcome }}" = "success"
       - name: Upload diagnostic
         if: always()
         uses: actions/upload-artifact@v4
