@@ -60,6 +60,14 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
+from pb_physical_scale_authority import (
+    PHYSICAL_SCALE_VIEWPORT_REQUIRED,
+    PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE,
+    PhysicalScaleProducer,
+    PhysicalScaleSelector,
+)
+from pb_physical_scale_calibration_bridge import build_physical_scale_calibration
+from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_area_bridge import build_source_room_area_bridge
 from pb_source_room_face_authority import SourceRoomFaceSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -275,168 +283,344 @@ def collect_live_physical_net_wall_claim(
     )
 
     room_area_quantity_evidence: list[QuantityEvidence] = []
-    if room_area_support_selected and canonical_rooms.rooms:
-        cross_view_area = CrossViewRoomAreaProducer.from_source(
-            source=source,
-            rooms=canonical_rooms,
-        ).publish()
-        if cross_view_area.records:
-            evidence_by_record = (
-                cross_view_area.evidence_by_source_room_face_record_id
-            )
-            rooms_by_scope: dict[tuple[str, str, str], list[LiveCanonicalRoomObject]] = {}
-            for room in canonical_rooms.rooms:
-                rooms_by_scope.setdefault(
-                    (
-                        str(room.page_id),
-                        str(room.snapshot_id),
-                        str(room.decision_scope_id),
-                    ),
-                    [],
-                ).append(room)
-
-            for (page_id, snapshot_id, decision_scope_id), scope_rooms in sorted(
-                rooms_by_scope.items()
-            ):
-                matching_evidence = {
-                    str(room.source_room_face_record_id): evidence_by_record[
-                        str(room.source_room_face_record_id)
-                    ]
-                    for room in scope_rooms
-                    if str(room.source_room_face_record_id) in evidence_by_record
-                }
-                if not matching_evidence:
-                    continue
-                try:
-                    page_no = int(page_id)
-                except (TypeError, ValueError):
-                    continue
-                extent = page_extents.get(page_id)
-                if extent is None:
-                    continue
-
-                room_binding = canonical_rooms.room_face_authority_binding_for(
-                    scope_rooms[0]
+    if canonical_rooms.rooms:
+        evidence_by_record = {}
+        if room_area_support_selected:
+            cross_view_area = CrossViewRoomAreaProducer.from_source(
+                source=source,
+                rooms=canonical_rooms,
+            ).publish()
+            if cross_view_area.records:
+                evidence_by_record = dict(
+                    cross_view_area.evidence_by_source_room_face_record_id
                 )
-                if room_binding is None or any(
-                    canonical_rooms.room_face_authority_binding_for(room)
-                    is not room_binding
-                    for room in scope_rooms[1:]
-                ):
-                    continue
-                room_face_authority = room_binding.authority
 
-                selector = SourceRoomFaceSelector(
+        scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
+            source
+        )
+        rooms_by_scope: dict[
+            tuple[str, str, str], list[LiveCanonicalRoomObject]
+        ] = {}
+        for room in canonical_rooms.rooms:
+            rooms_by_scope.setdefault(
+                (
+                    str(room.page_id),
+                    str(room.snapshot_id),
+                    str(room.decision_scope_id),
+                ),
+                [],
+            ).append(room)
+
+        for (page_id, snapshot_id, decision_scope_id), scope_rooms in sorted(
+            rooms_by_scope.items()
+        ):
+            try:
+                page_no = int(page_id)
+            except (TypeError, ValueError):
+                continue
+            extent = page_extents.get(page_id)
+            if extent is None:
+                continue
+
+            room_binding = canonical_rooms.room_face_authority_binding_for(
+                scope_rooms[0]
+            )
+            if room_binding is None or any(
+                canonical_rooms.room_face_authority_binding_for(room)
+                is not room_binding
+                for room in scope_rooms[1:]
+            ):
+                continue
+            room_face_authority = room_binding.authority
+
+            selector = SourceRoomFaceSelector(
+                document_id=scope_rooms[0].document_id,
+                revision_id=scope_rooms[0].revision_id,
+                source_sha256=scope_rooms[0].source_sha256,
+                snapshot_id=snapshot_id,
+                page_id=page_id,
+                decision_scope_id=decision_scope_id,
+            )
+            room_scope = room_face_authority.resolve_scope(selector)
+            if (
+                room_scope.status is not EvidenceResolutionStatus.CORROBORATED
+                or not room_scope.records
+            ):
+                continue
+
+            face_id_by_record = {
+                str(record.record_id): str(record.face_id)
+                for record in room_scope.records
+            }
+            matching_evidence = {
+                str(room.source_room_face_record_id): evidence_by_record[
+                    str(room.source_room_face_record_id)
+                ]
+                for room in scope_rooms
+                if str(room.source_room_face_record_id) in evidence_by_record
+            }
+            explicit_by_face_id = {
+                face_id_by_record[record_id]: evidence
+                for record_id, evidence in matching_evidence.items()
+                if record_id in face_id_by_record
+            }
+
+            if (
+                room_binding.viewport_id is not None
+                and room_binding.viewport_bbox is not None
+            ):
+                viewport_id = str(room_binding.viewport_id)
+                viewport_bbox = tuple(
+                    float(value) for value in room_binding.viewport_bbox
+                )
+                viewport_status = ViewportResolutionStatus.RESOLVED
+                viewport_reason_codes = (
+                    "producer_owned_room_face_viewport_scope",
+                )
+                scale_viewport_id = viewport_id
+            else:
+                viewport_id = stable_contract_id(
+                    "room_area_page_scope",
+                    {
+                        "document_id": scope_rooms[0].document_id,
+                        "page_id": page_id,
+                        "decision_scope_id": decision_scope_id,
+                    },
+                    digest_chars=24,
+                )
+                viewport_bbox = (0.0, 0.0, extent[0], extent[1])
+                viewport_status = ViewportResolutionStatus.DERIVED
+                viewport_reason_codes = (
+                    "producer_owned_full_page_room_area_scope",
+                )
+                scale_viewport_id = None
+
+            viewport = ViewportEvidence(
+                viewport_id=viewport_id,
+                document_id=scope_rooms[0].document_id,
+                page_id=page_id,
+                bbox=viewport_bbox,
+                view_type=DrawingViewType.FLOOR_PLAN.value,
+                status=viewport_status,
+                evidence_ids=(),
+                confidence=1.0,
+                reason_codes=viewport_reason_codes,
+            )
+            context = ProviderContext(
+                run_id=stable_contract_id(
+                    "live_room_area_run",
+                    {
+                        "document_id": scope_rooms[0].document_id,
+                        "revision_id": scope_rooms[0].revision_id,
+                        "snapshot_id": snapshot_id,
+                        "page_id": page_id,
+                        "decision_scope_id": decision_scope_id,
+                    },
+                ),
+                workspace_id="live-extractor",
+                project_id="live-extractor",
+                document_id=scope_rooms[0].document_id,
+                source_sha256=scope_rooms[0].source_sha256,
+                revision_id=scope_rooms[0].revision_id,
+                current_revision_id=scope_rooms[0].revision_id,
+                selected_pages=(page_no - 1,),
+                owned_viewport_ids=(viewport_id,),
+                evidence_snapshot_id=snapshot_id,
+                owned_page_numbers=(page_no,),
+                viewport_page_ownership=((viewport_id, page_no),),
+            )
+            document = DocumentEvidence(
+                document_id=scope_rooms[0].document_id,
+                source_sha256=scope_rooms[0].source_sha256,
+                page_count=page_count,
+                evidence_ids=(),
+                producer="live-physical-net-wall",
+                producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+            )
+
+            scale_calibration = None
+            scale_selector = PhysicalScaleSelector(
+                document_id=scope_rooms[0].document_id,
+                revision_id=scope_rooms[0].revision_id,
+                source_sha256=scope_rooms[0].source_sha256,
+                snapshot_id=snapshot_id,
+                page_id=page_id,
+                viewport_id=scale_viewport_id,
+            )
+            scale_result = scale_producer.publish_scope(scale_selector)
+            selected_scale_selector = scale_selector
+
+            # Page-wide room geometry may coexist with one authenticated
+            # drawing viewport. PhysicalScaleAuthority correctly refuses a
+            # page-wide calibration in that case. Bridge only through the
+            # existing producer-owned floor-plan viewport universe when there
+            # is exactly one corroborated viewport whose bbox fully contains
+            # every room polygon in this exact room scope.
+            if (
+                scale_viewport_id is None
+                and scale_result.reason_codes == (
+                    PHYSICAL_SCALE_VIEWPORT_REQUIRED,
+                )
+            ):
+                viewport_wall_producer = (
+                    PhysicalWallCandidateProducer.from_authenticated_viewports(
+                        source,
+                        page_ids=(page_id,),
+                    )
+                )
+                viewport_wall_authority = viewport_wall_producer.authority()
+                viewport_selectors = (
+                    viewport_wall_authority.selectors_for_authenticated_viewports(
+                        document_id=scope_rooms[0].document_id,
+                        revision_id=scope_rooms[0].revision_id,
+                        source_sha256=scope_rooms[0].source_sha256,
+                        snapshot_id=snapshot_id,
+                        page_id=page_id,
+                        view_type=DrawingViewType.FLOOR_PLAN.value,
+                    )
+                )
+                containing_viewports: dict[
+                    str, tuple[float, float, float, float]
+                ] = {}
+                for viewport_wall_selector in viewport_selectors:
+                    viewport_wall_scope = viewport_wall_authority.resolve_scope(
+                        viewport_wall_selector
+                    )
+                    bbox = getattr(viewport_wall_scope, "viewport_bbox", None)
+                    viewport_candidate_id = getattr(
+                        viewport_wall_scope, "viewport_id", None
+                    )
+                    if (
+                        viewport_wall_scope.status
+                        is not EvidenceResolutionStatus.CORROBORATED
+                        or not viewport_candidate_id
+                        or bbox is None
+                    ):
+                        continue
+                    try:
+                        x0, y0, x1, y1 = tuple(float(value) for value in bbox)
+                    except (TypeError, ValueError):
+                        continue
+                    if x1 <= x0 or y1 <= y0:
+                        continue
+                    if all(
+                        all(
+                            x0 <= float(point[0]) <= x1
+                            and y0 <= float(point[1]) <= y1
+                            for point in room.polygon_pdf_pts
+                        )
+                        for room in scope_rooms
+                    ):
+                        containing_viewports[str(viewport_candidate_id)] = (
+                            x0, y0, x1, y1
+                        )
+                if len(containing_viewports) == 1:
+                    resolved_viewport_id, resolved_viewport_bbox = next(
+                        iter(containing_viewports.items())
+                    )
+                    selected_scale_selector = PhysicalScaleSelector(
+                        document_id=scope_rooms[0].document_id,
+                        revision_id=scope_rooms[0].revision_id,
+                        source_sha256=scope_rooms[0].source_sha256,
+                        snapshot_id=snapshot_id,
+                        page_id=page_id,
+                        viewport_id=resolved_viewport_id,
+                    )
+                    scale_result = scale_producer.publish_scope(
+                        selected_scale_selector
+                    )
+                    if (
+                        scale_result.status
+                        is EvidenceResolutionStatus.CORROBORATED
+                    ):
+                        viewport = ViewportEvidence(
+                            viewport_id=resolved_viewport_id,
+                            document_id=scope_rooms[0].document_id,
+                            page_id=page_id,
+                            bbox=resolved_viewport_bbox,
+                            view_type=DrawingViewType.FLOOR_PLAN.value,
+                            status=ViewportResolutionStatus.RESOLVED,
+                            evidence_ids=(),
+                            confidence=1.0,
+                            reason_codes=(
+                                "producer_owned_authenticated_floor_plan_viewport",
+                            ),
+                        )
+                        context = ProviderContext(
+                            run_id=stable_contract_id(
+                                "live_room_area_run",
+                                {
+                                    "document_id": scope_rooms[0].document_id,
+                                    "revision_id": scope_rooms[0].revision_id,
+                                    "snapshot_id": snapshot_id,
+                                    "page_id": page_id,
+                                    "decision_scope_id": decision_scope_id,
+                                    "viewport_id": resolved_viewport_id,
+                                },
+                            ),
+                            workspace_id="live-extractor",
+                            project_id="live-extractor",
+                            document_id=scope_rooms[0].document_id,
+                            source_sha256=scope_rooms[0].source_sha256,
+                            revision_id=scope_rooms[0].revision_id,
+                            current_revision_id=scope_rooms[0].revision_id,
+                            selected_pages=(page_no - 1,),
+                            owned_viewport_ids=(resolved_viewport_id,),
+                            evidence_snapshot_id=snapshot_id,
+                            owned_page_numbers=(page_no,),
+                            viewport_page_ownership=(
+                                (resolved_viewport_id, page_no),
+                            ),
+                        )
+
+            if scale_result.reason_codes == (
+                PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE,
+            ):
+                page_scale_selector = PhysicalScaleSelector(
                     document_id=scope_rooms[0].document_id,
                     revision_id=scope_rooms[0].revision_id,
                     source_sha256=scope_rooms[0].source_sha256,
                     snapshot_id=snapshot_id,
                     page_id=page_id,
-                    decision_scope_id=decision_scope_id,
+                    viewport_id=None,
                 )
-                room_scope = room_face_authority.resolve_scope(selector)
-                if (
-                    room_scope.status is not EvidenceResolutionStatus.CORROBORATED
-                    or not room_scope.records
-                ):
-                    continue
-                face_id_by_record = {
-                    str(record.record_id): str(record.face_id)
-                    for record in room_scope.records
-                }
-                explicit_by_face_id = {
-                    face_id_by_record[record_id]: evidence
-                    for record_id, evidence in matching_evidence.items()
-                    if record_id in face_id_by_record
-                }
-                if not explicit_by_face_id:
-                    continue
+                scale_result = scale_producer.publish_scope(page_scale_selector)
+                selected_scale_selector = page_scale_selector
 
-                if (
-                    room_binding.viewport_id is not None
-                    and room_binding.viewport_bbox is not None
-                ):
-                    viewport_id = str(room_binding.viewport_id)
-                    viewport_bbox = tuple(
-                        float(value) for value in room_binding.viewport_bbox
-                    )
-                    viewport_status = ViewportResolutionStatus.RESOLVED
-                    viewport_reason_codes = (
-                        "producer_owned_room_face_viewport_scope",
-                    )
-                else:
-                    viewport_id = stable_contract_id(
-                        "room_area_page_scope",
-                        {
-                            "document_id": scope_rooms[0].document_id,
-                            "page_id": page_id,
-                            "decision_scope_id": decision_scope_id,
-                        },
-                        digest_chars=24,
-                    )
-                    viewport_bbox = (0.0, 0.0, extent[0], extent[1])
-                    viewport_status = ViewportResolutionStatus.DERIVED
-                    viewport_reason_codes = (
-                        "producer_owned_full_page_room_area_scope",
-                    )
-
-                viewport = ViewportEvidence(
-                    viewport_id=viewport_id,
-                    document_id=scope_rooms[0].document_id,
-                    page_id=page_id,
-                    bbox=viewport_bbox,
-                    view_type=DrawingViewType.FLOOR_PLAN.value,
-                    status=viewport_status,
-                    evidence_ids=(),
-                    confidence=1.0,
-                    reason_codes=viewport_reason_codes,
-                )
-                context = ProviderContext(
-                    run_id=stable_contract_id(
-                        "live_room_area_run",
-                        {
-                            "document_id": scope_rooms[0].document_id,
-                            "revision_id": scope_rooms[0].revision_id,
-                            "snapshot_id": snapshot_id,
-                            "page_id": page_id,
-                            "decision_scope_id": decision_scope_id,
-                        },
-                    ),
-                    workspace_id="live-extractor",
-                    project_id="live-extractor",
-                    document_id=scope_rooms[0].document_id,
-                    source_sha256=scope_rooms[0].source_sha256,
-                    revision_id=scope_rooms[0].revision_id,
-                    current_revision_id=scope_rooms[0].revision_id,
-                    selected_pages=(page_no - 1,),
-                    owned_viewport_ids=(viewport_id,),
-                    evidence_snapshot_id=snapshot_id,
-                    owned_page_numbers=(page_no,),
-                    viewport_page_ownership=((viewport_id, page_no),),
-                )
-                document = DocumentEvidence(
-                    document_id=scope_rooms[0].document_id,
-                    source_sha256=scope_rooms[0].source_sha256,
-                    page_count=page_count,
-                    evidence_ids=(),
-                    producer="live-physical-net-wall",
-                    producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
-                )
-                bridge = build_source_room_area_bridge(
-                    room_face_authority=room_face_authority,
-                    selector=selector,
+            if scale_result.status is EvidenceResolutionStatus.CORROBORATED:
+                scale_bridge = build_physical_scale_calibration(
+                    physical_scale_authority=scale_producer.authority(),
+                    selector=selected_scale_selector,
                     context=context,
-                    document=document,
                     viewport=viewport,
                     page_no=page_no,
-                    scale_calibration=None,
-                    explicit_area_evidence_by_room_id=explicit_by_face_id,
                 )
-                canonical_floors = enrich_live_canonical_floor_metric_areas(
-                    canonical_floors,
-                    bridge,
-                )
-                room_area_quantity_evidence.extend(bridge.quantities)
+                if (
+                    scale_bridge.status is EvidenceResolutionStatus.CORROBORATED
+                    and scale_bridge.calibration is not None
+                ):
+                    scale_calibration = scale_bridge.calibration
+
+            if not explicit_by_face_id and scale_calibration is None:
+                continue
+
+            bridge = build_source_room_area_bridge(
+                room_face_authority=room_face_authority,
+                selector=selector,
+                context=context,
+                document=document,
+                viewport=viewport,
+                page_no=page_no,
+                scale_calibration=scale_calibration,
+                explicit_area_evidence_by_room_id=(
+                    explicit_by_face_id if explicit_by_face_id else None
+                ),
+            )
+            canonical_floors = enrich_live_canonical_floor_metric_areas(
+                canonical_floors,
+                bridge,
+            )
+            room_area_quantity_evidence.extend(bridge.quantities)
 
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,

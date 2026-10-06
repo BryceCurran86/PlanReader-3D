@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_measurement_input_authority import scale_calibration_fingerprint
 from pb_migration_contracts import (
     DocumentEvidence,
@@ -318,7 +319,7 @@ def test_authoritative_explicit_area_preserves_figured_dimension_ids() -> None:
     assert qty.metadata["row_role"] == "floor_area"
 
 
-def test_explicit_vs_scaled_area_conflict_abstains() -> None:
+def test_documented_dimension_remains_firm_when_scaled_geometry_disagrees() -> None:
     scale = _scale()
     qty = build_room_area_quantity(
         room=_room(points=_square(scale, side_m=5.0)),
@@ -328,10 +329,45 @@ def test_explicit_vs_scaled_area_conflict_abstains() -> None:
         entity=_entity(),
         page_no=1,
         scale_calibration=scale,
-        explicit_area_evidence=_explicit_area(40.0),
+        explicit_area_evidence=_explicit_area(
+            40.0,
+            metadata={"figured_dimension_ids": ["dim-h", "dim-v"]},
+        ),
     )
-    assert qty.abstained is True
-    assert "explicit_vs_scaled_area_conflict" in qty.blocking_reasons
+    assert qty.abstained is False
+    assert qty.value == 40.0
+    assert qty.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert qty.metadata["figured_dimension_ids"] == ["dim-h", "dim-v"]
+    assert qty.metadata["scale_fingerprint"] is None
+
+
+def test_documented_dimension_remains_firm_when_scale_is_conflicting() -> None:
+    conflicting = resolve_page_scale_calibration(
+        page_no=1,
+        sheet_label="A101",
+        readings=[
+            ScaleSourceReading(ScaleSourceType.SCALE_BAR.value, "1:100", 100.0, 1.0),
+            ScaleSourceReading(ScaleSourceType.MANUAL.value, "1:50", 50.0, 1.0),
+        ],
+        revision_id="R1",
+    )
+    qty = build_room_area_quantity(
+        room=_room(),
+        context=_context(),
+        document=_document(),
+        viewport=_viewport(),
+        entity=_entity(),
+        page_no=1,
+        scale_calibration=conflicting,
+        explicit_area_evidence=_explicit_area(
+            25.0,
+            metadata={"figured_dimension_ids": ["dim-h", "dim-v"]},
+        ),
+    )
+    assert qty.abstained is False
+    assert qty.value == 25.0
+    assert qty.authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert qty.metadata["scale_fingerprint"] is None
 
 
 def test_void_geometry_requires_authoritative_explicit_area() -> None:
