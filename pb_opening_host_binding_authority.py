@@ -493,6 +493,10 @@ class OpeningHostBindingProducer:
             local_scope, local_reasons = _local_boundary_clean_host_scope(
                 wall_result,
                 geometry,
+                include_spanning_raster_candidates=(
+                    opening.structural_pattern
+                    == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                ),
             )
             if local_scope is None:
                 status = (
@@ -1372,8 +1376,17 @@ def _excluded_boundary_primitive_host_roles(
 def _local_boundary_clean_host_scope(
     wall_result: PhysicalWallCandidateScopeResult,
     opening: _OpeningGeometry,
+    *,
+    include_spanning_raster_candidates: bool = False,
 ) -> tuple[Optional[_LocalHostScope], tuple[str, ...]]:
-    """Prove one opening's host search locally closed without promoting global scope."""
+    """Prove one opening's host search locally closed without promoting global scope.
+
+    The ordinary local universe is the exact left/right host-role population.
+    Raster-framed openings additionally keep any boundary-clean W4 candidate
+    whose own local chain spans the aperture and carries usable immutable source
+    lineage. That is the same necessary local predicate already consumed by the
+    sealed raster source-primitive fallback; it is not nearest-wall inference.
+    """
     if (
         wall_result.status is not EvidenceResolutionStatus.CORROBORATED
         or wall_result.scope_complete is True
@@ -1388,10 +1401,30 @@ def _local_boundary_clean_host_scope(
     records_by_id = {
         str(record.wall_candidate_id): record for record in wall_result.records
     }
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
     relevant_ids = {
         wall_id
         for wall_id, record in records_by_id.items()
-        if _candidate_host_roles(record, opening)
+        if (
+            _candidate_host_roles(record, opening)
+            or (
+                include_spanning_raster_candidates
+                and record.physical_identity.usable
+                and bool(record.physical_identity.candidate_identity_id)
+                and bool(
+                    tuple(
+                        value
+                        for value in record.physical_identity.source_primitive_ids
+                        if str(value).strip()
+                    )
+                )
+                and _candidate_locally_owns_opening_span(
+                    record,
+                    opening,
+                    edge_tol=edge_tol,
+                )
+            )
+        )
     }
     if not relevant_ids:
         return None, (
