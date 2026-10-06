@@ -207,6 +207,13 @@ class _Word:
     word_no: int
 
 
+@dataclass(frozen=True)
+class _AuthenticatedRoomLabelLine:
+    label: str
+    word_evidence: tuple[SourceRoomLabelWordEvidence, ...]
+    source_bbox: tuple[float, float, float, float]
+
+
 def _normalized_room_line(text: str) -> Optional[str]:
     """Return a normalized literal room label or None.
 
@@ -403,6 +410,10 @@ class SourceRoomLabelProducer:
         self._results: dict[
             tuple[str, str, str, str, str, str],
             SourceRoomLabelScopeResult,
+        ] = {}
+        self._authenticated_candidate_lines: dict[
+            tuple[str, str, str, str, str, str],
+            tuple[_AuthenticatedRoomLabelLine, ...],
         ] = {}
 
     @classmethod
@@ -842,6 +853,15 @@ class SourceRoomLabelProducer:
             if published is None:
                 continue
             words = words_by_lineage.get(lineage, ())
+            scope_key = (
+                str(scope.document_id),
+                str(scope.revision_id),
+                str(scope.source_sha256),
+                str(scope.snapshot_id),
+                str(scope.page_id),
+                str(scope.decision_scope_id),
+            )
+            authenticated_candidates: list[_AuthenticatedRoomLabelLine] = []
             candidates_by_face: dict[
                 str,
                 list[
@@ -893,6 +913,17 @@ class SourceRoomLabelProducer:
                     required_word_unresolved = True
                     continue
 
+                source_bbox = _bbox_union(
+                    [item.geometry for item in evidence]
+                )
+                authenticated_candidates.append(
+                    _AuthenticatedRoomLabelLine(
+                        label=label,
+                        word_evidence=tuple(evidence),
+                        source_bbox=source_bbox,
+                    )
+                )
+
                 common_face: Optional[str] = None
                 position_ok = True
                 for item in evidence:
@@ -922,9 +953,7 @@ class SourceRoomLabelProducer:
                     (
                         label,
                         tuple(evidence),
-                        _bbox_union(
-                            [item.geometry for item in evidence]
-                        ),
+                        source_bbox,
                     )
                 )
 
@@ -1000,13 +1029,9 @@ class SourceRoomLabelProducer:
             if conflict:
                 reasons.append(SOURCE_ROOM_LABEL_CONFLICT)
 
-            key = (
-                str(scope.document_id),
-                str(scope.revision_id),
-                str(scope.source_sha256),
-                str(scope.snapshot_id),
-                str(scope.page_id),
-                str(scope.decision_scope_id),
+            key = scope_key
+            self._authenticated_candidate_lines[key] = tuple(
+                authenticated_candidates
             )
             self._results[key] = SourceRoomLabelScopeResult(
                 status=(
