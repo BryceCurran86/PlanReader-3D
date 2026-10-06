@@ -98,7 +98,7 @@ def main() -> int:
             }
         )
 
-    binding_by_id = {binding.dimension_id: binding for binding in bundle.bindings}
+    binding_by_id = {binding.observation_id: binding for binding in bundle.bindings}
     dimension_hits = []
     for observation in bundle.observations:
         if _norm(observation.raw_text) not in TARGET_RAW:
