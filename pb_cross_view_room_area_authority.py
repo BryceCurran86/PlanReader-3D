@@ -139,6 +139,17 @@ class _TrustedBoundDimension:
 
 
 @dataclass(frozen=True)
+class _SharedPhysicalExtentMatch:
+    support_lines: tuple[_TrustedLine, ...]
+    page_id: str
+    horizontal: _TrustedBoundDimension
+    vertical: _TrustedBoundDimension
+    donor_physical_room_id: str
+    donor_source_room_face_record_id: str
+    shared_axis: str
+
+
+@dataclass(frozen=True)
 class CrossViewRoomAreaRecord:
     physical_room_id: str
     source_room_face_record_id: str
@@ -1280,6 +1291,426 @@ def _line_inside_dimension_pair(
     )
 
 
+def _room_rectangle_bbox(
+    room: LiveCanonicalRoomObject,
+) -> Optional[tuple[float, float, float, float]]:
+    """Return an exact axis-aligned rectangular room extent, or fail closed."""
+    points = tuple(
+        (float(point[0]), float(point[1]))
+        for point in tuple(room.polygon_pdf_pts or ())
+    )
+    if len(points) < 4 or not all(
+        math.isfinite(value)
+        for point in points
+        for value in point
+    ):
+        return None
+
+    tolerance = 1e-6
+    for index, first in enumerate(points):
+        second = points[(index + 1) % len(points)]
+        dx = abs(second[0] - first[0])
+        dy = abs(second[1] - first[1])
+        if dx <= tolerance and dy <= tolerance:
+            return None
+        if dx > tolerance and dy > tolerance:
+            return None
+
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    bbox = (min(xs), min(ys), max(xs), max(ys))
+    width = bbox[2] - bbox[0]
+    height = bbox[3] - bbox[1]
+    if width <= tolerance or height <= tolerance:
+        return None
+
+    polygon_area = 0.0
+    for index, (x1, y1) in enumerate(points):
+        x2, y2 = points[(index + 1) % len(points)]
+        polygon_area += x1 * y2 - x2 * y1
+    polygon_area = abs(polygon_area) / 2.0
+    bbox_area = width * height
+    if abs(polygon_area - bbox_area) > max(tolerance, bbox_area * 1e-9):
+        return None
+    return bbox
+
+
+def _rooms_share_exact_full_boundary(
+    target: LiveCanonicalRoomObject,
+    donor: LiveCanonicalRoomObject,
+) -> Optional[str]:
+    """Return x or y only for one exact full shared physical-room edge."""
+    if (
+        target.document_id != donor.document_id
+        or target.revision_id != donor.revision_id
+        or target.source_sha256 != donor.source_sha256
+        or target.snapshot_id != donor.snapshot_id
+        or str(target.page_id) != str(donor.page_id)
+        or str(target.viewport_id or "") != str(donor.viewport_id or "")
+        or target.physical_room_id == donor.physical_room_id
+    ):
+        return None
+
+    left = _room_rectangle_bbox(target)
+    right = _room_rectangle_bbox(donor)
+    if left is None or right is None:
+        return None
+    tolerance = 1e-6
+
+    shared_axes: list[str] = []
+    x_extent_equal = (
+        abs(left[0] - right[0]) <= tolerance
+        and abs(left[2] - right[2]) <= tolerance
+    )
+    y_extent_equal = (
+        abs(left[1] - right[1]) <= tolerance
+        and abs(left[3] - right[3]) <= tolerance
+    )
+    if x_extent_equal and (
+        abs(left[3] - right[1]) <= tolerance
+        or abs(right[3] - left[1]) <= tolerance
+    ):
+        shared_axes.append("x")
+    if y_extent_equal and (
+        abs(left[2] - right[0]) <= tolerance
+        or abs(right[2] - left[0]) <= tolerance
+    ):
+        shared_axes.append("y")
+    return shared_axes[0] if len(shared_axes) == 1 else None
+
+
+def _room_span_pair_scale_consistent(
+    *,
+    page_id: str,
+    first_span_pt: float,
+    first_value_mm: float,
+    second_span_pt: float,
+    second_value_mm: float,
+) -> bool:
+    """Use the existing 5 percent scale-conflict contract for room shape proof."""
+    try:
+        page_no = int(str(page_id))
+    except (TypeError, ValueError):
+        return False
+
+    readings: list[ScaleSourceReading] = []
+    for name, span_pt, value_mm in (
+        ("first", first_span_pt, first_value_mm),
+        ("second", second_span_pt, second_value_mm),
+    ):
+        metres = float(value_mm) / 1000.0
+        if (
+            not math.isfinite(span_pt)
+            or span_pt <= 0.0
+            or not math.isfinite(metres)
+            or metres <= 0.0
+        ):
+            return False
+        points_per_metre = float(span_pt) / metres
+        if not math.isfinite(points_per_metre) or points_per_metre <= 0.0:
+            return False
+        readings.append(
+            ScaleSourceReading(
+                source_type=ScaleSourceType.INFERRED.value,
+                scale_text=f"physical room {name} figured consistency",
+                ratio=POINTS_PER_METRE_AT_1_1 / points_per_metre,
+                confidence=1.0,
+            )
+        )
+    calibration = resolve_page_scale_calibration(
+        page_no=page_no,
+        sheet_label="",
+        readings=readings,
+    )
+    return calibration.status == ScaleCalibrationStatus.PROVISIONAL.value
+
+
+def _room_pair_axis_mapping(
+    room: LiveCanonicalRoomObject,
+    horizontal: _TrustedBoundDimension,
+    vertical: _TrustedBoundDimension,
+) -> Optional[Mapping[str, _TrustedBoundDimension]]:
+    bbox = _room_rectangle_bbox(room)
+    if bbox is None:
+        return None
+    x_span = bbox[2] - bbox[0]
+    y_span = bbox[3] - bbox[1]
+
+    mappings: list[dict[str, _TrustedBoundDimension]] = []
+    if _room_span_pair_scale_consistent(
+        page_id=str(room.page_id),
+        first_span_pt=x_span,
+        first_value_mm=horizontal.value_mm,
+        second_span_pt=y_span,
+        second_value_mm=vertical.value_mm,
+    ):
+        mappings.append({"x": horizontal, "y": vertical})
+    if _room_span_pair_scale_consistent(
+        page_id=str(room.page_id),
+        first_span_pt=x_span,
+        first_value_mm=vertical.value_mm,
+        second_span_pt=y_span,
+        second_value_mm=horizontal.value_mm,
+    ):
+        mappings.append({"x": vertical, "y": horizontal})
+    if len(mappings) != 1:
+        return None
+    return MappingProxyType(mappings[0])
+
+
+def _base_room_dimension_matches(
+    *,
+    label: str,
+    room: LiveCanonicalRoomObject,
+    page_lines: Mapping[str, tuple[_TrustedLine, ...]],
+    page_results: Mapping[str, tuple[_TrustedBoundDimension, ...]],
+) -> tuple[
+    tuple[
+        tuple[_TrustedLine, ...],
+        str,
+        _TrustedBoundDimension,
+        _TrustedBoundDimension,
+    ],
+    ...,
+]:
+    """Mirror the normal single-label then repeated-label match contract."""
+    matches: list[
+        tuple[
+            tuple[_TrustedLine, ...],
+            str,
+            _TrustedBoundDimension,
+            _TrustedBoundDimension,
+        ]
+    ] = []
+    for page_id, trusted_lines in sorted(page_lines.items()):
+        if page_id == str(room.page_id):
+            continue
+        trusted_dimensions = page_results[page_id]
+        horizontals = tuple(
+            item
+            for item in trusted_dimensions
+            if item.orientation == DimensionOrientation.HORIZONTAL.value
+        )
+        verticals = tuple(
+            item
+            for item in trusted_dimensions
+            if item.orientation == DimensionOrientation.VERTICAL.value
+        )
+        if not horizontals or not verticals:
+            continue
+        for line in trusted_lines:
+            if _norm_label(line.text) != label:
+                continue
+            for horizontal in horizontals:
+                for vertical in verticals:
+                    if (
+                        _line_inside_dimension_pair(line, horizontal, vertical)
+                        and _figured_pair_scale_consistent(
+                            page_id=page_id,
+                            horizontal=horizontal,
+                            vertical=vertical,
+                        )
+                        and _witness_systems_intersect(horizontal, vertical)
+                    ):
+                        matches.append(
+                            ((line,), page_id, horizontal, vertical)
+                        )
+    if matches:
+        return tuple(matches)
+
+    annotation_matches: list[
+        tuple[
+            tuple[_TrustedLine, ...],
+            str,
+            _TrustedBoundDimension,
+            _TrustedBoundDimension,
+        ]
+    ] = []
+    seen: set[tuple[str, str, str]] = set()
+    for page_id, trusted_lines in sorted(page_lines.items()):
+        if page_id == str(room.page_id):
+            continue
+        label_lines = tuple(
+            line
+            for line in trusted_lines
+            if _norm_label(line.text) == label
+        )
+        if not label_lines:
+            continue
+        trusted_dimensions = page_results[page_id]
+        owned_horizontals = tuple(
+            (line, dimension)
+            for line in label_lines
+            for dimension in trusted_dimensions
+            if (
+                dimension.orientation == DimensionOrientation.HORIZONTAL.value
+                and _dimension_is_immediate_label_annotation(line, dimension)
+            )
+        )
+        owned_verticals = tuple(
+            (line, dimension)
+            for line in label_lines
+            for dimension in trusted_dimensions
+            if (
+                dimension.orientation == DimensionOrientation.VERTICAL.value
+                and _dimension_is_immediate_label_annotation(line, dimension)
+            )
+        )
+        for horizontal_line, horizontal in owned_horizontals:
+            for vertical_line, vertical in owned_verticals:
+                if not _figured_pair_scale_consistent(
+                    page_id=page_id,
+                    horizontal=horizontal,
+                    vertical=vertical,
+                ):
+                    continue
+                key = (str(page_id), horizontal.dimension_id, vertical.dimension_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                annotation_matches.append(
+                    (
+                        tuple(dict.fromkeys((horizontal_line, vertical_line))),
+                        page_id,
+                        horizontal,
+                        vertical,
+                    )
+                )
+    return tuple(annotation_matches)
+
+
+def _shared_physical_extent_matches(
+    *,
+    label: str,
+    room: LiveCanonicalRoomObject,
+    labels: Mapping[str, list[LiveCanonicalRoomObject]],
+    page_lines: Mapping[str, tuple[_TrustedLine, ...]],
+    page_results: Mapping[str, tuple[_TrustedBoundDimension, ...]],
+) -> tuple[_SharedPhysicalExtentMatch, ...]:
+    """Reuse a donor figured extent only through exact shared room geometry."""
+    candidates: list[_SharedPhysicalExtentMatch] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    for page_id, trusted_lines in sorted(page_lines.items()):
+        if page_id == str(room.page_id):
+            continue
+        target_lines = tuple(
+            line for line in trusted_lines if _norm_label(line.text) == label
+        )
+        if not target_lines:
+            continue
+        trusted_dimensions = page_results[page_id]
+        target_owned = tuple(
+            (line, dimension)
+            for line in target_lines
+            for dimension in trusted_dimensions
+            if _dimension_is_immediate_label_annotation(line, dimension)
+        )
+        if not target_owned:
+            continue
+
+        for donor_label, donor_group in sorted(labels.items()):
+            if donor_label == label or len(donor_group) != 1:
+                continue
+            donor = donor_group[0]
+            shared_axis = _rooms_share_exact_full_boundary(room, donor)
+            if shared_axis is None:
+                continue
+
+            donor_matches = tuple(
+                match
+                for match in _base_room_dimension_matches(
+                    label=donor_label,
+                    room=donor,
+                    page_lines=page_lines,
+                    page_results=page_results,
+                )
+                if match[1] == page_id
+            )
+            if len(donor_matches) != 1:
+                continue
+            donor_support, _donor_page, donor_h, donor_v = donor_matches[0]
+            donor_mapping = _room_pair_axis_mapping(donor, donor_h, donor_v)
+            if donor_mapping is None:
+                continue
+            shared_dimension = donor_mapping[shared_axis]
+
+            for owned_line, owned_dimension in target_owned:
+                if owned_dimension.orientation == shared_dimension.orientation:
+                    continue
+                if owned_dimension.orientation == DimensionOrientation.HORIZONTAL.value:
+                    horizontal, vertical = owned_dimension, shared_dimension
+                elif owned_dimension.orientation == DimensionOrientation.VERTICAL.value:
+                    horizontal, vertical = shared_dimension, owned_dimension
+                else:
+                    continue
+                if (
+                    horizontal.orientation != DimensionOrientation.HORIZONTAL.value
+                    or vertical.orientation != DimensionOrientation.VERTICAL.value
+                    or not _figured_pair_scale_consistent(
+                        page_id=page_id,
+                        horizontal=horizontal,
+                        vertical=vertical,
+                    )
+                ):
+                    continue
+
+                target_mapping = _room_pair_axis_mapping(room, horizontal, vertical)
+                if (
+                    target_mapping is None
+                    or target_mapping[shared_axis].dimension_id
+                    != shared_dimension.dimension_id
+                ):
+                    continue
+
+                spatial_lines = tuple(
+                    line
+                    for line in target_lines
+                    if _line_inside_dimension_pair(line, horizontal, vertical)
+                )
+                if len(spatial_lines) != 1:
+                    continue
+                support_lines = tuple(
+                    dict.fromkeys(
+                        (spatial_lines[0], owned_line, *donor_support)
+                    )
+                )
+                key = (
+                    str(page_id),
+                    horizontal.dimension_id,
+                    vertical.dimension_id,
+                    str(donor.physical_room_id),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(
+                    _SharedPhysicalExtentMatch(
+                        support_lines=support_lines,
+                        page_id=str(page_id),
+                        horizontal=horizontal,
+                        vertical=vertical,
+                        donor_physical_room_id=str(donor.physical_room_id),
+                        donor_source_room_face_record_id=str(
+                            donor.source_room_face_record_id
+                        ),
+                        shared_axis=shared_axis,
+                    )
+                )
+
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda item: (
+                item.page_id,
+                item.horizontal.dimension_id,
+                item.vertical.dimension_id,
+                item.donor_physical_room_id,
+            ),
+        )
+    )
+
+
 class CrossViewRoomAreaProducer:
     def __init__(
         self,
@@ -1432,6 +1863,7 @@ class CrossViewRoomAreaProducer:
                     _TrustedBoundDimension,
                 ]
             ] = []
+            shared_extent_match: Optional[_SharedPhysicalExtentMatch] = None
             for page_id, trusted_lines in sorted(page_lines.items()):
                 if page_id == str(room.page_id):
                     continue
@@ -1554,6 +1986,35 @@ class CrossViewRoomAreaProducer:
                             )
                 matches.extend(annotation_matches)
 
+            if not matches:
+                shared_extent_candidates = _shared_physical_extent_matches(
+                    label=label,
+                    room=room,
+                    labels=labels,
+                    page_lines=page_lines,
+                    page_results=page_results,
+                )
+                if len(shared_extent_candidates) == 1:
+                    shared_extent_match = shared_extent_candidates[0]
+                    matches.append(
+                        (
+                            shared_extent_match.support_lines,
+                            shared_extent_match.page_id,
+                            shared_extent_match.horizontal,
+                            shared_extent_match.vertical,
+                        )
+                    )
+                elif shared_extent_candidates:
+                    matches.extend(
+                        (
+                            candidate.support_lines,
+                            candidate.page_id,
+                            candidate.horizontal,
+                            candidate.vertical,
+                        )
+                        for candidate in shared_extent_candidates
+                    )
+
             if len(matches) != 1:
                 unresolved.add(str(room.physical_room_id))
                 if len(matches) > 1:
@@ -1604,18 +2065,41 @@ class CrossViewRoomAreaProducer:
                 horizontal_x[1],
                 vertical_y[1],
             )
+            evidence_payload = {
+                "document_id": room.document_id,
+                "physical_room_id": room.physical_room_id,
+                "source_room_face_record_id": room.source_room_face_record_id,
+                "dimension_page_id": dimension_page_id,
+                "label_receipt_ids": support_receipt_ids,
+                "horizontal_dimension_id": horizontal.dimension_id,
+                "vertical_dimension_id": vertical.dimension_id,
+                "area_m2": area_m2,
+            }
+            shared_extent_metadata: dict[str, object] = {}
+            if shared_extent_match is not None:
+                evidence_payload.update(
+                    {
+                        "shared_extent_donor_physical_room_id": (
+                            shared_extent_match.donor_physical_room_id
+                        ),
+                        "shared_extent_donor_source_room_face_record_id": (
+                            shared_extent_match.donor_source_room_face_record_id
+                        ),
+                        "shared_extent_axis": shared_extent_match.shared_axis,
+                    }
+                )
+                shared_extent_metadata = {
+                    "shared_extent_donor_physical_room_id": (
+                        shared_extent_match.donor_physical_room_id
+                    ),
+                    "shared_extent_donor_source_room_face_record_id": (
+                        shared_extent_match.donor_source_room_face_record_id
+                    ),
+                    "shared_extent_axis": shared_extent_match.shared_axis,
+                }
             evidence_id = stable_contract_id(
                 "cross_view_room_area",
-                {
-                    "document_id": room.document_id,
-                    "physical_room_id": room.physical_room_id,
-                    "source_room_face_record_id": room.source_room_face_record_id,
-                    "dimension_page_id": dimension_page_id,
-                    "label_receipt_ids": support_receipt_ids,
-                    "horizontal_dimension_id": horizontal.dimension_id,
-                    "vertical_dimension_id": vertical.dimension_id,
-                    "area_m2": area_m2,
-                },
+                evidence_payload,
                 digest_chars=32,
             )
             area_evidence = EvidenceAtom(
@@ -1652,10 +2136,15 @@ class CrossViewRoomAreaProducer:
                         for support_line in support_lines
                     ],
                     "source_label_support_mode": (
-                        "single_label_witness_junction"
-                        if len(support_lines) == 1
-                        else "repeated_label_annotation_blocks"
+                        "shared_physical_room_extent"
+                        if shared_extent_match is not None
+                        else (
+                            "single_label_witness_junction"
+                            if len(support_lines) == 1
+                            else "repeated_label_annotation_blocks"
+                        )
                     ),
+                    **shared_extent_metadata,
                     "source_dimension_box_pdf_pts": list(source_dimension_box),
                     "horizontal_endpoints_pt": [
                         list(horizontal.endpoints_pt[0]),
