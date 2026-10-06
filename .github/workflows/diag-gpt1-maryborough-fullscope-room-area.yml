@@ -1,0 +1,99 @@
+name: DIAG GPT1 Maryborough Full-Scope Room Area
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Reproduce full-scope room area stage
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from collections import defaultdict
+          from pathlib import Path
+          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(producer_method="gpt1-fullscope-room-area",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-fullscope-room-area",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","9","11","30","31"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+              evidence_page_ids=("9","11"),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          by_page=defaultdict(list)
+          by_label=defaultdict(list)
+          for room in rooms.rooms:
+              label=" ".join(str(room.room_label or "").strip().upper().split())
+              by_page[str(room.page_id)].append({
+                  "canonical_room_id":room.canonical_room_id,
+                  "physical_room_id":room.physical_room_id,
+                  "label":label,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "decision_scope_id":room.decision_scope_id,
+                  "geometry_complete":room.geometry_complete,
+                  "binding":bool(room.room_label_binding_record_id),
+                  "label_evidence":len(room.room_label_evidence_ids),
+              })
+              if label:
+                  by_label[label].append({
+                      "page_id":str(room.page_id),
+                      "physical_room_id":room.physical_room_id,
+                      "source_room_face_record_id":room.source_room_face_record_id,
+                  })
+
+          cross=CrossViewRoomAreaProducer.from_source(source=source,rooms=rooms).publish()
+          print(json.dumps({
+              "wall_status":getattr(wo.status,"value",str(wo.status)),
+              "canonical_room_status":getattr(rooms.status,"value",str(rooms.status)),
+              "canonical_room_reason_codes":list(rooms.reason_codes),
+              "canonical_room_count":len(rooms.rooms),
+              "page_counts":{page:len(rows) for page,rows in sorted(by_page.items())},
+              "label_groups":{label:rows for label,rows in sorted(by_label.items())},
+              "duplicate_labels":{label:rows for label,rows in sorted(by_label.items()) if len(rows)>1},
+              "cross_view_status":getattr(cross.status,"value",str(cross.status)),
+              "cross_view_reason_codes":list(cross.reason_codes),
+              "cross_view_records":[{
+                  "physical_room_id":r.physical_room_id,
+                  "room_label":r.room_label,
+                  "area_m2":r.area_m2,
+                  "source_room_face_record_id":r.source_room_face_record_id,
+                  "dimension_page_id":r.dimension_page_id,
+              } for r in cross.records],
+              "cross_view_unresolved":list(cross.unresolved_physical_room_ids),
+          },indent=2,sort_keys=True))
+          PY
