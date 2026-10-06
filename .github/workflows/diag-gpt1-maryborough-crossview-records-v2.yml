@@ -1,0 +1,105 @@
+name: DIAG GPT1 Maryborough CrossView Records V2
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Audit cross-view room-area records
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from collections import defaultdict
+          from pathlib import Path
+          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="gpt1-crossview-records-v2",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-crossview-records-v2",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","9","11","30","31"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+              evidence_page_ids=("9","11"),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          cross=CrossViewRoomAreaProducer.from_source(source=source,rooms=rooms).publish()
+
+          by_label=defaultdict(list)
+          for room in rooms.rooms:
+              label=" ".join(str(room.room_label or "").strip().upper().split())
+              if label:
+                  by_label[label].append({
+                      "page_id":str(room.page_id),
+                      "physical_room_id":room.physical_room_id,
+                      "source_room_face_record_id":room.source_room_face_record_id,
+                      "decision_scope_id":room.decision_scope_id,
+                      "geometry_complete":room.geometry_complete,
+                  })
+
+          rows=[]
+          for record in cross.records:
+              ev=record.area_evidence
+              rows.append({
+                  "physical_room_id":record.physical_room_id,
+                  "source_room_face_record_id":record.source_room_face_record_id,
+                  "room_label":record.room_label,
+                  "source_dimension_page_id":record.source_dimension_page_id,
+                  "horizontal_dimension_id":record.horizontal_dimension_id,
+                  "vertical_dimension_id":record.vertical_dimension_id,
+                  "area_value":ev.normalized_value,
+                  "unit":ev.unit,
+                  "evidence_page_id":ev.page_id,
+                  "evidence_viewport_id":ev.viewport_id,
+                  "method":ev.method,
+                  "status":getattr(ev.status,"value",str(ev.status)),
+                  "figured_dimension_ids":list((ev.metadata or {}).get("figured_dimension_ids") or ()),
+              })
+
+          print(json.dumps({
+              "wall_status":getattr(wo.status,"value",str(wo.status)),
+              "canonical_room_status":getattr(rooms.status,"value",str(rooms.status)),
+              "canonical_room_count":len(rooms.rooms),
+              "labels":{k:v for k,v in sorted(by_label.items())},
+              "cross_view_status":getattr(cross.status,"value",str(cross.status)),
+              "cross_view_reason_codes":list(cross.reason_codes),
+              "cross_view_record_count":len(rows),
+              "cross_view_records":rows,
+              "cross_view_unresolved_count":len(cross.unresolved_physical_room_ids),
+          },indent=2,sort_keys=True))
+          PY
