@@ -30,6 +30,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PHYSICAL_OPENING_EXISTS,
     PHYSICAL_OPENING_IDENTITY_RESOLVED,
@@ -1026,7 +1027,10 @@ def _opening_geometry(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
 ) -> Optional[_OpeningGeometry]:
-    if opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION:
+    if opening.structural_pattern in (
+        RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    ):
         bbox = opening.aperture_bbox_pt
         if bbox is None or len(bbox) != 4:
             return None
