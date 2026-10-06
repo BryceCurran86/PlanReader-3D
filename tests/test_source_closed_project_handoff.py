@@ -609,3 +609,129 @@ def test_project_handoff_does_not_seal_upstream_room_area_as_final_family(
     assert "room_area" not in summary["family_counts"]
     assert summary["combined_quantity_count"] == 0
     assert summary["status"] == "no_sealable_quantities"
+
+
+
+def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    source_sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    project_id = "project-core"
+
+    opening_q = _quantity("q-opening", "opening_area")
+    count_q = _quantity("q-count", "opening_count")
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="corroborated"),
+        reason_codes=("core-resolved",),
+        canonical_walls=(1,),
+        canonical_openings=(1,),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_spaces=(),
+        room_area_quantity_evidence=(),
+        opening_quantity_evidence=(opening_q,),
+        opening_count_quantity_evidence=(count_q,),
+    )
+    seen = {}
+
+    monkeypatch.setattr(
+        handoff,
+        "_source_page_scopes",
+        lambda path: ((1,), (0, 2), 3),
+    )
+
+    def _collect(*args, **kwargs):
+        seen.update(kwargs)
+        return claim
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        _collect,
+    )
+
+    def _surface_forbidden(*args, **kwargs):
+        raise AssertionError("core handoff must not invoke surface publication")
+
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        _surface_forbidden,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_ceiling_lining_review_candidates",
+        _surface_forbidden,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_opening_area_claim_run",
+        lambda *args, **kwargs: _run(
+            project_id=project_id,
+            source_sha256=source_sha,
+            family="opening_area",
+            quantity_id="sealed-opening",
+        ),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_opening_count_run",
+        lambda *args, **kwargs: _run(
+            project_id=project_id,
+            source_sha256=source_sha,
+            family="opening_count",
+            quantity_id="sealed-count",
+        ),
+    )
+
+    output = tmp_path / "out"
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id=project_id,
+        workspace_id=1,
+        output_dir=output,
+        family_group="core",
+    )
+
+    assert seen["pages"] == (1,)
+    assert seen["topology_pages"] == (1,)
+    assert seen["room_area_support_pages"] is None
+    assert summary["family_group"] == "core"
+    assert summary["execution_pages"] == [2]
+    assert summary["family_counts"] == {
+        "floor_area": 0,
+        "opening_area": 1,
+        "opening_count": 1,
+        "ceiling_lining": 0,
+    }
+    assert summary["combined_quantity_count"] == 2
+    assert summary["status"] == "sealed"
+    assert (output / f"{project_id}.json").is_file()
+
+
+def test_invalid_family_group_fails_before_source_scope_resolution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+
+    def _unexpected(*args, **kwargs):
+        raise AssertionError("source scope must not run for invalid family group")
+
+    monkeypatch.setattr(handoff, "_source_page_scopes", _unexpected)
+
+    with pytest.raises(
+        ValueError,
+        match="family_group must be one of",
+    ):
+        handoff.generate_project_handoff(
+            pdf_path=pdf,
+            project_id="project-a",
+            workspace_id=1,
+            output_dir=tmp_path / "out",
+            family_group="not-a-group",
+        )
