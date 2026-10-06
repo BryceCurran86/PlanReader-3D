@@ -15,7 +15,7 @@ jobs:
           python-version: '3.13'
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Run focused dense-lattice contract
         run: |
           set -o pipefail
