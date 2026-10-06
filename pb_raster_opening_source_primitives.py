@@ -20,7 +20,7 @@ import numpy as np
 
 
 RASTER_OPENING_PRIMITIVE_SCHEMA_VERSION = "1.1.0"
-RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION = "raster_opening_source_primitives_v2"
+RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION = "raster_opening_source_primitives_v3"
 
 RASTER_WALL_BAND_FACE = "raster_wall_band_face"
 RASTER_WALL_BAND_END = "raster_wall_band_end"
@@ -160,21 +160,39 @@ def _raw_axis_line_run_primitives(
     *,
     dpi: int,
     axis: str,
+    exclude_mask: np.ndarray | None = None,
 ) -> Iterable[RasterOpeningSourcePrimitive]:
-    """Publish lossless-enough axis line runs without component merging.
+    """Publish neutral axis-line evidence without re-publishing thick poche.
 
     Frame lines can touch jamb or wall ink and therefore cannot be recovered
-    safely from connected-component boxes. Scan each raster row (or column)
-    independently and retain every contiguous source-ink run at least 4 pt
-    long. This is perception only: no gap, frame, opening, or host relation is
-    decided here.
+    safely from connected-component boxes. Scan rows (or columns) independently,
+    but when exclude_mask is supplied remove pixels already classified as thick
+    wall/poche mass before run enumeration. This prevents dense filled wall
+    regions from exploding into one neutral line primitive per raster row.
+
+    A retained run may recover at most one excluded source-ink pixel at each end.
+    That preserves exact jamb contact for a thin frame line without walking back
+    through the thick mass or manufacturing a wall-spanning line. This remains
+    perception only: no gap, frame, opening, or host relation is decided here.
     """
 
-    work = (
+    source_work = (
         line_mask
         if axis == "horizontal"
         else np.ascontiguousarray(line_mask.T)
     )
+    excluded_work: np.ndarray | None = None
+    if exclude_mask is not None:
+        if exclude_mask.shape != line_mask.shape:
+            raise ValueError("exclude_mask must match line_mask shape")
+        excluded_work = (
+            exclude_mask
+            if axis == "horizontal"
+            else np.ascontiguousarray(exclude_mask.T)
+        )
+        work = (source_work & (excluded_work == 0)).astype(np.uint8)
+    else:
+        work = source_work
     minimum = _px(THIN_RUN_MIN_PT, dpi)
     for row_index, row in enumerate(work):
         padded = np.pad(row.astype(np.int8, copy=False), (1, 1))
@@ -184,6 +202,23 @@ def _raw_axis_line_run_primitives(
         for start, end in zip(starts.tolist(), ends.tolist()):
             if end - start + 1 < minimum:
                 continue
+
+            # Recover only immediate source-ink contact with excluded wall mass.
+            # Never traverse further into the excluded region.
+            if excluded_work is not None:
+                if (
+                    start > 0
+                    and bool(source_work[row_index, start - 1])
+                    and bool(excluded_work[row_index, start - 1])
+                ):
+                    start -= 1
+                if (
+                    end + 1 < source_work.shape[1]
+                    and bool(source_work[row_index, end + 1])
+                    and bool(excluded_work[row_index, end + 1])
+                ):
+                    end += 1
+
             center = float(row_index)
             geometry = (float(start), center, float(end), center)
             if axis == "vertical":
@@ -251,10 +286,20 @@ def detect_raster_opening_source_primitives(
 
     primitives = set(_band_edge_primitives(thick, dpi=dpi))
     primitives.update(
-        _raw_axis_line_run_primitives(line_mask, dpi=dpi, axis="horizontal")
+        _raw_axis_line_run_primitives(
+            line_mask,
+            dpi=dpi,
+            axis="horizontal",
+            exclude_mask=thick,
+        )
     )
     primitives.update(
-        _raw_axis_line_run_primitives(line_mask, dpi=dpi, axis="vertical")
+        _raw_axis_line_run_primitives(
+            line_mask,
+            dpi=dpi,
+            axis="vertical",
+            exclude_mask=thick,
+        )
     )
     # Preserve the stricter hairline primitive for later swing evidence. It is
     # intentionally distinct from RASTER_LINE_RUN, which is the neutral source
