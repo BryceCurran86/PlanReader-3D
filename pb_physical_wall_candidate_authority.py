@@ -81,6 +81,9 @@ from pb_wall_room_topology_stage_a import (
     is_structural_candidate_segment,
 )
 from pb_wall_room_topology_wall_assembly import assemble_wall_topology
+from pb_wall_room_topology_typed_negative_evidence import (
+    collect_typed_semantic_evidence,
+)
 
 
 PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.2.0"
@@ -296,6 +299,10 @@ class PhysicalWallCandidateScopeResult:
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
     boundary_evaluation: Optional[PhysicalWallScopeBoundaryEvaluation] = None
     source_metadata_table: Optional[PhysicalWallSourceMetadataScopeTable] = None
+    # Additive U2 sidecar only. It never changes wall scope status, completeness,
+    # equivalence, records, or reason codes. Downstream consumers must apply
+    # their own proposition-specific gates before using these CANDIDATE atoms.
+    typed_semantic_evidence_atoms: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2742,6 +2749,17 @@ def _assemble_scope_result(
         proven_wall_strips,
     )
     graph = build_wall_graph_for_viewport(graph_segments)
+    try:
+        typed_semantic_evidence_atoms = tuple(
+            collect_typed_semantic_evidence(
+                graph,
+                document_id=published.revision.document_id,
+                page_id=page_id,
+                viewport_id=scope_id,
+            )
+        )
+    except Exception:  # pragma: no cover - additive semantic sidecar is fail-open
+        typed_semantic_evidence_atoms = ()
     junctions, relationships = classify_junctions(
         graph,
         document_id=published.revision.document_id,
@@ -2936,6 +2954,7 @@ def _assemble_scope_result(
         ),
         boundary_evaluation=boundary_evaluation,
         source_metadata_table=source_metadata_table,
+        typed_semantic_evidence_atoms=typed_semantic_evidence_atoms,
     )
 
 

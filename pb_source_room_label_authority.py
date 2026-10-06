@@ -61,6 +61,9 @@ SOURCE_ROOM_LABEL_REQUIRED_WORD_UNRESOLVED = (
 )
 SOURCE_ROOM_LABEL_POSITION_UNRESOLVED = "source_room_label_position_unresolved"
 SOURCE_ROOM_LABEL_CONFLICT = "source_room_label_conflict"
+SOURCE_ROOM_LABEL_SPLIT_FACE_CANDIDATE = (
+    "source_room_label_split_face_candidate"
+)
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -161,6 +164,42 @@ class SourceRoomLabelRecord:
 
 
 @dataclass(frozen=True)
+class SourceRoomSplitLabelCandidate:
+    """Authenticated whole-line room text whose words own multiple exact faces."""
+
+    record_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    snapshot_id: str
+    page_id: str
+    decision_scope_id: str
+    label: str
+    observation_ids: tuple[str, ...]
+    word_evidence: tuple[SourceRoomLabelWordEvidence, ...]
+    word_face_ids: tuple[str, ...]
+    source_room_face_record_ids: tuple[str, ...]
+    source_bbox: tuple[float, float, float, float]
+    status: EvidenceResolutionStatus = EvidenceResolutionStatus.CANDIDATE
+    reason_codes: tuple[str, ...] = (SOURCE_ROOM_LABEL_SPLIT_FACE_CANDIDATE,)
+    schema_version: str = SOURCE_ROOM_LABEL_SCHEMA_VERSION
+    _seal: object = None
+
+    def __post_init__(self) -> None:
+        if self._seal is not _RECORD_SEAL:
+            raise TypeError("SourceRoomSplitLabelCandidate is producer-owned")
+        if self.status is not EvidenceResolutionStatus.CANDIDATE:
+            raise ValueError("split-face label evidence must remain CANDIDATE")
+        if (
+            not self.label
+            or len(self.word_evidence) < 2
+            or len(self.word_face_ids) != len(self.word_evidence)
+            or len(set(self.word_face_ids)) < 2
+        ):
+            raise ValueError("split-face label candidate requires multiple owned faces")
+
+
+@dataclass(frozen=True)
 class SourceRoomLabelScopeResult:
     status: EvidenceResolutionStatus
     reason_codes: tuple[str, ...]
@@ -171,6 +210,7 @@ class SourceRoomLabelScopeResult:
     snapshot_id: str
     page_id: str
     decision_scope_id: str
+    split_face_candidates: tuple[SourceRoomSplitLabelCandidate, ...] = ()
     schema_version: str = SOURCE_ROOM_LABEL_SCHEMA_VERSION
 
 
@@ -854,6 +894,10 @@ class SourceRoomLabelProducer:
             ] = {}
             required_word_unresolved = False
             position_unresolved = False
+            split_face_candidates: list[SourceRoomSplitLabelCandidate] = []
+            room_by_face = {
+                record.face_id: record for record in scope.records
+            }
 
             for line in _line_groups(words):
                 raw_line = " ".join(
@@ -893,7 +937,7 @@ class SourceRoomLabelProducer:
                     required_word_unresolved = True
                     continue
 
-                common_face: Optional[str] = None
+                word_face_ids: list[str] = []
                 position_ok = True
                 for item in evidence:
                     x0, y0, x1, y1 = item.geometry
@@ -909,15 +953,67 @@ class SourceRoomLabelProducer:
                     if len(matches) != 1:
                         position_ok = False
                         break
-                    if common_face is None:
-                        common_face = matches[0]
-                    elif common_face != matches[0]:
-                        position_ok = False
-                        break
-                if not position_ok or common_face is None:
+                    word_face_ids.append(str(matches[0]))
+                if not position_ok or not word_face_ids:
                     position_unresolved = True
                     continue
 
+                distinct_face_ids = tuple(dict.fromkeys(word_face_ids))
+                if len(distinct_face_ids) > 1:
+                    face_records = [
+                        room_by_face.get(face_id) for face_id in distinct_face_ids
+                    ]
+                    if any(record is None for record in face_records):
+                        position_unresolved = True
+                        continue
+                    payload = {
+                        "document_id": scope.document_id,
+                        "revision_id": scope.revision_id,
+                        "source_sha256": scope.source_sha256,
+                        "snapshot_id": scope.snapshot_id,
+                        "page_id": scope.page_id,
+                        "decision_scope_id": scope.decision_scope_id,
+                        "label": label,
+                        "word_face_ids": tuple(word_face_ids),
+                        "source_room_face_record_ids": tuple(
+                            record.record_id for record in face_records
+                        ),
+                        "authority_record_ids": tuple(
+                            item.authority_record_id for item in evidence
+                        ),
+                    }
+                    split_face_candidates.append(
+                        SourceRoomSplitLabelCandidate(
+                            record_id=stable_contract_id(
+                                "source_room_split_label_candidate",
+                                payload,
+                                digest_chars=32,
+                            ),
+                            document_id=scope.document_id,
+                            revision_id=scope.revision_id,
+                            source_sha256=scope.source_sha256,
+                            snapshot_id=scope.snapshot_id,
+                            page_id=scope.page_id,
+                            decision_scope_id=scope.decision_scope_id,
+                            label=label,
+                            observation_ids=tuple(
+                                item.observation_id for item in evidence
+                            ),
+                            word_evidence=tuple(evidence),
+                            word_face_ids=tuple(word_face_ids),
+                            source_room_face_record_ids=tuple(
+                                record.record_id for record in face_records
+                            ),
+                            source_bbox=_bbox_union(
+                                [item.geometry for item in evidence]
+                            ),
+                            _seal=_RECORD_SEAL,
+                        )
+                    )
+                    position_unresolved = True
+                    continue
+
+                common_face = distinct_face_ids[0]
                 candidates_by_face.setdefault(common_face, []).append(
                     (
                         label,
@@ -928,9 +1024,6 @@ class SourceRoomLabelProducer:
                     )
                 )
 
-            room_by_face = {
-                record.face_id: record for record in scope.records
-            }
             positive: list[SourceRoomLabelRecord] = []
             conflict = False
             for face_id, candidates in sorted(candidates_by_face.items()):
@@ -1030,6 +1123,12 @@ class SourceRoomLabelProducer:
                 snapshot_id=scope.snapshot_id,
                 page_id=scope.page_id,
                 decision_scope_id=scope.decision_scope_id,
+                split_face_candidates=tuple(
+                    sorted(
+                        split_face_candidates,
+                        key=lambda record: (record.label, record.record_id),
+                    )
+                ),
             )
 
     def authority(self) -> SourceRoomLabelAuthority:
@@ -1053,8 +1152,10 @@ __all__ = [
     "SOURCE_ROOM_LABEL_REQUIRED_WORD_UNRESOLVED",
     "SOURCE_ROOM_LABEL_POSITION_UNRESOLVED",
     "SOURCE_ROOM_LABEL_CONFLICT",
+    "SOURCE_ROOM_LABEL_SPLIT_FACE_CANDIDATE",
     "SourceRoomLabelWordEvidence",
     "SourceRoomLabelRecord",
+    "SourceRoomSplitLabelCandidate",
     "SourceRoomLabelScopeResult",
     "SourceRoomLabelSelector",
     "SourceRoomLabelAuthority",
