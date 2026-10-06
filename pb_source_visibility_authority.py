@@ -50,6 +50,7 @@ from pb_pdf_text_integrity_authority import (
     classify_native_word_integrity,
 )
 from pb_source_observation_authority import (
+    NativePageImagePlacement,
     OBSERVATION_UNAVAILABLE,
     PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
     PRODUCER_INTEGRITY_FAILURE,
@@ -759,6 +760,27 @@ class SourceVisibilityProducer:
             replace(page_parent),
             native_frame,
             RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+        )
+
+    def raster_opening_image_placements(
+        self,
+        revision_id: str,
+        page_id: str,
+    ) -> tuple[NativePageImagePlacement, ...]:
+        """Return producer-owned embedded-image registration evidence."""
+
+        published = self._published_by_revision.get(str(revision_id))
+        if published is None:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        clean_page_id = str(page_id).strip()
+        if not clean_page_id:
+            raise ValueError(OBSERVATION_UNAVAILABLE)
+        return self._producer.native_page_image_placements(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id=clean_page_id,
         )
 
     def physical_opening_authority(self):
