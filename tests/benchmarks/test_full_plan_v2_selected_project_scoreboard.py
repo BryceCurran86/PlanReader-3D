@@ -41,7 +41,7 @@ def _write_manifest(root: Path, project_id: str, expected: float) -> None:
     payload = {
         "schema_version": "2.0",
         "project_id": project_id,
-        "status": "INCOMPLETE",
+        "status": "VERIFIED",
         "source_package_complete": True,
         "source_documents": [{
             "name": f"{project_id}.pdf",
