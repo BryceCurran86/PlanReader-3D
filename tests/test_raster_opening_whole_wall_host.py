@@ -36,6 +36,7 @@ def _record(
                 (start, 55.0 + offset),
                 (end, 55.0 + offset),
             ),
+            reason_codes=(),
         ),
         physical_identity=SimpleNamespace(
             candidate_identity_id=f"candidate:{wall_id}",
