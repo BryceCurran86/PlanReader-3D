@@ -1473,6 +1473,11 @@ def _try_physical_net_wall_rows(
                 topology_pages = page_scope.topology_page_indices()
                 if topology_pages is not None:
                     claim_kwargs["topology_pages"] = topology_pages
+                support_pages = tuple(
+                    getattr(page_scope, "evidence_page_indices", ()) or ()
+                )
+                if support_pages:
+                    claim_kwargs["room_area_support_pages"] = support_pages
             claim = collect_live_physical_net_wall_claim(
                 group["path"], **claim_kwargs
             )
