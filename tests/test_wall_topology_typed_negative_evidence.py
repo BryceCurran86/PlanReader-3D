@@ -157,6 +157,28 @@ class TestTypedNegativeNominations:
         graph = _attach(segments)
         assert KIND_GRID in _kinds(graph)
 
+    def test_repeated_grid_survives_crossing_rechunking(self) -> None:
+        segments = []
+        for index, y in enumerate((0.0, 8.0, 16.0, 24.0)):
+            segments.append(_seg(f"h{index}", 0.0, y, 40.0, y))
+        for index, x in enumerate((8.0, 16.0, 24.0, 32.0)):
+            segments.append(_seg(f"v{index}", x, -8.0, x, 32.0))
+
+        graph = _attach(segments)
+        grid_atoms = [
+            atom
+            for atom in _atoms(graph)
+            if atom["kind"] == KIND_GRID
+        ]
+
+        assert grid_atoms
+        assert any(
+            len((atom.get("metadata") or {}).get("source_primitive_ids") or []) >= 1
+            for atom in grid_atoms
+        )
+        assert len(graph["edges"]) > len(segments)
+        assert len(graph["edges"]) == len(build_wall_graph_for_viewport(segments)["edges"])
+
     def test_annotation_border_enclosing_short_marks(self) -> None:
         segments = [
             _seg("o1", 0, 0, 40, 0),
