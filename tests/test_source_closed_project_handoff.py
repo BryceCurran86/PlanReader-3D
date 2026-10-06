@@ -316,7 +316,8 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
     assert seen["topology_pages"] is None
     assert seen["room_area_support_pages"] is None
     assert summary["status"] == "no_sealable_quantities"
-    assert summary["topology_pages"] == []
+    assert summary["topology_pages"] == [1, 2, 3]
+    assert summary["room_area_support_pages"] == []
     assert summary["topology_mode"] == "live_authority_all_pages_fallback"
     assert summary["claim_reason_codes"] == ["live-authority-unavailable"]
     assert summary["combined_run_file"] is None
