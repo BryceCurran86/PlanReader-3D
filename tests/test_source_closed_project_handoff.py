@@ -178,6 +178,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
     project_id = "project-a"
 
     floor_q = _quantity("q-floor", "floor_area")
+    floor_finish_q = _quantity("q-floor-finish", "floor_finish_area")
     opening_q = _quantity("q-opening", "opening_area")
     count_q = _quantity("q-count", "opening_count")
     claim = SimpleNamespace(
@@ -189,6 +190,7 @@ def test_project_handoff_combines_only_available_source_closed_families(
         canonical_floors=(1,),
         canonical_spaces=(1,),
         room_area_quantity_evidence=(),
+        floor_finish_quantity_evidence=(floor_finish_q,),
         opening_quantity_evidence=(opening_q,),
         opening_count_quantity_evidence=(count_q,),
     )
@@ -224,6 +226,16 @@ def test_project_handoff_combines_only_available_source_closed_families(
             source_sha256=source_sha,
             family="floor_area",
             quantity_id="sealed-floor",
+        ),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "seal_live_floor_finish_area_run",
+        lambda *args, **kwargs: _run(
+            project_id=project_id,
+            source_sha256=source_sha,
+            family="floor_finish_area",
+            quantity_id="sealed-floor-finish",
         ),
     )
     monkeypatch.setattr(
@@ -272,11 +284,12 @@ def test_project_handoff_combines_only_available_source_closed_families(
     assert summary["topology_mode"] == "live_authority_all_pages_fallback"
     assert summary["family_counts"] == {
         "floor_area": 1,
+        "floor_finish_area": 1,
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 1,
     }
-    assert summary["combined_quantity_count"] == 4
+    assert summary["combined_quantity_count"] == 5
     assert (output / f"{project_id}.json").is_file()
     assert (output / "production_summary.json").is_file()
     assert sorted((output / "family_runs").glob("*.sealed.json"))
@@ -744,6 +757,7 @@ def test_core_family_group_uses_only_proven_topology_scope_and_skips_surfaces(
     assert summary["execution_pages"] == [2]
     assert summary["family_counts"] == {
         "floor_area": 0,
+        "floor_finish_area": 0,
         "opening_area": 1,
         "opening_count": 1,
         "ceiling_area": 0,
