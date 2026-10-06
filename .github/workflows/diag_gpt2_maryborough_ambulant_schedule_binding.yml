@@ -1,0 +1,34 @@
+name: DIAG GPT2 Maryborough Ambulant Schedule Binding
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Trace ambulant room labels through door schedule binding
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-ambulant-schedule-binding
+          git rev-parse HEAD > artifacts/gpt2-maryborough-ambulant-schedule-binding/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-ambulant-schedule-binding/source_sha256.txt
+          PYTHONPATH=. python -u tools/diag_maryborough_ambulant_schedule_binding.py \
+            | tee artifacts/gpt2-maryborough-ambulant-schedule-binding/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-ambulant-schedule-binding
+          path: artifacts/gpt2-maryborough-ambulant-schedule-binding
+          retention-days: 1
