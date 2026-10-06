@@ -60,7 +60,11 @@ from pb_migration_contracts import (
     stable_contract_id,
 )
 from pb_migration_provider_envelope import ProviderContext
-from pb_physical_scale_authority import PhysicalScaleProducer, PhysicalScaleSelector
+from pb_physical_scale_authority import (
+    PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE,
+    PhysicalScaleProducer,
+    PhysicalScaleSelector,
+)
 from pb_physical_scale_calibration_bridge import build_physical_scale_calibration
 from pb_source_room_area_bridge import build_source_room_area_bridge
 from pb_source_room_face_authority import SourceRoomFaceSelector
@@ -442,10 +446,25 @@ def collect_live_physical_net_wall_claim(
                 viewport_id=scale_viewport_id,
             )
             scale_result = scale_producer.publish_scope(scale_selector)
+            selected_scale_selector = scale_selector
+            if scale_result.reason_codes == (
+                PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE,
+            ):
+                page_scale_selector = PhysicalScaleSelector(
+                    document_id=scope_rooms[0].document_id,
+                    revision_id=scope_rooms[0].revision_id,
+                    source_sha256=scope_rooms[0].source_sha256,
+                    snapshot_id=snapshot_id,
+                    page_id=page_id,
+                    viewport_id=None,
+                )
+                scale_result = scale_producer.publish_scope(page_scale_selector)
+                selected_scale_selector = page_scale_selector
+
             if scale_result.status is EvidenceResolutionStatus.CORROBORATED:
                 scale_bridge = build_physical_scale_calibration(
                     physical_scale_authority=scale_producer.authority(),
-                    selector=scale_selector,
+                    selector=selected_scale_selector,
                     context=context,
                     viewport=viewport,
                     page_no=page_no,
