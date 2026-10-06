@@ -717,3 +717,201 @@ def test_repeated_label_annotation_blocks_remain_fail_closed_when_pair_is_not_un
 
     assert result.records == ()
     assert result.status is EvidenceResolutionStatus.CONFLICT
+
+
+def _shared_physical_extent_fixture(monkeypatch, *, full_shared_edge: bool):
+    source, base_rooms = _source_and_room()
+    base = base_rooms.rooms[0]
+
+    donor = replace(
+        base,
+        canonical_room_id="donor-room",
+        physical_room_id="donor-room",
+        polygon_pdf_pts=(
+            (100.0, 100.0),
+            (250.0, 100.0),
+            (250.0, 200.0),
+            (100.0, 200.0),
+        ),
+        area_page_pts2=15000.0,
+        source_room_face_record_id="donor-face",
+        evidence_ids=("donor-face",),
+        room_label="DONOR",
+        room_label_binding_record_id="label-binding:donor",
+        room_label_evidence_ids=("label-evidence:donor",),
+    )
+    target_y0 = 100.0 if full_shared_edge else 110.0
+    target = replace(
+        base,
+        canonical_room_id="target-room",
+        physical_room_id="target-room",
+        polygon_pdf_pts=(
+            (250.0, target_y0),
+            (325.0, target_y0),
+            (325.0, 200.0),
+            (250.0, 200.0),
+        ),
+        area_page_pts2=75.0 * (200.0 - target_y0),
+        source_room_face_record_id="target-face",
+        evidence_ids=("target-face",),
+        room_label="TARGET",
+        room_label_binding_record_id="label-binding:target",
+        room_label_evidence_ids=("label-evidence:target",),
+    )
+    rooms = LiveCanonicalRoomComposition(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(LIVE_CANONICAL_ROOM_RESOLVED,),
+        rooms=(donor, target),
+        source_pages=(1,),
+    )
+
+    donor_line = cross_view._TrustedLine(
+        page_id="2",
+        text="DONOR",
+        bbox=(170.0, 145.0, 180.0, 155.0),
+        observation_ids=("donor-label",),
+        receipt_ids=("donor-receipt",),
+        source_partition_id="partition-2",
+        block_no=5,
+        line_no=0,
+    )
+    target_inside = cross_view._TrustedLine(
+        page_id="2",
+        text="TARGET",
+        bbox=(280.0, 145.0, 290.0, 155.0),
+        observation_ids=("target-inside",),
+        receipt_ids=("target-inside-receipt",),
+        source_partition_id="partition-2",
+        block_no=6,
+        line_no=0,
+    )
+    target_annotation = cross_view._TrustedLine(
+        page_id="2",
+        text="TARGET",
+        bbox=(280.0, 0.0, 290.0, 8.0),
+        observation_ids=("target-annotation",),
+        receipt_ids=("target-annotation-receipt",),
+        source_partition_id="partition-2",
+        block_no=10,
+        line_no=0,
+    )
+
+    donor_h = cross_view._TrustedBoundDimension(
+        "donor-h-3600",
+        "donor-h-text",
+        "donor-h-text-receipt",
+        "partition-2",
+        30,
+        0,
+        0,
+        3600.0,
+        "horizontal",
+        ((100.0, 80.0), (250.0, 80.0)),
+        ("donor-h-line",),
+        ("donor-h-w1", "donor-h-w2"),
+        (
+            (100.0, 68.0, 100.0, 92.0),
+            (250.0, 68.0, 250.0, 92.0),
+        ),
+    )
+    donor_v = cross_view._TrustedBoundDimension(
+        "donor-v-2400",
+        "donor-v-text",
+        "donor-v-text-receipt",
+        "partition-2",
+        31,
+        0,
+        0,
+        2400.0,
+        "vertical",
+        ((280.0, 80.0), (280.0, 180.0)),
+        ("donor-v-line",),
+        ("donor-v-w1", "donor-v-w2"),
+        (
+            (250.0, 80.0, 292.0, 80.0),
+            (268.0, 180.0, 292.0, 180.0),
+        ),
+    )
+    target_h = cross_view._TrustedBoundDimension(
+        "target-h-1800",
+        "target-h-text",
+        "target-h-text-receipt",
+        "partition-2",
+        10,
+        1,
+        0,
+        1800.0,
+        "horizontal",
+        ((250.0, 60.0), (325.0, 60.0)),
+        ("target-h-line",),
+        ("target-h-w1", "target-h-w2"),
+        (
+            (250.0, 50.0, 250.0, 70.0),
+            (325.0, 50.0, 325.0, 70.0),
+        ),
+    )
+
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_lines_for_page",
+        lambda source_arg, *, revision_id, page_id, candidate_labels: (
+            donor_line,
+            target_inside,
+            target_annotation,
+        ) if str(page_id) == "2" else (),
+    )
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_native_dimensions_for_page",
+        lambda source_arg, *, revision_id, page_id, candidate_lines=(): (
+            donor_h,
+            donor_v,
+            target_h,
+        ) if str(page_id) == "2" else (),
+    )
+    return source, rooms
+
+
+def test_shared_physical_room_extent_can_reuse_one_authenticated_donor_dimension(
+    monkeypatch,
+) -> None:
+    source, rooms = _shared_physical_extent_fixture(
+        monkeypatch,
+        full_shared_edge=True,
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    by_label = {record.room_label: record for record in result.records}
+    assert by_label["DONOR"].area_evidence.normalized_value == 8.64
+    target = by_label["TARGET"]
+    assert target.area_evidence.normalized_value == 4.32
+    assert target.area_evidence.metadata["source_label_support_mode"] == (
+        "shared_physical_room_extent"
+    )
+    assert target.area_evidence.metadata[
+        "shared_extent_donor_physical_room_id"
+    ] == "donor-room"
+    assert target.area_evidence.metadata["shared_extent_axis"] == "y"
+
+
+def test_shared_physical_room_extent_rejects_partial_adjacent_boundary(
+    monkeypatch,
+) -> None:
+    source, rooms = _shared_physical_extent_fixture(
+        monkeypatch,
+        full_shared_edge=False,
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    by_label = {record.room_label: record for record in result.records}
+    assert "DONOR" in by_label
+    assert "TARGET" not in by_label
+    assert "target-room" in result.unresolved_physical_room_ids
