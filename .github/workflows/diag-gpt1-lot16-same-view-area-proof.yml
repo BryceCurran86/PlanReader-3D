@@ -1,0 +1,84 @@
+name: DIAG GPT1 Lot16 Same-View Area Proof
+
+on:
+  pull_request:
+    branches:
+      - gpt1/same-view-room-area-authority-v1
+
+jobs:
+  lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run Lot16 same-view room/floor measurement
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          pdf=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          actual=hashlib.sha256(pdf.read_bytes()).hexdigest()
+          assert actual==expected
+
+          claim=collect_live_physical_net_wall_claim(
+              pdf,
+              pages=(2,),
+              topology_pages=(2,),
+              room_area_support_pages=None,
+          )
+          room_q=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floor_q=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          metric_floors=[
+              f for f in claim.canonical_floors
+              if f.metric_area_m2 is not None and f.metric_area_quantity_id
+          ]
+          print(json.dumps({
+              "source_sha256":actual,
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "room_area_quantity_count":len(room_q),
+              "room_areas":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "method":dict(q.metadata or {}).get("measurement_method"),
+                  "room_label":dict(q.metadata or {}).get("room_label"),
+              } for q in room_q],
+              "metric_floor_count":len(metric_floors),
+              "metric_floors":[{
+                  "canonical_floor_id":f.canonical_floor_id,
+                  "metric_area_m2":f.metric_area_m2,
+                  "metric_area_authority":f.metric_area_authority,
+                  "metric_area_quantity_id":f.metric_area_quantity_id,
+              } for f in metric_floors],
+              "floor_quantity_count":len(floor_q),
+              "floor_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+              } for q in floor_q],
+          },indent=2,sort_keys=True))
+          PY
