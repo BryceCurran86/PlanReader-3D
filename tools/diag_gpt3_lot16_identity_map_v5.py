@@ -4,9 +4,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from pb_live_physical_net_wall_integration import (
-    LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
-)
 from pb_migration_contracts import stable_contract_id
 from pb_opening_label_dimension_authority import (
     OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
@@ -14,7 +11,6 @@ from pb_opening_label_dimension_authority import (
     _trusted_text_lines,
     parse_opening_label_dimensions,
 )
-from pb_source_visibility_authority import SourceVisibilityProducer
 
 
 PROJECT="au_qld_lot16_power"
@@ -111,29 +107,47 @@ def main():
                 "bbox":tuple(float(v) for v in bbox),
             })
 
-    payload=PDF.read_bytes()
-    document_id=f"live-source:{source_sha[:32]}"
-    source=SourceVisibilityProducer(
-        producer_method="live-physical-net-wall",
-        producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
-    )
-    published=source.ingest_native_pdf_bytes(
-        document_id=document_id,
-        source_bytes=payload,
-        source_locator="memory://live-physical-net-wall-source.pdf",
-        page_ids=tuple(str(i) for i in range(1,14)),
-    )
+    # Capture the exact producer instance created by the production claim.
+    # This keeps every derived snapshot minted by the real wall/opening chain.
+    import pb_live_physical_net_wall_integration as live
 
-    # Opening-label text fragments are page/snapshot facts. Production's helper
-    # only reads these identity fields from the opening record.
-    page3_scope=SimpleNamespace(
-        document_id=published.revision.document_id,
-        revision_id=published.revision.revision_id,
-        source_sha256=published.revision.source_sha256,
-        snapshot_id=published.snapshot.snapshot_id,
-        page_id="3",
-    )
-    trusted_lines=_trusted_text_lines(source,page3_scope)
+    captured={}
+    original_source_cls=live.SourceVisibilityProducer
+
+    def _capture_source(*args,**kwargs):
+        obj=original_source_cls(*args,**kwargs)
+        captured["source"]=obj
+        return obj
+
+    live.SourceVisibilityProducer=_capture_source
+    try:
+        claim=live.collect_live_physical_net_wall_claim(
+            PDF,
+            pages=tuple(range(13)),
+            topology_pages=(2,),
+            room_area_support_pages=None,
+        )
+    finally:
+        live.SourceVisibilityProducer=original_source_cls
+
+    source=captured.get("source")
+    if source is None:
+        raise SystemExit("failed to capture production SourceVisibilityProducer")
+
+    claim_qids={
+        q.quantity_id
+        for q in (getattr(claim,"opening_quantity_evidence",()) or ())
+        if not q.abstained and q.value is not None
+    }
+    if claim_qids != combined_ids:
+        raise SystemExit(
+            f"captured claim/sealed quantity mismatch: claim={sorted(claim_qids)} sealed={sorted(combined_ids)}"
+        )
+
+    canonical_by_physical={
+        str(o.physical_opening_id):o
+        for o in (getattr(claim,"canonical_openings",()) or ())
+    }
 
     by_qid={q["quantity_id"]:q for q in family.get("quantities",())}
     combined_ids={
@@ -158,13 +172,47 @@ def main():
         page_id=str(row.get("source_page") or "")
         viewport_id=str(row.get("viewport_id") or "") or None
 
+        canonical=canonical_by_physical.get(physical_id)
+        if canonical is None:
+            raise SystemExit(f"{qid}: sealed physical id absent from captured production claim")
+        if str(canonical.figured_area_record_id or "") != target_measurement:
+            raise SystemExit(
+                f"{qid}: sealed/captured measurement id mismatch: "
+                f"{target_measurement} != {canonical.figured_area_record_id}"
+            )
+
+        # Production may advance the revision to newer derived snapshots after
+        # this opening was canonicalised. Temporarily point the producer's
+        # published snapshot at the exact immutable opening snapshot so the
+        # page-level trusted-text helper sees the same source universe that
+        # minted the sealed measurement record.
+        store=getattr(source,"_store",None)
+        if store is None:
+            raise SystemExit("captured source store unavailable")
+        prior_snapshot=store.source_snapshot_by_revision.get(canonical.revision_id)
+        store.source_snapshot_by_revision[canonical.revision_id]=canonical.snapshot_id
+        try:
+            scope=SimpleNamespace(
+                document_id=canonical.document_id,
+                revision_id=canonical.revision_id,
+                source_sha256=canonical.source_sha256,
+                snapshot_id=canonical.snapshot_id,
+                page_id=canonical.page_id,
+            )
+            trusted_lines=_trusted_text_lines(source,scope)
+        finally:
+            if prior_snapshot is None:
+                store.source_snapshot_by_revision.pop(canonical.revision_id,None)
+            else:
+                store.source_snapshot_by_revision[canonical.revision_id]=prior_snapshot
+
         evidence_matches=[]
         for line in trusted_lines:
             for evidence_id,payload_candidate in candidate_evidence_ids(
                 line=line,
                 physical_id=physical_id,
-                page_id=page_id,
-                viewport_id=viewport_id,
+                page_id=str(canonical.page_id),
+                viewport_id=canonical.viewport_id,
             ):
                 if evidence_id == target_measurement:
                     evidence_matches.append({
@@ -250,7 +298,6 @@ def main():
         json.dumps({
             "bbox_tolerance_pt":BBOX_TOL_PT,
             "sealed_quantity_count":len(combined_ids),
-            "trusted_text_fragment_count":len(trusted_lines),
             "binding_count":len(bindings),
             "frozen_bbox_candidate_count":len(frozen),
             "audit":audit,
@@ -259,7 +306,6 @@ def main():
     )
     print(json.dumps({
         "sealed_quantity_count":len(combined_ids),
-        "trusted_text_fragment_count":len(trusted_lines),
         "binding_count":len(bindings),
         "frozen_bbox_candidate_count":len(frozen),
         "audit":audit,
