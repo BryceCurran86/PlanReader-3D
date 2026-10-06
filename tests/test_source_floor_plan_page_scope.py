@@ -85,6 +85,41 @@ def test_bound_titles_separate_the_floor_plan_from_evidence_sheets() -> None:
     assert scope.decisions[1].reason_code == NOT_FLOOR_PLAN_PAGE_BOUND_TITLE
     doc.close()
 
+def test_room_area_support_scope_is_plan_like_not_every_evidence_sheet() -> None:
+    doc = _doc(
+        "FLOOR PLAN",
+        "PROP. FLOOR FINISHES & PARTITIONS PLAN",
+        "REFLECTED CEILING PLAN",
+        "ELEVATIONS",
+        "DOOR SCHEDULE",
+        "ROOF PLAN",
+        "DETAILS",
+    )
+    scope = classify_source_floor_plan_pages(doc, range(7))
+
+    assert scope.topology_page_indices() == (0,)
+    # General evidence remains broad for non-room families.
+    assert scope.evidence_page_indices == (1, 2, 3, 4, 5, 6)
+    # Room-area support is deliberately limited to plan-like repeated room
+    # geometry/annotation sheets.
+    assert scope.room_area_support_page_indices == (1, 2)
+    report = scope.to_dict()
+    assert report["room_area_support_page_indices"] == [1, 2]
+    doc.close()
+
+
+def test_room_area_support_scope_fails_closed_without_positive_floor_plan_split() -> None:
+    doc = _doc(
+        "PROP. FLOOR FINISHES & PARTITIONS PLAN",
+        "REFLECTED CEILING PLAN",
+        "DOOR SCHEDULE",
+    )
+    scope = classify_source_floor_plan_pages(doc, range(3))
+    assert scope.restricts is False
+    assert scope.room_area_support_page_indices == ()
+    doc.close()
+
+
 
 def test_without_a_positive_floor_plan_nothing_is_narrowed() -> None:
     doc = _doc("ELEVATIONS", "ROOF PLAN", None)
@@ -369,20 +404,38 @@ def test_customer_bridge_forwards_only_source_classified_evidence_pages_for_room
     app = _app(tmp_path)
     fake = SimpleNamespace(
         topology_page_indices=lambda: (0, 1),
-        evidence_page_indices=(2,),
+        evidence_page_indices=(2, 3),
+        room_area_support_page_indices=(2,),
         to_dict=lambda: {
             "floor_plan_page_indices": [0, 1],
-            "evidence_page_indices": [2],
+            "evidence_page_indices": [2, 3],
+            "room_area_support_page_indices": [2],
             "restricts": True,
         },
     )
     with patch(SCOPE_TOOL, return_value=fake), patch(CLAIM_TOOL, return_value=_abstained()) as collect:
-        auto._try_physical_net_wall_rows(app, 1, _pages(1, 2, 3), [])
+        auto._try_physical_net_wall_rows(app, 1, _pages(1, 2, 3, 4), [])
     assert collect.call_args.kwargs == {
-        "pages": (0, 1, 2),
+        "pages": (0, 1, 2, 3),
         "topology_pages": (0, 1),
         "room_area_support_pages": (2,),
     }
+
+
+def test_customer_bridge_keeps_legacy_scope_double_compatibility(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    fake = SimpleNamespace(
+        topology_page_indices=lambda: (0,),
+        evidence_page_indices=(1,),
+        to_dict=lambda: {
+            "floor_plan_page_indices": [0],
+            "evidence_page_indices": [1],
+            "restricts": True,
+        },
+    )
+    with patch(SCOPE_TOOL, return_value=fake), patch(CLAIM_TOOL, return_value=_abstained()) as collect:
+        auto._try_physical_net_wall_rows(app, 1, _pages(1, 2), [])
+    assert collect.call_args.kwargs["room_area_support_pages"] == (1,)
 
 
 def test_customer_bridge_passes_only_proven_floor_plan_pages_as_topology(tmp_path: Path) -> None:
