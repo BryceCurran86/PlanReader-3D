@@ -29,6 +29,7 @@ from pb_quantity_takeoff_adapter import (
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_takeoff_authority_v164 import prepare_ai_takeoff_editor_save
+from tests.test_live_ceiling_lining_integration_v1 import _write as _write_live_ceiling_pdf
 
 
 def _source_pdf(*, include_scale_bar: bool = True) -> bytes:
@@ -163,8 +164,7 @@ def test_generic_adapter_rejects_explicit_shadow_quantity() -> None:
 
 
 def test_review_collection_reuses_one_shadow_replay_for_canonical_ceiling(tmp_path) -> None:
-    path = tmp_path / "ceiling-review.pdf"
-    path.write_bytes(_source_pdf(include_scale_bar=True))
+    path = _write_live_ceiling_pdf(tmp_path, framed=True)
 
     bundle = collect_ceiling_lining_review_bundle(
         path,
