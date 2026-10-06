@@ -7,6 +7,7 @@ import pytest
 
 from pb_source_plan_opening_callout import (
     SOURCE_PLAN_OPENING_CALLOUT_BINDING_REQUIRED,
+    classify_compact_source_opening_text,
     extract_source_plan_opening_callouts,
 )
 
@@ -39,6 +40,19 @@ def _extract(payload: bytes):
         )
     finally:
         doc.close()
+
+
+def test_compact_descriptor_classifier_is_explicit_and_fail_closed() -> None:
+    assert classify_compact_source_opening_text("1218 SGW") == ("window", False)
+    assert classify_compact_source_opening_text("0630 FG") == ("window", False)
+    assert classify_compact_source_opening_text("2127 STACKER") == ("door", False)
+    assert classify_compact_source_opening_text("2148 PANEL LIFT") == ("door", False)
+
+    assert classify_compact_source_opening_text("1218 UNKNOWN") == (None, False)
+    assert classify_compact_source_opening_text("SGW") == (None, False)
+    assert classify_compact_source_opening_text("1218") == (None, False)
+    assert classify_compact_source_opening_text("9918 SGW") == (None, False)
+    assert classify_compact_source_opening_text("1218 SGW DOOR") == (None, True)
 
 
 def test_explicit_compact_window_and_door_callouts_publish_source_area() -> None:
