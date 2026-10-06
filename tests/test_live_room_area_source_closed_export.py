@@ -8,6 +8,8 @@ import pytest
 
 import pb_live_room_area_customer_projection as customer_projection
 import pb_live_room_area_source_closed_export as export
+import pb_live_floor_area_source_closed_export as floor_export
+from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
@@ -169,6 +171,61 @@ def test_live_room_area_seals_with_source_and_canonical_floor_trace(
     # Sealed production identity remains the quantity's real source-room
     # identity; canonical floor identity is additional trace provenance only.
     assert row.object_identity_refs == tuple(sorted(quantity.input_entity_ids))
+
+
+def test_floor_area_seals_on_physical_floor_identity(
+    live_claim,
+) -> None:
+    floor = _resolved_floor(live_claim)
+    floor_quantities = publish_live_floor_area_quantities(live_claim)
+    assert len(floor_quantities) == 1
+    quantity = floor_quantities[0]
+
+    assert quantity.family == "floor_area"
+    assert quantity.value == pytest.approx(8.64)
+    assert quantity.input_entity_ids == (floor.physical_floor_surface_id,)
+
+    traces = floor_export.build_live_floor_area_source_traces(
+        live_claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    trace = traces[quantity.quantity_id]
+    assert floor.physical_floor_surface_id in trace.canonical_entity_ids
+    assert floor.canonical_floor_id in trace.canonical_entity_ids
+    assert set(quantity.evidence_ids).issubset(trace.evidence_ids)
+
+    run = floor_export.seal_live_floor_area_run(
+        live_claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    assert len(run.quantities) == 1
+    row = run.quantities[0]
+    assert row.family == "floor_area"
+    assert row.quantity_id == quantity.quantity_id
+    assert row.value == pytest.approx(8.64)
+    assert row.object_identity_refs == (floor.physical_floor_surface_id,)
+    assert floor.physical_floor_surface_id in row.trace_canonical_entity_ids
+    assert row.lineage_ok is True
+
+
+def test_floor_area_sealing_is_deterministic(
+    live_claim,
+) -> None:
+    first = floor_export.seal_live_floor_area_run(
+        live_claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    second = floor_export.seal_live_floor_area_run(
+        live_claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    assert first.run_id == second.run_id
+    assert first.fingerprint == second.fingerprint
+    assert first.to_json() == second.to_json()
 
 
 def test_unavailable_room_areas_are_omitted_not_exported_as_zero(
