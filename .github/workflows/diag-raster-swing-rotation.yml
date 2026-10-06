@@ -1,0 +1,32 @@
+name: DIAG Raster Swing Rotation
+
+on:
+  pull_request:
+    branches:
+      - gpt4/raster-door-swing-g17-v1
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect swing rotation
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python tools/diag_raster_swing_rotation.py | tee raster-swing-rotation.json
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raster-swing-rotation
+          path: raster-swing-rotation.json
+          retention-days: 1
