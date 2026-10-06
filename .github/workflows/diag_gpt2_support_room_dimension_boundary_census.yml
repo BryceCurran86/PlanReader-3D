@@ -1,0 +1,178 @@
+name: DIAG GPT2 Support Room Dimension Boundary Census
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Census support-room dimension ownership
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-support-room-dimension-boundary-census
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          from shapely.geometry import LineString, Polygon
+          from shapely.validation import explain_validity
+
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          support=collect_live_physical_net_wall_claim(
+              SOURCE,
+              pages=(10,),
+              topology_pages=(10,),
+              room_area_support_pages=(10,),
+          )
+          labelled=[
+              room for room in support.canonical_rooms
+              if room.geometry_complete and norm(room.room_label)
+          ]
+          grouped={}
+          for room in labelled:
+              grouped.setdefault(norm(room.room_label),[]).append(room)
+          unique={label:rooms[0] for label,rooms in grouped.items() if len(rooms)==1}
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-support-room-dimension-boundary-census",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-support-room-dimension-boundary-census",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("11",),
+          )
+          lines=cv._trusted_lines_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_labels=tuple(unique),
+          )
+          dims=cv._trusted_native_dimensions_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_lines=lines,
+          )
+
+          def hit_length_and_points(boundary, segment):
+              line=LineString((
+                  (float(segment[0]),float(segment[1])),
+                  (float(segment[2]),float(segment[3])),
+              ))
+              hit=line.intersection(boundary)
+              pts=[]
+              def collect(g):
+                  if g.is_empty: return
+                  if g.geom_type=="Point":
+                      pts.append((round(float(g.x),6),round(float(g.y),6)))
+                  elif g.geom_type=="MultiPoint":
+                      for p in g.geoms: collect(p)
+                  elif g.geom_type in ("LineString","LinearRing"):
+                      coords=list(g.coords)
+                      if coords:
+                          pts.append((round(float(coords[0][0]),6),round(float(coords[0][1]),6)))
+                          pts.append((round(float(coords[-1][0]),6),round(float(coords[-1][1]),6)))
+                  elif hasattr(g,"geoms"):
+                      for child in g.geoms: collect(child)
+              collect(hit)
+              return float(hit.length), sorted(set(pts))
+
+          out={}
+          for label,room in sorted(unique.items()):
+              polygon=Polygon(room.polygon_pdf_pts)
+              boundary=polygon.boundary
+              label_lines=tuple(line for line in lines if norm(line.text)==label)
+              dimension_rows=[]
+              for dim in dims:
+                  witness_hits=[]
+                  total_length=0.0
+                  all_points=set()
+                  for segment in dim.witness_geometries:
+                      length,points=hit_length_and_points(boundary,segment)
+                      total_length+=length
+                      all_points.update(points)
+                      witness_hits.append({
+                          "geometry":list(segment),
+                          "boundary_overlap_length":length,
+                          "boundary_points":[list(p) for p in points],
+                      })
+                  immediate=[
+                      {
+                          "block":line.block_no,
+                          "line":line.line_no,
+                          "bbox":list(line.bbox),
+                      }
+                      for line in label_lines
+                      if cv._dimension_is_immediate_label_annotation(line,dim)
+                  ]
+                  if all_points or total_length>0.0 or immediate:
+                      dimension_rows.append({
+                          "dimension_id":dim.dimension_id,
+                          "orientation":dim.orientation,
+                          "value_mm":dim.value_mm,
+                          "endpoints":[
+                              list(dim.endpoints_pt[0]),list(dim.endpoints_pt[1])
+                          ],
+                          "witness_boundary_unique_points":[list(p) for p in sorted(all_points)],
+                          "witness_boundary_unique_point_count":len(all_points),
+                          "witness_boundary_overlap_length":total_length,
+                          "witness_hits":witness_hits,
+                          "immediate_label_annotations":immediate,
+                      })
+              out[label]={
+                  "physical_room_id":room.physical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "area_page_pts2":room.area_page_pts2,
+                  "polygon_vertex_count":len(room.polygon_pdf_pts),
+                  "polygon_valid":bool(polygon.is_valid),
+                  "polygon_empty":bool(polygon.is_empty),
+                  "polygon_validity_reason":explain_validity(polygon),
+                  "polygon_bounds":list(polygon.bounds),
+                  "label_lines":[
+                      {
+                          "block":line.block_no,
+                          "line":line.line_no,
+                          "bbox":list(line.bbox),
+                          "observation_ids":list(line.observation_ids),
+                      }
+                      for line in label_lines
+                  ],
+                  "owned_dimension_candidates":dimension_rows,
+              }
+
+          print(json.dumps({
+              "support_claim_status":getattr(support.status,"value",str(support.status)),
+              "support_claim_reason_codes":list(support.reason_codes),
+              "canonical_room_count":len(support.canonical_rooms),
+              "unique_label_count":len(unique),
+              "unique_labels":sorted(unique),
+              "trusted_dimension_count":len(dims),
+              "rooms":out,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-support-room-dimension-boundary-census
+          path: artifacts/gpt2-support-room-dimension-boundary-census
+          retention-days: 2
