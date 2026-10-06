@@ -1382,10 +1382,11 @@ def _local_boundary_clean_host_scope(
     """Prove one opening's host search locally closed without promoting global scope.
 
     The ordinary local universe is the exact left/right host-role population.
-    Raster-framed openings additionally keep any boundary-clean W4 candidate
-    whose own local chain spans the aperture and carries usable immutable source
-    lineage. That is the same necessary local predicate already consumed by the
-    sealed raster source-primitive fallback; it is not nearest-wall inference.
+    Raster-framed openings additionally keep every candidate that can enter
+    either sealed raster fallback: the exact whole-wall role used by
+    _resolve_raster_whole_wall_host, or a usable source-lineaged candidate whose
+    own local chain spans the aperture for source-primitive resolution. This is
+    candidate-universe preservation, not nearest-wall inference.
     """
     if (
         wall_result.status is not EvidenceResolutionStatus.CORROBORATED
@@ -1409,19 +1410,24 @@ def _local_boundary_clean_host_scope(
             _candidate_host_roles(record, opening)
             or (
                 include_spanning_raster_candidates
-                and record.physical_identity.usable
-                and bool(record.physical_identity.candidate_identity_id)
-                and bool(
-                    tuple(
-                        value
-                        for value in record.physical_identity.source_primitive_ids
-                        if str(value).strip()
+                and (
+                    _raster_whole_wall_role_data(record, opening) is not None
+                    or (
+                        record.physical_identity.usable
+                        and bool(record.physical_identity.candidate_identity_id)
+                        and bool(
+                            tuple(
+                                value
+                                for value in record.physical_identity.source_primitive_ids
+                                if str(value).strip()
+                            )
+                        )
+                        and _candidate_locally_owns_opening_span(
+                            record,
+                            opening,
+                            edge_tol=edge_tol,
+                        )
                     )
-                )
-                and _candidate_locally_owns_opening_span(
-                    record,
-                    opening,
-                    edge_tol=edge_tol,
                 )
             )
         )
@@ -1629,6 +1635,32 @@ def _normalize_role_candidates(
     return EvidenceResolutionStatus.CORROBORATED, tuple(normalized), ()
 
 
+def _raster_whole_wall_role_data(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> Optional[tuple[float, float, float]]:
+    """Return the exact raw role accepted by the sealed whole-wall resolver.
+
+    Keeping local-scope admission and final host resolution on one predicate
+    prevents a valid whole-wall representation from being discarded before the
+    resolver can evaluate equivalence. This establishes role eligibility only;
+    boundary cleanliness and physical equivalence are still proved separately.
+    """
+
+    data = _candidate_axis_data(record, opening)
+    if data is None:
+        return None
+    along_min, along_max, offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    if (
+        along_min >= -edge_tol
+        or along_max <= opening.length + edge_tol
+        or abs(offset) > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+    ):
+        return None
+    return data
+
+
 def _resolve_raster_whole_wall_host(
     records: Sequence[PhysicalWallCandidateRecord],
     opening: _OpeningGeometry,
@@ -1645,19 +1677,12 @@ def _resolve_raster_whole_wall_host(
     equality. It never selects a nearest wall.
     """
 
-    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
     centered: list[tuple[float, PhysicalWallCandidateRecord]] = []
     for record in records:
-        data = _candidate_axis_data(record, opening)
+        data = _raster_whole_wall_role_data(record, opening)
         if data is None:
             continue
-        along_min, along_max, offset = data
-        if (
-            along_min >= -edge_tol
-            or along_max <= opening.length + edge_tol
-            or abs(offset) > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
-        ):
-            continue
+        _along_min, _along_max, offset = data
         centered.append((offset, record))
 
     if not centered:
