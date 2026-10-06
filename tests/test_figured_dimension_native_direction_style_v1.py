@@ -284,3 +284,133 @@ def test_endpoint_witness_selection_prefers_actual_line_end_over_nearby_annotati
     assert result.status == BindingStatus.WITNESS_BOUND.value
     assert result.witness_line_ids == ("top-witness", "bottom-witness")
     assert result.endpoints == ((106.0, 60.0), (106.0, 140.0))
+
+
+
+def test_unique_native_orientation_with_two_endpoint_witnesses_breaks_perpendicular_tie() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "horizontal-dimension",
+            (80.0, 100.0),
+            (132.0, 100.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "vertical-competitor",
+            (106.0, 70.0),
+            (106.0, 130.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "left-witness",
+            (80.0, 82.0),
+            (80.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "right-witness",
+            (132.0, 82.0),
+            (132.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.dimension_line_id == "horizontal-dimension"
+    assert result.witness_line_ids == ("left-witness", "right-witness")
+    assert result.endpoints == ((80.0, 100.0), (132.0, 100.0))
+
+
+def test_native_orientation_with_only_one_endpoint_witness_stays_ambiguous() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "horizontal-dimension",
+            (80.0, 100.0),
+            (132.0, 100.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "vertical-competitor",
+            (106.0, 70.0),
+            (106.0, 130.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "left-witness",
+            (80.0, 82.0),
+            (80.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.AMBIGUOUS.value
+    assert result.dimension_line_id is None
+    assert result.endpoints is None
+
+
+def test_two_same_orientation_witness_complete_candidates_stay_ambiguous() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "horizontal-a",
+            (80.0, 98.0),
+            (132.0, 98.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "horizontal-b",
+            (80.0, 102.0),
+            (132.0, 102.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "left-witness",
+            (80.0, 80.0),
+            (80.0, 120.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "right-witness",
+            (132.0, 80.0),
+            (132.0, 120.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.AMBIGUOUS.value
+    assert result.dimension_line_id is None
+    assert result.endpoints is None
