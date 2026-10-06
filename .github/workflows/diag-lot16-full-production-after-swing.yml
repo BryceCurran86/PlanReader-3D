@@ -1,0 +1,86 @@
+name: DIAG Lot16 Full Production After Swing
+
+on:
+  pull_request:
+    branches:
+      - gpt4/raster-swing-local-registration-v1
+
+jobs:
+  lot16-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify Lot16 source SHA
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          print({"path":str(path),"sha256":actual,"verified":actual==expected})
+          if actual != expected:
+              raise SystemExit("Lot16 source SHA mismatch")
+          PY
+      - name: Run real all-family source-closed handoff
+        run: |
+          mkdir -p artifacts/lot16-full
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --project-id au_qld_lot16_power \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/lot16-full \
+            | tee artifacts/lot16-full/handoff.stdout.json
+      - name: Print production and sealed inventory
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/lot16-full")
+          summary_path=root/"production_summary.json"
+          if summary_path.exists():
+              summary=json.loads(summary_path.read_text())
+              print("PRODUCTION SUMMARY")
+              print(json.dumps(summary,indent=2,sort_keys=True))
+          sealed_path=root/"au_qld_lot16_power.json"
+          if sealed_path.exists():
+              sealed=json.loads(sealed_path.read_text())
+              rows=[]
+              for q in sealed.get("quantities",[]):
+                  rows.append({
+                      "quantity_id":q.get("quantity_id"),
+                      "family":q.get("family"),
+                      "semantic_key":q.get("semantic_key"),
+                      "value":q.get("value"),
+                      "unit":q.get("unit"),
+                      "object_identity_refs":q.get("object_identity_refs"),
+                      "input_entity_ids":q.get("input_entity_ids"),
+                      "lineage_ok":q.get("lineage_ok"),
+                      "abstained":q.get("abstained"),
+                  })
+              print("SEALED QUANTITIES")
+              print(json.dumps(rows,indent=2,sort_keys=True))
+              print("SEALED_QUANTITY_COUNT",len(rows))
+          else:
+              print("SEALED RUN NOT CREATED")
+          maps=list(Path(".").rglob("*identity_map*.json"))
+          print("IDENTITY_MAP_CANDIDATES",[str(p) for p in maps])
+          PY
+      - name: Upload production artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gptmax-lot16-full-production
+          path: artifacts/lot16-full
+          retention-days: 2
