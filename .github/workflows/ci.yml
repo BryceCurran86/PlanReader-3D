@@ -82,3 +82,47 @@ jobs:
 
       - name: Smoke test (envelope, quotes, copy, reconcile, publish)
         run: python tests/ci_smoke.py
+
+
+  lot16-diagnostics:
+    if: github.event_name == 'pull_request' && github.head_ref == 'diag/gpt3-lot16-snapshot-lineage-trace-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace Lot16 opening snapshot lineage
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_snapshot_lineage_trace.py \
+            | tee lot16-opening-snapshot-lineage-trace.json
+      - name: Audit Lot16 host-band geometry
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_host_band_geometry_audit.py \
+            | tee lot16-host-band-geometry-audit.json
+      - name: Shadow exact two-face lineage host recovery
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_lot16_two_face_lineage_host_shadow.py \
+            | tee lot16-two-face-lineage-host-shadow.json
+      - name: Upload Lot16 diagnostic outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-live-host-diagnostics
+          path: |
+            lot16-opening-snapshot-lineage-trace.json
+            lot16-host-band-geometry-audit.json
+            lot16-two-face-lineage-host-shadow.json
+          retention-days: 2
