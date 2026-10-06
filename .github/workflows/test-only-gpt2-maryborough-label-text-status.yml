@@ -1,0 +1,114 @@
+name: TEST ONLY GPT2 Maryborough label text status
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  label_text_status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe exact A110 room-label text authority
+        run: |
+          mkdir -p artifacts/gpt2-maryborough-label-text-status
+          git rev-parse HEAD > artifacts/gpt2-maryborough-label-text-status/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-label-text-status/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt2-maryborough-label-text-status/run.log
+          import json
+          from pathlib import Path
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_raster_text_corroboration_authority import (
+              RasterTextCorroborationProducer,
+              RasterTextCorroborationSelector,
+          )
+
+          targets={
+              "food prep","cold room","freezer","pwd","airlock","laundry",
+              "office","dry store","sales","wash up","food service",
+              "truck driver lounge","pos counter","m-amb","f-amb",
+          }
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-label-text-status",
+              producer_version="1.0",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt2-label-text-status",
+              source_bytes=path.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          text_auth=source.text_integrity_authority()
+          raster=RasterTextCorroborationProducer.from_source_visibility_producer(source)
+
+          words=[]
+          for oid in published.text_observation_ids:
+              res=text_auth.resolve_text(ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=oid,
+              ))
+              rec=res.receipt
+              if rec is None or str(rec.page_id)!="7" or rec.block_no is None or rec.line_no is None or rec.word_no is None:
+                  continue
+              words.append((oid,res,rec))
+
+          grouped={}
+          for item in words:
+              oid,res,rec=item
+              grouped.setdefault((str(rec.source_partition_id),int(rec.block_no),int(rec.line_no)),[]).append(item)
+
+          rows=[]
+          for key,items in sorted(grouped.items()):
+              items=sorted(items,key=lambda x:int(x[2].word_no))
+              raw_line=" ".join(str(x[2].raw_text or "").strip() for x in items if str(x[2].raw_text or "").strip())
+              norm=" ".join(raw_line.casefold().split())
+              if norm not in targets:
+                  continue
+              word_rows=[]
+              for oid,res,rec in items:
+                  rr=raster.publish(RasterTextCorroborationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=oid,
+                  ))
+                  word_rows.append({
+                      "raw":str(rec.raw_text or ""),
+                      "observation_id":oid,
+                      "native_status":getattr(res.status,"value",str(res.status)),
+                      "native_reason_codes":list(res.reason_codes),
+                      "receipt_reason_codes":list(rec.reason_codes or ()),
+                      "receipt_trusted":bool(rec.trusted),
+                      "trusted_text":res.trusted_text,
+                      "raster_status":getattr(rr.status,"value",str(rr.status)),
+                      "raster_reason_codes":list(rr.reason_codes),
+                      "raster_text":rr.corroborated_text,
+                      "geometry":[float(v) for v in rec.geometry],
+                  })
+              rows.append({"line":raw_line,"key":key,"words":word_rows})
+          print(json.dumps({
+              "source_sha256":published.revision.source_sha256,
+              "candidate_line_count":len(rows),
+              "rows":rows,
+          },sort_keys=True),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-label-text-status
+          path: artifacts/gpt2-maryborough-label-text-status
+          retention-days: 1
