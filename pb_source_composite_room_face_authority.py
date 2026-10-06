@@ -5,7 +5,8 @@ an independently authenticated multi-word room label may be split across adjacen
 SourceRoomFace records by drafting-grid walls. A composite is published only
 when every internal face transition is separated exclusively by W4 candidates
 whose contributing W2 edges all carry producer-owned source-lineage KIND_GRID
-opposition, and the exact constituent face union is one valid polygon.
+opposition, the exact constituent face union is one valid polygon, and none of
+the resulting external boundary walls is itself fully grid-opposed.
 
 The producer never invents dimensions, metric area, room semantics, nearest-face
 matches, or project-specific rules. Original wall and room-face authorities stay
@@ -217,6 +218,13 @@ def _candidate_record(
         )
     )
     if not external_walls:
+        return None
+    # A union of only the label-owned lattice cells is not a proven room
+    # footprint while any of its *outer* boundary walls is itself producer-
+    # classified as the same drafting grid. In that case the composite remains
+    # an internal fragment of a larger unresolved region and must not be
+    # published as geometry-complete room authority.
+    if any(wall_id in fully_grid_wall_ids for wall_id in external_walls):
         return None
 
     constituent_record_ids = tuple(record.record_id for record in constituent)
