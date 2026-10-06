@@ -1,4 +1,4 @@
-name: DIAG GPT3 Lot16 Exact Reconciliation V4
+name: DIAG GPT3 Lot16 Exact Reconciliation V5
 
 on:
   pull_request:
@@ -34,7 +34,7 @@ jobs:
             --family-group all \
             --output-dir artifacts/gpt3-lot16-exact-v4 \
             | tee artifacts/gpt3-lot16-exact-v4/handoff.stdout.json
-      - name: Build lineage-observation identity bindings
+      - name: Build measurement-hash identity bindings
         shell: bash
         run: |
           set -o pipefail
