@@ -1,0 +1,163 @@
+name: DIAG GPT2 Maryborough Sales Room Area Census
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Audit Sales cross-view area predicates
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-sales-area-census
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          TARGET="SALES"
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-sales-room-area-census",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt2-sales-room-area-census",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          eligible=[
+              room for room in rooms.rooms
+              if room.geometry_complete
+              and str(room.physical_room_id or "").strip()
+              and str(room.source_room_face_record_id or "").strip()
+              and norm(room.room_label)
+              and str(room.room_label_binding_record_id or "").strip()
+              and bool(room.room_label_evidence_ids)
+          ]
+          grouped={}
+          for room in eligible:
+              grouped.setdefault(norm(room.room_label),[]).append(room)
+          unique={k:v[0] for k,v in grouped.items() if len(v)==1}
+          room=unique.get(TARGET)
+
+          lines=cv._trusted_lines_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_labels=tuple(unique),
+          )
+          relevant=tuple(line for line in lines if norm(line.text)==TARGET)
+          dims=cv._trusted_native_dimensions_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_lines=relevant,
+          ) if relevant else ()
+          hs=tuple(d for d in dims if d.orientation==cv.DimensionOrientation.HORIZONTAL.value)
+          vs=tuple(d for d in dims if d.orientation==cv.DimensionOrientation.VERTICAL.value)
+
+          rows=[]
+          for line in relevant:
+              for h in hs:
+                  for v in vs:
+                      spatial=cv._line_inside_dimension_pair(line,h,v)
+                      scale=spatial and cv._figured_pair_scale_consistent(
+                          page_id="11",horizontal=h,vertical=v
+                      )
+                      witness=scale and cv._witness_systems_intersect(h,v)
+                      rows.append({
+                          "label_block":line.block_no,
+                          "label_line":line.line_no,
+                          "label_bbox":list(line.bbox),
+                          "horizontal_id":h.dimension_id,
+                          "horizontal_mm":h.value_mm,
+                          "horizontal_endpoints":[list(h.endpoints_pt[0]),list(h.endpoints_pt[1])],
+                          "vertical_id":v.dimension_id,
+                          "vertical_mm":v.value_mm,
+                          "vertical_endpoints":[list(v.endpoints_pt[0]),list(v.endpoints_pt[1])],
+                          "area_m2":round(float(h.value_mm)*float(v.value_mm)/1_000_000,6),
+                          "spatial":spatial,
+                          "scale_consistent":scale,
+                          "witness_intersects":witness,
+                          "h_immediate_annotation":cv._dimension_is_immediate_label_annotation(line,h),
+                          "v_immediate_annotation":cv._dimension_is_immediate_label_annotation(line,v),
+                      })
+
+          result=cv.CrossViewRoomAreaProducer.from_source(source=source,rooms=rooms).publish()
+          print(json.dumps({
+              "topology_room_present":room is not None,
+              "physical_room_id":None if room is None else room.physical_room_id,
+              "source_room_face_record_id":None if room is None else room.source_room_face_record_id,
+              "label_lines":[
+                  {"bbox":list(x.bbox),"block":x.block_no,"line":x.line_no}
+                  for x in relevant
+              ],
+              "dimensions":[
+                  {
+                      "id":d.dimension_id,
+                      "orientation":d.orientation,
+                      "value_mm":d.value_mm,
+                      "endpoints":[list(d.endpoints_pt[0]),list(d.endpoints_pt[1])],
+                      "text_block":d.text_block_no,
+                      "text_line":d.text_line_no,
+                      "witness_ids":list(d.witness_observation_ids),
+                  }
+                  for d in dims
+              ],
+              "pair_census":rows,
+              "published_records":[
+                  {
+                      "label":r.room_label,
+                      "area_m2":r.area_evidence.normalized_value,
+                      "h":r.horizontal_dimension_id,
+                      "v":r.vertical_dimension_id,
+                  }
+                  for r in result.records if norm(r.room_label)==TARGET
+              ],
+              "result_status":getattr(result.status,"value",str(result.status)),
+              "reason_codes":list(result.reason_codes),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-sales-area-census
+          path: artifacts/gpt2-sales-area-census
+          retention-days: 2
