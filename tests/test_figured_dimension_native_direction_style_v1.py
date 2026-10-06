@@ -23,6 +23,7 @@ def _segment(
     *,
     width: float | None,
     color: tuple[float, float, float] | None,
+    source_path_index: int | None = None,
 ) -> ObservedGeometrySegment:
     return ObservedGeometrySegment(
         segment_id=segment_id,
@@ -30,6 +31,7 @@ def _segment(
         start=start,
         end=end,
         view_id="V",
+        source_path_index=source_path_index,
         stroke_width_pt=width,
         stroke_color_rgb=color,
     )
@@ -532,3 +534,139 @@ def test_existing_strict_style_winner_is_not_vetoed_by_new_orientation_fallback(
         "vertical-top-witness",
         "vertical-bottom-witness",
     }
+
+
+def test_fragmented_source_path_competitors_do_not_block_unique_bracketing_dimension() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "dimension-line",
+            (80.0, 100.0),
+            (132.0, 100.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=100,
+        ),
+        _segment(
+            "fragment-a",
+            (100.0, 98.0),
+            (112.0, 98.0),
+            width=None,
+            color=None,
+            source_path_index=200,
+        ),
+        _segment(
+            "fragment-b",
+            (100.0, 102.0),
+            (112.0, 102.0),
+            width=None,
+            color=None,
+            source_path_index=200,
+        ),
+        _segment(
+            "left-witness",
+            (80.0, 82.0),
+            (80.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=101,
+        ),
+        _segment(
+            "right-witness",
+            (132.0, 82.0),
+            (132.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=102,
+        ),
+        _segment(
+            "fragment-left",
+            (100.0, 86.0),
+            (100.0, 114.0),
+            width=None,
+            color=None,
+            source_path_index=200,
+        ),
+        _segment(
+            "fragment-right",
+            (112.0, 86.0),
+            (112.0, 114.0),
+            width=None,
+            color=None,
+            source_path_index=200,
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.dimension_line_id == "dimension-line"
+
+
+def test_two_distinct_complete_source_paths_remain_ambiguous_even_if_one_brackets_text() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "bracketing-dimension",
+            (80.0, 100.0),
+            (132.0, 100.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=300,
+        ),
+        _segment(
+            "other-complete-dimension",
+            (100.0, 102.0),
+            (118.0, 102.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=400,
+        ),
+        _segment(
+            "a-left",
+            (80.0, 82.0),
+            (80.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=301,
+        ),
+        _segment(
+            "a-right",
+            (132.0, 82.0),
+            (132.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=302,
+        ),
+        _segment(
+            "b-left",
+            (100.0, 88.0),
+            (100.0, 116.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=401,
+        ),
+        _segment(
+            "b-right",
+            (118.0, 88.0),
+            (118.0, 116.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=402,
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.AMBIGUOUS.value
+    assert result.dimension_line_id is None
