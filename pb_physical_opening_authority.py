@@ -1446,12 +1446,19 @@ class PhysicalOpeningAuthority:
                 seed.revision_id,
                 seed.page_id,
             )
+            registration_scale = producer.raster_opening_registration_scale(
+                seed.revision_id,
+                seed.page_id,
+            )
         except Exception:
             image_placements = ()
-        # Framed primitive reconstruction stays in rendered page coordinates,
-        # matching the already-merged v3 production authority. Embedded-image
-        # anisotropy is consumed only by the local swing arc relation below.
-        registration_scale = (1.0, 1.0)
+            registration_scale = None
+        # A single/consistent embedded-image transform may normalize morphology
+        # for source-space quarter-turn invariance. Mixed tiled transforms never
+        # suppress the page: fall back to the already-validated page-coordinate
+        # detector and keep local placement evidence for swing arc registration.
+        if registration_scale is None:
+            registration_scale = (1.0, 1.0)
 
         encoded = np.frombuffer(png_bytes, dtype=np.uint8)
         gray = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
