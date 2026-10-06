@@ -101,8 +101,60 @@ def _edge(first: Iterable[float], second: Iterable[float]) -> Edge:
     return (a, b) if a <= b else (b, a)
 
 
+def _collapse_exact_ring_backtracks(
+    points: Iterable[Point],
+) -> tuple[Point, ...]:
+    """Remove only exact zero-area A->B->A spurs from a closed boundary walk.
+
+    Half-edge traversal can legitimately walk out along a bridge and immediately
+    retrace the same source edge before continuing around a bounded face. That
+    retraced spur contributes zero area and is not part of the room boundary,
+    but retaining it makes an otherwise source-owned ring self-intersect.
+
+    This normalization is deliberately exact after the existing six-decimal
+    source quantization. It applies no distance/angle tolerance, does not reorder
+    vertices, does not close gaps, and cannot collapse a merely-near return.
+    """
+
+    cleaned = list(points)
+    # Consecutive identical vertices carry no edge and are representation noise.
+    compact: list[Point] = []
+    for point in cleaned:
+        if compact and point == compact[-1]:
+            continue
+        compact.append(point)
+    if len(compact) > 1 and compact[0] == compact[-1]:
+        compact.pop()
+
+    while len(compact) >= 3:
+        changed = False
+        size = len(compact)
+        for index in range(size):
+            previous_index = (index - 1) % size
+            next_index = (index + 1) % size
+            if compact[previous_index] != compact[next_index]:
+                continue
+
+            # Rotate from the retained A vertex and skip B plus the duplicate A.
+            retained = compact[previous_index]
+            reduced = [retained]
+            cursor = (next_index + 1) % size
+            while cursor != previous_index:
+                reduced.append(compact[cursor])
+                cursor = (cursor + 1) % size
+            compact = reduced
+            changed = True
+            break
+        if not changed:
+            break
+
+    return tuple(compact) if len(compact) >= 3 else ()
+
+
 def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
-    cleaned = tuple(_point(point) for point in points)
+    cleaned = _collapse_exact_ring_backtracks(
+        tuple(_point(point) for point in points)
+    )
     if len(cleaned) < 3:
         return ()
     variants: list[tuple[Point, ...]] = []
