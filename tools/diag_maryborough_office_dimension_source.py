@@ -15,6 +15,7 @@ from pb_figured_dimension_evidence import (
     _projection_contains,
     calibrate_dimension_layout,
     extract_dimension_evidence_bundle,
+    _native_word_orientations,
 )
 from pb_cross_view_room_area_authority import (
     _isolated_dimension_numeric_corroboration,
@@ -55,6 +56,7 @@ def main() -> int:
     try:
         page = pdf.load_page(int(PAGE_ID) - 1)
         words = list(page.get_text("words") or ())
+        word_orientations = _native_word_orientations(page)
         bundle = extract_dimension_evidence_bundle(
             page,
             page_num=int(PAGE_ID),
@@ -242,6 +244,38 @@ def main() -> int:
                 text_result=text_result_by_raw[raw],
                 backend=ocr_backend,
             )
+        native_orientation_hint = None
+        if observation.dimension_id.startswith("native_dim_p11_"):
+            try:
+                word_index = int(observation.dimension_id.split("_")[-1])
+                word = words[word_index]
+                native_orientation_hint = word_orientations.get(
+                    (int(word[5]), int(word[6]))
+                )
+            except (IndexError, TypeError, ValueError):
+                native_orientation_hint = None
+
+        bbox_bracketing = []
+        if observation.bbox is not None and native_orientation_hint in {
+            DimensionOrientation.HORIZONTAL.value,
+            DimensionOrientation.VERTICAL.value,
+        }:
+            x0,y0,x1,y1 = map(float, observation.bbox)
+            margin = layout.median_word_height_pt * 0.25
+            for row in tied_status:
+                if row["orientation"] != native_orientation_hint:
+                    continue
+                sx0,sy0 = row["start"]
+                sx1,sy1 = row["end"]
+                if native_orientation_hint == DimensionOrientation.HORIZONTAL.value:
+                    lo,hi = sorted((float(sx0),float(sx1)))
+                    brackets = lo <= x0 - margin and hi >= x1 + margin
+                else:
+                    lo,hi = sorted((float(sy0),float(sy1)))
+                    brackets = lo <= y0 - margin and hi >= y1 + margin
+                if brackets:
+                    bbox_bracketing.append(row["segment_id"])
+
         dimension_hits.append(
             {
                 "dimension_id": observation.dimension_id,
@@ -264,6 +298,9 @@ def main() -> int:
                     1 for row in tied_status if row["witness_bound"]
                 ),
                 "isolated_two_render_numeric_corroboration": raster_corroboration,
+                "native_text_orientation_hint": native_orientation_hint,
+                "orientation_matched_bbox_bracketing_candidate_ids": bbox_bracketing,
+                "orientation_matched_bbox_bracketing_candidate_count": len(bbox_bracketing),
             }
         )
 
