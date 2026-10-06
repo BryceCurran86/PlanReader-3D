@@ -39,6 +39,34 @@ def _midpoint(g):
     return ((x1+x2)*0.5,(y1+y2)*0.5)
 
 
+def _target_text_status(source, published, page_id):
+    text_auth=source.text_integrity_authority()
+    rows=[]
+    for oid in published.text_observation_ids:
+        res=text_auth.resolve_text(ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=oid,
+        ))
+        receipt=res.receipt
+        if receipt is None or str(receipt.page_id)!=str(page_id):
+            continue
+        raw=" ".join(str(receipt.raw_text or "").strip().upper().split())
+        if raw not in {"M-AMB","F-AMB"}:
+            continue
+        rows.append({
+            "observation_id":oid,
+            "raw_text":raw,
+            "status":getattr(res.status,"value",str(res.status)),
+            "reason_codes":list(res.reason_codes),
+            "trusted_text":res.trusted_text,
+            "geometry":list(receipt.geometry or ()),
+        })
+    return rows
+
+
 def _page_records(source, published, page_id):
     auth=source.authority()
     rows=[]
@@ -214,6 +242,8 @@ def main():
         "target_long_axis_count":len(tgt),
         "candidate_transform_count":len(candidates),
         "unique_transform_by_diagnostic_rule":unique,
+        "source_target_text_status":_target_text_status(source,current,SOURCE_PAGE),
+        "rcp_target_text_status":_target_text_status(source,current,TARGET_PAGE),
         "top_candidates":top,
     },indent=2,sort_keys=True),flush=True)
 
