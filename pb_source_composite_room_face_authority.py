@@ -5,8 +5,11 @@ an independently authenticated multi-word room label may be split across adjacen
 SourceRoomFace records by drafting-grid walls. A composite is published only
 when every internal face transition is separated exclusively by W4 candidates
 whose contributing W2 edges all carry producer-owned source-lineage KIND_GRID
-opposition, the exact constituent face union is one valid polygon, and none of
-the resulting external boundary walls is itself fully grid-opposed.
+opposition. When the authenticated label words occupy only part of that grid
+component, the producer completes the exact connected component through those
+same proven grid separators. The final constituent union must be one valid
+polygon, contain no conflicting authenticated room label, and expose no
+remaining grid-opposed external boundary.
 
 The producer never invents dimensions, metric area, room semantics, nearest-face
 matches, or project-specific rules. Original wall and room-face authorities stay
@@ -146,37 +149,107 @@ def _fully_grid_opposed_wall_evidence(
     return fully, evidence_by_wall
 
 
+def _room_faces_by_wall(
+    room_scope: SourceRoomFaceScopeResult,
+) -> Mapping[str, tuple[str, ...]]:
+    faces_by_wall: dict[str, list[str]] = defaultdict(list)
+    for record in room_scope.records:
+        face_id = str(record.face_id)
+        for wall_id in tuple(str(value) for value in record.bounding_wall_ids):
+            faces_by_wall[wall_id].append(face_id)
+    return {
+        wall_id: tuple(sorted(dict.fromkeys(face_ids)))
+        for wall_id, face_ids in faces_by_wall.items()
+    }
+
+
+def _grid_connected_component(
+    seed_face_ids: tuple[str, ...],
+    *,
+    room_scope: SourceRoomFaceScopeResult,
+    fully_grid_wall_ids: set[str],
+) -> tuple[str, ...] | None:
+    """Complete one room component through source-proven drafting-grid walls.
+
+    Traversal is deliberately stricter than generic graph connectivity. A grid
+    wall may connect faces only when the complete SourceRoomFace scope proves
+    exactly two owners for that wall. One-sided, missing, or three-way ownership
+    remains a boundary/ambiguity and is never traversed.
+    """
+
+    room_by_face = {str(record.face_id): record for record in room_scope.records}
+    seeds = tuple(dict.fromkeys(str(value) for value in seed_face_ids))
+    if len(seeds) < 2 or any(face_id not in room_by_face for face_id in seeds):
+        return None
+
+    faces_by_wall = _room_faces_by_wall(room_scope)
+    visited: set[str] = {seeds[0]}
+    pending = [seeds[0]]
+    while pending:
+        face_id = pending.pop()
+        record = room_by_face[face_id]
+        for wall_id in tuple(str(value) for value in record.bounding_wall_ids):
+            if wall_id not in fully_grid_wall_ids:
+                continue
+            owners = faces_by_wall.get(wall_id, ())
+            if len(owners) != 2 or face_id not in owners:
+                continue
+            neighbour = owners[0] if owners[1] == face_id else owners[1]
+            if neighbour not in visited:
+                visited.add(neighbour)
+                pending.append(neighbour)
+
+    if any(seed not in visited for seed in seeds):
+        return None
+    return tuple(sorted(visited))
+
+
+def _component_has_conflicting_label(
+    component_face_ids: tuple[str, ...],
+    candidate: SourceRoomSplitLabelCandidate,
+    *,
+    label_scope: SourceRoomLabelScopeResult,
+) -> bool:
+    """Block a completed grid component that contains another room identity."""
+
+    component = set(component_face_ids)
+    if any(
+        str(record.face_id) in component
+        for record in tuple(label_scope.records or ())
+    ):
+        return True
+
+    for other in tuple(label_scope.split_face_candidates or ()):
+        if str(other.record_id) == str(candidate.record_id):
+            continue
+        if component.intersection(str(value) for value in other.word_face_ids):
+            return True
+    return False
+
+
 def _candidate_record(
     candidate: SourceRoomSplitLabelCandidate,
     *,
     wall_scope: PhysicalWallCandidateScopeResult,
     room_scope: SourceRoomFaceScopeResult,
+    label_scope: SourceRoomLabelScopeResult,
     fully_grid_wall_ids: set[str],
     grid_evidence_by_wall: Mapping[str, tuple[str, ...]],
 ) -> CompositeSourceRoomFaceRecord | None:
     room_by_face = {str(record.face_id): record for record in room_scope.records}
-    ordered_face_ids = tuple(str(value) for value in candidate.word_face_ids)
-    if not ordered_face_ids or any(face_id not in room_by_face for face_id in ordered_face_ids):
+    seed_face_ids = tuple(str(value) for value in candidate.word_face_ids)
+    constituent_face_ids = _grid_connected_component(
+        seed_face_ids,
+        room_scope=room_scope,
+        fully_grid_wall_ids=fully_grid_wall_ids,
+    )
+    if constituent_face_ids is None:
         return None
-
-    separator_wall_ids: set[str] = set()
-    grid_evidence_ids: set[str] = set()
-    for left_id, right_id in zip(ordered_face_ids, ordered_face_ids[1:]):
-        if left_id == right_id:
-            continue
-        left = room_by_face[left_id]
-        right = room_by_face[right_id]
-        shared = tuple(
-            sorted(set(str(v) for v in left.bounding_wall_ids) & set(str(v) for v in right.bounding_wall_ids))
-        )
-        if not shared or not all(wall_id in fully_grid_wall_ids for wall_id in shared):
-            return None
-        separator_wall_ids.update(shared)
-        for wall_id in shared:
-            grid_evidence_ids.update(grid_evidence_by_wall.get(wall_id, ()))
-
-    constituent_face_ids = tuple(dict.fromkeys(ordered_face_ids))
-    if len(constituent_face_ids) < 2 or not separator_wall_ids:
+    if _component_has_conflicting_label(
+        constituent_face_ids,
+        candidate,
+        label_scope=label_scope,
+    ):
         return None
 
     constituent = [room_by_face[face_id] for face_id in constituent_face_ids]
@@ -206,28 +279,37 @@ def _candidate_record(
         for wall_id in record.bounding_wall_ids
     )
     internal_shared = {
-        wall_id
-        for wall_id, count in wall_counts.items()
-        if count > 1 and wall_id in fully_grid_wall_ids
+        wall_id for wall_id, count in wall_counts.items() if count > 1
     }
+    if (
+        not internal_shared
+        or any(wall_counts[wall_id] != 2 for wall_id in internal_shared)
+        or any(wall_id not in fully_grid_wall_ids for wall_id in internal_shared)
+    ):
+        return None
+
     external_walls = tuple(
-        sorted(
-            wall_id
-            for wall_id in wall_counts
-            if wall_id not in internal_shared
-        )
+        sorted(wall_id for wall_id, count in wall_counts.items() if count == 1)
     )
     if not external_walls:
         return None
-    # A union of only the label-owned lattice cells is not a proven room
-    # footprint while any of its *outer* boundary walls is itself producer-
-    # classified as the same drafting grid. In that case the composite remains
-    # an internal fragment of a larger unresolved region and must not be
-    # published as geometry-complete room authority.
+    # Keep the #1683 hardening as the final completeness gate. If a completed
+    # component still exposes a source-proven drafting-grid wall externally,
+    # the room footprint is still only a fragment of a larger unresolved grid
+    # region and must remain unpublished.
     if any(wall_id in fully_grid_wall_ids for wall_id in external_walls):
         return None
 
-    constituent_record_ids = tuple(record.record_id for record in constituent)
+    separator_wall_ids = set(internal_shared)
+    grid_evidence_ids: set[str] = set()
+    for wall_id in separator_wall_ids:
+        grid_evidence_ids.update(grid_evidence_by_wall.get(wall_id, ()))
+    if not grid_evidence_ids:
+        return None
+
+    constituent_record_ids = tuple(
+        room_by_face[face_id].record_id for face_id in constituent_face_ids
+    )
     decision_scope_id = stable_contract_id(
         "composite_source_room_face_scope",
         {
@@ -352,6 +434,7 @@ def compose_grid_separated_room_faces(
             candidate,
             wall_scope=wall_scope,
             room_scope=room_scope,
+            label_scope=label_scope,
             fully_grid_wall_ids=fully_grid,
             grid_evidence_by_wall=evidence_by_wall,
         )
