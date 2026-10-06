@@ -431,6 +431,29 @@ def test_conflicting_compact_descriptor_remains_fail_closed() -> None:
     assert result.evidence is None
 
 
+def test_compact_semantic_evidence_only_unlocks_its_owned_source_line() -> None:
+    source, published = _ingest(
+        _pdf(
+            labels=(
+                (88.0, 121.0, "0630 FG"),
+                (88.0, 130.0, "2110 UNKNOWN"),
+            )
+        ),
+        "compact-semantic-line-ownership",
+    )
+    selector = _opening_selector(source, published)
+    result = OpeningLabelDimensionProducer.from_source_visibility_producer(
+        source
+    ).publish_scope(selector)
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.evidence is not None
+    assert result.evidence.raw_text == "0630 FG"
+    assert result.evidence.semantic_kind == "window"
+    assert result.evidence.dimension_values_mm == (600.0, 3000.0)
+    assert result.evidence.area_m2 == pytest.approx(1.8)
+
+
 def test_owned_legend_semantics_unlock_four_digit_compact_dimensions() -> None:
     payload = _pdf(
         labels=(
