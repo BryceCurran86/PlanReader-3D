@@ -1,0 +1,74 @@
+name: TEST GPT2 Maryborough Grid Sidecar Fastpath
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt
+      - name: Run Maryborough output and runtime parity proof
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-grid-sidecar-fastpath
+          git rev-parse HEAD > artifacts/gpt2-grid-sidecar-fastpath/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-grid-sidecar-fastpath/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt2-grid-sidecar-fastpath/result.json
+          import json, time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          elapsed=time.perf_counter()-started
+          def norm(v):
+              return " ".join(str(v or "").strip().upper().split())
+          labels=sorted({
+              norm(room.room_label)
+              for room in claim.canonical_rooms
+              if norm(room.room_label)
+          })
+          firm={
+              norm(dict(q.metadata or {}).get("room_label")): float(q.value)
+              for q in claim.room_area_quantity_evidence
+              if not q.abstained
+          }
+          assert "POS COUNTER" in labels
+          assert "FOOD SERVICE" in labels
+          assert "DRY STORE" not in labels
+          assert "WASH UP" not in labels
+          assert "TRUCK DRIVER LOUNGE" not in labels
+          assert abs(firm["FOOD PREP"]-13.270425) < 1e-9
+          assert abs(firm["COLD ROOM"]-25.37875) < 1e-9
+          for label in ("POS COUNTER","FOOD SERVICE","FREEZER","DRY STORE","WASH UP","TRUCK DRIVER LOUNGE"):
+              assert label not in firm
+          print(json.dumps({
+              "elapsed_seconds":elapsed,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "labels":labels,
+              "firm_room_areas":firm,
+              "status":getattr(claim.status,"value",str(claim.status)),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-grid-sidecar-fastpath
+          path: artifacts/gpt2-grid-sidecar-fastpath
+          retention-days: 1
