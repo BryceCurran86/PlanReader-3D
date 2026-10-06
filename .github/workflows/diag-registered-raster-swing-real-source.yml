@@ -24,7 +24,8 @@ jobs:
           PYTHONPATH=. pytest -q \
             tests/test_raster_door_swing_g17_contract.py \
             tests/test_raster_swing_registration_authority.py \
-            tests/test_raster_framed_opening_g17_contract.py
+            tests/test_raster_framed_opening_g17_contract.py \
+            tests/test_raster_opening_primitive_compaction.py
       - name: Run real-source swing census
         shell: bash
         run: |
