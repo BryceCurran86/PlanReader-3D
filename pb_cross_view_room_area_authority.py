@@ -336,6 +336,7 @@ def _trusted_lines_for_page(
     revision_id: str,
     page_id: str,
     candidate_labels: Sequence[str],
+    allow_compound_annotations: bool = False,
 ) -> tuple[_TrustedLine, ...]:
     published = source.published_snapshot_for_revision(revision_id)
     if published is None:
@@ -402,7 +403,24 @@ def _trusted_lines_for_page(
             for item in ordered
             if str(item[2].raw_text or "").strip()
         )
-        if _norm_label(raw_line) not in wanted_labels:
+        normalized_raw = _norm_label(raw_line)
+        label_members: tuple[str, ...] = ()
+        if normalized_raw in wanted_labels:
+            label_members = (normalized_raw,)
+        elif allow_compound_annotations and "/" in raw_line:
+            parts = tuple(
+                _norm_label(part)
+                for part in raw_line.split("/")
+                if _norm_label(part)
+            )
+            if (
+                len(parts) >= 2
+                and len(set(parts)) == len(parts)
+                and any(part in wanted_labels for part in parts)
+                and all(_normalized_room_line(part) is not None for part in parts)
+            ):
+                label_members = parts
+        if not label_members:
             continue
 
         trusted_words: list[str] = []
@@ -446,8 +464,18 @@ def _trusted_lines_for_page(
                 continue
         else:
             line_text = " ".join(value for value in trusted_words if value)
-        if _norm_label(line_text) not in wanted_labels:
-            continue
+        normalized_line_text = _norm_label(line_text)
+        if len(label_members) == 1:
+            if normalized_line_text != label_members[0]:
+                continue
+        else:
+            trusted_members = tuple(
+                _norm_label(part)
+                for part in line_text.split("/")
+                if _norm_label(part)
+            )
+            if trusted_members != label_members:
+                continue
 
         boxes = [_finite_bbox(item[2].geometry) for item in ordered]
         if any(box is None for box in boxes):
@@ -468,6 +496,7 @@ def _trusted_lines_for_page(
                 source_partition_id=str(key[0]),
                 block_no=int(key[1]),
                 line_no=int(key[2]),
+                label_members=label_members,
             )
         )
     return tuple(lines)
