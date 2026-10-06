@@ -1,0 +1,23 @@
+name: TEST GPT2 U2 Source Lineage Grid
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run U2 typed-negative regressions
+        run: |
+          set -o pipefail
+          PYTHONPATH=. pytest -q tests/test_wall_topology_typed_negative_evidence.py
+          python -m compileall -q pb_wall_room_topology_typed_negative_evidence.py
