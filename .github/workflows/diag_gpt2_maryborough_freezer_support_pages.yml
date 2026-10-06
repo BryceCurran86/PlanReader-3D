@@ -1,0 +1,32 @@
+name: DIAG GPT2 Maryborough Freezer Support Pages
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  navigate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Locate source-classified Freezer support pages
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-freezer-support-pages
+          git rev-parse HEAD > artifacts/gpt2-maryborough-freezer-support-pages/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-freezer-support-pages/source_sha256.txt
+          PYTHONPATH=. python -u tools/diag_maryborough_freezer_support_pages.py \
+            | tee artifacts/gpt2-maryborough-freezer-support-pages/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-freezer-support-pages
+          path: artifacts/gpt2-maryborough-freezer-support-pages
+          retention-days: 1
