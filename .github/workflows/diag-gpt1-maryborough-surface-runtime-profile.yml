@@ -1,0 +1,40 @@
+name: DIAG GPT1 Maryborough Surface Runtime Profile
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Profile surfaces handoff
+        run: |
+          mkdir -p artifacts/gpt1-surface-profile
+          PYTHONPATH=. python -m cProfile -o artifacts/gpt1-surface-profile/profile.pstats \
+            tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group surfaces \
+            --output-dir artifacts/gpt1-surface-profile/out \
+            > artifacts/gpt1-surface-profile/stdout.json
+          python - <<'PY'
+          import pstats
+          p=pstats.Stats("artifacts/gpt1-surface-profile/profile.pstats")
+          p.strip_dirs().sort_stats("cumulative").print_stats(120)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-surface-profile
+          path: artifacts/gpt1-surface-profile
+          retention-days: 1
