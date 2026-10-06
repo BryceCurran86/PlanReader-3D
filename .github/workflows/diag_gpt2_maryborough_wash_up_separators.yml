@@ -1,0 +1,34 @@
+name: DIAG GPT2 Maryborough Wash Up Separators
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Trace Wash Up separator lineage
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-wash-up-separators
+          git rev-parse HEAD > artifacts/gpt2-maryborough-wash-up-separators/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-wash-up-separators/source_sha256.txt
+          PYTHONPATH=. python -u tools/diag_maryborough_wash_up_separators.py \
+            | tee artifacts/gpt2-maryborough-wash-up-separators/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-wash-up-separators
+          path: artifacts/gpt2-maryborough-wash-up-separators
+          retention-days: 1
