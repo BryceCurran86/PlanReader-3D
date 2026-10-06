@@ -125,7 +125,10 @@ _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG = 2.0
 _DRAFTING_LATTICE_MIN_LINES_PER_AXIS = 8
 _DRAFTING_LATTICE_MAX_HAIRLINE_WIDTH_PT = 0.30
 _DRAFTING_LATTICE_MIN_AXIS_SPAN_FRACTION = 0.25
-_DRAFTING_LATTICE_MIN_REGULAR_DIFF_FRACTION = 0.80
+_DRAFTING_LATTICE_MIN_AXIS_COVERAGE_FRACTION = 0.15
+_DRAFTING_LATTICE_MAX_FRAGMENT_JOIN_GAP_PT = 1.0
+_DRAFTING_LATTICE_COORD_QUANTUM_PT = 0.12
+_DRAFTING_LATTICE_MIN_REGULAR_DIFF_FRACTION = 0.75
 _DRAFTING_LATTICE_SPACING_REL_TOLERANCE = 0.03
 _DRAFTING_LATTICE_SPACING_ABS_TOLERANCE_PT = 0.75
 _DRAFTING_LATTICE_MIN_INTERSECTION_FRACTION = 0.60
@@ -793,6 +796,90 @@ def _regular_lattice_coordinates(
     return coordinates
 
 
+def _drafting_lattice_coordinate_key(value: float) -> float:
+    quantum = _DRAFTING_LATTICE_COORD_QUANTUM_PT
+    return round(round(float(value) / quantum) * quantum, 6)
+
+
+def _merge_lattice_intervals(
+    intervals: Sequence[tuple[float, float]],
+) -> tuple[tuple[float, float], ...]:
+    ordered = sorted(
+        (min(float(a), float(b)), max(float(a), float(b)))
+        for a, b in intervals
+        if math.isfinite(float(a)) and math.isfinite(float(b))
+    )
+    if not ordered:
+        return ()
+    merged: list[list[float]] = []
+    for start, end in ordered:
+        if (
+            not merged
+            or start
+            > merged[-1][1] + _DRAFTING_LATTICE_MAX_FRAGMENT_JOIN_GAP_PT
+        ):
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+    return tuple((row[0], row[1]) for row in merged)
+
+
+def _aggregate_lattice_family(
+    rows: Sequence[
+        tuple[Mapping[str, object], float, float, float]
+    ],
+    *,
+    axis_span: float,
+) -> tuple[
+    tuple[
+        float,
+        float,
+        float,
+        tuple[Mapping[str, object], ...],
+        tuple[tuple[float, float], ...],
+    ],
+    ...,
+]:
+    """Aggregate fragmented same-coordinate hairlines into source line families."""
+    grouped: dict[
+        float,
+        list[tuple[Mapping[str, object], float, float]],
+    ] = defaultdict(list)
+    for segment, coordinate, start, end in rows:
+        grouped[_drafting_lattice_coordinate_key(coordinate)].append(
+            (segment, float(start), float(end))
+        )
+
+    out = []
+    for coordinate, members in sorted(grouped.items()):
+        merged = _merge_lattice_intervals(
+            tuple((start, end) for _segment, start, end in members)
+        )
+        if not merged:
+            continue
+        extent = max(end for _start, end in merged) - min(
+            start for start, _end in merged
+        )
+        coverage = sum(max(0.0, end - start) for start, end in merged)
+        if (
+            extent
+            < axis_span * _DRAFTING_LATTICE_MIN_AXIS_SPAN_FRACTION
+            or coverage
+            < axis_span * _DRAFTING_LATTICE_MIN_AXIS_COVERAGE_FRACTION
+        ):
+            continue
+        out.append(
+            (
+                coordinate,
+                extent,
+                coverage,
+                tuple(member[0] for member in members),
+                merged,
+            )
+        )
+    return tuple(out)
+
+
 def _dense_drafting_lattice_segment_ids(
     singleton_lines: Sequence[Mapping[str, object]],
     *,
@@ -800,17 +887,21 @@ def _dense_drafting_lattice_segment_ids(
     page_height: float,
     precomputed_angles: Optional[Mapping[int, float]] = None,
 ) -> set[int]:
-    """Prove long low-contrast orthogonal source lattices as non-wall drafting.
+    """Prove fragmented low-contrast orthogonal source lattices as drafting.
 
-    Positive exclusion requires:
-    * singleton source paths;
-    * one exact low-contrast solid hairline style;
-    * >= N long horizontal and vertical members;
+    CAD exports often split one apparent drafting/grid line into several
+    collinear source paths. Positive exclusion therefore operates on same-style
+    aggregate coordinate families, not individual primitive length.
+
+    Exclusion still requires all of:
+    * singleton source paths with one exact low-contrast solid hairline style;
+    * >= N aggregate horizontal and vertical coordinate families;
+    * substantial aggregate span AND ink coverage on each qualified coordinate;
     * regular translated coordinates on both axes; and
-    * substantial mutual crossing across the same drawing region.
+    * substantial mutual crossing of qualified aggregate families.
 
-    The return values are Python object ids only for the current immutable
-    segment collection; they never become physical identity or source lineage.
+    Sparse/irregular grids, one-axis repetition, low-coverage ticks, filled
+    geometry, and dark/coloured wall linework remain preserved.
     """
     page_width = float(page_width)
     page_height = float(page_height)
@@ -832,55 +923,75 @@ def _dense_drafting_lattice_segment_ids(
         if style is None:
             continue
         x1, y1, x2, y2 = _segment_geometry(segment)
-        dx = abs(x2 - x1)
-        dy = abs(y2 - y1)
         angle = (
             float(precomputed_angles[id(segment)])
             if precomputed_angles is not None
             and id(segment) in precomputed_angles
             else _segment_angle_deg(segment)
         )
-        if min(abs(angle), abs(angle - 180.0)) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG:
-            if dx < page_width * _DRAFTING_LATTICE_MIN_AXIS_SPAN_FRACTION:
-                continue
+        if (
+            min(abs(angle), abs(angle - 180.0))
+            <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG
+        ):
             coordinate = (y1 + y2) / 2.0
-            start, end = sorted((x1, x2))
-            groups[style]["horizontal"].append((segment, coordinate, start, end))
-        elif abs(angle - 90.0) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG:
-            if dy < page_height * _DRAFTING_LATTICE_MIN_AXIS_SPAN_FRACTION:
-                continue
+            start, finish = sorted((x1, x2))
+            groups[style]["horizontal"].append(
+                (segment, coordinate, start, finish)
+            )
+        elif (
+            abs(angle - 90.0)
+            <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG
+        ):
             coordinate = (x1 + x2) / 2.0
-            start, end = sorted((y1, y2))
-            groups[style]["vertical"].append((segment, coordinate, start, end))
+            start, finish = sorted((y1, y2))
+            groups[style]["vertical"].append(
+                (segment, coordinate, start, finish)
+            )
 
     excluded: set[int] = set()
     for families in groups.values():
-        horizontal = families["horizontal"]
-        vertical = families["vertical"]
+        horizontal = _aggregate_lattice_family(
+            families["horizontal"],
+            axis_span=page_width,
+        )
+        vertical = _aggregate_lattice_family(
+            families["vertical"],
+            axis_span=page_height,
+        )
         if (
             len(horizontal) < _DRAFTING_LATTICE_MIN_LINES_PER_AXIS
             or len(vertical) < _DRAFTING_LATTICE_MIN_LINES_PER_AXIS
         ):
             continue
+
         h_coords = _regular_lattice_coordinates(
-            tuple(row[1] for row in horizontal)
+            tuple(row[0] for row in horizontal)
         )
         v_coords = _regular_lattice_coordinates(
-            tuple(row[1] for row in vertical)
+            tuple(row[0] for row in vertical)
         )
         if h_coords is None or v_coords is None:
             continue
+        h_allowed = set(h_coords)
+        v_allowed = set(v_coords)
+        horizontal = tuple(row for row in horizontal if row[0] in h_allowed)
+        vertical = tuple(row for row in vertical if row[0] in v_allowed)
 
         potential = len(horizontal) * len(vertical)
         if potential <= 0:
             continue
         intersections = 0
-        for _h_segment, hy, hx0, hx1 in horizontal:
-            for _v_segment, vx, vy0, vy1 in vertical:
-                if (
-                    hx0 - _COORD_TOL <= vx <= hx1 + _COORD_TOL
-                    and vy0 - _COORD_TOL <= hy <= vy1 + _COORD_TOL
-                ):
+        for hy, _hextent, _hcoverage, _hmembers, h_intervals in horizontal:
+            for vx, _vextent, _vcoverage, _vmembers, v_intervals in vertical:
+                h_contains = any(
+                    start - _COORD_TOL <= vx <= finish + _COORD_TOL
+                    for start, finish in h_intervals
+                )
+                v_contains = any(
+                    start - _COORD_TOL <= hy <= finish + _COORD_TOL
+                    for start, finish in v_intervals
+                )
+                if h_contains and v_contains:
                     intersections += 1
         if (
             intersections / potential
@@ -888,8 +999,11 @@ def _dense_drafting_lattice_segment_ids(
         ):
             continue
 
-        excluded.update(id(row[0]) for row in horizontal)
-        excluded.update(id(row[0]) for row in vertical)
+        for _coord, _extent, _coverage, members, _intervals in (
+            *horizontal,
+            *vertical,
+        ):
+            excluded.update(id(segment) for segment in members)
     return excluded
 
 
