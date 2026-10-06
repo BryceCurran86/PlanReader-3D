@@ -57,6 +57,7 @@ def _write_manifest(root: Path, project_id: str, expected: float) -> None:
             "size_bytes": 100,
             "page_count": 1,
         }],
+        "reason_codes": ["synthetic_truth_expansion_in_progress"],
         "verified_takeoff_items": [{
             "item_id": f"{project_id}-floor",
             "description": "Verified floor area",
