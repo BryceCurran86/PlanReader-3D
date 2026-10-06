@@ -1,0 +1,191 @@
+name: DIAG GPT2 Maryborough Grid Subedge Rejections V2
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace exact grid-subedge room graph
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-grid-subedge-rejections-v2
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
+          from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
+          from pb_source_room_label_authority import SourceRoomLabelProducer, SourceRoomLabelSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          import pb_source_composite_room_face_authority as comp
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          TARGETS=("POS COUNTER","FOOD SERVICE","TRUCK DRIVER LOUNGE","WASH UP","DRY STORE")
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+          def edge_json(edge):
+              return [[float(edge[0][0]),float(edge[0][1])],[float(edge[1][0]),float(edge[1][1])]]
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-grid-subedge-rejections-v2",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-grid-subedge-rejections-v2",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          live=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          selector=PhysicalWallCandidateSelector(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id="7",
+              decision_scope_id="wall-source:page-7",
+          )
+          wall_auth=live.physical_wall_candidate_authority
+          wall_scope=wall_auth.resolve_scope(selector)
+          room_auth=build_source_room_face_authority(wall_auth)
+          room_selector=SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          )
+          room_scope=room_auth.resolve_scope(room_selector)
+          label_scope=SourceRoomLabelProducer.from_authorities(
+              source,room_auth,page_ids=("7",)
+          ).authority().resolve_scope(SourceRoomLabelSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          ))
+
+          fully,evidence=comp._fully_grid_opposed_wall_evidence(wall_scope)
+          owners=comp._local_edge_owners(room_scope)
+          adjacency=comp._grid_local_adjacency(room_scope,fully)
+          room_by_face={str(r.face_id):r for r in room_scope.records}
+          split_by_label={}
+          for cand in label_scope.split_face_candidates:
+              split_by_label.setdefault(norm(cand.label),[]).append(cand)
+
+          def reachable(start):
+              visited={start}
+              pending=[start]
+              while pending:
+                  face=pending.pop()
+                  for neighbour,_wall,_edge in adjacency.get(face,()):
+                      if neighbour not in visited:
+                          visited.add(neighbour)
+                          pending.append(neighbour)
+              return sorted(visited)
+
+          def face_detail(face_id):
+              rec=room_by_face[face_id]
+              edges=[]
+              for wall_id,edge in tuple(getattr(rec,"boundary_wall_edges",()) or ()):
+                  key=(str(wall_id),comp._edge_key(edge))
+                  edges.append({
+                      "wall_id":str(wall_id),
+                      "edge":edge_json(edge),
+                      "grid":str(wall_id) in fully,
+                      "exact_owner_faces":list(owners.get(key,())),
+                  })
+              return {
+                  "face_id":face_id,
+                  "record_id":rec.record_id,
+                  "area_page_pts2":rec.area_page_pts2,
+                  "bounding_wall_ids":list(rec.bounding_wall_ids),
+                  "boundary_edges":edges,
+                  "grid_adjacency":[
+                      {
+                          "neighbour":n,
+                          "wall_id":w,
+                          "edge":edge_json(e),
+                      }
+                      for n,w,e in adjacency.get(face_id,())
+                  ],
+                  "reachable_faces":reachable(face_id),
+              }
+
+          out={}
+          for target in TARGETS:
+              rows=[]
+              for cand in split_by_label.get(target,()):
+                  seeds=tuple(str(v) for v in cand.word_face_ids)
+                  component=comp._grid_connected_component(
+                      seeds,
+                      room_scope=room_scope,
+                      fully_grid_wall_ids=fully,
+                  )
+                  rows.append({
+                      "candidate_id":cand.record_id,
+                      "seeds":list(seeds),
+                      "seed_faces":[face_detail(s) for s in seeds if s in room_by_face],
+                      "component":None if component is None else list(component),
+                      "conflicting_label":(
+                          None if component is None else
+                          comp._component_has_conflicting_label(
+                              component,cand,label_scope=label_scope
+                          )
+                      ),
+                      "candidate_record_created":(
+                          comp._candidate_record(
+                              cand,
+                              wall_scope=wall_scope,
+                              room_scope=room_scope,
+                              label_scope=label_scope,
+                              fully_grid_wall_ids=fully,
+                              grid_evidence_by_wall=evidence,
+                          ) is not None
+                      ),
+                  })
+              out[target]=rows
+
+          print(json.dumps({
+              "wall_status":getattr(wall_scope.status,"value",str(wall_scope.status)),
+              "wall_scope_complete":wall_scope.scope_complete,
+              "wall_reason_codes":list(wall_scope.reason_codes),
+              "room_status":getattr(room_scope.status,"value",str(room_scope.status)),
+              "room_scope_complete":room_scope.scope_complete,
+              "room_reason_codes":list(room_scope.reason_codes),
+              "room_record_count":len(room_scope.records),
+              "fully_grid_wall_count":len(fully),
+              "split_candidate_count":len(label_scope.split_face_candidates),
+              "targets":out,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-grid-subedge-rejections-v2
+          path: artifacts/gpt2-grid-subedge-rejections-v2
+          retention-days: 2
