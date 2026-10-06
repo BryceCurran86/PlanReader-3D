@@ -1,0 +1,137 @@
+name: DIAG GPT1 Maryborough Lattice Proof
+
+on:
+  pull_request:
+    branches:
+      - gpt1/maryborough-generic-drafting-lattice-v1
+
+jobs:
+  focused-room-claim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused Maryborough room claim
+        run: |
+          mkdir -p artifacts/focused-room
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/focused-room/result.json
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,10),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          room_q=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floor_q=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          payload={
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "canonical_space_count":len(claim.canonical_spaces),
+              "room_area_quantity_count":len(room_q),
+              "room_area_quantities":[
+                  {
+                      "quantity_id":q.quantity_id,
+                      "value":q.value,
+                      "unit":q.unit,
+                      "authority":q.authority,
+                      "room_label":dict(q.metadata or {}).get("room_label"),
+                      "input_entity_ids":list(q.input_entity_ids),
+                      "page_no":dict(q.metadata or {}).get("page_no"),
+                      "viewport_id":dict(q.metadata or {}).get("viewport_id"),
+                      "figured_dimension_ids":dict(q.metadata or {}).get("figured_dimension_ids"),
+                  }
+                  for q in room_q
+              ],
+              "floor_area_quantity_count":len(floor_q),
+              "floor_area_quantities":[
+                  {
+                      "quantity_id":q.quantity_id,
+                      "value":q.value,
+                      "unit":q.unit,
+                      "authority":q.authority,
+                      "input_entity_ids":list(q.input_entity_ids),
+                      "room_area_quantity_id":dict(q.metadata or {}).get("room_area_quantity_id"),
+                  }
+                  for q in floor_q
+              ],
+          }
+          print(json.dumps(payload,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-lattice-focused-room
+          path: artifacts/focused-room
+          retention-days: 2
+
+  full-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run full Maryborough handoff
+        run: |
+          mkdir -p artifacts/full
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py             --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"             --project-id au_qld_maryborough_service_station             --workspace-id 1             --family-group all             --output-dir artifacts/full             | tee artifacts/full/handoff.stdout.json
+      - name: Print final inventory
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/full")
+          for name in ("production_summary.json","au_qld_maryborough_service_station.json"):
+              path=root/name
+              if path.exists():
+                  data=json.loads(path.read_text())
+                  if name.endswith("service_station.json"):
+                      print(json.dumps({
+                          "quantity_count":len(data.get("quantities",[])),
+                          "quantities":[{
+                              "quantity_id":q.get("quantity_id"),
+                              "family":q.get("family"),
+                              "value":q.get("value"),
+                              "unit":q.get("unit"),
+                              "object_identity_refs":q.get("object_identity_refs"),
+                              "lineage_ok":q.get("lineage_ok"),
+                          } for q in data.get("quantities",[])]
+                      },indent=2,sort_keys=True))
+                  else:
+                      print(json.dumps(data,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-lattice-full
+          path: artifacts/full
+          retention-days: 2
