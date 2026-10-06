@@ -5,6 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from pb_drawing_evidence_binding import DrawingViewType
+from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_observation_authority import ObservationSelector
 from pb_source_room_face_authority import (
@@ -59,6 +60,15 @@ def main() -> int:
         published.revision.revision_id
     )
     assert current is not None
+
+    # Match the production composition pre-pass used by the successful
+    # fragment-lineage diagnostic so authenticated viewport ownership is
+    # resolved before selecting the exact A110 floor-plan scope.
+    compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=(PAGE_ID,),
+    )
 
     wall_producer = PhysicalWallCandidateProducer.from_authenticated_viewports(
         source,
