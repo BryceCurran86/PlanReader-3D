@@ -111,6 +111,23 @@ _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION = 0.03
 _REPEATED_MOTIF_NON_ORTHOGONAL_SPAN_FRACTION = 0.10
 _REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION = 0.006
 _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG = 2.0
+
+# Long low-contrast singleton paths can also encode a translated drafting
+# lattice rather than physical walls. Unlike the short motif filter above,
+# positive exclusion here requires a dense *local* regular run on both axes and
+# per-segment crossings through the perpendicular run. This avoids turning
+# colour, length, or repetition alone into negative wall authority.
+_DRAFTING_LATTICE_MIN_RUN_COORDS = 8
+_DRAFTING_LATTICE_MIN_DOMINANT_DIFFS = 6
+_DRAFTING_LATTICE_MIN_CROSSINGS_PER_SEGMENT = 3
+_DRAFTING_LATTICE_MIN_SEGMENT_SPAN_FRACTION = 0.02
+_DRAFTING_LATTICE_SPACING_REL_TOLERANCE = 0.05
+_DRAFTING_LATTICE_SPACING_ABS_TOLERANCE_PT = 1.0
+_DRAFTING_LATTICE_GRAY_CHANNEL_TOLERANCE = 0.05
+_DRAFTING_LATTICE_GRAY_MIN = 0.20
+_DRAFTING_LATTICE_GRAY_MAX = 0.80
+_DRAFTING_LATTICE_MAX_HAIRLINE_WIDTH_PT = 0.30
+
 PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE = (
     "physical_wall_candidate_source_integrity_failure"
 )
@@ -688,6 +705,182 @@ def _is_proven_annotation_mask_edge(
         and segment.get("participates_in_source_physical_object") is False
     )
 
+def _low_contrast_hairline_style(
+    segment: Mapping[str, object],
+) -> Optional[tuple[float, float, float, float]]:
+    """Return a source style eligible for two-axis drafting-lattice proof."""
+    if (
+        str(segment.get("kind") or "") != "line"
+        or not bool(segment.get("stroke_present", False))
+        or bool(segment.get("fill_present", False))
+    ):
+        return None
+    dashes = str(segment.get("dashes") or "").strip()
+    if dashes not in ("", "[]", "[] 0"):
+        return None
+    try:
+        width = float(segment.get("width"))
+    except (TypeError, ValueError):
+        return None
+    if (
+        not math.isfinite(width)
+        or width <= 0.0
+        or width > _DRAFTING_LATTICE_MAX_HAIRLINE_WIDTH_PT
+    ):
+        return None
+    stroke = segment.get("stroke")
+    if not isinstance(stroke, (tuple, list)) or len(stroke) < 3:
+        return None
+    try:
+        channels = tuple(float(stroke[index]) for index in range(3))
+    except (TypeError, ValueError):
+        return None
+    if any(not math.isfinite(value) for value in channels):
+        return None
+    if max(channels) - min(channels) > _DRAFTING_LATTICE_GRAY_CHANNEL_TOLERANCE:
+        return None
+    gray = sum(channels) / 3.0
+    if gray < _DRAFTING_LATTICE_GRAY_MIN or gray > _DRAFTING_LATTICE_GRAY_MAX:
+        return None
+    return (
+        round(channels[0], 2),
+        round(channels[1], 2),
+        round(channels[2], 2),
+        round(width, 2),
+    )
+
+
+def _regular_coordinate_runs(
+    rows: Sequence[tuple[dict, float, float, float]],
+) -> tuple[tuple[float, tuple[float, ...]], ...]:
+    """Find dense local translated coordinate runs without page-specific spacing."""
+    coordinates = tuple(sorted({round(float(row[1]), 2) for row in rows}))
+    if len(coordinates) < _DRAFTING_LATTICE_MIN_RUN_COORDS:
+        return ()
+    diffs = [
+        right - left
+        for left, right in zip(coordinates, coordinates[1:])
+        if right - left > _COORD_TOL
+    ]
+    if len(diffs) < _DRAFTING_LATTICE_MIN_DOMINANT_DIFFS:
+        return ()
+
+    # Bin source-coordinate deltas to one point. Exact CAD translations often
+    # decode with small floating differences (for example 33.84 versus 34.08).
+    histogram: Counter[float] = Counter(round(value) for value in diffs)
+    candidates = [
+        float(spacing)
+        for spacing, count in histogram.most_common()
+        if spacing > 0.0 and count >= _DRAFTING_LATTICE_MIN_DOMINANT_DIFFS
+    ]
+    runs: list[tuple[float, tuple[float, ...]]] = []
+    seen: set[tuple[float, ...]] = set()
+    for spacing in candidates:
+        tolerance = max(
+            _DRAFTING_LATTICE_SPACING_ABS_TOLERANCE_PT,
+            spacing * _DRAFTING_LATTICE_SPACING_REL_TOLERANCE,
+        )
+        current: list[float] = []
+        for coordinate in coordinates:
+            if not current:
+                current = [coordinate]
+                continue
+            if abs((coordinate - current[-1]) - spacing) <= tolerance:
+                current.append(coordinate)
+                continue
+            if len(current) >= _DRAFTING_LATTICE_MIN_RUN_COORDS:
+                key = tuple(current)
+                if key not in seen:
+                    seen.add(key)
+                    runs.append((spacing, key))
+            current = [coordinate]
+        if len(current) >= _DRAFTING_LATTICE_MIN_RUN_COORDS:
+            key = tuple(current)
+            if key not in seen:
+                seen.add(key)
+                runs.append((spacing, key))
+    return tuple(runs)
+
+
+def _dense_local_drafting_lattice_ids(
+    singleton_lines: Sequence[dict],
+    *,
+    motif_by_segment_id: Mapping[
+        int, tuple[float, float, tuple[object, ...], tuple[object, ...], float]
+    ],
+    page_width: float,
+    page_height: float,
+) -> set[int]:
+    """Return only singleton segments positively proven inside a local 2-D lattice.
+
+    Geometry/angle values come from the caller's existing immutable motif cache;
+    this helper deliberately performs no repeated length/angle calculations.
+    """
+    page_span = min(float(page_width), float(page_height))
+    min_span = page_span * _DRAFTING_LATTICE_MIN_SEGMENT_SPAN_FRACTION
+    groups: dict[
+        tuple[float, float, float, float],
+        dict[str, list[tuple[dict, float, float, float]]],
+    ] = defaultdict(lambda: {"h": [], "v": []})
+
+    for segment in singleton_lines:
+        style = _low_contrast_hairline_style(segment)
+        if style is None:
+            continue
+        cached = motif_by_segment_id.get(id(segment))
+        if cached is None:
+            continue
+        length, angle = float(cached[0]), float(cached[1])
+        if length < min_span:
+            continue
+        x1, y1, x2, y2 = _segment_geometry(segment)
+        if min(abs(angle), abs(angle - 180.0)) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG:
+            groups[style]["h"].append(
+                (segment, (y1 + y2) / 2.0, min(x1, x2), max(x1, x2))
+            )
+        elif abs(angle - 90.0) <= _REPEATED_MOTIF_ORTHOGONAL_TOLERANCE_DEG:
+            groups[style]["v"].append(
+                (segment, (x1 + x2) / 2.0, min(y1, y2), max(y1, y2))
+            )
+
+    excluded: set[int] = set()
+    for families in groups.values():
+        h_runs = _regular_coordinate_runs(families["h"])
+        v_runs = _regular_coordinate_runs(families["v"])
+        if not h_runs or not v_runs:
+            continue
+        for h_spacing, h_coords in h_runs:
+            for v_spacing, v_coords in v_runs:
+                spacing_tolerance = max(
+                    _DRAFTING_LATTICE_SPACING_ABS_TOLERANCE_PT,
+                    max(h_spacing, v_spacing)
+                    * _DRAFTING_LATTICE_SPACING_REL_TOLERANCE,
+                )
+                if abs(h_spacing - v_spacing) > spacing_tolerance:
+                    continue
+                h_set = set(h_coords)
+                v_set = set(v_coords)
+                for segment, coordinate, start, end in families["h"]:
+                    if round(coordinate, 2) not in h_set:
+                        continue
+                    crossings = sum(
+                        start - _COORD_TOL <= value <= end + _COORD_TOL
+                        for value in v_coords
+                    )
+                    if crossings >= _DRAFTING_LATTICE_MIN_CROSSINGS_PER_SEGMENT:
+                        excluded.add(id(segment))
+                for segment, coordinate, start, end in families["v"]:
+                    if round(coordinate, 2) not in v_set:
+                        continue
+                    crossings = sum(
+                        start - _COORD_TOL <= value <= end + _COORD_TOL
+                        for value in h_coords
+                    )
+                    if crossings >= _DRAFTING_LATTICE_MIN_CROSSINGS_PER_SEGMENT:
+                        excluded.add(id(segment))
+    return excluded
+
+
 def _filter_repeated_non_physical_drafting_primitives(
     segments: Sequence[dict],
     *,
@@ -741,6 +934,13 @@ def _filter_repeated_non_physical_drafting_primitives(
         signature_counts[signature] += 1
         by_style_length[style_length][angle_key] += 1
 
+    drafting_lattice_ids = _dense_local_drafting_lattice_ids(
+        singleton_lines,
+        motif_by_segment_id=motif_by_segment_id,
+        page_width=page_width,
+        page_height=page_height,
+    )
+
     multi_angle_styles = {
         style
         for style, angle_counts in by_style_length.items()
@@ -767,6 +967,8 @@ def _filter_repeated_non_physical_drafting_primitives(
             continue
         if id(segment) not in singleton_ids:
             kept.append(segment)
+            continue
+        if id(segment) in drafting_lattice_ids:
             continue
         length, angle, signature, style_length, angle_key = motif_by_segment_id[
             id(segment)
