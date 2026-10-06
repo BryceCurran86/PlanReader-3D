@@ -1,0 +1,169 @@
+name: DIAG GPT1 Maryborough All Room Area P11
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Audit all unique room labels on source support page
+        run: |
+          mkdir -p artifacts/all-room-area-p11
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/all-room-area-p11/result.json
+          import json
+          from pathlib import Path
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+          source=SourceVisibilityProducer(producer_method="gpt1-all-room-area-p11",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-all-room-area-p11",
+              source_bytes=path.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          eligible=[
+              room for room in rooms.rooms
+              if room.geometry_complete
+              and str(room.physical_room_id or "").strip()
+              and str(room.source_room_face_record_id or "").strip()
+              and norm(room.room_label)
+              and str(room.room_label_binding_record_id or "").strip()
+              and bool(room.room_label_evidence_ids)
+          ]
+          grouped={}
+          for room in eligible:
+              grouped.setdefault(norm(room.room_label),[]).append(room)
+          unique={k:v[0] for k,v in grouped.items() if len(v)==1}
+          lines=cv._trusted_lines_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="11",
+              candidate_labels=tuple(unique),
+          )
+          rows={}
+          for label,room in sorted(unique.items()):
+              relevant=tuple(line for line in lines if norm(line.text)==label)
+              dims=cv._trusted_native_dimensions_for_page(
+                  source,
+                  revision_id=published.revision.revision_id,
+                  page_id="11",
+                  candidate_lines=relevant,
+              ) if relevant else ()
+              hs=tuple(d for d in dims if d.orientation==cv.DimensionOrientation.HORIZONTAL.value)
+              vs=tuple(d for d in dims if d.orientation==cv.DimensionOrientation.VERTICAL.value)
+              spatial=scaled=witness=0
+              witness_pairs=[]
+              for line in relevant:
+                  for h in hs:
+                      for v in vs:
+                          if not cv._line_inside_dimension_pair(line,h,v):
+                              continue
+                          spatial+=1
+                          if not cv._figured_pair_scale_consistent(page_id="11",horizontal=h,vertical=v):
+                              continue
+                          scaled+=1
+                          if not cv._witness_systems_intersect(h,v):
+                              continue
+                          witness+=1
+                          witness_pairs.append({
+                              "h_id":h.dimension_id,"h_mm":h.value_mm,
+                              "v_id":v.dimension_id,"v_mm":v.value_mm,
+                              "area_m2":round(float(h.value_mm)*float(v.value_mm)/1_000_000,9),
+                          })
+              owned_h=[
+                  (line,d) for line in relevant for d in hs
+                  if cv._dimension_is_immediate_label_annotation(line,d)
+              ]
+              owned_v=[
+                  (line,d) for line in relevant for d in vs
+                  if cv._dimension_is_immediate_label_annotation(line,d)
+              ]
+              ann=[]
+              seen=set()
+              for hl,h in owned_h:
+                  for vl,v in owned_v:
+                      if not cv._figured_pair_scale_consistent(page_id="11",horizontal=h,vertical=v):
+                          continue
+                      key=(h.dimension_id,v.dimension_id)
+                      if key in seen: continue
+                      seen.add(key)
+                      ann.append({
+                          "h_id":h.dimension_id,"h_mm":h.value_mm,
+                          "v_id":v.dimension_id,"v_mm":v.value_mm,
+                          "area_m2":round(float(h.value_mm)*float(v.value_mm)/1_000_000,9),
+                      })
+              rows[label]={
+                  "physical_room_id":room.physical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "support_label_count":len(relevant),
+                  "dimension_count":len(dims),
+                  "spatial_pair_count":spatial,
+                  "scale_consistent_pair_count":scaled,
+                  "witness_pair_count":witness,
+                  "witness_pairs":witness_pairs,
+                  "annotation_horizontal_count":len(owned_h),
+                  "annotation_vertical_count":len(owned_v),
+                  "annotation_pair_count":len(ann),
+                  "annotation_pairs":ann,
+              }
+          result=cv.CrossViewRoomAreaProducer.from_source(source=source,rooms=rooms).publish()
+          published_rows={
+              norm(record.room_label):{
+                  "area_m2":record.area_evidence.normalized_value,
+                  "page_id":record.source_dimension_page_id,
+                  "h":record.horizontal_dimension_id,
+                  "v":record.vertical_dimension_id,
+                  "support_mode":record.area_evidence.metadata.get("source_label_support_mode"),
+              }
+              for record in result.records
+          }
+          print(json.dumps({
+              "canonical_room_count":len(rooms.rooms),
+              "unique_label_count":len(unique),
+              "unique_labels":sorted(unique),
+              "page11":rows,
+              "published_records":published_rows,
+              "result_status":getattr(result.status,"value",str(result.status)),
+              "reason_codes":list(result.reason_codes),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-all-room-area-p11
+          path: artifacts/all-room-area-p11
+          retention-days: 2
