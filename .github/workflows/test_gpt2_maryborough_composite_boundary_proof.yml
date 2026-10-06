@@ -1,0 +1,85 @@
+name: TEST GPT2 Maryborough Composite Boundary Proof
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt
+      - name: Run Maryborough composite outer-boundary proof
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-composite-boundary-proof
+          git rev-parse HEAD > artifacts/gpt2-composite-boundary-proof/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-composite-boundary-proof/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt2-composite-boundary-proof/result.json
+          import json,time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          elapsed=time.perf_counter()-started
+          def norm(v):
+              return " ".join(str(v or "").strip().upper().split())
+
+          labelled=[
+              {
+                  "label":norm(room.room_label),
+                  "canonical_room_id":room.canonical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "decision_scope_id":room.decision_scope_id,
+                  "area_page_pts2":room.area_page_pts2,
+                  "geometry_complete":room.geometry_complete,
+              }
+              for room in claim.canonical_rooms if norm(room.room_label)
+          ]
+          labels=sorted({row["label"] for row in labelled})
+          firm={
+              norm(dict(q.metadata or {}).get("room_label")):float(q.value)
+              for q in claim.room_area_quantity_evidence if not q.abstained
+          }
+          assert abs(firm["FOOD PREP"]-13.270425) < 1e-9
+          assert abs(firm["COLD ROOM"]-25.37875) < 1e-9
+          for label in ("FREEZER","DRY STORE","WASH UP","TRUCK DRIVER LOUNGE","M-AMB","F-AMB"):
+              assert label not in firm
+          assert "DRY STORE" not in labels
+          assert "WASH UP" not in labels
+          assert "TRUCK DRIVER LOUNGE" not in labels
+          assert "M-AMB" not in labels
+          assert "F-AMB" not in labels
+
+          observed={name:[row for row in labelled if row["label"]==name]
+                    for name in ("POS COUNTER","FOOD SERVICE","SALES")}
+          print(json.dumps({
+              "elapsed_seconds":elapsed,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "labels":labels,
+              "observed_geometry_targets":observed,
+              "firm_room_areas":firm,
+              "status":getattr(claim.status,"value",str(claim.status)),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-composite-boundary-proof
+          path: artifacts/gpt2-composite-boundary-proof
+          retention-days: 1
