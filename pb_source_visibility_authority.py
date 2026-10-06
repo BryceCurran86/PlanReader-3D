@@ -1758,18 +1758,9 @@ class SourceVisibilityProducer:
             if int(getattr(native_frame, "rotation", 0) or 0) != 0:
                 continue
 
-            registration_scale = self.raster_opening_registration_scale(
-                published.revision.revision_id,
-                page_id,
-            )
             primitives = detect_raster_opening_source_primitives(
                 png_bytes,
                 dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                registration_scale=(
-                    registration_scale
-                    if registration_scale is not None
-                    else (1.0, 1.0)
-                ),
             )
             if not primitives:
                 continue
