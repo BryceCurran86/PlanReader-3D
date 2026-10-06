@@ -96,7 +96,7 @@ def main() -> int:
             SOURCE,
             pages=(page_index,),
             topology_pages=(page_index,),
-            room_area_support_pages=(),
+            room_area_support_pages=(page_index,),
         )
         results[name] = {
             "page_index_zero_based": page_index,
