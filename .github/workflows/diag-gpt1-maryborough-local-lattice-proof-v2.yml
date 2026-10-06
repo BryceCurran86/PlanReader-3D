@@ -1,0 +1,76 @@
+name: DIAG GPT1 Maryborough Local Lattice Proof V2
+
+on:
+  pull_request:
+    branches:
+      - gpt1/maryborough-local-divider-lattice-v2
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused Maryborough room claim
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,10),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          firm=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floors=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          labels={}
+          for room in claim.canonical_rooms:
+              label=" ".join(str(room.room_label or "").upper().split())
+              if label:
+                  labels[label]=labels.get(label,0)+1
+          by_label={}
+          for q in firm:
+              label=" ".join(str((q.metadata or {}).get("room_label") or "").upper().split())
+              by_label.setdefault(label,[]).append({
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "quantity_id":q.quantity_id,
+                  "input_entity_ids":list(q.input_entity_ids),
+              })
+          targets=[
+              "FOOD PREP","COLD ROOM","FREEZER","WASH UP","M-AMB","F-AMB",
+              "FOOD SERVICE","SALES","POS COUNTER","TRUCK DRIVER LOUNGE","DRY STORE"
+          ]
+          print(json.dumps({
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "canonical_space_count":len(claim.canonical_spaces),
+              "label_count":len(labels),
+              "target_label_counts":{t:labels.get(t,0) for t in targets},
+              "firm_room_area_count":len(firm),
+              "firm_floor_area_count":len(floors),
+              "target_firm_areas":{t:by_label.get(t,[]) for t in targets},
+          },indent=2,sort_keys=True))
+          PY
