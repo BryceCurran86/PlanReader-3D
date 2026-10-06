@@ -1,0 +1,97 @@
+name: DIAG GPT3 Maryborough Current Sealed V2
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Run current-main Maryborough all-family handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt3-maryborough-current
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/gpt3-maryborough-current \
+            | tee artifacts/gpt3-maryborough-current/handoff.stdout.json
+      - name: Audit handoff result
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-maryborough-current")
+          summary=json.loads((root/"production_summary.json").read_text())
+          combined=root/"au_qld_maryborough_service_station.json"
+          audit={
+              "source_sha256":summary["source_sha256"],
+              "status":summary["status"],
+              "claim_status":summary["claim_status"],
+              "claim_reason_codes":summary["claim_reason_codes"],
+              "canonical_counts":summary["canonical_counts"],
+              "family_counts":summary["family_counts"],
+              "combined_quantity_count":summary.get("combined_quantity_count",0),
+              "combined_run_file_exists":combined.is_file(),
+              "execution_pages":summary["execution_pages"],
+              "topology_pages":summary["topology_pages"],
+              "room_area_support_pages":summary["room_area_support_pages"],
+          }
+          if combined.is_file():
+              payload=json.loads(combined.read_text())
+              qs=payload.get("quantities") or []
+              audit.update({
+                  "run_id":payload.get("run_id"),
+                  "fingerprint":payload.get("fingerprint"),
+                  "quantity_count":len(qs),
+                  "lineage_conflicts":sum(not bool(q.get("lineage_ok",False)) for q in qs),
+                  "abstained_outputs":sum(bool(q.get("abstained",False)) for q in qs),
+                  "missing_identity_refs":sum(not bool(q.get("object_identity_refs")) for q in qs),
+                  "zero_non_abstained":sum(
+                      not bool(q.get("abstained",False))
+                      and q.get("value") is not None
+                      and float(q["value"])==0.0
+                      for q in qs
+                  ),
+                  "quantities":[{
+                      "quantity_id":q.get("quantity_id"),
+                      "family":q.get("family"),
+                      "semantic_key":q.get("semantic_key"),
+                      "value":q.get("value"),
+                      "unit":q.get("unit"),
+                      "authority":q.get("authority"),
+                      "object_identity_refs":q.get("object_identity_refs") or [],
+                      "lineage_ok":q.get("lineage_ok"),
+                  } for q in qs],
+              })
+          (root/"gpt3-audit.json").write_text(
+              json.dumps(audit,indent=2,sort_keys=True)+"\n"
+          )
+          print(json.dumps(audit,indent=2,sort_keys=True))
+          PY
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-maryborough-current-sealed-v2
+          path: artifacts/gpt3-maryborough-current
+          retention-days: 3
