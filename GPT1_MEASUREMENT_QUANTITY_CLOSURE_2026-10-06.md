@@ -164,3 +164,19 @@ Conclusion:
 The remaining 10.08 m² opening is blocked upstream by authenticated host topology / physical identity authority, not by measurement or quantity publication. The existing opening QuantityEvidence publisher is behaving correctly and must remain fail-closed.
 
 Ownership remains outside GPT-1 unless a future canonical opening satisfies the full publisher contract and still fails to produce QuantityEvidence.
+
+
+## Post-closure support audit — ceiling handoff
+
+Verified downstream source-closed handoff after canonical ceiling QuantityEvidence landed.
+
+Production handoff now:
+- calls `collect_live_ceiling_lining_claims(...)`;
+- derives final typed quantities with `publish_live_ceiling_area_quantities(...)`;
+- counts the family as `ceiling_area`;
+- seals those exact quantities with `seal_live_ceiling_area_run(...)`;
+- preserves exact canonical ceiling identity and source lineage.
+
+This confirms GPT-3 receives final canonical ceiling QuantityEvidence rather than the older review-draft ceiling quantity.
+
+No additional GPT-1 ceiling handoff defect remains.
