@@ -36,7 +36,6 @@ from tests.test_live_canonical_structural_member_projection import _resolved
 from tests.test_live_canonical_wall_finish_surface import _binding, _wall
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
 from tests.test_live_ceiling_lining_integration_v1 import _write as _write_ceiling_pdf
-from tests.test_ceiling_lining_review_promotion_v1 import _source_pdf as _ceiling_review_pdf
 from tests.test_live_room_area_source_closed_export import _cross_view_room_area_pdf
 
 
@@ -202,8 +201,7 @@ def test_quantity_stage_respects_the_existing_exact_status_vocabularies(status, 
 
 
 def test_ceiling_review_bundle_registers_canonical_object_without_quantity_promotion(tmp_path):
-    path = tmp_path / "ceiling-review-coverage.pdf"
-    path.write_bytes(_ceiling_review_pdf(include_scale_bar=True))
+    path = _write_ceiling_pdf(tmp_path, framed=True)
     bundle = collect_ceiling_lining_review_bundle(
         path,
         pages=(0,),
