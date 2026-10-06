@@ -340,7 +340,7 @@ def _trusted_words_by_page(
             ):
                 trusted_text = str(raster_result.corroborated_text)
                 trusted = True
-                reason_codes = tuple(raster_result.reason_codes or ())
+                reason_codes = ()
 
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
