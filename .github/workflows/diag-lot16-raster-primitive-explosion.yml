@@ -20,7 +20,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Count Lot16 raster primitive classes
+        shell: bash
         run: |
+          set -o pipefail
           PYTHONPATH=. python tools/diag_lot16_raster_primitive_explosion.py | tee lot16-raster-primitive-explosion.json
       - name: Upload diagnostic
         if: always()
