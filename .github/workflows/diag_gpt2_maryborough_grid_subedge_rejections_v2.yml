@@ -61,7 +61,11 @@ jobs:
               evidence_page_ids=(),
           )
           current=source.published_snapshot_for_revision(published.revision.revision_id)
-          wall_auth=live.physical_wall_candidate_authority
+          viewport_wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,
+              page_ids=("7",),
+          )
+          wall_auth=viewport_wall_producer.authority()
           viewport_selectors=wall_auth.selectors_for_authenticated_viewports(
               document_id=current.revision.document_id,
               revision_id=current.revision.revision_id,
