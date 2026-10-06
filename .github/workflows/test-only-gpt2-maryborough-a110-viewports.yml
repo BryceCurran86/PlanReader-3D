@@ -1,0 +1,51 @@
+name: TEST ONLY GPT2 Maryborough A110 viewport segmentation
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  a110_viewports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe A110 viewport segmentation
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import fitz, json
+          from pathlib import Path
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+              is_authoritative_derived_viewport,
+              is_segment_page_viewports_product,
+          )
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(path)
+          try:
+              rows=tuple(segment_page_viewports(doc[6], page_number=7))
+          finally:
+              doc.close()
+          payload=[]
+          for row in rows:
+              payload.append({
+                  "view_id":row.view_id,
+                  "view_type":row.view_type,
+                  "status":row.status,
+                  "bbox":None if row.bounding_box is None else list(row.bounding_box),
+                  "reason_codes":list(row.reason_codes),
+                  "producer_product":bool(is_segment_page_viewports_product(row)),
+                  "authoritative_derived":bool(is_authoritative_derived_viewport(row)),
+              })
+          print(json.dumps({
+              "count":len(rows),
+              "non_overlapping":validate_non_overlapping_viewports(rows),
+              "rows":payload,
+          },sort_keys=True))
+          PY
