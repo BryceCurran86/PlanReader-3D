@@ -1,0 +1,70 @@
+name: DIAG GPT1 Maryborough Same-View Room Areas
+
+on:
+  pull_request:
+    branches:
+      - gpt1/same-view-room-area-authority-v1
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run topology-only Maryborough room-area claim
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=None,
+          )
+          room_q=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floor_q=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          rows=[]
+          rooms_by_id={str(r.physical_room_id):r for r in claim.canonical_rooms}
+          for q in room_q:
+              rid=str(q.input_entity_ids[0]) if q.input_entity_ids else ""
+              room=rooms_by_id.get(rid)
+              rows.append({
+                  "room_label":None if room is None else room.room_label,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "authority":q.authority,
+                  "quantity_id":q.quantity_id,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "figured_dimension_ids":dict(q.metadata or {}).get("figured_dimension_ids"),
+              })
+          print(json.dumps({
+              "elapsed_seconds":time.perf_counter()-started,
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "room_area_quantity_count":len(room_q),
+              "room_area_quantities":rows,
+              "floor_area_quantity_count":len(floor_q),
+          },indent=2,sort_keys=True))
+          PY
