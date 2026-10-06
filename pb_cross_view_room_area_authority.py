@@ -1435,6 +1435,7 @@ class CrossViewRoomAreaProducer:
         }
         page_results: dict[str, tuple[_TrustedBoundDimension, ...]] = {}
         page_lines: dict[str, tuple[_TrustedLine, ...]] = {}
+        page_annotation_lines: dict[str, tuple[_TrustedLine, ...]] = {}
         for page_number in tuple(published.coverage.decoded_pages):
             page_id = str(int(page_number))
             trusted_lines = _trusted_lines_for_page(
@@ -1464,6 +1465,22 @@ class CrossViewRoomAreaProducer:
                 continue
             page_results[page_id] = trusted_dimensions
             page_lines[page_id] = relevant_lines
+            annotation_lines = _trusted_lines_for_page(
+                self._source,
+                revision_id=revision_id,
+                page_id=page_id,
+                candidate_labels=tuple(unique_labels),
+                allow_compound_annotations=True,
+            )
+            page_annotation_lines[page_id] = tuple(
+                line
+                for line in annotation_lines
+                if any(
+                    member in unique_labels
+                    and str(unique_labels[member].page_id) != page_id
+                    for member in line.label_members
+                )
+            )
 
         records: list[CrossViewRoomAreaRecord] = []
         unresolved: set[str] = {
@@ -1542,13 +1559,16 @@ class CrossViewRoomAreaProducer:
                     ]
                 ] = []
                 seen_annotation_pairs: set[tuple[str, str, str]] = set()
-                for page_id, trusted_lines in sorted(page_lines.items()):
+                for page_id, trusted_lines in sorted(page_annotation_lines.items()):
                     if page_id == str(room.page_id):
                         continue
                     label_lines = tuple(
                         line
                         for line in trusted_lines
-                        if _norm_label(line.text) == label
+                        if (
+                            _norm_label(line.text) == label
+                            or label in line.label_members
+                        )
                     )
                     if not label_lines:
                         continue
@@ -1579,6 +1599,11 @@ class CrossViewRoomAreaProducer:
                     )
                     for horizontal_line, horizontal in owned_horizontals:
                         for vertical_line, vertical in owned_verticals:
+                            if not any(
+                                _norm_label(owner.text) == label
+                                for owner in (horizontal_line, vertical_line)
+                            ):
+                                continue
                             if not _figured_pair_scale_consistent(
                                 page_id=page_id,
                                 horizontal=horizontal,
