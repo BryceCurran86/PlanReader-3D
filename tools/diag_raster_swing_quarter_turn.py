@@ -62,11 +62,7 @@ def inspect(gray: np.ndarray, label: str) -> None:
         published.revision.revision_id,
         page_ids=("1",),
     )
-    kinds = Counter(
-        row.observation_kind
-        for row in published.observations
-        if row.page_id == "1"
-    )
+    kinds = Counter()
     authority = source.physical_opening_authority()
     statuses = Counter()
     reasons = Counter()
