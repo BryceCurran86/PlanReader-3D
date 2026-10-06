@@ -28,6 +28,10 @@ jobs:
           from pb_source_ceiling_finish_evidence import collect_source_owned_ceiling_finish_candidates
           from pb_migration_contracts import ViewportEvidence, ViewportResolutionStatus
           from pb_migration_provider_envelope import ProviderContext
+          from pb_ceiling_lining_quantity import iter_explicit_ceiling_finish_matches
+          from pb_source_observation_authority import ObservationSelector
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_room_label_authority import _normalized_room_line
 
           pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           payload=pdf.read_bytes()
@@ -84,6 +88,66 @@ jobs:
                   })
 
           current=source.published_snapshot_for_revision(revision_id)
+
+          # Page-wide diagnostic census only: this does not mint authority.
+          # It tells us whether reflected-ceiling/non-topology sheets contain
+          # source-authenticated ceiling semantics and room labels that the
+          # current floor-plan-only collector cannot see.
+          text_auth=source.text_integrity_authority()
+          line_map={}
+          for observation_id in current.text_observation_ids:
+              result=text_auth.resolve_text(ObservationSelector(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              ))
+              receipt=result.receipt
+              if (
+                  receipt is None
+                  or receipt.block_no is None
+                  or receipt.line_no is None
+                  or receipt.word_no is None
+              ):
+                  continue
+              key=(str(receipt.page_id),int(receipt.block_no),int(receipt.line_no))
+              line_map.setdefault(key,[]).append((int(receipt.word_no),result,receipt))
+
+          pagewide_semantics=[]
+          for key,entries in sorted(line_map.items()):
+              nums=[e[0] for e in entries]
+              if len(nums)!=len(set(nums)):
+                  continue
+              ordered=sorted(entries,key=lambda e:e[0])
+              if [e[0] for e in ordered] != list(range(ordered[0][0],ordered[-1][0]+1)):
+                  continue
+              if any(
+                  e[1].status is not EvidenceResolutionStatus.CORROBORATED
+                  or not str(e[1].trusted_text or "").strip()
+                  for e in ordered
+              ):
+                  continue
+              text=" ".join(str(e[1].trusted_text).strip() for e in ordered)
+              boxes=[tuple(float(v) for v in (e[2].geometry or ())) for e in ordered]
+              boxes=[b for b in boxes if len(b)>=4]
+              if not boxes:
+                  continue
+              bbox=(min(b[0] for b in boxes),min(b[1] for b in boxes),
+                    max(b[2] for b in boxes),max(b[3] for b in boxes))
+              finish_matches=list(iter_explicit_ceiling_finish_matches(text))
+              room_label=_normalized_room_line(text)
+              if finish_matches or room_label is not None:
+                  pagewide_semantics.append({
+                      "page_id":key[0],
+                      "block_no":key[1],
+                      "line_no":key[2],
+                      "text":text,
+                      "bbox":list(bbox),
+                      "ceiling_finish_matches":finish_matches,
+                      "normalized_room_label":room_label,
+                  })
+
           ceiling_scopes=[]
           doc=fitz.open(stream=payload,filetype="pdf")
           try:
@@ -149,5 +213,6 @@ jobs:
               "occurrence_count":len(occurrences),
               "occurrences":occurrences,
               "ceiling_viewport_scopes":ceiling_scopes,
+              "pagewide_authenticated_room_and_ceiling_semantics":pagewide_semantics,
           },indent=2,sort_keys=True))
           PY
