@@ -1,0 +1,89 @@
+name: DIAG Floor Finish Live Impact
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify source SHA
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          p=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          expected="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          print(actual)
+          assert actual == expected
+          PY
+      - name: Run all-family handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/lot16
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" --project-id au_qld_lot16_power --workspace-id 1 --family-group all --output-dir artifacts/lot16 | tee artifacts/lot16/stdout.json
+      - name: Print summary
+        if: always()
+        run: cat artifacts/lot16/production_summary.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: floor-finish-impact-lot16
+          path: artifacts/lot16
+          retention-days: 1
+
+  maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify source SHA
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          p=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          actual=hashlib.sha256(p.read_bytes()).hexdigest()
+          print(actual)
+          assert actual == expected
+          PY
+      - name: Run all-family handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/maryborough
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" --project-id au_qld_maryborough_service_station --workspace-id 1 --family-group all --output-dir artifacts/maryborough | tee artifacts/maryborough/stdout.json
+      - name: Print summary
+        if: always()
+        run: cat artifacts/maryborough/production_summary.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: floor-finish-impact-maryborough
+          path: artifacts/maryborough
+          retention-days: 1
