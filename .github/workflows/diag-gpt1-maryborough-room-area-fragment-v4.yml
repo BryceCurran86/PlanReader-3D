@@ -24,6 +24,7 @@ jobs:
           PYTHONPATH=. python -u - <<'PY'
           import hashlib, json
           from pathlib import Path
+          import pb_live_physical_net_wall_integration as live_mod
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
           from pb_cross_view_room_area_authority import (
@@ -41,6 +42,13 @@ jobs:
 
           captured=[]
           captured_producers=[]
+          captured_bridges=[]
+          _orig_bridge=live_mod.build_source_room_area_bridge
+          def _capture_bridge(**kwargs):
+              result=_orig_bridge(**kwargs)
+              captured_bridges.append(result)
+              return result
+          live_mod.build_source_room_area_bridge=_capture_bridge
           _orig_publish=CrossViewRoomAreaProducer.publish
           def _capture_publish(self):
               captured_producers.append(self)
@@ -55,6 +63,7 @@ jobs:
               room_area_support_pages=(8,10),
           )
           CrossViewRoomAreaProducer.publish=_orig_publish
+          live_mod.build_source_room_area_bridge=_orig_bridge
           cross=captured[-1] if captured else None
           cross_producer=captured_producers[-1] if captured_producers else None
           cross_debug={}
@@ -133,6 +142,27 @@ jobs:
                   "decoded_pages":[] if published is None else list(published.coverage.decoded_pages),
                   "office_pages":office_pages,
               }
+          bridge_debug=[]
+          for bridge in captured_bridges:
+              bridge_debug.append({
+                  "status":getattr(bridge.status,"value",str(bridge.status)),
+                  "reason_codes":list(bridge.reason_codes),
+                  "room_index_room_count":0 if bridge.room_index is None else len(bridge.room_index.rooms()),
+                  "quantities":[
+                      {
+                          "family":q.family,
+                          "semantic_key":q.semantic_key,
+                          "value":q.value,
+                          "unit":q.unit,
+                          "authority":q.authority,
+                          "status":q.status,
+                          "abstained":q.abstained,
+                          "blocking_reasons":list(q.blocking_reasons),
+                          "input_entity_ids":list(q.input_entity_ids),
+                          "metadata":dict(q.metadata or {}),
+                      } for q in bridge.quantities
+                  ],
+              })
           room_by_id={r.canonical_room_id:r for r in claim.canonical_rooms}
           room_by_physical={r.physical_room_id:r for r in claim.canonical_rooms}
           floor_by_id={f.canonical_floor_id:f for f in claim.canonical_floors}
@@ -190,6 +220,7 @@ jobs:
               "cross_view_unresolved_count":0 if cross is None else len(cross.unresolved_physical_room_ids),
               "cross_debug":cross_debug,
               "cross_view_records":[] if cross is None else [{"room_label":r.room_label,"physical_room_id":r.physical_room_id,"source_room_face_record_id":r.source_room_face_record_id,"source_dimension_page_id":r.source_dimension_page_id,"horizontal_dimension_id":r.horizontal_dimension_id,"vertical_dimension_id":r.vertical_dimension_id,"area_value":r.area_evidence.value,"area_unit":r.area_evidence.unit} for r in cross.records],
+              "bridge_debug":bridge_debug,
               "room_quantity_count":len(rooms),
               "room_quantities":rooms,
               "floor_quantity_count":len(floors),
