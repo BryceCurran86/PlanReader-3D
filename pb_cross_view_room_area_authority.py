@@ -114,6 +114,9 @@ class _TrustedLine:
     bbox: tuple[float, float, float, float]
     observation_ids: tuple[str, ...]
     receipt_ids: tuple[str, ...]
+    source_partition_id: str
+    block_no: int
+    line_no: int
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,10 @@ class _TrustedBoundDimension:
     dimension_id: str
     text_observation_id: str
     text_receipt_id: str
+    text_source_partition_id: str
+    text_block_no: Optional[int]
+    text_line_no: Optional[int]
+    text_word_no: Optional[int]
     value_mm: float
     orientation: str
     endpoints_pt: tuple[tuple[float, float], tuple[float, float]]
@@ -177,6 +184,149 @@ class CrossViewRoomAreaResult:
         )
 
 
+def _isolated_line_text_corroboration(
+    source: SourceVisibilityProducer,
+    *,
+    published,
+    ordered: Sequence[tuple[str, object, object]],
+    raw_line: str,
+    backend,
+) -> Optional[str]:
+    """Authenticate one exact native text line by two isolated renders.
+
+    The line must already be a contiguous producer-owned native PDF text line
+    whose raw claim exactly matches a requested canonical room label. This
+    fallback is used only when one or more individual word crops cannot be read.
+    Every word must otherwise be eligible for the existing glyph-only raster
+    corroboration boundary. The union of the producer-derived word raster
+    targets is rendered at both authority DPIs, normalized by one common
+    producer-derived quarter-turn, and must yield exactly the native line in
+    both views. Blank margin is added only after rendering and cannot introduce
+    neighbouring source pixels.
+    """
+
+    raw_claim = normalize_reading(raw_line)
+    if not raw_claim or not ordered or not backend.is_available():
+        return None
+
+    targets: list[tuple[float, float, float, float]] = []
+    rotations: set[int] = set()
+    parent_keys: set[tuple[str, str, str]] = set()
+    admissible = {
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+        TEXT_CLIP_STATE_UNRESOLVED,
+    }
+
+    for observation_id, text_result, receipt in ordered:
+        reason_set = set(tuple(getattr(receipt, "reason_codes", ()) or ()))
+        if text_result.status is EvidenceResolutionStatus.CORROBORATED:
+            if not getattr(text_result, "trusted_text", None):
+                return None
+        elif (
+            text_result.status is not EvidenceResolutionStatus.ABSTAINED
+            or bool(getattr(receipt, "trusted", False))
+            or TEXT_GLYPH_MAPPING_UNVERIFIED not in reason_set
+            or not reason_set.issubset(admissible)
+            or tuple(text_result.reason_codes)
+            != tuple(getattr(receipt, "reason_codes", ()) or ())
+        ):
+            return None
+
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        source_result = source._producer.authority().resolve(selector)
+        observation = source_result.observation
+        if (
+            source_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or observation is None
+            or observation.observation_kind != "native_pdf_word"
+            or observation.origin_kind != "native"
+            or observation.viewport_id is not None
+            or str(observation.page_id) != str(receipt.page_id)
+            or tuple(observation.geometry) != tuple(receipt.geometry)
+        ):
+            return None
+        bbox = _finite_bbox(observation.geometry)
+        if bbox is None:
+            return None
+        target, rotation = _producer_owned_ocr_target(
+            source._producer,
+            revision_id=selector.revision_id,
+            source_sha256=selector.source_sha256,
+            page_id=str(observation.page_id),
+            receipt=receipt,
+            word_bbox=bbox,
+            raw_text=str(observation.raw_text),
+        )
+        targets.append(target)
+        rotations.add(int(rotation))
+
+    if len(rotations) != 1 or not targets:
+        return None
+    rotation = next(iter(rotations))
+    raster_bbox = (
+        min(value[0] for value in targets),
+        min(value[1] for value in targets),
+        max(value[2] for value in targets),
+        max(value[3] for value in targets),
+    )
+
+    readings: list[str] = []
+    for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+        try:
+            png_bytes, page_parent = source._producer.render_native_page_png(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                page_id=str(ordered[0][2].page_id),
+                dpi=float(dpi),
+                clip_pt=raster_bbox,
+            )
+        except Exception:
+            return None
+        parent_keys.add(
+            (
+                str(page_parent.observation_id),
+                str(page_parent.source_partition_id),
+                str(page_parent.page_id),
+            )
+        )
+        try:
+            rendered = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+            normalized = _lossless_rotate(rendered, rotation)
+        except Exception:
+            return None
+        margin_px = max(
+            1,
+            int(round(float(dpi) * _DIMENSION_OCR_BLANK_MARGIN_MM / 25.4)),
+        )
+        isolated = ImageOps.expand(normalized, border=margin_px, fill="white")
+        reading = _single_isolated_ocr_reading(
+            backend,
+            isolated,
+            dpi=int(dpi),
+        )
+        if reading is None or normalize_reading(reading) != raw_claim:
+            return None
+        readings.append(reading)
+
+    if (
+        len(parent_keys) != 1
+        or len(readings) != len(RASTER_TEXT_CORROBORATION_DPIS)
+    ):
+        return None
+    normalized_readings = tuple(normalize_reading(value) for value in readings)
+    if len(set(normalized_readings)) != 1 or normalized_readings[0] != raw_claim:
+        return None
+    return raw_claim
+
+
 def _trusted_lines_for_page(
     source: SourceVisibilityProducer,
     *,
@@ -189,6 +339,7 @@ def _trusted_lines_for_page(
         return ()
     text_authority = source.text_integrity_authority()
     raster = RasterTextCorroborationProducer.from_source_visibility_producer(source)
+    line_ocr_backend, _line_ocr_selection_reason = select_production_ocr_backend()
     wanted_labels = {
         _norm_label(value)
         for value in candidate_labels
@@ -281,9 +432,17 @@ def _trusted_lines_for_page(
                 break
             trusted_words.append(trusted.strip())
         if failed:
-            continue
-
-        line_text = " ".join(value for value in trusted_words if value)
+            line_text = _isolated_line_text_corroboration(
+                source,
+                published=published,
+                ordered=ordered,
+                raw_line=raw_line,
+                backend=line_ocr_backend,
+            )
+            if not line_text:
+                continue
+        else:
+            line_text = " ".join(value for value in trusted_words if value)
         if _norm_label(line_text) not in wanted_labels:
             continue
 
@@ -303,6 +462,9 @@ def _trusted_lines_for_page(
                 ),
                 observation_ids=tuple(str(item[0]) for item in ordered),
                 receipt_ids=tuple(str(item[2].receipt_id) for item in ordered),
+                source_partition_id=str(key[0]),
+                block_no=int(key[1]),
+                line_no=int(key[2]),
             )
         )
     return tuple(lines)
@@ -665,7 +827,17 @@ def _trusted_native_dimensions_for_page(
     )
     trusted_by_bbox: dict[
         tuple[float, float, float, float],
-        list[tuple[str, str, str]],
+        list[
+            tuple[
+                str,
+                str,
+                str,
+                str,
+                Optional[int],
+                Optional[int],
+                Optional[int],
+            ]
+        ],
     ] = {}
     for observation_id in published.text_observation_ids:
         selector = ObservationSelector(
@@ -705,6 +877,10 @@ def _trusted_native_dimensions_for_page(
                 trusted_text,
                 str(observation_id),
                 str(receipt.receipt_id),
+                str(receipt.source_partition_id),
+                None if receipt.block_no is None else int(receipt.block_no),
+                None if receipt.line_no is None else int(receipt.line_no),
+                None if receipt.word_no is None else int(receipt.word_no),
             )
         )
 
@@ -805,7 +981,15 @@ def _trusted_native_dimensions_for_page(
         trusted = trusted_by_bbox.get(_bbox_key(observation.bbox), ())
         if len(trusted) != 1:
             continue
-        trusted_text, text_observation_id, text_receipt_id = trusted[0]
+        (
+            trusted_text,
+            text_observation_id,
+            text_receipt_id,
+            text_source_partition_id,
+            text_block_no,
+            text_line_no,
+            text_word_no,
+        ) = trusted[0]
         try:
             parsed_mm = parse_figured_dimension_mm(trusted_text)
             observation_mm = float(observation.value_m) * 1000.0
@@ -879,6 +1063,10 @@ def _trusted_native_dimensions_for_page(
                 dimension_id=dimension_id,
                 text_observation_id=text_observation_id,
                 text_receipt_id=text_receipt_id,
+                text_source_partition_id=text_source_partition_id,
+                text_block_no=text_block_no,
+                text_line_no=text_line_no,
+                text_word_no=text_word_no,
                 value_mm=float(parsed_mm),
                 orientation=str(observation.orientation),
                 endpoints_pt=endpoints,
@@ -899,6 +1087,28 @@ def _trusted_native_dimensions_for_page(
             ),
         )
     )
+
+def _dimension_is_immediate_label_annotation(
+    line: _TrustedLine,
+    dimension: _TrustedBoundDimension,
+) -> bool:
+    """Return whether a figured dimension is the next source text line.
+
+    Some plan sheets repeat a unique room label in explicit dimension annotation
+    blocks, with one figured dimension on the immediately following native text
+    line. This source structure is stronger than proximity: the label and value
+    share one producer-owned text partition/block and there is no intervening
+    native text line. The dimension still has to satisfy all normal numeric,
+    vector-line, witness and source-visibility authority before reaching here.
+    """
+    return (
+        bool(line.source_partition_id)
+        and line.source_partition_id == dimension.text_source_partition_id
+        and dimension.text_block_no == line.block_no
+        and dimension.text_line_no == line.line_no + 1
+        and dimension.text_word_no == 0
+    )
+
 
 def _segment_orientation_value(
     first: tuple[float, float],
@@ -1216,7 +1426,7 @@ class CrossViewRoomAreaProducer:
             room = grouped_rooms[0]
             matches: list[
                 tuple[
-                    _TrustedLine,
+                    tuple[_TrustedLine, ...],
                     str,
                     _TrustedBoundDimension,
                     _TrustedBoundDimension,
@@ -1261,12 +1471,88 @@ class CrossViewRoomAreaProducer:
                             ):
                                 matches.append(
                                     (
-                                        line,
+                                        (line,),
                                         page_id,
                                         horizontal,
                                         vertical,
                                     )
                                 )
+
+            if not matches:
+                annotation_matches: list[
+                    tuple[
+                        tuple[_TrustedLine, ...],
+                        str,
+                        _TrustedBoundDimension,
+                        _TrustedBoundDimension,
+                    ]
+                ] = []
+                seen_annotation_pairs: set[tuple[str, str, str]] = set()
+                for page_id, trusted_lines in sorted(page_lines.items()):
+                    if page_id == str(room.page_id):
+                        continue
+                    label_lines = tuple(
+                        line
+                        for line in trusted_lines
+                        if _norm_label(line.text) == label
+                    )
+                    if not label_lines:
+                        continue
+                    trusted_dimensions = page_results[page_id]
+                    owned_horizontals = tuple(
+                        (line, dimension)
+                        for line in label_lines
+                        for dimension in trusted_dimensions
+                        if (
+                            dimension.orientation
+                            == DimensionOrientation.HORIZONTAL.value
+                            and _dimension_is_immediate_label_annotation(
+                                line, dimension
+                            )
+                        )
+                    )
+                    owned_verticals = tuple(
+                        (line, dimension)
+                        for line in label_lines
+                        for dimension in trusted_dimensions
+                        if (
+                            dimension.orientation
+                            == DimensionOrientation.VERTICAL.value
+                            and _dimension_is_immediate_label_annotation(
+                                line, dimension
+                            )
+                        )
+                    )
+                    for horizontal_line, horizontal in owned_horizontals:
+                        for vertical_line, vertical in owned_verticals:
+                            if not _figured_pair_scale_consistent(
+                                page_id=page_id,
+                                horizontal=horizontal,
+                                vertical=vertical,
+                            ):
+                                continue
+                            key = (
+                                str(page_id),
+                                horizontal.dimension_id,
+                                vertical.dimension_id,
+                            )
+                            if key in seen_annotation_pairs:
+                                continue
+                            seen_annotation_pairs.add(key)
+                            support_lines = tuple(
+                                dict.fromkeys(
+                                    (horizontal_line, vertical_line)
+                                )
+                            )
+                            annotation_matches.append(
+                                (
+                                    support_lines,
+                                    page_id,
+                                    horizontal,
+                                    vertical,
+                                )
+                            )
+                matches.extend(annotation_matches)
 
             if len(matches) != 1:
                 unresolved.add(str(room.physical_room_id))
@@ -1274,7 +1560,22 @@ class CrossViewRoomAreaProducer:
                     conflict_seen = True
                 continue
 
-            line, dimension_page_id, horizontal, vertical = matches[0]
+            support_lines, dimension_page_id, horizontal, vertical = matches[0]
+            line = support_lines[0]
+            support_observation_ids = tuple(
+                dict.fromkeys(
+                    observation_id
+                    for support_line in support_lines
+                    for observation_id in support_line.observation_ids
+                )
+            )
+            support_receipt_ids = tuple(
+                dict.fromkeys(
+                    receipt_id
+                    for support_line in support_lines
+                    for receipt_id in support_line.receipt_ids
+                )
+            )
             area_m2 = round(
                 float(horizontal.value_mm)
                 * float(vertical.value_mm)
@@ -1310,7 +1611,7 @@ class CrossViewRoomAreaProducer:
                     "physical_room_id": room.physical_room_id,
                     "source_room_face_record_id": room.source_room_face_record_id,
                     "dimension_page_id": dimension_page_id,
-                    "label_receipt_ids": line.receipt_ids,
+                    "label_receipt_ids": support_receipt_ids,
                     "horizontal_dimension_id": horizontal.dimension_id,
                     "vertical_dimension_id": vertical.dimension_id,
                     "area_m2": area_m2,
@@ -1343,9 +1644,18 @@ class CrossViewRoomAreaProducer:
                         published.snapshot.snapshot_id
                     ),
                     "source_label_text": line.text,
-                    "source_label_observation_ids": list(line.observation_ids),
-                    "source_label_receipt_ids": list(line.receipt_ids),
+                    "source_label_observation_ids": list(support_observation_ids),
+                    "source_label_receipt_ids": list(support_receipt_ids),
                     "source_label_bbox_pdf_pts": list(line.bbox),
+                    "source_label_bboxes_pdf_pts": [
+                        list(support_line.bbox)
+                        for support_line in support_lines
+                    ],
+                    "source_label_support_mode": (
+                        "single_label_witness_junction"
+                        if len(support_lines) == 1
+                        else "repeated_label_annotation_blocks"
+                    ),
                     "source_dimension_box_pdf_pts": list(source_dimension_box),
                     "horizontal_endpoints_pt": [
                         list(horizontal.endpoints_pt[0]),
@@ -1392,8 +1702,8 @@ class CrossViewRoomAreaProducer:
                     ),
                     room_label=str(room.room_label),
                     source_dimension_page_id=str(dimension_page_id),
-                    source_label_observation_ids=line.observation_ids,
-                    source_label_receipt_ids=line.receipt_ids,
+                    source_label_observation_ids=support_observation_ids,
+                    source_label_receipt_ids=support_receipt_ids,
                     horizontal_dimension_id=horizontal.dimension_id,
                     vertical_dimension_id=vertical.dimension_id,
                     area_evidence=area_evidence,
