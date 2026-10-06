@@ -106,7 +106,10 @@ jobs:
               for candidate in split_by_label.get(target,[]):
                   seeds=tuple(str(v) for v in candidate.word_face_ids)
                   component=comp._grid_connected_component(
-                      seeds,room_scope=room_scope,fully_grid_wall_ids=fully
+                      seeds,
+                      room_scope=room_scope,
+                      wall_scope=wall_scope,
+                      fully_grid_wall_ids=fully,
                   )
                   conflict=None if component is None else comp._component_has_conflicting_label(
                       component,candidate,label_scope=label_scope
@@ -126,10 +129,14 @@ jobs:
                           for w in rec.bounding_wall_ids
                       )
                       component_set=set(component)
+                      adjacency=comp._grid_local_adjacency(
+                          room_scope,wall_scope,fully
+                      )
                       separators={
-                          wall_id for wall_id in fully
-                          if len(faces_by_wall.get(wall_id,()))==2
-                          and set(faces_by_wall[wall_id]).issubset(component_set)
+                          wall_id
+                          for face_id in component_set
+                          for neighbour,wall_id in adjacency.get(face_id,())
+                          if neighbour in component_set
                       }
                       external=sorted(w for w in wall_counts if w not in separators)
                       merged=unary_union([Polygon(rec.polygon_pdf_pts) for rec in constituent])
