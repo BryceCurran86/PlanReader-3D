@@ -142,9 +142,12 @@ def generate_project_handoff(
         pdf_path
     )
     all_pages = tuple(range(page_count))
+    topology_restricted = bool(topology_pages) and (
+        tuple(topology_pages) != tuple(all_pages)
+    )
     topology_mode = (
         "source_classified_scope"
-        if topology_pages and tuple(topology_pages) != tuple(all_pages)
+        if topology_restricted
         else "live_authority_all_pages_fallback"
     )
 
@@ -176,7 +179,7 @@ def generate_project_handoff(
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
             pages=all_pages,
-            topology_pages=(topology_pages if topology_pages else None),
+            topology_pages=(topology_pages if topology_restricted else None),
             # Mirror customer runtime: only source-classified evidence pages may
             # activate cross-view room-area measurement. An empty support scope
             # means "do not add cross-view metric authority", never "scan all".
