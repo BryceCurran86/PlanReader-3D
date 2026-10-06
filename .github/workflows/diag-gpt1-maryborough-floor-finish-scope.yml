@@ -115,6 +115,7 @@ jobs:
               line_map.setdefault(key,[]).append((int(receipt.word_no),result,receipt))
 
           pagewide_semantics=[]
+          raw_ceiling_semantics=[]
           for key,entries in sorted(line_map.items()):
               nums=[e[0] for e in entries]
               if len(nums)!=len(set(nums)):
@@ -122,6 +123,18 @@ jobs:
               ordered=sorted(entries,key=lambda e:e[0])
               if [e[0] for e in ordered] != list(range(ordered[0][0],ordered[-1][0]+1)):
                   continue
+              raw_text=" ".join(str(e[2].raw_text or "").strip() for e in ordered)
+              raw_matches=list(iter_explicit_ceiling_finish_matches(raw_text))
+              if raw_matches:
+                  raw_ceiling_semantics.append({
+                      "page_id":key[0],
+                      "block_no":key[1],
+                      "line_no":key[2],
+                      "raw_text":raw_text,
+                      "ceiling_finish_matches":raw_matches,
+                      "word_statuses":[getattr(e[1].status,"value",str(e[1].status)) for e in ordered],
+                      "word_reason_codes":[list(e[1].reason_codes or ()) for e in ordered],
+                  })
               if any(
                   e[1].status is not EvidenceResolutionStatus.CORROBORATED
                   or not str(e[1].trusted_text or "").strip()
@@ -214,5 +227,6 @@ jobs:
               "occurrences":occurrences,
               "ceiling_viewport_scopes":ceiling_scopes,
               "pagewide_authenticated_room_and_ceiling_semantics":pagewide_semantics,
+              "raw_ceiling_semantics":raw_ceiling_semantics,
           },indent=2,sort_keys=True))
           PY
