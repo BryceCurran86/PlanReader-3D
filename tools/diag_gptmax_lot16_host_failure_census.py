@@ -5,6 +5,7 @@ import hashlib, json
 from pathlib import Path
 
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -18,13 +19,13 @@ def main():
     payload=PDF.read_bytes()
     assert hashlib.sha256(payload).hexdigest()==EXPECTED_SHA
     source=SourceVisibilityProducer(
-        producer_method="diag-gptmax-lot16-host-failure-census",
-        producer_version="1",
+        producer_method="live-physical-net-wall",
+        producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
     )
     published=source.ingest_native_pdf_bytes(
-        document_id="diag-gptmax-lot16-host-failure-census",
+        document_id=f"live-source:{EXPECTED_SHA[:32]}",
         source_bytes=payload,
-        source_locator=str(PDF),
+        source_locator="memory://live-physical-net-wall-source.pdf",
         page_ids=("3",),
     )
     comp=compose_live_wall_opening_authority(
@@ -52,6 +53,20 @@ def main():
         existence=auth.prove_existence(selector)
         opening=existence.existence_record
         pattern=(None if opening is None else str(opening.structural_pattern))
+        aperture_bbox=(None if opening is None else opening.aperture_bbox_pt)
+        observation_kinds=[]
+        if opening is not None:
+            visibility=auth.source_visibility_authority()
+            for observation_id in opening.source_observation_ids:
+                resolved=visibility.resolve_visible(ObservationSelector(
+                    document_id=current.revision.document_id,
+                    revision_id=current.revision.revision_id,
+                    source_sha256=current.revision.source_sha256,
+                    snapshot_id=current.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                ))
+                obs=resolved.observation
+                observation_kinds.append(None if obs is None else str(obs.observation_kind))
         status=_status(trace.status)
         status_counts[status]+=1
         if pattern:
@@ -63,6 +78,9 @@ def main():
             "opening_identity_id":trace.opening_identity_id,
             "representative_observation_id":trace.representative_observation_id,
             "structural_pattern":pattern,
+            "aperture_bbox_pt":(None if aperture_bbox is None else list(aperture_bbox)),
+            "source_observation_count":(0 if opening is None else len(opening.source_observation_ids)),
+            "source_observation_kinds":sorted({x for x in observation_kinds if x}),
             "existence_status":_status(existence.status),
             "binding_status":status,
             "binding_reason_codes":list(trace.reason_codes),
