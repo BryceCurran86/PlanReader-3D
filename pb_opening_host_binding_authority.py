@@ -1343,20 +1343,20 @@ def _candidate_host_roles(
     )
 
 
-def _excluded_boundary_primitive_host_roles(
+def _excluded_boundary_primitive_axis_data(
     primitive: ExcludedBoundaryPrimitive,
     opening: _OpeningGeometry,
-) -> tuple[str, ...]:
+) -> Optional[tuple[float, float, float]]:
     try:
         first = (float(primitive.x1), float(primitive.y1))
         second = (float(primitive.x2), float(primitive.y2))
     except (TypeError, ValueError):
-        return ()
+        return None
     if not all(math.isfinite(value) for point in (first, second) for value in point):
-        return ()
+        return None
     unit = _canonical_unit((first[0], first[1], second[0], second[1]))
     if unit is None or abs(_cross(unit, opening.axis)) > _PARALLEL_TOL:
-        return ()
+        return None
     along = (
         _project(first, opening.origin, opening.axis),
         _project(second, opening.origin, opening.axis),
@@ -1366,11 +1366,68 @@ def _excluded_boundary_primitive_host_roles(
         _project(second, opening.origin, opening.normal),
     )
     if abs(offsets[1] - offsets[0]) > DEFAULT_GAP_SNAP_TOLERANCE_PT:
-        return ()
-    return _host_roles_from_axis_data(
-        (min(along), max(along), sum(offsets) / 2.0),
-        opening,
+        return None
+    return (min(along), max(along), sum(offsets) / 2.0)
+
+
+def _axis_data_locally_spans_opening(
+    data: Optional[tuple[float, float, float]],
+    opening: _OpeningGeometry,
+    *,
+    edge_tol: float,
+) -> bool:
+    if data is None:
+        return False
+    along_min, along_max, offset = data
+    cross_limit = (
+        opening.thickness / 2.0
+        + _RASTER_WHOLE_WALL_CENTER_TOL_PT
+        + _COORD_TOL
     )
+    return (
+        along_min <= edge_tol
+        and along_max >= opening.length - edge_tol
+        and abs(offset) <= cross_limit
+    )
+
+
+def _raster_whole_wall_axis_data_is_role(
+    data: Optional[tuple[float, float, float]],
+    opening: _OpeningGeometry,
+) -> bool:
+    if data is None:
+        return False
+    along_min, along_max, offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    return (
+        along_min < -edge_tol
+        and along_max > opening.length + edge_tol
+        and abs(offset) <= _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+    )
+
+
+def _excluded_boundary_primitive_host_roles(
+    primitive: ExcludedBoundaryPrimitive,
+    opening: _OpeningGeometry,
+    *,
+    include_spanning_raster_candidates: bool = False,
+) -> tuple[str, ...]:
+    data = _excluded_boundary_primitive_axis_data(primitive, opening)
+    roles = list(_host_roles_from_axis_data(data, opening))
+    if include_spanning_raster_candidates:
+        edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+        if _raster_whole_wall_axis_data_is_role(data, opening):
+            roles.append("raster_whole")
+        elif _axis_data_locally_spans_opening(
+            data,
+            opening,
+            edge_tol=edge_tol,
+        ):
+            # Conservative counterpart of the source-primitive local-span
+            # fallback. An excluded structural primitive cannot be allowed to
+            # occupy the same aperture band merely because it never became W4.
+            roles.append("raster_span")
+    return tuple(dict.fromkeys(roles))
 
 
 def _local_boundary_clean_host_scope(
@@ -1458,7 +1515,11 @@ def _local_boundary_clean_host_scope(
         )
 
     if any(
-        _excluded_boundary_primitive_host_roles(primitive, opening)
+        _excluded_boundary_primitive_host_roles(
+            primitive,
+            opening,
+            include_spanning_raster_candidates=include_spanning_raster_candidates,
+        )
         for primitive in evaluation.excluded_boundary_primitives
     ):
         return None, (
@@ -1648,17 +1709,7 @@ def _raster_whole_wall_role_data(
     """
 
     data = _candidate_axis_data(record, opening)
-    if data is None:
-        return None
-    along_min, along_max, offset = data
-    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
-    if (
-        along_min >= -edge_tol
-        or along_max <= opening.length + edge_tol
-        or abs(offset) > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
-    ):
-        return None
-    return data
+    return data if _raster_whole_wall_axis_data_is_role(data, opening) else None
 
 
 def _resolve_raster_whole_wall_host(
