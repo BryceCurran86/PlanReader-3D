@@ -414,3 +414,66 @@ def test_two_same_orientation_witness_complete_candidates_stay_ambiguous() -> No
     assert result.status == BindingStatus.AMBIGUOUS.value
     assert result.dimension_line_id is None
     assert result.endpoints is None
+
+
+def test_unique_span_bracketing_witness_candidate_breaks_same_orientation_tie() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        _segment(
+            "full-dimension",
+            (80.0, 100.0),
+            (132.0, 100.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "short-competitor",
+            (100.0, 102.0),
+            (112.0, 102.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "full-left-witness",
+            (80.0, 82.0),
+            (80.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "full-right-witness",
+            (132.0, 82.0),
+            (132.0, 118.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "short-left-witness",
+            (100.0, 88.0),
+            (100.0, 116.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "short-right-witness",
+            (112.0, 88.0),
+            (112.0, 116.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.dimension_line_id == "full-dimension"
+    assert result.witness_line_ids == (
+        "full-left-witness",
+        "full-right-witness",
+    )
+    assert result.endpoints == ((80.0, 100.0), (132.0, 100.0))
