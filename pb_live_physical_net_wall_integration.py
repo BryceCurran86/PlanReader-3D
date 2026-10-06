@@ -775,7 +775,6 @@ def collect_live_physical_net_wall_claim(
             opening_quantity_evidence=opening_quantity_evidence,
             opening_count_quantity_evidence=opening_count_quantity_evidence,
             room_area_quantity_evidence=tuple(room_area_quantity_evidence),
-        floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
             floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
         )
 
