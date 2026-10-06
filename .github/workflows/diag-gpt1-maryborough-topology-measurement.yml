@@ -1,0 +1,161 @@
+name: DIAG GPT1 Maryborough Topology Measurement
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Audit page-7 measurement authority
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import pb_cross_view_room_area_authority as cv
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_scale_authority import PhysicalScaleProducer, PhysicalScaleSelector
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          targets={"FREEZER","SALES","FOOD PREP","COLD ROOM"}
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(producer_method="gpt1-topology-measurement",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-topology-measurement",
+              source_bytes=path.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","11"),
+          )
+          wo=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          cw=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wo,
+              canonical_wall_ids_by_candidate=cw.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=cw.unresolved_wall_candidate_ids,
+          )
+          label_rooms={}
+          for room in rooms.rooms:
+              label=norm(room.room_label)
+              if label in targets:
+                  label_rooms.setdefault(label,[]).append(room)
+          unique={k:v[0] for k,v in label_rooms.items() if len(v)==1}
+
+          lines=cv._trusted_lines_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="7",
+              candidate_labels=tuple(unique),
+          )
+
+          same_view={}
+          for label,room in sorted(unique.items()):
+              relevant=tuple(line for line in lines if norm(line.text)==label)
+              dims=cv._trusted_native_dimensions_for_page(
+                  source,
+                  revision_id=published.revision.revision_id,
+                  page_id="7",
+                  candidate_lines=relevant,
+              ) if relevant else ()
+              hs=tuple(d for d in dims if d.orientation==cv.DimensionOrientation.HORIZONTAL.value)
+              vs=tuple(d for d in dims if d.orientation==cv.DimensionOrientation.VERTICAL.value)
+              pairs=[]
+              for line in relevant:
+                  for h in hs:
+                      for v in vs:
+                          if not cv._line_inside_dimension_pair(line,h,v): continue
+                          if not cv._figured_pair_scale_consistent(page_id="7",horizontal=h,vertical=v): continue
+                          pairs.append({
+                              "h_id":h.dimension_id,"h_mm":h.value_mm,
+                              "v_id":v.dimension_id,"v_mm":v.value_mm,
+                              "witness_intersects":cv._witness_systems_intersect(h,v),
+                              "area_m2":float(h.value_mm)*float(v.value_mm)/1_000_000,
+                          })
+              same_view[label]={
+                  "physical_room_id":room.physical_room_id,
+                  "label_count":len(relevant),
+                  "dimension_count":len(dims),
+                  "scale_consistent_spatial_pairs":pairs,
+              }
+
+          scale=PhysicalScaleProducer.from_source_visibility_producer(source)
+          page_selector=PhysicalScaleSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="7",
+              viewport_id=None,
+          )
+          page_scale=scale.publish_scope(page_selector)
+
+          viewport_rows=[]
+          vp_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(source,page_ids=("7",))
+          vp_auth=vp_producer.authority()
+          selectors=vp_auth.selectors_for_authenticated_viewports(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="7",
+          )
+          for sel in selectors:
+              scope=vp_auth.resolve_scope(sel)
+              vp_id=getattr(scope,"viewport_id",None)
+              scale_result=None
+              if vp_id:
+                  scale_result=scale.publish_scope(PhysicalScaleSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      page_id="7",
+                      viewport_id=str(vp_id),
+                  ))
+              viewport_rows.append({
+                  "viewport_id":vp_id,
+                  "view_type":getattr(scope,"viewport_view_type",None),
+                  "bbox":getattr(scope,"viewport_bbox",None),
+                  "wall_status":getattr(scope.status,"value",str(scope.status)),
+                  "scale_status":None if scale_result is None else getattr(scale_result.status,"value",str(scale_result.status)),
+                  "scale_reason_codes":[] if scale_result is None else list(scale_result.reason_codes),
+                  "points_per_mm":None if scale_result is None or scale_result.evidence is None else scale_result.evidence.points_per_mm,
+              })
+
+          print(json.dumps({
+              "canonical_room_count":len(rooms.rooms),
+              "labels":sorted(unique),
+              "same_view":same_view,
+              "page_scale":{
+                  "status":getattr(page_scale.status,"value",str(page_scale.status)),
+                  "reason_codes":list(page_scale.reason_codes),
+                  "points_per_mm":None if page_scale.evidence is None else page_scale.evidence.points_per_mm,
+                  "viewport_id":None if page_scale.evidence is None else page_scale.evidence.selector.viewport_id,
+              },
+              "authenticated_viewports":viewport_rows,
+          },indent=2,sort_keys=True))
+          PY
