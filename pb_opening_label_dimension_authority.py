@@ -26,6 +26,7 @@ from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningExistenceRecord,
 )
@@ -455,14 +456,17 @@ def _gap_span_for_opening(
     """Resolve spatial label ownership for one already-proven physical opening.
 
     Native/vector openings keep the historical source-line reconstruction
-    byte-for-byte. The G17 raster-framed pattern is different by design: its
-    supporting primitives are isolated from ordinary visible observations.
-    For that one pattern only, consume G17's sealed aperture bbox as spatial
+    byte-for-byte. G17 raster framed/swing patterns are different by design:
+    their supporting primitives are isolated from ordinary visible observations.
+    For those raster patterns only, consume G17's sealed aperture bbox as spatial
     ownership geometry. The bbox cannot establish semantic kind, figured
     dimensions, metric measurement authority, host identity, or quantity.
     """
 
-    if opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION:
+    if opening.structural_pattern in (
+        RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    ):
         bbox = opening.aperture_bbox_pt
         if bbox is None or len(bbox) != 4:
             return None
