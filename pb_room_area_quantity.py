@@ -242,59 +242,10 @@ def build_room_area_quantity(
         explicit_value = float(explicit_area_evidence.normalized_value)
         explicit_fp = _evidence_fingerprint(explicit_area_evidence)
 
-    polygon_area_page = _polygon_area(room.polygon_pdf_pts)
-    polygon_area_m2: Optional[float] = None
-    scale_fp: Optional[str] = None
-    scale_blockers: tuple[str, ...] = ()
-    if scale_calibration is not None:
-        scale_blockers, fresh, candidate_fp = validate_scale_binding(
-            context=context,
-            viewport=viewport,
-            page_no=page_no,
-            calibration=scale_calibration,
-        )
-        scale_fp = candidate_fp
-        if not scale_blockers:
-            if polygon_area_page <= 0.0:
-                if explicit_value is None:
-                    return _abstention(
-                        room=room,
-                        entity=entity,
-                        context=context,
-                        blockers=("room_polygon_area_invalid",),
-                        authority=MeasurementAuthorityType.PDF_SCALED.value,
-                        metadata={"scale_fingerprint": scale_fp},
-                    )
-            else:
-                polygon_area_m2 = polygon_area_page / (fresh.px_per_m ** 2)
-        elif explicit_value is None:
-            return _abstention(
-                room=room,
-                entity=entity,
-                context=context,
-                blockers=scale_blockers,
-                authority=MeasurementAuthorityType.PDF_SCALED.value,
-                metadata={"scale_fingerprint": scale_fp},
-            )
-
+    # Documented figured dimensions are an independent numeric authority.
+    # Scale may govern geometry-derived area, but it must never downgrade or
+    # invalidate a corroborated explicit dimension result.
     if explicit_value is not None:
-        if polygon_area_m2 is not None and polygon_area_m2 > 0.0:
-            delta_ratio = abs(explicit_value - polygon_area_m2) / explicit_value
-            if delta_ratio > max_delta_ratio:
-                return _abstention(
-                    room=room,
-                    entity=entity,
-                    context=context,
-                    blockers=("explicit_vs_scaled_area_conflict",),
-                    authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-                    metadata={
-                        "explicit_area_m2": explicit_value,
-                        "polygon_area_m2": round(polygon_area_m2, 6),
-                        "delta_ratio": delta_ratio,
-                        "explicit_area_evidence_fingerprint": explicit_fp,
-                        "scale_fingerprint": scale_fp,
-                    },
-                )
         value = round(explicit_value, 6)
         explicit_metadata = (
             dict(explicit_area_evidence.metadata)
@@ -358,11 +309,44 @@ def build_room_area_quantity(
                 "substrate": "Other",
                 "inclusion_status": "INCLUSION",
                 "row_role": "floor_area",
-                "scale_fingerprint": scale_fp,
+                "scale_fingerprint": None,
                 "ignored_prefilled_floor_area_m2": room.floor_area_m2,
                 "ignored_prefilled_explicit_area_label_m2": room.explicit_area_label_m2,
             },
         )
+
+    polygon_area_page = _polygon_area(room.polygon_pdf_pts)
+    polygon_area_m2: Optional[float] = None
+    scale_fp: Optional[str] = None
+    scale_blockers: tuple[str, ...] = ()
+    if scale_calibration is not None:
+        scale_blockers, fresh, candidate_fp = validate_scale_binding(
+            context=context,
+            viewport=viewport,
+            page_no=page_no,
+            calibration=scale_calibration,
+        )
+        scale_fp = candidate_fp
+        if not scale_blockers:
+            if polygon_area_page <= 0.0:
+                return _abstention(
+                    room=room,
+                    entity=entity,
+                    context=context,
+                    blockers=("room_polygon_area_invalid",),
+                    authority=MeasurementAuthorityType.PDF_SCALED.value,
+                    metadata={"scale_fingerprint": scale_fp},
+                )
+            polygon_area_m2 = polygon_area_page / (fresh.px_per_m ** 2)
+        else:
+            return _abstention(
+                room=room,
+                entity=entity,
+                context=context,
+                blockers=scale_blockers,
+                authority=MeasurementAuthorityType.PDF_SCALED.value,
+                metadata={"scale_fingerprint": scale_fp},
+            )
 
     if room.has_voids:
         return _abstention(
