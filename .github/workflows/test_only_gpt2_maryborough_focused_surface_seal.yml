@@ -1,0 +1,153 @@
+name: TEST ONLY GPT2 Maryborough Focused Surface Seal
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  focused-surfaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install production OCR backend
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Seal source-proven Maryborough surfaces
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/maryborough-focused
+          git rev-parse HEAD > artifacts/maryborough-focused/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/maryborough-focused/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/maryborough-focused/run.log
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+          from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
+          from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
+          from pb_source_closed_run_export import combine_source_closed_runs
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          project_id = "au_qld_maryborough_service_station"
+          claim = collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+
+          room_quantities = tuple(
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          )
+          floor_quantities = tuple(
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          )
+
+          runs = []
+          if floor_quantities:
+              floor_run = seal_live_floor_area_run(
+                  claim,
+                  workspace_id=1,
+                  project_id=project_id,
+              )
+              Path("artifacts/maryborough-focused/floor_area.json").write_text(
+                  floor_run.to_json(), encoding="utf-8"
+              )
+              runs.append(floor_run)
+
+          ceiling_result = collect_live_ceiling_lining_claims(
+              path,
+              pages=(6,),
+              authoritative_room_area_quantities=tuple(
+                  claim.room_area_quantity_evidence
+              ),
+          )
+          ceiling_quantities = tuple(
+              q for q in publish_live_ceiling_area_quantities(ceiling_result)
+              if not q.abstained and q.value is not None
+          )
+          if ceiling_quantities:
+              ceiling_run = seal_live_ceiling_area_run(
+                  ceiling_result,
+                  workspace_id=1,
+                  project_id=project_id,
+              )
+              Path("artifacts/maryborough-focused/ceiling_area.json").write_text(
+                  ceiling_run.to_json(), encoding="utf-8"
+              )
+              runs.append(ceiling_run)
+
+          combined = None
+          if runs:
+              combined = combine_source_closed_runs(runs, project_id=project_id)
+              Path("artifacts/maryborough-focused/surfaces.json").write_text(
+                  combined.to_json(), encoding="utf-8"
+              )
+
+          summary = {
+              "claim_status": getattr(claim.status, "value", str(claim.status)),
+              "canonical_room_count": len(claim.canonical_rooms),
+              "canonical_floor_count": len(claim.canonical_floors),
+              "room_area_quantities": [
+                  {
+                      "quantity_id": q.quantity_id,
+                      "room_label": dict(q.metadata or {}).get("room_label"),
+                      "value": q.value,
+                      "unit": q.unit,
+                      "authority": q.authority,
+                  }
+                  for q in room_quantities
+              ],
+              "floor_quantities": [
+                  {
+                      "quantity_id": q.quantity_id,
+                      "value": q.value,
+                      "unit": q.unit,
+                      "input_entity_ids": list(q.input_entity_ids),
+                  }
+                  for q in floor_quantities
+              ],
+              "ceiling_quantities": [
+                  {
+                      "quantity_id": q.quantity_id,
+                      "value": q.value,
+                      "unit": q.unit,
+                      "input_entity_ids": list(q.input_entity_ids),
+                  }
+                  for q in ceiling_quantities
+              ],
+              "floor_count": len(floor_quantities),
+              "ceiling_count": len(ceiling_quantities),
+              "combined_quantity_count": (
+                  0 if combined is None else len(combined.quantities)
+              ),
+              "combined_run_id": (
+                  None if combined is None else combined.run_id
+              ),
+          }
+          Path("artifacts/maryborough-focused/summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+      - name: Upload focused surfaces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt2-maryborough-focused-surfaces
+          path: artifacts/maryborough-focused
+          retention-days: 1
