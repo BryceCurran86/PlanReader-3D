@@ -1105,6 +1105,7 @@ def _trusted_native_dimensions_for_page(
                 dimension_line_observation_ids=dimension_line_ids,
                 witness_observation_ids=tuple(sorted(witness_ids)),
                 witness_geometries=concrete_witness_geometries,
+                text_bbox=_finite_bbox(observation.bbox),
             )
         )
 
