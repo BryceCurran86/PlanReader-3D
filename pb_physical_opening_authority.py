@@ -643,24 +643,69 @@ def _raster_to_page_box(
     return (box[1], box[0], box[3], box[2])
 
 
+def _raster_axis_registration_scales(
+    axis: str,
+    registration_scale: tuple[float, float],
+) -> tuple[float, float]:
+    sx, sy = (float(value) for value in registration_scale)
+    if (
+        not math.isfinite(sx)
+        or not math.isfinite(sy)
+        or sx <= 0.0
+        or sy <= 0.0
+    ):
+        raise ValueError("registration_scale must contain positive finite values")
+    if axis == "horizontal":
+        return sx, sy
+    if axis == "vertical":
+        return sy, sx
+    raise ValueError("axis must be horizontal or vertical")
+
+
+def _raster_scaled_px(
+    value_pt: float,
+    dpi: int,
+    scale: float,
+    *,
+    minimum: int = 1,
+) -> int:
+    if not math.isfinite(float(scale)) or float(scale) <= 0.0:
+        raise ValueError("registration scale must be positive and finite")
+    return max(
+        int(minimum),
+        int(round(float(value_pt) * float(dpi) / 72.0 * float(scale))),
+    )
+
+
 def _raster_band_boxes(
     thick: np.ndarray,
     *,
     dpi: int,
     axis: str,
+    registration_scale: tuple[float, float] = (1.0, 1.0),
 ) -> tuple[tuple[int, int, int, int], ...]:
     """Return reviewed solid wall-band pieces in page pixel coordinates."""
 
     work = thick if axis == "horizontal" else np.ascontiguousarray(thick.T)
-    run = _raster_odd(_raster_px(RASTER_BAND_MIN_RUN_PT, dpi))
+    along_scale, cross_scale = _raster_axis_registration_scales(
+        axis,
+        registration_scale,
+    )
+    run = _raster_odd(
+        _raster_scaled_px(RASTER_BAND_MIN_RUN_PT, dpi, along_scale)
+    )
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (run, 1))
     band = cv2.morphologyEx(work, cv2.MORPH_OPEN, kernel)
     count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
         band,
         connectivity=8,
     )
-    solid = _raster_px(RASTER_POCHE_MIN_PT, dpi)
-    tmax = _raster_px(RASTER_BAND_MAX_THICKNESS_PT, dpi)
+    solid = _raster_scaled_px(RASTER_POCHE_MIN_PT, dpi, cross_scale)
+    tmax = _raster_scaled_px(
+        RASTER_BAND_MAX_THICKNESS_PT,
+        dpi,
+        cross_scale,
+    )
     boxes: list[tuple[int, int, int, int]] = []
     for index in range(1, int(count)):
         x = int(stats[index, cv2.CC_STAT_LEFT])
@@ -670,7 +715,8 @@ def _raster_band_boxes(
         if (
             height < solid
             or height > tmax
-            or width < RASTER_BAND_MIN_ASPECT * height
+            or (width / along_scale)
+            < RASTER_BAND_MIN_ASPECT * (height / cross_scale)
         ):
             continue
         analysis_box = (x, y, x + width - 1, y + height - 1)
@@ -714,11 +760,17 @@ def _raster_pair_flanks(
     boxes: Sequence[tuple[int, int, int, int]],
     *,
     dpi: int,
+    along_scale: float = 1.0,
+    cross_scale: float = 1.0,
 ) -> tuple[_RasterBandPair, ...]:
     """Pair each band only with the first real solid continuation in its row profile."""
 
-    window = _raster_px(_RASTER_END_WINDOW_PT, dpi)
-    min_gap_floor = _raster_px(_RASTER_MIN_OPENING_GAP_PT, dpi)
+    window = _raster_scaled_px(_RASTER_END_WINDOW_PT, dpi, along_scale)
+    min_gap_floor = _raster_scaled_px(
+        _RASTER_MIN_OPENING_GAP_PT,
+        dpi,
+        along_scale,
+    )
     width = work_thick.shape[1]
     box_array = np.asarray(tuple(boxes), dtype=np.int64).reshape(-1, 4)
     pairs: list[_RasterBandPair] = []
@@ -778,10 +830,13 @@ def _raster_pair_flanks(
         gap_x1 = position - 1
         gap = gap_x1 - gap_x0 + 1
         thickness = max(min(thickness_a, thickness_b), 1)
-        if gap < max(
-            min_gap_floor,
-            int(math.ceil(_RASTER_MIN_GAP_THICKNESS_RATIO * thickness)),
-        ):
+        relative_gap_floor = int(math.ceil(
+            _RASTER_MIN_GAP_THICKNESS_RATIO
+            * float(thickness)
+            * float(along_scale)
+            / float(cross_scale)
+        ))
+        if gap < max(min_gap_floor, relative_gap_floor):
             reasons.append("raster_gap_too_small")
         if gap < 1:
             continue
@@ -804,8 +859,14 @@ def _raster_frame_line_groups(
     pair: _RasterBandPair,
     *,
     dpi: int,
+    cross_scale: float = 1.0,
 ) -> tuple[tuple[int, int], ...]:
-    pad = _raster_px(_RASTER_LINE_ROW_PAD_PT, dpi, minimum=1)
+    pad = _raster_scaled_px(
+        _RASTER_LINE_ROW_PAD_PT,
+        dpi,
+        cross_scale,
+        minimum=1,
+    )
     r0 = max(pair.row0 - pad, 0)
     r1 = min(pair.row1 + pad, line_mask.shape[0] - 1)
     region = line_mask[r0 : r1 + 1, pair.gap_x0 : pair.gap_x1 + 1]
@@ -935,6 +996,7 @@ def _raster_door_swing_solutions(
     *,
     dpi: int,
     perpendicular_scale_ratio: float,
+    along_scale: float = 1.0,
 ) -> tuple[_RasterDoorSwingSolution, ...]:
     """Return every reviewed leaf + quarter-arc configuration for one clean gap.
 
@@ -943,7 +1005,11 @@ def _raster_door_swing_solutions(
     """
 
     gap = pair.gap_x1 - pair.gap_x0 + 1
-    pad = _raster_px(_RASTER_SWING_LEAF_JAMB_PAD_PT, dpi)
+    pad = _raster_scaled_px(
+        _RASTER_SWING_LEAF_JAMB_PAD_PT,
+        dpi,
+        along_scale,
+    )
     found: list[_RasterDoorSwingSolution] = []
     for hinge_end, hinge_x, direction in (
         ("low", pair.gap_x0, 1),
@@ -1380,8 +1446,16 @@ class PhysicalOpeningAuthority:
                 seed.revision_id,
                 seed.page_id,
             )
+            registration_scale = producer.raster_opening_registration_scale(
+                seed.revision_id,
+                seed.page_id,
+            )
         except Exception:
             image_placements = ()
+            registration_scale = None
+        if registration_scale is None:
+            self._raster_framed_candidate_cache[cache_key] = ()
+            return ()
 
         encoded = np.frombuffer(png_bytes, dtype=np.uint8)
         gray = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
@@ -1390,11 +1464,20 @@ class PhysicalOpeningAuthority:
             return ()
         mass = (gray < RASTER_MASS_THRESHOLD).astype(np.uint8)
         line_mask = (gray < RASTER_LINE_THRESHOLD).astype(np.uint8)
-        solid = _raster_odd(_raster_px(RASTER_POCHE_MIN_PT, dpi))
+        scale_x, scale_y = registration_scale
+        solid_x = _raster_odd(
+            _raster_scaled_px(RASTER_POCHE_MIN_PT, dpi, scale_x)
+        )
+        solid_y = _raster_odd(
+            _raster_scaled_px(RASTER_POCHE_MIN_PT, dpi, scale_y)
+        )
         thick = cv2.morphologyEx(
             mass,
             cv2.MORPH_OPEN,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (solid, solid)),
+            cv2.getStructuringElement(
+                cv2.MORPH_RECT,
+                (solid_x, solid_y),
+            ),
         )
         thin_mask = _raster_hairline_mask(line_mask, thick)
 
@@ -1518,8 +1601,13 @@ class PhysicalOpeningAuthority:
         def swing_leaf_support(
             solution: _RasterDoorSwingSolution,
             axis: str,
+            along_scale: float,
         ) -> tuple[SourceObservationRecord, ...]:
-            pad = _raster_px(_RASTER_SWING_LEAF_JAMB_PAD_PT, dpi)
+            pad = _raster_scaled_px(
+                _RASTER_SWING_LEAF_JAMB_PAD_PT,
+                dpi,
+                along_scale,
+            )
             expected_start = (
                 solution.face_y - solution.perpendicular_radius_px
                 if solution.side == -1
@@ -1576,7 +1664,16 @@ class PhysicalOpeningAuthority:
         ambiguous_support_ids: set[str] = set()
         framed_gap_boxes: set[tuple[float, float, float, float]] = set()
         for axis in ("horizontal", "vertical"):
-            page_boxes = _raster_band_boxes(thick, dpi=dpi, axis=axis)
+            along_scale, cross_scale = _raster_axis_registration_scales(
+                axis,
+                registration_scale,
+            )
+            page_boxes = _raster_band_boxes(
+                thick,
+                dpi=dpi,
+                axis=axis,
+                registration_scale=registration_scale,
+            )
             analysis_boxes = tuple(
                 _raster_analysis_box(box, axis)
                 for box in page_boxes
@@ -1600,6 +1697,8 @@ class PhysicalOpeningAuthority:
                 work_thick,
                 analysis_boxes,
                 dpi=dpi,
+                along_scale=along_scale,
+                cross_scale=cross_scale,
             ):
                 if pair.reasons:
                     continue
@@ -1620,6 +1719,7 @@ class PhysicalOpeningAuthority:
                     work_line,
                     pair,
                     dpi=dpi,
+                    cross_scale=cross_scale,
                 )
                 face_continues = (
                     bool(groups)
@@ -1671,6 +1771,7 @@ class PhysicalOpeningAuthority:
                     pair,
                     dpi=dpi,
                     perpendicular_scale_ratio=swing_scale_ratio,
+                    along_scale=along_scale,
                 )
                 if len(solutions) > 1:
                     ambiguous_support_ids.update(
@@ -1680,7 +1781,11 @@ class PhysicalOpeningAuthority:
                     continue
                 if len(solutions) != 1 or gap_box_pt in framed_gap_boxes:
                     continue
-                leaf = swing_leaf_support(solutions[0], axis)
+                leaf = swing_leaf_support(
+                    solutions[0],
+                    axis,
+                    along_scale,
+                )
                 if not leaf:
                     continue
                 support = (*support_a, *support_b, *leaf)
