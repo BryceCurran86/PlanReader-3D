@@ -97,11 +97,56 @@ jobs:
                   decision_scope_id=selector.decision_scope_id,
               )
           )
+          all_split=[
+              {
+                  "label":norm(c.label),
+                  "record_id":c.record_id,
+                  "word_face_ids":[str(x) for x in c.word_face_ids],
+                  "source_room_face_record_ids":[str(x) for x in c.source_room_face_record_ids],
+              }
+              for c in label_scope.split_face_candidates
+          ]
+          label_records=[
+              {
+                  "label":norm(r.label),
+                  "record_id":r.record_id,
+                  "face_id":str(r.face_id),
+                  "source_room_face_record_id":str(r.source_room_face_record_id),
+              }
+              for r in label_scope.records
+          ]
           candidates=[
               c for c in label_scope.split_face_candidates
               if norm(c.label)==TARGET
           ]
-          assert len(candidates)==1, len(candidates)
+          if len(candidates)!=1:
+              from pb_source_composite_room_face_authority import compose_grid_separated_room_faces
+              composite=compose_grid_separated_room_faces(
+                  wall_scope=wall_scope,
+                  room_scope=room_scope,
+                  label_scope=label_scope,
+              )
+              print(json.dumps({
+                  "source_sha256":sha,
+                  "wall_scope_status":getattr(wall_scope.status,"value",str(wall_scope.status)),
+                  "scope_complete":wall_scope.scope_complete,
+                  "label_scope_status":getattr(label_scope.status,"value",str(label_scope.status)),
+                  "label_scope_reason_codes":list(label_scope.reason_codes),
+                  "label_records":label_records,
+                  "split_face_candidates":all_split,
+                  "target_split_candidate_count":len(candidates),
+                  "composite_status":getattr(composite.status,"value",str(composite.status)),
+                  "composite_reason_codes":list(composite.reason_codes),
+                  "composite_records":[{
+                      "label":norm(r.label),
+                      "record_id":r.record_id,
+                      "constituent_face_ids":list(r.constituent_face_ids),
+                      "separator_wall_ids":list(r.separator_wall_ids),
+                      "bounding_wall_ids":list(r.bounding_wall_ids),
+                  } for r in composite.records],
+                  "composite_unresolved_label_candidate_ids":list(composite.unresolved_label_candidate_ids),
+              },indent=2,sort_keys=True))
+              raise SystemExit(0)
           candidate=candidates[0]
           face_by_id={str(r.face_id):r for r in room_scope.records}
           face_ids=tuple(str(x) for x in candidate.word_face_ids)
