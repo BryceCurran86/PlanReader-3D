@@ -173,18 +173,18 @@ def generate_project_handoff(
     )
 
     if topology_restricted:
-        source_owned_execution_pages = tuple(
-            sorted(set(topology_pages) | set(room_area_support_pages))
-        )
         if clean_family_group == "core":
+            # Core execution is intentionally topology-only.
             execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
         else:
-            execution_pages = (
-                source_owned_execution_pages
-                if source_owned_execution_pages
-                else tuple(topology_pages)
-            )
+            # Surface semantics may be authenticated by schedules, legends,
+            # reflected-ceiling plans and other non-topology source pages.
+            # Keep the full selected source universe visible to semantic
+            # authorities while topology remains restricted by topology_pages
+            # and room measurement remains restricted by the explicit support
+            # page set below.
+            execution_pages = tuple(all_pages)
             execution_room_support_pages = (
                 room_area_support_pages
                 if room_area_support_pages
