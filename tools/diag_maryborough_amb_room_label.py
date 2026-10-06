@@ -11,7 +11,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_room_face_authority import SourceRoomFaceSelector, build_source_room_face_authority
 from pb_source_room_label_authority import SourceRoomLabelProducer, SourceRoomLabelSelector, _point_in_polygon
 from pb_source_visibility_authority import SourceVisibilityProducer
-from pb_viewport_segmentation_authority import DrawingViewType
+from pb_drawing_evidence_binding import DrawingViewType
 
 SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
 PAGES=("7","11")
