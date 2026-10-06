@@ -112,3 +112,31 @@ def test_competing_image_transforms_fail_closed() -> None:
         "horizontal",
         (first, second),
     ) is None
+
+
+def test_page_registration_scale_is_quarter_turn_symmetric() -> None:
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    original = NativePageImagePlacement(
+        bbox_pt=(0.0, 0.0, 320.0, 180.0),
+        pixel_width=640,
+        pixel_height=360,
+    )
+    rotated = NativePageImagePlacement(
+        bbox_pt=(0.0, 0.0, 320.0, 180.0),
+        pixel_width=360,
+        pixel_height=640,
+    )
+
+    original_scale = SourceVisibilityProducer._registration_scale_from_image_placements(
+        (original,)
+    )
+    rotated_scale = SourceVisibilityProducer._registration_scale_from_image_placements(
+        (rotated,)
+    )
+
+    assert original_scale == pytest.approx((1.0, 1.0))
+    assert rotated_scale is not None
+    assert rotated_scale[0] == pytest.approx(1.0 / rotated_scale[1])
+    assert rotated_scale[0] > 1.0
+    assert rotated_scale[1] < 1.0
