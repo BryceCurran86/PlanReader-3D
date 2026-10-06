@@ -191,6 +191,36 @@ def test_selected_project_scoreboard_reports_complete_two_project_score(
     assert ledger.missing_execution_project_ids == ()
 
 
+def test_selected_project_scoreboard_scores_verified_denominator_from_incomplete_manifests(
+    tmp_path,
+) -> None:
+    root, sealed, identities = _fixture(tmp_path)
+    for project_id in ("p1", "p2"):
+        manifest_path = root / "projects" / project_id / "source_manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["status"] = "INCOMPLETE"
+        payload["reason_codes"] = ["remaining_truth_universe_not_closed"]
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    score, ledger = score_selected_projects(
+        root=root,
+        project_ids=("p1", "p2"),
+        sealed_dir=sealed,
+        identity_map_dir=identities,
+    )
+
+    assert score.status == "COMPLETE_CURRENT_TRUTH_SET"
+    assert score.source_closed_truth_items == 2
+    assert score.executed_denominator == 2
+    assert score.matched_within_tolerance == 2
+    assert score.development_accuracy == pytest.approx(1.0)
+    assert [row.manifest_status for row in score.project_results] == [
+        "INCOMPLETE",
+        "INCOMPLETE",
+    ]
+    assert ledger.failure_items == ()
+
+
 def test_selected_project_scoreboard_requires_every_selected_sealed_run(
     tmp_path,
 ) -> None:
