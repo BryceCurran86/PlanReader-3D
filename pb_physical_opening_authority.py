@@ -32,6 +32,7 @@ from pb_plan_opening_detection_indexed_v172 import (
     detect_gap_candidates_indexed,
 )
 from pb_source_observation_authority import (
+    NativePageImagePlacement,
     ObservationSelector,
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
@@ -278,6 +279,7 @@ class _RasterDoorSwingSolution:
     face_y: int
     direction: int
     radius_px: int
+    perpendicular_radius_px: int
     arc_coverage: float
     leaf_coverage: float
 
@@ -849,10 +851,59 @@ def _raster_hairline_mask(
     return (line_mask & (halo == 0)).astype(np.uint8)
 
 
+def _raster_swing_perpendicular_scale_ratio(
+    gap_box_pt: tuple[float, float, float, float],
+    axis: str,
+    placements: Sequence[NativePageImagePlacement],
+) -> Optional[float]:
+    """Return the producer-proved affine scale ratio for one raster gap.
+
+    A source-image circle may render as an ellipse when the PDF placement uses
+    different X/Y scales. The ratio is derived only from the exact embedded
+    image's intrinsic pixels and source-page placement. Competing transforms
+    fail closed.
+    """
+
+    x0, y0, x1, y1 = (float(value) for value in gap_box_pt)
+    matches: list[float] = []
+    tol = 1e-6
+    for placement in placements:
+        bx0, by0, bx1, by1 = placement.bbox_pt
+        if not (
+            bx0 - tol <= x0
+            and x1 <= bx1 + tol
+            and by0 - tol <= y0
+            and y1 <= by1 + tol
+        ):
+            continue
+        sx = (bx1 - bx0) / float(placement.pixel_width)
+        sy = (by1 - by0) / float(placement.pixel_height)
+        if (
+            not math.isfinite(sx)
+            or not math.isfinite(sy)
+            or sx <= 0.0
+            or sy <= 0.0
+        ):
+            continue
+        ratio = sy / sx if axis == "horizontal" else sx / sy
+        if math.isfinite(ratio) and ratio > 0.0:
+            matches.append(float(ratio))
+    if not matches:
+        return None
+    first = matches[0]
+    if any(
+        not math.isclose(value, first, rel_tol=1e-6, abs_tol=1e-9)
+        for value in matches[1:]
+    ):
+        return None
+    return first
+
+
 def _raster_swing_arc_coverage(
     thin_mask: np.ndarray,
     center: tuple[float, float],
     radius: float,
+    perpendicular_radius: float,
     *,
     side: int,
     direction: int,
@@ -866,7 +917,7 @@ def _raster_swing_arc_coverage(
     for degrees in range(0, 91, _RASTER_SWING_ARC_SAMPLE_STEP_DEG):
         theta = math.radians(degrees)
         x = cx + direction * radius * math.cos(theta)
-        y = cy + side * radius * math.sin(theta)
+        y = cy + side * perpendicular_radius * math.sin(theta)
         xi, yi = int(round(x)), int(round(y))
         total += 1
         if (
@@ -883,6 +934,7 @@ def _raster_door_swing_solutions(
     pair: _RasterBandPair,
     *,
     dpi: int,
+    perpendicular_scale_ratio: float,
 ) -> tuple[_RasterDoorSwingSolution, ...]:
     """Return every reviewed leaf + quarter-arc configuration for one clean gap.
 
@@ -898,7 +950,7 @@ def _raster_door_swing_solutions(
         ("high", pair.gap_x1, -1),
     ):
         for side, face_y in ((-1, pair.row0), (1, pair.row1)):
-            best: Optional[tuple[float, int]] = None
+            best: Optional[tuple[float, int, int]] = None
             low_radius = max(
                 int(math.ceil(
                     gap * (1.0 - _RASTER_SWING_ARC_RADIUS_TOLERANCE)
@@ -909,27 +961,38 @@ def _raster_door_swing_solutions(
                 gap * (1.0 + _RASTER_SWING_ARC_RADIUS_TOLERANCE)
             ))
             for radius in range(low_radius, high_radius + 1):
+                perpendicular_radius = max(
+                    int(round(float(radius) * perpendicular_scale_ratio)),
+                    2,
+                )
                 coverage = _raster_swing_arc_coverage(
                     thin_mask,
                     (float(hinge_x), float(face_y)),
                     float(radius),
+                    float(perpendicular_radius),
                     side=side,
                     direction=direction,
                 )
                 if best is None or coverage > best[0]:
-                    best = (coverage, radius)
+                    best = (coverage, radius, perpendicular_radius)
             if best is None or best[0] < _RASTER_SWING_ARC_MIN_COVERAGE:
                 continue
 
-            coverage, radius = best
+            coverage, radius, perpendicular_radius = best
             leaf_x0 = hinge_x - pad
             leaf_x1 = hinge_x + pad
             if side == -1:
-                rows = slice(max(face_y - radius, 0), face_y)
+                rows = slice(
+                    max(face_y - perpendicular_radius, 0),
+                    face_y,
+                )
             else:
                 rows = slice(
                     face_y + 1,
-                    min(face_y + 1 + radius, thin_mask.shape[0]),
+                    min(
+                        face_y + 1 + perpendicular_radius,
+                        thin_mask.shape[0],
+                    ),
                 )
             strip = thin_mask[
                 rows,
@@ -947,6 +1010,7 @@ def _raster_door_swing_solutions(
                 face_y=int(face_y),
                 direction=int(direction),
                 radius_px=int(radius),
+                perpendicular_radius_px=int(perpendicular_radius),
                 arc_coverage=float(coverage),
                 leaf_coverage=float(leaf_coverage),
             ))
@@ -1311,6 +1375,13 @@ class PhysicalOpeningAuthority:
         if int(getattr(native_frame, "rotation", 0) or 0) != 0:
             self._raster_framed_candidate_cache[cache_key] = ()
             return ()
+        try:
+            image_placements = producer.raster_opening_image_placements(
+                seed.revision_id,
+                seed.page_id,
+            )
+        except Exception:
+            image_placements = ()
 
         encoded = np.frombuffer(png_bytes, dtype=np.uint8)
         gray = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
@@ -1450,14 +1521,14 @@ class PhysicalOpeningAuthority:
         ) -> tuple[SourceObservationRecord, ...]:
             pad = _raster_px(_RASTER_SWING_LEAF_JAMB_PAD_PT, dpi)
             expected_start = (
-                solution.face_y - solution.radius_px
+                solution.face_y - solution.perpendicular_radius_px
                 if solution.side == -1
                 else solution.face_y + 1
             )
             expected_end = (
                 solution.face_y - 1
                 if solution.side == -1
-                else solution.face_y + solution.radius_px
+                else solution.face_y + solution.perpendicular_radius_px
             )
             expected_start, expected_end = sorted(
                 (float(expected_start), float(expected_end))
@@ -1588,10 +1659,18 @@ class PhysicalOpeningAuthority:
                         framed_gap_boxes.add(gap_box_pt)
                         continue
 
+                swing_scale_ratio = _raster_swing_perpendicular_scale_ratio(
+                    gap_box_pt,
+                    axis,
+                    image_placements,
+                )
+                if swing_scale_ratio is None:
+                    continue
                 solutions = _raster_door_swing_solutions(
                     work_thin,
                     pair,
                     dpi=dpi,
+                    perpendicular_scale_ratio=swing_scale_ratio,
                 )
                 if len(solutions) > 1:
                     ambiguous_support_ids.update(
