@@ -32,7 +32,10 @@ from pb_live_opening_source_closed_export import (
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
-from pb_live_room_area_source_closed_export import seal_live_room_area_run
+from pb_live_floor_area_quantity_publication import (
+    publish_live_floor_area_quantities,
+)
+from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
 from pb_migration_contracts import QuantityEvidence
 from pb_source_closed_run_export import (
     SealedSourceClosedRun,
@@ -142,12 +145,9 @@ def generate_project_handoff(
         pdf_path
     )
     all_pages = tuple(range(page_count))
-    topology_restricted = bool(topology_pages) and (
-        tuple(topology_pages) != tuple(all_pages)
-    )
     topology_mode = (
         "source_classified_scope"
-        if topology_restricted
+        if topology_pages and tuple(topology_pages) != tuple(all_pages)
         else "live_authority_all_pages_fallback"
     )
 
@@ -179,7 +179,7 @@ def generate_project_handoff(
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
             pages=all_pages,
-            topology_pages=(topology_pages if topology_restricted else None),
+            topology_pages=(topology_pages if topology_pages else None),
             # Mirror customer runtime: only source-classified evidence pages may
             # activate cross-view room-area measurement. An empty support scope
             # means "do not add cross-view metric authority", never "scan all".
@@ -216,15 +216,15 @@ def generate_project_handoff(
 
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
-    room_quantities = _non_abstained(
-        getattr(claim, "room_area_quantity_evidence", ())
+    floor_quantities = _non_abstained(
+        publish_live_floor_area_quantities(claim)
     )
-    summary["family_counts"]["room_area"] = len(room_quantities)
-    if room_quantities:
+    summary["family_counts"]["floor_area"] = len(floor_quantities)
+    if floor_quantities:
         family_runs.append(
             (
-                "room_area",
-                seal_live_room_area_run(
+                "floor_area",
+                seal_live_floor_area_run(
                     claim,
                     workspace_id=int(workspace_id),
                     project_id=project_id,
