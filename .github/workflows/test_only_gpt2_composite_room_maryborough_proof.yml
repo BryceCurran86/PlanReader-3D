@@ -64,17 +64,32 @@ jobs:
               for q in claim.room_area_quantity_evidence
               if not q.abstained
           ]
+          floor_rows=[
+              {
+                  "canonical_floor_id":floor.canonical_floor_id,
+                  "room_entity_id":floor.room_entity_id,
+                  "metric_area_m2":floor.metric_area_m2,
+                  "metric_area_quantity_id":floor.metric_area_quantity_id,
+                  "metric_area_authority":floor.metric_area_authority,
+              }
+              for floor in claim.canonical_floors
+          ]
           targets=("FOOD PREP","COLD ROOM","FREEZER","DRY STORE","SALES","WASH UP","FOOD SERVICE","POS COUNTER","M-AMB","F-AMB","TRUCK DRIVER LOUNGE","PWD","AIRLOCK","LAUNDRY","OFFICE")
           rows={}
           for name in targets:
+              target_rooms=[row for row in labelled if row["label"]==name]
+              target_room_ids={row["canonical_room_id"] for row in target_rooms}
               rows[name]={
                   "label_present":name in labels,
-                  "rooms":[row for row in labelled if row["label"]==name],
+                  "rooms":target_rooms,
+                  "floors":[row for row in floor_rows if row["room_entity_id"] in target_room_ids],
                   "firm_areas":[row for row in firm if norm(row.get("room_label"))==name],
               }
 
           assert rows["POS COUNTER"]["label_present"], rows["POS COUNTER"]
+          assert len(rows["POS COUNTER"]["floors"]) == 1, rows["POS COUNTER"]
           assert rows["FOOD SERVICE"]["label_present"], rows["FOOD SERVICE"]
+          assert len(rows["FOOD SERVICE"]["floors"]) == 1, rows["FOOD SERVICE"]
           assert not rows["DRY STORE"]["label_present"], rows["DRY STORE"]
           assert not rows["WASH UP"]["label_present"], rows["WASH UP"]
           assert not rows["TRUCK DRIVER LOUNGE"]["label_present"], rows["TRUCK DRIVER LOUNGE"]
