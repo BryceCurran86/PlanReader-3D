@@ -1,0 +1,30 @@
+name: DIAG Compact Semantic Test Order
+
+on:
+  pull_request:
+    branches:
+      - gptmax/owned-compact-semantic-bridge-v1
+
+jobs:
+  order:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Ambiguity alone
+        run: |
+          PYTHONPATH=. pytest -q tests/test_opening_label_dimension_authority.py::test_two_distinct_eligible_callouts_conflict_instead_of_picking_closest
+      - name: New compact positives then ambiguity
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_opening_label_dimension_authority.py::test_owned_compact_source_descriptors_unlock_dimensions_via_semantics \
+            tests/test_opening_label_dimension_authority.py::test_conflicting_compact_descriptor_remains_fail_closed \
+            tests/test_opening_label_dimension_authority.py::test_two_distinct_eligible_callouts_conflict_instead_of_picking_closest
