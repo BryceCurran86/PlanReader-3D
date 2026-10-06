@@ -195,6 +195,13 @@ class SourceDecodeCoverageRecord:
 
 
 @dataclass(frozen=True)
+class NativePageImagePlacement:
+    bbox_pt: tuple[float, float, float, float]
+    pixel_width: int
+    pixel_height: int
+
+
+@dataclass(frozen=True)
 class ProducerSnapshotRecord:
     snapshot_id: str
     document_id: str
@@ -755,6 +762,100 @@ class SourceObservationProducer:
                         continue
                     regions.add(tuple(round(value, 4) for value in geometry))
             return tuple(sorted(regions))
+        finally:
+            pdf.close()
+
+    def native_page_image_placements(
+        self,
+        *,
+        document_id: str,
+        revision_id: str,
+        source_sha256: str,
+        snapshot_id: str,
+        page_id: str,
+    ) -> tuple[NativePageImagePlacement, ...]:
+        """Return producer-derived image placement + intrinsic pixel geometry.
+
+        This is source registration evidence only. Callers address immutable
+        lineage and cannot supply image sizes, transforms, crops, or geometry.
+        """
+
+        # Reuse the existing source-owned validation boundary first.
+        self.native_page_image_regions(
+            document_id=document_id,
+            revision_id=revision_id,
+            source_sha256=source_sha256,
+            snapshot_id=snapshot_id,
+            page_id=page_id,
+        )
+
+        revision = self._store.revisions.get(revision_id)
+        source_bytes = self._store.source_bytes_by_revision.get(revision_id)
+        if revision is None or source_bytes is None:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: source lineage unavailable"
+            )
+        try:
+            page_number = int(page_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{SOURCE_UNAVAILABLE}: invalid page id {page_id!r}"
+            ) from exc
+
+        try:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+        except Exception as exc:
+            raise ProducerIntegrityError(
+                f"{PRODUCER_INTEGRITY_FAILURE}: stored PDF no longer decodes"
+            ) from exc
+        try:
+            if page_number > int(pdf.page_count):
+                raise ValueError(
+                    f"{SOURCE_UNAVAILABLE}: page {page_id} out of range"
+                )
+            page = pdf.load_page(page_number - 1)
+            placements: set[NativePageImagePlacement] = set()
+            for image in page.get_images(full=True) or ():
+                if len(image) < 4:
+                    continue
+                try:
+                    xref = int(image[0])
+                    pixel_width = int(image[2])
+                    pixel_height = int(image[3])
+                except (TypeError, ValueError):
+                    continue
+                if pixel_width <= 0 or pixel_height <= 0:
+                    continue
+                try:
+                    rects = page.get_image_rects(xref) or ()
+                except Exception:
+                    continue
+                for rect in rects:
+                    bbox = (
+                        float(rect.x0),
+                        float(rect.y0),
+                        float(rect.x1),
+                        float(rect.y1),
+                    )
+                    if (
+                        not all(math.isfinite(value) for value in bbox)
+                        or bbox[2] <= bbox[0]
+                        or bbox[3] <= bbox[1]
+                    ):
+                        continue
+                    placements.add(NativePageImagePlacement(
+                        bbox_pt=tuple(round(value, 6) for value in bbox),
+                        pixel_width=pixel_width,
+                        pixel_height=pixel_height,
+                    ))
+            return tuple(sorted(
+                placements,
+                key=lambda item: (
+                    item.bbox_pt,
+                    item.pixel_width,
+                    item.pixel_height,
+                ),
+            ))
         finally:
             pdf.close()
 
@@ -1533,6 +1634,7 @@ __all__ = [
     "SOURCE_OBSERVATION_EXISTS",
     "SOURCE_UNAVAILABLE",
     "STALE_REVISION",
+    "NativePageImagePlacement",
     "ObservationSelector",
     "ProducerIntegrityError",
     "ProducerSnapshotRecord",
