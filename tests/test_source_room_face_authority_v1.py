@@ -266,6 +266,14 @@ def test_planar_face_split_at_partition_keeps_room_face_authority() -> None:
     assert result.reason_codes == (SOURCE_ROOM_FACE_SCOPE_RESOLVED,)
     assert len(result.records) == 2
     assert all("partition" in row.bounding_wall_ids for row in result.records)
+    partition_edges = [
+        edge
+        for row in result.records
+        for wall_id, edge in row.boundary_wall_edges
+        if wall_id == "partition"
+    ]
+    assert len(partition_edges) == 2
+    assert partition_edges[0] == partition_edges[1]
 
 def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> None:
     def record(wall_id: str, first, second):
