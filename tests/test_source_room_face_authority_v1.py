@@ -106,11 +106,15 @@ def test_canonical_polygon_collapses_only_exact_retraced_spur() -> None:
 
 
 def test_canonical_polygon_collapses_multiple_exact_retraced_spurs() -> None:
-    clean = (
+    # Removing a retraced spur retains its A vertex. If that retained A happens
+    # to be collinear on a real boundary edge, this normalizer deliberately does
+    # NOT simplify it further: collinear simplification is a different rule.
+    expected = (
         (0.0, 0.0),
         (20.0, 0.0),
         (20.0, 20.0),
         (0.0, 20.0),
+        (0.0, 15.0),
     )
     with_spurs = (
         (0.0, 0.0),
@@ -124,7 +128,7 @@ def test_canonical_polygon_collapses_multiple_exact_retraced_spurs() -> None:
         (0.0, 15.0),
     )
 
-    assert _canonical_polygon(with_spurs) == _canonical_polygon(clean)
+    assert _canonical_polygon(with_spurs) == _canonical_polygon(expected)
 
 
 def test_canonical_polygon_collapses_consecutive_duplicate_before_spur() -> None:
