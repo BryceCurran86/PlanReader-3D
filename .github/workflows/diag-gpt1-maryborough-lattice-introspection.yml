@@ -100,7 +100,43 @@ jobs:
                   "vertical_x_sample":[r["x1"] for r in fams["v"][:30]],
               }
 
+          # Aggregate same-style orthogonal singleton fragments onto source
+          # coordinates. This shows whether apparent long dividers are encoded
+          # as many fragments rather than single primitives.
+          aggregate={}
+          for style,fams in grouped.items():
+              entry={"horizontal":[],"vertical":[]}
+              for axis,key in (("horizontal","h"),("vertical","v")):
+                  coord_groups=defaultdict(list)
+                  for row in fams[key]:
+                      coord = row["y1"] if axis=="horizontal" else row["x1"]
+                      start,end = (
+                          sorted((row["x1"],row["x2"]))
+                          if axis=="horizontal"
+                          else sorted((row["y1"],row["y2"]))
+                      )
+                      coord_groups[round(coord,2)].append((start,end))
+                  for coord, intervals in sorted(coord_groups.items()):
+                      ordered=sorted(intervals)
+                      merged=[]
+                      for a,b in ordered:
+                          if not merged or a > merged[-1][1] + 1.0:
+                              merged.append([a,b])
+                          else:
+                              merged[-1][1]=max(merged[-1][1],b)
+                      total=sum(max(0.0,b-a) for a,b in merged)
+                      extent=(max(b for a,b in merged)-min(a for a,b in merged)) if merged else 0.0
+                      entry[axis].append({
+                          "coord":coord,
+                          "fragment_count":len(intervals),
+                          "merged_count":len(merged),
+                          "total_coverage":round(total,3),
+                          "extent":round(extent,3),
+                      })
+              aggregate[str(style)]=entry
+
           payload={
+              "aggregate_by_style":aggregate,
               "page_width":width,
               "page_height":height,
               "raw_segment_count":len(segments),
