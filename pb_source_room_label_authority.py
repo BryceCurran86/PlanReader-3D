@@ -539,6 +539,7 @@ class SourceRoomLabelProducer:
         targets: list[tuple[float, float, float, float]] = []
         rotations: set[int] = set()
         source_partitions: set[str] = set()
+        source_page_ids: set[str] = set()
         observation_ids: list[str] = []
 
         for word in line:
@@ -615,12 +616,19 @@ class SourceRoomLabelProducer:
             targets.append(raster_bbox)
             rotations.add(int(rotation))
             source_partitions.add(str(observation.source_partition_id))
+            source_page_ids.add(str(observation.page_id))
             observation_ids.append(str(observation.observation_id))
 
-        if len(rotations) != 1 or len(source_partitions) != 1 or not targets:
+        if (
+            len(rotations) != 1
+            or len(source_partitions) != 1
+            or len(source_page_ids) != 1
+            or not targets
+        ):
             return None
         rotation = next(iter(rotations))
         source_partition_id = next(iter(source_partitions))
+        source_page_id = next(iter(source_page_ids))
         raster_bbox = (
             min(value[0] for value in targets),
             min(value[1] for value in targets),
@@ -638,21 +646,7 @@ class SourceRoomLabelProducer:
                         revision_id=published.revision.revision_id,
                         source_sha256=published.revision.source_sha256,
                         snapshot_id=published.snapshot.snapshot_id,
-                        page_id=str(line[0].source_partition_id).split(":")[-1]
-                        if str(line[0].source_partition_id).startswith("page:")
-                        else str(
-                            self._source.text_integrity_authority()
-                            .resolve_text(
-                                ObservationSelector(
-                                    document_id=published.revision.document_id,
-                                    revision_id=published.revision.revision_id,
-                                    source_sha256=published.revision.source_sha256,
-                                    snapshot_id=published.snapshot.snapshot_id,
-                                    observation_id=line[0].observation_id,
-                                )
-                            )
-                            .receipt.page_id
-                        ),
+                        page_id=source_page_id,
                         dpi=float(dpi),
                         clip_pt=raster_bbox,
                     )
@@ -665,6 +659,7 @@ class SourceRoomLabelProducer:
                 or page_parent.revision_id != published.revision.revision_id
                 or page_parent.source_sha256 != published.revision.source_sha256
                 or str(page_parent.source_partition_id) != source_partition_id
+                or str(page_parent.page_id) != source_page_id
             ):
                 return None
             parent_ids.add(
