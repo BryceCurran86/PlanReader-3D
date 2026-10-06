@@ -1,0 +1,135 @@
+name: TEST ONLY GPT2 Maryborough viewport label scopes
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  viewport_label_scopes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Probe exact Maryborough viewport label scopes
+        run: |
+          mkdir -p artifacts/gpt2-maryborough-viewport-label-scopes
+          git rev-parse HEAD > artifacts/gpt2-maryborough-viewport-label-scopes/head_sha.txt
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > artifacts/gpt2-maryborough-viewport-label-scopes/source_sha256.txt
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt2-maryborough-viewport-label-scopes/run.log
+          import json
+          from pathlib import Path
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer,
+              SourceRoomLabelSelector,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload = path.read_bytes()
+          source = SourceVisibilityProducer(
+              producer_method="gpt2-viewport-label-probe",
+              producer_version="1.0",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id="gpt2-maryborough-viewport-label-probe",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          composition = compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+          )
+          viewport_wall_producer = PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,
+              page_ids=("7",),
+          )
+          viewport_wall_authority = viewport_wall_producer.authority()
+          viewport_room_authority = build_source_room_face_authority(viewport_wall_authority)
+          viewport_label_authority = SourceRoomLabelProducer.from_authorities(
+              source,
+              viewport_room_authority,
+              page_ids=("7",),
+          ).authority()
+
+          selectors = viewport_wall_authority.selectors_for_authenticated_viewports(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          out=[]
+          for wall_selector in selectors:
+              wall_scope = viewport_wall_authority.resolve_scope(wall_selector)
+              room_selector = SourceRoomFaceSelector(
+                  document_id=wall_selector.document_id,
+                  revision_id=wall_selector.revision_id,
+                  source_sha256=wall_selector.source_sha256,
+                  snapshot_id=wall_selector.snapshot_id,
+                  page_id=wall_selector.page_id,
+                  decision_scope_id=wall_selector.decision_scope_id,
+              )
+              room_scope = viewport_room_authority.resolve_scope(room_selector)
+              label_scope = viewport_label_authority.resolve_scope(
+                  SourceRoomLabelSelector(
+                      document_id=wall_selector.document_id,
+                      revision_id=wall_selector.revision_id,
+                      source_sha256=wall_selector.source_sha256,
+                      snapshot_id=wall_selector.snapshot_id,
+                      page_id=wall_selector.page_id,
+                      decision_scope_id=wall_selector.decision_scope_id,
+                  )
+              )
+              out.append({
+                  "decision_scope_id": wall_selector.decision_scope_id,
+                  "viewport_id": getattr(wall_scope, "viewport_id", None),
+                  "viewport_bbox": getattr(wall_scope, "viewport_bbox", None),
+                  "wall_status": getattr(wall_scope.status, "value", str(wall_scope.status)),
+                  "wall_reason_codes": list(wall_scope.reason_codes),
+                  "wall_count": len(wall_scope.records),
+                  "room_status": getattr(room_scope.status, "value", str(room_scope.status)),
+                  "room_reason_codes": list(room_scope.reason_codes),
+                  "room_count": len(room_scope.records),
+                  "room_scope_complete": bool(room_scope.scope_complete),
+                  "label_status": getattr(label_scope.status, "value", str(label_scope.status)),
+                  "label_reason_codes": list(label_scope.reason_codes),
+                  "label_count": len(label_scope.records),
+                  "labels": [
+                      {
+                          "label": record.label,
+                          "face_id": record.face_id,
+                          "source_room_face_record_id": record.source_room_face_record_id,
+                          "source_bbox": list(record.source_bbox),
+                          "authority_kinds": [w.authority_kind for w in record.word_evidence],
+                      }
+                      for record in label_scope.records
+                  ],
+              })
+          print(json.dumps({
+              "source_sha256": published.revision.source_sha256,
+              "selector_count": len(selectors),
+              "scopes": out,
+          }, sort_keys=True), flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-viewport-label-scopes
+          path: artifacts/gpt2-maryborough-viewport-label-scopes
+          retention-days: 1
