@@ -105,6 +105,48 @@ def test_canonical_polygon_collapses_only_exact_retraced_spur() -> None:
     assert _canonical_polygon(with_exact_spur) == _canonical_polygon(clean)
 
 
+def test_canonical_polygon_collapses_multiple_exact_retraced_spurs() -> None:
+    clean = (
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (0.0, 20.0),
+    )
+    with_spurs = (
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (18.0, 20.0),
+        (20.0, 20.0),
+        (0.0, 20.0),
+        (0.0, 15.0),
+        (-3.0, 15.0),
+        (0.0, 15.0),
+    )
+
+    assert _canonical_polygon(with_spurs) == _canonical_polygon(clean)
+
+
+def test_canonical_polygon_collapses_consecutive_duplicate_before_spur() -> None:
+    clean = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+    noisy = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (8.0, 10.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+
+    assert _canonical_polygon(noisy) == _canonical_polygon(clean)
+
+
 def test_canonical_polygon_does_not_collapse_near_backtrack() -> None:
     near_backtrack = (
         (0.0, 0.0),
