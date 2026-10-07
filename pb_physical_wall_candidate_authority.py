@@ -60,6 +60,7 @@ from pb_physical_wall_source_metadata_shadow import (
     build_physical_wall_source_metadata_scope_table,
     unavailable_physical_wall_source_metadata_scope_table,
 )
+from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
@@ -2075,18 +2076,21 @@ def _producer_opening_wall_face_source_ids(
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
 ) -> frozenset[str]:
-    """Return exact source wall-face ids independently proven by G17 openings.
+    """Return exact source wall-face ids from independently proven openings.
 
-    The repeated-motif filter is intentionally source-structural, but short
-    repeated wall returns at genuine openings can share the same geometry/style
-    signature as decorative singleton marks. G17 already proves a complete
-    jamb-bounded two-face interruption from six authenticated source
-    observations. Reuse only its two SAME wall-face pairs here so physical wall
-    evidence cannot be discarded before W4 identity exists.
+    Semantic opening enumeration is source-owned and wall-independent. Its
+    representatives are chosen only from observation selectors that already
+    re-proved one exact PhysicalOpeningExistenceRecord. Consume those
+    representatives here so a support observation shared by several candidate
+    openings cannot broaden wall authority merely because it participates in
+    one candidate geometry.
 
-    No nearest geometry, opening label, schedule, scale, benchmark value, or
-    project-specific constant enters this protection.
+    Only complete G17 jamb-bounded two-face openings contribute protection,
+    and only the four source primitives in their two SAME wall-face pairs are
+    retained through the repeated-motif filter. Jambs, labels, schedules,
+    scale, benchmark values, and caller geometry never enter this path.
     """
+    del resolved_visible_observations  # enumeration owns the complete page scope
     visibility = source_producer.authority()
     opening_authority = (
         physical_opening_authority
@@ -2094,81 +2098,71 @@ def _producer_opening_wall_face_source_ids(
         else PhysicalOpeningAuthority.from_source_visibility_producer(source_producer)
     )
 
-    if resolved_visible_observations is None:
-        page_rows: list[tuple[str, object]] = []
-        for observation_id in published.visible_observation_ids:
-            resolved = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            if (
-                resolved.status is EvidenceResolutionStatus.CORROBORATED
-                and resolved.observation is not None
-                and str(resolved.observation.page_id) == str(page_id)
-            ):
-                page_rows.append((observation_id, resolved.observation))
-    else:
-        page_rows = [
-            (str(observation_id), observation)
-            for observation_id, observation in resolved_visible_observations
-            if str(observation.page_id) == str(page_id)
-        ]
+    semantic = SemanticOpeningEnumerationProducer.from_source_visibility_producer(
+        source_producer
+    )
+    semantic_result = semantic.publish_page_scope(
+        revision_id=published.revision.revision_id,
+        decision_scope_id=f"wall-opening-face-protection:{page_id}",
+        page_ids=(str(page_id),),
+    )
+    semantic_record = semantic_result.record
+    if semantic_record is None:
+        return frozenset()
 
-    page_observation_by_id = {
-        observation_id: observation
-        for observation_id, observation in page_rows
-    }
-    proven_records: dict[str, object] = {}
-    for observation_id, _observation in page_rows:
+    protected: set[str] = set()
+    for representative_id in semantic_record.representative_observation_ids:
         result = opening_authority.prove_existence(
             ObservationSelector(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256,
                 snapshot_id=published.snapshot.snapshot_id,
-                observation_id=observation_id,
+                observation_id=representative_id,
             )
         )
         existence = result.existence_record
         if (
-            result.status is EvidenceResolutionStatus.CORROBORATED
-            and result.proposition == PHYSICAL_OPENING_EXISTS
-            and existence is not None
-            and str(existence.page_id) == str(page_id)
-            and existence.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or result.proposition != PHYSICAL_OPENING_EXISTS
+            or existence is None
+            or str(existence.page_id) != str(page_id)
+            or existence.structural_pattern != JAMB_BOUNDED_TWO_FACE_INTERRUPTION
         ):
-            proven_records[existence.record_id] = existence
+            continue
 
-    protected: set[str] = set()
-    for existence in proven_records.values():
         raw_lines: dict[str, Line] = {}
         valid = True
-        for observation_id in existence.source_observation_ids:  # type: ignore[attr-defined]
-            observation = page_observation_by_id.get(str(observation_id))
-            if observation is None:
+        for observation_id in existence.source_observation_ids:
+            resolved = visibility.resolve_visible(
+                ObservationSelector(
+                    document_id=existence.document_id,
+                    revision_id=existence.revision_id,
+                    source_sha256=existence.source_sha256,
+                    snapshot_id=existence.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            observation = resolved.observation
+            if (
+                resolved.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+                or str(observation.page_id) != str(page_id)
+            ):
                 valid = False
                 break
             ref = str(observation.source_primitive_ref or "")
             if observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT:
                 prefix = "visible:segment:"
-                if not ref.startswith(prefix):
-                    valid = False
-                    break
-                raw_id = ref[len(prefix) :]
             elif observation.observation_kind == RASTER_PDF_VISIBLE_SEGMENT:
                 prefix = "visible:"
-                if not ref.startswith(prefix):
-                    valid = False
-                    break
-                raw_id = ref[len(prefix) :]
             else:
                 valid = False
                 break
+            if not ref.startswith(prefix):
+                valid = False
+                break
+            raw_id = ref[len(prefix) :]
             geometry = _line(observation.geometry)
             if not raw_id or geometry is None or raw_id in raw_lines:
                 valid = False
@@ -2188,7 +2182,6 @@ def _producer_opening_wall_face_source_ids(
             protected.update(face_ids)
 
     return frozenset(protected)
-
 
 def _producer_opening_relation_overrides(
     *,
