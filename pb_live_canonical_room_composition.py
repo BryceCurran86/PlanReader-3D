@@ -59,6 +59,7 @@ class _RoomFaceAuthorityBinding:
     source_room_face_record_ids: tuple[str, ...]
     viewport_id: Optional[str]
     viewport_bbox: Optional[tuple[float, float, float, float]]
+    viewport_view_type: Optional[str]
     authority: SourceRoomFaceAuthority = field(repr=False, compare=False)
     _seal: object = field(default=None, repr=False, compare=False)
 
@@ -210,6 +211,7 @@ def _authority_binding(
     *,
     viewport_id: Optional[str] = None,
     viewport_bbox: Optional[Collection[float]] = None,
+    viewport_view_type: Optional[str] = None,
 ) -> Optional[_RoomFaceAuthorityBinding]:
     if type(authority) is not SourceRoomFaceAuthority:
         return None
@@ -246,6 +248,11 @@ def _authority_binding(
         source_room_face_record_ids=record_ids,
         viewport_id=(None if viewport_id is None else str(viewport_id)),
         viewport_bbox=normalized_bbox,
+        viewport_view_type=(
+            None
+            if viewport_view_type is None
+            else str(viewport_view_type)
+        ),
         authority=authority,
         _seal=_ROOM_FACE_AUTHORITY_BINDING_SEAL,
     )
@@ -709,6 +716,11 @@ def compose_live_canonical_rooms(
                             else str(wall_scope.viewport_id)
                         ),
                         viewport_bbox=getattr(wall_scope, "viewport_bbox", None),
+                        viewport_view_type=getattr(
+                            wall_scope,
+                            "viewport_view_type",
+                            None,
+                        ),
                     )
                     if binding is not None:
                         authority_bindings.append(binding)
