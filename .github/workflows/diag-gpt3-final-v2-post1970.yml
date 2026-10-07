@@ -1,0 +1,142 @@
+name: DIAG GPT3 Final V2 Post1970
+
+on:
+  push:
+    branches:
+      - diag/gpt3-final-v2-post1970-v1
+
+jobs:
+  lot16-exact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Seal Lot16 production
+        shell: bash
+        run: |
+          set -o pipefail
+          ROOT=artifacts/gpt3-final-v2/lot16
+          mkdir -p "$ROOT"
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --project-id au_qld_lot16_power \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir "$ROOT" \
+            | tee "$ROOT/handoff.stdout.json"
+      - name: Build exact identity map
+        shell: bash
+        run: |
+          rm -rf artifacts/gpt3-lot16-current-main
+          cp -R artifacts/gpt3-final-v2/lot16 artifacts/gpt3-lot16-current-main
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_current_identity_map.py \
+            | tee artifacts/gpt3-final-v2/lot16/identity-map.stdout.json
+          cp artifacts/gpt3-lot16-current-main/lot16.identity-map.json artifacts/gpt3-final-v2/lot16/
+          cp artifacts/gpt3-lot16-current-main/lot16.identity-audit.json artifacts/gpt3-final-v2/lot16/
+      - name: Run exact frozen V2 reconciliation
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py \
+            --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json \
+            --sealed-run artifacts/gpt3-final-v2/lot16/au_qld_lot16_power.json \
+            --identity-map artifacts/gpt3-final-v2/lot16/lot16.identity-map.json \
+            --output artifacts/gpt3-final-v2/lot16/lot16.exact-report.json
+          cat artifacts/gpt3-final-v2/lot16/lot16.exact-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-final-v2-lot16
+          path: artifacts/gpt3-final-v2/lot16
+          retention-days: 3
+
+  maryborough:
+    strategy:
+      fail-fast: false
+      matrix:
+        family_group: [core, surfaces]
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Run Maryborough family
+        shell: bash
+        run: |
+          set -o pipefail
+          ROOT="artifacts/gpt3-final-v2/maryborough/${{ matrix.family_group }}"
+          mkdir -p "$ROOT"
+          START=$(date +%s)
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group "${{ matrix.family_group }}" \
+            --output-dir "$ROOT" \
+            | tee "$ROOT/handoff.stdout.json"
+          END=$(date +%s)
+          echo "{\"elapsed_seconds\":$((END-START))}" > "$ROOT/elapsed.json"
+      - name: Audit
+        if: success()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          family="${{ matrix.family_group }}"
+          root=Path("artifacts/gpt3-final-v2/maryborough")/family
+          summary=json.loads((root/"production_summary.json").read_text())
+          combined=root/f"au_qld_maryborough_service_station.{family}.json"
+          payload=json.loads(combined.read_text()) if combined.is_file() else {}
+          q=payload.get("quantities") or []
+          out={
+            "summary":summary,
+            "quantity_count":len(q),
+            "lineage_conflicts":sum(not bool(x.get("lineage_ok",False)) for x in q),
+            "zero_non_abstained":sum(
+              not bool(x.get("abstained",False))
+              and x.get("value") is not None
+              and float(x["value"]) == 0.0
+              for x in q
+            ),
+            "quantities":[{
+              "quantity_id":x.get("quantity_id"),
+              "family":x.get("family"),
+              "semantic_key":x.get("semantic_key"),
+              "value":x.get("value"),
+              "unit":x.get("unit"),
+              "object_identity_refs":x.get("object_identity_refs") or [],
+              "source_page":x.get("source_page"),
+              "viewport_id":x.get("viewport_id"),
+              "evidence_ids":x.get("evidence_ids") or [],
+              "trace_evidence_ids":x.get("trace_evidence_ids") or [],
+              "lineage_ok":x.get("lineage_ok"),
+            } for x in q],
+          }
+          (root/"audit.json").write_text(json.dumps(out,indent=2,sort_keys=True)+"\n")
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-final-v2-maryborough-${{ matrix.family_group }}
+          path: artifacts/gpt3-final-v2/maryborough/${{ matrix.family_group }}
+          retention-days: 3
