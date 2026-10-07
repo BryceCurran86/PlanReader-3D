@@ -47,6 +47,7 @@ def main() -> None:
 
     visibility = source.authority()
     thin_runs = []
+    line_runs = []
     for observation_id in published.raster_opening_primitive_observation_ids:
         resolved = visibility.resolve_raster_opening_primitive(
             ObservationSelector(
@@ -60,9 +61,11 @@ def main() -> None:
         if (
             resolved.status is EvidenceResolutionStatus.CORROBORATED
             and resolved.observation is not None
-            and resolved.observation.observation_kind == "raster_thin_ink_run"
         ):
-            thin_runs.append(resolved.observation)
+            if resolved.observation.observation_kind == "raster_thin_ink_run":
+                thin_runs.append(resolved.observation)
+            elif resolved.observation.observation_kind == "raster_line_run":
+                line_runs.append(resolved.observation)
 
     ratio_calls = []
     solution_calls = []
@@ -121,50 +124,55 @@ def main() -> None:
                 (float(expected_start), float(expected_end))
             )
             expected_length = max(expected_end - expected_start + 1.0, 1.0)
-            leaf_matches = []
-            leaf_near_misses = []
-            for record in thin_runs:
-                line = tuple(
-                    float(value) * float(dpi) / 72.0
-                    for value in record.geometry
-                )
-                if current["axis"] == "vertical":
-                    line = (line[1], line[0], line[3], line[2])
-                if abs(line[0] - line[2]) > 0.51:
-                    continue
-                leaf_x = (line[0] + line[2]) / 2.0
-                hinge_delta = abs(leaf_x - float(item.hinge_x))
-                run_start, run_end = sorted((line[1], line[3]))
-                overlap = max(
-                    0.0,
-                    min(run_end, expected_end)
-                    - max(run_start, expected_start)
-                    + 1.0,
-                )
-                overlap_ratio = overlap / expected_length
-                if item.side == -1:
-                    jamb_delta = abs(run_end - float(item.face_y))
-                else:
-                    jamb_delta = abs(run_start - float(item.face_y))
-                diagnostic = {
-                    "observation_id": record.observation_id,
-                    "geometry_pt": [float(value) for value in record.geometry],
-                    "hinge_delta_px": float(hinge_delta),
-                    "overlap_ratio": float(overlap_ratio),
-                    "jamb_delta_px": float(jamb_delta),
-                }
-                if (
-                    hinge_delta <= float(pad) + 0.51
-                    and overlap_ratio + 1e-12 >= g17._RASTER_SWING_LEAF_MIN_COVERAGE
-                    and jamb_delta <= float(pad) + 1.0
-                ):
-                    leaf_matches.append(diagnostic)
-                elif (
-                    hinge_delta <= float(pad) + 2.0
-                    or overlap_ratio >= 0.5
-                    or jamb_delta <= float(pad) + 2.0
-                ):
-                    leaf_near_misses.append(diagnostic)
+            def source_leaf_matches(records):
+                matches = []
+                near_misses = []
+                for record in records:
+                    line = tuple(
+                        float(value) * float(dpi) / 72.0
+                        for value in record.geometry
+                    )
+                    if current["axis"] == "vertical":
+                        line = (line[1], line[0], line[3], line[2])
+                    if abs(line[0] - line[2]) > 0.51:
+                        continue
+                    leaf_x = (line[0] + line[2]) / 2.0
+                    hinge_delta = abs(leaf_x - float(item.hinge_x))
+                    run_start, run_end = sorted((line[1], line[3]))
+                    overlap = max(
+                        0.0,
+                        min(run_end, expected_end)
+                        - max(run_start, expected_start)
+                        + 1.0,
+                    )
+                    overlap_ratio = overlap / expected_length
+                    if item.side == -1:
+                        jamb_delta = abs(run_end - float(item.face_y))
+                    else:
+                        jamb_delta = abs(run_start - float(item.face_y))
+                    diagnostic = {
+                        "observation_id": record.observation_id,
+                        "geometry_pt": [float(value) for value in record.geometry],
+                        "hinge_delta_px": float(hinge_delta),
+                        "overlap_ratio": float(overlap_ratio),
+                        "jamb_delta_px": float(jamb_delta),
+                    }
+                    if (
+                        hinge_delta <= float(pad) + 0.51
+                        and overlap_ratio + 1e-12 >= g17._RASTER_SWING_LEAF_MIN_COVERAGE
+                        and jamb_delta <= float(pad) + 1.0
+                    ):
+                        matches.append(diagnostic)
+                    elif (
+                        hinge_delta <= float(pad) + 2.0
+                        or overlap_ratio >= 0.5
+                        or jamb_delta <= float(pad) + 2.0
+                    ):
+                        near_misses.append(diagnostic)
+                return matches, near_misses
+
+            leaf_matches, leaf_near_misses = source_leaf_matches(thin_runs)
+            line_leaf_matches, line_leaf_near_misses = source_leaf_matches(line_runs)
 
             solution_rows.append({
                 "hinge_end": str(item.hinge_end),
@@ -175,8 +183,18 @@ def main() -> None:
                 "leaf_coverage": float(item.leaf_coverage),
                 "strict_leaf_match_count": len(leaf_matches),
                 "strict_leaf_matches": leaf_matches,
+                "neutral_line_leaf_match_count": len(line_leaf_matches),
+                "neutral_line_leaf_matches": line_leaf_matches,
                 "closest_leaf_near_misses": sorted(
                     leaf_near_misses,
+                    key=lambda row: (
+                        row["hinge_delta_px"],
+                        -row["overlap_ratio"],
+                        row["jamb_delta_px"],
+                    ),
+                )[:6],
+                "closest_neutral_line_leaf_near_misses": sorted(
+                    line_leaf_near_misses,
                     key=lambda row: (
                         row["hinge_delta_px"],
                         -row["overlap_ratio"],
@@ -263,8 +281,13 @@ def main() -> None:
         "swing_solution_call_count": len(solution_calls),
         "swing_solution_count_distribution": dict(solution_count_distribution),
         "strict_thin_run_count": len(thin_runs),
+        "neutral_line_run_count": len(line_runs),
         "one_solution_strict_leaf_match_count_distribution": dict(Counter(
             str(row["solutions"][0]["strict_leaf_match_count"])
+            for row in one_solution_rows
+        )),
+        "one_solution_neutral_line_leaf_match_count_distribution": dict(Counter(
+            str(row["solutions"][0]["neutral_line_leaf_match_count"])
             for row in one_solution_rows
         )),
         "one_solution_count": len(one_solution_rows),
