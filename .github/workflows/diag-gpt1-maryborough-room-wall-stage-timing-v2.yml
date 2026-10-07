@@ -1,0 +1,94 @@
+name: DIAG GPT1 Maryborough Room Wall Stage Timing V2
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Time room-wall phases
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json,time
+          from pathlib import Path
+          import pb_live_physical_net_wall_integration as live
+
+          timings={}
+          counts={}
+
+          def wrap(name):
+              original=getattr(live,name)
+              def _wrapped(*args,**kwargs):
+                  t=time.perf_counter()
+                  result=original(*args,**kwargs)
+                  timings[name]=timings.get(name,0.0)+(time.perf_counter()-t)
+                  try:
+                      counts[name]=len(result)
+                  except Exception:
+                      pass
+                  return result
+              setattr(live,name,_wrapped)
+
+          for name in (
+              "compose_live_wall_opening_authority",
+              "compose_live_canonical_walls",
+              "compose_live_canonical_rooms",
+              "compose_live_canonical_spaces",
+              "compose_live_canonical_floor_surfaces",
+              "compose_live_physical_opening_voids",
+              "publish_live_opening_area_quantities",
+              "publish_live_authenticated_opening_count_quantities",
+              "compose_live_gross_wall_geometry",
+              "compose_live_whole_wall_roles",
+              "compose_live_external_physical_net_wall_publication",
+          ):
+              if hasattr(live,name):
+                  wrap(name)
+
+          original_ingest=live.SourceVisibilityProducer.ingest_native_pdf_bytes
+          def timed_ingest(self,*args,**kwargs):
+              t=time.perf_counter()
+              result=original_ingest(self,*args,**kwargs)
+              timings["source_visibility_ingest"]=timings.get("source_visibility_ingest",0.0)+(time.perf_counter()-t)
+              return result
+          live.SourceVisibilityProducer.ingest_native_pdf_bytes=timed_ingest
+
+          original_cross=live.CrossViewRoomAreaProducer.publish
+          def timed_cross(self):
+              t=time.perf_counter()
+              result=original_cross(self)
+              timings["cross_view_room_area_publish"]=timings.get("cross_view_room_area_publish",0.0)+(time.perf_counter()-t)
+              counts["cross_view_room_area_records"]=len(result.records)
+              return result
+          live.CrossViewRoomAreaProducer.publish=timed_cross
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          t=time.perf_counter()
+          claim=live.collect_live_physical_net_wall_claim(
+              pdf,
+              pages=(6,8,10,29,30),
+              topology_pages=(6,29,30),
+              room_area_support_pages=(8,10),
+          )
+          total=time.perf_counter()-t
+          print(json.dumps({
+              "total_seconds":total,
+              "timings":timings,
+              "counts":counts,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "room_quantity_count":len(claim.room_area_quantity_evidence),
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+          },indent=2,sort_keys=True))
+          PY
