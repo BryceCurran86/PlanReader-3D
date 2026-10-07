@@ -12,6 +12,10 @@ Route-B suite:
 from __future__ import annotations
 
 import fitz
+import math
+from types import SimpleNamespace
+
+import pb_schedule_opening_instance_binding_authority as binding
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
@@ -128,3 +132,61 @@ def test_tag_on_adjacent_wall_segment_is_not_inside_opening_aperture() -> None:
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert BINDING_NO_CONTAINED_TAG in result.reason_codes
     assert result.record is None
+
+
+def test_raster_sealed_aperture_bbox_can_own_schedule_tag_without_scale() -> None:
+    opening = SimpleNamespace(
+        structural_pattern=binding.RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        aperture_bbox_pt=(100.0, 100.0, 140.0, 110.0),
+    )
+    aperture = binding._opening_aperture_for_physical_opening(object(), opening)
+    assert aperture is not None
+    assert binding._aperture_contains_bbox(
+        aperture, (111.0, 103.0, 123.0, 108.0)
+    )
+    assert not binding._aperture_contains_bbox(
+        aperture, (180.0, 103.0, 195.0, 108.0)
+    )
+
+
+def test_raster_schedule_aperture_abstains_without_valid_sealed_bbox() -> None:
+    for bbox in (
+        None,
+        (),
+        (100.0, 100.0, 100.0, 110.0),
+        (100.0, 100.0, 140.0, 100.0),
+        (100.0, 100.0, math.inf, 110.0),
+        (140.0, 100.0, 100.0, 110.0),
+    ):
+        opening = SimpleNamespace(
+            structural_pattern=binding.RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            aperture_bbox_pt=bbox,
+        )
+        assert (
+            binding._opening_aperture_for_physical_opening(object(), opening)
+            is None
+        )
+
+
+def test_vector_schedule_aperture_still_requires_source_visible_six_line_geometry() -> None:
+    opening = SimpleNamespace(
+        structural_pattern="jamb_bounded_two_face_interruption",
+        source_observation_ids=("missing-observation",),
+        document_id="doc",
+        revision_id="rev",
+        source_sha256="sha",
+        snapshot_id="snapshot",
+    )
+
+    class _Visibility:
+        def resolve_visible(self, selector):
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                observation=None,
+            )
+
+    class _Source:
+        def authority(self):
+            return _Visibility()
+
+    assert binding._opening_aperture_for_physical_opening(_Source(), opening) is None
