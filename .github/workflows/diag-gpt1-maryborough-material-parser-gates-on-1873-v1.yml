@@ -1,0 +1,115 @@
+name: DIAG GPT1 Maryborough Material Parser Gates On 1873
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace semantic table and parser gates
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+
+          import pb_source_material_semantic_authority as mat
+          from pb_material_schedule_v1222 import parse_schedule_text
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+              is_segment_page_viewports_product,
+          )
+
+          pdf_path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf_path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-material-parser-gates",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt1-material-parser-gates",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+          )
+          trusted=mat._trusted_words_by_page(source,published)
+          raster=mat.RasterTextCorroborationProducer.from_source_visibility_producer(source)
+          doc=fitz.open(stream=payload,filetype="pdf")
+          rows=[]
+          term_hits=[]
+          terms=("FINISH","EPOXY","VINYL","TILE","TILES","FLOOR","IP")
+          for index in range(doc.page_count):
+              page_no=index+1
+              page=doc[index]
+              native=page.get_text("text") or ""
+              upper=native.upper()
+              matched=[term for term in terms if term in upper]
+              if matched:
+                  term_hits.append({
+                      "page_no":page_no,
+                      "terms":matched,
+                      "lines":[
+                          line.strip() for line in native.splitlines()
+                          if any(term in line.upper() for term in matched)
+                      ][:80],
+                  })
+              viewports=tuple(segment_page_viewports(page,page_number=page_no))
+              if not viewports or any(not is_segment_page_viewports_product(v) for v in viewports):
+                  continue
+              non_overlap=validate_non_overlapping_viewports(viewports)
+              for viewport in viewports:
+                  if viewport.view_type not in {"schedule","legend","specification"}:
+                      continue
+                  row={
+                      "page_no":page_no,
+                      "viewport_id":viewport.view_id,
+                      "view_type":viewport.view_type,
+                      "label":viewport.label,
+                      "status":viewport.status,
+                      "bbox":None if viewport.bounding_box is None else list(viewport.bounding_box),
+                      "authoritative":mat._viewport_is_authoritative(
+                          viewport,
+                          sibling_non_overlapping=non_overlap,
+                      ),
+                  }
+                  if row["authoritative"]:
+                      page_words=trusted.get(str(page_no),())
+                      scoped=mat._recover_admissible_viewport_words(
+                          source=source,
+                          published=published,
+                          raster=raster,
+                          words=page_words,
+                          viewport=viewport,
+                      )
+                      lines,complete,reasons=mat._trusted_lines_for_viewport(scoped,viewport)
+                      text="\n".join(line[0] for line in lines)
+                      parsed=list(parse_schedule_text(
+                          text,
+                          page_id=page_no,
+                          page_label=f"page:{page_no}",
+                      ))
+                      row.update({
+                          "text_complete":complete,
+                          "text_reasons":list(reasons),
+                          "trusted_line_count":len(lines),
+                          "trusted_lines":[line[0] for line in lines][:120],
+                          "parsed_count":len(parsed),
+                          "parsed":parsed[:80],
+                      })
+                  rows.append(row)
+          print(json.dumps({
+              "semantic_table_viewports":rows,
+              "native_finish_term_hits":term_hits,
+          },indent=2,sort_keys=True))
+          PY
