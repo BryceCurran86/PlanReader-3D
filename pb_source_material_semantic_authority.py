@@ -1449,13 +1449,16 @@ class SourceMaterialSemanticProducer:
                     )
                 )
                 incomplete_definition_codes.update(cluster_blocked_codes)
-                native_schedule_blocks = tuple(
-                    dict.fromkeys(
-                        (
-                            *_trusted_native_material_schedule_blocks(page_words),
-                            *cluster_blocks,
-                        )
+                native_schedule_by_id = {
+                    schedule_block.scope_id: schedule_block
+                    for schedule_block in (
+                        *_trusted_native_material_schedule_blocks(page_words),
+                        *cluster_blocks,
                     )
+                }
+                native_schedule_blocks = tuple(
+                    native_schedule_by_id[key]
+                    for key in sorted(native_schedule_by_id)
                 )
                 for schedule_block in native_schedule_blocks:
                     line_evidence = dict(schedule_block.line_evidence)
