@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import fitz
 import pytest
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pb_source_material_semantic_authority as semantic
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import (
     SegmentedViewport,
@@ -380,3 +382,83 @@ def test_source_material_semantic_constructors_are_sealed() -> None:
         semantic.SourceMaterialSemanticProducer(object())
     with pytest.raises(TypeError, match="producer-owned"):
         semantic.SourceMaterialSemanticAuthority({}, {})
+
+
+def test_admissible_glyph_clip_failure_can_use_producer_owned_raster_corroboration(
+    monkeypatch,
+) -> None:
+    source, published = _source(
+        _pdf(
+            ("FINISH SCHEDULE", "WT1 Porcelain wall tile"),
+            ("INTERNAL ELEVATION", "WALL FINISH WT1"),
+        )
+    )
+    _patch_viewports(monkeypatch, {1: "schedule", 2: "elevation"})
+    real = source.text_integrity_authority()
+
+    class _GlyphClipScheduleCode:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            if (
+                result.receipt is not None
+                and str(result.receipt.page_id) == "1"
+                and result.trusted_text == "WT1"
+            ):
+                reasons = (
+                    semantic.TEXT_GLYPH_MAPPING_UNVERIFIED,
+                    semantic.TEXT_CLIP_STATE_UNRESOLVED,
+                )
+                receipt = replace(
+                    result.receipt,
+                    trusted=False,
+                    reason_codes=reasons,
+                )
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    trusted_text=None,
+                    reason_codes=reasons,
+                    receipt=receipt,
+                )
+            return result
+
+    class _FakeRasterProducer:
+        @classmethod
+        def from_source_visibility_producer(cls, _source):
+            return cls()
+
+        def publish(self, selector):
+            source_result = source._producer.authority().resolve(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=selector.observation_id,
+                )
+            )
+            raw = source_result.observation.raw_text
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                record=SimpleNamespace(record_id="raster-proof"),
+                corroborated_text=raw,
+            )
+
+    monkeypatch.setattr(
+        source,
+        "text_integrity_authority",
+        lambda: _GlyphClipScheduleCode(),
+    )
+    monkeypatch.setattr(
+        semantic,
+        "RasterTextCorroborationProducer",
+        _FakeRasterProducer,
+    )
+
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    definition = authority.resolve_definition(_definition_selector(published, "WT1"))
+    assert definition.status is EvidenceResolutionStatus.CORROBORATED
+    assert definition.record is not None
+    assert definition.record.semantic_finish == "tile"
