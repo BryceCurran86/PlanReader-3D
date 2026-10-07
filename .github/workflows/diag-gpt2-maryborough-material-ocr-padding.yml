@@ -52,7 +52,7 @@ jobs:
                   max(float(w[3]) for w in rows),
               )
               probes=[]
-              for pad_pt in (0.0,1.0,2.0,4.0,8.0,12.0):
+              for pad_pt in (0.0,1.0,2.0,4.0):
                   clip=fitz.Rect(
                       max(float(page.rect.x0),bbox.x0-pad_pt),
                       max(float(page.rect.y0),bbox.y0-pad_pt),
@@ -64,9 +64,13 @@ jobs:
                       pix=page.get_pixmap(dpi=dpi,clip=clip,alpha=False)
                       img=Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
                       border=max(1,round(dpi*1.0/25.4))
-                      img=ImageOps.expand(img,border=border,fill="white")
-                      raw=pytesseract.image_to_string(img,config="--psm 7")
-                      readings[str(dpi)]=" ".join(str(raw or "").split())
+                      rotation_reads={}
+                      for degrees in (0,90,-90,180):
+                          rotated=img if degrees == 0 else img.rotate(degrees,expand=True)
+                          isolated=ImageOps.expand(rotated,border=border,fill="white")
+                          raw=pytesseract.image_to_string(isolated,config="--psm 7")
+                          rotation_reads[str(degrees)]=" ".join(str(raw or "").split())
+                      readings[str(dpi)]=rotation_reads
                   probes.append({"pad_pt":pad_pt,"clip":list(clip),"readings":readings})
               out["blocks"][str(block_no)]={
                   "label":label,
