@@ -177,30 +177,20 @@ def _unique_authenticated_containing_floor_plan_viewport(
         )
     )
     viewport_wall_authority = viewport_wall_producer.authority()
-    selectors_by_scope = {}
-    for topology_view_type in (
-        DrawingViewType.FLOOR_PLAN.value,
-        DrawingViewType.FLOOR_FINISH_PLAN.value,
-    ):
-        for candidate_selector in (
-            viewport_wall_authority.selectors_for_authenticated_viewports(
-                document_id=first.document_id,
-                revision_id=first.revision_id,
-                source_sha256=first.source_sha256,
-                snapshot_id=str(snapshot_id),
-                page_id=str(page_id),
-                view_type=topology_view_type,
-            )
-        ):
-            selectors_by_scope[candidate_selector.decision_scope_id] = (
-                candidate_selector,
-                topology_view_type,
-            )
+    selectors = viewport_wall_authority.selectors_for_authenticated_viewports(
+        document_id=first.document_id,
+        revision_id=first.revision_id,
+        source_sha256=first.source_sha256,
+        snapshot_id=str(snapshot_id),
+        page_id=str(page_id),
+        view_type=DrawingViewType.FLOOR_PLAN.value,
+    )
     containing: dict[
         str,
         tuple[tuple[float, float, float, float], str],
     ] = {}
-    for viewport_selector, topology_view_type in selectors_by_scope.values():
+    for viewport_selector in selectors:
+        topology_view_type = DrawingViewType.FLOOR_PLAN.value
         scope = viewport_wall_authority.resolve_scope(viewport_selector)
         bbox = getattr(scope, "viewport_bbox", None)
         viewport_id = getattr(scope, "viewport_id", None)
