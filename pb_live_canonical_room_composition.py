@@ -478,16 +478,39 @@ def compose_live_canonical_rooms(
     authority = build_source_room_face_authority(
         wall_opening_composition.physical_wall_candidate_authority
     )
-    try:
-        page_label_authority = SourceRoomLabelProducer.from_authorities(
-            source_visibility_producer,
-            authority,
-            page_ids=tuple(wall_opening_composition.page_ids),
-        ).authority()
-    except Exception:
-        # Room labels are semantic annotation only. A label-authority failure
-        # must never destroy already-proven room geometry.
-        page_label_authority = None
+
+    # Resolve the cheap sealed room-face scopes before constructing any
+    # semantic label producer. Pages that cannot publish a page-wide room scope
+    # are handled by the authenticated viewport fallback below; OCR/text
+    # corroboration for those pages must not be performed once here and then
+    # repeated again against the fallback authority.
+    page_room_results = {}
+    page_room_selectors = {}
+    page_label_ids: list[str] = []
+    for page_id in wall_opening_composition.page_ids:
+        selector = page_room_selectors[page_id]
+        result = page_room_results[page_id]
+        page_room_selectors[page_id] = selector
+        page_room_results[page_id] = result
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and result.scope_complete
+            and result.records
+        ):
+            page_label_ids.append(str(page_id))
+
+    page_label_authority = None
+    if page_label_ids:
+        try:
+            page_label_authority = SourceRoomLabelProducer.from_authorities(
+                source_visibility_producer,
+                authority,
+                page_ids=tuple(page_label_ids),
+            ).authority()
+        except Exception:
+            # Room labels are semantic annotation only. A label-authority failure
+            # must never destroy already-proven room geometry.
+            page_label_authority = None
 
     rooms: list[LiveCanonicalRoomObject] = []
     reasons: list[str] = []
