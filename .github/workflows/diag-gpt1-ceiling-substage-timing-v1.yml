@@ -1,0 +1,65 @@
+name: DIAG GPT1 Ceiling Substage Timing
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Time ceiling substages
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, time
+          from pathlib import Path
+          import pb_source_owned_ceiling_lining_pipeline as pipe
+          import pb_live_ceiling_lining_integration as live
+
+          timings={}
+          counts={}
+          def timed(name, fn):
+              def wrapper(*args, **kwargs):
+                  t=time.perf_counter()
+                  try:
+                      out=fn(*args, **kwargs)
+                      return out
+                  finally:
+                      timings[name]=timings.get(name,0.0)+(time.perf_counter()-t)
+                      counts[name]=counts.get(name,0)+1
+              return wrapper
+
+          orig_wall=pipe.PhysicalWallCandidateProducer.from_source_visibility_producer
+          pipe.PhysicalWallCandidateProducer.from_source_visibility_producer=timed("wall_candidate_producer",orig_wall)
+          pipe.build_source_room_face_authority=timed("build_room_face_authority",pipe.build_source_room_face_authority)
+          pipe.collect_source_owned_ceiling_finish_candidates=timed("finish_candidates",pipe.collect_source_owned_ceiling_finish_candidates)
+          pipe._physical_scale=timed("physical_scale",pipe._physical_scale)
+          pipe.run_source_ceiling_lining_shadow=timed("ceiling_shadow",pipe.run_source_ceiling_lining_shadow)
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          t=time.perf_counter()
+          result=live.collect_live_ceiling_lining_claims(
+              pdf,
+              pages=tuple(range(31)),
+              topology_pages=(6,29,30),
+              authoritative_room_area_quantities=(),
+          )
+          total=time.perf_counter()-t
+          print(json.dumps({
+              "total_seconds":total,
+              "timings":timings,
+              "call_counts":counts,
+              "status":getattr(result.status,"value",str(result.status)),
+              "reason_codes":list(result.reason_codes),
+              "claim_count":len(result.claims),
+              "canonical_ceiling_count":len(result.canonical_ceilings),
+          },indent=2,sort_keys=True))
+          PY
