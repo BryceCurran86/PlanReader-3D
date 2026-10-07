@@ -961,6 +961,9 @@ class SourceMaterialSemanticAuthority:
         occurrence_results: Mapping[
             tuple[str, str, str, str, str, str], SourceMaterialOccurrenceScopeResult
         ],
+        definition_scope_blockers: Optional[
+            Mapping[tuple[str, str, str, str], tuple[str, ...]]
+        ] = None,
         *,
         _seal: object = None,
     ) -> None:
@@ -968,6 +971,9 @@ class SourceMaterialSemanticAuthority:
             raise TypeError("SourceMaterialSemanticAuthority is producer-owned")
         self._definition_results = MappingProxyType(dict(definition_results))
         self._occurrence_results = MappingProxyType(dict(occurrence_results))
+        self._definition_scope_blockers = MappingProxyType(
+            dict(definition_scope_blockers or {})
+        )
 
     def resolve_definition(
         self,
@@ -975,12 +981,18 @@ class SourceMaterialSemanticAuthority:
     ) -> SourceMaterialDefinitionResult:
         if type(selector) is not SourceMaterialDefinitionSelector:
             raise TypeError("selector must be SourceMaterialDefinitionSelector")
-        return self._definition_results.get(
-            selector.key,
-            _definition_blocked(
+        resolved = self._definition_results.get(selector.key)
+        if resolved is not None:
+            return resolved
+        scope_blockers = self._definition_scope_blockers.get(selector.key[:4])
+        if scope_blockers:
+            return _definition_blocked(
                 EvidenceResolutionStatus.ABSTAINED,
-                SOURCE_MATERIAL_DEFINITION_UNAVAILABLE,
-            ),
+                *scope_blockers,
+            )
+        return _definition_blocked(
+            EvidenceResolutionStatus.ABSTAINED,
+            SOURCE_MATERIAL_DEFINITION_UNAVAILABLE,
         )
 
     def resolve_occurrences(
@@ -1019,6 +1031,9 @@ class SourceMaterialSemanticProducer:
         self._occurrence_results: dict[
             tuple[str, str, str, str, str, str], SourceMaterialOccurrenceScopeResult
         ] = {}
+        self._definition_scope_blockers: dict[
+            tuple[str, str, str, str], tuple[str, ...]
+        ] = {}
         self._published_revisions: set[str] = set()
 
     @classmethod
@@ -1032,6 +1047,7 @@ class SourceMaterialSemanticProducer:
         return SourceMaterialSemanticAuthority(
             self._definition_results,
             self._occurrence_results,
+            self._definition_scope_blockers,
             _seal=_AUTHORITY_SEAL,
         )
 
@@ -1243,6 +1259,14 @@ class SourceMaterialSemanticProducer:
                         )
                     )
                 )
+                self._definition_scope_blockers[
+                    (
+                        lineage["document_id"],
+                        lineage["revision_id"],
+                        lineage["source_sha256"],
+                        lineage["snapshot_id"],
+                    )
+                ] = blocked_reasons
                 for code in sorted(raw_definitions):
                     selector = SourceMaterialDefinitionSelector(
                         **lineage,
