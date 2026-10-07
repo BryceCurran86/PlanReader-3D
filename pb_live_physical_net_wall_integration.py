@@ -249,12 +249,15 @@ def collect_live_physical_net_wall_claim(
     pages: Optional[Sequence[int]] = None,
     topology_pages: Optional[Sequence[int]] = None,
     room_area_support_pages: Optional[Sequence[int]] = None,
+    semantic_evidence_pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
-    ``pages`` is the decoded evidence universe. ``topology_pages`` defaults to
-    all selected pages and, when supplied, must be a non-empty subset whose
-    linework may mint walls, openings, rooms and canonical objects.
+    ``pages`` is the wall/opening evidence universe. ``topology_pages``
+    defaults to all selected pages and, when supplied, must be a non-empty
+    subset whose linework may mint walls, openings, rooms and canonical objects.
+    ``semantic_evidence_pages`` may add decoded source pages for material/RCP
+    semantics without adding those pages to wall/opening evidence scope.
     """
 
     path = Path(pdf_path)
@@ -281,8 +284,19 @@ def collect_live_physical_net_wall_claim(
                 page_count,
                 room_area_support_pages,
             )
+        if semantic_evidence_pages is None:
+            semantic_evidence_selected: tuple[int, ...] = ()
+        else:
+            semantic_evidence_selected = _selected_page_indices(
+                page_count,
+                semantic_evidence_pages,
+            )
         decoded_selected = tuple(
-            sorted(set(selected) | set(room_area_support_selected))
+            sorted(
+                set(selected)
+                | set(room_area_support_selected)
+                | set(semantic_evidence_selected)
+            )
         )
         page_extents = {
             str(index + 1): (
@@ -410,6 +424,10 @@ def collect_live_physical_net_wall_claim(
             cross_view_area = CrossViewRoomAreaProducer.from_source(
                 source=source,
                 rooms=canonical_rooms,
+                support_page_ids=tuple(
+                    str(index + 1)
+                    for index in room_area_support_selected
+                ),
             ).publish()
             if cross_view_area.records:
                 cross_view_by_record = dict(
