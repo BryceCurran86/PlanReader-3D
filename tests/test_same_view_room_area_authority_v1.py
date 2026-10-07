@@ -130,7 +130,7 @@ def test_same_view_figured_dimensions_mint_room_owned_area_without_scale() -> No
 
 def test_same_view_floor_plan_can_witness_promote_year_shaped_dimension() -> None:
     source, rooms = _source_and_rooms(
-        horizontal_text="3100",
+        horizontal_text="2850",
         vertical_text="1900",
     )
     result = SameViewRoomAreaProducer.from_source(
@@ -141,7 +141,7 @@ def test_same_view_floor_plan_can_witness_promote_year_shaped_dimension() -> Non
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.records) == 1
     record = result.records[0]
-    assert record.area_evidence.normalized_value == 5.89
+    assert record.area_evidence.normalized_value == 5.415
     assert record.area_evidence.method == "authenticated_same_view_figured_dimensions"
     assert len(record.area_evidence.metadata["figured_dimension_ids"]) == 2
 
