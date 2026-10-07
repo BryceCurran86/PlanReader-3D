@@ -1,0 +1,84 @@
+name: DIAG GPT1 RCP Title Ownership Page9
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace page 9 RCP title ownership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          import pb_viewport_segmentation as vp
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(stream=path.read_bytes(),filetype="pdf")
+          page=doc[8]
+          calibration=vp.calibrate_viewport_layout(page)
+          anchors=vp.extract_view_title_anchors(page)
+          regions=vp._title_field_owned_regions(page)
+          block=vp._proven_title_block_region(page)
+          frames=vp.extract_vector_frames(page,calibration)
+          rows=[]
+          for i,a in enumerate(anchors):
+              if "CEILING" not in str(a.text).upper():
+                  continue
+              candidates=vp._frame_candidates_for_title(
+                  page,a,frames,calibration,anchors=anchors
+              )
+              rows.append({
+                  "index":i,
+                  "text":a.text,
+                  "view_type":a.view_type,
+                  "bbox":list(a.bbox),
+                  "visual_bbox":list(vp._to_visual_bbox(page,a.bbox)),
+                  "center":list(a.center),
+                  "in_title_owned_region":any(
+                      vp._point_in_bbox(
+                          vp._bbox_center(vp._to_visual_bbox(page,a.bbox)),
+                          r,
+                      )
+                      for r in regions
+                  ),
+                  "frame_candidates":[list(x) for x in candidates],
+                  "table_like":[
+                      list(x) for x in candidates
+                      if vp._frame_looks_like_table(x,page,calibration)
+                  ],
+              })
+          segmented=vp.segment_page_viewports(page,page_number=9)
+          print(json.dumps({
+              "rotation":getattr(page,"rotation",None),
+              "title_block":None if block is None else list(block),
+              "title_owned_regions":[list(r) for r in regions],
+              "rcp_anchors":rows,
+              "all_anchors":[{
+                  "text":a.text,
+                  "view_type":a.view_type,
+                  "bbox":list(a.bbox),
+              } for a in anchors],
+              "segmented":[{
+                  "view_id":v.view_id,
+                  "label":v.label,
+                  "view_type":v.view_type,
+                  "status":v.status,
+                  "bbox":None if v.bounding_box is None else list(v.bounding_box),
+                  "notes":list(v.notes),
+                  "provenance":dict(v.provenance or {}),
+              } for v in segmented],
+          },indent=2,sort_keys=True,default=str))
+          doc.close()
+          PY
