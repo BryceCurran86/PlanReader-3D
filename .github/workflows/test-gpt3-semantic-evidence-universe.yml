@@ -1,0 +1,29 @@
+name: TEST GPT3 Semantic Evidence Universe
+
+on:
+  push:
+    branches:
+      - fix/gpt3-semantic-evidence-universe-v1
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Focused contracts
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_cross_view_room_area_authority_v1.py \
+            tests/test_source_closed_project_handoff.py \
+            tests/test_source_material_semantic_authority_v1.py \
+            tests/test_cross_view_ceiling_finish_authority.py \
+            tests/test_cross_view_ceiling_quantity_authority.py
