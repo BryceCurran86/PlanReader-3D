@@ -32,10 +32,18 @@ jobs:
           set -o pipefail
           PYTHONPATH=. python -u tools/diag_gpt3_lot16_host_integration.py \
             | tee lot16-combined-host-recovery.json
+      - name: Run current-snapshot semantic residual audit
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_semantic_residual_current.py \
+            | tee lot16-semantic-residual-current.json
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gpt3-lot16-combined-host-recovery
-          path: lot16-combined-host-recovery.json
+          path: |
+            lot16-combined-host-recovery.json
+            lot16-semantic-residual-current.json
           retention-days: 2
