@@ -441,8 +441,8 @@ def test_incomplete_page_face_universe_routes_to_authenticated_viewport(monkeypa
     assert room.decision_scope_id == viewport_selector.decision_scope_id
 
 
-def test_incomplete_viewport_wall_scope_is_delegated_to_room_authority(monkeypatch) -> None:
-    """Let source-room authority decide whether an incomplete wall scope is locally safe."""
+def test_incomplete_viewport_room_universe_remains_fail_closed(monkeypatch) -> None:
+    """A locally resolved face cannot mint a room while its face universe is incomplete."""
     from types import SimpleNamespace
     import pb_live_canonical_room_composition as module
 
@@ -523,13 +523,10 @@ def test_incomplete_viewport_wall_scope_is_delegated_to_room_authority(monkeypat
         wall_opening_composition=wall_opening,
     )
 
-    assert result.status is EvidenceResolutionStatus.CANDIDATE
-    assert LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED in result.reason_codes
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL in result.reason_codes
-    assert result.source_pages == (1,)
-    assert len(result.rooms) == 1
-    assert result.rooms[0].source_room_face_record_id == record.record_id
-    assert result.rooms[0].viewport_id == "floor-plan-vp"
+    assert result.source_pages == ()
+    assert result.rooms == ()
 
 
 def test_incomplete_viewport_wall_scope_cannot_publish_when_room_authority_abstains(monkeypatch) -> None:
