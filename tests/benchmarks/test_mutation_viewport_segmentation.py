@@ -512,3 +512,17 @@ def test_gridded_table_frame_cannot_mint_floor_plan_viewport():
         assert plan.bounding_box is None
     finally:
         doc.close()
+
+
+def test_gridded_internal_finishes_schedule_table_frame_is_authoritative():
+    doc = _single_table_frame_view("INTERNAL FINISHES SCHEDULE")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
