@@ -839,7 +839,13 @@ def _trusted_native_dimensions_for_page(
             ]
         ],
     ] = {}
+    page_text_ids = text_authority.observation_ids_for_page(
+        published.snapshot.snapshot_id,
+        str(page_id),
+    )
     for observation_id in published.text_observation_ids:
+        if str(observation_id) not in page_text_ids:
+            continue
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
@@ -885,6 +891,10 @@ def _trusted_native_dimensions_for_page(
         )
 
     visibility = source.authority()
+    page_visible_ids = visibility.visible_observation_ids_for_page(
+        published.snapshot.snapshot_id,
+        str(page_id),
+    )
     source_ids_by_geometry: dict[
         tuple[float, float, float, float],
         list[str],
@@ -894,6 +904,8 @@ def _trusted_native_dimensions_for_page(
         tuple[float, float, float, float],
     ] = {}
     for observation_id in published.visible_observation_ids:
+        if str(observation_id) not in page_visible_ids:
+            continue
         resolved = visibility.resolve_visible(
             ObservationSelector(
                 document_id=published.revision.document_id,

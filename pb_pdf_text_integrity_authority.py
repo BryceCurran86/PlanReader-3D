@@ -2094,6 +2094,35 @@ class PdfTextIntegrityAuthority:
         self._source_authority = source_authority
         self._receipts = receipts
 
+    def observation_ids_for_snapshot(self, snapshot_id: str) -> frozenset[str]:
+        """Return receipt-backed text ids for addressing only."""
+        snapshot_id = str(snapshot_id)
+        return frozenset(
+            str(observation_id)
+            for receipt_snapshot_id, observation_id in self._receipts
+            if receipt_snapshot_id == snapshot_id
+        )
+
+    def observation_ids_for_page(
+        self,
+        snapshot_id: str,
+        page_id: str,
+    ) -> frozenset[str]:
+        """Return receipt-backed text ids addressable to one source page.
+
+        This grants no text authority; callers must still call resolve_text().
+        """
+        snapshot_id = str(snapshot_id)
+        page_id = str(page_id)
+        return frozenset(
+            str(observation_id)
+            for (receipt_snapshot_id, observation_id), receipt in self._receipts.items()
+            if (
+                receipt_snapshot_id == snapshot_id
+                and str(receipt.page_id) == page_id
+            )
+        )
+
     def resolve_text(self, selector: ObservationSelector) -> PdfTextIntegrityResult:
         receipt = self._receipts.get((selector.snapshot_id, selector.observation_id))
         if receipt is None:
