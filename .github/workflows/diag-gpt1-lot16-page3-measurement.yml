@@ -67,6 +67,28 @@ jobs:
           status_counts={}
           for binding in bundle.bindings:
               status_counts[binding.status]=status_counts.get(binding.status,0)+1
+
+          observations={obs.dimension_id:obs for obs in bundle.observations}
+          witness_bound=[]
+          for binding in bundle.bindings:
+              if binding.status != "witness_bound":
+                  continue
+              obs=observations.get(binding.observation_id)
+              if obs is None:
+                  continue
+              witness_bound.append({
+                  "observation_id":binding.observation_id,
+                  "raw_text":obs.raw_text,
+                  "value":obs.value,
+                  "unit":obs.unit,
+                  "value_mm":obs.value_m*1000.0,
+                  "orientation":obs.orientation,
+                  "bbox":None if obs.bbox is None else list(obs.bbox),
+                  "dimension_line_id":binding.dimension_line_id,
+                  "witness_line_ids":list(binding.witness_line_ids),
+                  "endpoints":None if binding.endpoints is None else [list(x) for x in binding.endpoints],
+                  "notes":list(binding.notes),
+              })
           orientation_counts={}
           for obs in bundle.observations:
               orientation_counts[obs.orientation]=orientation_counts.get(obs.orientation,0)+1
@@ -92,6 +114,7 @@ jobs:
               "raw_dimension_observation_count":len(bundle.observations),
               "raw_dimension_binding_count":len(bundle.bindings),
               "raw_dimension_binding_status_counts":status_counts,
+              "raw_witness_bound_dimensions":witness_bound,
               "raw_dimension_orientation_counts":orientation_counts,
               "trusted_dimension_count":len(trusted),
               "trusted_dimensions":[
