@@ -433,6 +433,32 @@ def _collapse_nested_band_frames(
     return kept
 
 
+def _collapse_semantic_table_container_frames(
+    frames: Sequence[tuple[float, float, float, float]],
+) -> list[tuple[float, float, float, float]]:
+    """Prefer the most local positively table-proven ownership frame.
+
+    Semantic schedule/legend titles can sit immediately below a compact table
+    that is itself nested inside a much larger drawing frame.  Dense plans can
+    also satisfy the positive table-grid predicate, so a containing frame must
+    not swallow a smaller candidate that independently proves table structure
+    and the same title relationship.  Only strict containment is collapsed;
+    disjoint or merely overlapping competing tables remain ambiguous.
+    """
+
+    kept: list[tuple[float, float, float, float]] = []
+    for frame in frames:
+        contains_smaller_table = any(
+            other != frame
+            and _bbox_contains(frame, other, margin=1.0)
+            and _bbox_area(other) < _bbox_area(frame)
+            for other in frames
+        )
+        if not contains_smaller_table:
+            kept.append(frame)
+    return kept
+
+
 def _collapse_equivalent_nested_frames(
     frames: Sequence[tuple[float, float, float, float]],
     calibration: ViewportLayoutCalibration,
@@ -1342,7 +1368,10 @@ def _frame_resolved_viewports(
                 view_type=anchor.view_type,
             )
         ]
-        usable = _collapse_nested_band_frames(usable)
+        if str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES:
+            usable = _collapse_semantic_table_container_frames(usable)
+        else:
+            usable = _collapse_nested_band_frames(usable)
         usable = _collapse_equivalent_nested_frames(usable, calibration)
         if len(usable) > 1:
             out.append(SegmentedViewport(
