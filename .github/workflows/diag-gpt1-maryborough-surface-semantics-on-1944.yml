@@ -1,0 +1,111 @@
+name: DIAG GPT1 Maryborough Surface Semantics On 1944
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove Maryborough material semantics
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          import fitz
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import segment_page_viewports,is_authoritative_derived_viewport
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf.read_bytes()
+          doc=fitz.open(stream=payload,filetype="pdf")
+          page_ids=tuple(str(i+1) for i in range(doc.page_count))
+          views=[]
+          for index in range(doc.page_count):
+              page_no=index+1
+              for v in segment_page_viewports(doc[index],page_number=page_no):
+                  if v.view_type in {
+                      DrawingViewType.REFLECTED_CEILING_PLAN.value,
+                      DrawingViewType.FLOOR_FINISH_PLAN.value,
+                      DrawingViewType.SCHEDULE.value,
+                      DrawingViewType.LEGEND.value,
+                      DrawingViewType.SPECIFICATION.value,
+                  }:
+                      views.append({
+                          "page_no":page_no,
+                          "view_id":v.view_id,
+                          "label":v.label,
+                          "view_type":v.view_type,
+                          "status":v.status,
+                          "bbox":None if v.bounding_box is None else list(v.bounding_box),
+                          "authoritative_derived":is_authoritative_derived_viewport(v),
+                      })
+          doc.close()
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-surface-semantics-1944",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag:{hashlib.sha256(payload).hexdigest()[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=page_ids,
+          )
+          producer=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          producer.publish(published.revision.revision_id)
+
+          definitions=[]
+          for result in producer._definition_results.values():
+              r=result.record
+              definitions.append({
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "code":None if r is None else r.code,
+                  "description":None if r is None else r.description,
+                  "semantic_finish":None if r is None else r.semantic_finish,
+                  "source_page_ids":[] if r is None else list(r.source_page_ids),
+                  "source_viewport_ids":[] if r is None else list(r.source_viewport_ids),
+              })
+
+          occurrences=[]
+          blocked_scopes=[]
+          for result in producer.published_occurrence_results():
+              if not result.records:
+                  blocked_scopes.append({
+                      "status":getattr(result.status,"value",str(result.status)),
+                      "scope_complete":result.scope_complete,
+                      "reason_codes":list(result.reason_codes),
+                  })
+              for r in result.records:
+                  occurrences.append({
+                      "status":getattr(result.status,"value",str(result.status)),
+                      "page_id":r.page_id,
+                      "viewport_id":r.viewport_id,
+                      "code":r.code,
+                      "semantic_finish":r.semantic_finish,
+                      "raw_text":r.raw_text,
+                      "bbox":list(r.bbox_pdf_pts),
+                  })
+
+          print(json.dumps({
+              "surface_views":views,
+              "definition_count":len(definitions),
+              "definitions":definitions,
+              "occurrence_count":len(occurrences),
+              "occurrences":occurrences,
+              "blocked_scope_count":len(blocked_scopes),
+              "blocked_scopes":blocked_scopes,
+          },indent=2,sort_keys=True,default=str))
+          PY
