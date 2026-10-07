@@ -533,8 +533,7 @@ def _bbox_center(bbox: tuple[float, float, float, float]) -> tuple[float, float]
 
 
 def _source_rectangle_tightly_wraps_observation(
-    candidate: ObservedGeometrySegment,
-    same_scope: Sequence[ObservedGeometrySegment],
+    siblings: Sequence[ObservedGeometrySegment],
     observation_bbox: Sequence[float],
     calibration: DimensionLayoutCalibration,
 ) -> bool:
@@ -550,22 +549,7 @@ def _source_rectangle_tightly_wraps_observation(
     table or annotation rectangles remain in the candidate universe.
     """
 
-    if (
-        candidate.source_path_index is None
-        or candidate.source_item_index is None
-        or len(observation_bbox) < 4
-    ):
-        return False
-    siblings = tuple(
-        segment
-        for segment in same_scope
-        if (
-            segment.source_page == candidate.source_page
-            and segment.source_path_index == candidate.source_path_index
-            and segment.source_item_index == candidate.source_item_index
-        )
-    )
-    if len(siblings) != 4:
+    if len(observation_bbox) < 4 or len(siblings) != 4:
         return False
     horizontals = tuple(
         segment
@@ -979,13 +963,43 @@ def bind_observation_to_vector_geometry(
         and (not observation.view_id or not s.view_id or s.view_id == observation.view_id)
         and s.orientation != DimensionOrientation.UNKNOWN.value
     ]
-    candidates = [
-        s for s in same_scope
-        if not _source_rectangle_tightly_wraps_observation(
-            s,
-            same_scope,
+    source_item_groups: dict[
+        tuple[int, int],
+        list[ObservedGeometrySegment],
+    ] = {}
+    for segment in same_scope:
+        if (
+            segment.source_path_index is None
+            or segment.source_item_index is None
+        ):
+            continue
+        source_item_groups.setdefault(
+            (
+                int(segment.source_path_index),
+                int(segment.source_item_index),
+            ),
+            [],
+        ).append(segment)
+    text_box_items = {
+        key
+        for key, siblings in source_item_groups.items()
+        if _source_rectangle_tightly_wraps_observation(
+            tuple(siblings),
             observation.bbox,
             calibration,
+        )
+    }
+
+    candidates = [
+        s for s in same_scope
+        if (
+            s.source_path_index is None
+            or s.source_item_index is None
+            or (
+                int(s.source_path_index),
+                int(s.source_item_index),
+            )
+            not in text_box_items
         )
         and _axis_distance(center, s) <= calibration.line_search_distance_pt
         and _projection_contains(center, s, calibration.line_search_distance_pt)
