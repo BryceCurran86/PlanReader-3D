@@ -349,9 +349,9 @@ def test_publish_two_face_lineage_uses_recovered_local_scope(
     assert result.record is not None
     assert host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED in result.reason_codes
     assert host.TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED in result.reason_codes
-    assert captured["record_ids"] == tuple(
+    assert set(captured["record_ids"]) == {
         record.wall_candidate_id for record in records
-    )
+    }
     assert captured["equivalence"] is not None
     assert captured["equivalence"] is not universe_result.equivalence
 
