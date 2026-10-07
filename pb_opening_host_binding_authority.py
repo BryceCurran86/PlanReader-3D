@@ -969,13 +969,24 @@ HOST_GAP_LINEAGE_AMBIGUOUS = "opening_gap_wall_lineage_ambiguous"
 
 
 def _raw_source_primitive_id(record: SourceObservationRecord) -> Optional[str]:
-    """Return the exact producer source primitive referenced by a visible line."""
+    """Return the source primitive id in the exact W4 lineage namespace.
+
+    Native visible observations use ``visible:segment:<raw>`` while the
+    native segment handed to Stage A / W4 retains the bare source id. Raster
+    observations use ``visible:raster_segment:<raw>`` while W4 deliberately
+    retains ``raster_segment:<raw>``. Mirror those producer translations
+    exactly; unknown visible namespaces remain unmapped.
+    """
     ref = str(getattr(record, "source_primitive_ref", "") or "")
-    prefix = "visible:"
-    if not ref.startswith(prefix):
-        return None
-    raw_id = ref[len(prefix):].strip()
-    return raw_id or None
+    native_prefix = "visible:segment:"
+    raster_prefix = "visible:raster_segment:"
+    if ref.startswith(native_prefix):
+        raw_id = ref[len(native_prefix):].strip()
+        return raw_id or None
+    if ref.startswith(raster_prefix):
+        raw_id = ref[len("visible:"):].strip()
+        return raw_id or None
+    return None
 
 
 def _unique_gap_source_records(
