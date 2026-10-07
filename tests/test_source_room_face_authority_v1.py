@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import fitz
 
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
@@ -97,7 +97,32 @@ def test_two_room_source_plan_publishes_exact_room_faces(tmp_path: Path) -> None
     assert all(record.area_page_pts2 > 0.0 for record in result.records)
     assert all(len(record.polygon_pdf_pts) >= 4 for record in result.records)
     assert all(record.bounding_wall_ids for record in result.records)
+    assert all(record.boundary_wall_edges for record in result.records)
+    assert all(
+        len(record.boundary_wall_edges) == len(record.polygon_pdf_pts)
+        for record in result.records
+    )
     assert len({record.face_id for record in result.records}) == 2
+
+    # Additive boundary-subedge provenance must not participate in the stable
+    # physical/source-room record identity. Recompute the historical payload
+    # exactly and require the same record id.
+    for record in result.records:
+        expected_payload = {
+            "face_id": record.face_id,
+            "document_id": record.document_id,
+            "revision_id": record.revision_id,
+            "source_sha256": record.source_sha256,
+            "snapshot_id": record.snapshot_id,
+            "page_id": record.page_id,
+            "decision_scope_id": record.decision_scope_id,
+            "polygon": record.polygon_pdf_pts,
+            "bounding_wall_ids": record.bounding_wall_ids,
+            "area_page_pts2": record.area_page_pts2,
+        }
+        assert record.record_id == stable_contract_id(
+            "source_room_face_record", expected_payload, digest_chars=32
+        )
 
 
 def test_single_box_cannot_mint_room_face_authority(tmp_path: Path) -> None:
@@ -241,6 +266,14 @@ def test_planar_face_split_at_partition_keeps_room_face_authority() -> None:
     assert result.reason_codes == (SOURCE_ROOM_FACE_SCOPE_RESOLVED,)
     assert len(result.records) == 2
     assert all("partition" in row.bounding_wall_ids for row in result.records)
+    partition_edges = [
+        edge
+        for row in result.records
+        for wall_id, edge in row.boundary_wall_edges
+        if wall_id == "partition"
+    ]
+    assert len(partition_edges) == 2
+    assert partition_edges[0] == partition_edges[1]
 
 def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> None:
     def record(wall_id: str, first, second):

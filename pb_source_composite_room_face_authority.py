@@ -5,8 +5,11 @@ an independently authenticated multi-word room label may be split across adjacen
 SourceRoomFace records by drafting-grid walls. A composite is published only
 when every internal face transition is separated exclusively by W4 candidates
 whose contributing W2 edges all carry producer-owned source-lineage KIND_GRID
-opposition, the exact constituent face union is one valid polygon, and none of
-the resulting external boundary walls is itself fully grid-opposed.
+opposition. When the authenticated label words occupy only part of that grid
+component, the producer completes the exact connected component through those
+same proven grid separators. The final constituent union must be one valid
+polygon, contain no conflicting authenticated room label, and expose no
+remaining grid-opposed external boundary.
 
 The producer never invents dimensions, metric area, room semantics, nearest-face
 matches, or project-specific rules. Original wall and room-face authorities stay
@@ -146,37 +149,165 @@ def _fully_grid_opposed_wall_evidence(
     return fully, evidence_by_wall
 
 
+def _edge_key(value) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Normalize one producer-owned planarized edge without adding tolerance."""
+
+    try:
+        first = (float(value[0][0]), float(value[0][1]))
+        second = (float(value[1][0]), float(value[1][1]))
+    except (IndexError, TypeError, ValueError):
+        return None
+    if first == second:
+        return None
+    return (first, second) if first <= second else (second, first)
+
+
+def _local_edge_owners(
+    room_scope: SourceRoomFaceScopeResult,
+) -> Mapping[
+    tuple[str, tuple[tuple[float, float], tuple[float, float]]],
+    tuple[str, ...],
+]:
+    """Exact (W4 wall id, planarized subedge) ownership from room authority."""
+
+    owners: dict[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]],
+        set[str],
+    ] = defaultdict(set)
+    for record in room_scope.records:
+        face_id = str(record.face_id)
+        for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
+            try:
+                wall_id = str(item[0])
+                edge = _edge_key(item[1])
+            except (IndexError, TypeError):
+                continue
+            if wall_id and edge is not None:
+                owners[(wall_id, edge)].add(face_id)
+    return {
+        key: tuple(sorted(face_ids))
+        for key, face_ids in owners.items()
+    }
+
+
+def _grid_local_adjacency(
+    room_scope: SourceRoomFaceScopeResult,
+    fully_grid_wall_ids: set[str],
+) -> Mapping[
+    str,
+    tuple[
+        tuple[
+            str,
+            str,
+            tuple[tuple[float, float], tuple[float, float]],
+        ],
+        ...,
+    ],
+]:
+    """Return neighbours sharing the exact same grid-owned planarized subedge.
+
+    A W4 wall may span many room cells, so whole-wall owner counts are not
+    adjacency evidence. The SourceRoomFace producer already proved a unique
+    wall owner for every published face subedge; exactly two published faces
+    owning the same (wall, subedge) is the local two-sided separator proof.
+    """
+
+    adjacency: dict[
+        str,
+        set[
+            tuple[
+                str,
+                str,
+                tuple[tuple[float, float], tuple[float, float]],
+            ]
+        ],
+    ] = defaultdict(set)
+    for (wall_id, edge), face_ids in _local_edge_owners(room_scope).items():
+        if wall_id not in fully_grid_wall_ids or len(face_ids) != 2:
+            continue
+        left_id, right_id = face_ids
+        adjacency[left_id].add((right_id, wall_id, edge))
+        adjacency[right_id].add((left_id, wall_id, edge))
+    return {
+        face_id: tuple(sorted(values))
+        for face_id, values in adjacency.items()
+    }
+
+
+def _grid_connected_component(
+    seed_face_ids: tuple[str, ...],
+    *,
+    room_scope: SourceRoomFaceScopeResult,
+    fully_grid_wall_ids: set[str],
+) -> tuple[str, ...] | None:
+    """Complete one room through exact two-sided grid-owned subedges."""
+
+    room_by_face = {str(record.face_id): record for record in room_scope.records}
+    seeds = tuple(dict.fromkeys(str(value) for value in seed_face_ids))
+    if len(seeds) < 2 or any(face_id not in room_by_face for face_id in seeds):
+        return None
+
+    adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
+    visited: set[str] = {seeds[0]}
+    pending = [seeds[0]]
+    while pending:
+        face_id = pending.pop()
+        for neighbour, _wall_id, _edge in adjacency.get(face_id, ()):
+            if neighbour not in visited:
+                visited.add(neighbour)
+                pending.append(neighbour)
+
+    if any(seed not in visited for seed in seeds):
+        return None
+    return tuple(sorted(visited))
+
+
+def _component_has_conflicting_label(
+    component_face_ids: tuple[str, ...],
+    candidate: SourceRoomSplitLabelCandidate,
+    *,
+    label_scope: SourceRoomLabelScopeResult,
+) -> bool:
+    """Block a completed grid component that contains another room identity."""
+
+    component = set(component_face_ids)
+    if any(
+        str(record.face_id) in component
+        for record in tuple(label_scope.records or ())
+    ):
+        return True
+
+    for other in tuple(label_scope.split_face_candidates or ()):
+        if str(other.record_id) == str(candidate.record_id):
+            continue
+        if component.intersection(str(value) for value in other.word_face_ids):
+            return True
+    return False
+
+
 def _candidate_record(
     candidate: SourceRoomSplitLabelCandidate,
     *,
     wall_scope: PhysicalWallCandidateScopeResult,
     room_scope: SourceRoomFaceScopeResult,
+    label_scope: SourceRoomLabelScopeResult,
     fully_grid_wall_ids: set[str],
     grid_evidence_by_wall: Mapping[str, tuple[str, ...]],
 ) -> CompositeSourceRoomFaceRecord | None:
     room_by_face = {str(record.face_id): record for record in room_scope.records}
-    ordered_face_ids = tuple(str(value) for value in candidate.word_face_ids)
-    if not ordered_face_ids or any(face_id not in room_by_face for face_id in ordered_face_ids):
+    seed_face_ids = tuple(str(value) for value in candidate.word_face_ids)
+    constituent_face_ids = _grid_connected_component(
+        seed_face_ids,
+        room_scope=room_scope,
+        fully_grid_wall_ids=fully_grid_wall_ids,
+    )
+    if constituent_face_ids is None:
         return None
-
-    separator_wall_ids: set[str] = set()
-    grid_evidence_ids: set[str] = set()
-    for left_id, right_id in zip(ordered_face_ids, ordered_face_ids[1:]):
-        if left_id == right_id:
-            continue
-        left = room_by_face[left_id]
-        right = room_by_face[right_id]
-        shared = tuple(
-            sorted(set(str(v) for v in left.bounding_wall_ids) & set(str(v) for v in right.bounding_wall_ids))
-        )
-        if not shared or not all(wall_id in fully_grid_wall_ids for wall_id in shared):
-            return None
-        separator_wall_ids.update(shared)
-        for wall_id in shared:
-            grid_evidence_ids.update(grid_evidence_by_wall.get(wall_id, ()))
-
-    constituent_face_ids = tuple(dict.fromkeys(ordered_face_ids))
-    if len(constituent_face_ids) < 2 or not separator_wall_ids:
+    if _component_has_conflicting_label(
+        constituent_face_ids,
+        candidate,
+        label_scope=label_scope,
+    ):
         return None
 
     constituent = [room_by_face[face_id] for face_id in constituent_face_ids]
@@ -200,34 +331,72 @@ def _candidate_record(
     if len(polygon) < 3:
         return None
 
-    wall_counts = Counter(
-        str(wall_id)
-        for record in constituent
-        for wall_id in record.bounding_wall_ids
-    )
-    internal_shared = {
-        wall_id
-        for wall_id, count in wall_counts.items()
-        if count > 1 and wall_id in fully_grid_wall_ids
-    }
-    external_walls = tuple(
-        sorted(
-            wall_id
-            for wall_id in wall_counts
-            if wall_id not in internal_shared
-        )
-    )
-    if not external_walls:
-        return None
-    # A union of only the label-owned lattice cells is not a proven room
-    # footprint while any of its *outer* boundary walls is itself producer-
-    # classified as the same drafting grid. In that case the composite remains
-    # an internal fragment of a larger unresolved region and must not be
-    # published as geometry-complete room authority.
-    if any(wall_id in fully_grid_wall_ids for wall_id in external_walls):
+    component_face_set = set(constituent_face_ids)
+    edge_owners = _local_edge_owners(room_scope)
+    component_edge_counts: Counter[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]]
+    ] = Counter()
+    for record in constituent:
+        for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
+            try:
+                wall_id = str(item[0])
+                edge = _edge_key(item[1])
+            except (IndexError, TypeError):
+                return None
+            if not wall_id or edge is None:
+                return None
+            component_edge_counts[(wall_id, edge)] += 1
+
+    if not component_edge_counts or any(count > 2 for count in component_edge_counts.values()):
         return None
 
-    constituent_record_ids = tuple(record.record_id for record in constituent)
+    separator_keys: set[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]]
+    ] = set()
+    external_keys: set[
+        tuple[str, tuple[tuple[float, float], tuple[float, float]]]
+    ] = set()
+    for key, count in component_edge_counts.items():
+        wall_id, _edge = key
+        global_owners = edge_owners.get(key, ())
+        if count == 2:
+            # An internal boundary may disappear only when the exact local
+            # subedge is globally two-sided and its W4 wall is fully grid.
+            if (
+                wall_id not in fully_grid_wall_ids
+                or len(global_owners) != 2
+                or not set(global_owners).issubset(component_face_set)
+            ):
+                return None
+            separator_keys.add(key)
+        elif count == 1:
+            external_keys.add(key)
+        else:
+            return None
+
+    if not separator_keys or not external_keys:
+        return None
+
+    # Preserve the #1683 hardening at subedge resolution. A long grid wall can
+    # be internal at one cell and external at another; any grid-owned external
+    # subedge means the room component is still incomplete and must abstain.
+    if any(wall_id in fully_grid_wall_ids for wall_id, _edge in external_keys):
+        return None
+
+    separator_wall_ids = {wall_id for wall_id, _edge in separator_keys}
+    external_walls = tuple(sorted({wall_id for wall_id, _edge in external_keys}))
+    if not external_walls:
+        return None
+
+    grid_evidence_ids: set[str] = set()
+    for wall_id in separator_wall_ids:
+        grid_evidence_ids.update(grid_evidence_by_wall.get(wall_id, ()))
+    if not grid_evidence_ids:
+        return None
+
+    constituent_record_ids = tuple(
+        room_by_face[face_id].record_id for face_id in constituent_face_ids
+    )
     decision_scope_id = stable_contract_id(
         "composite_source_room_face_scope",
         {
@@ -304,7 +473,6 @@ def _candidate_record(
         evidence_ids=evidence_ids,
     )
 
-
 def compose_grid_separated_room_faces(
     *,
     wall_scope: PhysicalWallCandidateScopeResult,
@@ -352,6 +520,7 @@ def compose_grid_separated_room_faces(
             candidate,
             wall_scope=wall_scope,
             room_scope=room_scope,
+            label_scope=label_scope,
             fully_grid_wall_ids=fully_grid,
             grid_evidence_by_wall=evidence_by_wall,
         )
