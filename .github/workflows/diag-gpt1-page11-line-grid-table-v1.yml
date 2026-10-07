@@ -1,0 +1,74 @@
+name: DIAG GPT1 Page11 Line Grid Table
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace page 11 finish schedule line grid
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, math
+          from pathlib import Path
+          import fitz
+          import pb_viewport_segmentation as vp
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(stream=path.read_bytes(),filetype="pdf")
+          page=doc[10]
+          cal=vp.calibrate_viewport_layout(page)
+          anchors=vp.extract_view_title_anchors(page)
+          frames=vp.extract_vector_frames(page,cal)
+          rows=[]
+          for a in anchors:
+              title=" ".join(str(a.text or "").upper().split())
+              if "INTERNAL FINISHES SCHEDULE" not in title:
+                  continue
+              candidates=vp._frame_candidates_for_title(
+                  page,a,frames,cal,anchors=anchors
+              )
+              for frame in candidates:
+                  tol=max(cal.median_word_height_pt*0.15,0.75)
+                  horiz=[]
+                  vert=[]
+                  for drawing in vp._page_drawings(page):
+                      for item in drawing.get("items",[]) or []:
+                          if not item or item[0]!="l" or len(item)<3:
+                              continue
+                          p0,p1=item[1],item[2]
+                          x0,y0,x1,y1=map(float,(p0.x,p0.y,p1.x,p1.y))
+                          mx,my=(x0+x1)/2,(y0+y1)/2
+                          if not vp._point_in_bbox((mx,my),frame,margin=tol):
+                              continue
+                          if abs(y1-y0)<=tol and abs(x1-x0)>=cal.median_word_height_pt*2:
+                              horiz.append([min(x0,x1),(y0+y1)/2,max(x0,x1)])
+                          if abs(x1-x0)<=tol and abs(y1-y0)>=cal.median_word_height_pt*2:
+                              vert.append([(x0+x1)/2,min(y0,y1),max(y0,y1)])
+                  y_positions=sorted({round(x[1],2) for x in horiz})
+                  x_positions=sorted({round(x[0],2) for x in vert})
+                  rows.append({
+                      "title":a.text,
+                      "title_bbox":list(a.bbox),
+                      "frame":list(frame),
+                      "rectangle_table":vp._frame_looks_like_table(frame,page,cal),
+                      "horizontal_count":len(horiz),
+                      "vertical_count":len(vert),
+                      "unique_horizontal_positions":y_positions,
+                      "unique_vertical_positions":x_positions,
+                      "horizontal_samples":horiz[:80],
+                      "vertical_samples":vert[:80],
+                  })
+          print(json.dumps({"rows":rows},indent=2,sort_keys=True))
+          doc.close()
+          PY
