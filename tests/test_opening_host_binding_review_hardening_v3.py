@@ -419,32 +419,38 @@ def test_local_host_scope_abstains_when_excluded_boundary_primitive_can_host() -
     assert "host_relevant_excluded_boundary_primitive" in reasons
 
 
-@pytest.mark.parametrize(
-    "classification",
-    [
-        PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
-        PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
-    ],
-)
-def test_nonhost_unsafe_equivalence_bridge_blocks_local_host(
-    classification,
-) -> None:
+def _unsafe_bridge_scope(
+    *,
+    classification: PhysicalEquivalenceClass,
+    unsafe: PhysicalWallCandidateRecord,
+    share_lineage: bool = False,
+) -> PhysicalWallCandidateScopeResult:
     host_records = _band_records(center_offset=0.0)
-    relevant_id = host_records[0].wall_candidate_id
-    unsafe = _record("unsafe-nonhost", ((200.0, 80.0), (260.0, 80.0)))
+    relevant = host_records[0]
+    relevant_id = relevant.wall_candidate_id
+    if share_lineage:
+        unsafe = replace(
+            unsafe,
+            physical_identity=replace(
+                unsafe.physical_identity,
+                source_primitive_ids=(
+                    relevant.physical_identity.source_primitive_ids[0],
+                ),
+            ),
+        )
     records = host_records + (unsafe,)
     base = _equivalence(records)
-    equivalence_groups = (
-        ((relevant_id, unsafe.wall_candidate_id),)
+    same_group = (
+        (tuple(sorted((relevant_id, unsafe.wall_candidate_id))),)
         if classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
         else ()
     )
     equivalence = replace(
         base,
-        equivalence_groups=equivalence_groups,
+        equivalence_groups=same_group,
         same_wall_ids=(
             tuple(sorted((relevant_id, unsafe.wall_candidate_id)))
-            if equivalence_groups
+            if same_group
             else ()
         ),
         ambiguous_wall_ids=(
@@ -461,10 +467,18 @@ def test_nonhost_unsafe_equivalence_bridge_blocks_local_host(
             ),
         ),
     )
-    scope = _incomplete_scope(
+    return _incomplete_scope(
         records,
         tainted_ids=(unsafe.wall_candidate_id,),
         equivalence=equivalence,
+    )
+
+
+def test_nonhost_unsafe_same_bridge_still_blocks_local_host() -> None:
+    unsafe = _record("unsafe-same-remote", ((200.0, 80.0), (260.0, 80.0)))
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.SAME_PHYSICAL_WALL,
+        unsafe=unsafe,
     )
 
     local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
@@ -472,6 +486,85 @@ def test_nonhost_unsafe_equivalence_bridge_blocks_local_host(
     assert local is None
     assert host.HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE in reasons
     assert "host_equivalence_bridges_unsafe_boundary_evidence" in reasons
+
+
+def test_remote_lineage_independent_ambiguous_bridge_is_not_local_contamination() -> None:
+    # Page-wide equivalence intentionally keeps unscaled overlapping parallel
+    # paths ambiguous. This wall is both longitudinally and laterally remote
+    # from the opening and shares no immutable identity evidence with its host.
+    unsafe = _record(
+        "unsafe-ambiguous-remote",
+        ((200.0, 80.0), (260.0, 80.0)),
+    )
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        unsafe=unsafe,
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is not None
+    assert reasons == (host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,)
+    assert unsafe.wall_candidate_id not in {
+        record.wall_candidate_id for record in local.records
+    }
+
+
+def test_remote_ambiguous_bridge_with_shared_lineage_still_blocks() -> None:
+    unsafe = _record(
+        "unsafe-ambiguous-shared-source",
+        ((200.0, 80.0), (260.0, 80.0)),
+    )
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        unsafe=unsafe,
+        share_lineage=True,
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert "host_equivalence_bridges_unsafe_boundary_evidence" in reasons
+
+
+def test_ambiguous_unsafe_candidate_inside_opening_wall_band_still_blocks() -> None:
+    # Spans the aperture rather than ending at a host edge, so it is not one of
+    # the ordinary left/right local records. It nevertheless occupies the
+    # opening's own source-proven wall band and must remain contamination.
+    unsafe = _record(
+        "unsafe-ambiguous-local-band",
+        ((-20.0, 4.0), (60.0, 4.0)),
+    )
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        unsafe=unsafe,
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert "host_equivalence_bridges_unsafe_boundary_evidence" in reasons
+
+
+def test_non_evaluable_ambiguous_unsafe_candidate_stays_fail_closed() -> None:
+    unsafe_base = _record(
+        "unsafe-ambiguous-curved",
+        ((200.0, 80.0), (260.0, 80.0)),
+    )
+    unsafe = replace(
+        unsafe_base,
+        wall_candidate=replace(unsafe_base.wall_candidate, is_curved=True),
+    )
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        unsafe=unsafe,
+    )
+
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert "host_equivalence_bridges_unsafe_boundary_evidence" in reasons
+
 
 
 def test_local_host_scope_recomputes_canonical_equivalence_invariants() -> None:
