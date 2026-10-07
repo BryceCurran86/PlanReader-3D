@@ -553,7 +553,16 @@ def test_non_evaluable_ambiguous_unsafe_candidate_stays_fail_closed() -> None:
     )
     unsafe = replace(
         unsafe_base,
-        wall_candidate=replace(unsafe_base.wall_candidate, is_curved=True),
+        wall_candidate=replace(
+            unsafe_base.wall_candidate,
+            representation="curved",
+            is_curved=True,
+            curve_control_pts=(
+                (200.0, 80.0),
+                (230.0, 90.0),
+                (260.0, 80.0),
+            ),
+        ),
     )
     scope = _unsafe_bridge_scope(
         classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
