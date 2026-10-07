@@ -241,6 +241,25 @@ def test_exact_same_native_block_binds_one_ceiling_finish(monkeypatch) -> None:
     assert record.definition_evidence_ids == ("def-evidence",)
 
 
+def test_authenticated_tile_semantic_is_valid_ceiling_lining_family() -> None:
+    definition = SourceMaterialDefinitionRecord(
+        record_id="def-grid-tile",
+        document_id="doc",
+        revision_id="rev",
+        source_sha256="a" * 64,
+        snapshot_id="snap",
+        code="GRID",
+        description="Vinyl faced plaster tile 600x1200",
+        substrate="",
+        finish="",
+        semantic_finish="tile",
+        source_definition_ids=("def-evidence",),
+        source_page_ids=("1",),
+        source_viewport_ids=("schedule-vp",),
+    )
+    assert ceiling._definition_is_ceiling_finish(definition) is True
+
+
 def test_finish_in_different_native_block_does_not_bind(monkeypatch) -> None:
     source, published = _source()
     rooms = _rooms(published, _room(published))
