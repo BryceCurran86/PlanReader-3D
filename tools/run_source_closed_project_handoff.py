@@ -384,6 +384,9 @@ def generate_project_handoff(
             # sheets. Keep the full surface execution evidence universe visible;
             # the collector still owns topology independently.
             pages=semantic_execution_pages,
+            topology_pages=(
+                topology_pages if topology_pages else semantic_execution_pages
+            ),
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
