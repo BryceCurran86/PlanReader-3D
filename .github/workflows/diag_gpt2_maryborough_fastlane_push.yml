@@ -1,0 +1,42 @@
+name: DIAG GPT2 Maryborough Fastlane Push
+
+on:
+  push:
+    branches:
+      - diagnostic/gpt2-maryborough-fastlane-push-v1
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run window-tag binding diagnostic
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt2_fastlane_window_tags.py | tee /tmp/window-tags.json
+      - name: Run opening-count diagnostic
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt2_fastlane_count.py | tee /tmp/opening-count.json
+      - name: Run two-face lineage owner diagnostic
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt2_fastlane_two_face_lineage.py | tee /tmp/two-face-lineage.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-fastlane
+          path: |
+            /tmp/window-tags.json
+            /tmp/opening-count.json
+            /tmp/two-face-lineage.json
+          retention-days: 1
