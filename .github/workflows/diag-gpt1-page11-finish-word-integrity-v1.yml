@@ -1,0 +1,117 @@
+name: DIAG GPT1 Page11 Finish Word Integrity
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace page11 finish schedule word integrity
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+          import fitz
+          import pb_source_material_semantic_authority as mat
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-page11-finish-word-integrity",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt1-page11-finish-word-integrity",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+          )
+          words=mat._trusted_words_by_page(source,published).get("11",())
+          raster=mat.RasterTextCorroborationProducer.from_source_visibility_producer(source)
+          doc=fitz.open(stream=payload,filetype="pdf")
+          page=doc[10]
+          viewport=next(
+              v for v in segment_page_viewports(page,page_number=11)
+              if "INTERNAL FINISHES SCHEDULE" in " ".join(str(v.label or "").upper().split())
+          )
+          assert viewport.bounding_box is not None
+          inside=[]
+          crossing=[]
+          for word in words:
+              if not mat._bbox_intersects(word.bbox,viewport.bounding_box):
+                  continue
+              row={
+                  "text":word.text,
+                  "bbox":list(word.bbox),
+                  "trusted":word.trusted,
+                  "reasons":list(word.reason_codes),
+                  "block":word.block_no,
+                  "line":word.line_no,
+                  "word":word.word_no,
+                  "observation_id":word.observation_id,
+              }
+              if mat._bbox_fully_inside(word.bbox,viewport.bounding_box):
+                  inside.append(row)
+              else:
+                  crossing.append(row)
+
+          recovered=mat._recover_admissible_viewport_words(
+              source=source,
+              published=published,
+              raster=raster,
+              words=words,
+              viewport=viewport,
+          )
+          recovered_inside=[
+              w for w in recovered
+              if mat._bbox_fully_inside(w.bbox,viewport.bounding_box)
+          ]
+          reason_counts=Counter(tuple(row["reasons"]) for row in inside if not row["trusted"])
+          by_line=defaultdict(list)
+          for row in inside:
+              by_line[(row["block"],row["line"])].append(row)
+          lines=[]
+          for key,items in sorted(by_line.items()):
+              items=sorted(items,key=lambda r:(r["word"],r["bbox"][0]))
+              lines.append({
+                  "block":key[0],
+                  "line":key[1],
+                  "text":" ".join(str(r["text"]) for r in items),
+                  "all_trusted":all(r["trusted"] for r in items),
+                  "reason_sets":sorted({tuple(r["reasons"]) for r in items if not r["trusted"]}),
+              })
+          print(json.dumps({
+              "viewport":{
+                  "id":viewport.view_id,
+                  "bbox":list(viewport.bounding_box),
+                  "status":viewport.status,
+              },
+              "inside_count":len(inside),
+              "inside_trusted_count":sum(1 for r in inside if r["trusted"]),
+              "inside_untrusted_count":sum(1 for r in inside if not r["trusted"]),
+              "crossing_count":len(crossing),
+              "crossing_words":crossing[:100],
+              "untrusted_reason_counts":[
+                  {"reasons":list(k),"count":v}
+                  for k,v in reason_counts.most_common()
+              ],
+              "recovered_inside_trusted_count":sum(1 for w in recovered_inside if w.trusted),
+              "recovered_new_count":sum(
+                  1 for before,after in zip(words,recovered)
+                  if (not before.trusted) and after.trusted
+              ),
+              "lines":lines[:200],
+          },indent=2,sort_keys=True))
+          PY
