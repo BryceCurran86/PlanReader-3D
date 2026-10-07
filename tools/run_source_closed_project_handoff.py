@@ -23,6 +23,9 @@ from pb_live_ceiling_area_quantity_publication import (
 )
 from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
 from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+from pb_live_ceiling_lining_source_closed_export import (
+    seal_live_ceiling_lining_run,
+)
 from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
 from pb_live_opening_count_source_closed_export import (
     seal_live_opening_count_run,
@@ -344,29 +347,54 @@ def generate_project_handoff(
             )
         )
 
+    cross_view_ceiling = False
     if clean_family_group in {"all", "surfaces"}:
-        ceiling_result = collect_live_ceiling_lining_claims(
-            pdf_path,
-            pages=(topology_pages if topology_pages else all_pages),
-            authoritative_room_area_quantities=tuple(
-                getattr(claim, "room_area_quantity_evidence", ()) or ()
-            ),
-        )
         ceiling_quantities = _non_abstained(
-            publish_live_ceiling_area_quantities(ceiling_result)
+            getattr(claim, "ceiling_lining_quantity_evidence", ())
         )
+        if ceiling_quantities:
+            cross_view_ceiling = True
+            ceiling_result = None
+        else:
+            ceiling_result = collect_live_ceiling_lining_claims(
+                pdf_path,
+                pages=(topology_pages if topology_pages else all_pages),
+                authoritative_room_area_quantities=tuple(
+                    getattr(claim, "room_area_quantity_evidence", ()) or ()
+                ),
+            )
+            ceiling_quantities = _non_abstained(
+                publish_live_ceiling_area_quantities(ceiling_result)
+            )
     else:
         ceiling_result = None
         ceiling_quantities = ()
     summary["family_counts"]["ceiling_area"] = len(ceiling_quantities)
-    if ceiling_quantities and ceiling_result is not None:
+    summary["ceiling_authority_path"] = (
+        "cross_view_room_area_plus_rcp_finish"
+        if cross_view_ceiling
+        else (
+            "legacy_same_scope_ceiling_lining"
+            if ceiling_quantities
+            else "unavailable"
+        )
+    )
+    if ceiling_quantities:
         family_runs.append(
             (
                 "ceiling_area",
-                seal_live_ceiling_area_run(
-                    ceiling_result,
-                    workspace_id=int(workspace_id),
-                    project_id=project_id,
+                (
+                    seal_live_ceiling_lining_run(
+                        claim,
+                        workspace_id=int(workspace_id),
+                        project_id=project_id,
+                    )
+                    if cross_view_ceiling
+                    else seal_live_ceiling_area_run(
+                        ceiling_result,
+                        workspace_id=int(workspace_id),
+                        project_id=project_id,
+                    )
                 ),
             )
         )
