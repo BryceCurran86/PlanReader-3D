@@ -22,7 +22,10 @@ from pb_opening_schedule_v171 import ScheduleEntry, detect_header, parse_schedul
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
+    PhysicalOpeningExistenceRecord,
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -385,6 +388,67 @@ def _opening_aperture(records: Sequence[SourceObservationRecord]) -> _OpeningApe
     if len(unique) != 1:
         return None
     return next(iter(unique.values()))
+
+
+def _sealed_raster_opening_aperture(
+    opening: PhysicalOpeningExistenceRecord,
+) -> _OpeningAperture | None:
+    """Recover tag-ownership geometry from an already sealed G17 raster aperture.
+
+    Raster support observations are intentionally isolated from ordinary
+    visibility, so the historical six-visible-segment reconstruction cannot
+    consume them.  Only the two reviewed G17 raster patterns may use their
+    producer-owned aperture bbox here.  This grants no opening kind, schedule
+    row, dimension, or quantity; it only defines the exact spatial proposition
+    in which an independently authenticated D/W tag must lie.
+    """
+
+    if opening.structural_pattern not in {
+        RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    }:
+        return None
+    bbox = opening.aperture_bbox_pt
+    if bbox is None or len(bbox) != 4:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(value) for value in bbox)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        not all(math.isfinite(value) for value in (x0, y0, x1, y1))
+        or x1 <= x0
+        or y1 <= y0
+    ):
+        return None
+
+    width = x1 - x0
+    height = y1 - y0
+    thickness = min(width, height)
+    span = max(width, height)
+    # Recheck the same high-level G17 wall-band invariant before this sealed
+    # geometry is reused by schedule ownership.  Near-square boxes are not an
+    # opening aperture proposition.
+    if thickness <= _COORD_TOL or span + _COORD_TOL < 2.0 * thickness:
+        return None
+
+    if width >= height:
+        return _OpeningAperture(
+            axis=(1.0, 0.0),
+            normal=(0.0, 1.0),
+            along_min=x0,
+            along_max=x1,
+            normal_min=y0,
+            normal_max=y1,
+        )
+    return _OpeningAperture(
+        axis=(0.0, 1.0),
+        normal=(-1.0, 0.0),
+        along_min=y0,
+        along_max=y1,
+        normal_min=-x1,
+        normal_max=-x0,
+    )
 
 
 def _aperture_contains_bbox(aperture: _OpeningAperture, bbox: BBox) -> bool:
@@ -765,31 +829,36 @@ class ScheduleOpeningInstanceBindingProducer:
                 ),
             )
 
-        opening_records: list[SourceObservationRecord] = []
-        for observation_id in opening.source_observation_ids:
-            resolved = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=opening.document_id,
-                    revision_id=opening.revision_id,
-                    source_sha256=opening.source_sha256,
-                    snapshot_id=opening.snapshot_id,
-                    observation_id=observation_id,
+        aperture = _sealed_raster_opening_aperture(opening)
+        if opening.structural_pattern not in {
+            RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+        }:
+            opening_records: list[SourceObservationRecord] = []
+            for observation_id in opening.source_observation_ids:
+                resolved = visibility.resolve_visible(
+                    ObservationSelector(
+                        document_id=opening.document_id,
+                        revision_id=opening.revision_id,
+                        source_sha256=opening.source_sha256,
+                        snapshot_id=opening.snapshot_id,
+                        observation_id=observation_id,
+                    )
                 )
-            )
-            if (
-                resolved.status is not EvidenceResolutionStatus.CORROBORATED
-                or resolved.observation is None
-            ):
-                return self._store(
-                    key,
-                    _blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        BINDING_GEOMETRY_UNAVAILABLE,
-                    ),
-                )
-            opening_records.append(resolved.observation)
+                if (
+                    resolved.status is not EvidenceResolutionStatus.CORROBORATED
+                    or resolved.observation is None
+                ):
+                    return self._store(
+                        key,
+                        _blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            BINDING_GEOMETRY_UNAVAILABLE,
+                        ),
+                    )
+                opening_records.append(resolved.observation)
+            aperture = _opening_aperture(opening_records)
 
-        aperture = _opening_aperture(opening_records)
         if aperture is None:
             return self._store(
                 key,
