@@ -1,0 +1,77 @@
+name: DIAG GPT1 Maryborough Materials On 1873
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Publish Maryborough material semantics
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf.read_bytes()
+          doc=fitz.open(stream=payload,filetype="pdf")
+          try:
+              page_ids=tuple(str(i+1) for i in range(doc.page_count))
+          finally:
+              doc.close()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-materials-1801",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag:{hashlib.sha256(payload).hexdigest()[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=page_ids,
+          )
+          producer=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          producer.publish(published.revision.revision_id)
+          definitions=[]
+          for result in producer._definition_results.values():
+              r=result.record
+              definitions.append({
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "code":None if r is None else r.code,
+                  "semantic_finish":None if r is None else r.semantic_finish,
+                  "source_page_ids":[] if r is None else list(r.source_page_ids),
+                  "source_viewport_ids":[] if r is None else list(r.source_viewport_ids),
+              })
+          occurrences=[]
+          for result in producer.published_occurrence_results():
+              for r in result.records:
+                  occurrences.append({
+                      "status":getattr(result.status,"value",str(result.status)),
+                      "reason_codes":list(result.reason_codes),
+                      "scope_complete":result.scope_complete,
+                      "page_id":r.page_id,
+                      "viewport_id":r.viewport_id,
+                      "code":r.code,
+                      "semantic_finish":r.semantic_finish,
+                      "raw_text":r.raw_text,
+                  })
+          print(json.dumps({
+              "definition_count":len(definitions),
+              "definitions":definitions,
+              "occurrence_count":len(occurrences),
+              "occurrences":occurrences,
+          },indent=2,sort_keys=True))
+          PY
