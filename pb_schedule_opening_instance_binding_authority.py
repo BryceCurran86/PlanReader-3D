@@ -27,7 +27,7 @@ from pb_physical_opening_authority import (
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION = "2.1.0"
+SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION = "2.2.0"
 
 BINDING_RESOLVED = "schedule_opening_instance_binding_resolved"
 BINDING_OPENING_UNRESOLVED = "schedule_opening_instance_binding_opening_unresolved"
@@ -101,6 +101,10 @@ class ScheduleOpeningInstanceBindingRecord:
     # Physical meaning is parser-owned from explicit schedule headings only.
     schedule_row_dimension_basis: str = ""
     schedule_row_basis_source: str = ""
+    # Exact authenticated schedule-row semantic text retained additively for
+    # downstream grouping/classification. It is evidence, not a derived class
+    # and never authorizes a quantity by itself.
+    schedule_row_description: str = ""
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -964,6 +968,7 @@ class ScheduleOpeningInstanceBindingProducer:
             "schedule_row_count_explicit": bool(entry.count_explicit),
             "schedule_row_dimension_basis": str(entry.dimension_basis or ""),
             "schedule_row_basis_source": str(entry.basis_source or ""),
+            "schedule_row_description": str(entry.description or ""),
         }
         record = ScheduleOpeningInstanceBindingRecord(
             record_id=stable_contract_id(
@@ -988,6 +993,7 @@ class ScheduleOpeningInstanceBindingProducer:
             schedule_row_count_explicit=bool(entry.count_explicit),
             schedule_row_dimension_basis=str(entry.dimension_basis or ""),
             schedule_row_basis_source=str(entry.basis_source or ""),
+            schedule_row_description=str(entry.description or ""),
         )
         return self._store(
             key,
