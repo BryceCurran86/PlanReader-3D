@@ -60,7 +60,7 @@ from pb_viewport_segmentation import (
 )
 
 
-CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION = "1.0.0"
+CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION = "1.1.0"
 CROSS_VIEW_CEILING_FINISH_RESOLVED = "cross_view_ceiling_finish_resolved"
 CROSS_VIEW_CEILING_FINISH_PARTIAL = "cross_view_ceiling_finish_partial"
 CROSS_VIEW_CEILING_FINISH_UNAVAILABLE = "cross_view_ceiling_finish_unavailable"
