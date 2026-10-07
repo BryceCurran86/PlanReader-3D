@@ -1,0 +1,78 @@
+name: DIAG GPT1 Maryborough Ceilings From Firm Rooms
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run firm-room to ceiling proof
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json,time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          t=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          room_seconds=time.perf_counter()-t
+          firm=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          t=time.perf_counter()
+          ceiling=collect_live_ceiling_lining_claims(
+              path,
+              pages=tuple(range(31)),
+              topology_pages=(6,29,30),
+              authoritative_room_area_quantities=tuple(firm),
+          )
+          ceiling_seconds=time.perf_counter()-t
+          print(json.dumps({
+              "room_seconds":room_seconds,
+              "firm_room_quantities":[
+                  {
+                      "value":q.value,
+                      "unit":q.unit,
+                      "status":q.status,
+                      "authority":q.authority,
+                      "metadata":dict(q.metadata or {}),
+                  } for q in firm
+              ],
+              "ceiling_seconds":ceiling_seconds,
+              "ceiling_status":getattr(ceiling.status,"value",str(ceiling.status)),
+              "ceiling_reason_codes":list(ceiling.reason_codes),
+              "ceiling_claim_count":len(ceiling.claims),
+              "canonical_ceiling_count":len(ceiling.canonical_ceilings),
+              "ceiling_quantity_count":len(ceiling.quantity_evidence),
+              "ceiling_quantities":[
+                  {
+                      "semantic_key":q.semantic_key,
+                      "value":q.value,
+                      "unit":q.unit,
+                      "status":q.status,
+                      "authority":q.authority,
+                      "metadata":dict(q.metadata or {}),
+                  } for q in ceiling.quantity_evidence
+              ],
+          },indent=2,sort_keys=True))
+          PY
