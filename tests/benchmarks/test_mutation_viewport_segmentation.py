@@ -463,3 +463,28 @@ def test_plan_floor_layout_title_is_supported_without_relaxing_prose_guard():
     prose = _reopen(prose)
     assert segment_page_viewports(prose[0], page_number=1) == []
     prose.close()
+
+
+def test_floor_finish_plan_segments_without_becoming_floor_plan_topology() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=350)
+    frame = fitz.Rect(30, 30, 470, 300)
+    page.draw_rect(frame)
+    page.draw_line((80, 100), (420, 100))
+    page.draw_line((80, 100), (80, 240))
+    page.insert_text(
+        (95, 270),
+        "PROP. FLOOR FINISHES & PARTITIONS PLAN",
+        fontsize=11,
+    )
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        viewport = viewports[0]
+        assert viewport.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+        assert viewport.status == ViewportSegmentationStatus.RESOLVED.value
+        assert viewport.bounding_box == pytest.approx((30, 30, 470, 300))
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == ()
+    finally:
+        doc.close()
