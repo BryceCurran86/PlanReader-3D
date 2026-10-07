@@ -255,6 +255,15 @@ def generate_project_handoff(
             # measurement. Surface/all execution retains the source-classified
             # support-page contract.
             room_area_support_pages=execution_room_support_pages,
+            # Surface geometry remains scoped to topology/support pages, while
+            # material/RCP authority may authenticate against the complete
+            # semantic source universe. These pages are decoded only; they are
+            # never added to wall/opening evidence scope.
+            semantic_evidence_pages=(
+                semantic_execution_pages
+                if clean_family_group == "surfaces"
+                else None
+            ),
         )
     except Exception as exc:
         summary["status"] = "production_failed"
