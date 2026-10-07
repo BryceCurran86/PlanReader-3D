@@ -1499,7 +1499,10 @@ class SourceMaterialSemanticProducer:
                                 ),
                             )
                         )
-                records.sort(key=lambda row: row.record_id)
+                # `lines` is already emitted in deterministic producer-owned
+                # native block/line order. Preserve that source order here:
+                # `record_id` is identity, not an ordering key, and adding
+                # legitimate provenance must not reshuffle published output.
                 self._occurrence_results[scope_selector.key] = (
                     SourceMaterialOccurrenceScopeResult(
                         status=EvidenceResolutionStatus.CORROBORATED,
