@@ -73,7 +73,10 @@ from pb_viewport_segmentation import (
     validate_non_overlapping_viewports,
 )
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
-from pb_wall_room_topology_junction_classifier import classify_junctions
+from pb_wall_room_topology_junction_classifier import (
+    classify_junctions,
+    deduplicate_coincident_edges,
+)
 from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 from pb_wall_room_topology_stage_a import (
     DEFAULT_GAP_SNAP_TOLERANCE_PT,
@@ -86,7 +89,7 @@ from pb_wall_room_topology_typed_negative_evidence import (
 )
 
 
-PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.2.0"
+PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.3.0"
 PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED = "physical_wall_candidate_scope_resolved"
 PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE = "physical_wall_candidate_scope_unavailable"
 PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED = (
@@ -209,6 +212,11 @@ class PhysicalWallCandidateRecord:
     wall_candidate_id: str
     wall_candidate: WallCandidate
     physical_identity: PhysicalWallIdentity
+    # Exact source-coverage ancestry owned by this W4 wall after W3's
+    # coincident-edge deduplication. This is deliberately separate from
+    # physical_identity.source_primitive_ids: adding discarded coincident
+    # source ancestry here must never churn the physical wall identity hash.
+    source_coverage_primitive_ids: tuple[str, ...] = ()
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
 
 
@@ -2710,6 +2718,87 @@ def _apply_trusted_relation_overrides(
     )
 
 
+def _exact_source_coverage_by_wall(
+    *,
+    walls: Sequence[WallCandidate],
+    graph: Mapping[str, object],
+) -> Mapping[str, tuple[str, ...]]:
+    """Preserve exact source ancestry discarded only by W3 edge dedup.
+
+    W3 collapses graph edges that connect the exact same snapped node pair.
+    That is a topology operation: duplicate edges must not create duplicate
+    walls. The discarded edge can nevertheless carry independent producer-
+    owned source lineage. Losing that ancestry makes later exact source-wall
+    joins report "unmapped" even though the retained W4 edge is the exact
+    topology survivor for the same node pair.
+
+    This sidecar replays the same deterministic coincident-edge dedup and
+    associates every pre-dedup edge's lineage with the unique W4 wall that
+    owns the retained edge for that exact node pair. It never changes graph
+    geometry, WallCandidate membership, PhysicalWallIdentity ancestry, wall
+    ids, equivalence, or completeness. No coordinate/proximity matching is
+    used: ownership is exact snapped node-pair identity only.
+    """
+
+    raw_edges = tuple(
+        edge
+        for edge in tuple(graph.get("edges") or ())
+        if isinstance(edge, Mapping) and not edge.get("_removed")
+    )
+    if not raw_edges or not walls:
+        return {}
+
+    deduped_graph, _removed = deduplicate_coincident_edges(dict(graph))
+    survivor_by_pair: dict[frozenset[object], str] = {}
+    for edge in tuple(deduped_graph.get("edges") or ()):
+        if not isinstance(edge, Mapping) or edge.get("_removed"):
+            continue
+        edge_id = str(edge.get("id") or "").strip()
+        if not edge_id:
+            continue
+        pair = frozenset((edge.get("a"), edge.get("b")))
+        if len(pair) != 2:
+            continue
+        survivor_by_pair[pair] = edge_id
+
+    owners_by_edge: dict[str, set[str]] = {}
+    for wall in walls:
+        wall_id = str(wall.candidate_id)
+        edge_ids = tuple(wall.face_a_segment_ids) + tuple(
+            wall.face_b_segment_ids or ()
+        )
+        for edge_id in edge_ids:
+            owners_by_edge.setdefault(str(edge_id), set()).add(wall_id)
+
+    coverage: dict[str, set[str]] = {
+        str(wall.candidate_id): set() for wall in walls
+    }
+    for edge in raw_edges:
+        pair = frozenset((edge.get("a"), edge.get("b")))
+        survivor_id = survivor_by_pair.get(pair)
+        if survivor_id is None:
+            continue
+        owners = owners_by_edge.get(survivor_id, set())
+        # A retained edge claimed by zero or multiple W4 walls is not a
+        # producer-owned unique source-coverage relation.
+        if len(owners) != 1:
+            continue
+        wall_id = next(iter(owners))
+        lineage = edge.get(LINEAGE_KEY) or {}
+        if not isinstance(lineage, Mapping):
+            continue
+        for source_id in tuple(lineage.get("source_primitive_ids") or ()):
+            text = str(source_id or "").strip()
+            if text:
+                coverage[wall_id].add(text)
+
+    return {
+        wall_id: tuple(sorted(source_ids))
+        for wall_id, source_ids in sorted(coverage.items())
+        if source_ids
+    }
+
+
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2773,6 +2862,10 @@ def _assemble_scope_result(
         viewport_id=scope_id,
     )
     identities = collect_physical_wall_identities(walls, graph)
+    source_coverage_by_wall = _exact_source_coverage_by_wall(
+        walls=tuple(walls),
+        graph=graph,
+    )
 
     ordered_walls = sorted(walls, key=lambda item: item.candidate_id)
     records: list[PhysicalWallCandidateRecord] = []
@@ -2786,6 +2879,9 @@ def _assemble_scope_result(
                 wall_candidate_id=wall.candidate_id,
                 wall_candidate=wall,
                 physical_identity=identity,
+                source_coverage_primitive_ids=tuple(
+                    source_coverage_by_wall.get(wall.candidate_id, ())
+                ),
             )
         )
         ordered_identities.append(identity)
