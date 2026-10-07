@@ -239,6 +239,8 @@ def test_exact_same_native_block_binds_one_ceiling_finish(monkeypatch) -> None:
     assert record.support_snapshot_id == published.snapshot.snapshot_id
     assert record.support_block_no == 7
     assert record.occurrence_evidence_id == "occ-evidence"
+    assert record.occurrence_observation_ids == ("obs-7-1",)
+    assert record.occurrence_receipt_ids == ("receipt-7-1",)
     assert record.definition_evidence_ids == ("def-evidence",)
 
 
