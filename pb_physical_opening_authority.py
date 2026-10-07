@@ -1626,6 +1626,7 @@ class PhysicalOpeningAuthority:
             )
             expected_length = max(expected_end - expected_start + 1.0, 1.0)
             matched: dict[str, SourceObservationRecord] = {}
+            matched_geometry: dict[str, tuple[float, float, float]] = {}
             for record in thin_runs:
                 line = tuple(
                     float(value) * float(dpi) / 72.0
@@ -1657,10 +1658,47 @@ class PhysicalOpeningAuthority:
                     if abs(run_start - float(solution.face_y)) > float(pad) + 1.0:
                         continue
                 matched[record.observation_id] = record
-            if len(matched) != 1:
+                matched_geometry[record.observation_id] = (
+                    float(leaf_x),
+                    float(run_start),
+                    float(run_end),
+                )
+
+            if not matched:
                 return ()
-            observation_id = next(iter(sorted(matched)))
-            return (matched[observation_id],)
+
+            # Raster antialiasing / line thickness can legitimately publish one
+            # physical door leaf as two or more parallel thin-run primitives.
+            # Preserve every source record as provenance, but accept them as one
+            # leaf bundle only when they are spatially compact at the already
+            # authenticated hinge and mutually overlap for the same full leaf.
+            # Separated or non-overlapping multiple candidates remain fail-closed.
+            if len(matched) > 1:
+                geometries = tuple(
+                    matched_geometry[observation_id]
+                    for observation_id in sorted(matched_geometry)
+                )
+                leaf_positions = tuple(item[0] for item in geometries)
+                if max(leaf_positions) - min(leaf_positions) > float(pad):
+                    return ()
+
+                common_start = max(item[1] for item in geometries)
+                common_end = min(item[2] for item in geometries)
+                common_overlap = max(common_end - common_start + 1.0, 0.0)
+                shortest_run = min(
+                    max(item[2] - item[1] + 1.0, 1.0)
+                    for item in geometries
+                )
+                if (
+                    common_overlap / shortest_run + 1e-12
+                    < _RASTER_SWING_LEAF_MIN_COVERAGE
+                ):
+                    return ()
+
+            return tuple(
+                matched[observation_id]
+                for observation_id in sorted(matched)
+            )
 
         discovered: dict[str, dict[str, SourceObservationRecord]] = {}
         candidate_patterns: dict[str, str] = {}
