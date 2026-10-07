@@ -104,9 +104,9 @@ class ObservedGeometrySegment:
     coordinate_space: str = CoordinateSpace.PDF_POINTS.value
     view_id: str = ""
     source_path_index: Optional[int] = None
-    source_item_index: Optional[int] = None
     stroke_width_pt: Optional[float] = None
     stroke_color_rgb: Optional[tuple[float, float, float]] = None
+    source_item_index: Optional[int] = None
 
     @property
     def dx(self) -> float:
