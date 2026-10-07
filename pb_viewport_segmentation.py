@@ -1392,6 +1392,8 @@ def _frame_resolved_viewports(
 _AUTHORITATIVE_DERIVED_PARTITION_MODE = "columnar_title_grid"
 _SINGLE_FLOOR_PLAN_PARTITION_MODE = "single_floor_plan_printable_area"
 _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE = "single_floor_plan_sheet_frame"
+_SINGLE_FLOOR_FINISH_PARTITION_MODE = "single_floor_finish_plan_printable_area"
+_SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE = "single_floor_finish_plan_sheet_frame"
 _SINGLE_REFLECTED_CEILING_PARTITION_MODE = "single_reflected_ceiling_printable_area"
 _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE = "single_reflected_ceiling_sheet_frame"
 
@@ -1411,6 +1413,7 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
         return provenance.get("grid_validated") is True
     if mode in (
         _SINGLE_FLOOR_PLAN_PARTITION_MODE,
+        _SINGLE_FLOOR_FINISH_PARTITION_MODE,
         _SINGLE_REFLECTED_CEILING_PARTITION_MODE,
     ):
         return bool(
@@ -1420,6 +1423,7 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
         )
     if mode in (
         _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE,
+        _SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE,
         _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE,
     ):
         return bool(
@@ -1821,6 +1825,7 @@ def _single_floor_plan_sheet_frame_partition(
 ) -> Optional[SegmentedViewport]:
     if anchor.view_type not in (
         DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.FLOOR_FINISH_PLAN.value,
         DrawingViewType.REFLECTED_CEILING_PLAN.value,
     ):
         return None
@@ -1848,7 +1853,11 @@ def _single_floor_plan_sheet_frame_partition(
             (
                 "single floor plan owns closed native sheet drawing frame with separate metadata band"
                 if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
-                else "single reflected ceiling plan owns closed native sheet drawing frame with separate metadata band"
+                else (
+                    "single floor finish plan owns closed native sheet drawing frame with separate metadata band"
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else "single reflected ceiling plan owns closed native sheet drawing frame with separate metadata band"
+                )
             ),
             *scale_notes,
         ],
@@ -1856,7 +1865,11 @@ def _single_floor_plan_sheet_frame_partition(
             "partition_mode": (
                 _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE
                 if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
-                else _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE
+                else (
+                    _SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE
+                )
             ),
             "single_view_validated": True,
             "metadata_label_count": metadata_count,
@@ -1877,6 +1890,7 @@ def _single_floor_plan_printable_partition(
     """Resolve one unframed semantic plan from page ownership, fail-closed."""
     if anchor.view_type not in (
         DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.FLOOR_FINISH_PLAN.value,
         DrawingViewType.REFLECTED_CEILING_PLAN.value,
     ):
         return None
@@ -1957,7 +1971,11 @@ def _single_floor_plan_printable_partition(
             (
                 "single floor plan owns proven printable area outside native title block"
                 if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
-                else "single reflected ceiling plan owns proven printable area outside native title block"
+                else (
+                    "single floor finish plan owns proven printable area outside native title block"
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else "single reflected ceiling plan owns proven printable area outside native title block"
+                )
             ),
             *scale_notes,
         ],
@@ -1965,7 +1983,11 @@ def _single_floor_plan_printable_partition(
             "partition_mode": (
                 _SINGLE_FLOOR_PLAN_PARTITION_MODE
                 if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
-                else _SINGLE_REFLECTED_CEILING_PARTITION_MODE
+                else (
+                    _SINGLE_FLOOR_FINISH_PARTITION_MODE
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else _SINGLE_REFLECTED_CEILING_PARTITION_MODE
+                )
             ),
             "single_view_validated": True,
             "title_block_bbox": title_block,
