@@ -4,6 +4,15 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - "pb_*opening*.py"
+      - "pb_*wall*.py"
+      - "tests/test_opening_host_binding_*.py"
+      - ".github/workflows/test-gpt3-two-face-lineage-host.yml"
+
+concurrency:
+  group: gpt3-two-face-lineage-host-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
