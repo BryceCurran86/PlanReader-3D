@@ -167,6 +167,12 @@ class LiveCanonicalRoomComposition:
         if len(owned) != 1:
             return None
 
+        # The binding is minted only inside compose_live_canonical_rooms after
+        # this exact producer-owned room-face scope has already resolved
+        # CORROBORATED + complete. Replaying that immutable authority scope
+        # once per room is redundant and pathological on dense CAD plans. Keep
+        # the historical owned-room uniqueness check above, then validate exact
+        # membership against the sealed record-id universe below.
         matches = [
             binding
             for binding in self._room_face_authority_bindings
@@ -181,26 +187,6 @@ class LiveCanonicalRoomComposition:
         if len(matches) != 1:
             return None
         binding = matches[0]
-        authority = binding.authority
-        selector = SourceRoomFaceSelector(
-            document_id=room.document_id,
-            revision_id=room.revision_id,
-            source_sha256=room.source_sha256,
-            snapshot_id=room.snapshot_id,
-            page_id=room.page_id,
-            decision_scope_id=room.decision_scope_id,
-        )
-        resolved = authority.resolve_scope(selector)
-        if (
-            resolved.status is not EvidenceResolutionStatus.CORROBORATED
-            or not resolved.scope_complete
-            or sum(
-                1
-                for record in resolved.records
-                if str(record.record_id) == room.source_room_face_record_id
-            ) != 1
-        ):
-            return None
         if room.viewport_id:
             if (
                 binding.viewport_id != room.viewport_id
