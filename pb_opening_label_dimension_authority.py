@@ -26,6 +26,7 @@ from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningExistenceRecord,
 )
@@ -462,7 +463,10 @@ def _gap_span_for_opening(
     dimensions, metric measurement authority, host identity, or quantity.
     """
 
-    if opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION:
+    if opening.structural_pattern in {
+        RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    }:
         bbox = opening.aperture_bbox_pt
         if bbox is None or len(bbox) != 4:
             return None
@@ -897,7 +901,10 @@ def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
 
 
 def _structural_kind(pattern: str) -> Optional[str]:
-    if pattern == GAP_CORROBORATED_DOOR_JAMB_LEAF:
+    if pattern in {
+        GAP_CORROBORATED_DOOR_JAMB_LEAF,
+        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    }:
         return "door"
     if pattern == GAP_CORROBORATED_WINDOW_JAMB_PAIR:
         return "window"
