@@ -12,6 +12,8 @@ concurrency:
   group: diag-gpt3-maryborough-runtime-v1
   cancel-in-progress: true
 
+# Supersedes completed focused profile; later runs remain diagnostic-only.
+
 jobs:
   validate:
     runs-on: ubuntu-latest
