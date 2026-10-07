@@ -19,7 +19,7 @@ from typing import Optional, Sequence
 import cv2
 import numpy as np
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import EvidenceAtom, EvidenceResolutionStatus, stable_contract_id
 from pb_plan_opening_detection_v171 import (
     Segment as LegacyPlanSegment,
     detect_door_candidates,
@@ -134,6 +134,7 @@ _PARALLEL_REL_TOL = 1e-9
 _VIEWPORT_SCOPED_PRODUCER_SEAL = object()
 OPENING_CANDIDATE_OUTSIDE_FLOOR_PLAN_SCOPE = "opening_candidate_outside_floor_plan_scope"
 OPENING_CANDIDATE_VIEWPORT_SCOPE_UNRESOLVED = "opening_candidate_viewport_scope_unresolved"
+NATIVE_DIMENSION_ANNOTATION_OPPOSES_OPENING = "native_dimension_annotation_opposes_opening"
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,7 @@ class PhysicalOpeningExistenceResult:
     candidate: Optional[CandidateSemanticOpening] = None
     existence_record: Optional[PhysicalOpeningExistenceRecord] = None
     missing_upstream_capability: Optional[str] = None
+    opposing_evidence_atoms: tuple[EvidenceAtom, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -3118,10 +3120,21 @@ class PhysicalOpeningAuthority:
         promotable, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(seed, records)
         )
-        proven_supports = tuple(
-            frozenset(candidate.source_observation_ids)
-            for candidate in promotable
-        )
+        # Structural membership alone is not existence authority. Inventory
+        # every G17 hypothesis, including those opposed by annotation evidence,
+        # and independently re-prove any support used to close raw candidates.
+        for candidate in proven:
+            raw_candidates[candidate.candidate_id] = frozenset(candidate.source_observation_ids)
+        proven_supports = []
+        for candidate in promotable:
+            support = frozenset(candidate.source_observation_ids)
+            for observation_id in candidate.source_observation_ids:
+                existence = self.prove_existence(replace(selector, observation_id=observation_id))
+                if (existence.status is EvidenceResolutionStatus.CORROBORATED
+                        and existence.existence_record is not None
+                        and frozenset(existence.existence_record.source_observation_ids) == support):
+                    proven_supports.append(support)
+                    break
         typed_non_plan_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven
@@ -3604,6 +3617,27 @@ class PhysicalOpeningAuthority:
             ))
 
         candidate = containing[0]
+        if (self._source_visibility_producer is not None
+                and candidate.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION):
+            try:
+                opposing = self._source_visibility_producer.native_dimension_cap_evidence(
+                    selector, opening_support_ids=candidate.source_observation_ids)
+            except RuntimeError:
+                return cache_visible(PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=('opening_annotation_source_integrity_unproven',),
+                    source_observation=source_result, candidate=candidate))
+            if opposing:
+                # Retain the complete hypothesis and its exact opposing source
+                # evidence. Annotation opposition is not non-existence proof
+                # and does not dispose the raw universe for count authority.
+                return cache_visible(PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=(NATIVE_DIMENSION_ANNOTATION_OPPOSES_OPENING,),
+                    source_observation=source_result, candidate=candidate,
+                    opposing_evidence_atoms=opposing))
         physical_geometry = _physical_opening_geometry_identity(candidate, records)
         if not physical_geometry:
             return cache_visible(PhysicalOpeningExistenceResult(

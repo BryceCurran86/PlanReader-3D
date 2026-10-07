@@ -7,6 +7,9 @@ on:
       - pb_opening_dimension_authority.py
       - pb_opening_host_frame_authority.py
       - pb_source_visibility_authority.py
+      - pb_physical_opening_authority.py
+      - pb_native_dimension_cap_evidence.py
+      - tests/test_native_dimension_cap_evidence.py
       - tests/test_raster_connected_host_frame.py
       - tests/test_raster_opening_dimension_source_namespace.py
       - tests/test_raster_opening_source_band_host.py
@@ -33,6 +36,12 @@ jobs:
           tests/test_raster_opening_source_band_host.py
           tests/test_raster_opening_dimension_source_namespace.py
           tests/test_raster_connected_host_frame.py
+          tests/test_native_dimension_cap_evidence.py
+          tests/test_g17_visible_opening_existence_v1.py
+          tests/test_physical_opening_candidate_structure_v1.py
+          tests/test_source_opening_universe_evidence_v1.py
+          tests/test_opening_universe_completeness_source_adapter_v1.py
+          tests/test_opening_universe_page_scope_coverage_v1.py
           tests/test_opening_host_frame_authority.py
           tests/test_opening_dimension_production_v1.py
           tests/test_raster_opening_source_primitive_host.py

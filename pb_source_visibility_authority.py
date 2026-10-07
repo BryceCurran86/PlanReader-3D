@@ -1191,6 +1191,70 @@ class SourceVisibilityProducer:
             return False
         finally:
             pdf.close()
+    def native_dimension_cap_evidence(
+        self, selector: ObservationSelector, *, opening_support_ids: Sequence[str]
+    ):
+        """Reprove exact native annotation opposition from this source only.
+
+        Missing or damaged source receipts raise the existing integrity error;
+        consumers must not mistake failed authentication for no opposition.
+        Results are candidate EvidenceAtoms, never metric or non-existence authority.
+        """
+        from pb_native_dimension_cap_evidence import collect_native_dimension_cap_evidence
+
+        published = self.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        visibility = self.authority()
+        selected = frozenset(opening_support_ids)
+        if selector.observation_id not in selected:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        rows = visibility.authenticated_visible_observations(published)
+        records = {i: r for i, r in rows if r.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT}
+        if not selected or not selected <= records.keys():
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        page_id = records[selector.observation_id].page_id
+        if any(records[i].page_id != page_id for i in selected):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        segments = {i: tuple(r.geometry) for i, r in records.items() if r.page_id == page_id}
+        source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
+        if source_bytes is None:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        try:
+            with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                page = pdf[int(page_id) - 1]
+                directions = {(bi, li): tuple(line.get('dir', (0., 0.)))
+                    for bi, block in enumerate(page.get_text('dict', flags=fitz.TEXTFLAGS_WORDS)['blocks'])
+                    for li, line in enumerate(block.get('lines', []))}
+        except (ValueError, IndexError, RuntimeError):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        text_authority = self.text_integrity_authority()
+        source_authority = self._producer.authority()
+        words = []
+        for observation_id in published.text_observation_ids:
+            word_selector = replace(selector, observation_id=observation_id)
+            source_result = source_authority.resolve(word_selector)
+            record = source_result.observation
+            if source_result.status is not EvidenceResolutionStatus.CORROBORATED or record is None:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if record.page_id != page_id:
+                continue
+            text = text_authority.resolve_text(word_selector)
+            if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
+                continue
+            receipt = text.receipt
+            words.append(dict(id=observation_id, text=text.trusted_text,
+                bbox=receipt.geometry,
+                axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+        return collect_native_dimension_cap_evidence(segments=segments, words=words,
+            selected_ids=tuple(selected), document_id=selector.document_id, page_id=page_id,
+            revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id)
+
     def opening_dimension_authority(self):
         """Return the read-only dimension resolver bound to this producer."""
         from pb_opening_dimension_authority import (

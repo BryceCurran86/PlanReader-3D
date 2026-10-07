@@ -209,12 +209,52 @@ def main():
     )
     areas = publish_live_opening_area_quantities(voids)
 
+    # Preserve the raw hypotheses and exact opposing source receipts in the
+    # audit. Annotation opposition never counts as non-existence or closure.
+    annotation_opposition = {}
+    if wall_result.source_observation_ids:
+        seed_selector = ObservationSelector(document_id=current.revision.document_id,
+            revision_id=current.revision.revision_id, source_sha256=actual,
+            snapshot_id=current.snapshot.snapshot_id,
+            observation_id=wall_result.source_observation_ids[0])
+        structures = physical.visible_candidate_structures(seed_selector)
+        for candidate in structures.candidates:
+            if candidate.structural_pattern != JAMB_BOUNDED_TWO_FACE_INTERRUPTION:
+                continue
+            for observation_id in candidate.source_observation_ids:
+                result = physical.prove_existence(ObservationSelector(
+                    document_id=current.revision.document_id,revision_id=current.revision.revision_id,
+                    source_sha256=actual,snapshot_id=current.snapshot.snapshot_id,
+                    observation_id=observation_id))
+                if result.opposing_evidence_atoms and result.candidate is not None:
+                    annotation_opposition[result.candidate.candidate_id] = dict(
+                        candidate=asdict(result.candidate), reason_codes=result.reason_codes,
+                        opposing_evidence_atoms=[a.to_dict() for a in result.opposing_evidence_atoms])
+        # Exact remaining aligned W4 alternatives; no diagnostic fact here
+        # modifies the frame's positive DISTINCT requirement.
+        for row in rows:
+            diagnostic = row['host_diagnostic']
+            if diagnostic is None or diagnostic['geometry'] is None:
+                continue
+            geometry = host._OpeningGeometry(**diagnostic['geometry'])
+            aligned = []
+            for record in wall_result.records:
+                points = record.wall_candidate.centerline_pts
+                if any(data is not None and abs(data[2]) <= geometry.thickness/2 + host._RASTER_WHOLE_WALL_CENTER_TOL_PT
+                    for data in (host._source_line_axis_data((*a,*b),geometry) for a,b in zip(points,points[1:]))):
+                    aligned.append(dict(wall_id=record.wall_candidate_id,
+                        centerline=points, source_primitive_ids=record.physical_identity.source_primitive_ids,
+                        equivalence_pairs=[list(p) for p in wall_result.equivalence.pair_classifications
+                            if record.wall_candidate_id in p[:2]]))
+            diagnostic['aligned_wall_scope_candidates'] = aligned
+
     from pb_live_opening_source_closed_export import seal_live_opening_area_run
     sealed = seal_live_opening_area_run(voids, workspace_id=1, project_id="au_qld_lot16_power")
     Path("lot16-openings-sealed.json").write_text(sealed.to_json())
     payload = {
         "source_sha256": actual,
         "snapshot_id": current.snapshot.snapshot_id,
+        "native_annotation_opposition": list(annotation_opposition.values()),
         "semantic_status": state(composition.semantic_enumeration_result.status),
         "opening_count": len(composition.opening_bindings),
         "host_bound_count": sum(1 for trace in composition.opening_bindings if trace.host_wall_id),
