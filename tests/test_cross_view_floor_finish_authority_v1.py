@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import fitz
 
+import pb_cross_view_floor_finish_authority as floor_finish_authority
 import pb_source_material_semantic_authority as material_semantic
 from pb_cross_view_floor_finish_authority import (
     CROSS_VIEW_FLOOR_FINISH_CONFLICT,
@@ -620,3 +621,106 @@ def test_cross_view_floor_finish_area_precedes_same_view_supplement(
     assert "same-view-supplement-area-evidence" not in (
         result.records[0].quantity.evidence_ids
     )
+
+
+def _cross_view_floor_finish_payload(*, same_block: bool = True) -> bytes:
+    doc = fitz.open(stream=_payload(detail_codes=()), filetype="pdf")
+    try:
+        finish = doc.new_page(pno=2, width=400.0, height=300.0)
+        finish.insert_text(
+            (40.0, 40.0),
+            "FLOOR FINISHES PLAN",
+            fontsize=10.0,
+        )
+        if same_block:
+            finish.insert_textbox(
+                fitz.Rect(140.0, 120.0, 240.0, 180.0),
+                "TEST ROOM\nFT1",
+                fontsize=10.0,
+            )
+        else:
+            finish.insert_text((150.0, 140.0), "TEST ROOM", fontsize=10.0)
+            finish.insert_text((165.0, 160.0), "FT1", fontsize=10.0)
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+def _patch_cross_view_floor_finish_viewports(monkeypatch) -> None:
+    types = {
+        1: "floor_plan",
+        2: "floor_plan",
+        3: "floor_finish_plan",
+        4: "schedule",
+    }
+
+    def segment(_page, *, page_number):
+        return tuple(
+            _stamp_segment_page_viewports_product(
+                [
+                    _viewport(
+                        page_number,
+                        types[page_number],
+                        f"vp-{page_number}",
+                    )
+                ]
+            )
+        )
+
+    monkeypatch.setattr(
+        material_semantic,
+        "segment_page_viewports",
+        segment,
+    )
+    monkeypatch.setattr(
+        floor_finish_authority,
+        "segment_page_viewports",
+        segment,
+    )
+
+
+def test_separate_floor_finish_plan_binds_by_exact_native_room_block(
+    monkeypatch,
+) -> None:
+    _patch_cross_view_floor_finish_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _cross_view_floor_finish_payload(same_block=True)
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.finish_code == "FT1"
+    assert record.semantic_finish == "tile"
+    assert record.quantity.value == 8.64
+    assert record.quantity.metadata["source_dimension_page_id"] == "2"
+    assert record.quantity.metadata["support_page_id"] == "3"
+    assert record.quantity.metadata["support_viewport_id"] == "vp-3"
+    assert (
+        record.quantity.metadata["finish_binding_mode"]
+        == "native_block_room_label"
+    )
+
+
+def test_separate_floor_finish_plan_nearby_code_in_different_block_abstains(
+    monkeypatch,
+) -> None:
+    _patch_cross_view_floor_finish_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _cross_view_floor_finish_payload(same_block=False)
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.records == ()
+    assert result.quantities == ()
