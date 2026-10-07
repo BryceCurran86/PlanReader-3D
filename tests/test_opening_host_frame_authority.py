@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+from types import SimpleNamespace
 
 import fitz
 import pytest
@@ -20,8 +21,15 @@ from pb_opening_host_frame_authority import (
     OpeningHostFrameAuthority,
     OpeningHostFrameProducer,
 )
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
-from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+from pb_physical_opening_authority import (
+    PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    PhysicalOpeningAuthority,
+)
+from pb_physical_wall_candidate_authority import (
+    PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+    PhysicalWallCandidateProducer,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
@@ -188,6 +196,68 @@ def test_authority_and_producer_are_sealed_and_no_raw_geometry_surface() -> None
     }
     params = set(inspect.signature(OpeningHostFrameProducer.publish).parameters)
     assert not (params & forbidden)
+
+
+def test_raster_swing_one_member_host_reuses_raster_whole_wall_frame(monkeypatch) -> None:
+    producer = object.__new__(OpeningHostFrameProducer)
+    record = SimpleNamespace(
+        wall_candidate_id="wall:host",
+        wall_candidate=SimpleNamespace(
+            is_curved=False,
+            centerline_pts=((20.0, 90.0), (280.0, 90.0)),
+        ),
+    )
+    wall_scope = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        proposition=PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
+        equivalence=SimpleNamespace(),
+        records=(record,),
+    )
+    producer._walls = SimpleNamespace(resolve_scope=lambda _selector: wall_scope)
+
+    monkeypatch.setattr(
+        host_geometry,
+        "_resolve_raster_whole_wall_host",
+        lambda _records, _geometry, _equivalence: SimpleNamespace(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            bands=(SimpleNamespace(member_ids=("wall:host",)),),
+        ),
+    )
+    geometry = host_geometry._OpeningGeometry(
+        origin=(120.0, 90.0),
+        axis=(1.0, 0.0),
+        normal=(0.0, 1.0),
+        length=40.0,
+        thickness=20.0,
+    )
+    binding = SimpleNamespace(
+        document_id="doc",
+        revision_id="rev",
+        source_sha256="a" * 64,
+        snapshot_id="snap",
+        page_id="1",
+        decision_scope_id="wall-source:page-1",
+        opening_identity_id="opening:swing",
+        record_id="binding:swing",
+        member_wall_candidate_ids=("wall:host",),
+    )
+    opening = SimpleNamespace(
+        record_id="opening:swing",
+        structural_pattern=RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+        source_observation_ids=("raster:leaf:a", "raster:leaf:b"),
+    )
+
+    frame = producer._raster_whole_wall_frame(
+        binding=binding,
+        opening=opening,
+        geometry=geometry,
+    )
+    assert frame is not None
+    assert frame.candidate_ids == ("wall:host",)
+    assert frame.u0 == pytest.approx(100.0)
+    assert frame.u1 == pytest.approx(140.0)
+    assert frame.wall_thickness == pytest.approx(20.0)
 
 
 def test_single_opening_real_source_frame_resolves_and_replays() -> None:
