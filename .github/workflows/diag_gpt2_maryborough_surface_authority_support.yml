@@ -1,0 +1,56 @@
+name: DIAG GPT2 Maryborough Surface Authority Support
+
+on:
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: diag-gpt2-maryborough-surface-support-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  material-authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove real Maryborough material semantics
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-surface-support
+          PYTHONPATH=. python -u tools/diag_gpt2_maryborough_surface_material_authority.py | tee artifacts/gpt2-maryborough-surface-support/material-authority.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-material-authority
+          path: artifacts/gpt2-maryborough-surface-support/material-authority.json
+          retention-days: 2
+
+  surface-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Audit real Maryborough room to sealed surface path
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-surface-support
+          PYTHONPATH=. python -u tools/diag_gpt2_maryborough_surface_handoff_audit.py | tee artifacts/gpt2-maryborough-surface-support/surface-handoff.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-surface-handoff
+          path: artifacts/gpt2-maryborough-surface-support/surface-handoff.json
+          retention-days: 2
