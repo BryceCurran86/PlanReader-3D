@@ -1,6 +1,8 @@
 """Focused regressions for cross-view ceiling-finish authority."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import fitz
 
 import pb_cross_view_ceiling_finish_authority as ceiling
@@ -15,13 +17,15 @@ from pb_source_material_semantic_authority import (
     SourceMaterialOccurrenceRecord,
     SourceMaterialOccurrenceScopeResult,
 )
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
 def _pdf() -> bytes:
     doc = fitz.open()
     doc.new_page(width=300.0, height=220.0)
-    doc.new_page(width=300.0, height=220.0)
+    page = doc.new_page(width=300.0, height=220.0)
+    page.insert_text((100.0, 80.0), "GRID", fontsize=10)
     payload = doc.tobytes()
     doc.close()
     return payload
@@ -128,7 +132,26 @@ def _occurrence(published) -> SourceMaterialOccurrenceRecord:
     )
 
 
-def _patch_material(monkeypatch, published):
+def _line(
+    *,
+    text: str,
+    block_no: int,
+    line_no: int,
+    bbox: tuple[float, float, float, float],
+):
+    return ceiling._TrustedLine(
+        page_id="2",
+        source_partition_id="partition-2",
+        block_no=block_no,
+        line_no=line_no,
+        text=text,
+        bbox=bbox,
+        observation_ids=(f"obs-{block_no}-{line_no}",),
+        receipt_ids=(f"receipt-{block_no}-{line_no}",),
+    )
+
+
+def _patch_material(monkeypatch, published, *, occurrence_block: int = 7):
     definition = _definition(published)
     occurrence = _occurrence(published)
 
@@ -168,32 +191,23 @@ def _patch_material(monkeypatch, published):
             ("2", "rcp-vp"): (0.0, 0.0, 250.0, 200.0),
         },
     )
-    return occurrence
-
-
-def _line(
-    *,
-    text: str,
-    block_no: int,
-    line_no: int,
-    bbox: tuple[float, float, float, float],
-):
-    return ceiling._TrustedLine(
-        page_id="2",
-        source_partition_id="partition-2",
-        block_no=block_no,
-        line_no=line_no,
-        text=text,
-        bbox=bbox,
-        observation_ids=(f"obs-{block_no}-{line_no}",),
-        receipt_ids=(f"receipt-{block_no}-{line_no}",),
+    monkeypatch.setattr(
+        ceiling,
+        "_occurrence_line",
+        lambda *_args, **_kwargs: _line(
+            text="GRID",
+            block_no=occurrence_block,
+            line_no=1 if occurrence_block == 7 else 0,
+            bbox=(100.0, 70.0, 125.0, 82.0),
+        ),
     )
+    return occurrence
 
 
 def test_exact_same_native_block_binds_one_ceiling_finish(monkeypatch) -> None:
     source, published = _source()
     rooms = _rooms(published, _room(published))
-    _patch_material(monkeypatch, published)
+    _patch_material(monkeypatch, published, occurrence_block=7)
 
     label = _line(
         text="OFFICE",
@@ -201,16 +215,10 @@ def test_exact_same_native_block_binds_one_ceiling_finish(monkeypatch) -> None:
         line_no=0,
         bbox=(50.0, 50.0, 90.0, 62.0),
     )
-    finish = _line(
-        text="GRID",
-        block_no=7,
-        line_no=1,
-        bbox=(100.0, 70.0, 125.0, 82.0),
-    )
     monkeypatch.setattr(
         ceiling,
-        "_trusted_lines_for_pages",
-        lambda *_args, **_kwargs: {"2": (label, finish)},
+        "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label,)},
     )
 
     result = ceiling.CrossViewCeilingFinishProducer.from_source(
@@ -236,7 +244,7 @@ def test_exact_same_native_block_binds_one_ceiling_finish(monkeypatch) -> None:
 def test_finish_in_different_native_block_does_not_bind(monkeypatch) -> None:
     source, published = _source()
     rooms = _rooms(published, _room(published))
-    _patch_material(monkeypatch, published)
+    _patch_material(monkeypatch, published, occurrence_block=8)
 
     label = _line(
         text="OFFICE",
@@ -244,16 +252,10 @@ def test_finish_in_different_native_block_does_not_bind(monkeypatch) -> None:
         line_no=0,
         bbox=(50.0, 50.0, 90.0, 62.0),
     )
-    finish = _line(
-        text="GRID",
-        block_no=8,
-        line_no=0,
-        bbox=(100.0, 70.0, 125.0, 82.0),
-    )
     monkeypatch.setattr(
         ceiling,
-        "_trusted_lines_for_pages",
-        lambda *_args, **_kwargs: {"2": (label, finish)},
+        "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label,)},
     )
 
     result = ceiling.CrossViewCeilingFinishProducer.from_source(
@@ -289,7 +291,7 @@ def test_duplicate_canonical_room_label_cannot_mint_cross_view_identity(
             label="OFFICE",
         ),
     )
-    _patch_material(monkeypatch, published)
+    _patch_material(monkeypatch, published, occurrence_block=7)
 
     label = _line(
         text="OFFICE",
@@ -297,16 +299,10 @@ def test_duplicate_canonical_room_label_cannot_mint_cross_view_identity(
         line_no=0,
         bbox=(50.0, 50.0, 90.0, 62.0),
     )
-    finish = _line(
-        text="GRID",
-        block_no=7,
-        line_no=1,
-        bbox=(100.0, 70.0, 125.0, 82.0),
-    )
     monkeypatch.setattr(
         ceiling,
-        "_trusted_lines_for_pages",
-        lambda *_args, **_kwargs: {"2": (label, finish)},
+        "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label,)},
     )
 
     result = ceiling.CrossViewCeilingFinishProducer.from_source(
@@ -339,13 +335,7 @@ def test_non_ceiling_material_definition_cannot_bind(monkeypatch) -> None:
         source_page_ids=("1",),
         source_viewport_ids=("schedule-vp",),
     )
-    occurrence = _occurrence(published)
-    occurrence = SourceMaterialOccurrenceRecord(
-        **{
-            **occurrence.__dict__,
-            "semantic_finish": "tile",
-        }
-    )
+    occurrence = replace(_occurrence(published), semantic_finish="tile")
 
     class _Authority:
         def resolve_definition(self, selector):
@@ -387,16 +377,20 @@ def test_non_ceiling_material_definition_cannot_bind(monkeypatch) -> None:
         line_no=0,
         bbox=(50.0, 50.0, 90.0, 62.0),
     )
-    finish = _line(
-        text="GRID",
-        block_no=7,
-        line_no=1,
-        bbox=(100.0, 70.0, 125.0, 82.0),
+    monkeypatch.setattr(
+        ceiling,
+        "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label,)},
     )
     monkeypatch.setattr(
         ceiling,
-        "_trusted_lines_for_pages",
-        lambda *_args, **_kwargs: {"2": (label, finish)},
+        "_occurrence_line",
+        lambda *_args, **_kwargs: _line(
+            text="GRID",
+            block_no=7,
+            line_no=1,
+            bbox=(100.0, 70.0, 125.0, 82.0),
+        ),
     )
 
     result = ceiling.CrossViewCeilingFinishProducer.from_source(
@@ -407,3 +401,49 @@ def test_non_ceiling_material_definition_cannot_bind(monkeypatch) -> None:
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.records == ()
     assert result.unresolved_physical_room_ids == ("room-1",)
+
+
+def test_occurrence_line_replays_preserved_source_text_receipts() -> None:
+    source, published = _source()
+    authority = source.text_integrity_authority()
+
+    matches = []
+    for observation_id in published.text_observation_ids:
+        resolved = authority.resolve_text(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        receipt = resolved.receipt
+        if (
+            receipt is not None
+            and str(receipt.page_id) == "2"
+            and str(receipt.raw_text).strip() == "GRID"
+        ):
+            matches.append((observation_id, receipt))
+
+    assert len(matches) == 1
+    observation_id, receipt = matches[0]
+    occurrence = replace(
+        _occurrence(published),
+        bbox_pdf_pts=tuple(float(value) for value in receipt.geometry),
+        source_text_observation_ids=(str(observation_id),),
+    )
+
+    line = ceiling._occurrence_line(
+        source,
+        revision_id=published.revision.revision_id,
+        occurrence=occurrence,
+    )
+
+    assert line is not None
+    assert line.text == "GRID"
+    assert line.observation_ids == (str(observation_id),)
+    assert line.receipt_ids == (str(receipt.receipt_id),)
+    assert line.block_no == int(receipt.block_no)
+    assert line.line_no == int(receipt.line_no)
+    assert line.source_partition_id == str(receipt.source_partition_id)
