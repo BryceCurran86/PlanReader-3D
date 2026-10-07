@@ -775,22 +775,23 @@ def _filter_repeated_non_physical_drafting_primitives(
 
     kept: list[dict] = []
     for segment in segments:
+        # A complete producer-owned G17 two-face opening is stronger physical
+        # evidence than the earlier generic annotation-mask sidecar. The mask
+        # sidecar is created before opening topology exists and can therefore
+        # only say that a fill rectangle looked text-associated at that stage.
+        # If G17 later proves one exact edge is an interrupted physical wall
+        # face, preserve that exact source primitive. This does not rescue the
+        # other rectangle edges, opening jambs, or unrelated repeated marks.
+        if str(segment.get("id") or "") in protected_ids:
+            kept.append(segment)
+            continue
         # A fill-only PDF rectangle is not automatically an annotation wipeout.
         # Filled rectangles can also be legitimate source-owned physical
         # geometry. Prune its synthetic rect_edge linework only when an
         # upstream producer has explicitly authenticated the rectangle as a
-        # text-associated annotation mask and proved it does not participate in
-        # a physical wall/object. Missing proof preserves the source geometry.
+        # text-associated annotation mask and no stronger physical-object proof
+        # exists for this exact source primitive.
         if _is_proven_annotation_mask_edge(segment):
-            continue
-        # A complete producer-owned G17 two-face opening independently proves
-        # which four source primitives are the interrupted wall faces. Those
-        # faces are physical wall evidence even when their short repeated
-        # geometry resembles a dense drafting motif. Protect only those exact
-        # source ids; opening jambs and unrelated repeated marks remain subject
-        # to the historical motif filter.
-        if str(segment.get("id") or "") in protected_ids:
-            kept.append(segment)
             continue
         if id(segment) not in singleton_ids:
             kept.append(segment)
