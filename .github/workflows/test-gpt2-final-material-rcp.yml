@@ -31,9 +31,9 @@ jobs:
             tests/test_cross_view_room_area_authority_v1.py \
             tests/test_source_closed_project_handoff.py
 
-  maryborough-exact:
+  maryborough-material:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,83 +46,84 @@ jobs:
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-      - name: Run real Maryborough surfaces
+      - name: Prove real Maryborough FPB and GRID definitions
         shell: bash
         run: |
           set -o pipefail
           ROOT=artifacts/gpt2-final-material-rcp/maryborough
           mkdir -p "$ROOT"
-          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
-            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
-            --project-id au_qld_maryborough_service_station \
-            --workspace-id 1 \
-            --family-group surfaces \
-            --output-dir "$ROOT" \
-            | tee "$ROOT/handoff.stdout.json"
-      - name: Audit real surface output
-        shell: bash
-        run: |
-          python - <<'PY'
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$ROOT/material-authority.json"
+          import hashlib
           import json
           from pathlib import Path
-          root=Path("artifacts/gpt2-final-material-rcp/maryborough")
-          summary=json.loads((root/"production_summary.json").read_text())
-          sealed=root/"au_qld_maryborough_service_station.surfaces.json"
-          payload=json.loads(sealed.read_text()) if sealed.is_file() else {}
-          q=payload.get("quantities") or []
-          out={
-            "summary":summary,
-            "quantity_count":len(q),
-            "lineage_conflicts":sum(not bool(x.get("lineage_ok",False)) for x in q),
-            "zero_non_abstained":sum(
-              not bool(x.get("abstained",False))
-              and x.get("value") is not None
-              and float(x["value"]) == 0.0
-              for x in q
-            ),
-            "family_counts":{},
-            "quantities":[{
-              "quantity_id":x.get("quantity_id"),
-              "family":x.get("family"),
-              "semantic_key":x.get("semantic_key"),
-              "value":x.get("value"),
-              "unit":x.get("unit"),
-              "object_identity_refs":x.get("object_identity_refs") or [],
-              "source_page":x.get("source_page"),
-              "viewport_id":x.get("viewport_id"),
-              "lineage_ok":x.get("lineage_ok"),
-            } for x in q],
+
+          from pb_source_material_semantic_authority import (
+              SourceMaterialDefinitionSelector,
+              SourceMaterialSemanticProducer,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload = path.read_bytes()
+          sha = hashlib.sha256(payload).hexdigest()
+          expected_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert sha == expected_sha, (sha, expected_sha)
+
+          source = SourceVisibilityProducer(
+              producer_method="gpt2-final-real-material-proof",
+              producer_version="1",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id="gpt2-final-real-material-proof",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("9", "16", "18"),
+          )
+          authority = (
+              SourceMaterialSemanticProducer
+              .from_source_visibility_producer(source)
+              .publish(published.revision.revision_id)
+          )
+
+          results = {}
+          for code in ("FPB", "GRID", "WFPB"):
+              result = authority.resolve_definition(
+                  SourceMaterialDefinitionSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      code=code,
+                  )
+              )
+              record = result.record
+              results[code] = {
+                  "status": getattr(result.status, "value", str(result.status)),
+                  "reason_codes": list(result.reason_codes or ()),
+                  "record_id": None if record is None else record.record_id,
+                  "description": None if record is None else record.description,
+                  "semantic_finish": None if record is None else record.semantic_finish,
+                  "source_page_ids": [] if record is None else list(record.source_page_ids),
+                  "source_viewport_ids": [] if record is None else list(record.source_viewport_ids),
+                  "source_definition_ids": [] if record is None else list(record.source_definition_ids),
+              }
+
+          out = {
+              "source_sha256": sha,
+              "decoded_pages": list(published.coverage.decoded_pages),
+              "definitions": results,
           }
-          for row in q:
-            out["family_counts"][row.get("family")]=out["family_counts"].get(row.get("family"),0)+1
-          assert out["lineage_conflicts"] == 0, out
-          assert out["zero_non_abstained"] == 0, out
-          assert out["family_counts"].get("floor_area",0) >= 3, out
-          (root/"audit.json").write_text(json.dumps(out,indent=2,sort_keys=True)+"\n")
-          print(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out, indent=2, sort_keys=True))
+
+          assert results["FPB"]["status"] == "corroborated", results
+          assert results["FPB"]["semantic_finish"] == "plasterboard", results
+          assert results["GRID"]["status"] == "corroborated", results
+          assert results["GRID"]["semantic_finish"] == "ceiling_grid", results
+          assert results["FPB"]["source_definition_ids"], results
+          assert results["GRID"]["source_definition_ids"], results
+          assert set(results["FPB"]["source_page_ids"]) <= {"9", "16", "18"}, results
+          assert set(results["GRID"]["source_page_ids"]) <= {"9", "16", "18"}, results
           PY
-      - name: Build fail-closed Maryborough identity map
-        shell: bash
-        run: |
-          cat > artifacts/gpt2-final-material-rcp/maryborough/maryborough.empty-identity-map.json <<'JSON'
-          {
-            "schema_version": "1.0.0",
-            "project_id": "au_qld_maryborough_service_station",
-            "source_sha256s": [
-              "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-            ],
-            "bindings": []
-          }
-          JSON
-      - name: Run exact frozen Maryborough reconciliation
-        shell: bash
-        run: |
-          PYTHONPATH=. python -u benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py \
-            --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json \
-            --sealed-run artifacts/gpt2-final-material-rcp/maryborough/au_qld_maryborough_service_station.surfaces.json \
-            --identity-map artifacts/gpt2-final-material-rcp/maryborough/maryborough.empty-identity-map.json \
-            --output artifacts/gpt2-final-material-rcp/maryborough/maryborough.exact-report.json
-          cat artifacts/gpt2-final-material-rcp/maryborough/maryborough.exact-report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
