@@ -155,9 +155,7 @@ def _unique_authenticated_containing_floor_plan_viewport(
     scope_rooms: Sequence[LiveCanonicalRoomObject],
     page_id: str,
     snapshot_id: str,
-) -> Optional[
-    tuple[str, tuple[float, float, float, float], str]
-]:
+) -> Optional[tuple[str, tuple[float, float, float, float]]]:
     """Return one producer-owned floor-plan viewport that owns the whole room scope.
 
     Page-scoped room faces can be valid even when viewport segmentation was not
@@ -185,12 +183,8 @@ def _unique_authenticated_containing_floor_plan_viewport(
         page_id=str(page_id),
         view_type=DrawingViewType.FLOOR_PLAN.value,
     )
-    containing: dict[
-        str,
-        tuple[tuple[float, float, float, float], str],
-    ] = {}
+    containing: dict[str, tuple[float, float, float, float]] = {}
     for viewport_selector in selectors:
-        topology_view_type = DrawingViewType.FLOOR_PLAN.value
         scope = viewport_wall_authority.resolve_scope(viewport_selector)
         bbox = getattr(scope, "viewport_bbox", None)
         viewport_id = getattr(scope, "viewport_id", None)
@@ -214,14 +208,10 @@ def _unique_authenticated_containing_floor_plan_viewport(
             )
             for room in scope_rooms
         ):
-            containing[str(viewport_id)] = (
-                (x0, y0, x1, y1),
-                topology_view_type,
-            )
+            containing[str(viewport_id)] = (x0, y0, x1, y1)
     if len(containing) != 1:
         return None
-    viewport_id, (bbox, view_type) = next(iter(containing.items()))
-    return viewport_id, bbox, view_type
+    return next(iter(containing.items()))
 
 
 def _merge_documented_room_area_evidence(
@@ -525,9 +515,7 @@ def collect_live_physical_net_wall_claim(
                     )
                 )
                 if containing_viewport is not None:
-                    viewport_id, viewport_bbox, _viewport_view_type = (
-                        containing_viewport
-                    )
+                    viewport_id, viewport_bbox = containing_viewport
                     viewport_view_type = DrawingViewType.FLOOR_PLAN.value
                     viewport_status = ViewportResolutionStatus.RESOLVED
                     viewport_reason_codes = (
@@ -628,11 +616,9 @@ def collect_live_physical_net_wall_claim(
                     )
                 )
                 if containing_viewport is not None:
-                    (
-                        resolved_viewport_id,
-                        resolved_viewport_bbox,
-                        _resolved_viewport_type,
-                    ) = containing_viewport
+                    resolved_viewport_id, resolved_viewport_bbox = (
+                        containing_viewport
+                    )
                     selected_scale_selector = PhysicalScaleSelector(
                         document_id=scope_rooms[0].document_id,
                         revision_id=scope_rooms[0].revision_id,
