@@ -1,0 +1,63 @@
+name: DIAG GPT1 Maryborough RCP View On 1893 V2
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove Maryborough reflected ceiling viewport classification
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+          from pb_viewport_segmentation import segment_page_viewports
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(pdf)
+          rows=[]
+          try:
+              for index in range(doc.page_count):
+                  page_no=index+1
+                  segmented=segment_page_viewports(doc[index],page_number=page_no)
+                  for view in segmented:
+                      if (
+                          view.view_type==DrawingViewType.REFLECTED_CEILING_PLAN.value
+                          or "CEILING" in str(view.label or "").upper()
+                          or "R.C.P" in str(view.label or "").upper()
+                      ):
+                          rows.append({
+                              "page_no":page_no,
+                              "view_id":view.view_id,
+                              "view_type":view.view_type,
+                              "label":view.label,
+                              "status":view.status,
+                              "bounding_box":view.bounding_box,
+                              "boundary_source":view.boundary_source,
+                              "confidence":view.confidence,
+                          })
+              floor_pages=[]
+              for index in range(doc.page_count):
+                  if authoritative_floor_plan_viewports(doc[index],page_number=index+1):
+                      floor_pages.append(index+1)
+          finally:
+              doc.close()
+          print(json.dumps({
+              "rcp_rows":rows,
+              "rcp_count":sum(1 for r in rows if r["view_type"]==DrawingViewType.REFLECTED_CEILING_PLAN.value),
+              "authoritative_floor_plan_pages":floor_pages,
+          },indent=2,sort_keys=True))
+          PY
