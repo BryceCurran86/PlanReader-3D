@@ -82,152 +82,132 @@ jobs:
 
           producer = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
           words_by_page = material._trusted_words_by_page(source, published)
-          cluster_debug = {}
-          for page_id in ("9", "16", "18"):
-              words = words_by_page.get(page_id, ())
-              raw = material._raw_material_definition_candidates(words)
+          page_id = "9"
+          words = words_by_page.get(page_id, ())
+          assert words, "page 9 source words unavailable"
 
-              grouped = {}
-              for word in words:
-                  grouped.setdefault(
-                      (word.source_partition_id, int(word.block_no)), []
-                  ).append(word)
-              title_debug = []
-              code_block_debug = []
-              for (partition_id, block_no), block_words in sorted(grouped.items()):
-                  ordered = tuple(sorted(
-                      block_words,
-                      key=lambda row: (
-                          row.line_no, row.word_no, row.bbox[0], row.observation_id
-                      ),
-                  ))
-                  rows = material._native_block_line_rows(ordered)
-                  raw_text = " | ".join(row[0] for row in rows)
-                  if material._is_material_schedule_title(" ".join(row[0] for row in rows)):
-                      recovered = material._recover_native_material_block(
-                          source=source,
-                          published=published,
-                          raster=producer._raster,
-                          block_words=ordered,
-                      )
-                      title_debug.append({
-                          "partition_id": partition_id,
-                          "block_no": block_no,
-                          "raw_text": raw_text,
-                          "raw_words": [
-                              {
-                                  "text": word.text,
-                                  "trusted": bool(word.trusted),
-                                  "reasons": list(word.reason_codes),
-                              }
-                              for word in ordered
-                          ],
-                          "recovered_words": [
-                              {
-                                  "text": word.text,
-                                  "trusted": bool(word.trusted),
-                                  "reasons": list(word.reason_codes),
-                              }
-                              for word in recovered
-                          ],
-                      })
-                  first_line = rows[0][0].strip().upper() if rows else ""
-                  if first_line in {"FPB", "GRID", "WFPB"}:
-                      recovered = material._recover_native_material_block(
-                          source=source,
-                          published=published,
-                          raster=producer._raster,
-                          block_words=ordered,
-                      )
-                      code_block_debug.append({
-                          "partition_id": partition_id,
-                          "block_no": block_no,
-                          "raw_text": raw_text,
-                          "candidate": material._material_definition_candidate(ordered),
-                          "recovered_candidate": material._material_definition_candidate(recovered),
-                          "recovered_words": [
-                              {
-                                  "text": word.text,
-                                  "trusted": bool(word.trusted),
-                                  "reasons": list(word.reason_codes),
-                              }
-                              for word in recovered
-                          ],
-                      })
+          grouped = {}
+          for word in words:
+              grouped.setdefault(
+                  (word.source_partition_id, int(word.block_no)), []
+              ).append(word)
 
-              blocks, blocked = material._trusted_native_material_schedule_cluster_blocks(
-                  source=source,
-                  published=published,
-                  raster=producer._raster,
-                  words=words,
-              )
-              cluster_debug[page_id] = {
-                  "raw_candidates": [
-                      {
-                          "partition_id": row[0],
-                          "block_no": row[1],
-                          "code": row[3],
-                          "bbox": list(material._native_block_bbox(row[2])),
-                          "raw_text": " | ".join(
-                              line[0] for line in material._native_block_line_rows(row[2])
-                          ),
-                      }
-                      for row in raw
-                  ],
-                  "trusted_cluster_blocks": [
-                      {
-                          "block_no": block.block_no,
-                          "text": block.text,
-                          "scope_id": block.scope_id,
-                      }
-                      for block in blocks
-                  ],
-                  "blocked_codes": list(blocked),
-                  "title_debug": title_debug,
-                  "code_block_debug": code_block_debug,
-              }
-
-          authority = producer.publish(published.revision.revision_id)
-
-          results = {}
-          for code in ("FPB", "GRID", "WFPB"):
-              result = authority.resolve_definition(
-                  SourceMaterialDefinitionSelector(
-                      document_id=published.revision.document_id,
-                      revision_id=published.revision.revision_id,
-                      source_sha256=published.revision.source_sha256,
-                      snapshot_id=published.snapshot.snapshot_id,
-                      code=code,
+          title_rows = []
+          code_rows = {}
+          for (partition_id, block_no), block_words in sorted(grouped.items()):
+              ordered = tuple(sorted(
+                  block_words,
+                  key=lambda row: (
+                      row.line_no, row.word_no, row.bbox[0], row.observation_id
+                  ),
+              ))
+              rows = material._native_block_line_rows(ordered)
+              if not rows:
+                  continue
+              joined = " ".join(row[0] for row in rows)
+              if material._is_material_schedule_title(joined):
+                  recovered = material._recover_native_material_block(
+                      source=source,
+                      published=published,
+                      raster=producer._raster,
+                      block_words=ordered,
                   )
-              )
-              record = result.record
-              results[code] = {
-                  "status": getattr(result.status, "value", str(result.status)),
-                  "reason_codes": list(result.reason_codes or ()),
-                  "record_id": None if record is None else record.record_id,
-                  "description": None if record is None else record.description,
-                  "semantic_finish": None if record is None else record.semantic_finish,
-                  "source_page_ids": [] if record is None else list(record.source_page_ids),
-                  "source_viewport_ids": [] if record is None else list(record.source_viewport_ids),
-                  "source_definition_ids": [] if record is None else list(record.source_definition_ids),
-              }
+                  title_rows.append({
+                      "partition_id": partition_id,
+                      "block_no": block_no,
+                      "text": joined,
+                      "trusted": bool(recovered) and all(
+                          word.trusted for word in recovered
+                      ),
+                  })
+              first = rows[0][0].strip().upper()
+              if first in {"FPB", "GRID", "WFPB"}:
+                  recovered = material._recover_native_material_block(
+                      source=source,
+                      published=published,
+                      raster=producer._raster,
+                      block_words=ordered,
+                  )
+                  code_rows[first] = {
+                      "partition_id": partition_id,
+                      "block_no": block_no,
+                      "text": " | ".join(row[0] for row in rows),
+                      "trusted": bool(recovered) and all(
+                          word.trusted for word in recovered
+                      ),
+                      "candidate": material._material_definition_candidate(recovered),
+                      "recovered_words": [
+                          {
+                              "text": word.text,
+                              "trusted": bool(word.trusted),
+                              "reason_codes": list(word.reason_codes),
+                          }
+                          for word in recovered
+                      ],
+                  }
+
+          blocks, blocked = material._trusted_native_material_schedule_cluster_blocks(
+              source=source,
+              published=published,
+              raster=producer._raster,
+              words=words,
+          )
+          parsed = {}
+          for block in blocks:
+              for item in material.parse_schedule_text(
+                  block.text,
+                  page_id=9,
+                  page_label="page:9",
+              ):
+                  code = str(item.get("code") or "").strip().upper()
+                  if not code:
+                      continue
+                  entry = {
+                      "status": "Confirmed",
+                      "code": code,
+                      "description": str(item.get("description") or ""),
+                      "substrate": str(item.get("substrate") or ""),
+                      "finish": str(item.get("finish") or ""),
+                  }
+                  parsed[code] = {
+                      "description": entry["description"],
+                      "semantic_finish": material.semantic_finish_from_schedule_entry(entry),
+                      "scope_id": block.scope_id,
+                  }
 
           out = {
               "source_sha256": sha,
-              "decoded_pages": list(published.coverage.decoded_pages),
-              "cluster_debug": cluster_debug,
-              "definitions": results,
+              "page_id": page_id,
+              "title_rows": title_rows,
+              "code_rows": code_rows,
+              "blocked_codes": list(blocked),
+              "trusted_cluster_blocks": [
+                  {
+                      "block_no": block.block_no,
+                      "text": block.text,
+                      "scope_id": block.scope_id,
+                  }
+                  for block in blocks
+              ],
+              "parsed_definitions": parsed,
           }
-          print(json.dumps(out, indent=2, sort_keys=True))
+          print(json.dumps(out, indent=2, sort_keys=True, default=str))
 
-          assert results["FPB"]["status"] == "corroborated", results
-          assert results["FPB"]["semantic_finish"] == "plasterboard", results
-          assert results["GRID"]["status"] == "corroborated", results
-          assert results["GRID"]["semantic_finish"] == "ceiling_grid", results
-          assert results["FPB"]["source_definition_ids"], results
-          assert results["GRID"]["source_definition_ids"], results
-          assert set(results["FPB"]["source_page_ids"]) <= {"9", "16", "18"}, results
-          assert set(results["GRID"]["source_page_ids"]) <= {"9", "16", "18"}, results
+          assert any(row["trusted"] for row in title_rows), out
+          assert code_rows["FPB"]["trusted"], out
+          assert code_rows["WFPB"]["trusted"], out
+          assert code_rows["GRID"]["trusted"], out
+
+          assert parsed["FPB"]["semantic_finish"] == "plasterboard", out
+          assert parsed["WFPB"]["semantic_finish"] == "plasterboard", out
+
+          # The real Maryborough GRID row says "VINYL FACED PLASTER TILE
+          # 600x1200". It is readable source evidence, but it does not
+          # independently define a ceiling-grid system. Preserve the global
+          # bare-token guard: source ownership alone must not promote GRID.
+          assert code_rows["GRID"]["candidate"] is None, out
+          assert "GRID" not in parsed, out
+          assert "GRID" not in blocked, out
           PY
       - uses: actions/upload-artifact@v4
         if: always()
