@@ -53,6 +53,10 @@ from pb_cross_view_floor_finish_authority import (
     CrossViewFloorFinishProducer,
     enrich_live_canonical_floor_finishes,
 )
+from pb_cross_view_ceiling_finish_authority import CrossViewCeilingFinishProducer
+from pb_cross_view_ceiling_quantity_authority import (
+    publish_cross_view_ceiling_quantities,
+)
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_migration_contracts import (
@@ -118,6 +122,7 @@ class LivePhysicalNetWallClaim:
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     floor_finish_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    ceiling_lining_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -354,6 +359,7 @@ def collect_live_physical_net_wall_claim(
 
     room_area_quantity_evidence: list[QuantityEvidence] = []
     floor_finish_quantity_evidence: list[QuantityEvidence] = []
+    ceiling_lining_quantity_evidence: list[QuantityEvidence] = []
     cross_view_area = None
     if canonical_rooms.rooms:
         evidence_by_record = {}
@@ -684,6 +690,20 @@ def collect_live_physical_net_wall_claim(
         )
         floor_finish_quantity_evidence.extend(floor_finishes.quantities)
 
+        ceiling_finishes = CrossViewCeilingFinishProducer.from_source(
+            source=source,
+            rooms=canonical_rooms,
+        ).publish()
+        if ceiling_finishes.records:
+            ceiling_quantities = publish_cross_view_ceiling_quantities(
+                rooms=canonical_rooms,
+                room_areas=cross_view_area,
+                finishes=ceiling_finishes,
+            )
+            ceiling_lining_quantity_evidence.extend(
+                ceiling_quantities.quantities
+            )
+
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
         wall_opening_composition=wall_opening,
@@ -776,6 +796,9 @@ def collect_live_physical_net_wall_claim(
             opening_count_quantity_evidence=opening_count_quantity_evidence,
             room_area_quantity_evidence=tuple(room_area_quantity_evidence),
             floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
+            ceiling_lining_quantity_evidence=tuple(
+                ceiling_lining_quantity_evidence
+            ),
         )
 
     return LivePhysicalNetWallClaim(
@@ -814,6 +837,9 @@ def collect_live_physical_net_wall_claim(
         opening_count_quantity_evidence=opening_count_quantity_evidence,
         room_area_quantity_evidence=tuple(room_area_quantity_evidence),
         floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
+        ceiling_lining_quantity_evidence=tuple(
+            ceiling_lining_quantity_evidence
+        ),
     )
 
 
