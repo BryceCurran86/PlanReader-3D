@@ -30,6 +30,7 @@ jobs:
 
           from pb_drawing_evidence_binding import DrawingViewType
           from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
           from pb_source_room_face_authority import (
               SourceRoomFaceSelector,
               build_source_room_face_authority,
@@ -65,7 +66,11 @@ jobs:
               published.revision.revision_id
           )
           assert current is not None
-          wall_auth=live.physical_wall_candidate_authority
+          viewport_wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,
+              page_ids=("7",),
+          )
+          wall_auth=viewport_wall_producer.authority()
           selectors=wall_auth.selectors_for_authenticated_viewports(
               document_id=current.revision.document_id,
               revision_id=current.revision.revision_id,
