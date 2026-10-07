@@ -501,6 +501,7 @@ def test_surface_family_group_scopes_geometry_but_keeps_full_semantic_evidence(
     assert seen["pages"] == (0, 2)
     assert seen["topology_pages"] == (0,)
     assert seen["room_area_support_pages"] == (2,)
+    assert seen["ceiling_semantic_pages"] == (0, 1, 2, 3, 4)
     assert ceiling_seen["pages"] == (0, 1, 2, 3, 4)
     assert summary["execution_pages"] == [1, 3]
     assert summary["semantic_execution_pages"] == [1, 2, 3, 4, 5]
