@@ -110,6 +110,38 @@ jobs:
                       readings[str(dpi)]=mode_reads
                   probes.append({"pad_pt":pad_pt,"clip":list(clip),"readings":readings})
               composites={}
+              for dpi in (300,450):
+                  word_images=[]
+                  for w in rows:
+                      wb=fitz.Rect(float(w[0]),float(w[1]),float(w[2]),float(w[3]))
+                      render_wb=wb * page.rotation_matrix
+                      pix=page.get_pixmap(
+                          matrix=fitz.Matrix(float(dpi)/72.0,float(dpi)/72.0),
+                          clip=render_wb,
+                          alpha=False,
+                      )
+                      wi=Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+                      wi=ImageOps.expand(
+                          wi,
+                          border=max(1,round(dpi*0.4/25.4)),
+                          fill="white",
+                      )
+                      word_images.append(wi)
+                  if word_images:
+                      gap=max(4,round(dpi*1.2/25.4))
+                      height=max(im.height for im in word_images)
+                      width=sum(im.width for im in word_images)+gap*(len(word_images)-1)
+                      canvas=Image.new("RGB",(width,height),"white")
+                      x=0
+                      for im in word_images:
+                          y=max(0,(height-im.height)//2)
+                          canvas.paste(im,(x,y))
+                          x+=im.width+gap
+                      readings={}
+                      for mode,config in (("psm7","--psm 7"),("psm13","--psm 13")):
+                          raw=pytesseract.image_to_string(canvas,config=config)
+                          readings[mode]=" ".join(str(raw or "").split())
+                      composites[str(dpi)]=readings
               out["blocks"][str(block_no)]={
                   "label":label,
                   "native_text":text,
