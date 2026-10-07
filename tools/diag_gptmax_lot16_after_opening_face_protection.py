@@ -364,6 +364,15 @@ def main():
         "wall_scope_complete": bool(wall_result.scope_complete),
         "wall_scope_reason_codes": list(wall_result.reason_codes),
         "protected_face_source_id_count": len(protected_face_ids),
+        "semantic_result_status": state(semantic_result.status),
+        "semantic_two_face_opening_count": semantic_two_face_opening_count,
+        "semantic_protected_face_source_id_count": len(semantic_protected_face_ids),
+        "semantic_extra_protected_face_source_id_count": len(
+            semantic_protected_face_ids - set(protected_face_ids)
+        ),
+        "semantic_missing_current_protected_face_source_id_count": len(
+            set(protected_face_ids) - semantic_protected_face_ids
+        ),
         "protected_face_occurrence_count": len(protected_occurrences),
         "unprotected_face_occurrence_count": len(unprotected_occurrences),
         "opening_protected_face_count_distribution": dict(sorted(
