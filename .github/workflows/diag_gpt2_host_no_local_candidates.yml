@@ -1,0 +1,198 @@
+name: DIAG GPT2 Host No Local Candidates
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify missing local host candidates
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-host-no-local-candidates
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import pb_opening_host_binding_authority as host
+          from pb_live_wall_opening_authority_composition import (
+              compose_live_wall_opening_authority,
+          )
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateSelector,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-host-no-local-candidates",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-host-no-local-candidates",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","30","31"),
+          )
+          composition=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+          )
+
+          rows=[]
+          for trace in composition.opening_bindings:
+              if "no_local_host_wall_candidates" not in trace.reason_codes:
+                  continue
+              binding_selector=composition.binding_selectors.get(
+                  trace.opening_identity_id
+              )
+              if binding_selector is None:
+                  continue
+              obs_selector=ObservationSelector(
+                  document_id=binding_selector.document_id,
+                  revision_id=binding_selector.revision_id,
+                  source_sha256=binding_selector.source_sha256,
+                  snapshot_id=binding_selector.snapshot_id,
+                  observation_id=trace.representative_observation_id,
+              )
+              existence=composition.physical_opening_authority.prove_existence(
+                  obs_selector
+              )
+              opening=existence.existence_record
+              if opening is None:
+                  continue
+              geometry=host._opening_geometry(
+                  composition.physical_opening_authority,
+                  opening,
+              )
+              if geometry is None:
+                  continue
+              wall_scope=composition.physical_wall_candidate_authority.resolve_scope(
+                  PhysicalWallCandidateSelector(
+                      document_id=binding_selector.document_id,
+                      revision_id=binding_selector.revision_id,
+                      source_sha256=binding_selector.source_sha256,
+                      snapshot_id=binding_selector.snapshot_id,
+                      page_id=binding_selector.page_id,
+                      decision_scope_id=binding_selector.decision_scope_id,
+                  )
+              )
+
+              raw_opening_records=[]
+              visibility=composition.physical_opening_authority.source_visibility_authority()
+              for observation_id in opening.source_observation_ids:
+                  result=visibility.resolve_visible(ObservationSelector(
+                      document_id=opening.document_id,
+                      revision_id=opening.revision_id,
+                      source_sha256=opening.source_sha256,
+                      snapshot_id=opening.snapshot_id,
+                      observation_id=observation_id,
+                  ))
+                  if result.observation is not None:
+                      raw_opening_records.append(result.observation)
+
+              gap_pair=host._unique_gap_source_records(raw_opening_records)
+              gap_raw_ids=[]
+              if gap_pair is not None:
+                  for record in gap_pair:
+                      raw_id=host._raw_source_primitive_id(record)
+                      if raw_id:
+                          gap_raw_ids.append(raw_id)
+
+              wall_rows=[]
+              gap_owner_ids=set()
+              for record in wall_scope.records:
+                  data=host._candidate_axis_data(record,geometry)
+                  roles=list(host._host_roles_from_axis_data(data,geometry))
+                  sources=set(
+                      str(v)
+                      for v in record.physical_identity.source_primitive_ids
+                      if str(v).strip()
+                  )
+                  owns_gap=bool(sources & set(gap_raw_ids))
+                  if owns_gap:
+                      gap_owner_ids.add(record.wall_candidate_id)
+                  if data is None and not owns_gap:
+                      continue
+                  along_min=along_max=offset=None
+                  if data is not None:
+                      along_min,along_max,offset=data
+                  wall_rows.append({
+                      "wall_id":record.wall_candidate_id,
+                      "roles":roles,
+                      "axis_data":None if data is None else list(data),
+                      "owns_opening_gap_primitive":owns_gap,
+                      "shared_gap_primitive_count":
+                          len(sources & set(gap_raw_ids)),
+                      "source_primitive_count":len(sources),
+                      "boundary_clean":(
+                          wall_scope.boundary_evaluation is not None
+                          and wall_scope.boundary_evaluation.is_boundary_clean(
+                              record.wall_candidate_id
+                          )
+                      ),
+                      "candidate_identity_id":
+                          record.physical_identity.candidate_identity_id,
+                  })
+
+              evaluable=[row for row in wall_rows if row["axis_data"] is not None]
+              rows.append({
+                  "opening_identity_id":trace.opening_identity_id,
+                  "page_id":trace.page_id,
+                  "structural_pattern":opening.structural_pattern,
+                  "opening_source_observation_count":
+                      len(opening.source_observation_ids),
+                  "gap_raw_ids":gap_raw_ids,
+                  "wall_record_count":len(wall_scope.records),
+                  "axis_evaluable_count":len(evaluable),
+                  "left_role_count":sum(
+                      1 for row in evaluable if "left" in row["roles"]
+                  ),
+                  "right_role_count":sum(
+                      1 for row in evaluable if "right" in row["roles"]
+                  ),
+                  "gap_primitive_owner_count":len(gap_owner_ids),
+                  "gap_primitive_owner_ids":sorted(gap_owner_ids),
+                  "wall_rows":wall_rows,
+              })
+
+          print(json.dumps({
+              "opening_count":len(composition.opening_bindings),
+              "resolved_binding_count":sum(
+                  1 for trace in composition.opening_bindings if trace.record_id
+              ),
+              "no_local_candidate_opening_count":len(rows),
+              "structural_pattern_counts":dict(sorted(Counter(
+                  row["structural_pattern"] for row in rows
+              ).items())),
+              "gap_owner_count_distribution":dict(sorted(Counter(
+                  row["gap_primitive_owner_count"] for row in rows
+              ).items())),
+              "axis_evaluable_count_distribution":dict(sorted(Counter(
+                  row["axis_evaluable_count"] for row in rows
+              ).items())),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-host-no-local-candidates
+          path: artifacts/gpt2-host-no-local-candidates
+          retention-days: 2
