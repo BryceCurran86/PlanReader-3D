@@ -70,11 +70,18 @@ jobs:
 
           observations={obs.dimension_id:obs for obs in bundle.observations}
           bindings_by_id={binding.observation_id:binding for binding in bundle.bindings}
+          segments_by_id={segment.segment_id:segment for segment in bundle.observed_geometry}
           large_linear_dimensions=[]
           for obs in bundle.observations:
               if obs.value_m * 1000.0 < 1500.0:
                   continue
               binding=bindings_by_id.get(obs.dimension_id)
+              tied_ids=[]
+              if binding is not None:
+                  for note in binding.notes:
+                      prefix="multiple equally plausible dimension lines: "
+                      if note.startswith(prefix):
+                          tied_ids=[item.strip() for item in note[len(prefix):].split(",") if item.strip()]
               large_linear_dimensions.append({
                   "observation_id":obs.dimension_id,
                   "raw_text":obs.raw_text,
@@ -85,6 +92,19 @@ jobs:
                   "dimension_line_id":None if binding is None else binding.dimension_line_id,
                   "witness_line_ids":[] if binding is None else list(binding.witness_line_ids),
                   "notes":[] if binding is None else list(binding.notes),
+                  "tied_segments":[
+                      {
+                          "segment_id":segment_id,
+                          "start":list(segments_by_id[segment_id].start),
+                          "end":list(segments_by_id[segment_id].end),
+                          "length":segments_by_id[segment_id].length,
+                          "orientation":segments_by_id[segment_id].orientation,
+                          "source_path_index":segments_by_id[segment_id].source_path_index,
+                          "stroke_width_pt":segments_by_id[segment_id].stroke_width_pt,
+                      }
+                      for segment_id in tied_ids
+                      if segment_id in segments_by_id
+                  ],
               })
 
           witness_bound=[]
