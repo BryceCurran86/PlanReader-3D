@@ -1,0 +1,38 @@
+name: DIAG GPT3 Maryborough Page Scope V1
+
+on:
+  push:
+    branches:
+      - diag/gpt3-maryborough-page-scope-v1
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify Maryborough source pages
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          import fitz
+          doc=fitz.open(pdf)
+          try:
+              selected=tuple(range(doc.page_count))
+          finally:
+              doc.close()
+          scope=source_floor_plan_topology_scope(pdf, selected)
+          if scope is None:
+              raise SystemExit("scope unavailable")
+          print(json.dumps(scope.to_dict(), indent=2, sort_keys=True))
+          PY
