@@ -140,6 +140,56 @@ def main() -> int:
             "cross_evidence_id": b.area_evidence.evidence_id,
         })
 
+
+    bridge_mapping = []
+    rooms_by_record = {
+        str(room.source_room_face_record_id): room
+        for room in rooms.rooms
+        if str(room.source_room_face_record_id or "").strip()
+    }
+    for record in cross.records:
+        record_id = str(record.source_room_face_record_id)
+        room = rooms_by_record.get(record_id)
+        item = {
+            "record_id": record_id,
+            "label": record.room_label,
+            "canonical_room_present": room is not None,
+        }
+        if room is not None:
+            item.update({
+                "canonical_room_id": room.canonical_room_id,
+                "physical_room_id": room.physical_room_id,
+                "page_id": room.page_id,
+                "viewport_id": room.viewport_id,
+                "decision_scope_id": room.decision_scope_id,
+            })
+            binding = rooms.room_face_authority_binding_for(room)
+            item["binding_present"] = binding is not None
+            if binding is not None:
+                item["binding_viewport_id"] = binding.viewport_id
+                item["binding_contains_record"] = (
+                    record_id in binding.source_room_face_record_ids
+                )
+                from pb_source_room_face_authority import SourceRoomFaceSelector
+                selector = SourceRoomFaceSelector(
+                    document_id=room.document_id,
+                    revision_id=room.revision_id,
+                    source_sha256=room.source_sha256,
+                    snapshot_id=room.snapshot_id,
+                    page_id=room.page_id,
+                    decision_scope_id=room.decision_scope_id,
+                )
+                resolved = binding.authority.resolve_scope(selector)
+                item["resolved_status"] = getattr(resolved.status, "value", str(resolved.status))
+                item["resolved_scope_complete"] = bool(resolved.scope_complete)
+                matches = [
+                    row for row in resolved.records
+                    if str(row.record_id) == record_id
+                ]
+                item["resolved_record_match_count"] = len(matches)
+                item["resolved_face_ids"] = [str(row.face_id) for row in matches]
+        bridge_mapping.append(item)
+
     labels = sorted({
         str(room.room_label or "").strip()
         for room in rooms.rooms
@@ -159,6 +209,7 @@ def main() -> int:
         "cross_records": [_record(r) for r in cross.records],
         "overlap_count": len(overlap),
         "overlap": overlap,
+        "bridge_mapping": bridge_mapping,
         "binding_diagnostics": binding_diagnostics,
     }, indent=2, sort_keys=True, default=str))
     return 0
