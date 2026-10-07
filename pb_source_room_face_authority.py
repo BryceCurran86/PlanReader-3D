@@ -151,10 +151,8 @@ def _collapse_exact_ring_backtracks(
     return tuple(compact) if len(compact) >= 3 else ()
 
 
-def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
-    cleaned = _collapse_exact_ring_backtracks(
-        tuple(_point(point) for point in points)
-    )
+def _canonical_cycle(points: Iterable[Point]) -> tuple[Point, ...]:
+    cleaned = tuple(points)
     if len(cleaned) < 3:
         return ()
     variants: list[tuple[Point, ...]] = []
@@ -166,6 +164,88 @@ def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
             tuple(cleaned[(start - i) % len(cleaned)] for i in range(len(cleaned)))
         )
     return min(variants)
+
+
+def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
+    """Canonicalize the RAW planar face without deleting topology evidence.
+
+    Competing-owner and contamination logic consumes this exact walk. In
+    particular, retraced A->B->A edges must remain visible until ownership has
+    been evaluated; otherwise representation cleanup could erase evidence that
+    two authenticated walls compete for the same span.
+    """
+
+    return _canonical_cycle(tuple(_point(point) for point in points))
+
+
+def _publication_polygon(
+    raw_polygon: Iterable[Iterable[float]],
+) -> tuple[Point, ...]:
+    """Normalize representation-only exact retraces after authority gates.
+
+    This helper must never be used for ownership/contamination decisions.
+    """
+
+    return _canonical_cycle(
+        _collapse_exact_ring_backtracks(
+            tuple(_point(point) for point in raw_polygon)
+        )
+    )
+
+
+def _publication_boundary_ownership(
+    raw_polygon: tuple[Point, ...],
+    *,
+    edge_owner: Mapping[Edge, str],
+    ownership_grid: Mapping[tuple[int, int], list[tuple[str, Edge]]],
+    ownership_oversized: list[tuple[str, Edge]],
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> Optional[
+    tuple[
+        tuple[Point, ...],
+        tuple[str, ...],
+        tuple[tuple[str, Edge], ...],
+    ]
+]:
+    """Return a clean publication ring only with exact unique boundary owners.
+
+    The raw face has already passed the live ownership, contamination,
+    strict-minority and component gates before this is called. Cleanup removes
+    only exact zero-area retraces; every edge that remains must still resolve
+    through the same exact/contained source-wall ownership contract.
+    """
+
+    polygon = _publication_polygon(raw_polygon)
+    if not polygon:
+        return None
+
+    owned_edges: list[tuple[str, Edge]] = []
+    owners: list[str] = []
+    for index, first in enumerate(polygon):
+        second = polygon[(index + 1) % len(polygon)]
+        face_edge = _edge(first, second)
+        if face_edge[0] == face_edge[1]:
+            return None
+
+        owner = edge_owner.get(face_edge)
+        if owner is None:
+            containing = _containing_wall_ids(
+                face_edge,
+                grid=ownership_grid,
+                oversized=ownership_oversized,
+                wall_edges=wall_edges,
+            )
+            if len(containing) != 1:
+                return None
+            owner = containing[0]
+        owners.append(owner)
+        owned_edges.append((owner, face_edge))
+
+    return (
+        polygon,
+        tuple(sorted(set(owners))),
+        tuple(owned_edges),
+    )
 
 
 def _polygon_area(points: tuple[Point, ...]) -> float:
@@ -934,9 +1014,32 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
 
     output: list[SourceRoomFaceRecord] = []
     for face_id in sorted(resolved_faces):
-        polygon = polygons.get(face_id)
-        if polygon is None:
+        raw_polygon = polygons.get(face_id)
+        if raw_polygon is None:
             return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+
+        publication = _publication_boundary_ownership(
+            raw_polygon,
+            edge_owner=edge_owner,
+            ownership_grid=ownership_grid,
+            ownership_oversized=ownership_oversized,
+            wall_edges=wall_edges,
+        )
+        if publication is None:
+            return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+        polygon, publication_wall_ids, _publication_edges = publication
+
+        # Exact A->B->A retraces have zero signed area. Refuse publication if
+        # cleanup changes the already-authorized face area for any other reason.
+        publication_area = _polygon_area(polygon)
+        if not math.isclose(
+            publication_area,
+            face_areas[face_id],
+            rel_tol=1e-12,
+            abs_tol=1e-6,
+        ):
+            return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+
         payload = {
             "face_id": face_id,
             "document_id": scope.document_id,
@@ -946,7 +1049,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             "page_id": scope.page_id,
             "decision_scope_id": scope.decision_scope_id,
             "polygon": polygon,
-            "bounding_wall_ids": face_walls[face_id],
+            "bounding_wall_ids": publication_wall_ids,
             "area_page_pts2": face_areas[face_id],
         }
         output.append(
@@ -962,7 +1065,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                 page_id=scope.page_id,
                 decision_scope_id=scope.decision_scope_id,
                 polygon_pdf_pts=polygon,
-                bounding_wall_ids=face_walls[face_id],
+                bounding_wall_ids=publication_wall_ids,
                 area_page_pts2=face_areas[face_id],
             )
         )
