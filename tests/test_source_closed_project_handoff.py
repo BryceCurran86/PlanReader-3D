@@ -794,3 +794,63 @@ def test_invalid_family_group_fails_before_source_scope_resolution(
             output_dir=tmp_path / "out",
             family_group="not-a-group",
         )
+
+
+def test_project_handoff_passes_full_ceiling_evidence_and_topology_scope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    monkeypatch.setattr(
+        handoff,
+        "_source_page_scopes",
+        lambda path: ((0,), (2,), 5),
+    )
+
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="abstained"),
+        reason_codes=("resolved-scope",),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_spaces=(),
+        room_area_quantity_evidence=(),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+    ceiling_seen = {}
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        lambda *args, **kwargs: claim,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: (
+            ceiling_seen.update(kwargs) or SimpleNamespace()
+        ),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+
+    handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-a",
+        workspace_id=1,
+        output_dir=tmp_path / "out",
+    )
+
+    assert ceiling_seen["pages"] == (0, 1, 2, 3, 4)
+    assert ceiling_seen["topology_pages"] == (0,)
