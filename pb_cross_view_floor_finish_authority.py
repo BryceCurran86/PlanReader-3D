@@ -623,6 +623,23 @@ class CrossViewFloorFinishProducer:
                 )
             )
 
+        records_by_floor: dict[str, list[CrossViewFloorFinishRecord]] = {}
+        for record in records:
+            records_by_floor.setdefault(record.canonical_floor_id, []).append(record)
+        duplicate_floor_ids = {
+            floor_id
+            for floor_id, floor_records in records_by_floor.items()
+            if len(floor_records) != 1
+        }
+        if duplicate_floor_ids:
+            conflict = True
+            unresolved.update(duplicate_floor_ids)
+            records = [
+                record
+                for record in records
+                if record.canonical_floor_id not in duplicate_floor_ids
+            ]
+
         records.sort(key=lambda record: record.canonical_floor_id)
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
