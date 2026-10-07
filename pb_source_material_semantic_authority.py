@@ -281,6 +281,13 @@ class _TrustedScheduleBlock:
     line_evidence: Mapping[str, tuple[str, ...]]
 
 
+@dataclass(frozen=True)
+class _TrustedBlockScope:
+    """Minimal producer-owned bbox scope for one native PDF text block."""
+
+    bounding_box: tuple[float, float, float, float]
+
+
 def _is_material_schedule_title(value: object) -> bool:
     text = " ".join(str(value or "").strip().casefold().split())
     if not text or not any(token in text for token in SCHEDULE_WORDS):
@@ -883,6 +890,299 @@ def _recover_admissible_viewport_lines(
     )
 
 
+def _native_block_lines(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    by_line: dict[int, list[_TrustedTextWord]] = {}
+    for word in words:
+        by_line.setdefault(int(word.line_no), []).append(word)
+    output: list[tuple[str, tuple[str, ...]]] = []
+    for line_no in sorted(by_line):
+        line_words = sorted(
+            by_line[line_no],
+            key=lambda row: (row.word_no, row.bbox[0], row.observation_id),
+        )
+        word_numbers = [int(row.word_no) for row in line_words]
+        if (
+            not word_numbers
+            or len(set(word_numbers)) != len(word_numbers)
+            or word_numbers
+            != list(range(word_numbers[0], word_numbers[-1] + 1))
+        ):
+            return ()
+        text = " ".join(
+            row.text.strip() for row in line_words if row.text.strip()
+        ).strip()
+        if not text:
+            return ()
+        output.append(
+            (text, tuple(row.observation_id for row in line_words))
+        )
+    return tuple(output)
+
+
+def _semantic_schedule_rows(
+    text: str,
+    *,
+    page_id: str,
+) -> tuple[dict[str, object], ...]:
+    rows: list[dict[str, object]] = []
+    try:
+        page_number = int(page_id)
+    except (TypeError, ValueError):
+        page_number = 0
+    for item in parse_schedule_text(
+        text,
+        page_id=page_number,
+        page_label=f"page:{page_id}",
+    ):
+        entry = {
+            "status": "Confirmed",
+            "description": str(item.get("description") or ""),
+            "substrate": str(item.get("substrate") or ""),
+            "finish": str(item.get("finish") or ""),
+        }
+        semantic = semantic_finish_from_schedule_entry(entry)
+        code = str(item.get("code") or "").strip().upper()
+        if not code or not semantic:
+            continue
+        row = dict(item)
+        row["semantic_finish"] = semantic
+        rows.append(row)
+    return tuple(rows)
+
+
+def _recover_native_material_block(
+    *,
+    source: SourceVisibilityProducer,
+    published: object,
+    raster: RasterTextCorroborationProducer,
+    block_words: Sequence[_TrustedTextWord],
+) -> tuple[
+    tuple[tuple[str, tuple[str, ...]], ...],
+    tuple[float, float, float, float],
+] | None:
+    if not block_words:
+        return None
+    pages = {str(word.page_id) for word in block_words}
+    partitions = {str(word.source_partition_id) for word in block_words}
+    block_nos = {int(word.block_no) for word in block_words}
+    if len(pages) != 1 or len(partitions) != 1 or len(block_nos) != 1:
+        return None
+    bbox = (
+        min(word.bbox[0] for word in block_words),
+        min(word.bbox[1] for word in block_words),
+        max(word.bbox[2] for word in block_words),
+        max(word.bbox[3] for word in block_words),
+    )
+    scope = _TrustedBlockScope(bounding_box=bbox)
+    recovered = _recover_admissible_viewport_words(
+        source=source,
+        published=published,
+        raster=raster,
+        words=tuple(block_words),
+        viewport=scope,
+    )
+    recovered = _recover_admissible_viewport_lines(
+        source=source,
+        published=published,
+        raster=raster,
+        words=recovered,
+        viewport=scope,
+    )
+    lines, complete, _reasons = _trusted_lines_for_viewport(
+        recovered,
+        scope,
+    )
+    if not complete or not lines:
+        return None
+    return (
+        tuple((text, tuple(ids)) for text, _bbox, ids in lines),
+        bbox,
+    )
+
+
+def _native_material_schedule_clusters(
+    *,
+    source: SourceVisibilityProducer,
+    published: object,
+    raster: RasterTextCorroborationProducer,
+    words: Sequence[_TrustedTextWord],
+) -> tuple[_TrustedScheduleBlock, ...]:
+    """Recover source-owned schedule rows without trusting a competing frame.
+
+    Some CAD PDFs emit the schedule title and each material row as independent
+    native text blocks.  A large nearby vector frame can therefore be a valid
+    drawing frame but the wrong owner for the schedule title.  This fallback
+    never chooses a rectangle.  It requires, on one source page/partition:
+
+    * exactly one independently raster-corroborated material-schedule title;
+    * at least two definition-shaped native blocks whose complete text is
+      independently raster-corroborated;
+    * every raw definition-shaped block on that page to recover successfully;
+    * all recovered definition blocks to overlap on one source axis, proving a
+      single aligned row/column band rather than scattered drawing notes.
+
+    Raw native text is used only to decide what must be proven.  It never
+    authorizes a definition.
+    """
+
+    grouped: dict[
+        tuple[str, str, int],
+        tuple[_TrustedTextWord, ...],
+    ] = {}
+    mutable: dict[tuple[str, str, int], list[_TrustedTextWord]] = {}
+    for word in words:
+        if not word.source_partition_id:
+            continue
+        key = (
+            str(word.page_id),
+            str(word.source_partition_id),
+            int(word.block_no),
+        )
+        mutable.setdefault(key, []).append(word)
+    for key, block_words in mutable.items():
+        grouped[key] = tuple(block_words)
+
+    raw_titles: dict[str, set[tuple[str, str, int]]] = {}
+    raw_rows: dict[str, set[tuple[str, str, int]]] = {}
+    trusted_titles: dict[
+        str,
+        list[
+            tuple[
+                tuple[str, str, int],
+                tuple[tuple[str, tuple[str, ...]], ...],
+                tuple[float, float, float, float],
+            ]
+        ],
+    ] = {}
+    trusted_rows: dict[
+        str,
+        list[
+            tuple[
+                tuple[str, str, int],
+                tuple[tuple[str, tuple[str, ...]], ...],
+                tuple[float, float, float, float],
+            ]
+        ],
+    ] = {}
+
+    for key, block_words in sorted(grouped.items()):
+        page_id, _partition_id, _block_no = key
+        raw_lines = _native_block_lines(block_words)
+        if not raw_lines:
+            continue
+        raw_text = "\n".join(text for text, _ids in raw_lines)
+        title_candidate = _is_material_schedule_title(raw_text)
+        row_candidate = bool(_semantic_schedule_rows(raw_text, page_id=page_id))
+        if not title_candidate and not row_candidate:
+            continue
+        if title_candidate:
+            raw_titles.setdefault(page_id, set()).add(key)
+        if row_candidate:
+            raw_rows.setdefault(page_id, set()).add(key)
+
+        recovered = _recover_native_material_block(
+            source=source,
+            published=published,
+            raster=raster,
+            block_words=block_words,
+        )
+        if recovered is None:
+            continue
+        recovered_lines, bbox = recovered
+        recovered_text = "\n".join(text for text, _ids in recovered_lines)
+        if title_candidate and _is_material_schedule_title(recovered_text):
+            trusted_titles.setdefault(page_id, []).append(
+                (key, recovered_lines, bbox)
+            )
+        if row_candidate and _semantic_schedule_rows(
+            recovered_text,
+            page_id=page_id,
+        ):
+            trusted_rows.setdefault(page_id, []).append(
+                (key, recovered_lines, bbox)
+            )
+
+    output: list[_TrustedScheduleBlock] = []
+    for page_id in sorted(set(raw_titles) | set(raw_rows)):
+        title_keys = raw_titles.get(page_id, set())
+        row_keys = raw_rows.get(page_id, set())
+        page_titles = trusted_titles.get(page_id, [])
+        page_rows = trusted_rows.get(page_id, [])
+        if (
+            len(title_keys) != 1
+            or len(page_titles) != 1
+            or len(row_keys) < 2
+            or {row[0] for row in page_rows} != row_keys
+        ):
+            continue
+
+        title_key, title_lines, _title_bbox = page_titles[0]
+        partition_id = title_key[1]
+        if any(row[0][1] != partition_id for row in page_rows):
+            continue
+
+        row_bboxes = [row[2] for row in page_rows]
+        common_x = min(b[2] for b in row_bboxes) > max(b[0] for b in row_bboxes)
+        common_y = min(b[3] for b in row_bboxes) > max(b[1] for b in row_bboxes)
+        if not (common_x or common_y):
+            continue
+
+        ordered_rows = sorted(page_rows, key=lambda row: row[0][2])
+        title_ids = tuple(
+            dict.fromkeys(
+                observation_id
+                for _text, ids in title_lines
+                for observation_id in ids
+            )
+        )
+        combined_lines: list[tuple[str, tuple[str, ...]]] = list(title_lines)
+        for _key, row_lines, _bbox in ordered_rows:
+            for text_value, ids in row_lines:
+                combined_lines.append(
+                    (
+                        text_value,
+                        tuple(dict.fromkeys((*title_ids, *ids))),
+                    )
+                )
+
+        evidence: dict[str, tuple[str, ...]] = {}
+        for text_value, ids in combined_lines:
+            evidence[text_value] = tuple(
+                dict.fromkeys((*evidence.get(text_value, ()), *ids))
+            )
+
+        scope_id = stable_contract_id(
+            "source_material_native_schedule_cluster",
+            {
+                "page_id": page_id,
+                "source_partition_id": partition_id,
+                "title_block_no": title_key[2],
+                "row_block_nos": tuple(row[0][2] for row in ordered_rows),
+                "observation_ids": tuple(
+                    dict.fromkeys(
+                        observation_id
+                        for _text, ids in combined_lines
+                        for observation_id in ids
+                    )
+                ),
+            },
+            digest_chars=32,
+        )
+        output.append(
+            _TrustedScheduleBlock(
+                page_id=page_id,
+                source_partition_id=partition_id,
+                block_no=title_key[2],
+                scope_id=scope_id,
+                text="\n".join(text_value for text_value, _ids in combined_lines),
+                line_evidence=MappingProxyType(evidence),
+            )
+        )
+    return tuple(output)
+
+
 def _trusted_lines_for_viewport(
     words: Sequence[_TrustedTextWord],
     viewport: SegmentedViewport,
@@ -1101,6 +1401,7 @@ class SourceMaterialSemanticProducer:
             published,
         )
         raster = self._raster
+        native_schedule_cluster_pages: set[str] = set()
 
         pdf = fitz.open(stream=source_bytes, filetype="pdf")
         try:
@@ -1110,14 +1411,27 @@ class SourceMaterialSemanticProducer:
                 page = pdf.load_page(page_number - 1)
                 page_words = trusted_words.get(str(page_number), ())
 
-                # A native source text block headed by a qualified material
-                # schedule title is independently usable for definitions even
-                # when competing outer vector frames leave the schedule
-                # viewport ambiguous. No drawing occurrence is minted from this
-                # route; it owns schedule semantics only.
-                for schedule_block in _trusted_native_material_schedule_blocks(
-                    page_words
-                ):
+                # Native source ownership can prove schedule semantics either
+                # inside one complete text block or, for CAD exports that split
+                # the title and rows into separate blocks, through a complete
+                # raster-corroborated aligned block cluster. Neither route mints
+                # drawing occurrences.
+                native_schedule_blocks = (
+                    *_trusted_native_material_schedule_blocks(page_words),
+                    *_native_material_schedule_clusters(
+                        source=self._source,
+                        published=published,
+                        raster=raster,
+                        words=page_words,
+                    ),
+                )
+                for schedule_block in native_schedule_blocks:
+                    if schedule_block.scope_id.startswith(
+                        "source_material_native_schedule_cluster"
+                    ):
+                        native_schedule_cluster_pages.add(
+                            str(schedule_block.page_id)
+                        )
                     line_evidence = dict(schedule_block.line_evidence)
                     for item in parse_schedule_text(
                         schedule_block.text,
@@ -1189,6 +1503,16 @@ class SourceMaterialSemanticProducer:
                     )
                     if viewport.view_type in _SCHEDULE_VIEW_TYPES:
                         if not text_complete or not lines:
+                            if (
+                                str(page_number) in native_schedule_cluster_pages
+                                and _is_material_schedule_title(viewport.label)
+                            ):
+                                # The material-definition rows on this source
+                                # page were independently proven from exact
+                                # native blocks.  Unrelated unreadable drawing
+                                # text inside a competing/misbound frame must
+                                # not poison that completed schedule scope.
+                                continue
                             schedule_universe_complete = False
                             schedule_universe_reasons.append(
                                 SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED
