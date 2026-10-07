@@ -144,12 +144,14 @@ def test_floor_finish_quantity_seals_on_exact_canonical_floor_lineage() -> None:
     assert row.lineage_ok is True
     assert set(row.trace_canonical_entity_ids) >= {"floor-1", "room-1"}
 
+    claim = _claim()
     traces = build_live_floor_finish_area_source_traces(
-        _claim(),
+        claim,
         workspace_id=1,
         project_id="project-1",
     )
-    trace = traces["floor-finish-quantity-1"]
+    quantity_id = claim.floor_finish_quantity_evidence[0].quantity_id
+    trace = traces[quantity_id]
     assert trace.metadata["support_page_id"] == "9"
     assert trace.metadata["support_viewport_id"] == "finish-vp"
 
