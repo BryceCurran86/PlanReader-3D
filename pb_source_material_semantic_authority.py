@@ -1092,6 +1092,44 @@ class SourceMaterialSemanticProducer:
                 if page_number < 1 or page_number > pdf.page_count:
                     continue
                 page = pdf.load_page(page_number - 1)
+                page_words = trusted_words.get(str(page_number), ())
+
+                # A native source text block headed by a qualified material
+                # schedule title is independently usable for definitions even
+                # when competing outer vector frames leave the schedule
+                # viewport ambiguous. No drawing occurrence is minted from this
+                # route; it owns schedule semantics only.
+                for schedule_block in _trusted_native_material_schedule_blocks(
+                    page_words
+                ):
+                    line_evidence = dict(schedule_block.line_evidence)
+                    for item in parse_schedule_text(
+                        schedule_block.text,
+                        page_id=page_number,
+                        page_label=f"page:{page_number}",
+                    ):
+                        code = str(item.get("code") or "").strip().upper()
+                        if not code:
+                            continue
+                        raw = dict(item)
+                        raw["source_viewport_id"] = ""
+                        raw["source_block_id"] = schedule_block.scope_id
+                        contributing_lines = tuple(
+                            item.get("source_lines")
+                            or (str(item.get("source_line") or ""),)
+                        )
+                        raw["source_text_observation_ids"] = tuple(
+                            dict.fromkeys(
+                                observation_id
+                                for source_line in contributing_lines
+                                for observation_id in line_evidence.get(
+                                    str(source_line),
+                                    (),
+                                )
+                            )
+                        )
+                        raw_definitions.setdefault(code, []).append(raw)
+
                 viewports = tuple(
                     segment_page_viewports(page, page_number=page_number)
                 )
@@ -1112,7 +1150,6 @@ class SourceMaterialSemanticProducer:
                         sibling_non_overlapping=sibling_non_overlapping,
                     )
                 )
-                page_words = trusted_words.get(str(page_number), ())
                 for viewport in authoritative:
                     if _is_explicit_non_material_schedule(viewport):
                         continue
