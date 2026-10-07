@@ -49,7 +49,7 @@ from pb_source_material_semantic_authority import (
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION = "1.1.0"
+CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION = "1.2.0"
 CROSS_VIEW_FLOOR_FINISH_RESOLVED = "cross_view_floor_finish_resolved"
 CROSS_VIEW_FLOOR_FINISH_PARTIAL = "cross_view_floor_finish_partial"
 CROSS_VIEW_FLOOR_FINISH_UNAVAILABLE = "cross_view_floor_finish_unavailable"
@@ -598,7 +598,7 @@ class CrossViewFloorFinishProducer:
                 unit="m2",
                 input_entity_ids=(floor.canonical_floor_id,),
                 formula="authenticated_cross_view_room_area_with_source_finish",
-                formula_version="1.0.0",
+                formula_version=CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION,
                 evidence_ids=evidence_ids,
                 authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
                 status=AuthorityStatus.FIRM.value,
