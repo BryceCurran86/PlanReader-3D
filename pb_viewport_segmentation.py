@@ -248,6 +248,8 @@ def _stamp_segment_page_viewports_product(
 _TITLE_SHAPE_RE = re.compile(
     r"^\s*(?:"
     r"(?:(?:PROP(?:OSED)?\.?)|(?:GROUND|FIRST|SECOND|THIRD|UPPER|LOWER|LEVEL\s*[A-Z0-9.-]+))?\s*FLOOR\s+PLAN|"
+    r"(?:(?:PROP(?:OSED)?\.?)\s*)?FLOOR\s+FINISH(?:ES)?(?:\s*&\s*PARTITIONS?)?\s+PLAN|"
+    r"(?:(?:PROP(?:OSED)?\.?)\s*)?REFLECTED\s+CEILING\s+PLAN|R\.?C\.?P\.?|"
     r"PLAN\s*:\s*FLOOR\s+LAYOUT|FLOOR\s+LAYOUT|LAYOUT\s+PLAN|ROOF(?:ING)?\s+(?:LAYOUT\s+)?PLAN|"
     r"(?:NORTH|SOUTH|EAST|WEST|FRONT|REAR|SIDE)?\s*ELEV(?:ATION)?(?:\s+[A-Z0-9.-]+)?|"
     r"SECTION(?:\s+[A-Z0-9.-]+)?|CROSS\s+SECTION|LONGITUDINAL\s+SECTION|"
@@ -921,6 +923,53 @@ def _wrapped_continuation(previous: _NativeLine, current: _NativeLine) -> bool:
     return smaller > 0 and overlap >= _WRAP_MIN_ALIGNED_OVERLAP * smaller
 
 
+def _wrapped_title_fragments(
+    page: Any,
+) -> list[tuple[tuple[float, float, float, float], str]]:
+    """Return only positively title-shaped wrapped native-line runs."""
+    try:
+        data = _page_text(page, "dict") or {}
+    except Exception:
+        return []
+
+    fragments: list[tuple[tuple[float, float, float, float], str]] = []
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        lines = [
+            line
+            for line in (
+                _native_line(item) for item in block.get("lines", []) or []
+            )
+            if line is not None
+        ]
+        runs: list[list[int]] = []
+        for index, line in enumerate(lines):
+            if index and _wrapped_continuation(lines[index - 1], line):
+                runs[-1].append(index)
+            else:
+                runs.append([index])
+        for run in runs:
+            if len(run) < 2:
+                continue
+            merged = _normalise_text(" ".join(lines[index].text for index in run))
+            if not _TITLE_SHAPE_RE.match(merged):
+                continue
+            view_type = DrawingViewClassifier.classify_text(
+                _strip_scale_suffix(merged)
+            ).value
+            if view_type == DrawingViewType.UNKNOWN.value:
+                continue
+            bbox = (
+                min(lines[index].bbox[0] for index in run),
+                min(lines[index].bbox[1] for index in run),
+                max(lines[index].bbox[2] for index in run),
+                max(lines[index].bbox[3] for index in run),
+            )
+            fragments.append((bbox, merged))
+    return fragments
+
+
 def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float, float], str]]:
     """Lines (box, text) that are the wrapped tail of a note in the same native text block.
 
@@ -972,7 +1021,11 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
     owned: Optional[list[tuple[float, float, float, float]]] = None
     tails: Optional[list[tuple[tuple[float, float, float, float], str]]] = None
-    for bbox, text in _text_fragments(page):
+    title_fragments = [
+        *_text_fragments(page),
+        *_wrapped_title_fragments(page),
+    ]
+    for bbox, text in title_fragments:
         if not _TITLE_SHAPE_RE.match(text):
             continue
         view_type = DrawingViewClassifier.classify_text(_strip_scale_suffix(text)).value
@@ -1224,6 +1277,8 @@ def _frame_resolved_viewports(
 _AUTHORITATIVE_DERIVED_PARTITION_MODE = "columnar_title_grid"
 _SINGLE_FLOOR_PLAN_PARTITION_MODE = "single_floor_plan_printable_area"
 _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE = "single_floor_plan_sheet_frame"
+_SINGLE_REFLECTED_CEILING_PARTITION_MODE = "single_reflected_ceiling_printable_area"
+_SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE = "single_reflected_ceiling_sheet_frame"
 
 
 def is_authoritative_derived_viewport(viewport: Any) -> bool:
@@ -1239,13 +1294,19 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
     mode = provenance.get("partition_mode")
     if mode == _AUTHORITATIVE_DERIVED_PARTITION_MODE:
         return provenance.get("grid_validated") is True
-    if mode == _SINGLE_FLOOR_PLAN_PARTITION_MODE:
+    if mode in (
+        _SINGLE_FLOOR_PLAN_PARTITION_MODE,
+        _SINGLE_REFLECTED_CEILING_PARTITION_MODE,
+    ):
         return bool(
             provenance.get("single_view_validated") is True
             and provenance.get("title_block_bbox")
             and int(provenance.get("drawing_vector_primitive_count", 0) or 0) >= 2
         )
-    if mode == _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE:
+    if mode in (
+        _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE,
+        _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE,
+    ):
         return bool(
             provenance.get("single_view_validated") is True
             and int(provenance.get("metadata_label_count", 0) or 0) >= 2
@@ -1643,7 +1704,10 @@ def _single_floor_plan_sheet_frame_partition(
     *,
     page_number: int,
 ) -> Optional[SegmentedViewport]:
-    if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
+    if anchor.view_type not in (
+        DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.REFLECTED_CEILING_PLAN.value,
+    ):
         return None
     candidates = _single_view_sheet_drawing_frames(page, anchor, calibration)
     if len(candidates) != 1:
@@ -1666,11 +1730,19 @@ def _single_floor_plan_sheet_frame_partition(
         scale_denominator=denominator,
         scale_conflict=scale_conflict,
         notes=[
-            "single floor plan owns closed native sheet drawing frame with separate metadata band",
+            (
+                "single floor plan owns closed native sheet drawing frame with separate metadata band"
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else "single reflected ceiling plan owns closed native sheet drawing frame with separate metadata band"
+            ),
             *scale_notes,
         ],
         provenance={
-            "partition_mode": _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE,
+            "partition_mode": (
+                _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE
+            ),
             "single_view_validated": True,
             "metadata_label_count": metadata_count,
             "drawing_vector_primitive_count": primitive_count,
@@ -1687,8 +1759,11 @@ def _single_floor_plan_printable_partition(
     *,
     page_number: int,
 ) -> Optional[SegmentedViewport]:
-    """Resolve one unframed floor plan from page ownership, fail-closed."""
-    if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
+    """Resolve one unframed semantic plan from page ownership, fail-closed."""
+    if anchor.view_type not in (
+        DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.REFLECTED_CEILING_PLAN.value,
+    ):
         return None
     # pb_page_title_authority deliberately works in visual/display space.
     # Until that title-block rectangle has an explicit display->native bridge,
@@ -1764,11 +1839,19 @@ def _single_floor_plan_printable_partition(
         scale_denominator=denominator,
         scale_conflict=scale_conflict,
         notes=[
-            "single floor plan owns proven printable area outside native title block",
+            (
+                "single floor plan owns proven printable area outside native title block"
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else "single reflected ceiling plan owns proven printable area outside native title block"
+            ),
             *scale_notes,
         ],
         provenance={
-            "partition_mode": _SINGLE_FLOOR_PLAN_PARTITION_MODE,
+            "partition_mode": (
+                _SINGLE_FLOOR_PLAN_PARTITION_MODE
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else _SINGLE_REFLECTED_CEILING_PARTITION_MODE
+            ),
             "single_view_validated": True,
             "title_block_bbox": title_block,
             "drawing_vector_primitive_count": primitive_count,
