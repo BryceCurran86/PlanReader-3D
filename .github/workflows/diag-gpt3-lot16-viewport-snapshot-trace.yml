@@ -1,0 +1,36 @@
+name: DIAG GPT3 Lot16 Viewport Snapshot Trace
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused contracts
+        run: |
+          PYTHONPATH=. pytest -q tests/test_physical_opening_viewport_scope_authority.py tests/test_raster_framed_opening_g17_contract.py
+      - name: Trace live Lot16 viewport snapshot lineage
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_viewport_snapshot_trace.py | tee lot16-viewport-snapshot-trace.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-lot16-viewport-snapshot-trace
+          path: lot16-viewport-snapshot-trace.json
+          retention-days: 2
