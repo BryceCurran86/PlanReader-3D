@@ -298,6 +298,7 @@ class CrossViewFloorFinishRecord:
     occurrence_record_id: str
     occurrence_evidence_id: str
     occurrence_bbox_pdf_pts: tuple[float, float, float, float]
+    support_snapshot_id: str
     quantity: QuantityEvidence
     schema_version: str = CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION
     _seal: object = None
@@ -410,6 +411,7 @@ class CrossViewFloorFinishProducer:
                 unresolved_canonical_floor_ids=(),
             )
 
+        document_ids: set[str] = set()
         revision_ids: set[str] = set()
         source_hashes: set[str] = set()
         for record in area_records:
@@ -418,13 +420,20 @@ class CrossViewFloorFinishProducer:
                 if isinstance(record.area_evidence.metadata, Mapping)
                 else {}
             )
+            document_id = _clean(record.area_evidence.document_id)
             revision = _clean(metadata.get("room_revision_id"))
             source_hash = _clean(metadata.get("source_sha256")).lower()
+            if document_id:
+                document_ids.add(document_id)
             if revision:
                 revision_ids.add(revision)
             if source_hash:
                 source_hashes.add(source_hash)
-        if len(revision_ids) != 1 or len(source_hashes) != 1:
+        if (
+            len(document_ids) != 1
+            or len(revision_ids) != 1
+            or len(source_hashes) != 1
+        ):
             return CrossViewFloorFinishResult(
                 status=EvidenceResolutionStatus.CONFLICT,
                 reason_codes=(CROSS_VIEW_FLOOR_FINISH_LINEAGE_CONFLICT,),
@@ -437,10 +446,13 @@ class CrossViewFloorFinishProducer:
                 ),
             )
 
+        document_id = next(iter(document_ids))
         revision_id = next(iter(revision_ids))
         published = self._source.published_snapshot_for_revision(revision_id)
         if (
             published is None
+            or published.revision.document_id != document_id
+            or published.revision.revision_id != revision_id
             or published.revision.source_sha256.lower() != next(iter(source_hashes))
         ):
             return CrossViewFloorFinishResult(
@@ -509,6 +521,8 @@ class CrossViewFloorFinishProducer:
                     definition_result.status
                     is not EvidenceResolutionStatus.CORROBORATED
                     or definition is None
+                    or occurrence.snapshot_id != published.snapshot.snapshot_id
+                    or definition.snapshot_id != published.snapshot.snapshot_id
                     or definition.record_id != occurrence.definition_record_id
                     or definition.semantic_finish != occurrence.semantic_finish
                     or not _definition_is_floor_finish(definition)
@@ -604,6 +618,7 @@ class CrossViewFloorFinishProducer:
                     "source_room_face_record_id": floor.source_room_face_record_id,
                     "finish_code": occurrence.code,
                     "semantic_finish": occurrence.semantic_finish,
+                    "support_snapshot_id": published.snapshot.snapshot_id,
                     "finish_definition_record_id": definition.record_id,
                     "finish_occurrence_record_id": occurrence.record_id,
                     "finish_occurrence_evidence_id": occurrence.source_evidence_id,
@@ -632,6 +647,7 @@ class CrossViewFloorFinishProducer:
                     occurrence_record_id=occurrence.record_id,
                     occurrence_evidence_id=occurrence.source_evidence_id,
                     occurrence_bbox_pdf_pts=occurrence.bbox_pdf_pts,
+                    support_snapshot_id=published.snapshot.snapshot_id,
                     quantity=quantity,
                     _seal=_RECORD_SEAL,
                 )
