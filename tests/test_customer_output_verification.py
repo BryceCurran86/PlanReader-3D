@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import copy
+from dataclasses import replace
 
 import pytest
 
@@ -141,6 +141,14 @@ def test_persisted_database_shape_keeps_complete_lineage_in_notes_and_reference(
     report = verify_sealed_customer_output(sealed, persisted)
 
     assert report.verified_quantity_ids == ("qty-1", "qty-2")
+
+
+def test_tampered_sealed_run_envelope_fails_before_customer_verification() -> None:
+    sealed, rows = sealed_and_rows()
+    tampered = replace(sealed, run_id="tampered-run")
+
+    with pytest.raises(CustomerOutputVerificationError, match="cryptographic verification"):
+        verify_sealed_customer_output(tampered, rows)
 
 
 def test_missing_valid_customer_row_fails_closed() -> None:
