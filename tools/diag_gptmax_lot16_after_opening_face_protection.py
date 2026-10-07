@@ -20,6 +20,7 @@ from pb_physical_wall_candidate_authority import (
     _producer_opening_wall_face_source_ids,
     _source_page_segments,
 )
+from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
