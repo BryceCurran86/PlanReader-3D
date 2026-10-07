@@ -79,11 +79,45 @@ jobs:
               source_locator="memory://maryborough.pdf",
               page_ids=("9", "16", "18"),
           )
-          authority = (
-              SourceMaterialSemanticProducer
-              .from_source_visibility_producer(source)
-              .publish(published.revision.revision_id)
-          )
+          import pb_source_material_semantic_authority as material
+
+          producer = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          words_by_page = material._trusted_words_by_page(source, published)
+          cluster_debug = {}
+          for page_id in ("9", "16", "18"):
+              words = words_by_page.get(page_id, ())
+              raw = material._raw_material_definition_candidates(words)
+              blocks, blocked = material._trusted_native_material_schedule_cluster_blocks(
+                  source=source,
+                  published=published,
+                  raster=producer._raster,
+                  words=words,
+              )
+              cluster_debug[page_id] = {
+                  "raw_candidates": [
+                      {
+                          "partition_id": row[0],
+                          "block_no": row[1],
+                          "code": row[3],
+                          "bbox": list(material._native_block_bbox(row[2])),
+                          "raw_text": " | ".join(
+                              line[0] for line in material._native_block_line_rows(row[2])
+                          ),
+                      }
+                      for row in raw
+                  ],
+                  "trusted_cluster_blocks": [
+                      {
+                          "block_no": block.block_no,
+                          "text": block.text,
+                          "scope_id": block.scope_id,
+                      }
+                      for block in blocks
+                  ],
+                  "blocked_codes": list(blocked),
+              }
+
+          authority = producer.publish(published.revision.revision_id)
 
           results = {}
           for code in ("FPB", "GRID", "WFPB"):
@@ -111,6 +145,7 @@ jobs:
           out = {
               "source_sha256": sha,
               "decoded_pages": list(published.coverage.decoded_pages),
+              "cluster_debug": cluster_debug,
               "definitions": results,
           }
           print(json.dumps(out, indent=2, sort_keys=True))
