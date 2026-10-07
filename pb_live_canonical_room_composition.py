@@ -168,12 +168,10 @@ class LiveCanonicalRoomComposition:
         if len(owned) != 1:
             return None
 
-        # The binding is minted only inside compose_live_canonical_rooms after
-        # this exact producer-owned room-face scope has already resolved
-        # CORROBORATED + complete. Replaying that immutable authority scope
-        # once per room is redundant and pathological on dense CAD plans. Keep
-        # the historical owned-room uniqueness check above, then validate exact
-        # membership against the sealed record-id universe below.
+        # This binding was minted only after the exact producer-owned room-face
+        # scope resolved CORROBORATED + complete. Replaying that immutable
+        # authority scope once per room is redundant on dense CAD plans; exact
+        # membership remains sealed below.
         matches = [
             binding
             for binding in self._room_face_authority_bindings
@@ -249,9 +247,7 @@ def _authority_binding(
         viewport_id=(None if viewport_id is None else str(viewport_id)),
         viewport_bbox=normalized_bbox,
         viewport_view_type=(
-            None
-            if viewport_view_type is None
-            else str(viewport_view_type)
+            None if viewport_view_type is None else str(viewport_view_type)
         ),
         authority=authority,
         _seal=_ROOM_FACE_AUTHORITY_BINDING_SEAL,
@@ -471,25 +467,15 @@ def compose_live_canonical_rooms(
     authority = build_source_room_face_authority(
         wall_opening_composition.physical_wall_candidate_authority
     )
-    try:
-        page_label_authority = SourceRoomLabelProducer.from_authorities(
-            source_visibility_producer,
-            authority,
-            page_ids=tuple(wall_opening_composition.page_ids),
-        ).authority()
-    except Exception:
-        # Room labels are semantic annotation only. A label-authority failure
-        # must never destroy already-proven room geometry.
-        page_label_authority = None
 
-    rooms: list[LiveCanonicalRoomObject] = []
-    reasons: list[str] = []
-    resolved_pages: set[int] = set()
-    room_pages: set[int] = set()
-    unresolved_pages: list[str] = []
-    viewport_fallback_used = False
-    authority_bindings: list[_RoomFaceAuthorityBinding] = []
-
+    # Resolve the cheap sealed room-face scopes before constructing any
+    # semantic label producer. Pages that cannot publish a page-wide room scope
+    # are handled by the authenticated viewport fallback below; OCR/text
+    # corroboration for those pages must not be performed once here and then
+    # repeated again against the fallback authority.
+    page_room_results = {}
+    page_room_selectors = {}
+    page_label_ids: list[str] = []
     for page_id in wall_opening_composition.page_ids:
         selector = SourceRoomFaceSelector(
             document_id=published.revision.document_id,
@@ -500,6 +486,39 @@ def compose_live_canonical_rooms(
             decision_scope_id=f"wall-source:page-{page_id}",
         )
         result = authority.resolve_scope(selector)
+        page_room_selectors[page_id] = selector
+        page_room_results[page_id] = result
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and result.scope_complete
+            and result.records
+        ):
+            page_label_ids.append(str(page_id))
+
+    page_label_authority = None
+    if page_label_ids:
+        try:
+            page_label_authority = SourceRoomLabelProducer.from_authorities(
+                source_visibility_producer,
+                authority,
+                page_ids=tuple(page_label_ids),
+            ).authority()
+        except Exception:
+            # Room labels are semantic annotation only. A label-authority failure
+            # must never destroy already-proven room geometry.
+            page_label_authority = None
+
+    rooms: list[LiveCanonicalRoomObject] = []
+    reasons: list[str] = []
+    resolved_pages: set[int] = set()
+    room_pages: set[int] = set()
+    unresolved_pages: list[str] = []
+    viewport_fallback_used = False
+    authority_bindings: list[_RoomFaceAuthorityBinding] = []
+
+    for page_id in wall_opening_composition.page_ids:
+        selector = page_room_selectors[page_id]
+        result = page_room_results[page_id]
         if (
             result.status is EvidenceResolutionStatus.CORROBORATED
             and result.scope_complete
@@ -616,9 +635,9 @@ def compose_live_canonical_rooms(
                 viewport_label_authority = None
 
             for page_id in unresolved_pages:
-                # Canonical room geometry is topology authority. Floor-finish
-                # plans are semantic/support views and must not mint or replace
-                # physical room faces merely because they contain linework.
+                # Canonical room geometry is topology authority. Semantic/support
+                # plans must not mint or replace physical room faces merely
+                # because they contain linework.
                 selectors = (
                     viewport_wall_authority.selectors_for_authenticated_viewports(
                         document_id=viewport_published.revision.document_id,
