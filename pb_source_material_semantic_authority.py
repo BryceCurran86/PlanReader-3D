@@ -203,6 +203,7 @@ class SourceMaterialOccurrenceRecord:
     bbox_pdf_pts: tuple[float, float, float, float]
     raw_text: str
     source_evidence_id: str
+    source_text_observation_ids: tuple[str, ...] = ()
     schema_version: str = SOURCE_MATERIAL_SEMANTIC_SCHEMA_VERSION
 
 
@@ -1292,6 +1293,9 @@ class SourceMaterialSemanticProducer:
                                 bbox_pdf_pts=normalized_bbox,
                                 raw_text=raw_text,
                                 source_evidence_id=evidence_id,
+                                source_text_observation_ids=tuple(
+                                    text_observation_ids
+                                ),
                             )
                         )
                 records.sort(key=lambda row: row.record_id)
