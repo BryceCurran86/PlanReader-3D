@@ -488,8 +488,15 @@ def compose_live_canonical_rooms(
     page_room_selectors = {}
     page_label_ids: list[str] = []
     for page_id in wall_opening_composition.page_ids:
-        selector = page_room_selectors[page_id]
-        result = page_room_results[page_id]
+        selector = SourceRoomFaceSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            page_id=page_id,
+            decision_scope_id=f"wall-source:page-{page_id}",
+        )
+        result = authority.resolve_scope(selector)
         page_room_selectors[page_id] = selector
         page_room_results[page_id] = result
         if (
@@ -521,15 +528,8 @@ def compose_live_canonical_rooms(
     authority_bindings: list[_RoomFaceAuthorityBinding] = []
 
     for page_id in wall_opening_composition.page_ids:
-        selector = SourceRoomFaceSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            page_id=page_id,
-            decision_scope_id=f"wall-source:page-{page_id}",
-        )
-        result = authority.resolve_scope(selector)
+        selector = page_room_selectors[page_id]
+        result = page_room_results[page_id]
         if (
             result.status is EvidenceResolutionStatus.CORROBORATED
             and result.scope_complete
