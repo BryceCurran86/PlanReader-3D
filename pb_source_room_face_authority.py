@@ -40,7 +40,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field, replace
 import math
 from types import MappingProxyType
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Optional
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
