@@ -484,3 +484,52 @@ def test_reflected_ceiling_plan_segments_without_becoming_floor_plan_topology() 
         assert authoritative_floor_plan_viewports(doc[0], page_number=1) == ()
     finally:
         doc.close()
+
+
+def test_single_reflected_ceiling_plan_can_own_printable_area_without_becoming_floor_topology():
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=842)
+    page.insert_text((220, 760), "PROP. REFLECTED CEILING PLAN", fontsize=11)
+
+    page.draw_line((80, 100), (780, 100))
+    page.draw_line((780, 100), (780, 620))
+    page.draw_line((780, 620), (80, 620))
+    page.draw_line((80, 620), (80, 100))
+    page.draw_line((300, 100), (300, 620))
+
+    x = 1000
+    page.insert_text((x, 520), "PROJECT TITLE", fontsize=6)
+    page.insert_text((x, 532), "SYNTHETIC RESIDENCE", fontsize=9)
+    page.insert_text((x, 556), "CLIENT", fontsize=6)
+    page.insert_text((x, 568), "EXAMPLE CLIENT", fontsize=9)
+    page.insert_text((x, 596), "DRAWING TITLE", fontsize=6)
+    page.insert_text((x, 612), "REFLECTED CEILING PLAN", fontsize=11)
+    page.insert_text((x, 650), "DRAWN", fontsize=6)
+    page.insert_text((x + 60, 650), "CHECKED", fontsize=6)
+    page.insert_text((x + 120, 650), "SCALE", fontsize=6)
+    page.insert_text((x, 662), "AB", fontsize=8)
+    page.insert_text((x + 60, 662), "CD", fontsize=8)
+    page.insert_text((x + 120, 662), "1:100", fontsize=8)
+    page.insert_text((x, 690), "DRAWING NO", fontsize=6)
+    page.insert_text((x + 120, 690), "REVISION", fontsize=6)
+    page.insert_text((x, 704), "A-501", fontsize=10)
+    page.insert_text((x + 120, 704), "A", fontsize=10)
+
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        rcp = viewports[0]
+        assert rcp.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+        assert rcp.status == ViewportSegmentationStatus.DERIVED.value
+        assert rcp.boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+        assert rcp.bounding_box is not None
+        assert (
+            rcp.provenance["partition_mode"]
+            == "single_reflected_ceiling_printable_area"
+        )
+        assert rcp.provenance["single_view_validated"] is True
+        assert is_authoritative_derived_viewport(rcp)
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
