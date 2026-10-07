@@ -301,6 +301,43 @@ def test_same_revision_distinct_semantic_snapshot_can_bind(monkeypatch) -> None:
     )
 
 
+def test_semantic_source_from_different_revision_fails_closed() -> None:
+    payload = _pdf()
+    geometry_source = SourceVisibilityProducer(
+        producer_method="cross-view-ceiling-geometry-revision-test",
+        producer_version="1",
+    )
+    geometry_published = geometry_source.ingest_native_pdf_bytes(
+        document_id="doc-ceiling-geometry",
+        source_bytes=payload,
+        source_locator="memory:geometry-revision.pdf",
+        page_ids=("1",),
+    )
+    semantic_source = SourceVisibilityProducer(
+        producer_method="cross-view-ceiling-semantic-revision-test",
+        producer_version="1",
+    )
+    semantic_source.ingest_native_pdf_bytes(
+        document_id="doc-ceiling-other",
+        source_bytes=payload,
+        source_locator="memory:semantic-other.pdf",
+        page_ids=("1", "2"),
+    )
+
+    rooms = _rooms(geometry_published, _room(geometry_published))
+    result = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=semantic_source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert (
+        ceiling.CROSS_VIEW_CEILING_FINISH_LINEAGE_CONFLICT
+        in result.reason_codes
+    )
+
+
 def test_finish_in_different_native_block_does_not_bind(monkeypatch) -> None:
     source, published = _source()
     rooms = _rooms(published, _room(published))
