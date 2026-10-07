@@ -30,11 +30,12 @@ from pb_physical_opening_authority import (
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningExistenceRecord,
 )
+from pb_raster_opening_source_primitives import RASTER_THIN_INK_RUN
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-OPENING_LABEL_DIMENSION_SCHEMA_VERSION = "1.0.0"
+OPENING_LABEL_DIMENSION_SCHEMA_VERSION = "1.1.0"
 OPENING_LABEL_DIMENSION_RESOLVED = "opening_label_dimension_resolved"
 OPENING_LABEL_DIMENSION_UNAVAILABLE = "opening_label_dimension_unavailable"
 OPENING_LABEL_DIMENSION_GEOMETRY_UNAVAILABLE = "opening_label_dimension_geometry_unavailable"
@@ -138,6 +139,7 @@ class OpeningLabelDimensionEvidence:
     semantic_kind: Optional[str]
     area_m2: Optional[float]
     axis_order_resolved: bool = False
+    dimension_axis: Optional[str] = None
     basis: str = "figured_opening_label"
     schema_version: str = OPENING_LABEL_DIMENSION_SCHEMA_VERSION
 
@@ -900,6 +902,110 @@ def _label_matches_gap(label: _TrustedTextLine, gap: _GapSpan) -> bool:
     return abs(cross - gap.cross_center) <= cross_allowance + _COORD_TOL
 
 
+def _raster_swing_leaf_span(
+    source: SourceVisibilityProducer,
+    opening: PhysicalOpeningExistenceRecord,
+) -> Optional[_GapSpan]:
+    """Return the common span of G17's authenticated raster swing leaf.
+
+    G17 includes only producer-owned RASTER_THIN_INK_RUN observations that
+    passed its leaf-support contract in a raster door-swing opening record.
+    This helper never searches for another leaf or chooses a nearest primitive.
+    """
+    if opening.structural_pattern != RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION:
+        return None
+    visibility = source.authority()
+    leaf_lines: list[tuple[float, float, float, float]] = []
+    for observation_id in opening.source_observation_ids:
+        result = visibility.resolve_raster_opening_primitive(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        observation = getattr(result, "observation", None)
+        if (
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or observation is None
+            or observation.observation_kind != RASTER_THIN_INK_RUN
+        ):
+            continue
+        geometry = _line(observation)
+        if geometry is not None:
+            leaf_lines.append(geometry)
+    if not leaf_lines:
+        return None
+
+    axis = _unit(leaf_lines[0])
+    if axis is None:
+        return None
+    normal = (-axis[1], axis[0])
+    intervals: list[tuple[float, float]] = []
+    cross_values: list[float] = []
+    for geometry in leaf_lines:
+        other_axis = _unit(geometry)
+        if (
+            other_axis is None
+            or abs(abs(_dot(other_axis, axis)) - 1.0) > _COORD_TOL
+        ):
+            return None
+        endpoints = _endpoints(geometry)
+        values = sorted(_dot(point, axis) for point in endpoints)
+        intervals.append((values[0], values[1]))
+        cross_values.append(
+            sum(_dot(point, normal) for point in endpoints) / 2.0
+        )
+
+    common_start = max(value[0] for value in intervals)
+    common_end = min(value[1] for value in intervals)
+    if common_end - common_start <= _COORD_TOL:
+        return None
+    return _GapSpan(
+        axis=axis,
+        normal=normal,
+        along_min=common_start,
+        along_max=common_end,
+        cross_center=sum(cross_values) / len(cross_values),
+        cross_spread=max(cross_values) - min(cross_values),
+    )
+
+
+def _label_matches_leaf(line: _TrustedTextLine, leaf: _GapSpan) -> bool:
+    """Require trusted figured text to be carried by the proven door leaf."""
+    x0, y0, x1, y1 = line.bbox
+    corners = ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+    along_values = tuple(_dot(point, leaf.axis) for point in corners)
+    cross_values = tuple(_dot(point, leaf.normal) for point in corners)
+    label_along_min = min(along_values)
+    label_along_max = max(along_values)
+    label_cross_min = min(cross_values)
+    label_cross_max = max(cross_values)
+    along_extent = label_along_max - label_along_min
+    cross_extent = label_cross_max - label_cross_min
+
+    # The printed word must run with the authenticated leaf rather than merely
+    # crossing it, and its full longitudinal bbox must be carried by the common
+    # source-proven leaf span.
+    if along_extent <= cross_extent + _COORD_TOL:
+        return False
+    if (
+        label_along_min < leaf.along_min - _COORD_TOL
+        or label_along_max > leaf.along_max + _COORD_TOL
+    ):
+        return False
+
+    cross_center = (label_cross_min + label_cross_max) / 2.0
+    glyph_height = max(_COORD_TOL, min(abs(x1 - x0), abs(y1 - y0)))
+    cross_allowance = max(3.0 * glyph_height, 2.0 * leaf.cross_spread)
+    return (
+        abs(cross_center - leaf.cross_center)
+        <= cross_allowance + _COORD_TOL
+    )
+
+
 def _structural_kind(pattern: str) -> Optional[str]:
     if pattern in {
         GAP_CORROBORATED_DOOR_JAMB_LEAF,
@@ -1002,6 +1108,7 @@ class OpeningLabelDimensionProducer:
             )
 
         structural_kind = _structural_kind(opening.structural_pattern)
+        swing_leaf = _raster_swing_leaf_span(self._source, opening)
         # Semantic authority is independent of syntax parsing. Import lazily to
         # avoid a module cycle: semantic authority reuses the geometry helpers
         # defined in this module, while this producer consumes only its
@@ -1050,11 +1157,29 @@ class OpeningLabelDimensionProducer:
                 Optional[str],
                 tuple[float, ...],
                 bool,
+                bool,
             ],
         ] = {}
         for line in self._trusted_text_lines_for_opening(opening):
             parsed = parse_opening_label_dimensions(line.text)
             if parsed is None or not _label_matches_gap(line, gap):
+                continue
+            leaf_bound_single_width = (
+                opening.structural_pattern
+                == RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
+                and parsed.dimension_count == 1
+                and swing_leaf is not None
+                and _label_matches_leaf(line, swing_leaf)
+            )
+            # A bare single-number label stays axis-unresolved everywhere except
+            # where G17 has already proven a physical door leaf and the trusted
+            # figured text is carried by that exact leaf.
+            if (
+                opening.structural_pattern
+                == RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
+                and parsed.dimension_count == 1
+                and not leaf_bound_single_width
+            ):
                 continue
             suffix_kind, suffix_conflict = _semantic_kind_evidence(parsed.suffix_text)
             authenticated_kinds = tuple(
@@ -1104,7 +1229,14 @@ class OpeningLabelDimensionProducer:
             )
             candidates.setdefault(
                 signature,
-                (line, parsed, semantic_kind, resolved_values_mm, compact_used),
+                (
+                    line,
+                    parsed,
+                    semantic_kind,
+                    resolved_values_mm,
+                    compact_used,
+                    leaf_bound_single_width,
+                ),
             )
         if not candidates:
             return self._store(
@@ -1129,7 +1261,15 @@ class OpeningLabelDimensionProducer:
             semantic_kind,
             resolved_values_mm,
             compact_used,
+            leaf_bound_single_width,
         ) = next(iter(candidates.values()))
+        dimension_axis = "width" if leaf_bound_single_width else None
+        axis_order_resolved = bool(leaf_bound_single_width)
+        evidence_basis = (
+            "figured_door_leaf_width_label"
+            if leaf_bound_single_width
+            else "figured_opening_label"
+        )
         payload = {
             "schema_version": OPENING_LABEL_DIMENSION_SCHEMA_VERSION,
             "opening_record_id": opening.record_id,
@@ -1140,6 +1280,9 @@ class OpeningLabelDimensionProducer:
             "dimension_values_mm": resolved_values_mm,
             "compact_hundreds_used": compact_used,
             "semantic_kind": semantic_kind,
+            "axis_order_resolved": axis_order_resolved,
+            "dimension_axis": dimension_axis,
+            "basis": evidence_basis,
         }
         evidence = OpeningLabelDimensionEvidence(
             evidence_id=stable_contract_id(
@@ -1155,6 +1298,9 @@ class OpeningLabelDimensionProducer:
             dimension_values_mm=resolved_values_mm,
             semantic_kind=semantic_kind,
             area_m2=_area_from_dimension_values(resolved_values_mm),
+            axis_order_resolved=axis_order_resolved,
+            dimension_axis=dimension_axis,
+            basis=evidence_basis,
         )
         return self._store(
             key,
