@@ -1,14 +1,22 @@
-"""Tests for firm cross-view ceiling quantity publication."""
+"""Tests for firm ceiling quantity publication from final room-area authority."""
 from __future__ import annotations
 
 import pb_cross_view_ceiling_finish_authority as finish_authority
 import pb_cross_view_ceiling_quantity_authority as ceiling_quantity
-import pb_cross_view_room_area_authority as room_area_authority
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
     LiveCanonicalRoomObject,
 )
-from pb_migration_contracts import EvidenceAtom, EvidenceResolutionStatus
+from pb_migration_contracts import (
+    DocumentEvidence,
+    EntityEvidence,
+    EvidenceResolutionStatus,
+    QuantityEvidence,
+)
+from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
+
+
+SOURCE_SHA = "a" * 64
 
 
 def _room() -> LiveCanonicalRoomObject:
@@ -17,7 +25,7 @@ def _room() -> LiveCanonicalRoomObject:
         physical_room_id="physical-room-1",
         document_id="doc-1",
         revision_id="rev-1",
-        source_sha256="a" * 64,
+        source_sha256=SOURCE_SHA,
         snapshot_id="snap-1",
         page_id="7",
         viewport_id="floor-vp",
@@ -51,45 +59,72 @@ def _rooms() -> LiveCanonicalRoomComposition:
     )
 
 
-def _area(*, face_id: str = "face-1"):
-    evidence = EvidenceAtom(
-        evidence_id="area-evidence",
-        document_id="doc-1",
-        page_id="7",
-        viewport_id="floor-vp",
-        kind="explicit_room_area",
-        method="authenticated_cross_view_figured_dimensions",
-        normalized_value=9.05352,
-        unit="m2",
-        confidence=1.0,
+def _bridge(
+    *,
+    face_id: str = "face-1",
+    quantity_id: str = "room-area-qty-1",
+    authority: str = "documented_dimension",
+) -> SourceRoomAreaBridgeResult:
+    entity = EntityEvidence(
+        candidate_entity_id="source-room-1",
+        candidate_type="room",
+        evidence_ids=(face_id, "room-geometry-evidence"),
         status=EvidenceResolutionStatus.CORROBORATED,
-        reason_codes=("resolved",),
+        confidence=1.0,
+        reason_codes=("source_room_face_entity_bound",),
         metadata={
-            "physical_room_id": "physical-room-1",
-            "source_room_face_record_id": face_id,
-            "figured_dimension_ids": ["dim-h", "dim-v"],
-            "room_revision_id": "rev-1",
-            "room_snapshot_id": "snap-1",
-            "source_sha256": "a" * 64,
+            "source_sha256": SOURCE_SHA,
+            "revision_id": "rev-1",
+            "page_id": "7",
+            "page_no": 7,
+            "viewport_id": "floor-vp",
         },
     )
-    record = room_area_authority.CrossViewRoomAreaRecord(
-        physical_room_id="physical-room-1",
-        source_room_face_record_id=face_id,
-        room_label="OFFICE",
-        source_dimension_page_id="11",
-        source_label_observation_ids=("area-label-obs",),
-        source_label_receipt_ids=("area-label-receipt",),
-        horizontal_dimension_id="dim-h",
-        vertical_dimension_id="dim-v",
-        area_evidence=evidence,
-        _seal=room_area_authority._RECORD_SEAL,
+    metadata = {
+        "source_sha256": SOURCE_SHA,
+        "revision_id": "rev-1",
+        "page_no": 7,
+        "viewport_id": "floor-vp",
+        "room_label": "OFFICE",
+    }
+    if authority == "documented_dimension":
+        metadata["figured_dimension_ids"] = ["dim-h", "dim-v"]
+        metadata["scale_fingerprint"] = None
+    else:
+        metadata["figured_dimension_ids"] = []
+        metadata["scale_fingerprint"] = "scale-fingerprint-1"
+
+    quantity = QuantityEvidence(
+        quantity_id=quantity_id,
+        family="room_area",
+        semantic_key="room_area:source-room-1",
+        value=9.05352,
+        unit="m2",
+        input_entity_ids=("source-room-1",),
+        formula="authoritative_explicit_area",
+        formula_version="1.1.0",
+        evidence_ids=(face_id, "room-geometry-evidence"),
+        authority=authority,
+        status="firm",
+        confidence=1.0,
+        abstained=False,
+        metadata=metadata,
     )
-    return room_area_authority.CrossViewRoomAreaResult(
+    document = DocumentEvidence(
+        document_id="doc-1",
+        source_sha256=SOURCE_SHA,
+        page_count=1,
+        evidence_ids=(face_id, "room-geometry-evidence"),
+        producer="test",
+        producer_version="1",
+    )
+    return SourceRoomAreaBridgeResult(
         status=EvidenceResolutionStatus.CORROBORATED,
         reason_codes=("resolved",),
-        records=(record,),
-        unresolved_physical_room_ids=(),
+        room_index=None,
+        document=document,
+        entities=(entity,),
+        quantities=(quantity,),
     )
 
 
@@ -123,10 +158,10 @@ def _finish(*, face_id: str = "face-1"):
     )
 
 
-def test_documented_room_area_and_rcp_finish_publish_firm_ceiling_quantity() -> None:
+def test_final_documented_room_area_and_rcp_finish_publish_firm_ceiling_quantity() -> None:
     result = ceiling_quantity.publish_cross_view_ceiling_quantities(
         rooms=_rooms(),
-        room_areas=_area(),
+        room_area_bridges=(_bridge(),),
         finishes=_finish(),
     )
 
@@ -137,9 +172,7 @@ def test_documented_room_area_and_rcp_finish_publish_firm_ceiling_quantity() -> 
     quantity = record.quantity
     assert record.canonical_ceiling_id == record.physical_ceiling_surface_id
     assert record.physical_room_id == "physical-room-1"
-    assert record.room_label == "OFFICE"
-    assert record.finish_code == "GRID"
-    assert record.semantic_finish == "ceiling_grid"
+    assert record.upstream_room_area_quantity_id == "room-area-qty-1"
     assert quantity.family == "ceiling_lining"
     assert quantity.value == 9.05352
     assert quantity.unit == "m2"
@@ -148,15 +181,32 @@ def test_documented_room_area_and_rcp_finish_publish_firm_ceiling_quantity() -> 
     assert quantity.abstained is False
     assert quantity.input_entity_ids == (record.canonical_ceiling_id,)
     assert quantity.metadata["figured_dimension_ids"] == ["dim-h", "dim-v"]
+    assert quantity.metadata["upstream_room_area_quantity_id"] == "room-area-qty-1"
     assert quantity.metadata["support_page_id"] == "9"
     assert quantity.metadata["support_viewport_id"] == "rcp-vp"
     assert quantity.metadata["row_role"] == "ceiling_area"
 
 
+def test_firm_scaled_room_area_can_be_reused_without_new_scale_inference() -> None:
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(_bridge(authority="pdf_scaled"),),
+        finishes=_finish(),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    quantity = result.records[0].quantity
+    assert quantity.authority == "pdf_scaled"
+    assert quantity.value == 9.05352
+    assert quantity.metadata["scale_fingerprint"] == "scale-fingerprint-1"
+    assert quantity.metadata["figured_dimension_ids"] == []
+
+
 def test_source_room_face_mismatch_remains_unresolved() -> None:
     result = ceiling_quantity.publish_cross_view_ceiling_quantities(
         rooms=_rooms(),
-        room_areas=_area(face_id="face-other"),
+        room_area_bridges=(_bridge(face_id="face-other"),),
         finishes=_finish(),
     )
 
@@ -165,17 +215,29 @@ def test_source_room_face_mismatch_remains_unresolved() -> None:
     assert result.unresolved_physical_room_ids == ("physical-room-1",)
 
 
+def test_multiple_firm_room_area_claims_for_same_physical_room_conflict() -> None:
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(
+            _bridge(quantity_id="room-area-qty-1"),
+            _bridge(quantity_id="room-area-qty-2"),
+        ),
+        finishes=_finish(),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+
+
 def test_ceiling_identity_and_quantity_id_are_deterministic() -> None:
-    first = ceiling_quantity.publish_cross_view_ceiling_quantities(
-        rooms=_rooms(),
-        room_areas=_area(),
-        finishes=_finish(),
-    )
-    second = ceiling_quantity.publish_cross_view_ceiling_quantities(
-        rooms=_rooms(),
-        room_areas=_area(),
-        finishes=_finish(),
-    )
+    kwargs = {
+        "rooms": _rooms(),
+        "room_area_bridges": (_bridge(),),
+        "finishes": _finish(),
+    }
+    first = ceiling_quantity.publish_cross_view_ceiling_quantities(**kwargs)
+    second = ceiling_quantity.publish_cross_view_ceiling_quantities(**kwargs)
 
     assert len(first.records) == 1
     assert len(second.records) == 1
