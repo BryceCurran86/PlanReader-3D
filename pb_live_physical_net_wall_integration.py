@@ -28,6 +28,7 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
     compose_live_canonical_rooms,
 )
+from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
 from pb_live_canonical_wall_composition import compose_live_canonical_walls
 from pb_live_external_physical_net_wall_publication import (
     LiveCanonicalWallObject,
@@ -117,6 +118,7 @@ class LivePhysicalNetWallClaim:
     confidence: float
     publication: LiveExternalPhysicalNetWallPublication
     canonical_spaces: tuple[CanonicalSpace, ...] = ()
+    canonical_ceilings: tuple[LiveCanonicalCeilingSurfaceObject, ...] = ()
     canonical_space_status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED
     canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
@@ -390,6 +392,7 @@ def collect_live_physical_net_wall_claim(
     room_area_quantity_evidence: list[QuantityEvidence] = []
     floor_finish_quantity_evidence: list[QuantityEvidence] = []
     ceiling_lining_quantity_evidence: list[QuantityEvidence] = []
+    canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
     room_area_bridges = []
     cross_view_area = None
     if canonical_rooms.rooms:
@@ -746,6 +749,9 @@ def collect_live_physical_net_wall_claim(
                 room_area_bridges=tuple(room_area_bridges),
                 finishes=ceiling_finishes,
             )
+            canonical_ceiling_objects.extend(
+                ceiling_quantities.canonical_ceilings
+            )
             ceiling_lining_quantity_evidence.extend(
                 ceiling_quantities.quantities
             )
@@ -836,6 +842,7 @@ def collect_live_physical_net_wall_claim(
             confidence=float(evidence.confidence),
             publication=publication,
             canonical_spaces=canonical_space_core.spaces,
+            canonical_ceilings=tuple(canonical_ceiling_objects),
             canonical_space_status=canonical_space_core.status,
             canonical_space_reason_codes=canonical_space_core.reason_codes,
             opening_quantity_evidence=opening_quantity_evidence,
@@ -877,6 +884,7 @@ def collect_live_physical_net_wall_claim(
         confidence=0.0,
         publication=publication,
         canonical_spaces=canonical_space_core.spaces,
+        canonical_ceilings=tuple(canonical_ceiling_objects),
         canonical_space_status=canonical_space_core.status,
         canonical_space_reason_codes=canonical_space_core.reason_codes,
         opening_quantity_evidence=opening_quantity_evidence,
