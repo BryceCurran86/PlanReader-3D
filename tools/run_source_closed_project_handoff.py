@@ -348,10 +348,13 @@ def generate_project_handoff(
         ceiling_result = collect_live_ceiling_lining_claims(
             pdf_path,
             # Keep the complete source evidence universe available to ceiling
-            # semantics. The collector still mints room/ceiling geometry only
-            # from positively resolved floor-plan viewports, so evidence pages
-            # do not become topology.
+            # semantics, but do not rerun expensive topology across every
+            # evidence-only page. Topology remains restricted to the already
+            # selected physical drawing pages.
             pages=execution_pages,
+            topology_pages=(
+                topology_pages if topology_pages else execution_pages
+            ),
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
