@@ -38,13 +38,17 @@ from pb_physical_opening_authority import (
     PhysicalOpeningExistenceRecord,
 )
 from pb_physical_wall_candidate_authority import (
+    BOUNDARY_EVALUATION_EVALUATED,
+    ExcludedBoundaryPrimitive,
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateRecord,
+    PhysicalWallCandidateScopeResult,
     PhysicalWallCandidateSelector,
 )
 from pb_physical_wall_identity import (
     PhysicalEquivalenceClass,
     PhysicalWallEquivalenceResolution,
+    resolve_physical_wall_equivalence,
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import (
@@ -63,6 +67,12 @@ OPENING_HOST_BINDING_UNAVAILABLE = "opening_host_binding_unavailable"
 HOST_EQUIVALENCE_AMBIGUOUS = "ambiguous_physical_wall_equivalence_for_host"
 HOST_EQUIVALENCE_UNAVAILABLE = "physical_wall_equivalence_required_for_host"
 HOST_BAND_CENTER_MISMATCH = "authenticated_host_wall_band_not_centered_on_opening"
+HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED = (
+    "opening_host_local_boundary_clean_scope_resolved"
+)
+HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE = (
+    "opening_host_local_boundary_scope_unavailable"
+)
 RASTER_WHOLE_WALL_HOST_RESOLVED = "raster_whole_wall_host_resolved"
 MULTIPLE_RASTER_WHOLE_WALL_HOSTS = "multiple_authenticated_raster_whole_wall_hosts"
 RASTER_SPLIT_CENTERLINE_HOST_RESOLVED = "raster_split_centerline_host_resolved"
@@ -213,6 +223,13 @@ class _HostBandResolution:
     reason_codes: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _LocalHostScope:
+    records: tuple[PhysicalWallCandidateRecord, ...]
+    equivalence: PhysicalWallEquivalenceResolution
+    source_observation_ids: tuple[str, ...]
+
+
 _BindingKey = tuple[str, str, str, str, str, str, str]
 
 
@@ -307,13 +324,14 @@ class OpeningHostWallUniverseAuthority:
             raise TypeError("physical_wall_candidate_authority must be producer-owned")
         self._wall_authority = physical_wall_candidate_authority
 
-    def resolve_scope(
+    def _resolve_physical_wall_scope(
         self,
         selector: OpeningHostWallUniverseSelector,
-    ) -> OpeningHostWallUniverseResult:
+    ) -> PhysicalWallCandidateScopeResult:
+        """Internal producer-owned wall scope; never exposed as host authority."""
         if not isinstance(selector, OpeningHostWallUniverseSelector):
             raise TypeError("selector must be OpeningHostWallUniverseSelector")
-        wall_result = self._wall_authority.resolve_scope(
+        return self._wall_authority.resolve_scope(
             PhysicalWallCandidateSelector(
                 document_id=selector.document_id,
                 revision_id=selector.revision_id,
@@ -323,6 +341,14 @@ class OpeningHostWallUniverseAuthority:
                 decision_scope_id=selector.decision_scope_id,
             )
         )
+
+    def resolve_scope(
+        self,
+        selector: OpeningHostWallUniverseSelector,
+    ) -> OpeningHostWallUniverseResult:
+        if not isinstance(selector, OpeningHostWallUniverseSelector):
+            raise TypeError("selector must be OpeningHostWallUniverseSelector")
+        wall_result = self._resolve_physical_wall_scope(selector)
         if (
             wall_result.status is not EvidenceResolutionStatus.CORROBORATED
             or wall_result.scope_complete is not True
@@ -434,34 +460,77 @@ class OpeningHostBindingProducer:
             return _blocked_binding("opening_host_scope_mismatch")
 
         universe = self._universe.resolve_scope(host_universe_selector)
+        host_records: tuple[PhysicalWallCandidateRecord, ...]
+        host_equivalence: PhysicalWallEquivalenceResolution
+        host_source_observation_ids: tuple[str, ...]
+        binding_resolution_reasons: tuple[str, ...] = ()
+        geometry: Optional[_OpeningGeometry] = None
+
         if (
-            universe.status is not EvidenceResolutionStatus.CORROBORATED
-            or universe.scope_complete is not True
-            or universe.equivalence is None
+            universe.status is EvidenceResolutionStatus.CORROBORATED
+            and universe.scope_complete is True
+            and universe.equivalence is not None
         ):
-            status = (
-                EvidenceResolutionStatus.CONFLICT
-                if universe.status is EvidenceResolutionStatus.CONFLICT
-                else EvidenceResolutionStatus.ABSTAINED
+            host_records = tuple(universe.records)
+            host_equivalence = universe.equivalence
+            host_source_observation_ids = tuple(universe.source_observation_ids)
+        else:
+            geometry = _opening_geometry(self._opening, opening)
+            if geometry is None:
+                status = (
+                    EvidenceResolutionStatus.CONFLICT
+                    if universe.status is EvidenceResolutionStatus.CONFLICT
+                    else EvidenceResolutionStatus.ABSTAINED
+                )
+                return _blocked_binding(
+                    "complete_authenticated_host_wall_universe_required",
+                    *universe.reason_codes,
+                    "authenticated_opening_geometry_unavailable",
+                    status=status,
+                )
+            wall_result = self._universe._resolve_physical_wall_scope(
+                host_universe_selector
             )
-            return _blocked_binding(
-                "complete_authenticated_host_wall_universe_required",
-                *universe.reason_codes,
-                status=status,
+            local_scope, local_reasons = _local_boundary_clean_host_scope(
+                wall_result,
+                geometry,
+                include_spanning_raster_candidates=(
+                    opening.structural_pattern
+                    == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                ),
             )
+            if local_scope is None:
+                status = (
+                    EvidenceResolutionStatus.CONFLICT
+                    if (
+                        universe.status is EvidenceResolutionStatus.CONFLICT
+                        or wall_result.status is EvidenceResolutionStatus.CONFLICT
+                    )
+                    else EvidenceResolutionStatus.ABSTAINED
+                )
+                return _blocked_binding(
+                    "complete_authenticated_host_wall_universe_required",
+                    *universe.reason_codes,
+                    *local_reasons,
+                    status=status,
+                )
+            host_records = local_scope.records
+            host_equivalence = local_scope.equivalence
+            host_source_observation_ids = local_scope.source_observation_ids
+            binding_resolution_reasons = local_reasons
 
         lineage_resolution = _resolve_generic_gap_lineage_host(
             self._opening,
             opening,
-            universe.records,
-            universe.equivalence,
+            host_records,
+            host_equivalence,
         )
         if lineage_resolution is None:
             two_face_lineage_resolution = _resolve_two_face_lineage_host(
                 self._opening,
                 opening,
-                universe.records,
-                universe.equivalence,
+                host_records,
+                host_equivalence,
             )
             # Positive source-lineage authority supersedes the weaker geometry
             # path, and a genuine ownership conflict remains fail-closed.
@@ -476,13 +545,14 @@ class OpeningHostBindingProducer:
         if lineage_resolution is not None:
             band_resolution = lineage_resolution
         else:
-            geometry = _opening_geometry(self._opening, opening)
+            if geometry is None:
+                geometry = _opening_geometry(self._opening, opening)
             if geometry is None:
                 return _blocked_binding("authenticated_opening_geometry_unavailable")
             band_resolution = _resolve_host_bands(
-                universe.records,
+                host_records,
                 geometry,
-                universe.equivalence,
+                host_equivalence,
             )
             if (
                 opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION
@@ -490,18 +560,18 @@ class OpeningHostBindingProducer:
                 and not band_resolution.bands
             ):
                 band_resolution = _resolve_raster_whole_wall_host(
-                    universe.records,
+                    host_records,
                     geometry,
-                    universe.equivalence,
+                    host_equivalence,
                 )
                 if (
                     band_resolution.status is EvidenceResolutionStatus.CORROBORATED
                     and not band_resolution.bands
                 ):
                     band_resolution = _resolve_raster_split_centerline_host(
-                        universe.records,
+                        host_records,
                         geometry,
-                        universe.equivalence,
+                        host_equivalence,
                     )
                     if (
                         band_resolution.status
@@ -511,10 +581,10 @@ class OpeningHostBindingProducer:
                         band_resolution = _resolve_raster_source_primitive_host(
                             self._opening,
                             opening,
-                            universe.records,
+                            host_records,
                             geometry,
-                            universe.equivalence,
-                            universe.source_observation_ids,
+                            host_equivalence,
+                            host_source_observation_ids,
                         )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
@@ -561,7 +631,7 @@ class OpeningHostBindingProducer:
             "member_wall_candidate_ids": band.member_ids,
             "member_candidate_identity_ids": band.member_candidate_identity_ids,
             "member_equivalence_groups": band.member_equivalence_groups,
-            "source_observation_ids": universe.source_observation_ids,
+            "source_observation_ids": host_source_observation_ids,
         }
         record = OpeningHostBindingRecord(
             record_id=stable_contract_id("opening_host_binding_v3", payload, digest_chars=32),
@@ -576,12 +646,13 @@ class OpeningHostBindingProducer:
             member_wall_candidate_ids=band.member_ids,
             member_candidate_identity_ids=band.member_candidate_identity_ids,
             member_equivalence_groups=band.member_equivalence_groups,
-            source_observation_ids=tuple(universe.source_observation_ids),
+            source_observation_ids=tuple(host_source_observation_ids),
         )
         result = OpeningHostBindingResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             reason_codes=(
                 OPENING_HOST_BINDING_RESOLVED,
+                *binding_resolution_reasons,
                 *band_resolution.reason_codes,
             ),
             record=record,
@@ -898,13 +969,24 @@ HOST_GAP_LINEAGE_AMBIGUOUS = "opening_gap_wall_lineage_ambiguous"
 
 
 def _raw_source_primitive_id(record: SourceObservationRecord) -> Optional[str]:
-    """Return the exact producer source primitive referenced by a visible line."""
+    """Return the source primitive id in the exact W4 lineage namespace.
+
+    Native visible observations use ``visible:segment:<raw>`` while the
+    native segment handed to Stage A / W4 retains the bare source id. Raster
+    observations use ``visible:raster_segment:<raw>`` while W4 deliberately
+    retains ``raster_segment:<raw>``. Mirror those producer translations
+    exactly; unknown visible namespaces remain unmapped.
+    """
     ref = str(getattr(record, "source_primitive_ref", "") or "")
-    prefix = "visible:"
-    if not ref.startswith(prefix):
-        return None
-    raw_id = ref[len(prefix):].strip()
-    return raw_id or None
+    native_prefix = "visible:segment:"
+    raster_prefix = "visible:raster_segment:"
+    if ref.startswith(native_prefix):
+        raw_id = ref[len(native_prefix):].strip()
+        return raw_id or None
+    if ref.startswith(raster_prefix):
+        raw_id = ref[len("visible:"):].strip()
+        return raw_id or None
+    return None
 
 
 def _unique_gap_source_records(
@@ -1531,6 +1613,444 @@ def _candidate_axis_data(
     return (min(along), max(along), sum(offsets) / len(offsets))
 
 
+def _host_roles_from_axis_data(
+    data: Optional[tuple[float, float, float]],
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    if data is None:
+        return ()
+    along_min, along_max, _offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    roles: list[str] = []
+    if along_min < -edge_tol and abs(along_max) <= edge_tol:
+        roles.append("left")
+    if (
+        along_max > opening.length + edge_tol
+        and abs(along_min - opening.length) <= edge_tol
+    ):
+        roles.append("right")
+    return tuple(roles)
+
+
+def _candidate_host_roles(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> tuple[str, ...]:
+    return _host_roles_from_axis_data(
+        _candidate_axis_data(record, opening),
+        opening,
+    )
+
+
+def _excluded_boundary_primitive_axis_data(
+    primitive: ExcludedBoundaryPrimitive,
+    opening: _OpeningGeometry,
+) -> Optional[tuple[float, float, float]]:
+    try:
+        first = (float(primitive.x1), float(primitive.y1))
+        second = (float(primitive.x2), float(primitive.y2))
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for point in (first, second) for value in point):
+        return None
+    unit = _canonical_unit((first[0], first[1], second[0], second[1]))
+    if unit is None or abs(_cross(unit, opening.axis)) > _PARALLEL_TOL:
+        return None
+    along = (
+        _project(first, opening.origin, opening.axis),
+        _project(second, opening.origin, opening.axis),
+    )
+    offsets = (
+        _project(first, opening.origin, opening.normal),
+        _project(second, opening.origin, opening.normal),
+    )
+    if abs(offsets[1] - offsets[0]) > DEFAULT_GAP_SNAP_TOLERANCE_PT:
+        return None
+    return (min(along), max(along), sum(offsets) / 2.0)
+
+
+def _axis_data_locally_spans_opening(
+    data: Optional[tuple[float, float, float]],
+    opening: _OpeningGeometry,
+    *,
+    edge_tol: float,
+) -> bool:
+    if data is None:
+        return False
+    along_min, along_max, offset = data
+    cross_limit = (
+        opening.thickness / 2.0
+        + _RASTER_WHOLE_WALL_CENTER_TOL_PT
+        + _COORD_TOL
+    )
+    return (
+        along_min <= edge_tol
+        and along_max >= opening.length - edge_tol
+        and abs(offset) <= cross_limit
+    )
+
+
+def _raster_whole_wall_axis_data_is_role(
+    data: Optional[tuple[float, float, float]],
+    opening: _OpeningGeometry,
+) -> bool:
+    if data is None:
+        return False
+    along_min, along_max, offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    return (
+        along_min < -edge_tol
+        and along_max > opening.length + edge_tol
+        and abs(offset) <= _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+    )
+
+
+def _excluded_boundary_primitive_host_roles(
+    primitive: ExcludedBoundaryPrimitive,
+    opening: _OpeningGeometry,
+    *,
+    include_spanning_raster_candidates: bool = False,
+) -> tuple[str, ...]:
+    data = _excluded_boundary_primitive_axis_data(primitive, opening)
+    roles = list(_host_roles_from_axis_data(data, opening))
+    if include_spanning_raster_candidates:
+        edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+        if _raster_whole_wall_axis_data_is_role(data, opening):
+            roles.append("raster_whole")
+        elif _axis_data_locally_spans_opening(
+            data,
+            opening,
+            edge_tol=edge_tol,
+        ):
+            # Conservative counterpart of the source-primitive local-span
+            # fallback. An excluded structural primitive cannot be allowed to
+            # occupy the same aperture band merely because it never became W4.
+            roles.append("raster_span")
+    return tuple(dict.fromkeys(roles))
+
+
+def _candidate_is_definitely_orientation_incompatible(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> bool:
+    """Positive proof that one source wall path cannot be this straight host band.
+
+    This predicate is intentionally narrower than _candidate_axis_data(). It
+    returns True only when the producer-owned centerline is otherwise
+    trustworthy/evaluable and its orientation is positively incompatible with
+    the sealed opening axis. Curved, non-simple, degenerate, non-finite, or
+    otherwise incomplete geometry remains unknown and must stay fail-closed.
+    """
+
+    wall = record.wall_candidate
+    if (
+        wall.is_curved
+        or len(wall.centerline_pts) < 2
+        or "non_simple_chain_topology_fallback_ordering" in wall.reason_codes
+    ):
+        return False
+
+    points = tuple((float(x), float(y)) for x, y in wall.centerline_pts)
+    if any(
+        not (math.isfinite(x) and math.isfinite(y))
+        for x, y in points
+    ):
+        return False
+
+    line_unit = _canonical_unit(
+        (points[0][0], points[0][1], points[-1][0], points[-1][1])
+    )
+    segment_units = tuple(
+        _canonical_unit((start[0], start[1], end[0], end[1]))
+        for start, end in zip(points, points[1:])
+    )
+    if line_unit is None or any(unit is None for unit in segment_units):
+        return False
+
+    return (
+        abs(_cross(line_unit, opening.axis)) > _PARALLEL_TOL
+        or any(
+            abs(_cross(unit, opening.axis)) > _PARALLEL_TOL
+            for unit in segment_units
+            if unit is not None
+        )
+    )
+
+
+def _candidate_could_affect_opening_local_band(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> Optional[bool]:
+    """Whether one evaluable wall path can participate in this opening's band.
+
+    This is not a wall-identity classifier. It narrows only the opening-local
+    contamination proposition after global equivalence has conservatively kept
+    an independent-provenance pair AMBIGUOUS because physical scale is absent.
+
+    A locally relevant representation must be parallel to the sealed opening,
+    overlap/touch the aperture run, and lie inside the wall band already proved
+    by the opening's own jamb geometry. Non-evaluable geometry returns None so
+    callers remain fail-closed.
+    """
+
+    data = _candidate_axis_data(record, opening)
+    if data is None:
+        # Orientation mismatch is not missing information: for an otherwise
+        # trustworthy straight-chain representation it positively proves that
+        # this wall cannot participate in the opening's source-proven straight
+        # host band. All other non-evaluable geometry remains unknown.
+        if _candidate_is_definitely_orientation_incompatible(record, opening):
+            return False
+        return None
+    along_min, along_max, offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    cross_limit = (
+        opening.thickness / 2.0
+        + DEFAULT_GAP_SNAP_TOLERANCE_PT
+        + _COORD_TOL
+    )
+    return (
+        along_min <= opening.length + edge_tol
+        and along_max >= -edge_tol
+        and abs(offset) <= cross_limit
+    )
+
+
+def _identities_share_opening_local_ambiguity_evidence(
+    left: PhysicalWallCandidateRecord,
+    right: PhysicalWallCandidateRecord,
+) -> bool:
+    """Positive immutable evidence that remote ambiguity must still propagate."""
+
+    left_identity = left.physical_identity
+    right_identity = right.physical_identity
+    left_sources = {
+        str(value)
+        for value in left_identity.source_primitive_ids
+        if str(value).strip()
+    }
+    right_sources = {
+        str(value)
+        for value in right_identity.source_primitive_ids
+        if str(value).strip()
+    }
+    if left_sources & right_sources:
+        return True
+
+    left_candidate_identity = str(
+        left_identity.candidate_identity_id or ""
+    ).strip()
+    right_candidate_identity = str(
+        right_identity.candidate_identity_id or ""
+    ).strip()
+    if (
+        left_candidate_identity
+        and left_candidate_identity == right_candidate_identity
+    ):
+        return True
+
+    return (
+        left_identity.path_fingerprint is not None
+        and left_identity.path_fingerprint
+        == right_identity.path_fingerprint
+    )
+
+
+def _local_boundary_clean_host_scope(
+    wall_result: PhysicalWallCandidateScopeResult,
+    opening: _OpeningGeometry,
+    *,
+    include_spanning_raster_candidates: bool = False,
+) -> tuple[Optional[_LocalHostScope], tuple[str, ...]]:
+    """Prove one opening's host search locally closed without promoting global scope.
+
+    The ordinary local universe is the exact left/right host-role population.
+    Raster-framed openings additionally keep every candidate that can enter
+    either sealed raster fallback: the exact whole-wall role used by
+    _resolve_raster_whole_wall_host, or a usable source-lineaged candidate whose
+    own local chain spans the aperture for source-primitive resolution. This is
+    candidate-universe preservation, not nearest-wall inference.
+
+    Page-wide wall equivalence intentionally keeps unscaled independent
+    parallel paths AMBIGUOUS because their physical separation is unknown.
+    For this narrower proposition, such ambiguity propagates unsafe boundary
+    evidence only when positive immutable identity evidence links the pair or
+    the unsafe geometry can actually participate in the source-proven opening
+    wall band. Positive SAME always blocks.
+    """
+    if (
+        wall_result.status is not EvidenceResolutionStatus.CORROBORATED
+        or wall_result.scope_complete is True
+        or not wall_result.records
+        or wall_result.equivalence is None
+        or wall_result.boundary_evaluation is None
+        or wall_result.boundary_evaluation.status != BOUNDARY_EVALUATION_EVALUATED
+    ):
+        return None, (HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,)
+
+    evaluation = wall_result.boundary_evaluation
+    records_by_id = {
+        str(record.wall_candidate_id): record for record in wall_result.records
+    }
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    relevant_ids = {
+        wall_id
+        for wall_id, record in records_by_id.items()
+        if (
+            _candidate_host_roles(record, opening)
+            or (
+                include_spanning_raster_candidates
+                and (
+                    _raster_whole_wall_role_data(record, opening) is not None
+                    or (
+                        record.physical_identity.usable
+                        and bool(record.physical_identity.candidate_identity_id)
+                        and bool(
+                            tuple(
+                                value
+                                for value in record.physical_identity.source_primitive_ids
+                                if str(value).strip()
+                            )
+                        )
+                        and _candidate_locally_owns_opening_span(
+                            record,
+                            opening,
+                            edge_tol=edge_tol,
+                        )
+                    )
+                )
+            )
+        )
+    }
+    if not relevant_ids:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "no_local_host_wall_candidates",
+        )
+
+    evaluated_ids = {
+        str(value) for value in evaluation.evaluated_wall_candidate_ids
+    }
+    tainted_ids = {
+        str(value) for value in evaluation.boundary_tainted_wall_candidate_ids
+    }
+    unevaluated_relevant = relevant_ids - evaluated_ids
+    tainted_relevant = relevant_ids & tainted_ids
+    if unevaluated_relevant:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_wall_boundary_unevaluated",
+        )
+    if tainted_relevant:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_wall_boundary_tainted",
+        )
+
+    if any(
+        _excluded_boundary_primitive_host_roles(
+            primitive,
+            opening,
+            include_spanning_raster_candidates=include_spanning_raster_candidates,
+        )
+        for primitive in evaluation.excluded_boundary_primitives
+    ):
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_relevant_excluded_boundary_primitive",
+        )
+
+    clean_ids = evaluated_ids - tainted_ids
+    equivalence = wall_result.equivalence
+    unsafe_ids = set(records_by_id) - clean_ids
+
+    for group in equivalence.equivalence_groups:
+        members = {str(value) for value in group}
+        if members & relevant_ids and members & unsafe_ids:
+            return None, (
+                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                "host_equivalence_bridges_unsafe_boundary_evidence",
+            )
+    for left, right, raw_classification in equivalence.pair_classifications:
+        classification = str(raw_classification)
+        if classification not in {
+            PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value,
+            PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value,
+        }:
+            continue
+        pair = {str(left), str(right)}
+        relevant_pair_ids = pair & relevant_ids
+        unsafe_pair_ids = pair & unsafe_ids
+        if not relevant_pair_ids or not unsafe_pair_ids:
+            continue
+
+        # Positive SAME remains globally authoritative and always carries
+        # unsafe boundary evidence into the opening-local proposition.
+        if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
+            return None, (
+                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                "host_equivalence_bridges_unsafe_boundary_evidence",
+            )
+
+        # Global wall equivalence deliberately keeps unscaled, parallel,
+        # longitudinally-overlapping independent paths AMBIGUOUS regardless of
+        # lateral separation. That is correct for global wall publication, but
+        # it must not make every remote boundary-tainted wall contaminate every
+        # opening. Keep AMBIGUOUS fail-closed whenever immutable identity
+        # evidence connects the pair, the unsafe path can occupy this opening's
+        # source-proven wall band, or its geometry cannot be evaluated. Only an
+        # evaluable, remote, lineage-independent ambiguity is outside this
+        # opening-local proposition.
+        for relevant_id in sorted(relevant_pair_ids):
+            relevant_record = records_by_id.get(relevant_id)
+            if relevant_record is None:
+                return None, (
+                    HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                    "host_equivalence_bridges_unsafe_boundary_evidence",
+                )
+            for unsafe_id in sorted(unsafe_pair_ids):
+                unsafe_record = records_by_id.get(unsafe_id)
+                if unsafe_record is None:
+                    return None, (
+                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                        "host_equivalence_bridges_unsafe_boundary_evidence",
+                    )
+                if _identities_share_opening_local_ambiguity_evidence(
+                    relevant_record,
+                    unsafe_record,
+                ):
+                    return None, (
+                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                        "host_equivalence_bridges_unsafe_boundary_evidence",
+                    )
+                local_effect = _candidate_could_affect_opening_local_band(
+                    unsafe_record,
+                    opening,
+                )
+                if local_effect is not False:
+                    return None, (
+                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                        "host_equivalence_bridges_unsafe_boundary_evidence",
+                    )
+
+    local_records = tuple(
+        records_by_id[wall_id] for wall_id in sorted(relevant_ids)
+    )
+    audit = equivalence.candidate_pair_audit
+    filtered_equivalence = resolve_physical_wall_equivalence(
+        tuple(record.physical_identity for record in local_records),
+        points_per_mm=None if audit is None else audit.verified_points_per_mm,
+    )
+    return (
+        _LocalHostScope(
+            records=local_records,
+            equivalence=filtered_equivalence,
+            source_observation_ids=tuple(wall_result.source_observation_ids),
+        ),
+        (HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,),
+    )
+
+
 def _pair_lookup(
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
@@ -1657,6 +2177,22 @@ def _normalize_role_candidates(
     return EvidenceResolutionStatus.CORROBORATED, tuple(normalized), ()
 
 
+def _raster_whole_wall_role_data(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> Optional[tuple[float, float, float]]:
+    """Return the exact raw role accepted by the sealed whole-wall resolver.
+
+    Keeping local-scope admission and final host resolution on one predicate
+    prevents a valid whole-wall representation from being discarded before the
+    resolver can evaluate equivalence. This establishes role eligibility only;
+    boundary cleanliness and physical equivalence are still proved separately.
+    """
+
+    data = _candidate_axis_data(record, opening)
+    return data if _raster_whole_wall_axis_data_is_role(data, opening) else None
+
+
 def _resolve_raster_whole_wall_host(
     records: Sequence[PhysicalWallCandidateRecord],
     opening: _OpeningGeometry,
@@ -1673,19 +2209,12 @@ def _resolve_raster_whole_wall_host(
     equality. It never selects a nearest wall.
     """
 
-    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
     centered: list[tuple[float, PhysicalWallCandidateRecord]] = []
     for record in records:
-        data = _candidate_axis_data(record, opening)
+        data = _raster_whole_wall_role_data(record, opening)
         if data is None:
             continue
-        along_min, along_max, offset = data
-        if (
-            along_min >= -edge_tol
-            or along_max <= opening.length + edge_tol
-            or abs(offset) > _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
-        ):
-            continue
+        _along_min, _along_max, offset = data
         centered.append((offset, record))
 
     if not centered:
@@ -2143,16 +2672,16 @@ def _resolve_host_bands(
 ) -> _HostBandResolution:
     left_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
     right_raw: list[tuple[float, PhysicalWallCandidateRecord]] = []
-    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
 
     for record in records:
         data = _candidate_axis_data(record, opening)
         if data is None:
             continue
-        along_min, along_max, offset = data
-        if along_min < -edge_tol and abs(along_max) <= edge_tol:
+        _along_min, _along_max, offset = data
+        roles = _host_roles_from_axis_data(data, opening)
+        if "left" in roles:
             left_raw.append((offset, record))
-        if along_max > opening.length + edge_tol and abs(along_min - opening.length) <= edge_tol:
+        if "right" in roles:
             right_raw.append((offset, record))
 
     pair_lookup = _pair_lookup(equivalence)
