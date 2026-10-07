@@ -921,6 +921,91 @@ def test_admissible_line_fallback_word_composite_recovers_exact_source_words(mon
     assert definition.record.semantic_finish == "tile"
 
 
+def test_exact_line_proof_accepts_prior_source_bound_raster_word(monkeypatch) -> None:
+    source, published = _source(
+        _pdf(
+            ("FINISH SCHEDULE", "WT1 Porcelain wall tile"),
+            ("INTERNAL ELEVATION", "WALL FINISH WT1"),
+        )
+    )
+    _patch_viewports(monkeypatch, {1: "schedule", 2: "elevation"})
+    real = source.text_integrity_authority()
+
+    class _MixedIntegrity:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            receipt = result.receipt
+            if (
+                receipt is not None
+                and str(receipt.page_id) == "1"
+                and str(receipt.raw_text) in {"WT1", "Porcelain"}
+            ):
+                reasons = (
+                    semantic.TEXT_GLYPH_MAPPING_UNVERIFIED,
+                    semantic.TEXT_CLIP_STATE_UNRESOLVED,
+                )
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    trusted_text=None,
+                    reason_codes=reasons,
+                    receipt=replace(
+                        receipt,
+                        trusted=False,
+                        reason_codes=reasons,
+                    ),
+                )
+            return result
+
+    class _Backend:
+        def is_available(self):
+            return True
+
+    class _MixedRaster:
+        def __init__(self):
+            self._backend = _Backend()
+
+        @classmethod
+        def from_source_visibility_producer(cls, _source):
+            return cls()
+
+        def publish(self, selector):
+            native = real.resolve_text(selector)
+            raw = str(native.receipt.raw_text) if native.receipt is not None else ""
+            if raw == "WT1":
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    record=SimpleNamespace(record_id="raster-wt1"),
+                    corroborated_text="WT1",
+                )
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                record=None,
+                corroborated_text=None,
+            )
+
+    monkeypatch.setattr(source, "text_integrity_authority", lambda: _MixedIntegrity())
+    monkeypatch.setattr(semantic, "RasterTextCorroborationProducer", _MixedRaster)
+    monkeypatch.setattr(
+        semantic,
+        "_producer_owned_ocr_target",
+        lambda _producer, **kwargs: (tuple(kwargs["word_bbox"]), 0),
+    )
+    monkeypatch.setattr(
+        semantic,
+        "_single_isolated_material_line_reading",
+        lambda _backend, _image, *, dpi: "WT1 Porcelain wall tile",
+    )
+
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    definition = authority.resolve_definition(_definition_selector(published, "WT1"))
+    assert definition.status is EvidenceResolutionStatus.CORROBORATED
+    assert definition.record is not None
+    assert definition.record.semantic_finish == "tile"
+
+
 def test_admissible_line_fallback_mismatched_second_render_remains_blocked(monkeypatch) -> None:
     source, published = _source(
         _pdf(
