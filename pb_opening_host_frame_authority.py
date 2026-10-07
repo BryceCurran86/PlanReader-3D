@@ -32,6 +32,7 @@ from pb_opening_host_binding_authority import (
 )
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
 )
@@ -53,6 +54,13 @@ OPENING_HOST_FRAME_WHOLE_WALL_UNPROVEN = "opening_host_frame_whole_wall_unproven
 OPENING_HOST_FRAME_SCOPE_MISMATCH = "opening_host_frame_scope_mismatch"
 OPENING_HOST_FRAME_GEOMETRY_UNAVAILABLE = "opening_host_frame_geometry_unavailable"
 OPENING_HOST_FRAME_GEOMETRY_INVALID = "opening_host_frame_geometry_invalid"
+
+RASTER_APERTURE_FRAME_PATTERNS = frozenset(
+    {
+        RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    }
+)
 
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
@@ -481,7 +489,7 @@ class OpeningHostFrameProducer:
         """Build one source-space frame from a re-proven raster whole-wall host."""
 
         if (
-            opening.structural_pattern != RASTER_FRAMED_WALL_BAND_INTERRUPTION
+            opening.structural_pattern not in RASTER_APERTURE_FRAME_PATTERNS
             or len(tuple(binding.member_wall_candidate_ids)) != 1
         ):
             return None
