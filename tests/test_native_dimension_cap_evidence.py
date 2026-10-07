@@ -149,6 +149,8 @@ def test_live_g17_retains_hypothesis_with_opposition_without_claiming_nonexisten
     closure=physical.assess_visible_candidate_closure(selector)
     assert closure.raw_candidate_count > 0 and not closure.candidate_universe_complete
     assert result.candidate.candidate_id in closure.unresolved_candidate_ids
+    assert set(result.candidate.source_observation_ids) <= set(closure.unresolved_observation_ids)
+    assert closure == physical.assess_visible_candidate_closure(selector)
     assert len(source.authority().authenticated_visible_observations(_published)) > len(support)
 
 
@@ -194,7 +196,11 @@ def test_damaged_source_cannot_supply_annotation_opposition(defect):
 def test_live_g17_does_not_treat_missing_text_receipt_as_absent_opposition():
     source,_published,selector,_support=_source()
     source._text_integrity_receipts.clear()
-    result=source.physical_opening_authority().prove_existence(selector)
+    physical=source.physical_opening_authority()
+    result=physical.prove_existence(selector)
     assert result.status is Status.ABSTAINED
     assert result.reason_codes == ('opening_annotation_source_integrity_unproven',)
     assert result.existence_record is None
+    closure=physical.assess_visible_candidate_closure(selector)
+    assert not closure.candidate_universe_complete
+    assert result.candidate.candidate_id in closure.unresolved_candidate_ids

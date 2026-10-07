@@ -3120,11 +3120,12 @@ class PhysicalOpeningAuthority:
         promotable, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(seed, records)
         )
-        # Structural membership alone is not existence authority. Inventory
-        # every G17 hypothesis, including those opposed by annotation evidence,
-        # and independently re-prove any support used to close raw candidates.
-        for candidate in proven:
-            raw_candidates[candidate.candidate_id] = frozenset(candidate.source_observation_ids)
+        # Structural membership alone is not existence authority. Independently
+        # re-prove every support used to close a registered raw path. Retain an
+        # exact selected hypothesis that fails promotion, including annotation
+        # opposition. Unselected overlapping / cross-viewport alternatives stay
+        # in the structural inventory and its existing ambiguity disposition;
+        # they cannot create a second conflict merely by entering closure.
         proven_supports = []
         for candidate in promotable:
             support = frozenset(candidate.source_observation_ids)
@@ -3135,6 +3136,9 @@ class PhysicalOpeningAuthority:
                         and frozenset(existence.existence_record.source_observation_ids) == support):
                     proven_supports.append(support)
                     break
+                if (existence.candidate is not None
+                        and existence.candidate.candidate_id == candidate.candidate_id):
+                    raw_candidates[candidate.candidate_id] = support
         typed_non_plan_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven

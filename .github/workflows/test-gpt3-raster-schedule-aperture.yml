@@ -1,0 +1,28 @@
+name: TEST GPT3 Raster Schedule Aperture
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run schedule binding regressions
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_schedule_opening_instance_binding_authority_v1.py \
+            tests/test_schedule_opening_instance_binding_authority_v2_regressions.py \
+            tests/test_opening_label_dimension_authority.py \
+            tests/test_opening_label_semantic_authority.py

@@ -22,12 +22,13 @@ from pb_opening_schedule_v171 import ScheduleEntry, detect_header, parse_schedul
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
 )
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION = "2.1.0"
+SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION = "2.2.0"
 
 BINDING_RESOLVED = "schedule_opening_instance_binding_resolved"
 BINDING_OPENING_UNRESOLVED = "schedule_opening_instance_binding_opening_unresolved"
@@ -385,6 +386,66 @@ def _opening_aperture(records: Sequence[SourceObservationRecord]) -> _OpeningApe
     if len(unique) != 1:
         return None
     return next(iter(unique.values()))
+
+
+
+def _opening_aperture_for_physical_opening(
+    source_visibility_producer: SourceVisibilityProducer,
+    opening,
+) -> _OpeningAperture | None:
+    """Resolve tag-containment geometry from the physical opening itself.
+
+    Native/vector G17 openings preserve the historical six-line reconstruction.
+    Raster-framed G17 openings carry a producer-sealed aperture bbox because
+    their support primitives are intentionally isolated from ordinary visible
+    observations.  Reusing that bbox proves only spatial ownership of a plan
+    tag; it does not establish scale, width, height, semantic kind, schedule
+    identity, or quantity.
+    """
+    if (
+        getattr(opening, "structural_pattern", None)
+        == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+    ):
+        bbox = getattr(opening, "aperture_bbox_pt", None)
+        if bbox is None:
+            return None
+        try:
+            values = tuple(float(value) for value in bbox)
+        except (TypeError, ValueError):
+            return None
+        if len(values) != 4 or not all(math.isfinite(value) for value in values):
+            return None
+        x0, y0, x1, y1 = values
+        if x1 - x0 <= _COORD_TOL or y1 - y0 <= _COORD_TOL:
+            return None
+        return _OpeningAperture(
+            axis=(1.0, 0.0),
+            normal=(0.0, 1.0),
+            along_min=x0,
+            along_max=x1,
+            normal_min=y0,
+            normal_max=y1,
+        )
+
+    visibility = source_visibility_producer.authority()
+    opening_records: list[SourceObservationRecord] = []
+    for observation_id in opening.source_observation_ids:
+        resolved = visibility.resolve_visible(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            resolved.status is not EvidenceResolutionStatus.CORROBORATED
+            or resolved.observation is None
+        ):
+            return None
+        opening_records.append(resolved.observation)
+    return _opening_aperture(opening_records)
 
 
 def _aperture_contains_bbox(aperture: _OpeningAperture, bbox: BBox) -> bool:
@@ -765,31 +826,10 @@ class ScheduleOpeningInstanceBindingProducer:
                 ),
             )
 
-        opening_records: list[SourceObservationRecord] = []
-        for observation_id in opening.source_observation_ids:
-            resolved = visibility.resolve_visible(
-                ObservationSelector(
-                    document_id=opening.document_id,
-                    revision_id=opening.revision_id,
-                    source_sha256=opening.source_sha256,
-                    snapshot_id=opening.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            if (
-                resolved.status is not EvidenceResolutionStatus.CORROBORATED
-                or resolved.observation is None
-            ):
-                return self._store(
-                    key,
-                    _blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        BINDING_GEOMETRY_UNAVAILABLE,
-                    ),
-                )
-            opening_records.append(resolved.observation)
-
-        aperture = _opening_aperture(opening_records)
+        aperture = _opening_aperture_for_physical_opening(
+            self._source_visibility_producer,
+            opening,
+        )
         if aperture is None:
             return self._store(
                 key,

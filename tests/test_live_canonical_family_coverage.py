@@ -11,7 +11,10 @@ import pb_auto_geometry_v1219 as auto
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_ceiling_lining_review_promotion import collect_ceiling_lining_review_bundle
 from pb_live_canonical_floor_surface import compose_live_canonical_floor_surfaces
-from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+from pb_live_ceiling_lining_integration import (
+    LiveCanonicalCeilingSurfaceObject,
+    collect_live_ceiling_lining_claims,
+)
 from pb_live_canonical_roof_projection import project_source_gable_roof
 from pb_live_canonical_room_composition import compose_live_canonical_rooms
 from pb_live_canonical_slab_projection import (
@@ -21,7 +24,7 @@ from pb_live_canonical_slab_projection import (
 from pb_live_canonical_structural_member_projection import project_structural_member_resolution
 from pb_live_canonical_wall_finish_surface import project_wall_finish_bindings
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_structural_member_quantity import build_structural_member_count_quantity
 from pb_takeoff_output_authority import TakeoffOutputRow
 from pb_takeoff_coverage_audit_adapter import (
@@ -265,6 +268,68 @@ def test_live_ceiling_enters_registry_without_promoting_provisional_quantity(tmp
         "QUANTIFIED": 0,
         "PUBLISHED": 0,
     }
+
+
+def test_firm_canonical_ceiling_quantity_reaches_quantified_without_inventing_publication():
+    ceiling = LiveCanonicalCeilingSurfaceObject(
+        canonical_ceiling_id="ceiling-physical-1",
+        document_id="doc-ceiling",
+        snapshot_id="snapshot-ceiling",
+        room_entity_id="room-1",
+        source_page=7,
+        viewport_id="floor-vp",
+        source_sha256="a" * 64,
+        revision_id="rev-ceiling",
+        polygon_pdf_pts=((0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0)),
+        area_m2=9.05352,
+        finish_descriptor="ceiling_grid",
+        room_area_quantity_id="room-area-1",
+        ceiling_quantity_id="ceiling-qty-1",
+        source_room_index_id="room-index-1",
+        evidence_ids=("ceiling-evidence-1",),
+        physical_scale_record_id="",
+        measurement_authority="documented_dimension",
+        figured_dimension_ids=("dim-h", "dim-v"),
+        geometry_complete=True,
+        metric_area_complete=True,
+        metric_geometry_complete=False,
+    )
+    quantity = QuantityEvidence(
+        quantity_id="ceiling-qty-1",
+        family="ceiling_lining",
+        semantic_key="ceiling_lining:ceiling-physical-1:GRID:ceiling_grid",
+        value=9.05352,
+        unit="m2",
+        input_entity_ids=("ceiling-physical-1",),
+        formula="reuse_firm_documented_room_area_with_authenticated_rcp_finish",
+        formula_version="1.2.0",
+        evidence_ids=("ceiling-evidence-1",),
+        authority="documented_dimension",
+        status="firm",
+        confidence=1.0,
+        abstained=False,
+    )
+
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=(ceiling,),
+        quantities=(quantity,),
+        output_rows=(),
+        registry_run_scope="firm-ceiling-quantity",
+    )
+    assert gaps == {}
+    report = build_runtime_coverage_publication(summaries, family_gaps=gaps)
+    family = report["family_reports"]["ceiling"]
+    assert family["classification"] == "PARTIAL"
+    assert family["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 1,
+        "PUBLISHED": 0,
+    }
+    record = summaries[0].object_records[0]
+    assert record.object_id == ceiling.canonical_ceiling_id
+    assert record.quantity_ids == (quantity.quantity_id,)
 
 
 def test_source_authenticated_rooms_are_partial_without_metric_quantity_and_inputs_stay_unchanged():

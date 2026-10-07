@@ -65,6 +65,7 @@ from pb_raster_text_corroboration_authority import (
     normalize_reading,
 )
 from pb_source_observation_authority import ObservationSelector
+from pb_source_room_label_authority import _normalized_room_line
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
     SourceVisibilityProducer,
@@ -117,6 +118,7 @@ class _TrustedLine:
     source_partition_id: str
     block_no: int
     line_no: int
+    label_members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,7 @@ class _TrustedBoundDimension:
     witness_geometries: tuple[
         tuple[float, float, float, float], ...
     ]
+    text_bbox: Optional[tuple[float, float, float, float]] = None
 
 
 @dataclass(frozen=True)
@@ -333,6 +336,7 @@ def _trusted_lines_for_page(
     revision_id: str,
     page_id: str,
     candidate_labels: Sequence[str],
+    allow_compound_annotations: bool = False,
 ) -> tuple[_TrustedLine, ...]:
     published = source.published_snapshot_for_revision(revision_id)
     if published is None:
@@ -399,7 +403,24 @@ def _trusted_lines_for_page(
             for item in ordered
             if str(item[2].raw_text or "").strip()
         )
-        if _norm_label(raw_line) not in wanted_labels:
+        normalized_raw = _norm_label(raw_line)
+        label_members: tuple[str, ...] = ()
+        if normalized_raw in wanted_labels:
+            label_members = (normalized_raw,)
+        elif allow_compound_annotations and "/" in raw_line:
+            parts = tuple(
+                _norm_label(part)
+                for part in raw_line.split("/")
+                if _norm_label(part)
+            )
+            if (
+                len(parts) >= 2
+                and len(set(parts)) == len(parts)
+                and any(part in wanted_labels for part in parts)
+                and all(_normalized_room_line(part) is not None for part in parts)
+            ):
+                label_members = parts
+        if not label_members:
             continue
 
         trusted_words: list[str] = []
@@ -443,8 +464,18 @@ def _trusted_lines_for_page(
                 continue
         else:
             line_text = " ".join(value for value in trusted_words if value)
-        if _norm_label(line_text) not in wanted_labels:
-            continue
+        normalized_line_text = _norm_label(line_text)
+        if len(label_members) == 1:
+            if normalized_line_text != label_members[0]:
+                continue
+        else:
+            trusted_members = tuple(
+                _norm_label(part)
+                for part in line_text.split("/")
+                if _norm_label(part)
+            )
+            if trusted_members != label_members:
+                continue
 
         boxes = [_finite_bbox(item[2].geometry) for item in ordered]
         if any(box is None for box in boxes):
@@ -465,6 +496,7 @@ def _trusted_lines_for_page(
                 source_partition_id=str(key[0]),
                 block_no=int(key[1]),
                 line_no=int(key[2]),
+                label_members=label_members,
             )
         )
     return tuple(lines)
@@ -1085,6 +1117,7 @@ def _trusted_native_dimensions_for_page(
                 dimension_line_observation_ids=dimension_line_ids,
                 witness_observation_ids=tuple(sorted(witness_ids)),
                 witness_geometries=concrete_witness_geometries,
+                text_bbox=_finite_bbox(observation.bbox),
             )
         )
 
@@ -1104,22 +1137,43 @@ def _dimension_is_immediate_label_annotation(
     line: _TrustedLine,
     dimension: _TrustedBoundDimension,
 ) -> bool:
-    """Return whether a figured dimension is the next source text line.
+    """Return whether native text structure owns one figured dimension.
 
-    Some plan sheets repeat a unique room label in explicit dimension annotation
-    blocks, with one figured dimension on the immediately following native text
-    line. This source structure is stronger than proximity: the label and value
-    share one producer-owned text partition/block and there is no intervening
-    native text line. The dimension still has to satisfy all normal numeric,
-    vector-line, witness and source-visibility authority before reaching here.
+    The historical same-block next-line relation remains authoritative.
+    A second form handles PDF producers that split one visual label/value
+    annotation into consecutive native text blocks. That form is accepted only
+    when both records are line zero, the numeric word is word zero, and the
+    native text bboxes overlap along the dimension axis. No nearest-text search
+    or free-distance ranking is used.
     """
-    return (
-        bool(line.source_partition_id)
-        and line.source_partition_id == dimension.text_source_partition_id
-        and dimension.text_block_no == line.block_no
+    if (
+        not line.source_partition_id
+        or line.source_partition_id != dimension.text_source_partition_id
+        or dimension.text_block_no is None
+        or dimension.text_line_no is None
+        or dimension.text_word_no != 0
+    ):
+        return False
+    if (
+        dimension.text_block_no == line.block_no
         and dimension.text_line_no == line.line_no + 1
-        and dimension.text_word_no == 0
-    )
+    ):
+        return True
+    if (
+        dimension.text_block_no != line.block_no + 1
+        or line.line_no != 0
+        or dimension.text_line_no != 0
+        or dimension.text_bbox is None
+    ):
+        return False
+
+    lx0, ly0, lx1, ly1 = line.bbox
+    dx0, dy0, dx1, dy1 = dimension.text_bbox
+    if dimension.orientation == DimensionOrientation.HORIZONTAL.value:
+        return min(lx1, dx1) - max(lx0, dx0) > 0.0
+    if dimension.orientation == DimensionOrientation.VERTICAL.value:
+        return min(ly1, dy1) - max(ly0, dy0) > 0.0
+    return False
 
 
 def _segment_orientation_value(
@@ -1393,6 +1447,7 @@ class CrossViewRoomAreaProducer:
         }
         page_results: dict[str, tuple[_TrustedBoundDimension, ...]] = {}
         page_lines: dict[str, tuple[_TrustedLine, ...]] = {}
+        page_annotation_lines: dict[str, tuple[_TrustedLine, ...]] = {}
         for page_number in tuple(published.coverage.decoded_pages):
             page_id = str(int(page_number))
             trusted_lines = _trusted_lines_for_page(
@@ -1422,6 +1477,25 @@ class CrossViewRoomAreaProducer:
                 continue
             page_results[page_id] = trusted_dimensions
             page_lines[page_id] = relevant_lines
+            annotation_lines = _trusted_lines_for_page(
+                self._source,
+                revision_id=revision_id,
+                page_id=page_id,
+                candidate_labels=tuple(unique_labels),
+                allow_compound_annotations=True,
+            )
+            page_annotation_lines[page_id] = tuple(
+                line
+                for line in annotation_lines
+                if any(
+                    member in unique_labels
+                    and str(unique_labels[member].page_id) != page_id
+                    for member in (
+                        line.label_members
+                        or (_norm_label(line.text),)
+                    )
+                )
+            )
 
         records: list[CrossViewRoomAreaRecord] = []
         unresolved: set[str] = {
@@ -1500,13 +1574,16 @@ class CrossViewRoomAreaProducer:
                     ]
                 ] = []
                 seen_annotation_pairs: set[tuple[str, str, str]] = set()
-                for page_id, trusted_lines in sorted(page_lines.items()):
+                for page_id, trusted_lines in sorted(page_annotation_lines.items()):
                     if page_id == str(room.page_id):
                         continue
                     label_lines = tuple(
                         line
                         for line in trusted_lines
-                        if _norm_label(line.text) == label
+                        if (
+                            _norm_label(line.text) == label
+                            or label in line.label_members
+                        )
                     )
                     if not label_lines:
                         continue
@@ -1537,6 +1614,11 @@ class CrossViewRoomAreaProducer:
                     )
                     for horizontal_line, horizontal in owned_horizontals:
                         for vertical_line, vertical in owned_verticals:
+                            if not any(
+                                _norm_label(owner.text) == label
+                                for owner in (horizontal_line, vertical_line)
+                            ):
+                                continue
                             if not _figured_pair_scale_consistent(
                                 page_id=page_id,
                                 horizontal=horizontal,

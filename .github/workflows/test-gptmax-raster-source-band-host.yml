@@ -38,6 +38,8 @@ jobs:
           tests/test_raster_opening_dimension_source_namespace.py
           tests/test_raster_connected_host_frame.py
           tests/test_native_dimension_cap_evidence.py
+          tests/test_physical_opening_viewport_scope_live_gate.py
+          tests/test_semantic_conflict_diagnostic_v1.py
           tests/test_g17_visible_opening_existence_v1.py
           tests/test_physical_opening_candidate_structure_v1.py
           tests/test_source_opening_universe_evidence_v1.py

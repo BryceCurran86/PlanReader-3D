@@ -445,12 +445,38 @@ def build_room_area_quantities(
             duplicate_ids.add(room.room_ref)
         seen_ids.add(room.room_ref)
         rings.setdefault(_canonical_ring(room.polygon_pdf_pts), []).append(room.room_ref)
-    duplicate_face_ids = {
-        room_id
-        for ids in rings.values()
-        if len(ids) > 1
-        for room_id in ids
-    }
+    duplicate_face_ids: set[str] = set()
+    for ids in rings.values():
+        if len(ids) <= 1:
+            continue
+
+        # Duplicate geometry remains blocked by default. A single exact room
+        # identity may survive only when that identity alone carries a fully
+        # valid producer-owned explicit-area proposition. This does not choose
+        # between geometry duplicates by score/proximity: the explicit evidence
+        # is already keyed to the source room identity and passes the same
+        # document/entity/page/viewport checks used by the quantity builder.
+        explicit_owners: list[str] = []
+        for room_id in ids:
+            evidence = explicit.get(room_id)
+            entity = entities_by_room_id.get(room_id)
+            if type(evidence) is not EvidenceAtom or entity is None:
+                continue
+            if not _validate_explicit_area(
+                evidence,
+                document=document,
+                viewport=viewport,
+                entity=entity,
+            ):
+                explicit_owners.append(room_id)
+
+        if len(explicit_owners) == 1:
+            owner = explicit_owners[0]
+            duplicate_face_ids.update(
+                room_id for room_id in ids if room_id != owner
+            )
+        else:
+            duplicate_face_ids.update(ids)
 
     output: list[QuantityEvidence] = []
     for room in rooms:
