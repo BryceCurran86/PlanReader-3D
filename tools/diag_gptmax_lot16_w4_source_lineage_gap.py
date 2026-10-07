@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Diagnostic-only W4 lineage census; no production authority is changed.
+
 from collections import Counter
 import hashlib
 import json
