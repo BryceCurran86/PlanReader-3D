@@ -247,6 +247,7 @@ def build_live_ceiling_lining_source_traces(
                 "room_area_quantity_id": ceiling.room_area_quantity_id,
                 "support_page_id": metadata.get("support_page_id"),
                 "support_viewport_id": metadata.get("support_viewport_id"),
+                "support_snapshot_id": metadata.get("support_snapshot_id"),
                 "finish_code": metadata.get("finish_code"),
                 "semantic_finish": metadata.get("semantic_finish"),
                 "measurement_authority": ceiling.measurement_authority,
