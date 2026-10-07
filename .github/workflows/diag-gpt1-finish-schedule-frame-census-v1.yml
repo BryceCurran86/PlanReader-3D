@@ -1,0 +1,70 @@
+name: DIAG GPT1 Finish Schedule Frame Census
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Census finish schedule frames
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          import pb_viewport_segmentation as vp
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(stream=path.read_bytes(),filetype="pdf")
+          rows=[]
+          for index in range(doc.page_count):
+              page=doc[index]
+              calibration=vp.calibrate_viewport_layout(page)
+              anchors=vp.extract_view_title_anchors(page)
+              frames=vp.extract_vector_frames(page,calibration)
+              fragments=vp._text_fragments(page)
+              for anchor in anchors:
+                  title=" ".join(str(anchor.text or "").upper().split())
+                  if "FINISH" not in title or "SCHEDULE" not in title:
+                      continue
+                  candidates=vp._frame_candidates_for_title(
+                      page,anchor,frames,calibration,anchors=anchors
+                  )
+                  table=[f for f in candidates if vp._frame_looks_like_table(f,page,calibration)]
+                  selected=table if table else candidates
+                  usable=[
+                      f for f in selected
+                      if not vp._rejected_ownership_frame(
+                          page,f,calibration,fragments,view_type=anchor.view_type
+                      )
+                  ]
+                  band=vp._collapse_nested_band_frames(usable)
+                  collapsed=vp._collapse_equivalent_nested_frames(band,calibration)
+                  rows.append({
+                      "page_no":index+1,
+                      "title":anchor.text,
+                      "view_type":anchor.view_type,
+                      "title_bbox":list(anchor.bbox),
+                      "candidate_count":len(candidates),
+                      "candidates":[list(f) for f in candidates],
+                      "table_candidate_count":len(table),
+                      "table_candidates":[list(f) for f in table],
+                      "usable_count":len(usable),
+                      "usable":[list(f) for f in usable],
+                      "after_band_count":len(band),
+                      "after_band":[list(f) for f in band],
+                      "after_equivalent_count":len(collapsed),
+                      "after_equivalent":[list(f) for f in collapsed],
+                  })
+          print(json.dumps({"finish_schedule_frames":rows},indent=2,sort_keys=True))
+          PY
