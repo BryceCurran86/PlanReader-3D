@@ -1,0 +1,135 @@
+name: DIAG GPT1 Lot16 Room Area Production
+
+on:
+  push:
+    branches:
+      - gpt1/figured-dimension-self-box-v1
+
+concurrency:
+  group: diag-gpt1-lot16-room-area-production
+  cancel-in-progress: true
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Run real Lot16 production room-area proof
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u - <<'PY' | tee lot16-room-area-production.json
+          import json
+          import time
+          from pathlib import Path
+
+          from pb_live_floor_area_quantity_publication import (
+              publish_live_floor_area_quantities,
+          )
+          from pb_live_physical_net_wall_integration import (
+              collect_live_physical_net_wall_claim,
+          )
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(2,),
+              topology_pages=(2,),
+              room_area_support_pages=None,
+              surface_semantic_pages=(2,),
+          )
+          elapsed=time.perf_counter()-started
+
+          room_q=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floor_q=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          floor_finish_q=[
+              q for q in claim.floor_finish_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          ceiling_q=[
+              q for q in claim.ceiling_lining_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+
+          rooms={
+              r.canonical_room_id:{
+                  "physical_room_id":r.physical_room_id,
+                  "room_label":r.room_label,
+                  "source_room_face_record_id":r.source_room_face_record_id,
+              }
+              for r in claim.canonical_rooms
+          }
+          metric_floors=[]
+          for floor in claim.canonical_floors:
+              if floor.metric_area_m2 is None:
+                  continue
+              room=rooms.get(floor.room_entity_id,{})
+              metric_floors.append({
+                  "canonical_floor_id":floor.canonical_floor_id,
+                  "room_entity_id":floor.room_entity_id,
+                  "room_label":room.get("room_label"),
+                  "physical_room_id":room.get("physical_room_id"),
+                  "metric_area_m2":floor.metric_area_m2,
+                  "metric_area_quantity_id":floor.metric_area_quantity_id,
+                  "metric_area_authority":floor.metric_area_authority,
+                  "finish_descriptor":floor.finish_descriptor,
+              })
+
+          def qrows(rows):
+              return [
+                  {
+                      "quantity_id":q.quantity_id,
+                      "family":q.family,
+                      "semantic_key":q.semantic_key,
+                      "value":q.value,
+                      "unit":q.unit,
+                      "authority":q.authority,
+                      "input_entity_ids":list(q.input_entity_ids),
+                      "reason_codes":list(q.reason_codes),
+                      "metadata":dict(q.metadata or {}),
+                  }
+                  for q in rows
+              ]
+
+          out={
+              "elapsed_seconds":round(elapsed,3),
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "metric_floor_count":len(metric_floors),
+              "metric_floors":metric_floors,
+              "firm_room_area_count":len(room_q),
+              "firm_room_areas":qrows(room_q),
+              "floor_area_quantity_count":len(floor_q),
+              "floor_area_quantities":qrows(floor_q),
+              "floor_finish_quantity_count":len(floor_finish_q),
+              "floor_finish_quantities":qrows(floor_finish_q),
+              "ceiling_lining_quantity_count":len(ceiling_q),
+              "ceiling_lining_quantities":qrows(ceiling_q),
+          }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-lot16-room-area-production
+          path: lot16-room-area-production.json
+          retention-days: 3
