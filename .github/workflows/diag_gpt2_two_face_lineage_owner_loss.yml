@@ -1,0 +1,219 @@
+name: DIAG GPT2 Two Face Lineage Owner Loss
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Compare source-lineage owners before and after local scope
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-two-face-lineage-owner-loss
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import pb_opening_host_binding_authority as host
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-two-face-lineage-owner-loss",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-two-face-lineage-owner-loss",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","30","31"),
+          )
+          composition=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+          )
+
+          rows=[]
+          visibility=composition.physical_opening_authority.source_visibility_authority()
+          for trace in composition.opening_bindings:
+              if "no_authenticated_host_wall_band" not in trace.reason_codes:
+                  continue
+              binding_selector=composition.binding_selectors.get(trace.opening_identity_id)
+              if binding_selector is None:
+                  continue
+              obs=ObservationSelector(
+                  document_id=binding_selector.document_id,
+                  revision_id=binding_selector.revision_id,
+                  source_sha256=binding_selector.source_sha256,
+                  snapshot_id=binding_selector.snapshot_id,
+                  observation_id=trace.representative_observation_id,
+              )
+              opening=composition.physical_opening_authority.prove_existence(obs).existence_record
+              if opening is None or opening.structural_pattern != host.JAMB_BOUNDED_TWO_FACE_INTERRUPTION:
+                  continue
+              geometry=host._opening_geometry(composition.physical_opening_authority,opening)
+              if geometry is None:
+                  continue
+
+              opening_records=[]
+              for observation_id in opening.source_observation_ids:
+                  result=visibility.resolve_visible(ObservationSelector(
+                      document_id=opening.document_id,
+                      revision_id=opening.revision_id,
+                      source_sha256=opening.source_sha256,
+                      snapshot_id=opening.snapshot_id,
+                      observation_id=observation_id,
+                  ))
+                  if result.observation is not None:
+                      opening_records.append(result.observation)
+              pairs=host._positive_gap_source_pairs(opening_records)
+              if len(pairs)!=2:
+                  continue
+              face_records=(pairs[0][0],pairs[0][1],pairs[1][0],pairs[1][1])
+              raw_ids=[
+                  host._raw_source_primitive_id(record)
+                  for record in face_records
+              ]
+              if any(raw_id is None for raw_id in raw_ids):
+                  continue
+              raw_ids=[str(v) for v in raw_ids]
+
+              wall_scope=composition.physical_wall_candidate_authority.resolve_scope(
+                  PhysicalWallCandidateSelector(
+                      document_id=binding_selector.document_id,
+                      revision_id=binding_selector.revision_id,
+                      source_sha256=binding_selector.source_sha256,
+                      snapshot_id=binding_selector.snapshot_id,
+                      page_id=binding_selector.page_id,
+                      decision_scope_id=binding_selector.decision_scope_id,
+                  )
+              )
+              all_records=tuple(wall_scope.records)
+              local_scope,local_reasons=host._local_boundary_clean_host_scope(
+                  wall_scope,
+                  geometry,
+                  include_spanning_raster_candidates=False,
+              )
+              local_records=() if local_scope is None else tuple(local_scope.records)
+
+              evaluated=set()
+              tainted=set()
+              if wall_scope.boundary_evaluation is not None:
+                  evaluated={
+                      str(v) for v in
+                      wall_scope.boundary_evaluation.evaluated_wall_candidate_ids
+                  }
+                  tainted={
+                      str(v) for v in
+                      wall_scope.boundary_evaluation.boundary_tainted_wall_candidate_ids
+                  }
+
+              raw_rows=[]
+              for raw_id in raw_ids:
+                  all_owners=[
+                      record for record in all_records
+                      if record.physical_identity.usable
+                      and raw_id in set(record.physical_identity.source_primitive_ids)
+                  ]
+                  local_owners=[
+                      record for record in local_records
+                      if record.physical_identity.usable
+                      and raw_id in set(record.physical_identity.source_primitive_ids)
+                  ]
+                  raw_rows.append({
+                      "raw_id":raw_id,
+                      "all_owner_ids":[r.wall_candidate_id for r in all_owners],
+                      "local_owner_ids":[r.wall_candidate_id for r in local_owners],
+                      "all_owner_count":len(all_owners),
+                      "local_owner_count":len(local_owners),
+                      "all_owner_states":[
+                          {
+                              "wall_id":r.wall_candidate_id,
+                              "boundary_evaluated":r.wall_candidate_id in evaluated,
+                              "boundary_tainted":r.wall_candidate_id in tainted,
+                              "host_roles":list(host._candidate_host_roles(r,geometry)),
+                              "axis_evaluable":host._candidate_axis_data(r,geometry) is not None,
+                              "candidate_identity_id":r.physical_identity.candidate_identity_id,
+                          }
+                          for r in all_owners
+                      ],
+                  })
+
+              rows.append({
+                  "opening_identity_id":trace.opening_identity_id,
+                  "scope_complete":wall_scope.scope_complete,
+                  "local_scope_available":local_scope is not None,
+                  "local_reasons":list(local_reasons),
+                  "all_wall_count":len(all_records),
+                  "local_wall_count":len(local_records),
+                  "raw_rows":raw_rows,
+                  "all_four_have_global_owner":all(r["all_owner_count"]>0 for r in raw_rows),
+                  "all_four_have_local_owner":all(r["local_owner_count"]>0 for r in raw_rows),
+                  "global_owned_but_local_missing_count":sum(
+                      1 for r in raw_rows
+                      if r["all_owner_count"]>0 and r["local_owner_count"]==0
+                  ),
+                  "no_global_owner_count":sum(
+                      1 for r in raw_rows if r["all_owner_count"]==0
+                  ),
+              })
+
+          print(json.dumps({
+              "opening_count":len(composition.opening_bindings),
+              "resolved_binding_count":sum(1 for t in composition.opening_bindings if t.record_id),
+              "no_band_two_face_count":len(rows),
+              "all_four_global_owner_opening_count":sum(
+                  1 for r in rows if r["all_four_have_global_owner"]
+              ),
+              "all_four_local_owner_opening_count":sum(
+                  1 for r in rows if r["all_four_have_local_owner"]
+              ),
+              "global_owned_but_local_missing_distribution":dict(sorted(Counter(
+                  r["global_owned_but_local_missing_count"] for r in rows
+              ).items())),
+              "no_global_owner_distribution":dict(sorted(Counter(
+                  r["no_global_owner_count"] for r in rows
+              ).items())),
+              "raw_owner_state_counts":dict(sorted(Counter(
+                  (
+                      "missing_global"
+                      if raw["all_owner_count"]==0
+                      else "present_local"
+                      if raw["local_owner_count"]>0
+                      else "global_clean_filtered"
+                      if any(
+                          s["boundary_evaluated"] and not s["boundary_tainted"]
+                          for s in raw["all_owner_states"]
+                      )
+                      else "global_tainted_or_unevaluated"
+                  )
+                  for row in rows for raw in row["raw_rows"]
+              ).items())),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-two-face-lineage-owner-loss
+          path: artifacts/gpt2-two-face-lineage-owner-loss
+          retention-days: 2
