@@ -56,6 +56,12 @@ jobs:
           set -o pipefail
           PYTHONPATH=. python -u tools/diag_gpt3_lot16_hosted_no_area.py \
             | tee lot16-hosted-no-area.json
+      - name: Run measured-but-unpublished area audit
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_area_publication_gap.py \
+            | tee lot16-area-publication-gap.json
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
@@ -67,4 +73,5 @@ jobs:
             lot16-candidate-overlap.json
             lot16-opening-role-origin.json
             lot16-hosted-no-area.json
+            lot16-area-publication-gap.json
           retention-days: 2
