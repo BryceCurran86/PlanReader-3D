@@ -13,7 +13,12 @@ import json
 import re
 from typing import Any
 
-from pb_source_closed_run_export import SealedSourceClosedRun, SealedSourceClosedQuantity
+from pb_source_closed_run_export import (
+    SealedSourceClosedRun,
+    SealedSourceClosedQuantity,
+    SourceClosedRunExportError,
+    sealed_source_closed_run_from_dict,
+)
 
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -342,6 +347,12 @@ def verify_sealed_customer_output(
     """
     if not isinstance(sealed_run, SealedSourceClosedRun):
         raise TypeError("sealed_run must be a SealedSourceClosedRun")
+    try:
+        sealed_run = sealed_source_closed_run_from_dict(sealed_run.to_dict())
+    except SourceClosedRunExportError as exc:
+        raise CustomerOutputVerificationError(
+            "sealed source-closed run failed cryptographic verification"
+        ) from exc
 
     sealed_by_id = {row.quantity_id: row for row in sealed_run.quantities}
     if len(sealed_by_id) != len(sealed_run.quantities):
