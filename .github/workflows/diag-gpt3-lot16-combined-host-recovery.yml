@@ -38,6 +38,12 @@ jobs:
           set -o pipefail
           PYTHONPATH=. python -u tools/diag_gpt3_lot16_semantic_residual_current.py \
             | tee lot16-semantic-residual-current.json
+      - name: Run physical-opening candidate overlap audit
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_candidate_overlap.py \
+            | tee lot16-candidate-overlap.json
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
@@ -46,4 +52,5 @@ jobs:
           path: |
             lot16-combined-host-recovery.json
             lot16-semantic-residual-current.json
+            lot16-candidate-overlap.json
           retention-days: 2
