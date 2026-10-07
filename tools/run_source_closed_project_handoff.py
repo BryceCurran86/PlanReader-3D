@@ -11,6 +11,7 @@ quantities, tolerances, denominator eligibility, identity maps, or scoring.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -348,57 +349,102 @@ def generate_project_handoff(
             )
         )
 
-    cross_view_ceiling = False
+    new_ceiling_quantities: tuple[QuantityEvidence, ...] = ()
+    legacy_ceiling_quantities: tuple[QuantityEvidence, ...] = ()
+    ceiling_result = None
     if clean_family_group in {"all", "surfaces"}:
-        ceiling_quantities = _non_abstained(
+        new_ceiling_quantities = _non_abstained(
             getattr(claim, "ceiling_lining_quantity_evidence", ())
         )
-        if ceiling_quantities:
-            cross_view_ceiling = True
-            ceiling_result = None
-        else:
-            ceiling_result = collect_live_ceiling_lining_claims(
-                pdf_path,
-                pages=(topology_pages if topology_pages else all_pages),
-                authoritative_room_area_quantities=tuple(
-                    getattr(claim, "room_area_quantity_evidence", ()) or ()
+
+        # Preserve the existing scale-aware/same-scope ceiling path for rooms
+        # not already owned by the new RCP authority. One valid new ceiling
+        # must never suppress unrelated valid existing output.
+        ceiling_result = collect_live_ceiling_lining_claims(
+            pdf_path,
+            pages=(topology_pages if topology_pages else all_pages),
+            authoritative_room_area_quantities=tuple(
+                getattr(claim, "room_area_quantity_evidence", ()) or ()
+            ),
+        )
+        new_room_index_ids = {
+            _clean(ceiling.source_room_index_id)
+            for ceiling in tuple(
+                getattr(claim, "canonical_ceilings", ()) or ()
+            )
+            if _clean(ceiling.source_room_index_id)
+        }
+        if new_room_index_ids:
+            retained_legacy_ceilings = tuple(
+                ceiling
+                for ceiling in ceiling_result.canonical_ceilings
+                if _clean(ceiling.source_room_index_id)
+                not in new_room_index_ids
+            )
+            retained_shadow_ids = {
+                _clean(ceiling.ceiling_quantity_id)
+                for ceiling in retained_legacy_ceilings
+                if _clean(ceiling.ceiling_quantity_id)
+            }
+            ceiling_result = replace(
+                ceiling_result,
+                claims=(),
+                canonical_ceilings=retained_legacy_ceilings,
+                quantity_evidence=tuple(
+                    quantity
+                    for quantity in ceiling_result.quantity_evidence
+                    if _clean(quantity.quantity_id) in retained_shadow_ids
                 ),
             )
-            ceiling_quantities = _non_abstained(
-                publish_live_ceiling_area_quantities(ceiling_result)
-            )
-    else:
-        ceiling_result = None
-        ceiling_quantities = ()
-    summary["family_counts"]["ceiling_area"] = len(ceiling_quantities)
-    summary["ceiling_authority_path"] = (
-        "cross_view_room_area_plus_rcp_finish"
-        if cross_view_ceiling
-        else (
-            "legacy_same_scope_ceiling_lining"
-            if ceiling_quantities
-            else "unavailable"
+        legacy_ceiling_quantities = _non_abstained(
+            publish_live_ceiling_area_quantities(ceiling_result)
         )
+
+    ceiling_quantities = (
+        *new_ceiling_quantities,
+        *legacy_ceiling_quantities,
     )
+    summary["family_counts"]["ceiling_area"] = len(ceiling_quantities)
+    if new_ceiling_quantities and legacy_ceiling_quantities:
+        summary["ceiling_authority_path"] = (
+            "cross_view_rcp_plus_legacy_nonoverlap"
+        )
+    elif new_ceiling_quantities:
+        summary["ceiling_authority_path"] = (
+            "cross_view_room_area_plus_rcp_finish"
+        )
+    elif legacy_ceiling_quantities:
+        summary["ceiling_authority_path"] = "legacy_same_scope_ceiling_lining"
+    else:
+        summary["ceiling_authority_path"] = "unavailable"
+
     if ceiling_quantities:
-        family_runs.append(
-            (
-                "ceiling_area",
-                (
-                    seal_live_ceiling_lining_run(
-                        claim,
-                        workspace_id=int(workspace_id),
-                        project_id=project_id,
-                    )
-                    if cross_view_ceiling
-                    else seal_live_ceiling_area_run(
-                        ceiling_result,
-                        workspace_id=int(workspace_id),
-                        project_id=project_id,
-                    )
-                ),
+        ceiling_runs: list[SealedSourceClosedRun] = []
+        if new_ceiling_quantities:
+            ceiling_runs.append(
+                seal_live_ceiling_lining_run(
+                    claim,
+                    workspace_id=int(workspace_id),
+                    project_id=project_id,
+                )
+            )
+        if legacy_ceiling_quantities and ceiling_result is not None:
+            ceiling_runs.append(
+                seal_live_ceiling_area_run(
+                    ceiling_result,
+                    workspace_id=int(workspace_id),
+                    project_id=project_id,
+                )
+            )
+        ceiling_run = (
+            ceiling_runs[0]
+            if len(ceiling_runs) == 1
+            else combine_source_closed_runs(
+                tuple(ceiling_runs),
+                project_id=project_id,
             )
         )
+        family_runs.append(("ceiling_area", ceiling_run))
 
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
