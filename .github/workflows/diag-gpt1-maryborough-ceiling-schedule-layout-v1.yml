@@ -1,0 +1,67 @@
+name: DIAG GPT1 Maryborough Ceiling Schedule Layout
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace ceiling finish schedule ownership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(stream=path.read_bytes(),filetype="pdf")
+          rows=[]
+          for index in range(doc.page_count):
+              page=doc[index]
+              native=page.get_text("text") or ""
+              if "CEILING FINISHES SCHEDULE" not in native.upper():
+                  continue
+              viewports=segment_page_viewports(page,page_number=index+1)
+              blocks=page.get_text("blocks") or []
+              for viewport in viewports:
+                  label=" ".join(str(viewport.label or "").upper().split())
+                  if "CEILING FINISHES SCHEDULE" not in label:
+                      continue
+                  bbox=viewport.bounding_box
+                  owned=[]
+                  if bbox is not None:
+                      x0,y0,x1,y1=map(float,bbox)
+                      for block in blocks:
+                          bx0,by0,bx1,by1,text,*_=block
+                          cx=(float(bx0)+float(bx1))/2.0
+                          cy=(float(by0)+float(by1))/2.0
+                          if x0 <= cx <= x1 and y0 <= cy <= y1:
+                              cleaned=[" ".join(line.split()) for line in str(text).splitlines() if line.strip()]
+                              if cleaned:
+                                  owned.append({
+                                      "bbox":[float(bx0),float(by0),float(bx1),float(by1)],
+                                      "lines":cleaned,
+                                  })
+                  rows.append({
+                      "page_no":index+1,
+                      "viewport_id":viewport.view_id,
+                      "view_type":viewport.view_type,
+                      "label":viewport.label,
+                      "status":viewport.status,
+                      "boundary_source":viewport.boundary_source,
+                      "bbox":None if bbox is None else list(bbox),
+                      "owned_blocks":owned,
+                  })
+          print(json.dumps({"ceiling_schedule_viewports":rows},indent=2,sort_keys=True))
+          PY
