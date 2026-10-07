@@ -129,7 +129,8 @@ def build_live_floor_finish_area_source_traces(
 
         semantic_finish = _clean(metadata.get("semantic_finish")).lower()
         if (
-            not semantic_finish
+            not _clean(metadata.get("support_snapshot_id"))
+            or not semantic_finish
             or _clean(floor.finish_descriptor).lower() != semantic_finish
         ):
             raise SourceClosedRunConflictError(
@@ -199,6 +200,7 @@ def build_live_floor_finish_area_source_traces(
                 "source_room_face_record_id": floor.source_room_face_record_id,
                 "finish_code": metadata.get("finish_code"),
                 "semantic_finish": semantic_finish,
+                "support_snapshot_id": metadata.get("support_snapshot_id"),
                 "finish_definition_record_id": metadata.get(
                     "finish_definition_record_id"
                 ),
