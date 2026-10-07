@@ -908,6 +908,61 @@ def _wrapped_continuation(previous: _NativeLine, current: _NativeLine) -> bool:
     return smaller > 0 and overlap >= _WRAP_MIN_ALIGNED_OVERLAP * smaller
 
 
+def _wrapped_title_fragments(
+    page: Any,
+) -> list[tuple[tuple[float, float, float, float], str]]:
+    """Return only positively title-shaped wrapped native-line runs.
+
+    Lines must already satisfy the same strict same-block continuation proof
+    used to quarantine wrapped note tails. We merge only a maximal run whose
+    complete text independently matches the drawing-title grammar and resolves
+    to a known drawing view type. This never joins arbitrary blocks or nearby
+    text.
+    """
+    try:
+        data = _page_text(page, "dict") or {}
+    except Exception:
+        return []
+
+    fragments: list[tuple[tuple[float, float, float, float], str]] = []
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        lines = [
+            line
+            for line in (
+                _native_line(item) for item in block.get("lines", []) or []
+            )
+            if line is not None
+        ]
+        runs: list[list[int]] = []
+        for index, line in enumerate(lines):
+            if index and _wrapped_continuation(lines[index - 1], line):
+                runs[-1].append(index)
+            else:
+                runs.append([index])
+
+        for run in runs:
+            if len(run) < 2:
+                continue
+            merged = _normalise_text(" ".join(lines[index].text for index in run))
+            if not _TITLE_SHAPE_RE.match(merged):
+                continue
+            view_type = DrawingViewClassifier.classify_text(
+                _strip_scale_suffix(merged)
+            ).value
+            if view_type == DrawingViewType.UNKNOWN.value:
+                continue
+            bbox = (
+                min(lines[index].bbox[0] for index in run),
+                min(lines[index].bbox[1] for index in run),
+                max(lines[index].bbox[2] for index in run),
+                max(lines[index].bbox[3] for index in run),
+            )
+            fragments.append((bbox, merged))
+    return fragments
+
+
 def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float, float], str]]:
     """Lines (box, text) that are the wrapped tail of a note in the same native text block.
 
@@ -959,7 +1014,11 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
     owned: Optional[list[tuple[float, float, float, float]]] = None
     tails: Optional[list[tuple[tuple[float, float, float, float], str]]] = None
-    for bbox, text in _text_fragments(page):
+    title_fragments = [
+        *_text_fragments(page),
+        *_wrapped_title_fragments(page),
+    ]
+    for bbox, text in title_fragments:
         if not _TITLE_SHAPE_RE.match(text):
             continue
         view_type = DrawingViewClassifier.classify_text(_strip_scale_suffix(text)).value
