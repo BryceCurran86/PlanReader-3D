@@ -78,6 +78,19 @@ CROSS_VIEW_CEILING_FINISH_NATIVE_BLOCK_UNAVAILABLE = (
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
 
+# Material meaning comes from the authenticated schedule definition. Ceiling
+# role comes from the independently authenticated RCP occurrence, so the
+# definition does not need to repeat the word "ceiling".
+_CEILING_LINING_SEMANTICS = frozenset(
+    {
+        "ceiling_grid",
+        "plasterboard",
+        "fibre_cement",
+        "insulated_panel",
+        "sandwich_panel",
+    }
+)
+
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
@@ -313,22 +326,24 @@ def _definition_is_ceiling_finish(
     definition: SourceMaterialDefinitionRecord,
 ) -> bool:
     semantic = _norm(definition.semantic_finish)
-    if not semantic:
+    if semantic not in _CEILING_LINING_SEMANTICS:
         return False
-    text = _norm(
-        " ".join(
-            _clean(value)
-            for value in (
-                definition.description,
-                definition.substrate,
-                definition.finish,
+    # The semantic family must still come from a non-empty authenticated
+    # schedule meaning. The occurrence's authenticated RCP viewport supplies
+    # the ceiling role; a bare raw code can never reach this function.
+    return bool(
+        _norm(
+            " ".join(
+                _clean(value)
+                for value in (
+                    definition.description,
+                    definition.substrate,
+                    definition.finish,
+                )
+                if _clean(value)
             )
-            if _clean(value)
         )
     )
-    if semantic == "ceiling_grid":
-        return True
-    return "ceiling" in text
 
 
 def _occurrence_line(
