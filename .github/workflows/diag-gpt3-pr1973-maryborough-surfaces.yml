@@ -1,0 +1,79 @@
+name: DIAG GPT3 PR1973 Maryborough Surfaces
+
+on:
+  push:
+    branches:
+      - diag/gpt3-pr1973-maryborough-surfaces-v1
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Run real Maryborough surfaces
+        shell: bash
+        run: |
+          set -o pipefail
+          ROOT=artifacts/gpt3-pr1973-maryborough
+          mkdir -p "$ROOT"
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group surfaces \
+            --output-dir "$ROOT" \
+            | tee "$ROOT/handoff.stdout.json"
+      - name: Audit sealed output
+        if: success()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-pr1973-maryborough")
+          summary=json.loads((root/"production_summary.json").read_text())
+          sealed=root/"au_qld_maryborough_service_station.surfaces.json"
+          payload=json.loads(sealed.read_text()) if sealed.is_file() else {}
+          q=payload.get("quantities") or []
+          out={
+            "summary":summary,
+            "quantity_count":len(q),
+            "lineage_conflicts":sum(not bool(x.get("lineage_ok",False)) for x in q),
+            "zero_non_abstained":sum(
+              not bool(x.get("abstained",False))
+              and x.get("value") is not None
+              and float(x["value"]) == 0.0
+              for x in q
+            ),
+            "quantities":[{
+              "quantity_id":x.get("quantity_id"),
+              "family":x.get("family"),
+              "semantic_key":x.get("semantic_key"),
+              "value":x.get("value"),
+              "unit":x.get("unit"),
+              "object_identity_refs":x.get("object_identity_refs") or [],
+              "source_page":x.get("source_page"),
+              "viewport_id":x.get("viewport_id"),
+              "lineage_ok":x.get("lineage_ok"),
+            } for x in q],
+          }
+          (root/"audit.json").write_text(json.dumps(out,indent=2,sort_keys=True)+"\n")
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-pr1973-maryborough-surfaces
+          path: artifacts/gpt3-pr1973-maryborough
+          retention-days: 3
