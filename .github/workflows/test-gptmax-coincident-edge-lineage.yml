@@ -1,0 +1,27 @@
+name: TEST GPTMAX Coincident Edge Lineage
+
+on:
+  pull_request:
+    branches:
+      - gptmax/raster-candidate-closure-current-main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run wall topology lineage regressions
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_wall_room_topology_junction_classifier.py \
+            tests/test_p2_w4_stable_wall_identity.py \
+            tests/test_physical_wall_equivalence_candidate_eligibility.py
