@@ -72,11 +72,40 @@ jobs:
                           rotation_reads[str(degrees)]=" ".join(str(raw or "").split())
                       readings[str(dpi)]=rotation_reads
                   probes.append({"pad_pt":pad_pt,"clip":list(clip),"readings":readings})
+              composites={}
+              for dpi in (300,450):
+                  composites[str(dpi)]={}
+                  for degrees in (90,-90):
+                      word_images=[]
+                      for w in rows:
+                          wb=fitz.Rect(float(w[0]),float(w[1]),float(w[2]),float(w[3]))
+                          pix=page.get_pixmap(dpi=dpi,clip=wb,alpha=False)
+                          wi=Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+                          wi=wi.rotate(degrees,expand=True)
+                          wi=ImageOps.expand(
+                              wi,
+                              border=max(1,round(dpi*0.6/25.4)),
+                              fill="white",
+                          )
+                          word_images.append(wi)
+                      if word_images:
+                          gap=max(4,round(dpi*1.5/25.4))
+                          height=max(im.height for im in word_images)
+                          width=sum(im.width for im in word_images)+gap*(len(word_images)-1)
+                          canvas=Image.new("RGB",(width,height),"white")
+                          x=0
+                          for im in word_images:
+                              y=max(0,(height-im.height)//2)
+                              canvas.paste(im,(x,y))
+                              x+=im.width+gap
+                          raw=pytesseract.image_to_string(canvas,config="--psm 7")
+                          composites[str(dpi)][str(degrees)]=" ".join(str(raw or "").split())
               out["blocks"][str(block_no)]={
                   "label":label,
                   "native_text":text,
                   "bbox":list(bbox),
                   "probes":probes,
+                  "composites":composites,
               }
           print(json.dumps(out,indent=2,sort_keys=True))
           PY
