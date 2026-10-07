@@ -24,6 +24,7 @@ def _segment(
     width: float | None,
     color: tuple[float, float, float] | None,
     source_path_index: int | None = None,
+    source_item_index: int | None = None,
 ) -> ObservedGeometrySegment:
     return ObservedGeometrySegment(
         segment_id=segment_id,
@@ -32,6 +33,7 @@ def _segment(
         end=end,
         view_id="V",
         source_path_index=source_path_index,
+        source_item_index=source_item_index,
         stroke_width_pt=width,
         stroke_color_rgb=color,
     )
@@ -666,6 +668,153 @@ def test_two_distinct_complete_source_paths_remain_ambiguous_even_if_one_bracket
         segments,
         _calibration(),
         text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.AMBIGUOUS.value
+    assert result.dimension_line_id is None
+
+
+def _text_box_rectangle_segments(
+    *,
+    path_index: int,
+    item_index: int,
+    bbox: tuple[float, float, float, float],
+) -> tuple[ObservedGeometrySegment, ...]:
+    x0, y0, x1, y1 = bbox
+    return (
+        _segment(
+            "box-e0",
+            (x0, y0),
+            (x1, y0),
+            width=None,
+            color=None,
+            source_path_index=path_index,
+            source_item_index=item_index,
+        ),
+        _segment(
+            "box-e1",
+            (x1, y0),
+            (x1, y1),
+            width=None,
+            color=None,
+            source_path_index=path_index,
+            source_item_index=item_index,
+        ),
+        _segment(
+            "box-e2",
+            (x1, y1),
+            (x0, y1),
+            width=None,
+            color=None,
+            source_path_index=path_index,
+            source_item_index=item_index,
+        ),
+        _segment(
+            "box-e3",
+            (x0, y1),
+            (x0, y0),
+            width=None,
+            color=None,
+            source_path_index=path_index,
+            source_item_index=item_index,
+        ),
+    )
+
+
+def test_native_rectangle_tightly_boxing_dimension_text_is_not_a_line_candidate() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    self_box = _text_box_rectangle_segments(
+        path_index=500,
+        item_index=0,
+        bbox=observation.bbox,
+    )
+    segments = (
+        *self_box,
+        _segment(
+            "real-dimension-line",
+            (80.0, 120.0),
+            (132.0, 120.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=501,
+            source_item_index=0,
+        ),
+        _segment(
+            "real-left-witness",
+            (80.0, 108.0),
+            (80.0, 132.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=502,
+            source_item_index=0,
+        ),
+        _segment(
+            "real-right-witness",
+            (132.0, 108.0),
+            (132.0, 132.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=503,
+            source_item_index=0,
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+    )
+
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.dimension_line_id == "real-dimension-line"
+    assert result.witness_line_ids == (
+        "real-left-witness",
+        "real-right-witness",
+    )
+
+
+def test_larger_native_rectangle_is_not_suppressed_as_dimension_text_box() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    larger_box = _text_box_rectangle_segments(
+        path_index=600,
+        item_index=0,
+        bbox=(80.0, 85.0, 140.0, 115.0),
+    )
+    segments = (
+        *larger_box,
+        _segment(
+            "real-dimension-line",
+            (80.0, 120.0),
+            (132.0, 120.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=601,
+            source_item_index=0,
+        ),
+        _segment(
+            "real-left-witness",
+            (80.0, 108.0),
+            (80.0, 132.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=602,
+            source_item_index=0,
+        ),
+        _segment(
+            "real-right-witness",
+            (132.0, 108.0),
+            (132.0, 132.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+            source_path_index=603,
+            source_item_index=0,
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
     )
 
     assert result.status == BindingStatus.AMBIGUOUS.value
