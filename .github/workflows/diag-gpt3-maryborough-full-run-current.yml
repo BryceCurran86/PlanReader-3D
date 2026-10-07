@@ -1,0 +1,90 @@
+name: DIAG GPT3 Maryborough Full Production Current
+
+on:
+  push:
+    branches:
+      - diag/gpt3-maryborough-full-run-current-v1
+
+jobs:
+  maryborough-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Verify Maryborough source SHA
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          actual=hashlib.sha256(path.read_bytes()).hexdigest()
+          expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          print({"path":str(path),"sha256":actual,"verified":actual==expected})
+          if actual != expected:
+              raise SystemExit("Maryborough source SHA mismatch")
+          PY
+      - name: Run real all-family source-closed Maryborough handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt3-maryborough-current
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/gpt3-maryborough-current \
+            | tee artifacts/gpt3-maryborough-current/handoff.stdout.json
+      - name: Summarize sealed Maryborough run
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-maryborough-current")
+          sealed_path=root/"au_qld_maryborough_service_station.json"
+          payload={"main_sha":"67ded1b40487eb7d4d203ccb003227a63c2566b5"}
+          if sealed_path.exists():
+              sealed=json.loads(sealed_path.read_text())
+              rows=[q for q in sealed.get("quantities",[]) if not q.get("abstained",False)]
+              payload["sealed_run_created"]=True
+              payload["sealed_quantity_count"]=len(rows)
+              payload["quantities"]=[{
+                  "quantity_id":q.get("quantity_id"),
+                  "family":q.get("family"),
+                  "value":q.get("value"),
+                  "unit":q.get("unit"),
+                  "object_identity_refs":q.get("object_identity_refs"),
+                  "lineage_ok":q.get("lineage_ok"),
+              } for q in rows]
+          else:
+              payload["sealed_run_created"]=False
+              payload["sealed_quantity_count"]=0
+              payload["quantities"]=[]
+          maps=sorted(str(p) for p in Path(".").rglob("*identity*map*.json"))
+          payload["identity_map_candidates"]=maps
+          payload["exact_reconciliation_ready"]=bool(maps)
+          (root/"maryborough-run-summary.json").write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n")
+          print(json.dumps(payload,indent=2,sort_keys=True))
+          PY
+      - name: Upload Maryborough run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-maryborough-current-full-production
+          path: artifacts/gpt3-maryborough-current
+          retention-days: 3
