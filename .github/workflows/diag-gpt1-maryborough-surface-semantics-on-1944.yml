@@ -79,6 +79,45 @@ jobs:
                   "source_viewport_ids":[] if r is None else list(r.source_viewport_ids),
               })
 
+          def native_block_for_bbox(page, bbox):
+              words=page.get_text("words") or ()
+              if not bbox:
+                  return None
+              ox0,oy0,ox1,oy1=[float(v) for v in bbox]
+              ocx=(ox0+ox1)/2.0
+              ocy=(oy0+oy1)/2.0
+              block_ids=[]
+              for word in words:
+                  if len(word) < 8:
+                      continue
+                  x0,y0,x1,y1=[float(v) for v in word[:4]]
+                  if x0 <= ocx <= x1 and y0 <= ocy <= y1:
+                      block_ids.append(int(word[5]))
+              if not block_ids:
+                  for word in words:
+                      if len(word) < 8:
+                          continue
+                      x0,y0,x1,y1=[float(v) for v in word[:4]]
+                      intersects=(min(ox1,x1) > max(ox0,x0) and min(oy1,y1) > max(oy0,y0))
+                      if intersects:
+                          block_ids.append(int(word[5]))
+              if len(set(block_ids)) != 1:
+                  return None
+              block_no=block_ids[0]
+              grouped={}
+              for word in words:
+                  if len(word) < 8 or int(word[5]) != block_no:
+                      continue
+                  grouped.setdefault(int(word[6]),[]).append(word)
+              lines=[]
+              for line_no,line_words in sorted(grouped.items()):
+                  ordered=sorted(line_words,key=lambda item:int(item[7]))
+                  text_value=" ".join(str(item[4]).strip() for item in ordered if str(item[4]).strip())
+                  if text_value:
+                      lines.append({"line_no":line_no,"text":text_value})
+              return {"block_no":block_no,"lines":lines}
+
+          occurrence_doc=fitz.open(stream=payload,filetype="pdf")
           occurrences=[]
           blocked_scopes=[]
           for result in producer.published_occurrence_results():
@@ -89,6 +128,14 @@ jobs:
                       "reason_codes":list(result.reason_codes),
                   })
               for r in result.records:
+                  block=None
+                  try:
+                      block=native_block_for_bbox(
+                          occurrence_doc[int(r.page_id)-1],
+                          r.bbox_pdf_pts,
+                      )
+                  except Exception:
+                      block=None
                   occurrences.append({
                       "status":getattr(result.status,"value",str(result.status)),
                       "page_id":r.page_id,
@@ -97,7 +144,9 @@ jobs:
                       "semantic_finish":r.semantic_finish,
                       "raw_text":r.raw_text,
                       "bbox":list(r.bbox_pdf_pts),
+                      "native_block":block,
                   })
+          occurrence_doc.close()
 
           print(json.dumps({
               "surface_views":views,
