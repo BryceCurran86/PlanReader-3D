@@ -394,6 +394,7 @@ def collect_live_physical_net_wall_claim(
     ceiling_lining_quantity_evidence: list[QuantityEvidence] = []
     canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
     room_area_bridges = []
+    same_view_area = None
     cross_view_area = None
     if canonical_rooms.rooms:
         same_view_area = SameViewRoomAreaProducer.from_source(
@@ -725,7 +726,7 @@ def collect_live_physical_net_wall_claim(
     # same-view or cross-view figured dimensions may supply the source-owned
     # dimension box; finish occurrence ownership remains exact to that box.
     if (
-        same_view_area.records
+        (same_view_area is not None and same_view_area.records)
         or (cross_view_area is not None and cross_view_area.records)
     ):
         floor_finishes = CrossViewFloorFinishProducer.from_source(
