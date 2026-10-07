@@ -11,6 +11,7 @@ quantities, tolerances, denominator eligibility, identity maps, or scoring.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -23,6 +24,9 @@ from pb_live_ceiling_area_quantity_publication import (
 )
 from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
 from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+from pb_live_ceiling_lining_source_closed_export import (
+    seal_live_ceiling_lining_run,
+)
 from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
 from pb_live_opening_count_source_closed_export import (
     seal_live_opening_count_run,
@@ -179,16 +183,14 @@ def generate_project_handoff(
             semantic_execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
         elif clean_family_group == "surfaces":
-            # Surface geometry and room measurement only need the positively
-            # classified topology plus positively classified plan-like support
-            # pages. Do not replay wall/opening/room composition over unrelated
-            # schedules, elevations, sections and details.
+            # Surface geometry and room measurement only need positively
+            # classified topology plus plan-like room-area support pages.
             claim_execution_pages = tuple(
                 sorted(set(topology_pages) | set(room_area_support_pages))
             )
             # Ceiling/material semantics remain free to authenticate against the
-            # complete source evidence universe. This split narrows expensive
-            # geometry work without narrowing semantic evidence authority.
+            # complete source evidence universe. This narrows expensive geometry
+            # work without narrowing semantic evidence authority.
             semantic_execution_pages = tuple(all_pages)
             execution_room_support_pages = (
                 room_area_support_pages
@@ -196,9 +198,8 @@ def generate_project_handoff(
                 else None
             )
         else:
-            # Complete handoff preserves the established all-page evidence
-            # universe because opening families may depend on schedules,
-            # elevations and other non-topology source evidence.
+            # Complete handoff preserves the all-page evidence universe because
+            # opening families may depend on schedules/elevations/support pages.
             claim_execution_pages = tuple(all_pages)
             semantic_execution_pages = tuple(all_pages)
             execution_room_support_pages = (
@@ -277,6 +278,7 @@ def generate_project_handoff(
         "openings": len(tuple(getattr(claim, "canonical_openings", ()) or ())),
         "rooms": len(tuple(getattr(claim, "canonical_rooms", ()) or ())),
         "floors": len(tuple(getattr(claim, "canonical_floors", ()) or ())),
+        "ceilings": len(tuple(getattr(claim, "canonical_ceilings", ()) or ())),
         "spaces": len(tuple(getattr(claim, "canonical_spaces", ()) or ())),
     }
 
@@ -364,36 +366,105 @@ def generate_project_handoff(
             )
         )
 
+    new_ceiling_quantities: tuple[QuantityEvidence, ...] = ()
+    legacy_ceiling_quantities: tuple[QuantityEvidence, ...] = ()
+    ceiling_result = None
     if clean_family_group in {"all", "surfaces"}:
+        new_ceiling_quantities = _non_abstained(
+            getattr(claim, "ceiling_lining_quantity_evidence", ())
+        )
+
+        # Preserve the existing scale-aware/same-scope ceiling path for rooms
+        # not already owned by the new RCP authority. One valid new ceiling
+        # must never suppress unrelated valid existing output.
         ceiling_result = collect_live_ceiling_lining_claims(
             pdf_path,
-            # Keep the complete source evidence universe available to ceiling
-            # semantics. The collector still mints room/ceiling geometry only
-            # from positively resolved floor-plan viewports, so evidence pages
-            # do not become topology.
+            # Ceiling semantics may live on schedules, legends and RCP support
+            # sheets. Keep the full surface execution evidence universe visible;
+            # the collector still owns topology independently.
             pages=semantic_execution_pages,
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
         )
-        ceiling_quantities = _non_abstained(
+        new_room_index_ids = {
+            _clean(ceiling.source_room_index_id)
+            for ceiling in tuple(
+                getattr(claim, "canonical_ceilings", ()) or ()
+            )
+            if _clean(ceiling.source_room_index_id)
+        }
+        if new_room_index_ids:
+            retained_legacy_ceilings = tuple(
+                ceiling
+                for ceiling in ceiling_result.canonical_ceilings
+                if _clean(ceiling.source_room_index_id)
+                not in new_room_index_ids
+            )
+            retained_shadow_ids = {
+                _clean(ceiling.ceiling_quantity_id)
+                for ceiling in retained_legacy_ceilings
+                if _clean(ceiling.ceiling_quantity_id)
+            }
+            ceiling_result = replace(
+                ceiling_result,
+                claims=(),
+                canonical_ceilings=retained_legacy_ceilings,
+                quantity_evidence=tuple(
+                    quantity
+                    for quantity in ceiling_result.quantity_evidence
+                    if _clean(quantity.quantity_id) in retained_shadow_ids
+                ),
+            )
+        legacy_ceiling_quantities = _non_abstained(
             publish_live_ceiling_area_quantities(ceiling_result)
         )
-    else:
-        ceiling_result = None
-        ceiling_quantities = ()
+
+    ceiling_quantities = (
+        *new_ceiling_quantities,
+        *legacy_ceiling_quantities,
+    )
     summary["family_counts"]["ceiling_area"] = len(ceiling_quantities)
-    if ceiling_quantities and ceiling_result is not None:
-        family_runs.append(
-            (
-                "ceiling_area",
+    if new_ceiling_quantities and legacy_ceiling_quantities:
+        summary["ceiling_authority_path"] = (
+            "cross_view_rcp_plus_legacy_nonoverlap"
+        )
+    elif new_ceiling_quantities:
+        summary["ceiling_authority_path"] = (
+            "cross_view_room_area_plus_rcp_finish"
+        )
+    elif legacy_ceiling_quantities:
+        summary["ceiling_authority_path"] = "legacy_same_scope_ceiling_lining"
+    else:
+        summary["ceiling_authority_path"] = "unavailable"
+
+    if ceiling_quantities:
+        ceiling_runs: list[SealedSourceClosedRun] = []
+        if new_ceiling_quantities:
+            ceiling_runs.append(
+                seal_live_ceiling_lining_run(
+                    claim,
+                    workspace_id=int(workspace_id),
+                    project_id=project_id,
+                )
+            )
+        if legacy_ceiling_quantities and ceiling_result is not None:
+            ceiling_runs.append(
                 seal_live_ceiling_area_run(
                     ceiling_result,
                     workspace_id=int(workspace_id),
                     project_id=project_id,
-                ),
+                )
+            )
+        ceiling_run = (
+            ceiling_runs[0]
+            if len(ceiling_runs) == 1
+            else combine_source_closed_runs(
+                tuple(ceiling_runs),
+                project_id=project_id,
             )
         )
+        family_runs.append(("ceiling_area", ceiling_run))
 
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
