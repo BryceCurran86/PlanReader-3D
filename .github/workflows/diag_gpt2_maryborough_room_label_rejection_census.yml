@@ -64,6 +64,9 @@ jobs:
               published.revision.revision_id
           )
           assert current is not None
+          # All diagnostic text selectors must address the same final immutable
+          # snapshot used by the wall/room authorities after raster augmentation.
+          published=current
           wall_auth=live.physical_wall_candidate_authority
           selectors=wall_auth.selectors_for_authenticated_viewports(
               document_id=current.revision.document_id,
