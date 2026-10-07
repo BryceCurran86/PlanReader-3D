@@ -236,9 +236,69 @@ def test_exact_same_native_block_binds_one_ceiling_finish(monkeypatch) -> None:
     assert record.semantic_finish == "ceiling_grid"
     assert record.support_page_id == "2"
     assert record.support_viewport_id == "rcp-vp"
+    assert record.support_snapshot_id == published.snapshot.snapshot_id
     assert record.support_block_no == 7
     assert record.occurrence_evidence_id == "occ-evidence"
     assert record.definition_evidence_ids == ("def-evidence",)
+
+
+def test_same_revision_distinct_semantic_snapshot_can_bind(monkeypatch) -> None:
+    payload = _pdf()
+    geometry_source = SourceVisibilityProducer(
+        producer_method="cross-view-ceiling-geometry-test",
+        producer_version="1",
+    )
+    geometry_published = geometry_source.ingest_native_pdf_bytes(
+        document_id="doc-ceiling-finish",
+        source_bytes=payload,
+        source_locator="memory:geometry.pdf",
+        page_ids=("1",),
+    )
+    semantic_source = SourceVisibilityProducer(
+        producer_method="cross-view-ceiling-semantic-test",
+        producer_version="1",
+    )
+    semantic_published = semantic_source.ingest_native_pdf_bytes(
+        document_id="doc-ceiling-finish",
+        source_bytes=payload,
+        source_locator="memory:semantic.pdf",
+        page_ids=("1", "2"),
+    )
+
+    assert (
+        geometry_published.revision.revision_id
+        == semantic_published.revision.revision_id
+    )
+    assert (
+        geometry_published.snapshot.snapshot_id
+        != semantic_published.snapshot.snapshot_id
+    )
+
+    rooms = _rooms(geometry_published, _room(geometry_published))
+    _patch_material(monkeypatch, semantic_published, occurrence_block=7)
+    label = _line(
+        text="OFFICE",
+        block_no=7,
+        line_no=0,
+        bbox=(50.0, 50.0, 90.0, 62.0),
+    )
+    monkeypatch.setattr(
+        ceiling,
+        "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label,)},
+    )
+
+    result = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=semantic_source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert (
+        result.records[0].support_snapshot_id
+        == semantic_published.snapshot.snapshot_id
+    )
 
 
 def test_finish_in_different_native_block_does_not_bind(monkeypatch) -> None:
