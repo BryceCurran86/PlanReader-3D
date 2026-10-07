@@ -31,6 +31,7 @@ from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PHYSICAL_OPENING_EXISTS,
     PHYSICAL_OPENING_IDENTITY_RESOLVED,
@@ -495,8 +496,7 @@ class OpeningHostBindingProducer:
                 wall_result,
                 geometry,
                 include_spanning_raster_candidates=(
-                    opening.structural_pattern
-                    == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                    opening.structural_pattern in RASTER_APERTURE_HOST_PATTERNS
                 ),
             )
             if local_scope is None:
@@ -555,7 +555,7 @@ class OpeningHostBindingProducer:
                 host_equivalence,
             )
             if (
-                opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                opening.structural_pattern in RASTER_APERTURE_HOST_PATTERNS
                 and band_resolution.status is EvidenceResolutionStatus.CORROBORATED
                 and not band_resolution.bands
             ):
@@ -961,6 +961,12 @@ GENERIC_GAP_HOST_PATTERNS = frozenset(
     {
         GAP_CORROBORATED_DOOR_JAMB_LEAF,
         GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+    }
+)
+RASTER_APERTURE_HOST_PATTERNS = frozenset(
+    {
+        RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     }
 )
 HOST_GAP_LINEAGE_UNAVAILABLE = "opening_gap_wall_lineage_unavailable"
@@ -1453,7 +1459,7 @@ def _opening_geometry(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
 ) -> Optional[_OpeningGeometry]:
-    if opening.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION:
+    if opening.structural_pattern in RASTER_APERTURE_HOST_PATTERNS:
         bbox = opening.aperture_bbox_pt
         if bbox is None or len(bbox) != 4:
             return None
