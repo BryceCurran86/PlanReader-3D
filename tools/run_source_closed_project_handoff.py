@@ -179,23 +179,40 @@ def generate_project_handoff(
     if topology_restricted:
         if clean_family_group == "core":
             # Core execution is intentionally topology-only.
-            execution_pages = tuple(topology_pages)
+            claim_execution_pages = tuple(topology_pages)
+            semantic_execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
+        elif clean_family_group == "surfaces":
+            # Surface geometry and room measurement only need the positively
+            # classified topology plus positively classified plan-like support
+            # pages. Do not replay wall/opening/room composition over unrelated
+            # schedules, elevations, sections and details.
+            claim_execution_pages = tuple(
+                sorted(set(topology_pages) | set(room_area_support_pages))
+            )
+            # Ceiling/material semantics remain free to authenticate against the
+            # complete source evidence universe. This split narrows expensive
+            # geometry work without narrowing semantic evidence authority.
+            semantic_execution_pages = tuple(all_pages)
+            execution_room_support_pages = (
+                room_area_support_pages
+                if room_area_support_pages
+                else None
+            )
         else:
-            # Surface semantics may be authenticated by schedules, legends,
-            # reflected-ceiling plans and other non-topology source pages.
-            # Keep the full selected source universe visible to semantic
-            # authorities while topology remains restricted by topology_pages
-            # and room measurement remains restricted by the explicit support
-            # page set below.
-            execution_pages = tuple(all_pages)
+            # Complete handoff preserves the established all-page evidence
+            # universe because opening families may depend on schedules,
+            # elevations and other non-topology source evidence.
+            claim_execution_pages = tuple(all_pages)
+            semantic_execution_pages = tuple(all_pages)
             execution_room_support_pages = (
                 room_area_support_pages
                 if room_area_support_pages
                 else None
             )
     else:
-        execution_pages = all_pages
+        claim_execution_pages = tuple(all_pages)
+        semantic_execution_pages = tuple(all_pages)
         execution_room_support_pages = (
             room_area_support_pages
             if room_area_support_pages
@@ -215,7 +232,10 @@ def generate_project_handoff(
         "topology_mode": topology_mode,
         "family_group": clean_family_group,
         "complete_project_handoff": clean_family_group == "all",
-        "execution_pages": [page + 1 for page in execution_pages],
+        "execution_pages": [page + 1 for page in claim_execution_pages],
+        "semantic_execution_pages": [
+            page + 1 for page in semantic_execution_pages
+        ],
         "status": "unavailable",
         "family_counts": {},
         "family_run_ids": {},
@@ -232,7 +252,7 @@ def generate_project_handoff(
     try:
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
-            pages=execution_pages,
+            pages=claim_execution_pages,
             topology_pages=(topology_pages if topology_restricted else None),
             # Core-family execution never activates cross-view room-area
             # measurement. Surface/all execution retains the source-classified
@@ -365,7 +385,7 @@ def generate_project_handoff(
             # Ceiling semantics may live on schedules, legends and RCP support
             # sheets. Keep the full surface execution evidence universe visible;
             # the collector still owns topology independently.
-            pages=execution_pages,
+            pages=semantic_execution_pages,
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
