@@ -529,8 +529,8 @@ class OpeningHostBindingProducer:
             two_face_lineage_resolution = _resolve_two_face_lineage_host(
                 self._opening,
                 opening,
-                universe.records,
-                universe.equivalence,
+                host_records,
+                host_equivalence,
             )
             # Positive source-lineage authority supersedes the weaker geometry
             # path, and a genuine ownership conflict remains fail-closed.
