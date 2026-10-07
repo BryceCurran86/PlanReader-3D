@@ -120,7 +120,7 @@ def collect_source_owned_ceiling_finish_candidates(
     raster = None
     line_results: dict[
         tuple[str, int, int],
-        list[tuple[int, object, object]],
+        list[tuple[int, str, object, object]],
     ] = {}
 
     # Iterate the complete producer-owned text universe. We deliberately do
@@ -145,7 +145,7 @@ def collect_source_owned_ceiling_finish_candidates(
             continue
         key = (receipt.page_id, int(receipt.block_no), int(receipt.line_no))
         line_results.setdefault(key, []).append(
-            (int(receipt.word_no), result, receipt)
+            (int(receipt.word_no), str(observation_id), result, receipt)
         )
 
     atoms: list[EvidenceAtom] = []
@@ -168,13 +168,15 @@ def collect_source_owned_ceiling_finish_candidates(
         # narrow glyph/clip failures already admitted by room-label authority,
         # reuse producer-owned RasterTextCorroborationAuthority; arbitrary
         # integrity failures remain fail-closed.
-        trusted_entries: list[tuple[str, object, object, Optional[str]]] = []
+        trusted_entries: list[
+            tuple[str, str, object, object, Optional[str]]
+        ] = []
         line_failed = False
         admissible = {
             TEXT_GLYPH_MAPPING_UNVERIFIED,
             TEXT_CLIP_STATE_UNRESOLVED,
         }
-        for _, result, receipt in ordered:
+        for _, native_observation_id, result, receipt in ordered:
             trusted_text = (
                 _clean(result.trusted_text)
                 if (
@@ -208,7 +210,7 @@ def collect_source_owned_ceiling_finish_candidates(
                         revision_id=published.revision.revision_id,
                         source_sha256=published.revision.source_sha256,
                         snapshot_id=published.snapshot.snapshot_id,
-                        observation_id=parent_observation_id,
+                        observation_id=native_observation_id,
                     )
                 )
                 if (
@@ -221,19 +223,28 @@ def collect_source_owned_ceiling_finish_candidates(
                 trusted_text = _clean(raster_result.corroborated_text)
                 raster_record_id = _clean(raster_result.record.record_id)
             trusted_entries.append(
-                (trusted_text, result, receipt, raster_record_id)
+                (
+                    trusted_text,
+                    native_observation_id,
+                    result,
+                    receipt,
+                    raster_record_id,
+                )
             )
         if line_failed or len(trusted_entries) != len(ordered):
             continue
 
-        boxes = [_bbox(receipt.geometry) for _, _, receipt, _ in trusted_entries]
+        boxes = [
+            _bbox(receipt.geometry)
+            for _, _, _, receipt, _ in trusted_entries
+        ]
         if any(box is None for box in boxes):
             continue
         trusted_boxes = tuple(box for box in boxes if box is not None)
         if any(not _inside(box, viewport_bbox) for box in trusted_boxes):
             continue
 
-        texts = [text for text, _, _, _ in trusted_entries]
+        texts = [text for text, _, _, _, _ in trusted_entries]
         line_text = " ".join(texts)
         matches = iter_explicit_ceiling_finish_matches(line_text)
         if not matches:
@@ -270,17 +281,17 @@ def collect_source_owned_ceiling_finish_candidates(
                 max(box[3] for box in selected_boxes),
             )
             parent_ids = tuple(
-                trusted_entries[index][2].parent_observation_id
+                trusted_entries[index][3].parent_observation_id
                 for index in selected_indexes
             )
             receipt_ids = tuple(
-                trusted_entries[index][2].receipt_id
+                trusted_entries[index][3].receipt_id
                 for index in selected_indexes
             )
             raster_record_ids = tuple(
                 record_id
                 for index in selected_indexes
-                for record_id in (trusted_entries[index][3],)
+                for record_id in (trusted_entries[index][4],)
                 if record_id
             )
             candidates = collect_unscoped_ceiling_finish_candidates(
