@@ -347,7 +347,8 @@ def generate_project_handoff(
     if clean_family_group in {"all", "surfaces"}:
         ceiling_result = collect_live_ceiling_lining_claims(
             pdf_path,
-            pages=(topology_pages if topology_pages else all_pages),
+            pages=all_pages,
+            topology_pages=(topology_pages if topology_pages else all_pages),
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
