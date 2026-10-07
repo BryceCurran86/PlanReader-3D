@@ -316,3 +316,109 @@ def test_generic_gap_host_conflicts_when_one_source_role_has_multiple_unproved_o
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.bands == ()
     assert host.HOST_GAP_LINEAGE_AMBIGUOUS in result.reason_codes
+
+
+def _two_face_opening_source_records() -> tuple[object, ...]:
+    return (
+        _source_obs((-100.0, -5.0, 0.0, -5.0), "source:left-top"),
+        _source_obs((40.0, -5.0, 140.0, -5.0), "source:right-top"),
+        _source_obs((-100.0, 5.0, 0.0, 5.0), "source:left-bottom"),
+        _source_obs((40.0, 5.0, 140.0, 5.0), "source:right-bottom"),
+        _source_obs((0.0, -5.0, 0.0, 5.0), "source:left-jamb"),
+        _source_obs((40.0, -5.0, 40.0, 5.0), "source:right-jamb"),
+    )
+
+
+def test_two_face_lineage_host_binds_exact_four_interrupted_wall_roles() -> None:
+    records = (
+        _record("left-top", ((-100.0, -5.0), (0.0, -5.0))),
+        _record("right-top", ((40.0, -5.0), (140.0, -5.0))),
+        _record("left-bottom", ((-100.0, 5.0), (0.0, 5.0))),
+        _record("right-bottom", ((40.0, 5.0), (140.0, 5.0))),
+        _record("nearby-unrelated", ((-20.0, 0.0), (60.0, 0.0))),
+    )
+    result = host._resolve_two_face_lineage_host_from_records(
+        _two_face_opening_source_records(),
+        records,
+        _equivalence(records),
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.reason_codes == (host.TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED,)
+    assert len(result.bands) == 1
+    assert set(result.bands[0].member_ids) == {
+        "left-top",
+        "right-top",
+        "left-bottom",
+        "right-bottom",
+    }
+    assert "nearby-unrelated" not in result.bands[0].member_ids
+
+
+def test_two_face_lineage_host_abstains_when_one_wall_role_is_unmapped() -> None:
+    records = (
+        _record("left-top", ((-100.0, -5.0), (0.0, -5.0))),
+        _record("right-top", ((40.0, -5.0), (140.0, -5.0))),
+        _record("left-bottom", ((-100.0, 5.0), (0.0, 5.0))),
+    )
+    result = host._resolve_two_face_lineage_host_from_records(
+        _two_face_opening_source_records(),
+        records,
+        _equivalence(records),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.bands == ()
+    assert host.HOST_TWO_FACE_LINEAGE_UNMAPPED in result.reason_codes
+
+
+def test_two_face_lineage_host_conflicts_on_unproved_competing_owner() -> None:
+    left_top = _record("left-top", ((-100.0, -5.0), (0.0, -5.0)))
+    left_top_competing_base = _record(
+        "left-top-competing", ((-100.0, -5.0), (0.0, -5.0))
+    )
+    left_top_competing = replace(
+        left_top_competing_base,
+        physical_identity=replace(
+            left_top_competing_base.physical_identity,
+            source_primitive_ids=("source:left-top",),
+        ),
+    )
+    records = (
+        left_top,
+        left_top_competing,
+        _record("right-top", ((40.0, -5.0), (140.0, -5.0))),
+        _record("left-bottom", ((-100.0, 5.0), (0.0, 5.0))),
+        _record("right-bottom", ((40.0, 5.0), (140.0, 5.0))),
+    )
+    result = host._resolve_two_face_lineage_host_from_records(
+        _two_face_opening_source_records(),
+        records,
+        _equivalence(records),
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.bands == ()
+    assert host.HOST_TWO_FACE_LINEAGE_AMBIGUOUS in result.reason_codes
+
+
+def test_two_face_lineage_host_rejects_nonmatching_gap_stations() -> None:
+    opening_records = (
+        _source_obs((-100.0, -5.0, 0.0, -5.0), "source:left-top"),
+        _source_obs((40.0, -5.0, 140.0, -5.0), "source:right-top"),
+        _source_obs((-100.0, 5.0, 1.0, 5.0), "source:left-bottom"),
+        _source_obs((41.0, 5.0, 140.0, 5.0), "source:right-bottom"),
+        _source_obs((0.0, -5.0, 1.0, 5.0), "source:left-jamb"),
+        _source_obs((40.0, -5.0, 41.0, 5.0), "source:right-jamb"),
+    )
+    records = (
+        _record("left-top", ((-100.0, -5.0), (0.0, -5.0))),
+        _record("right-top", ((40.0, -5.0), (140.0, -5.0))),
+        _record("left-bottom", ((-100.0, 5.0), (1.0, 5.0))),
+        _record("right-bottom", ((41.0, 5.0), (140.0, 5.0))),
+    )
+    result = host._resolve_two_face_lineage_host_from_records(
+        opening_records,
+        records,
+        _equivalence(records),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.bands == ()
+    assert host.HOST_TWO_FACE_LINEAGE_UNAVAILABLE in result.reason_codes
