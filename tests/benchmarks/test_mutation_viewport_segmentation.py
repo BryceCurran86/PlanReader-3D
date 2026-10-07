@@ -556,6 +556,62 @@ def test_gridded_finish_schedule_table_frame_can_own_schedule_viewport():
         doc.close()
 
 
+def _nested_schedule_inside_grid_like_drawing() -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=1100, height=1000)
+
+    # A large grid-like drawing frame that can independently satisfy the
+    # positive table predicate.
+    outer = fitz.Rect(80, 30, 1000, 930)
+    page.draw_rect(outer)
+    outer_x0, outer_y0 = 120.0, 80.0
+    outer_cell_w, outer_cell_h = 200.0, 180.0
+    for row in range(4):
+        for col in range(4):
+            page.draw_rect(
+                fitz.Rect(
+                    outer_x0 + col * outer_cell_w,
+                    outer_y0 + row * outer_cell_h,
+                    outer_x0 + (col + 1) * outer_cell_w,
+                    outer_y0 + (row + 1) * outer_cell_h,
+                )
+            )
+
+    # The real semantic schedule is a compact, independently gridded table
+    # nested inside that drawing.  Its title is immediately below the table
+    # while still lying inside the much larger drawing frame.
+    schedule = fitz.Rect(620, 700, 940, 850)
+    page.draw_rect(schedule)
+    cell_w = 90.0
+    cell_h = 40.0
+    for row in range(3):
+        for col in range(3):
+            page.draw_rect(
+                fitz.Rect(
+                    640 + col * cell_w,
+                    715 + row * cell_h,
+                    640 + (col + 1) * cell_w,
+                    715 + (row + 1) * cell_h,
+                )
+            )
+    page.insert_text((660, 895), "CEILING FINISHES SCHEDULE", fontsize=11)
+    return _reopen(doc)
+
+
+def test_nested_semantic_schedule_prefers_local_table_over_grid_like_container():
+    doc = _nested_schedule_inside_grid_like_drawing()
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((620, 700, 940, 850))
+    finally:
+        doc.close()
+
+
 def test_gridded_table_frame_cannot_mint_floor_plan_viewport():
     doc = _single_table_frame_view("GROUND FLOOR PLAN")
     try:
