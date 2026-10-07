@@ -16,6 +16,7 @@ from pb_source_room_face_authority import (
     SOURCE_ROOM_FACE_SCOPE_RESOLVED,
     SourceRoomFaceSelector,
     _canonical_polygon,
+    _publication_polygon,
     _derive_scope,
     _edge,
     _edge_contains_edge,
@@ -86,7 +87,7 @@ def _scope(path: Path):
 
 
 
-def test_canonical_polygon_collapses_only_exact_retraced_spur() -> None:
+def test_raw_canonical_polygon_retains_retraced_spur_for_ownership_audit() -> None:
     clean = (
         (0.0, 0.0),
         (10.0, 0.0),
@@ -102,13 +103,14 @@ def test_canonical_polygon_collapses_only_exact_retraced_spur() -> None:
         (0.0, 10.0),
     )
 
-    assert _canonical_polygon(with_exact_spur) == _canonical_polygon(clean)
+    raw = _canonical_polygon(with_exact_spur)
+
+    assert len(raw) == 6
+    assert raw != _canonical_polygon(clean)
+    assert _publication_polygon(raw) == _canonical_polygon(clean)
 
 
-def test_canonical_polygon_collapses_multiple_exact_retraced_spurs() -> None:
-    # Removing a retraced spur retains its A vertex. If that retained A happens
-    # to be collinear on a real boundary edge, this normalizer deliberately does
-    # NOT simplify it further: collinear simplification is a different rule.
+def test_publication_polygon_collapses_multiple_exact_retraced_spurs() -> None:
     expected = (
         (0.0, 0.0),
         (20.0, 0.0),
@@ -128,10 +130,13 @@ def test_canonical_polygon_collapses_multiple_exact_retraced_spurs() -> None:
         (0.0, 15.0),
     )
 
-    assert _canonical_polygon(with_spurs) == _canonical_polygon(expected)
+    raw = _canonical_polygon(with_spurs)
+
+    assert len(raw) == len(with_spurs)
+    assert _publication_polygon(raw) == _canonical_polygon(expected)
 
 
-def test_canonical_polygon_collapses_consecutive_duplicate_before_spur() -> None:
+def test_publication_polygon_collapses_consecutive_duplicate_before_spur() -> None:
     clean = (
         (0.0, 0.0),
         (10.0, 0.0),
@@ -148,10 +153,10 @@ def test_canonical_polygon_collapses_consecutive_duplicate_before_spur() -> None
         (0.0, 10.0),
     )
 
-    assert _canonical_polygon(noisy) == _canonical_polygon(clean)
+    assert _publication_polygon(_canonical_polygon(noisy)) == _canonical_polygon(clean)
 
 
-def test_canonical_polygon_does_not_collapse_near_backtrack() -> None:
+def test_publication_polygon_does_not_collapse_near_backtrack() -> None:
     near_backtrack = (
         (0.0, 0.0),
         (10.0, 0.0),
@@ -161,15 +166,17 @@ def test_canonical_polygon_does_not_collapse_near_backtrack() -> None:
         (0.0, 10.0),
     )
 
-    result = _canonical_polygon(near_backtrack)
+    raw = _canonical_polygon(near_backtrack)
+    result = _publication_polygon(raw)
 
     assert len(result) == 6
+    assert result == raw
     assert result != _canonical_polygon(
         ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0))
     )
 
 
-def test_canonical_polygon_collapses_exact_spur_across_ring_start() -> None:
+def test_publication_polygon_collapses_exact_spur_across_ring_start() -> None:
     clean = (
         (0.0, 0.0),
         (10.0, 0.0),
@@ -185,7 +192,11 @@ def test_canonical_polygon_collapses_exact_spur_across_ring_start() -> None:
         (10.0, 10.0),
     )
 
-    assert _canonical_polygon(wrapped_spur) == _canonical_polygon(clean)
+    raw = _canonical_polygon(wrapped_spur)
+
+    assert raw != _canonical_polygon(clean)
+    assert _publication_polygon(raw) == _canonical_polygon(clean)
+
 
 def test_two_room_source_plan_publishes_exact_room_faces(tmp_path: Path) -> None:
     path = tmp_path / "two-room.pdf"
