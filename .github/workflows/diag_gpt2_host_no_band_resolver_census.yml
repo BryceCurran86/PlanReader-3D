@@ -1,0 +1,324 @@
+name: DIAG GPT2 Host No Band Resolver Census
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Replay no-band resolver stages
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-host-no-band-resolver-census
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import pb_opening_host_binding_authority as host
+          from pb_live_wall_opening_authority_composition import (
+              compose_live_wall_opening_authority,
+          )
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateSelector,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-host-no-band-resolver-census",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-host-no-band-resolver-census",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","30","31"),
+          )
+          composition=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+          )
+
+          def status(result):
+              if result is None:
+                  return None
+              return getattr(result.status,"value",str(result.status))
+
+          def row_for_result(result):
+              if result is None:
+                  return None
+              return {
+                  "status":status(result),
+                  "band_count":len(result.bands),
+                  "reason_codes":list(result.reason_codes),
+              }
+
+          rows=[]
+          for trace in composition.opening_bindings:
+              if "no_authenticated_host_wall_band" not in trace.reason_codes:
+                  continue
+              binding_selector=composition.binding_selectors.get(
+                  trace.opening_identity_id
+              )
+              if binding_selector is None:
+                  continue
+              obs_selector=ObservationSelector(
+                  document_id=binding_selector.document_id,
+                  revision_id=binding_selector.revision_id,
+                  source_sha256=binding_selector.source_sha256,
+                  snapshot_id=binding_selector.snapshot_id,
+                  observation_id=trace.representative_observation_id,
+              )
+              existence=composition.physical_opening_authority.prove_existence(
+                  obs_selector
+              )
+              opening=existence.existence_record
+              if opening is None:
+                  continue
+              geometry=host._opening_geometry(
+                  composition.physical_opening_authority,
+                  opening,
+              )
+              if geometry is None:
+                  continue
+
+              wall_scope=composition.physical_wall_candidate_authority.resolve_scope(
+                  PhysicalWallCandidateSelector(
+                      document_id=binding_selector.document_id,
+                      revision_id=binding_selector.revision_id,
+                      source_sha256=binding_selector.source_sha256,
+                      snapshot_id=binding_selector.snapshot_id,
+                      page_id=binding_selector.page_id,
+                      decision_scope_id=binding_selector.decision_scope_id,
+                  )
+              )
+
+              scope_mode="global"
+              records=tuple(wall_scope.records)
+              equivalence=wall_scope.equivalence
+              source_observation_ids=tuple(wall_scope.source_observation_ids)
+              local_reasons=()
+              if not (
+                  wall_scope.status is EvidenceResolutionStatus.CORROBORATED
+                  and wall_scope.scope_complete is True
+                  and equivalence is not None
+              ):
+                  local_scope,local_reasons=host._local_boundary_clean_host_scope(
+                      wall_scope,
+                      geometry,
+                      include_spanning_raster_candidates=(
+                          opening.structural_pattern
+                          == host.RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                      ),
+                  )
+                  if local_scope is None:
+                      rows.append({
+                          "opening_identity_id":trace.opening_identity_id,
+                          "structural_pattern":opening.structural_pattern,
+                          "scope_mode":"local_failed_replay",
+                          "local_reasons":list(local_reasons),
+                      })
+                      continue
+                  scope_mode="local"
+                  records=local_scope.records
+                  equivalence=local_scope.equivalence
+                  source_observation_ids=local_scope.source_observation_ids
+
+              if equivalence is None:
+                  rows.append({
+                      "opening_identity_id":trace.opening_identity_id,
+                      "structural_pattern":opening.structural_pattern,
+                      "scope_mode":scope_mode,
+                      "error":"equivalence_unavailable",
+                  })
+                  continue
+
+              left=[]
+              right=[]
+              for record in records:
+                  roles=host._candidate_host_roles(record,geometry)
+                  if "left" in roles:
+                      left.append(record.wall_candidate_id)
+                  if "right" in roles:
+                      right.append(record.wall_candidate_id)
+
+              generic=host._resolve_generic_gap_lineage_host(
+                  composition.physical_opening_authority,
+                  opening,
+                  records,
+                  equivalence,
+              )
+              twoface=None
+              lineage=generic
+              if generic is None:
+                  twoface=host._resolve_two_face_lineage_host(
+                      composition.physical_opening_authority,
+                      opening,
+                      records,
+                      equivalence,
+                  )
+                  if (
+                      twoface is not None
+                      and twoface.status is not EvidenceResolutionStatus.ABSTAINED
+                  ):
+                      lineage=twoface
+
+              geometric=None
+              raster_whole=None
+              raster_split=None
+              raster_source=None
+              final_stage=None
+              final_result=lineage
+              if lineage is not None:
+                  final_stage="generic_lineage" if generic is not None else "two_face_lineage"
+              else:
+                  geometric=host._resolve_host_bands(
+                      records,geometry,equivalence
+                  )
+                  final_result=geometric
+                  final_stage="geometric_host_bands"
+                  if (
+                      opening.structural_pattern
+                      == host.RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                      and geometric.status is EvidenceResolutionStatus.CORROBORATED
+                      and not geometric.bands
+                  ):
+                      raster_whole=host._resolve_raster_whole_wall_host(
+                          records,geometry,equivalence
+                      )
+                      final_result=raster_whole
+                      final_stage="raster_whole_wall"
+                      if (
+                          raster_whole.status is EvidenceResolutionStatus.CORROBORATED
+                          and not raster_whole.bands
+                      ):
+                          raster_split=host._resolve_raster_split_centerline_host(
+                              records,geometry,equivalence
+                          )
+                          final_result=raster_split
+                          final_stage="raster_split_centerline"
+                          if (
+                              raster_split.status is EvidenceResolutionStatus.CORROBORATED
+                              and not raster_split.bands
+                          ):
+                              raster_source=host._resolve_raster_source_primitive_host(
+                                  composition.physical_opening_authority,
+                                  opening,
+                                  records,
+                                  geometry,
+                                  equivalence,
+                                  source_observation_ids,
+                              )
+                              final_result=raster_source
+                              final_stage="raster_source_primitive"
+
+              raster_whole_role_count=sum(
+                  1 for record in records
+                  if host._raster_whole_wall_role_data(record,geometry) is not None
+              )
+              edge_tol=max(0.5,min(2.0,geometry.length*0.02))
+              raster_local_span_count=sum(
+                  1 for record in records
+                  if (
+                      record.physical_identity.usable
+                      and bool(record.physical_identity.candidate_identity_id)
+                      and bool(tuple(
+                          value
+                          for value in record.physical_identity.source_primitive_ids
+                          if str(value).strip()
+                      ))
+                      and host._candidate_locally_owns_opening_span(
+                          record,geometry,edge_tol=edge_tol
+                      )
+                  )
+              )
+
+              rows.append({
+                  "opening_identity_id":trace.opening_identity_id,
+                  "page_id":trace.page_id,
+                  "structural_pattern":opening.structural_pattern,
+                  "scope_mode":scope_mode,
+                  "local_reasons":list(local_reasons),
+                  "record_count":len(records),
+                  "left_role_count":len(left),
+                  "right_role_count":len(right),
+                  "raster_whole_role_count":raster_whole_role_count,
+                  "raster_local_span_count":raster_local_span_count,
+                  "generic_lineage":row_for_result(generic),
+                  "two_face_lineage":row_for_result(twoface),
+                  "geometric_host_bands":row_for_result(geometric),
+                  "raster_whole_wall":row_for_result(raster_whole),
+                  "raster_split_centerline":row_for_result(raster_split),
+                  "raster_source_primitive":row_for_result(raster_source),
+                  "final_stage":final_stage,
+                  "final_status":status(final_result),
+                  "final_band_count":(
+                      None if final_result is None else len(final_result.bands)
+                  ),
+                  "final_reason_codes":(
+                      [] if final_result is None else list(final_result.reason_codes)
+                  ),
+              })
+
+          print(json.dumps({
+              "opening_count":len(composition.opening_bindings),
+              "resolved_binding_count":sum(
+                  1 for trace in composition.opening_bindings if trace.record_id
+              ),
+              "no_band_count":len(rows),
+              "structural_pattern_counts":dict(sorted(Counter(
+                  row.get("structural_pattern") for row in rows
+              ).items())),
+              "scope_mode_counts":dict(sorted(Counter(
+                  row.get("scope_mode") for row in rows
+              ).items())),
+              "final_stage_counts":dict(sorted(Counter(
+                  row.get("final_stage") for row in rows
+              ).items())),
+              "left_right_role_counts":dict(sorted(Counter(
+                  f'{row.get("left_role_count")}L/{row.get("right_role_count")}R'
+                  for row in rows
+                  if "left_role_count" in row
+              ).items())),
+              "generic_reason_counts":dict(sorted(Counter(
+                  reason
+                  for row in rows
+                  for reason in (
+                      [] if row.get("generic_lineage") is None
+                      else row["generic_lineage"]["reason_codes"]
+                  )
+              ).items())),
+              "two_face_reason_counts":dict(sorted(Counter(
+                  reason
+                  for row in rows
+                  for reason in (
+                      [] if row.get("two_face_lineage") is None
+                      else row["two_face_lineage"]["reason_codes"]
+                  )
+              ).items())),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-host-no-band-resolver-census
+          path: artifacts/gpt2-host-no-band-resolver-census
+          retention-days: 2
