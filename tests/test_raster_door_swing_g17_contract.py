@@ -24,6 +24,7 @@ def _sheet(
     leaf: bool,
     arc: bool,
     second_swing: bool = False,
+    leaf_bundle: bool = False,
 ) -> np.ndarray:
     gray = np.full((360, 640), 255, np.uint8)
 
@@ -35,6 +36,11 @@ def _sheet(
     radius = 160
     if leaf:
         cv2.line(gray, (240, 164), (240, 324), 0, 1)
+        if leaf_bundle:
+            # One physical leaf may rasterize as a compact pair of parallel
+            # source runs. G17 must preserve both records without treating the
+            # representation itself as a second swing configuration.
+            cv2.line(gray, (242, 164), (242, 324), 0, 1)
     if arc:
         cv2.ellipse(
             gray,
@@ -124,6 +130,18 @@ def test_one_unambiguous_leaf_and_quarter_arc_proves_one_swing_opening() -> None
     assert len(records) == 1
     assert records[0].structural_pattern == SWING_PATTERN
     assert records[0].aperture_bbox_pt is not None
+
+
+def test_compact_parallel_leaf_runs_preserve_one_physical_swing() -> None:
+    records = _records(
+        _results(_sheet(leaf=True, arc=True, leaf_bundle=True))
+    )
+    assert len(records) == 1
+    assert records[0].structural_pattern == SWING_PATTERN
+    assert records[0].aperture_bbox_pt is not None
+    # Both producer-owned thin runs remain in the physical-opening provenance;
+    # the authority does not pick a nearest/first representative.
+    assert len(records[0].source_observation_ids) > 7
 
 
 def test_quarter_turn_preserves_one_swing_opening() -> None:

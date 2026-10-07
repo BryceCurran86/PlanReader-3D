@@ -9,6 +9,7 @@ import pb_opening_host_binding_authority as host
 import pb_opening_host_frame_authority as frame
 from pb_physical_opening_authority import (
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
 )
 from pb_physical_wall_candidate_authority import (
@@ -108,6 +109,21 @@ def test_raster_whole_wall_binding_produces_source_space_frame() -> None:
     assert result.whole_wall_length == pytest.approx(200.0)
     assert result.candidate_ids == ("wall:host",)
     assert result.source_observation_ids == ("face:a", "face:b", "frame:a")
+
+
+def test_raster_swing_whole_wall_binding_produces_same_source_space_frame() -> None:
+    records = (_record("wall:host"),)
+    result = _producer(_scope(records))._raster_whole_wall_frame(
+        binding=_binding(),
+        opening=_opening(pattern=RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION),
+        geometry=GEOMETRY,
+    )
+
+    assert result is not None
+    assert result.origin == pytest.approx((20.0, 55.0))
+    assert result.u0 == pytest.approx(80.0)
+    assert result.u1 == pytest.approx(120.0)
+    assert result.candidate_ids == ("wall:host",)
 
 
 def test_binding_member_must_match_reproved_whole_wall_host() -> None:

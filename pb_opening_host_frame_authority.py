@@ -32,6 +32,7 @@ from pb_opening_host_binding_authority import (
 )
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
 )
@@ -481,7 +482,11 @@ class OpeningHostFrameProducer:
         """Build one source-space frame from a re-proven raster whole-wall host."""
 
         if (
-            opening.structural_pattern != RASTER_FRAMED_WALL_BAND_INTERRUPTION
+            opening.structural_pattern
+            not in {
+                RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+            }
             or len(tuple(binding.member_wall_candidate_ids)) != 1
         ):
             return None
