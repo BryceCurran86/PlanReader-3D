@@ -113,10 +113,10 @@ jobs:
               str(row["metadata"].get("room_label") or "").strip().upper():float(row["value"])
               for row in mary["firm_room_areas"]
           }
+          print(json.dumps(out,indent=2,sort_keys=True))
           assert abs(mary_firm["FOOD PREP"]-13.270425) < 1e-9, mary
           assert abs(mary_firm["COLD ROOM"]-25.37875) < 1e-9, mary
           assert abs(mary_firm["OFFICE"]-9.05352) < 1e-9, mary
-          print(json.dumps(out,indent=2,sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
