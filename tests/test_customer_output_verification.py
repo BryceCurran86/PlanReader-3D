@@ -106,12 +106,36 @@ def test_every_valid_sealed_quantity_has_exactly_one_complete_customer_row() -> 
     }
 
 
-def test_persisted_notes_provenance_is_sufficient_for_lineage_verification() -> None:
+def test_persisted_database_shape_keeps_complete_lineage_in_notes_and_reference() -> None:
     sealed, rows = sealed_and_rows()
+    adapter_only_fields = {
+        "project_id",
+        "quantity_id",
+        "semantic_key",
+        "quantity_family",
+        "quantity_authority",
+        "document_id",
+        "source_sha256",
+        "revision_id",
+        "viewport_id",
+        "source_bbox",
+        "evidence_ids",
+        "canonical_entity_ids",
+        "measurement_method",
+        "figured_dimension_ids",
+        "resolved_scale_id",
+        "scale_status",
+        "scale_conflicts",
+        "commercial_projection_fingerprint",
+        "commercial_projection_provenance",
+    }
     persisted = []
     for row in rows:
-        copy_row = dict(row)
-        copy_row.pop("commercial_projection_provenance")
+        copy_row = {
+            key: value
+            for key, value in row.items()
+            if key not in adapter_only_fields
+        }
         persisted.append(copy_row)
 
     report = verify_sealed_customer_output(sealed, persisted)
@@ -148,6 +172,17 @@ def test_customer_lineage_mismatch_fails_closed() -> None:
     tampered[0]["canonical_entity_ids"] = ["other-floor"]
 
     with pytest.raises(CustomerOutputVerificationError, match="canonical_entity_ids mismatch"):
+        verify_sealed_customer_output(sealed, tampered)
+
+
+def test_persisted_source_reference_tamper_fails_closed() -> None:
+    sealed, rows = sealed_and_rows()
+    tampered = [dict(row) for row in rows]
+    tampered[0].pop("commercial_projection_provenance")
+    tampered[0].pop("quantity_id")
+    tampered[0]["source_reference"] = "QuantityEvidence qty-1; document=doc-1"
+
+    with pytest.raises(CustomerOutputVerificationError, match="source_reference lineage is incomplete"):
         verify_sealed_customer_output(sealed, tampered)
 
 
