@@ -481,7 +481,7 @@ def test_same_view_figured_room_area_can_own_floor_finish_occurrence(
     assert len(result.records[0].quantity.metadata["figured_dimension_ids"]) == 2
 
 
-def test_same_and_cross_view_finish_authority_for_same_floor_conflicts(
+def test_cross_view_floor_finish_area_precedes_same_view_supplement(
     monkeypatch,
 ) -> None:
     _patch_material_viewports(monkeypatch)
@@ -489,8 +489,9 @@ def test_same_and_cross_view_finish_authority_for_same_floor_conflicts(
     cross_record = cross_view_areas.records[0]
     same_evidence = replace(
         cross_record.area_evidence,
-        evidence_id="same-view-duplicate-area-evidence",
+        evidence_id="same-view-supplement-area-evidence",
         method="authenticated_same_view_figured_dimensions",
+        normalized_value=9.0,
     )
     same_record = SameViewRoomAreaRecord(
         physical_room_id=cross_record.physical_room_id,
@@ -518,9 +519,14 @@ def test_same_and_cross_view_finish_authority_for_same_floor_conflicts(
         floors=floors,
     ).publish()
 
-    assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert result.records == ()
-    assert result.quantities == ()
-    assert result.unresolved_canonical_floor_ids == (
-        floors.floors[0].canonical_floor_id,
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.unresolved_canonical_floor_ids == ()
+    assert len(result.records) == 1
+    assert result.records[0].quantity.value == 8.64
+    assert (
+        result.records[0].quantity.metadata["source_dimension_page_id"]
+        == cross_record.source_dimension_page_id
+    )
+    assert "same-view-supplement-area-evidence" not in (
+        result.records[0].quantity.evidence_ids
     )
