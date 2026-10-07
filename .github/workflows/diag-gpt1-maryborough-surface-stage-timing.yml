@@ -1,0 +1,53 @@
+name: DIAG GPT1 Maryborough Surface Stage Timing
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Time room-wall and ceiling stages
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          out={}
+
+          t=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              pdf,
+              pages=(6,8,10,29,30),
+              topology_pages=(6,29,30),
+              room_area_support_pages=(8,10),
+          )
+          out["room_wall_seconds"]=time.perf_counter()-t
+          out["canonical_room_count"]=len(claim.canonical_rooms)
+          out["room_quantity_count"]=len(claim.room_area_quantity_evidence)
+
+          t=time.perf_counter()
+          ceiling=collect_live_ceiling_lining_claims(
+              pdf,
+              pages=tuple(range(31)),
+              authoritative_room_area_quantities=tuple(claim.room_area_quantity_evidence),
+          )
+          out["ceiling_seconds"]=time.perf_counter()-t
+          out["ceiling_claim_count"]=len(ceiling.claims)
+          out["canonical_ceiling_count"]=len(ceiling.canonical_ceilings)
+          out["ceiling_status"]=getattr(ceiling.status,"value",str(ceiling.status))
+          out["ceiling_reason_codes"]=list(ceiling.reason_codes)
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
