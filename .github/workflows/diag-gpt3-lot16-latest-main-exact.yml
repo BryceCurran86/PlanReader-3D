@@ -1,0 +1,75 @@
+name: DIAG GPT3 Lot16 Latest Main Exact
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  exact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Seal latest-main Lot16 production
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt3-lot16-latest-main
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --project-id au_qld_lot16_power \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/gpt3-lot16-latest-main \
+            | tee artifacts/gpt3-lot16-latest-main/handoff.stdout.json
+      - name: Build exact producer-evidence identity map
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_latest_main_identity_map.py \
+            | tee artifacts/gpt3-lot16-latest-main/identity-map.stdout.json
+      - name: Require one binding per sealed quantity
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-lot16-latest-main")
+          sealed=json.loads((root/"au_qld_lot16_power.json").read_text())
+          identity=json.loads((root/"lot16.identity-map.json").read_text())
+          q=[x for x in sealed["quantities"] if not x.get("abstained",False)]
+          if len(identity["bindings"]) != len(q):
+              raise SystemExit(f"identity binding incomplete: {len(identity['bindings'])}/{len(q)}")
+          print(json.dumps({"sealed_quantities":len(q),"bindings":len(identity["bindings"])},indent=2))
+          PY
+      - name: Run exact frozen V2 reconciliation
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py \
+            --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json \
+            --sealed-run artifacts/gpt3-lot16-latest-main/au_qld_lot16_power.json \
+            --identity-map artifacts/gpt3-lot16-latest-main/lot16.identity-map.json \
+            --output artifacts/gpt3-lot16-latest-main/lot16.exact-report.json
+          cat artifacts/gpt3-lot16-latest-main/lot16.exact-report.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-lot16-latest-main-exact
+          path: artifacts/gpt3-lot16-latest-main
+          retention-days: 3
