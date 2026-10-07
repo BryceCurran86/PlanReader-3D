@@ -10,7 +10,7 @@ import uuid
 import fitz
 import pytest
 
-from pb_drawing_evidence_binding import DrawingViewType
+from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewType
 from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
 from pb_viewport_segmentation import (
     ViewportBoundarySource,
@@ -489,6 +489,30 @@ def _single_table_frame_view(title: str) -> fitz.Document:
 
 def test_gridded_finish_schedule_table_frame_can_own_schedule_viewport():
     doc = _single_table_frame_view("FINISH SCHEDULE")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize(
+    "title",
+    (
+        "INTERNAL FINISHES SCHEDULE",
+        "EXTERNAL FINISHES SCHEDULE",
+        "CEILING FINISHES SCHEDULE",
+        "FLOOR FINISHES SCHEDULE",
+    ),
+)
+def test_qualified_finish_schedule_titles_resolve_table_viewports(title: str):
+    assert DrawingViewClassifier.classify_text(title) is DrawingViewType.SCHEDULE
+    doc = _single_table_frame_view(title)
     try:
         viewports = segment_page_viewports(doc[0], page_number=1)
         assert len(viewports) == 1
