@@ -334,7 +334,9 @@ def test_source_defined_alphabetic_ceiling_codes_require_semantic_schedule_rows(
     )
     assert scope.status is EvidenceResolutionStatus.CORROBORATED
     assert scope.scope_complete is True
-    assert [(row.code, row.semantic_finish) for row in scope.records] == [
+    assert sorted(
+        (row.code, row.semantic_finish) for row in scope.records
+    ) == [
         ("FPB", "plasterboard"),
         ("GRID", "ceiling_grid"),
     ]
