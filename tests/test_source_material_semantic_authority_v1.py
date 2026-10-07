@@ -342,6 +342,24 @@ def test_source_defined_alphabetic_ceiling_codes_require_semantic_schedule_rows(
     ]
 
 
+def test_source_defined_alpha_code_can_use_following_description_line() -> None:
+    rows = semantic.parse_schedule_text(
+        "FPB\nFLUSHSET PLASTERBOARD\nGRID\nVINYL FACED PLASTER TILE 600x1200"
+    )
+    assert [row["code"] for row in rows] == ["FPB", "GRID"]
+    semantics = [
+        semantic.semantic_finish_from_schedule_entry(
+            {
+                "status": "Confirmed",
+                "description": row["description"],
+                "substrate": row["substrate"],
+                "finish": row["finish"],
+            }
+        )
+        for row in rows
+    ]
+    assert semantics == ["plasterboard", "tile"]
+
 def test_split_native_material_rows_survive_unrelated_untrusted_schedule_text(
     monkeypatch,
 ) -> None:
