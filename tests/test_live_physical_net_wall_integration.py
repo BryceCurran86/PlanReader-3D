@@ -5,6 +5,7 @@ import inspect
 import fitz
 import pytest
 
+import pb_live_physical_net_wall_integration as live_integration
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
 )
@@ -125,6 +126,68 @@ def _two_room_cross_view_area_pdf() -> bytes:
         return doc.tobytes()
     finally:
         doc.close()
+
+
+def _room_area_with_semantic_only_page_pdf() -> bytes:
+    doc = fitz.open(
+        stream=_two_room_cross_view_area_pdf(),
+        filetype="pdf",
+    )
+    try:
+        semantic = doc.new_page(width=300.0, height=220.0)
+        semantic.insert_text((70.0, 80.0), "REFLECTED CEILING PLAN", fontsize=10.0)
+        semantic.insert_text((70.0, 110.0), "OFFICE GRID", fontsize=9.0)
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+def test_ceiling_semantic_pages_use_isolated_source_without_expanding_topology(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "cross-view-room-area-with-semantic.pdf"
+    path.write_bytes(_room_area_with_semantic_only_page_pdf())
+    seen = {}
+
+    class _CeilingProducer:
+        @classmethod
+        def from_source(cls, *, source, rooms):
+            revision_id = rooms.rooms[0].revision_id
+            published = source.published_snapshot_for_revision(revision_id)
+            assert published is not None
+            seen["decoded_pages"] = tuple(published.coverage.decoded_pages)
+            seen["semantic_snapshot_id"] = published.snapshot.snapshot_id
+            seen["room_snapshot_id"] = rooms.rooms[0].snapshot_id
+            return cls()
+
+        def publish(self):
+            return SimpleNamespace(records=())
+
+    monkeypatch.setattr(
+        live_integration,
+        "CrossViewCeilingFinishProducer",
+        _CeilingProducer,
+    )
+
+    result = live_integration.collect_live_physical_net_wall_claim(
+        path,
+        pages=(0,),
+        topology_pages=(0,),
+        room_area_support_pages=(1,),
+        ceiling_semantic_pages=(2,),
+    )
+
+    assert seen["decoded_pages"] == (3,)
+    assert seen["semantic_snapshot_id"] != seen["room_snapshot_id"]
+    assert result.canonical_room_source_pages == (1,)
+    assert all(room.page_id == "1" for room in result.canonical_rooms)
+    assert all(floor.page_id == "1" for floor in result.canonical_floors)
+    assert any(
+        quantity.value == 8.64
+        for quantity in result.room_area_quantity_evidence
+        if not quantity.abstained
+    )
 
 
 def test_cross_view_room_area_reaches_same_canonical_floor_without_scale(
