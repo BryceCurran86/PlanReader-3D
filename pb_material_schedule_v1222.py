@@ -129,8 +129,8 @@ def _bare_source_defined_alpha_token(value: Any) -> str:
     only to look ahead to an independently meaningful description row.
     """
 
-    text = re.sub(r"\\s+", " ", str(value or "")).strip()
-    match = re.fullmatch(r"[\\s:;|,\\-–—]*([A-Z]{2,4})[\\s:;|,\\-–—]*", text)
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    match = re.fullmatch(r"[\s:;|,\-–—]*([A-Z]{2,4})[\s:;|,\-–—]*", text)
     if match is None:
         return ""
     code = match.group(1).upper()
@@ -312,7 +312,7 @@ def parse_schedule_text(text: Any, page_id: int = 0, page_label: str = "") -> Li
                     if len(" ".join(preview_parts)) >= 40:
                         break
                 preview = re.sub(
-                    r"\\s+",
+                    r"\s+",
                     " ",
                     " ".join(preview_parts),
                 ).strip()
