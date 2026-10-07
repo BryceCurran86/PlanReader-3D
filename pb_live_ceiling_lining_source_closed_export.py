@@ -69,19 +69,41 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling quantity must own one canonical ceiling identity: "
                 f"{quantity.quantity_id}"
             )
+        authority = _clean(quantity.authority)
         if (
             _clean(quantity.status) != AuthorityStatus.FIRM.value
-            or _clean(quantity.authority)
-            != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+            or authority
+            not in {
+                MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                MeasurementAuthorityType.PDF_SCALED.value,
+            }
         ):
             raise SourceClosedRunConflictError(
-                f"ceiling quantity is not firm documented authority: "
+                f"ceiling quantity lacks firm measurement authority: "
                 f"{quantity.quantity_id}"
             )
 
         metadata = (
             quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
         )
+        if authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
+            figured_ids = tuple(
+                {
+                    _clean(value)
+                    for value in (metadata.get("figured_dimension_ids") or ())
+                    if _clean(value)
+                }
+            )
+            if len(figured_ids) != 2:
+                raise SourceClosedRunConflictError(
+                    f"documented ceiling quantity lacks figured dimension pair: "
+                    f"{quantity.quantity_id}"
+                )
+        elif not _clean(metadata.get("scale_fingerprint")):
+            raise SourceClosedRunConflictError(
+                f"scaled ceiling quantity lacks scale fingerprint: "
+                f"{quantity.quantity_id}"
+            )
         canonical_ceiling_id = _clean(quantity.input_entity_ids[0])
         if _clean(metadata.get("canonical_ceiling_id")) != canonical_ceiling_id:
             raise SourceClosedRunConflictError(
@@ -205,6 +227,14 @@ def build_live_ceiling_lining_source_traces(
                 "support_viewport_id": metadata.get("support_viewport_id"),
                 "finish_code": metadata.get("finish_code"),
                 "semantic_finish": metadata.get("semantic_finish"),
+                "measurement_authority": authority,
+                "figured_dimension_ids": tuple(
+                    metadata.get("figured_dimension_ids") or ()
+                ),
+                "scale_fingerprint": metadata.get("scale_fingerprint"),
+                "upstream_room_area_quantity_id": metadata.get(
+                    "upstream_room_area_quantity_id"
+                ),
             },
         )
         if quantity.quantity_id in traces:
