@@ -629,9 +629,7 @@ class SourceMaterialSemanticProducer:
             self._source,
             published,
         )
-        raster = RasterTextCorroborationProducer.from_source_visibility_producer(
-            self._source
-        )
+        raster = self._raster
 
         pdf = fitz.open(stream=source_bytes, filetype="pdf")
         try:
