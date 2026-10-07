@@ -670,3 +670,61 @@ def test_two_distinct_complete_source_paths_remain_ambiguous_even_if_one_bracket
 
     assert result.status == BindingStatus.AMBIGUOUS.value
     assert result.dimension_line_id is None
+
+
+def test_witness_proven_orientation_can_escape_nearest_perpendicular_tie() -> None:
+    observation = _observation(orientation=DimensionOrientation.UNKNOWN.value)
+    segments = (
+        # Two unrelated perpendicular primitives form the nearest-distance tie.
+        # Equal style means neither may win by graphic-state preference.
+        _segment(
+            "near-vertical-a",
+            (104.0, 70.0),
+            (104.0, 130.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "near-vertical-b",
+            (108.0, 70.0),
+            (108.0, 130.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        # The real dimension line is slightly farther from the text centre but
+        # independently proves the native horizontal direction with both
+        # endpoint witnesses and spans beyond the text extent.
+        _segment(
+            "horizontal-dimension",
+            (80.0, 108.0),
+            (132.0, 108.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "left-witness",
+            (80.0, 86.0),
+            (80.0, 126.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+        _segment(
+            "right-witness",
+            (132.0, 86.0),
+            (132.0, 126.0),
+            width=0.48,
+            color=(0.0, 0.0, 0.0),
+        ),
+    )
+
+    result = bind_observation_to_vector_geometry(
+        observation,
+        segments,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.dimension_line_id == "horizontal-dimension"
+    assert result.witness_line_ids == ("left-witness", "right-witness")
+    assert result.endpoints == ((80.0, 108.0), (132.0, 108.0))
