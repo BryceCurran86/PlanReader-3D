@@ -28,6 +28,21 @@ _GENERIC_SCHEDULE_CODE_RE = re.compile(
     r"^[\s:;|,\-–—]*([A-Z]{1,4}(?:[-_.]?\d{1,4})[A-Z]?)(?![A-Z0-9])",
     re.IGNORECASE,
 )
+_SOURCE_DEFINED_ALPHA_CODE_RE = re.compile(
+    r"^[\s:;|,\-–—]*([A-Z]{2,4})(?![A-Z0-9])\s+(.+)$"
+)
+_SOURCE_DEFINED_ALPHA_CODE_STOPWORDS = frozenset(
+    {
+        "CODE",
+        "TYPE",
+        "ROOM",
+        "WALL",
+        "FLOOR",
+        "DOOR",
+        "NOTE",
+        "FIRE",
+    }
+)
 SCHEDULE_WORDS = (
     "finish schedule", "finishes schedule", "finishing schedule", "material schedule",
     "colour schedule", "color schedule", "external finishes", "paint schedule",
@@ -68,14 +83,52 @@ def _codes(value: Any) -> List[str]:
     return sorted({match.group(0).upper() for match in CODE_RE.finditer(str(value or ""))})
 
 
+def _source_defined_alpha_code(value: Any) -> str:
+    """Return a schedule-defined alphabetic code only with semantic row proof.
+
+    Bare alphabetic abbreviations are not globally meaningful. They become a
+    candidate code only when they are the leading token of one schedule row and
+    the remainder of that same row independently resolves to a material/finish
+    family. This lets authenticated schedules define ordinary abbreviations
+    without teaching production what any raw abbreviation means.
+    """
+
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    match = _SOURCE_DEFINED_ALPHA_CODE_RE.match(text)
+    if match is None:
+        return ""
+    code = match.group(1).upper()
+    description = match.group(2).strip()
+    if code in _SOURCE_DEFINED_ALPHA_CODE_STOPWORDS:
+        return ""
+    if len(_normalise(description)) < 3:
+        return ""
+
+    substrate = _infer_substrate(description)
+    finish = _infer_finish(description, code)
+    semantic = semantic_finish_from_schedule_entry(
+        {
+            "status": "Confirmed",
+            "description": description,
+            "substrate": substrate,
+            "finish": finish,
+        }
+    )
+    if not semantic:
+        return ""
+    if code == "GRID" and semantic != "ceiling_grid":
+        return ""
+    return code
+
+
 def _schedule_codes(value: Any) -> List[str]:
     """Return code-shaped tokens that a schedule row can define.
 
-    The legacy code vocabulary remains supported, but a finishing/material
-    schedule is itself authority for ordinary letter+number codes such as
-    WT1 or WM1. Requiring a numeric component keeps prose headings from
-    becoming definitions; non-numeric legacy codes (for example IP) still
-    come only from the explicit CODE_RE vocabulary.
+    The legacy code vocabulary remains supported. A finishing/material schedule
+    may additionally define ordinary letter+number codes and narrowly proven
+    alphabetic abbreviations. Alphabetic meaning is never inferred from the
+    token itself; source-defined alphabetic codes require an independently
+    semantic row description.
     """
 
     text = str(value or "")
@@ -84,6 +137,9 @@ def _schedule_codes(value: Any) -> List[str]:
         match.group(1).upper()
         for match in _GENERIC_SCHEDULE_CODE_RE.finditer(text)
     )
+    alpha = _source_defined_alpha_code(text)
+    if alpha:
+        codes.add(alpha)
     return sorted(codes)
 
 
@@ -178,6 +234,13 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         return "fibre_cement"
     if "plasterboard" in text or "gyprock" in text or "gypsum board" in text:
         return "plasterboard"
+    if (
+        "ceiling grid" in text
+        or "grid ceiling" in text
+        or "suspended grid" in text
+        or "suspended ceiling grid" in text
+    ):
+        return "ceiling_grid"
     if "epoxy" in text:
         return "epoxy"
     if "vinyl" in text:
