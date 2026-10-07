@@ -17,6 +17,7 @@ from pb_physical_wall_candidate_authority import (
     _filter_repeated_non_physical_drafting_primitives,
     _opening_raw_relation_sets,
     _proven_filled_wall_strips,
+    _producer_opening_wall_face_source_ids,
     _source_page_segments,
 )
 from pb_source_observation_authority import ObservationSelector
@@ -104,10 +105,38 @@ def main():
         decision_scope_id=SCOPE_ID,
     )
     raw_segment = {str(s.get("id") or ""): s for s in segments if str(s.get("id") or "")}
+    protected_face_ids = _producer_opening_wall_face_source_ids(
+        source_producer=source,
+        published=current,
+        page_id=PAGE_ID,
+        resolved_visible_observations=tuple(
+            (observation_id, observation)
+            for observation_id, observation in (
+                (
+                    observation_id,
+                    composition.physical_opening_authority
+                    .source_visibility_authority()
+                    .resolve_visible(
+                        ObservationSelector(
+                            document_id=current.revision.document_id,
+                            revision_id=current.revision.revision_id,
+                            source_sha256=current.revision.source_sha256,
+                            snapshot_id=current.snapshot.snapshot_id,
+                            observation_id=observation_id,
+                        )
+                    ).observation,
+                )
+                for observation_id in current.visible_observation_ids
+            )
+            if observation is not None and str(observation.page_id) == PAGE_ID
+        ),
+        physical_opening_authority=composition.physical_opening_authority,
+    )
     motif_filtered = _filter_repeated_non_physical_drafting_primitives(
         segments,
         page_width=page_width,
         page_height=page_height,
+        protected_source_primitive_ids=protected_face_ids,
     )
     motif_ids = {str(s.get("id") or "") for s in motif_filtered}
     strips = _proven_filled_wall_strips(motif_filtered)
@@ -251,6 +280,7 @@ def main():
         "wall_scope_status": state(wall_result.status),
         "wall_scope_complete": bool(wall_result.scope_complete),
         "wall_scope_reason_codes": list(wall_result.reason_codes),
+        "protected_face_source_id_count": len(protected_face_ids),
         "wall_candidate_count": len(wall_result.records),
         "equivalence_ambiguous_wall_count": 0 if equivalence is None else len(equivalence.ambiguous_wall_ids),
         "host_bound_count": sum(1 for trace in composition.opening_bindings if trace.host_wall_id),
