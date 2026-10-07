@@ -37,7 +37,11 @@ from pb_pdf_text_integrity_authority import (
 )
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_drawing_evidence_binding import DrawingViewType
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
+from pb_physical_opening_authority import (
+    JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+    PHYSICAL_OPENING_EXISTS,
+    PhysicalOpeningAuthority,
+)
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_RESOLVED,
     PhysicalScaleProducer,
@@ -700,6 +704,7 @@ def _filter_repeated_non_physical_drafting_primitives(
     *,
     page_width: float,
     page_height: float,
+    protected_source_primitive_ids: Sequence[str] = (),
 ) -> tuple[dict, ...]:
     """Exclude only source-proven dense singleton drafting motifs.
 
@@ -762,14 +767,30 @@ def _filter_repeated_non_physical_drafting_primitives(
     non_orthogonal_span = page_span * _REPEATED_MOTIF_NON_ORTHOGONAL_SPAN_FRACTION
     multi_angle_span = page_span * _REPEATED_MOTIF_MULTI_ANGLE_SPAN_FRACTION
 
+    protected_ids = {
+        str(value)
+        for value in protected_source_primitive_ids
+        if str(value)
+    }
+
     kept: list[dict] = []
     for segment in segments:
+        # A complete producer-owned G17 two-face opening is stronger physical
+        # evidence than the earlier generic annotation-mask sidecar. The mask
+        # sidecar is created before opening topology exists and can therefore
+        # only say that a fill rectangle looked text-associated at that stage.
+        # If G17 later proves one exact edge is an interrupted physical wall
+        # face, preserve that exact source primitive. This does not rescue the
+        # other rectangle edges, opening jambs, or unrelated repeated marks.
+        if str(segment.get("id") or "") in protected_ids:
+            kept.append(segment)
+            continue
         # A fill-only PDF rectangle is not automatically an annotation wipeout.
         # Filled rectangles can also be legitimate source-owned physical
         # geometry. Prune its synthetic rect_edge linework only when an
         # upstream producer has explicitly authenticated the rectangle as a
-        # text-associated annotation mask and proved it does not participate in
-        # a physical wall/object. Missing proof preserves the source geometry.
+        # text-associated annotation mask and no stronger physical-object proof
+        # exists for this exact source primitive.
         if _is_proven_annotation_mask_edge(segment):
             continue
         if id(segment) not in singleton_ids:
@@ -2046,6 +2067,129 @@ def _opening_raw_relation_sets(
     return relation_sets
 
 
+def _producer_opening_wall_face_source_ids(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    page_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+) -> frozenset[str]:
+    """Return exact source wall-face ids independently proven by G17 openings.
+
+    The repeated-motif filter is intentionally source-structural, but short
+    repeated wall returns at genuine openings can share the same geometry/style
+    signature as decorative singleton marks. G17 already proves a complete
+    jamb-bounded two-face interruption from six authenticated source
+    observations. Reuse only its two SAME wall-face pairs here so physical wall
+    evidence cannot be discarded before W4 identity exists.
+
+    No nearest geometry, opening label, schedule, scale, benchmark value, or
+    project-specific constant enters this protection.
+    """
+    visibility = source_producer.authority()
+    opening_authority = (
+        physical_opening_authority
+        if physical_opening_authority is not None
+        else PhysicalOpeningAuthority.from_source_visibility_producer(source_producer)
+    )
+
+    if resolved_visible_observations is None:
+        page_rows: list[tuple[str, object]] = []
+        for observation_id in published.visible_observation_ids:
+            resolved = visibility.resolve_visible(
+                ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=observation_id,
+                )
+            )
+            if (
+                resolved.status is EvidenceResolutionStatus.CORROBORATED
+                and resolved.observation is not None
+                and str(resolved.observation.page_id) == str(page_id)
+            ):
+                page_rows.append((observation_id, resolved.observation))
+    else:
+        page_rows = [
+            (str(observation_id), observation)
+            for observation_id, observation in resolved_visible_observations
+            if str(observation.page_id) == str(page_id)
+        ]
+
+    page_observation_by_id = {
+        observation_id: observation
+        for observation_id, observation in page_rows
+    }
+    proven_records: dict[str, object] = {}
+    for observation_id, _observation in page_rows:
+        result = opening_authority.prove_existence(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        existence = result.existence_record
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and result.proposition == PHYSICAL_OPENING_EXISTS
+            and existence is not None
+            and str(existence.page_id) == str(page_id)
+            and existence.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+        ):
+            proven_records[existence.record_id] = existence
+
+    protected: set[str] = set()
+    for existence in proven_records.values():
+        raw_lines: dict[str, Line] = {}
+        valid = True
+        for observation_id in existence.source_observation_ids:  # type: ignore[attr-defined]
+            observation = page_observation_by_id.get(str(observation_id))
+            if observation is None:
+                valid = False
+                break
+            ref = str(observation.source_primitive_ref or "")
+            if observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT:
+                prefix = "visible:segment:"
+                if not ref.startswith(prefix):
+                    valid = False
+                    break
+                raw_id = ref[len(prefix) :]
+            elif observation.observation_kind == RASTER_PDF_VISIBLE_SEGMENT:
+                prefix = "visible:"
+                if not ref.startswith(prefix):
+                    valid = False
+                    break
+                raw_id = ref[len(prefix) :]
+            else:
+                valid = False
+                break
+            geometry = _line(observation.geometry)
+            if not raw_id or geometry is None or raw_id in raw_lines:
+                valid = False
+                break
+            raw_lines[raw_id] = geometry
+        if not valid or len(raw_lines) != 6:
+            continue
+
+        relations = _opening_raw_relation_sets(raw_lines)
+        same_pairs = tuple(
+            pair
+            for pair, classifications in relations.items()
+            if classifications == {PhysicalEquivalenceClass.SAME_PHYSICAL_WALL}
+        )
+        face_ids = {raw_id for pair in same_pairs for raw_id in pair}
+        if len(same_pairs) == 2 and len(face_ids) == 4:
+            protected.update(face_ids)
+
+    return frozenset(protected)
+
+
 def _producer_opening_relation_overrides(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2733,10 +2877,18 @@ def _assemble_scope_result(
     authenticated_frame_edge_primitive_count: int = 0,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
+    protected_opening_wall_face_ids = _producer_opening_wall_face_source_ids(
+        source_producer=source_producer,
+        published=published,
+        page_id=page_id,
+        resolved_visible_observations=resolved_visible_observations,
+        physical_opening_authority=physical_opening_authority,
+    )
     topology_segments = _filter_repeated_non_physical_drafting_primitives(
         segments,
         page_width=page_width,
         page_height=page_height,
+        protected_source_primitive_ids=protected_opening_wall_face_ids,
     )
     if len(topology_segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
         return _blocked(
