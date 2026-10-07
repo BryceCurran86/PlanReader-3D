@@ -81,6 +81,7 @@ MULTIPLE_RASTER_SPLIT_CENTERLINE_HOSTS = (
     "multiple_authenticated_raster_split_centerline_hosts"
 )
 RASTER_SOURCE_PRIMITIVE_HOST_RESOLVED = "raster_source_primitive_host_resolved"
+RASTER_SOURCE_BAND_HOST_RESOLVED = "raster_source_band_host_resolved"
 MULTIPLE_RASTER_SOURCE_PRIMITIVE_HOSTS = (
     "multiple_authenticated_raster_source_primitive_hosts"
 )
@@ -586,6 +587,15 @@ class OpeningHostBindingProducer:
                             host_equivalence,
                             host_source_observation_ids,
                         )
+                        if (
+                            universe.scope_complete is True
+                            and band_resolution.status is EvidenceResolutionStatus.CORROBORATED
+                            and not band_resolution.bands
+                        ):
+                            band_resolution = _resolve_raster_source_band_host(
+                                self._opening, opening, host_records, geometry,
+                                host_equivalence, host_source_observation_ids,
+                            )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
                 *band_resolution.reason_codes,
@@ -593,7 +603,7 @@ class OpeningHostBindingProducer:
             )
         bands = band_resolution.bands
         if not bands:
-            return _blocked_binding("no_authenticated_host_wall_band")
+            return _blocked_binding("no_authenticated_host_wall_band", *band_resolution.reason_codes)
         if len(bands) != 1:
             return _blocked_binding(
                 "multiple_authenticated_host_wall_bands",
@@ -2668,6 +2678,171 @@ def _resolve_raster_source_primitive_host(
             opening_record,
             source_observation_ids,
         ),
+    )
+
+
+def _resolve_raster_source_band_host_from_records(
+    support: Sequence[SourceObservationRecord],
+    records: Sequence[PhysicalWallCandidateRecord],
+    opening: _OpeningGeometry,
+    equivalence: PhysicalWallEquivalenceResolution,
+    source_lines_by_primitive: Mapping[str, Sequence[float]],
+) -> _HostBandResolution:
+    """Map both producer-proven solid flanks to their local W4 source owners.
+
+    Separate raster primitives on opposite sides of a real interruption need
+    not share a primitive id. The positive relationship here is membership of
+    each exact source primitive and its own W4 chain in G17's sealed solid
+    flank, including its authenticated end. No global wall identity is inferred.
+    """
+    empty = _HostBandResolution(EvidenceResolutionStatus.CORROBORATED, ())
+    faces = [r for r in support if r.observation_kind == "raster_wall_band_face"]
+    ends = [r for r in support if r.observation_kind == "raster_wall_band_end"]
+    if len(faces) != 4 or len(ends) != 2:
+        return empty
+    by_interval: dict[tuple[float, float], list[float]] = {}
+    for face in faces:
+        line = _line(face)
+        data = None if line is None else _source_line_axis_data(line, opening)
+        if data is None:
+            return empty
+        lo, hi, offset = data
+        by_interval.setdefault((lo, hi), []).append(offset)
+    if len(by_interval) != 2 or any(len(v) != 2 for v in by_interval.values()):
+        return empty
+
+    flanks: dict[str, tuple[float, float, float, float, float]] = {}
+    pixel_tol = _RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+    snap_tol = DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
+    for (lo, hi), offsets in by_interval.items():
+        cross_lo, cross_hi = sorted(offsets)
+        if cross_hi - cross_lo <= _COORD_TOL:
+            return empty
+        if cross_lo > pixel_tol or cross_hi < -pixel_tol:
+            return empty
+        if lo < -pixel_tol and abs(hi) <= pixel_tol:
+            role, edge = "left", hi
+        elif hi > opening.length + pixel_tol and abs(lo - opening.length) <= pixel_tol:
+            role, edge = "right", lo
+        else:
+            return empty
+        matching_ends = []
+        for end in ends:
+            line = _line(end)
+            if line is None:
+                return empty
+            points = _endpoints(line)
+            along = tuple(_project(p, opening.origin, opening.axis) for p in points)
+            cross = sorted(_project(p, opening.origin, opening.normal) for p in points)
+            if (all(abs(v - edge) <= _COORD_TOL for v in along)
+                    and abs(cross[0] - cross_lo) <= _COORD_TOL
+                    and abs(cross[1] - cross_hi) <= _COORD_TOL):
+                matching_ends.append(end)
+        if len(matching_ends) != 1 or role in flanks:
+            return empty
+        flanks[role] = (lo, hi, cross_lo, cross_hi, edge)
+    if set(flanks) != {"left", "right"}:
+        return empty
+
+    selected: list[_RoleCandidate] = []
+    for role in ("left", "right"):
+        lo, hi, cross_lo, cross_hi, edge = flanks[role]
+        owners: list[tuple[float, PhysicalWallCandidateRecord]] = []
+        source_members = 0
+        for record in records:
+            identity = record.physical_identity
+            wall = record.wall_candidate
+            if (not identity.usable or not identity.candidate_identity_id or wall.is_curved
+                    or "non_simple_chain_topology_fallback_ordering" in wall.reason_codes):
+                continue
+            for primitive_id in identity.source_primitive_ids:
+                line = source_lines_by_primitive.get(str(primitive_id))
+                data = None if line is None else _source_line_axis_data(line, opening)
+                if data is None:
+                    continue
+                p_lo, p_hi, offset = data
+                endpoint = p_hi if role == "left" else p_lo
+                if (abs(endpoint - edge) > snap_tol
+                        or offset < cross_lo - pixel_tol or offset > cross_hi + pixel_tol
+                        or min(p_hi, hi) - max(p_lo, lo) <= pixel_tol):
+                    continue
+                source_members += 1
+                # Exact primitive ancestry alone does not select a remote W4
+                # fragment of a longer source line. Its own chain must reach
+                # this authenticated flank end inside the same source band.
+                locally_owned = False
+                points = wall.centerline_pts
+                for start, end in zip(points, points[1:]):
+                    local = _source_line_axis_data((*start, *end), opening)
+                    if local is None:
+                        continue
+                    s_lo, s_hi, s_offset = local
+                    s_edge = s_hi if role == "left" else s_lo
+                    if (abs(s_edge - edge) <= snap_tol
+                            and cross_lo - snap_tol <= s_offset <= cross_hi + snap_tol
+                            and min(s_hi, p_hi, hi) - max(s_lo, p_lo, lo) > pixel_tol):
+                        locally_owned = True
+                        break
+                if locally_owned:
+                    owners.append((offset, record))
+                    break
+        if not owners:
+            reason = (
+                f"raster_source_band_{role}_local_wall_owner_unmapped"
+                if source_members else f"raster_source_band_{role}_source_primitive_unmapped"
+            )
+            return _HostBandResolution(EvidenceResolutionStatus.CORROBORATED, (), (reason,))
+        status, normalized, reasons = _normalize_role_candidates(
+            owners, equivalence, cross_hi - cross_lo + 2.0 * pixel_tol,
+        )
+        if status is not EvidenceResolutionStatus.CORROBORATED:
+            return _HostBandResolution(status, (), reasons)
+        if len(normalized) != 1:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT, (),
+                ("multiple_authenticated_raster_source_band_hosts",),
+            )
+        selected.append(normalized[0])
+    ids = tuple(sorted({item.record.wall_candidate_id for item in selected}))
+    if len(ids) != 2:
+        return empty
+    return _HostBandResolution(
+        EvidenceResolutionStatus.CORROBORATED,
+        (_HostBand(
+            member_ids=ids,
+            member_candidate_identity_ids=tuple(sorted(
+                item.record.physical_identity.candidate_identity_id for item in selected
+            )),
+            member_equivalence_groups=tuple(sorted({item.candidate_group for item in selected})),
+            center_offset=sum(item.offset for item in selected) / 2.0,
+        ),),
+        (RASTER_SOURCE_BAND_HOST_RESOLVED,),
+    )
+
+
+def _resolve_raster_source_band_host(
+    authority: PhysicalOpeningAuthority,
+    opening_record: PhysicalOpeningExistenceRecord,
+    records: Sequence[PhysicalWallCandidateRecord],
+    opening: _OpeningGeometry,
+    equivalence: PhysicalWallEquivalenceResolution,
+    source_observation_ids: Sequence[str],
+) -> _HostBandResolution:
+    visibility = authority.source_visibility_authority()
+    support = []
+    for observation_id in opening_record.source_observation_ids:
+        result = visibility.resolve_raster_opening_primitive(ObservationSelector(
+            document_id=opening_record.document_id, revision_id=opening_record.revision_id,
+            source_sha256=opening_record.source_sha256, snapshot_id=opening_record.snapshot_id,
+            observation_id=observation_id,
+        ))
+        if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+            return _HostBandResolution(EvidenceResolutionStatus.ABSTAINED, (),
+                ("raster_source_band_support_unavailable",))
+        support.append(result.observation)
+    return _resolve_raster_source_band_host_from_records(
+        support, records, opening, equivalence,
+        _authenticated_raster_source_lines(authority, opening_record, source_observation_ids),
     )
 
 

@@ -23,6 +23,8 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_pdf_text_integrity_authority import PdfTextIntegrityAuthority
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
     PhysicalOpeningExistenceRecord,
 )
@@ -388,15 +390,26 @@ class OpeningDimensionAuthority:
     ) -> tuple[SourceObservationRecord, ...]:
         records: list[SourceObservationRecord] = []
         for observation_id in existence.source_observation_ids:
-            result = self._visibility.resolve_visible(
-                ObservationSelector(
+            selector = ObservationSelector(
                     document_id=existence.document_id,
                     revision_id=existence.revision_id,
                     source_sha256=existence.source_sha256,
                     snapshot_id=existence.snapshot_id,
                     observation_id=observation_id,
                 )
-            )
+            result = self._visibility.resolve_visible(selector)
+            if (
+                result.status is EvidenceResolutionStatus.ABSTAINED
+                and existence.structural_pattern in {
+                    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+                    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+                }
+            ):
+                # Isolated raster-opening receipts have their own sealed
+                # namespace. Re-reading those exact support IDs establishes
+                # source availability only; jamb/witness/axis/text authority
+                # below is still required before a width can publish.
+                result = self._visibility.resolve_raster_opening_primitive(selector)
             if (
                 result.status is EvidenceResolutionStatus.CORROBORATED
                 and result.observation is not None
