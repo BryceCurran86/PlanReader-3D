@@ -116,8 +116,9 @@ def _source_defined_alpha_code(value: Any) -> str:
     )
     if not semantic:
         return ""
-    if code == "GRID" and semantic != "ceiling_grid":
-        return ""
+    # The source description owns the semantic family.  Never impose a
+    # global meaning from an alphabetic token (for example, GRID may describe
+    # a tile product in one project's authenticated schedule).
     return code
 
 
