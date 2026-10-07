@@ -1,0 +1,237 @@
+name: DIAG GPT2 Maryborough Room Label Rejection Census
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace label rejection stages
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-room-label-rejection-census
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          import pb_source_room_label_authority as labels
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          TARGETS={
+              "M-AMB","F-AMB","WASH UP","DRY STORE",
+              "FOOD SERVICE","POS COUNTER","TRUCK DRIVER LOUNGE",
+          }
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-room-label-rejection-census",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-room-label-rejection-census",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          live=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          wall_auth=live.physical_wall_candidate_authority
+          selectors=wall_auth.selectors_for_authenticated_viewports(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          assert len(selectors)==1, [s.decision_scope_id for s in selectors]
+          selector=selectors[0]
+          room_auth=build_source_room_face_authority(wall_auth)
+          room_scope=room_auth.resolve_scope(SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          ))
+          producer=labels.SourceRoomLabelProducer.from_authorities(
+              source,room_auth,page_ids=("7",)
+          )
+          label_result=producer.authority().resolve_scope(
+              labels.SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              )
+          )
+
+          text_auth=source.text_integrity_authority()
+          words=[]
+          for observation_id in published.text_observation_ids:
+              native=text_auth.resolve_text(ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=observation_id,
+              ))
+              receipt=native.receipt
+              if (
+                  receipt is None
+                  or str(receipt.page_id)!="7"
+                  or receipt.block_no is None
+                  or receipt.line_no is None
+                  or receipt.word_no is None
+              ):
+                  continue
+              geometry=tuple(float(v) for v in receipt.geometry)
+              words.append(labels._Word(
+                  observation_id=observation_id,
+                  receipt_id=receipt.receipt_id,
+                  source_partition_id=str(receipt.source_partition_id),
+                  raw_text=str(receipt.raw_text or ""),
+                  geometry=geometry,
+                  block_no=int(receipt.block_no),
+                  line_no=int(receipt.line_no),
+                  word_no=int(receipt.word_no),
+              ))
+
+          rows=[]
+          for line in labels._line_groups(words):
+              raw=" ".join(w.raw_text.strip() for w in line if w.raw_text.strip())
+              if norm(raw) not in TARGETS:
+                  continue
+              semantic=labels._normalized_room_line(raw)
+              per_word=[]
+              evidence=[]
+              unresolved=False
+              for word in line:
+                  native=text_auth.resolve_text(ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=word.observation_id,
+                  ))
+                  authorized=producer._authorize_word(published,word)
+                  if authorized is None:
+                      unresolved=True
+                  else:
+                      evidence.append(authorized)
+                  per_word.append({
+                      "raw_text":word.raw_text,
+                      "observation_id":word.observation_id,
+                      "receipt_id":word.receipt_id,
+                      "bbox":list(word.geometry),
+                      "native_status":getattr(native.status,"value",str(native.status)),
+                      "native_reasons":list(native.reason_codes),
+                      "trusted_text":native.trusted_text,
+                      "authorized":authorized is not None,
+                      "authority_kind":None if authorized is None else authorized.authority_kind,
+                  })
+              fallback=None
+              final_evidence=evidence
+              if unresolved:
+                  candidate_fallback=producer._authorize_line_fallback(
+                      published,line,raw
+                  )
+                  if candidate_fallback is not None:
+                      fallback=[
+                          {
+                              "trusted_text":e.trusted_text,
+                              "authority_kind":e.authority_kind,
+                              "authority_record_id":e.authority_record_id,
+                          }
+                          for e in candidate_fallback
+                      ]
+                      final_evidence=list(candidate_fallback)
+
+              word_face_matches=[]
+              if semantic is not None and len(final_evidence)==len(line):
+                  for item in final_evidence:
+                      x0,y0,x1,y1=item.geometry
+                      point=((x0+x1)/2.0,(y0+y1)/2.0)
+                      matches=[
+                          rec.face_id for rec in room_scope.records
+                          if labels._point_in_polygon(point,rec.polygon_pdf_pts)
+                      ]
+                      word_face_matches.append({
+                          "trusted_text":item.trusted_text,
+                          "centre":[point[0],point[1]],
+                          "face_matches":matches,
+                      })
+              rows.append({
+                  "raw_line":raw,
+                  "normalized_target":norm(raw),
+                  "semantic_candidate":semantic,
+                  "block_no":line[0].block_no,
+                  "line_no":line[0].line_no,
+                  "word_count":len(line),
+                  "per_word":per_word,
+                  "line_fallback":fallback,
+                  "word_face_matches":word_face_matches,
+                  "distinct_face_ids":sorted({
+                      face
+                      for row in word_face_matches
+                      for face in row["face_matches"]
+                      if len(row["face_matches"])==1
+                  }),
+              })
+
+          print(json.dumps({
+              "viewport_scope":selector.decision_scope_id,
+              "room_status":getattr(room_scope.status,"value",str(room_scope.status)),
+              "room_reason_codes":list(room_scope.reason_codes),
+              "room_record_count":len(room_scope.records),
+              "label_status":getattr(label_result.status,"value",str(label_result.status)),
+              "label_reason_codes":list(label_result.reason_codes),
+              "published_labels":sorted(norm(r.label) for r in label_result.records),
+              "split_candidates":[
+                  {
+                      "label":norm(c.label),
+                      "record_id":c.record_id,
+                      "word_face_ids":list(c.word_face_ids),
+                      "source_room_face_record_ids":list(c.source_room_face_record_ids),
+                      "source_bbox":list(c.source_bbox),
+                  }
+                  for c in label_result.split_face_candidates
+                  if norm(c.label) in TARGETS
+              ],
+              "target_lines":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-room-label-rejection-census
+          path: artifacts/gpt2-room-label-rejection-census
+          retention-days: 2
