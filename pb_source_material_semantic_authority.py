@@ -883,6 +883,329 @@ def _recover_admissible_viewport_lines(
     )
 
 
+
+
+def _native_block_line_rows(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[
+    tuple[str, tuple[str, ...], tuple[float, float, float, float]], ...
+]:
+    by_line: dict[int, list[_TrustedTextWord]] = {}
+    for word in words:
+        by_line.setdefault(int(word.line_no), []).append(word)
+    rows = []
+    for line_no in sorted(by_line):
+        line_words = sorted(
+            by_line[line_no],
+            key=lambda row: (row.word_no, row.bbox[0], row.observation_id),
+        )
+        word_numbers = [int(row.word_no) for row in line_words]
+        if (
+            not word_numbers
+            or len(set(word_numbers)) != len(word_numbers)
+            or word_numbers
+            != list(range(word_numbers[0], word_numbers[-1] + 1))
+        ):
+            return ()
+        text = " ".join(
+            row.text.strip() for row in line_words if row.text.strip()
+        ).strip()
+        if not text:
+            return ()
+        rows.append(
+            (
+                text,
+                tuple(row.observation_id for row in line_words),
+                (
+                    min(row.bbox[0] for row in line_words),
+                    min(row.bbox[1] for row in line_words),
+                    max(row.bbox[2] for row in line_words),
+                    max(row.bbox[3] for row in line_words),
+                ),
+            )
+        )
+    return tuple(rows)
+
+
+def _material_definition_candidate(
+    words: Sequence[_TrustedTextWord],
+) -> Optional[tuple[str, dict[str, object]]]:
+    """Recognise one code-cell + semantic-description native block.
+
+    This function only identifies a block worth authenticating.  Publication
+    still requires every word in the block to clear source-text integrity.
+    """
+
+    lines = _native_block_line_rows(words)
+    if not lines:
+        return None
+    combined = " ".join(row[0] for row in lines).strip()
+    if not combined:
+        return None
+
+    parsed = parse_schedule_text(
+        combined,
+        page_id=int(words[0].page_id) if words else 0,
+        page_label=f"page:{words[0].page_id}" if words else "",
+    )
+    candidates = []
+    for item in parsed:
+        code = str(item.get("code") or "").strip().upper()
+        if not code:
+            continue
+        entry = {
+            "status": "Confirmed",
+            "code": code,
+            "description": str(item.get("description") or ""),
+            "substrate": str(item.get("substrate") or ""),
+            "finish": str(item.get("finish") or ""),
+        }
+        if semantic_finish_from_schedule_entry(entry):
+            candidates.append((code, dict(item)))
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def _raw_material_definition_candidates(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[
+    tuple[str, int, tuple[_TrustedTextWord, ...], str, dict[str, object]], ...
+]:
+    grouped: dict[tuple[str, int], list[_TrustedTextWord]] = {}
+    for word in words:
+        if not word.source_partition_id:
+            continue
+        grouped.setdefault(
+            (word.source_partition_id, int(word.block_no)),
+            [],
+        ).append(word)
+
+    out = []
+    for (partition_id, block_no), block_words in sorted(grouped.items()):
+        ordered = tuple(
+            sorted(
+                block_words,
+                key=lambda row: (
+                    row.line_no,
+                    row.word_no,
+                    row.bbox[0],
+                    row.observation_id,
+                ),
+            )
+        )
+        candidate = _material_definition_candidate(ordered)
+        if candidate is None:
+            continue
+        code, item = candidate
+        out.append((partition_id, block_no, ordered, code, item))
+    return tuple(out)
+
+
+def _native_block_bbox(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[float, float, float, float]:
+    return (
+        min(word.bbox[0] for word in words),
+        min(word.bbox[1] for word in words),
+        max(word.bbox[2] for word in words),
+        max(word.bbox[3] for word in words),
+    )
+
+
+def _recover_native_material_block(
+    *,
+    source: SourceVisibilityProducer,
+    published: object,
+    raster: RasterTextCorroborationProducer,
+    block_words: Sequence[_TrustedTextWord],
+) -> tuple[_TrustedTextWord, ...]:
+    if not block_words:
+        return ()
+    bbox = _native_block_bbox(block_words)
+    try:
+        page_number = int(block_words[0].page_id)
+    except (TypeError, ValueError):
+        return ()
+    viewport = SegmentedViewport(
+        view_id=f"native_material_block:{block_words[0].source_partition_id}:{block_words[0].block_no}",
+        page_number=page_number,
+        view_type=DrawingViewType.SCHEDULE.value,
+        label="NATIVE MATERIAL DEFINITION BLOCK",
+        title_bbox=bbox,
+        bounding_box=bbox,
+        status=ViewportSegmentationStatus.RESOLVED.value,
+        boundary_source="native_text_block",
+        confidence=1.0,
+    )
+    recovered = _recover_admissible_viewport_words(
+        source=source,
+        published=published,
+        raster=raster,
+        words=block_words,
+        viewport=viewport,
+    )
+    return _recover_admissible_viewport_lines(
+        source=source,
+        published=published,
+        raster=raster,
+        words=recovered,
+        viewport=viewport,
+    )
+
+
+def _trusted_native_material_schedule_cluster_blocks(
+    *,
+    source: SourceVisibilityProducer,
+    published: object,
+    raster: RasterTextCorroborationProducer,
+    words: Sequence[_TrustedTextWord],
+) -> tuple[tuple[_TrustedScheduleBlock, ...], tuple[str, ...]]:
+    """Authenticate split native material-definition rows under one schedule title.
+
+    CAD exports often store the schedule title and each code/description row in
+    separate native text blocks.  The older fallback required title + rows in
+    one block, which cannot represent that source structure.  This route stays
+    fail-closed: exactly one material-schedule title must authenticate, at least
+    two semantic definition-row blocks must exist, the title and row cluster
+    must overlap on one native axis, and each published row must independently
+    authenticate every source word.
+    """
+
+    grouped: dict[tuple[str, int], tuple[_TrustedTextWord, ...]] = {}
+    for word in words:
+        if not word.source_partition_id:
+            continue
+        key = (word.source_partition_id, int(word.block_no))
+        grouped[key] = tuple(
+            sorted(
+                (*grouped.get(key, ()), word),
+                key=lambda row: (
+                    row.line_no,
+                    row.word_no,
+                    row.bbox[0],
+                    row.observation_id,
+                ),
+            )
+        )
+
+    trusted_titles: list[tuple[tuple[float, float, float, float], tuple[str, ...]]] = []
+    for block_words in grouped.values():
+        raw_text = " ".join(row[0] for row in _native_block_line_rows(block_words))
+        if not _is_material_schedule_title(raw_text):
+            continue
+        recovered = _recover_native_material_block(
+            source=source,
+            published=published,
+            raster=raster,
+            block_words=block_words,
+        )
+        if not recovered or any(not word.trusted for word in recovered):
+            continue
+        recovered_text = " ".join(
+            row[0] for row in _native_block_line_rows(recovered)
+        )
+        if not _is_material_schedule_title(recovered_text):
+            continue
+        trusted_titles.append(
+            (
+                _native_block_bbox(recovered),
+                tuple(word.observation_id for word in recovered),
+            )
+        )
+
+    candidates = _raw_material_definition_candidates(words)
+    # This independent route only exists for a genuine multi-row split
+    # schedule cluster. Ordinary one-row schedules continue through the
+    # established viewport path and must not be poisoned by cluster detection.
+    if len(trusted_titles) != 1 or len(candidates) < 2:
+        return (), ()
+
+    title_bbox, title_ids = trusted_titles[0]
+    row_bbox = (
+        min(_native_block_bbox(row[2])[0] for row in candidates),
+        min(_native_block_bbox(row[2])[1] for row in candidates),
+        max(_native_block_bbox(row[2])[2] for row in candidates),
+        max(_native_block_bbox(row[2])[3] for row in candidates),
+    )
+    overlap_x = min(title_bbox[2], row_bbox[2]) - max(title_bbox[0], row_bbox[0])
+    overlap_y = min(title_bbox[3], row_bbox[3]) - max(title_bbox[1], row_bbox[1])
+    if overlap_x <= 0.0 and overlap_y <= 0.0:
+        return (), tuple(sorted({row[3] for row in candidates}))
+
+    blocks: list[_TrustedScheduleBlock] = []
+    blocked_codes: set[str] = set()
+    for partition_id, block_no, block_words, raw_code, _raw_item in candidates:
+        recovered = _recover_native_material_block(
+            source=source,
+            published=published,
+            raster=raster,
+            block_words=block_words,
+        )
+        if not recovered or any(not word.trusted for word in recovered):
+            blocked_codes.add(raw_code)
+            continue
+        candidate = _material_definition_candidate(recovered)
+        if candidate is None or candidate[0] != raw_code:
+            blocked_codes.add(raw_code)
+            continue
+        code, item = candidate
+        combined_line = f"{code} {str(item.get('description') or '').strip()}".strip()
+        observation_ids = tuple(word.observation_id for word in recovered)
+        page_ids = {word.page_id for word in recovered}
+        partitions = {word.source_partition_id for word in recovered}
+        if len(page_ids) != 1 or partitions != {partition_id}:
+            blocked_codes.add(raw_code)
+            continue
+        page_id = next(iter(page_ids))
+        scope_id = stable_contract_id(
+            "source_material_native_schedule_cluster_row",
+            {
+                "page_id": page_id,
+                "source_partition_id": partition_id,
+                "block_no": block_no,
+                "code": code,
+                "title_observation_ids": title_ids,
+                "row_observation_ids": observation_ids,
+            },
+            digest_chars=32,
+        )
+        blocks.append(
+            _TrustedScheduleBlock(
+                page_id=page_id,
+                source_partition_id=partition_id,
+                block_no=block_no,
+                scope_id=scope_id,
+                text=combined_line,
+                line_evidence=MappingProxyType(
+                    {combined_line: observation_ids}
+                ),
+            )
+        )
+
+    if len(blocks) < 2:
+        blocked_codes.update(row[3] for row in candidates)
+        return (), tuple(sorted(blocked_codes))
+    return tuple(blocks), tuple(sorted(blocked_codes))
+
+
+def _material_candidate_codes_with_untrusted_words(
+    words: Sequence[_TrustedTextWord],
+    viewport: SegmentedViewport,
+) -> tuple[str, ...]:
+    if viewport.bounding_box is None:
+        return ()
+    scoped = tuple(
+        word
+        for word in words
+        if _bbox_fully_inside(word.bbox, viewport.bounding_box)
+    )
+    blocked = set()
+    for _partition, _block_no, block_words, code, _item in _raw_material_definition_candidates(scoped):
+        if any(not word.trusted for word in block_words):
+            blocked.add(code)
+    return tuple(sorted(blocked))
+
 def _trusted_lines_for_viewport(
     words: Sequence[_TrustedTextWord],
     viewport: SegmentedViewport,
@@ -1096,6 +1419,7 @@ class SourceMaterialSemanticProducer:
         ] = []
         schedule_universe_complete = True
         schedule_universe_reasons: list[str] = []
+        incomplete_definition_codes: set[str] = set()
         trusted_words = _trusted_words_by_page(
             self._source,
             published,
@@ -1110,14 +1434,31 @@ class SourceMaterialSemanticProducer:
                 page = pdf.load_page(page_number - 1)
                 page_words = trusted_words.get(str(page_number), ())
 
-                # A native source text block headed by a qualified material
-                # schedule title is independently usable for definitions even
-                # when competing outer vector frames leave the schedule
-                # viewport ambiguous. No drawing occurrence is minted from this
-                # route; it owns schedule semantics only.
-                for schedule_block in _trusted_native_material_schedule_blocks(
-                    page_words
-                ):
+                # Native source text can own schedule semantics either when
+                # title + rows live in one block or when an independently
+                # authenticated CAD export stores one schedule title plus a
+                # strict cluster of split code/description row blocks.
+                cluster_blocks, cluster_blocked_codes = (
+                    _trusted_native_material_schedule_cluster_blocks(
+                        source=self._source,
+                        published=published,
+                        raster=raster,
+                        words=page_words,
+                    )
+                )
+                incomplete_definition_codes.update(cluster_blocked_codes)
+                native_schedule_by_id = {
+                    schedule_block.scope_id: schedule_block
+                    for schedule_block in (
+                        *_trusted_native_material_schedule_blocks(page_words),
+                        *cluster_blocks,
+                    )
+                }
+                native_schedule_blocks = tuple(
+                    native_schedule_by_id[key]
+                    for key in sorted(native_schedule_by_id)
+                )
+                for schedule_block in native_schedule_blocks:
                     line_evidence = dict(schedule_block.line_evidence)
                     for item in parse_schedule_text(
                         schedule_block.text,
@@ -1198,6 +1539,12 @@ class SourceMaterialSemanticProducer:
                                 schedule_universe_reasons.append(
                                     "schedule_viewport_has_no_trusted_text"
                                 )
+                            incomplete_definition_codes.update(
+                                _material_candidate_codes_with_untrusted_words(
+                                    scoped_words,
+                                    viewport,
+                                )
+                            )
                             continue
                         text = "\n".join(line[0] for line in lines)
                         line_evidence = {
@@ -1246,6 +1593,7 @@ class SourceMaterialSemanticProducer:
                             (page_number, viewport, scoped_words)
                         )
 
+            blocked_reasons: tuple[str, ...] = ()
             if not schedule_universe_complete:
                 blocked_reasons = tuple(
                     dict.fromkeys(
@@ -1259,6 +1607,10 @@ class SourceMaterialSemanticProducer:
                         )
                     )
                 )
+                # Preserve a fail-closed answer for codes that have no exact
+                # authenticated definition result, without letting unrelated
+                # unreadable schedule text erase independently authenticated
+                # code rows.
                 self._definition_scope_blockers[
                     (
                         lineage["document_id"],
@@ -1267,31 +1619,22 @@ class SourceMaterialSemanticProducer:
                         lineage["snapshot_id"],
                     )
                 ] = blocked_reasons
-                for code in sorted(raw_definitions):
-                    selector = SourceMaterialDefinitionSelector(
-                        **lineage,
-                        code=code,
-                    )
-                    self._definition_results[selector.key] = _definition_blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        *blocked_reasons,
-                    )
-                for page_number, viewport, _page_words in drawing_viewports:
-                    scope_selector = SourceMaterialOccurrenceSelector(
-                        **lineage,
-                        page_id=str(page_number),
-                        viewport_id=viewport.view_id,
-                    )
-                    self._occurrence_results[scope_selector.key] = _scope_blocked(
-                        EvidenceResolutionStatus.ABSTAINED,
-                        SOURCE_MATERIAL_SCOPE_UNAVAILABLE,
-                        *blocked_reasons,
-                    )
-                self._published_revisions.add(revision_id)
-                return self.authority()
 
             confirmed_dictionary: dict[str, dict[str, object]] = {}
+            blocked_definition_codes: set[str] = set(incomplete_definition_codes)
             for code, items in sorted(raw_definitions.items()):
+                selector = SourceMaterialDefinitionSelector(
+                    **lineage,
+                    code=code,
+                )
+                if code in incomplete_definition_codes:
+                    blocked_definition_codes.add(code)
+                    self._definition_results[selector.key] = _definition_blocked(
+                        EvidenceResolutionStatus.ABSTAINED,
+                        SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED,
+                        *blocked_reasons,
+                    )
+                    continue
                 representative = items[0]
                 conflicting = [
                     item
@@ -1319,10 +1662,6 @@ class SourceMaterialSemanticProducer:
                         or len(finish_names) > 1
                     )
                     else EvidenceResolutionStatus.CORROBORATED
-                )
-                selector = SourceMaterialDefinitionSelector(
-                    **lineage,
-                    code=code,
                 )
                 if status is EvidenceResolutionStatus.CONFLICT:
                     self._definition_results[selector.key] = _definition_blocked(
@@ -1438,6 +1777,21 @@ class SourceMaterialSemanticProducer:
                         *text_reasons,
                     )
                     continue
+                if blocked_definition_codes:
+                    blocked_lookup = {
+                        code: {}
+                        for code in blocked_definition_codes
+                    }
+                    if any(
+                        _defined_codes_in_text(raw_text, blocked_lookup)
+                        for raw_text, _bbox, _ids in lines
+                    ):
+                        self._occurrence_results[scope_selector.key] = _scope_blocked(
+                            EvidenceResolutionStatus.ABSTAINED,
+                            SOURCE_MATERIAL_SCOPE_UNAVAILABLE,
+                            *blocked_reasons,
+                        )
+                        continue
                 for raw_text, bbox, text_observation_ids in lines:
                     for code in _defined_codes_in_text(raw_text, dictionary_for_scan):
                         entry = confirmed_dictionary.get(code)
