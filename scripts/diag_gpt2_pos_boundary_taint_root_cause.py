@@ -142,6 +142,18 @@ wall_by_id = {str(r.wall_candidate_id): r for r in wall_scope.records}
 ownership_by_face = {
     str(f.face_id): f for f in room_scope.ownership_evaluation.unresolved_faces
 }
+equivalence = wall_scope.equivalence
+pair_lookup = {}
+groups_by_wall = {}
+if equivalence is not None:
+    pair_lookup = {
+        (min(str(left), str(right)), max(str(left), str(right))): str(classification)
+        for left, right, classification in equivalence.pair_classifications
+    }
+    for group in equivalence.equivalence_groups:
+        normalized = tuple(str(v) for v in group)
+        for wall_id in normalized:
+            groups_by_wall.setdefault(wall_id, []).append(list(normalized))
 
 face_rows = []
 for face_id, row in sorted(touching.items()):
@@ -174,6 +186,75 @@ for face_id, row in sorted(touching.items()):
                 else list(record.physical_identity.source_primitive_ids),
             }
         )
+    competing_rows = []
+    competing_ids = [] if ownership is None else list(ownership.competing_wall_ids)
+    for wall_id in competing_ids:
+        record = wall_by_id.get(str(wall_id))
+        competing_rows.append(
+            {
+                "wall_id": str(wall_id),
+                "centerline_pts": []
+                if record is None
+                else [list(p) for p in record.wall_candidate.centerline_pts],
+                "source_primitive_ids": []
+                if record is None
+                else list(record.physical_identity.source_primitive_ids),
+                "candidate_identity_id": None
+                if record is None
+                else record.physical_identity.candidate_identity_id,
+                "path_fingerprint": None
+                if record is None
+                else list(record.physical_identity.path_fingerprint or ()),
+                "edge_ids": []
+                if record is None
+                else list(record.physical_identity.edge_ids),
+                "identity_status": None
+                if record is None
+                else getattr(
+                    record.physical_identity.status,
+                    "value",
+                    str(record.physical_identity.status),
+                ),
+                "is_representative": False
+                if equivalence is None
+                else str(wall_id) in set(equivalence.representative_wall_ids),
+                "is_abstained": False
+                if equivalence is None
+                else str(wall_id) in set(equivalence.abstained_wall_ids),
+                "is_ambiguous": False
+                if equivalence is None
+                else str(wall_id) in set(equivalence.ambiguous_wall_ids),
+                "equivalence_groups": groups_by_wall.get(str(wall_id), []),
+            }
+        )
+    competing_pairs = []
+    for index, left in enumerate(competing_ids):
+        for right in competing_ids[index + 1 :]:
+            key = (min(str(left), str(right)), max(str(left), str(right)))
+            competing_pairs.append(
+                {
+                    "left": str(left),
+                    "right": str(right),
+                    "classification": pair_lookup.get(key),
+                    "same_equivalence_group": bool(
+                        set(groups_by_wall.get(str(left), [])[0])
+                        & {str(right)}
+                    )
+                    if groups_by_wall.get(str(left))
+                    else False,
+                    "shared_source_primitive_ids": []
+                    if wall_by_id.get(str(left)) is None
+                    or wall_by_id.get(str(right)) is None
+                    else sorted(
+                        set(
+                            wall_by_id[str(left)].physical_identity.source_primitive_ids
+                        )
+                        & set(
+                            wall_by_id[str(right)].physical_identity.source_primitive_ids
+                        )
+                    ),
+                }
+            )
     face_rows.append(
         {
             "face_id": face_id,
@@ -187,6 +268,8 @@ for face_id, row in sorted(touching.items()):
             "ownership_competing_wall_ids": []
             if ownership is None
             else list(ownership.competing_wall_ids),
+            "ownership_competing_walls": competing_rows,
+            "ownership_competing_pairs": competing_pairs,
             "boundary_tainted_wall_count": len(face_tainted_walls),
             "boundary_tainted_walls": wall_rows,
             "excluded_boundary_primitive_touch_count": len(excluded_touching),
