@@ -356,7 +356,7 @@ def test_split_native_ceiling_schedule_rows_survive_misbound_outer_viewport(
     )
     schedule_page.insert_text(
         (25.0, 125.0),
-        "GRID\nVINYL FACED PLASTER TILE 600x1200",
+        "GRID\nSUSPENDED CEILING GRID SYSTEM",
         fontsize=10,
     )
     drawing_page = doc.new_page(width=300.0, height=220.0)
