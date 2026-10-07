@@ -3,7 +3,7 @@ name: DIAG GPTMAX Lot16 Swing Kind Area Real Proof
 on:
   pull_request:
     branches:
-      - fix/gptmax-raster-swing-kind-v1
+      - fix/gptmax-raster-swing-production-current-main-v1
 
 jobs:
   diagnose:
