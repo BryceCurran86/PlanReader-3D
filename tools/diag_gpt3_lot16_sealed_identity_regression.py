@@ -61,7 +61,7 @@ def main() -> None:
         producer_version="1",
     )
     published=source.ingest_native_pdf_bytes(
-        document_id="diag-gpt3-lot16-sealed-identity-regression",
+        document_id=f"live-source:{sha[:32]}",
         source_bytes=source_bytes,
         source_locator=str(PDF),
         page_ids=all_page_ids,
