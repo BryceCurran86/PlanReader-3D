@@ -3,7 +3,7 @@ name: DIAG GPTMAX Lot16 Swing Bundle Real Proof
 on:
   pull_request:
     branches:
-      - fix/gptmax-raster-swing-leaf-bundle-v1
+      - fix/gptmax-raster-swing-live-bridge-v1
 
 jobs:
   diagnose:
