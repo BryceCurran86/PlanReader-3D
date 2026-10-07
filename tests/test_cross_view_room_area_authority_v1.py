@@ -368,6 +368,27 @@ def test_exact_coincident_source_witnesses_preserve_all_provenance_without_ambig
     assert result.records[0].area_evidence.normalized_value == 8.64
 
 
+def test_explicit_support_page_scope_excludes_other_decoded_pages():
+    source, rooms = _source_and_room()
+
+    excluded = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+        support_page_ids=("1",),
+    ).publish()
+    assert excluded.records == ()
+    assert excluded.unresolved_physical_room_ids == ("physical-room-1",)
+
+    included = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+        support_page_ids=("2",),
+    ).publish()
+    assert included.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(included.records) == 1
+    assert included.records[0].source_dimension_page_id == "2"
+
+
 def test_scoped_ingest_preserves_one_based_measurement_page_identity():
     source, rooms = _source_and_room(page_ids=("2",))
     result = CrossViewRoomAreaProducer.from_source(
