@@ -1352,6 +1352,7 @@ class CrossViewRoomAreaProducer:
         *,
         source: SourceVisibilityProducer,
         rooms: LiveCanonicalRoomComposition,
+        support_page_ids: Optional[Sequence[str]] = None,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -1362,6 +1363,15 @@ class CrossViewRoomAreaProducer:
             raise TypeError("rooms must be exact LiveCanonicalRoomComposition")
         self._source = source
         self._rooms = rooms
+        self._support_page_ids = (
+            None
+            if support_page_ids is None
+            else frozenset(
+                str(value).strip()
+                for value in support_page_ids
+                if str(value).strip()
+            )
+        )
 
     @classmethod
     def from_source(
@@ -1369,10 +1379,12 @@ class CrossViewRoomAreaProducer:
         *,
         source: SourceVisibilityProducer,
         rooms: LiveCanonicalRoomComposition,
+        support_page_ids: Optional[Sequence[str]] = None,
     ) -> "CrossViewRoomAreaProducer":
         return cls(
             source=source,
             rooms=rooms,
+            support_page_ids=support_page_ids,
             _seal=_PRODUCER_SEAL,
         )
 
@@ -1450,6 +1462,11 @@ class CrossViewRoomAreaProducer:
         page_annotation_lines: dict[str, tuple[_TrustedLine, ...]] = {}
         for page_number in tuple(published.coverage.decoded_pages):
             page_id = str(int(page_number))
+            if (
+                self._support_page_ids is not None
+                and page_id not in self._support_page_ids
+            ):
+                continue
             trusted_lines = _trusted_lines_for_page(
                 self._source,
                 revision_id=revision_id,
