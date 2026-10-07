@@ -342,6 +342,75 @@ def test_source_defined_alphabetic_ceiling_codes_require_semantic_schedule_rows(
     ]
 
 
+def test_split_native_material_rows_survive_unrelated_untrusted_schedule_text(
+    monkeypatch,
+) -> None:
+    source, published = _source(
+        _pdf(
+            (
+                "CEILING FINISHES SCHEDULE",
+                "FPB Flush plasterboard ceiling lining",
+                "GRID Vinyl faced plaster tile 600x1200",
+                "UNRELATED NOTE",
+            ),
+            (
+                "REFLECTED CEILING PLAN",
+                "CEILING FINISH FPB",
+                "CEILING FINISH GRID",
+            ),
+        )
+    )
+    _patch_viewports(
+        monkeypatch,
+        {1: "schedule", 2: "reflected_ceiling_plan"},
+    )
+    real = source.text_integrity_authority()
+
+    class _BlockOnlyUnrelatedNote:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            if (
+                result.receipt is not None
+                and str(result.receipt.page_id) == "1"
+                and result.trusted_text == "UNRELATED"
+            ):
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    trusted_text=None,
+                    reason_codes=("forced_untrusted_unrelated_note",),
+                    receipt=result.receipt,
+                )
+            return result
+
+    monkeypatch.setattr(
+        source,
+        "text_integrity_authority",
+        lambda: _BlockOnlyUnrelatedNote(),
+    )
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    fpb = authority.resolve_definition(_definition_selector(published, "FPB"))
+    assert fpb.status is EvidenceResolutionStatus.CORROBORATED
+    assert fpb.record is not None
+    assert fpb.record.semantic_finish == "plasterboard"
+
+    grid = authority.resolve_definition(_definition_selector(published, "GRID"))
+    assert grid.status is EvidenceResolutionStatus.CORROBORATED
+    assert grid.record is not None
+    assert grid.record.semantic_finish == "tile"
+
+    scope = authority.resolve_occurrences(
+        _occurrence_selector(published, "2", "vp-2")
+    )
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert [(row.code, row.semantic_finish) for row in scope.records] == [
+        ("FPB", "plasterboard"),
+        ("GRID", "tile"),
+    ]
+
+
 def test_bare_alphabetic_token_is_not_promoted_without_semantic_schedule_definition(
     monkeypatch,
 ) -> None:
