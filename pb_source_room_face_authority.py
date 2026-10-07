@@ -178,19 +178,117 @@ def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
     return _canonical_cycle(tuple(_point(point) for point in points))
 
 
-def _publication_polygon(
-    raw_polygon: Iterable[Iterable[float]],
-) -> tuple[Point, ...]:
-    """Normalize representation-only exact retraces after authority gates.
+def _collapse_tiny_exact_attached_cycles(
+    points: Iterable[Point],
+    *,
+    area_limit: float,
+) -> tuple[tuple[Point, ...], float]:
+    """Remove only exact attached simple cycles below the existing tiny limit.
 
-    This helper must never be used for ownership/contamination decisions.
+    A planar half-edge walk can contain a small closed cycle attached to the
+    main boundary at one exact repeated source vertex, followed by an exact
+    retraced stem. That is not a valid simple room ring. Treat the attached
+    cycle like the already-established candidate-local degenerate-face rule only
+    when all of the following are true:
+
+    - the cycle starts and ends at the exact same six-decimal source vertex;
+    - every interior cycle vertex is unique (no nested/compound repair);
+    - its exact shoelace area is positive and below the supplied area limit;
+    - the total removed attached-cycle area also stays below that limit.
+
+    No tolerance, hull, buffer, nearest-edge choice, gap closure, or semantic
+    label participates. Any non-tiny or compound repeated topology is retained
+    so the publication boundary can fail closed.
     """
 
-    return _canonical_cycle(
-        _collapse_exact_ring_backtracks(
-            tuple(_point(point) for point in raw_polygon)
+    original = tuple(points)
+    if (
+        len(original) < 3
+        or not math.isfinite(float(area_limit))
+        or float(area_limit) <= 0.0
+    ):
+        return original, 0.0
+
+    compact = list(original)
+    removed_area = 0.0
+    while len(compact) >= 3:
+        by_point: dict[Point, list[int]] = defaultdict(list)
+        for index, point in enumerate(compact):
+            by_point[point].append(index)
+
+        candidates: list[tuple[int, int, int, float]] = []
+        for indices in by_point.values():
+            if len(indices) < 2:
+                continue
+            for left, right in zip(indices, indices[1:]):
+                cycle = tuple(compact[left:right])
+                if len(cycle) < 3 or len(set(cycle)) != len(cycle):
+                    continue
+                total = 0.0
+                for cycle_index, (x1, y1) in enumerate(cycle):
+                    x2, y2 = cycle[(cycle_index + 1) % len(cycle)]
+                    total += x1 * y2 - x2 * y1
+                cycle_area = abs(total) / 2.0
+                if (
+                    cycle_area <= 0.0
+                    or cycle_area >= float(area_limit)
+                    or not math.isfinite(cycle_area)
+                ):
+                    continue
+                candidates.append((right - left, left, right, cycle_area))
+
+        if not candidates:
+            break
+
+        _span, left, right, cycle_area = min(candidates)
+        if removed_area + cycle_area >= float(area_limit):
+            return original, 0.0
+
+        compact = compact[: left + 1] + compact[right + 1 :]
+        collapsed = _collapse_exact_ring_backtracks(compact)
+        if not collapsed:
+            return original, 0.0
+        compact = list(collapsed)
+        removed_area += cycle_area
+
+    return tuple(compact), removed_area
+
+
+def _publication_polygon_with_cleanup(
+    raw_polygon: Iterable[Iterable[float]],
+    *,
+    degenerate_area_limit: Optional[float] = None,
+) -> tuple[tuple[Point, ...], float]:
+    quantized = tuple(_point(point) for point in raw_polygon)
+    cleaned = _collapse_exact_ring_backtracks(quantized)
+    removed_cycle_area = 0.0
+    if degenerate_area_limit is not None:
+        cleaned, removed_cycle_area = _collapse_tiny_exact_attached_cycles(
+            cleaned,
+            area_limit=float(degenerate_area_limit),
         )
+        cleaned = _collapse_exact_ring_backtracks(cleaned)
+    return _canonical_cycle(cleaned), removed_cycle_area
+
+
+def _publication_polygon(
+    raw_polygon: Iterable[Iterable[float]],
+    *,
+    degenerate_area_limit: Optional[float] = None,
+) -> tuple[Point, ...]:
+    """Normalize only source-exact representation defects after authority gates.
+
+    Without a degenerate-area limit this preserves the historical exact
+    zero-area retrace cleanup. When the producer supplies its existing
+    degenerate-face area limit, an exact tiny attached simple cycle may also be
+    removed; all non-tiny or compound repeated topology remains fail-closed.
+    """
+
+    polygon, _removed_cycle_area = _publication_polygon_with_cleanup(
+        raw_polygon,
+        degenerate_area_limit=degenerate_area_limit,
     )
+    return polygon
 
 
 def _publication_boundary_ownership(
@@ -200,11 +298,13 @@ def _publication_boundary_ownership(
     ownership_grid: Mapping[tuple[int, int], list[tuple[str, Edge]]],
     ownership_oversized: list[tuple[str, Edge]],
     wall_edges: Mapping[str, tuple[Edge, ...]],
+    degenerate_area_limit: float,
 ) -> Optional[
     tuple[
         tuple[Point, ...],
         tuple[str, ...],
         tuple[tuple[str, Edge], ...],
+        float,
     ]
 ]:
     """Return a clean publication ring only with exact unique boundary owners.
@@ -215,8 +315,11 @@ def _publication_boundary_ownership(
     through the same exact/contained source-wall ownership contract.
     """
 
-    polygon = _publication_polygon(raw_polygon)
-    if not polygon:
+    polygon, removed_cycle_area = _publication_polygon_with_cleanup(
+        raw_polygon,
+        degenerate_area_limit=degenerate_area_limit,
+    )
+    if not polygon or len(set(polygon)) != len(polygon):
         return None
 
     owned_edges: list[tuple[str, Edge]] = []
@@ -245,6 +348,7 @@ def _publication_boundary_ownership(
         polygon,
         tuple(sorted(set(owners))),
         tuple(owned_edges),
+        removed_cycle_area,
     )
 
 
@@ -1028,25 +1132,45 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         if raw_polygon is None:
             return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
+        degenerate_area_limit = max(
+            _ABSOLUTE_DEGENERATE_AREA_PT2,
+            _TINY_RELATIVE_THRESHOLD * largest_area,
+        )
         publication = _publication_boundary_ownership(
             raw_polygon,
             edge_owner=edge_owner,
             ownership_grid=ownership_grid,
             ownership_oversized=ownership_oversized,
             wall_edges=wall_edges,
+            degenerate_area_limit=degenerate_area_limit,
         )
         if publication is None:
             return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
-        polygon, publication_wall_ids, _publication_edges = publication
+        (
+            polygon,
+            publication_wall_ids,
+            _publication_edges,
+            removed_cycle_area,
+        ) = publication
 
-        # Exact A->B->A retraces have zero signed area. Refuse publication if
-        # cleanup changes the already-authorized face area for any other reason.
         publication_area = _polygon_area(polygon)
-        if not math.isclose(
-            publication_area,
-            face_areas[face_id],
-            rel_tol=1e-12,
-            abs_tol=1e-6,
+        area_delta = abs(publication_area - face_areas[face_id])
+        if removed_cycle_area <= 0.0:
+            if not math.isclose(
+                publication_area,
+                face_areas[face_id],
+                rel_tol=1e-12,
+                abs_tol=1e-6,
+            ):
+                return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+        elif (
+            removed_cycle_area >= degenerate_area_limit
+            or not math.isclose(
+                area_delta,
+                removed_cycle_area,
+                rel_tol=1e-12,
+                abs_tol=1e-6,
+            )
         ):
             return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
@@ -1060,7 +1184,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             "decision_scope_id": scope.decision_scope_id,
             "polygon": polygon,
             "bounding_wall_ids": publication_wall_ids,
-            "area_page_pts2": face_areas[face_id],
+            "area_page_pts2": publication_area,
         }
         output.append(
             SourceRoomFaceRecord(
@@ -1076,7 +1200,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                 decision_scope_id=scope.decision_scope_id,
                 polygon_pdf_pts=polygon,
                 bounding_wall_ids=publication_wall_ids,
-                area_page_pts2=face_areas[face_id],
+                area_page_pts2=publication_area,
                 boundary_wall_edges=_publication_edges,
             )
         )
