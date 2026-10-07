@@ -1503,7 +1503,8 @@ class SourceMaterialSemanticProducer:
                         if not text_complete or not lines:
                             if (
                                 str(page_number) in native_schedule_cluster_pages
-                                and _is_material_schedule_title(viewport.label)
+                                and viewport.view_type
+                                == DrawingViewType.SCHEDULE.value
                             ):
                                 # The material-definition rows on this source
                                 # page were independently proven from exact
