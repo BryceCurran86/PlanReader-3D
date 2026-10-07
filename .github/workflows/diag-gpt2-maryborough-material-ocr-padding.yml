@@ -72,8 +72,16 @@ jobs:
                       for degrees in (0,90,-90,180):
                           rotated=img if degrees == 0 else img.rotate(degrees,expand=True)
                           isolated=ImageOps.expand(rotated,border=border,fill="white")
-                          raw=pytesseract.image_to_string(isolated,config="--psm 7")
-                          rotation_reads[str(degrees)]=" ".join(str(raw or "").split())
+                          mode_reads={}
+                          for mode,config in (
+                              ("psm7","--psm 7"),
+                              ("psm6","--psm 6"),
+                              ("psm13","--psm 13"),
+                              ("psm7_no_tables","--psm 7 -c textord_tabfind_find_tables=0"),
+                          ):
+                              raw=pytesseract.image_to_string(isolated,config=config)
+                              mode_reads[mode]=" ".join(str(raw or "").split())
+                          rotation_reads[str(degrees)]=mode_reads
                       readings[str(dpi)]=rotation_reads
                   probes.append({"pad_pt":pad_pt,"clip":list(clip),"readings":readings})
               composites={}
