@@ -394,6 +394,7 @@ def collect_live_ceiling_lining_claims(
     pdf_path: Path | str,
     *,
     pages: Optional[Sequence[int]] = None,
+    topology_pages: Optional[Sequence[int]] = None,
     authoritative_room_area_quantities: Optional[Sequence[QuantityEvidence]] = None,
 ) -> LiveCeilingLiningResult:
     """Collect live provisional ceiling claims from authoritative source viewports."""
@@ -406,6 +407,13 @@ def collect_live_ceiling_lining_claims(
     doc = fitz.open(stream=payload, filetype="pdf")
     try:
         selected = _selected_page_indices(len(doc), pages)
+        topology_selected = (
+            selected
+            if topology_pages is None
+            else _selected_page_indices(len(doc), topology_pages)
+        )
+        if any(index not in set(selected) for index in topology_selected):
+            raise ValueError("topology_pages must be a subset of pages")
         page_ids = tuple(str(index + 1) for index in selected)
         source = SourceVisibilityProducer(
             producer_method="live-ceiling-lining",
@@ -440,7 +448,7 @@ def collect_live_ceiling_lining_claims(
         validated_quantities: dict[str, QuantityEvidence] = {}
         upstream_room_areas = tuple(authoritative_room_area_quantities or ())
 
-        for page_index in selected:
+        for page_index in topology_selected:
             page_no = page_index + 1
             page = doc[page_index]
             for segmented in authoritative_floor_plan_viewports(
