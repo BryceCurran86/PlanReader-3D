@@ -51,10 +51,35 @@ jobs:
           words=mat._trusted_words_by_page(source,published)
           raster=RasterTextCorroborationProducer.from_source_visibility_producer(source)
           rows=[]
+          raw_page_semantics=[]
           doc=fitz.open(stream=payload,filetype="pdf")
           try:
               for index in range(doc.page_count):
                   page_number=index+1
+                  raw_text=doc[index].get_text("text") or ""
+                  raw_upper=raw_text.upper()
+                  raw_parsed=list(parse_schedule_text(
+                      raw_text,
+                      page_id=page_number,
+                      page_label=f"page:{page_number}",
+                  ))
+                  keyword_hits=[
+                      keyword for keyword in (
+                          "EPOXY","VINYL","FLOOR FINISH","FINISH SCHEDULE",
+                          "SEALED","TILE","CARPET","INSULATED PANEL"
+                      )
+                      if keyword in raw_upper
+                  ]
+                  if raw_parsed or keyword_hits:
+                      raw_page_semantics.append({
+                          "page":page_number,
+                          "keyword_hits":keyword_hits,
+                          "parsed_items":raw_parsed,
+                          "text_excerpt":[
+                              line for line in raw_text.splitlines()
+                              if any(k in line.upper() for k in keyword_hits)
+                          ][:80],
+                      })
                   viewports=tuple(segment_page_viewports(doc[index],page_number=page_number))
                   non_overlap=validate_non_overlapping_viewports(viewports)
                   for viewport in viewports:
@@ -104,5 +129,6 @@ jobs:
                   1 for r in rows if r["authoritative"] and r["is_schedule_type"]
               ),
               "rows":rows,
+              "raw_page_semantics":raw_page_semantics,
           },indent=2,sort_keys=True,default=str))
           PY
