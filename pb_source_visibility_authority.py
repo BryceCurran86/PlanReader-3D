@@ -2085,6 +2085,30 @@ class SourceVisibilityAuthority:
         )
         return frozenset(ids)
 
+    def raster_opening_primitive_observation_ids_for_snapshot(
+        self, snapshot_id: str
+    ) -> frozenset[str]:
+        """Address isolated source observations; each ID needs a valid receipt.
+
+        Inventory the sealed snapshot as well as receipts so a missing receipt
+        cannot hide an opening from a downstream whole-wall completeness check.
+        This index itself supplies no existence or geometry authority.
+        """
+        snapshot_id = str(snapshot_id)
+        ids = {
+            observation_id
+            for receipt_snapshot_id, observation_id in self._raster_opening_primitive_receipts
+            if receipt_snapshot_id == snapshot_id
+        }
+        store = self._source_authority._store
+        snapshot = store.snapshots.get(snapshot_id)
+        if snapshot is not None:
+            for observation_id in snapshot.observation_ids:
+                record = store.observations.get((snapshot_id, observation_id))
+                if record is None or record.origin_kind == RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND:
+                    ids.add(observation_id)
+        return frozenset(ids)
+
     def authenticated_visible_observations(
         self, published: "PublishedVisibleSourceSnapshot"
     ) -> tuple[tuple[str, object], ...]:

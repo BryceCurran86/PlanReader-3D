@@ -166,6 +166,11 @@ def main():
                 host_diagnostic["fallbacks"]["source_band"] = asdict(host._resolve_raster_source_band_host(physical, record, wall_result.records, geometry, wall_result.equivalence, wall_result.source_observation_ids))
                 host_diagnostic["fallbacks"]["source"] = asdict(host._resolve_raster_source_primitive_host_from_lines(wall_result.records, geometry, wall_result.equivalence, source_lines))
         rows.append({
+            "source_opening": None if record is None else asdict(record),
+            "source_opening_geometry": None if record is None else (
+                None if host._opening_geometry(physical, record) is None
+                else asdict(host._opening_geometry(physical, record))
+            ),
             "host_diagnostic": host_diagnostic,
             "opening_identity_id": trace.opening_identity_id,
             "representative_observation_id": trace.representative_observation_id,
@@ -277,6 +282,28 @@ def main():
         "host_frame_traces": [asdict(t) for t in composition.host_frames],
         "rows": rows,
     }
+    # Observability only: enumerate the exact source propositions rejected by
+    # the connected-frame geometry gate, including openings outside the raster
+    # namespace. No result here is fed back into any producer.
+    for selected in rows:
+        geometry = selected["source_opening_geometry"]
+        if selected["structural_pattern"] != RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION or geometry is None:
+            continue
+        conflicts = []
+        for other in rows:
+            candidate = other["source_opening_geometry"]
+            if candidate is None or other is selected:
+                continue
+            cross = geometry["axis"][0]*candidate["axis"][1] - geometry["axis"][1]*candidate["axis"][0]
+            offset = sum((candidate["origin"][i]-geometry["origin"][i])*geometry["normal"][i] for i in (0, 1))
+            allowance = max(.75, geometry["thickness"]*.15)
+            if abs(cross) <= 1e-6 and abs(offset) <= allowance and abs(candidate["thickness"]-geometry["thickness"]) > allowance + 1e-6*geometry["thickness"]:
+                conflicts.append({"opening_identity_id": other["opening_identity_id"],
+                    "structural_pattern": other["structural_pattern"],
+                    "geometry": candidate, "normal_offset_pt": offset,
+                    "host_status": other["binding_status"], "host_reasons": other["binding_reason_codes"],
+                    "source_opening": other["source_opening"]})
+        selected["aligned_frame_geometry_conflicts"] = conflicts
     print(json.dumps(payload, indent=2, sort_keys=True, default=state))
 
 

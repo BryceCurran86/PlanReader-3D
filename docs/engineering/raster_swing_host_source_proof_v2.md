@@ -63,13 +63,15 @@ missing W4 representation, not permission to lower a global threshold. For
 ba7f..., the visible raw line lies outside the actual G17 solid flank's bounded
 cross-render equality allowance. No distance budget was widened to force it.
 
-The three newly host-bound swings stop at whole-wall frame authority:
-The existing frame routes are incompatible with this two-member representation:
-_raster_whole_wall_frame admits one member; _binding_nodes requires four face
-members. Scope discovery can also abstain before reaching those checks.
-Authenticated raster centreline-flank bindings have two members. Local host ownership
-does not establish a complete whole-wall frame, so frame publication remains
-ABSTAIN rather than inventing whole-wall extent.
+The initial three newly host-bound swings stopped at whole-wall frame authority:
+the one-member raster route and four-face graph did not admit their representation.
+The continuation now inventories and authenticates isolated G17 source support,
+re-proves two-member source-band edges and uses the existing connected wall graph.
+A complete synthetic source chain resolves; real Lot16 remains ABSTAIN at
+opening_host_frame_aligned_band_geometry_inconsistent. Other source-proven G17
+openings on the same axis have incompatible band thickness, and their ownership
+has not been proved distinct. No wall extent is invented. See
+raster_connected_host_frame.md for the exact continuation and test matrix.
 
 ### Width and height
 
@@ -108,9 +110,9 @@ publication or matching a benchmark value.
 
 ### Validation and reconciliation
 
-122 focused tests passed (including 19 new positive/negative/conflict,
+144 focused tests passed (including the original 19 positive/negative/conflict,
 translation/rotation/scaling, source ancestry, segment-splitting, replay,
-input-order and no-mutation checks). Provider/gold isolation and frozen V2
+input-order and no-mutation checks plus 16 connected-frame checks). Provider/gold isolation and frozen V2
 integrity passed. Python compilation and whitespace validation passed.
 A single scoped GitHub proof workflow repeats the source run and seals all
 seven publishable opening areas for review; no runner fan-out is added.
