@@ -341,6 +341,31 @@ def main():
             "face_rows": face_rows,
         })
 
+    exact_lineage_host_ready = []
+    exact_lineage_host_blocked = Counter()
+    for opening in opening_rows:
+        faces = opening["face_rows"]
+        if len(faces) != 4:
+            exact_lineage_host_blocked["face_count_not_four"] += 1
+            continue
+        owner_lists = [face["usable_w4_owner_ids"] for face in faces]
+        if any(len(owners) == 0 for owners in owner_lists):
+            exact_lineage_host_blocked["unmapped_face"] += 1
+            continue
+        if any(len(owners) != 1 for owners in owner_lists):
+            exact_lineage_host_blocked["multi_owner_face"] += 1
+            continue
+        owner_ids = tuple(owners[0] for owners in owner_lists)
+        if len(set(owner_ids)) != 4:
+            exact_lineage_host_blocked["owners_not_four_distinct"] += 1
+            continue
+        exact_lineage_host_ready.append({
+            "opening_identity_id": opening["opening_identity_id"],
+            "owner_ids": list(owner_ids),
+            "current_host_binding_status": opening["host_binding_status"],
+            "current_host_binding_reason_codes": opening["host_binding_reason_codes"],
+        })
+
     protected_occurrences = [
         face
         for opening in opening_rows
@@ -384,8 +409,19 @@ def main():
         "unprotected_face_source_ids": sorted({
             face["raw_id"] for face in unprotected_occurrences
         }),
+        "exact_lineage_host_ready_opening_count": len(exact_lineage_host_ready),
+        "exact_lineage_host_blocked_reason_counts": dict(exact_lineage_host_blocked.most_common()),
+        "exact_lineage_host_ready_openings": exact_lineage_host_ready,
         "wall_candidate_count": len(wall_result.records),
         "equivalence_ambiguous_wall_count": 0 if equivalence is None else len(equivalence.ambiguous_wall_ids),
+        "equivalence_pair_audit": None if equivalence is None else {
+            "total_pairs": equivalence.candidate_pair_audit.total_pairs,
+            "considered_pairs": equivalence.candidate_pair_audit.considered_pairs,
+            "excluded_pairs": equivalence.candidate_pair_audit.excluded_pairs,
+            "exclusion_reason_counts": dict(equivalence.candidate_pair_audit.exclusion_reason_counts),
+            "verified_points_per_mm": equivalence.candidate_pair_audit.verified_points_per_mm,
+            "candidate_wall_body_band_pt": equivalence.candidate_pair_audit.candidate_wall_body_band_pt,
+        },
         "host_bound_count": sum(1 for trace in composition.opening_bindings if trace.host_wall_id),
         "host_binding_reason_counts": dict(Counter(
             reason
