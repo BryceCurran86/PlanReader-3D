@@ -669,6 +669,97 @@ def test_ambiguous_unsafe_candidate_inside_opening_wall_band_still_blocks() -> N
     assert "host_equivalence_bridges_unsafe_boundary_evidence" in reasons
 
 
+def test_orientation_incompatible_ambiguous_remote_wall_is_not_local_contamination() -> None:
+    # Endpoints remain parallel to the opening, but the trusted source chain
+    # contains a nonparallel segment. That positively excludes the candidate
+    # from this straight opening-local wall band.
+    unsafe = _record(
+        "unsafe-ambiguous-nonparallel-chain",
+        (
+            (200.0, 80.0),
+            (220.0, 80.0),
+            (230.0, 90.0),
+            (260.0, 80.0),
+        ),
+    )
+    assert host._candidate_axis_data(unsafe, OPENING) is None
+    assert host._candidate_is_definitely_orientation_incompatible(
+        unsafe, OPENING
+    )
+    assert host._candidate_could_affect_opening_local_band(
+        unsafe, OPENING
+    ) is False
+
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        unsafe=unsafe,
+    )
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is not None
+    assert reasons == (host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED,)
+    assert unsafe.wall_candidate_id not in {
+        record.wall_candidate_id for record in local.records
+    }
+
+
+def test_non_simple_orientation_mismatch_remains_fail_closed() -> None:
+    unsafe = _record(
+        "unsafe-ambiguous-non-simple",
+        (
+            (200.0, 80.0),
+            (220.0, 80.0),
+            (230.0, 90.0),
+            (260.0, 80.0),
+        ),
+        reason_codes=("non_simple_chain_topology_fallback_ordering",),
+    )
+    assert host._candidate_axis_data(unsafe, OPENING) is None
+    assert not host._candidate_is_definitely_orientation_incompatible(
+        unsafe, OPENING
+    )
+    assert host._candidate_could_affect_opening_local_band(
+        unsafe, OPENING
+    ) is None
+
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        unsafe=unsafe,
+    )
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert "host_equivalence_bridges_unsafe_boundary_evidence" in reasons
+
+
+def test_degenerate_segment_orientation_remains_fail_closed() -> None:
+    unsafe = _record(
+        "unsafe-ambiguous-degenerate-segment",
+        (
+            (200.0, 80.0),
+            (220.0, 80.0),
+            (220.0, 80.0),
+            (260.0, 80.0),
+        ),
+    )
+    assert host._candidate_axis_data(unsafe, OPENING) is None
+    assert not host._candidate_is_definitely_orientation_incompatible(
+        unsafe, OPENING
+    )
+    assert host._candidate_could_affect_opening_local_band(
+        unsafe, OPENING
+    ) is None
+
+    scope = _unsafe_bridge_scope(
+        classification=PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE,
+        unsafe=unsafe,
+    )
+    local, reasons = host._local_boundary_clean_host_scope(scope, OPENING)
+
+    assert local is None
+    assert "host_equivalence_bridges_unsafe_boundary_evidence" in reasons
+
+
 def test_non_evaluable_ambiguous_unsafe_candidate_stays_fail_closed() -> None:
     unsafe_base = _record(
         "unsafe-ambiguous-curved",
