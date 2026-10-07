@@ -439,13 +439,82 @@ def main():
         wall_opening_composition=composition,
     )
     area_quantities = publish_live_opening_area_quantities(voids)
+    opening_by_id = {
+        opening.physical_opening_id: opening
+        for opening in voids.canonical_openings
+    }
+    hosted_openings = [
+        opening for opening in voids.canonical_openings if opening.host_wall_id
+    ]
     payload.update({
         "canonical_opening_count": len(voids.canonical_openings),
+        "hosted_canonical_opening_count": len(hosted_openings),
+        "hosted_kind_resolved_count": sum(
+            1 for opening in hosted_openings
+            if opening.opening_kind in {"door", "window"}
+        ),
+        "hosted_width_resolved_count": sum(
+            1 for opening in hosted_openings if opening.width_m is not None
+        ),
+        "hosted_height_resolved_count": sum(
+            1 for opening in hosted_openings if opening.height_m is not None
+        ),
+        "hosted_area_resolved_count": sum(
+            1 for opening in hosted_openings if opening.area_m2 is not None
+        ),
+        "hosted_geometry_complete_count": sum(
+            1 for opening in hosted_openings if opening.geometry_complete
+        ),
         "area_resolved_count": sum(
             1 for opening in voids.canonical_openings if opening.area_m2 is not None
         ),
         "opening_area_quantity_count": len(area_quantities),
         "opening_area_values": [float(quantity.value) for quantity in area_quantities],
+        "width_reason_counts_for_hosted": dict(Counter(
+            reason
+            for trace in voids.traces
+            if opening_by_id.get(trace.opening_identity_id) is not None
+            and opening_by_id[trace.opening_identity_id].host_wall_id
+            for reason in trace.width_reason_codes
+        ).most_common()),
+        "height_reason_counts_for_hosted": dict(Counter(
+            reason
+            for trace in voids.traces
+            if opening_by_id.get(trace.opening_identity_id) is not None
+            and opening_by_id[trace.opening_identity_id].host_wall_id
+            for reason in trace.height_reason_codes
+        ).most_common()),
+        "schedule_reason_counts_for_hosted": dict(Counter(
+            reason
+            for trace in voids.traces
+            if opening_by_id.get(trace.opening_identity_id) is not None
+            and opening_by_id[trace.opening_identity_id].host_wall_id
+            for reason in trace.schedule_binding_reason_codes
+        ).most_common()),
+        "void_reason_counts_for_hosted": dict(Counter(
+            reason
+            for trace in voids.traces
+            if opening_by_id.get(trace.opening_identity_id) is not None
+            and opening_by_id[trace.opening_identity_id].host_wall_id
+            for reason in trace.void_reason_codes
+        ).most_common()),
+        "hosted_opening_rows": [
+            {
+                "physical_opening_id": opening.physical_opening_id,
+                "structural_pattern": opening.structural_pattern,
+                "opening_kind": opening.opening_kind,
+                "type_mark": opening.type_mark,
+                "width_m": opening.width_m,
+                "height_m": opening.height_m,
+                "area_m2": opening.area_m2,
+                "area_basis": opening.area_basis,
+                "geometry_complete": opening.geometry_complete,
+                "schedule_binding_record_id": opening.schedule_binding_record_id,
+                "schedule_declared_width_mm": opening.schedule_declared_width_mm,
+                "schedule_declared_height_mm": opening.schedule_declared_height_mm,
+            }
+            for opening in hosted_openings
+        ],
     })
     print(json.dumps(payload, indent=2, sort_keys=True))
 
