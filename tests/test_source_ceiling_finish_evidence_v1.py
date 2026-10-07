@@ -12,6 +12,7 @@ from pb_source_ceiling_finish_evidence import (
     SOURCE_CEILING_FINISH_METHOD,
     collect_source_owned_ceiling_finish_candidates,
 )
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_vector_geometry_v130 import extract_native_page
 
@@ -206,7 +207,15 @@ def test_admissible_glyph_clip_failure_can_use_raster_text_corroboration(
             return cls()
 
         def publish(self, selector):
-            source_result = producer._producer.authority().resolve(selector)
+            source_result = producer._producer.authority().resolve(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=selector.observation_id,
+                )
+            )
             raw = source_result.observation.raw_text
             return SimpleNamespace(
                 status=ceiling_source.EvidenceResolutionStatus.CORROBORATED,
