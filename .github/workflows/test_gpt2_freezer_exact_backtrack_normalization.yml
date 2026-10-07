@@ -47,16 +47,17 @@ jobs:
               document_id="gpt2-freezer-backtrack-proof",
               source_bytes=payload,
               source_locator="memory://maryborough.pdf",
-              page_ids=("10",),
+              page_ids=("7",),
           )
-          # Prove the room at the room-authority boundary.  The whole net-wall
-          # customer claim also requires unrelated opening/external-wall
-          # completeness; those gates must not decide whether an already
-          # source-owned room polygon is a valid exact-backtrack publication.
+          # Prove the room at the room-authority boundary on the independently
+          # authenticated floor-plan view. The legacy A140 support view is
+          # currently fail-closed by source_room_face_tiny_or_degenerate; do not
+          # weaken that pollution guard just to recover one room. The focused
+          # tests above retain the exact-backtrack regression itself.
           wall_opening=compose_live_wall_opening_authority(
               source_visibility_producer=source,
               revision_id=published.revision.revision_id,
-              page_ids=("10",),
+              page_ids=("7",),
               evidence_page_ids=(),
           )
           walls=compose_live_canonical_walls(
