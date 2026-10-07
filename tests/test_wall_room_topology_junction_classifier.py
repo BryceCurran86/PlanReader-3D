@@ -11,6 +11,7 @@ from pb_wall_room_topology_junction_classifier import (
     find_rejected_non_wall_crossings,
 )
 from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport, filter_structural_segments
+from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 
 
 def _seg(seg_id, x1, y1, x2, y2, **overrides):
@@ -228,6 +229,21 @@ class TestDuplicateEdgeHandling:
         deduped, removed = deduplicate_coincident_edges(graph)
         assert len(deduped["edges"]) == 1
         assert removed == ["split_1"]
+
+    def test_duplicate_line_preserves_union_of_source_lineage(self) -> None:
+        segments = [_seg("wall", 0, 0, 300, 0), _seg("wall_copy", 0, 0, 300, 0)]
+        graph = build_wall_graph_for_viewport(segments)
+        deduped, removed = deduplicate_coincident_edges(graph)
+
+        assert removed == ["split_1"]
+        assert len(deduped["edges"]) == 1
+        lineage = deduped["edges"][0][LINEAGE_KEY]
+        assert tuple(lineage["source_primitive_ids"]) == ("wall", "wall_copy")
+
+        # Topology identity remains the historical first edge; only provenance
+        # is strengthened so later physical-wall identity can trace either
+        # coincident source primitive.
+        assert deduped["edges"][0]["id"] == "split_0"
 
     def test_classify_junctions_applies_dedup_internally(self) -> None:
         segments = [_seg("wall", 0, 0, 300, 0), _seg("wall_copy", 0, 0, 300, 0)]
