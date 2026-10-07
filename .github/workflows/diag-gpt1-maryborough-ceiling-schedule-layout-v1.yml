@@ -61,6 +61,8 @@ jobs:
                       "status":viewport.status,
                       "boundary_source":viewport.boundary_source,
                       "bbox":None if bbox is None else list(bbox),
+                      "notes":list(viewport.notes or ()),
+                      "provenance":dict(viewport.provenance or {}),
                       "owned_blocks":owned,
                   })
           print(json.dumps({"ceiling_schedule_viewports":rows},indent=2,sort_keys=True))
