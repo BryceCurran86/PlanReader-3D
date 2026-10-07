@@ -1315,25 +1315,31 @@ class SourceMaterialSemanticProducer:
                     "status": "Confirmed",
                 }
                 semantic_finish = semantic_finish_from_schedule_entry(entry)
-                source_ids = tuple(
-                    sorted(
+                source_id_rows: list[str] = []
+                for item in items:
+                    evidence_payload = {
+                        **lineage,
+                        "page_id": str(item.get("page_id") or ""),
+                        "viewport_id": str(item.get("source_viewport_id") or ""),
+                        "code": code,
+                        "source_line": str(item.get("source_line") or ""),
+                        "source_text_observation_ids": tuple(
+                            item.get("source_text_observation_ids") or ()
+                        ),
+                    }
+                    source_block_id = str(
+                        item.get("source_block_id") or ""
+                    ).strip()
+                    if source_block_id:
+                        evidence_payload["source_block_id"] = source_block_id
+                    source_id_rows.append(
                         stable_contract_id(
                             "source_material_definition_evidence",
-                            {
-                                **lineage,
-                                "page_id": str(item.get("page_id") or ""),
-                                "viewport_id": str(item.get("source_viewport_id") or ""),
-                                "code": code,
-                                "source_line": str(item.get("source_line") or ""),
-                                "source_text_observation_ids": tuple(
-                                    item.get("source_text_observation_ids") or ()
-                                ),
-                            },
+                            evidence_payload,
                             digest_chars=32,
                         )
-                        for item in items
                     )
-                )
+                source_ids = tuple(sorted(source_id_rows))
                 payload = {
                     **lineage,
                     "code": code,
@@ -1365,8 +1371,11 @@ class SourceMaterialSemanticProducer:
                     source_viewport_ids=tuple(
                         sorted(
                             {
-                                str(item.get("source_viewport_id") or "")
+                                str(item.get("source_viewport_id") or "").strip()
                                 for item in items
+                                if str(
+                                    item.get("source_viewport_id") or ""
+                                ).strip()
                             }
                         )
                     ),
