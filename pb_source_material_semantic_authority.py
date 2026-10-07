@@ -645,6 +645,18 @@ def _recover_admissible_viewport_lines(
     raster: RasterTextCorroborationProducer,
     words: Sequence[_TrustedTextWord],
     viewport: SegmentedViewport,
+    reading_cache: Optional[
+        dict[
+            tuple[
+                str,
+                tuple[float, float, float, float],
+                int,
+                int,
+                str,
+            ],
+            Optional[str],
+        ]
+    ] = None,
 ) -> tuple[_TrustedTextWord, ...]:
     """Corroborate exact native lines when per-word OCR remains unresolved.
 
@@ -848,11 +860,23 @@ def _recover_admissible_viewport_lines(
                 border=margin_px,
                 fill="white",
             )
-            reading = _single_isolated_material_line_reading(
-                backend,
-                isolated,
-                dpi=int(dpi),
+            cache_key = (
+                source_page_id,
+                tuple(round(float(value), 6) for value in raster_bbox),
+                int(rotation),
+                int(dpi),
+                claim,
             )
+            if reading_cache is not None and cache_key in reading_cache:
+                reading = reading_cache[cache_key]
+            else:
+                reading = _single_isolated_material_line_reading(
+                    backend,
+                    isolated,
+                    dpi=int(dpi),
+                )
+                if reading_cache is not None:
+                    reading_cache[cache_key] = reading
             if reading is None or normalize_reading(reading) != claim:
                 line_valid = False
                 break
@@ -958,6 +982,18 @@ def _recover_native_material_block(
     published: object,
     raster: RasterTextCorroborationProducer,
     block_words: Sequence[_TrustedTextWord],
+    reading_cache: Optional[
+        dict[
+            tuple[
+                str,
+                tuple[float, float, float, float],
+                int,
+                int,
+                str,
+            ],
+            Optional[str],
+        ]
+    ] = None,
 ) -> tuple[
     tuple[tuple[str, tuple[str, ...]], ...],
     tuple[float, float, float, float],
@@ -989,6 +1025,7 @@ def _recover_native_material_block(
         raster=raster,
         words=recovered,
         viewport=scope,
+        reading_cache=reading_cache,
     )
     lines, complete, _reasons = _trusted_lines_for_viewport(
         recovered,
@@ -1008,6 +1045,18 @@ def _native_material_schedule_clusters(
     published: object,
     raster: RasterTextCorroborationProducer,
     words: Sequence[_TrustedTextWord],
+    reading_cache: Optional[
+        dict[
+            tuple[
+                str,
+                tuple[float, float, float, float],
+                int,
+                int,
+                str,
+            ],
+            Optional[str],
+        ]
+    ] = None,
 ) -> tuple[_TrustedScheduleBlock, ...]:
     """Recover source-owned schedule rows without trusting a competing frame.
 
@@ -1087,6 +1136,7 @@ def _native_material_schedule_clusters(
             published=published,
             raster=raster,
             block_words=block_words,
+            reading_cache=reading_cache,
         )
         if recovered is None:
             continue
@@ -1440,6 +1490,16 @@ class SourceMaterialSemanticProducer:
             published,
         )
         raster = self._raster
+        line_reading_cache: dict[
+            tuple[
+                str,
+                tuple[float, float, float, float],
+                int,
+                int,
+                str,
+            ],
+            Optional[str],
+        ] = {}
         native_schedule_cluster_pages: set[str] = set()
 
         pdf = fitz.open(stream=source_bytes, filetype="pdf")
@@ -1460,6 +1520,7 @@ class SourceMaterialSemanticProducer:
                     published=published,
                     raster=raster,
                     words=page_words,
+                    reading_cache=line_reading_cache,
                 )
                 native_schedule_cluster_pages.update(
                     str(block.page_id) for block in native_schedule_clusters
@@ -1533,6 +1594,7 @@ class SourceMaterialSemanticProducer:
                         raster=raster,
                         words=scoped_words,
                         viewport=viewport,
+                        reading_cache=line_reading_cache,
                     )
                     lines, text_complete, text_reasons = _trusted_lines_for_viewport(
                         scoped_words,
