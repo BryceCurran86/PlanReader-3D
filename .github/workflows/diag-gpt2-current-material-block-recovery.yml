@@ -1,0 +1,89 @@
+name: DIAG GPT2 Current Material Block Recovery
+
+on:
+  push:
+    branches:
+      - diag/gpt2-current-material-block-recovery
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Probe production block recovery
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import pb_source_material_semantic_authority as material
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-current-block",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-current-block",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+          )
+          producer=material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          words=material._trusted_words_by_page(source,published).get("9",())
+          grouped={}
+          for word in words:
+              grouped.setdefault((word.source_partition_id,int(word.block_no)),[]).append(word)
+
+          original=material._single_isolated_material_line_reading
+          calls=[]
+          def spy(backend,image,*,dpi):
+              reading=original(backend,image,dpi=dpi)
+              calls.append({
+                  "dpi":int(dpi),
+                  "size":[int(image.width),int(image.height)],
+                  "reading":reading,
+              })
+              return reading
+          material._single_isolated_material_line_reading=spy
+
+          out={}
+          for (_partition,block_no),block_words in sorted(grouped.items()):
+              if block_no not in {26,27,28,353}:
+                  continue
+              ordered=tuple(sorted(
+                  block_words,
+                  key=lambda row:(row.line_no,row.word_no,row.bbox[0],row.observation_id),
+              ))
+              before=len(calls)
+              recovered=material._recover_native_material_block(
+                  source=source,
+                  published=published,
+                  raster=producer._raster,
+                  block_words=ordered,
+              )
+              out[str(block_no)]={
+                  "native_rows":[row[0] for row in material._native_block_line_rows(ordered)],
+                  "calls":calls[before:],
+                  "recovered":[
+                      {
+                          "text":word.text,
+                          "line_no":word.line_no,
+                          "word_no":word.word_no,
+                          "trusted":bool(word.trusted),
+                          "reasons":list(word.reason_codes),
+                      }
+                      for word in recovered
+                  ],
+              }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
