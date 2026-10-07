@@ -78,6 +78,7 @@ def _bridge(
             "page_id": "7",
             "page_no": 7,
             "viewport_id": "floor-vp",
+            "source_room_index_id": "room-index-1",
         },
     )
     metadata = {
@@ -185,22 +186,28 @@ def test_final_documented_room_area_and_rcp_finish_publish_firm_ceiling_quantity
     assert quantity.metadata["support_page_id"] == "9"
     assert quantity.metadata["support_viewport_id"] == "rcp-vp"
     assert quantity.metadata["row_role"] == "ceiling_area"
+    assert len(result.canonical_ceilings) == 1
+    canonical = result.canonical_ceilings[0]
+    assert canonical.canonical_ceiling_id == record.canonical_ceiling_id
+    assert canonical.room_entity_id == "canonical-room-1"
+    assert canonical.room_area_quantity_id == "room-area-qty-1"
+    assert canonical.ceiling_quantity_id == quantity.quantity_id
+    assert canonical.measurement_authority == "documented_dimension"
+    assert canonical.figured_dimension_ids == ("dim-h", "dim-v")
+    assert canonical.finish_descriptor == "ceiling_grid"
 
 
-def test_firm_scaled_room_area_can_be_reused_without_new_scale_inference() -> None:
+def test_scaled_room_area_stays_out_of_documented_rcp_ceiling_path() -> None:
     result = ceiling_quantity.publish_cross_view_ceiling_quantities(
         rooms=_rooms(),
         room_area_bridges=(_bridge(authority="pdf_scaled"),),
         finishes=_finish(),
     )
 
-    assert result.status is EvidenceResolutionStatus.CORROBORATED
-    assert len(result.records) == 1
-    quantity = result.records[0].quantity
-    assert quantity.authority == "pdf_scaled"
-    assert quantity.value == 9.05352
-    assert quantity.metadata["scale_fingerprint"] == "scale-fingerprint-1"
-    assert quantity.metadata["figured_dimension_ids"] == []
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.canonical_ceilings == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
 
 
 def test_source_room_face_mismatch_remains_unresolved() -> None:
