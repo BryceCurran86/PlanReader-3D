@@ -25,7 +25,7 @@ jobs:
           pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Inspect surface/ceiling scope
         env:
-          PROJECT_NAME: \${{ matrix.project }}
+          PROJECT_NAME: ${{ matrix.project }}
         run: |
           PYTHONPATH=. python -u - <<'PY'
           import json, os
