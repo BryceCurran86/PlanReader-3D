@@ -1,0 +1,77 @@
+name: DIAG GPT1 Lot16 6490 Gate
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-6490-after-self-box-v1
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Probe exact 6490 raw binding
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+
+          payload=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf").read_bytes()
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          try:
+              bundle=extract_dimension_evidence_bundle(
+                  pdf.load_page(2),
+                  page_num=3,
+                  view_type=DrawingViewType.FLOOR_PLAN.value,
+              )
+          finally:
+              pdf.close()
+          by_binding={b.observation_id:b for b in bundle.bindings}
+          by_segment={s.segment_id:s for s in bundle.observed_geometry}
+          rows=[]
+          for obs in bundle.observations:
+              if str(obs.raw_text).strip()!="6490":
+                  continue
+              binding=by_binding.get(obs.dimension_id)
+              tied=[]
+              if binding is not None:
+                  prefix="multiple equally plausible dimension lines: "
+                  for note in binding.notes:
+                      if note.startswith(prefix):
+                          for sid in note[len(prefix):].split(","):
+                              sid=sid.strip()
+                              seg=by_segment.get(sid)
+                              if seg:
+                                  tied.append({
+                                      "id":sid,
+                                      "start":list(seg.start),
+                                      "end":list(seg.end),
+                                      "path":seg.source_path_index,
+                                      "item":seg.source_item_index,
+                                      "orientation":seg.orientation,
+                                  })
+              rows.append({
+                  "id":obs.dimension_id,
+                  "raw_text":obs.raw_text,
+                  "bbox":list(obs.bbox or ()),
+                  "orientation":obs.orientation,
+                  "extraction_method":obs.extraction_method,
+                  "binding_status":None if binding is None else binding.status,
+                  "dimension_line_id":None if binding is None else binding.dimension_line_id,
+                  "witness_line_ids":[] if binding is None else list(binding.witness_line_ids),
+                  "endpoints":None if binding is None or binding.endpoints is None else [list(x) for x in binding.endpoints],
+                  "notes":[] if binding is None else list(binding.notes),
+                  "tied":tied,
+              })
+          print(json.dumps({"rows":rows},indent=2,sort_keys=True))
+          PY
