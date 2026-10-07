@@ -19,6 +19,9 @@ jobs:
       - name: Focused GPT1 ceiling regressions
         run: |
           PYTHONPATH=. pytest -q tests/test_cross_view_ceiling_finish_authority.py tests/test_cross_view_ceiling_quantity_authority.py tests/test_live_ceiling_lining_source_closed_export.py tests/test_source_closed_project_handoff_cross_view_ceiling.py
+      - name: Native ceiling schedule ownership proof
+        run: |
+          PYTHONPATH=. python -u tools/diag_gpt1_maryborough_ceiling_schedule_native_block.py
       - name: Real Maryborough ceiling seal proof
         run: |
           PYTHONPATH=. python -u tools/diag_gpt1_maryborough_ceiling_seal_post1947.py
