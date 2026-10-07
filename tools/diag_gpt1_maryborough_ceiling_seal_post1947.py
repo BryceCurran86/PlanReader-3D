@@ -69,8 +69,13 @@ def main() -> int:
             for quantity in claim.floor_finish_quantity_evidence
             if not quantity.abstained and quantity.value is not None
         ),
+        "canonical_ceiling_count": len(claim.canonical_ceilings),
         "ceiling_lining_quantity_count": len(quantities),
         "rooms": rooms,
+        "canonical_ceilings": [
+            ceiling.to_dict()
+            for ceiling in claim.canonical_ceilings
+        ],
         "ceiling_quantities": [
             {
                 "quantity_id": quantity.quantity_id,
@@ -91,6 +96,21 @@ def main() -> int:
 
     if quantities:
         assert run is not None
+        assert len(claim.canonical_ceilings) == len(quantities)
+        assert {
+            ceiling.ceiling_quantity_id
+            for ceiling in claim.canonical_ceilings
+        } == {
+            quantity.quantity_id
+            for quantity in quantities
+        }
+        assert {
+            ceiling.canonical_ceiling_id
+            for ceiling in claim.canonical_ceilings
+        } == {
+            quantity.input_entity_ids[0]
+            for quantity in quantities
+        }
         assert len(run.quantities) == len(quantities)
         assert {row.quantity_id for row in run.quantities} == {
             quantity.quantity_id for quantity in quantities
