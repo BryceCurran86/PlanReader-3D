@@ -198,6 +198,60 @@ def test_publication_polygon_collapses_exact_spur_across_ring_start() -> None:
     assert _publication_polygon(raw) == _canonical_polygon(clean)
 
 
+def test_publication_polygon_drops_only_tiny_exact_attached_cycle() -> None:
+    clean = (
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (15.0, 20.0),
+        (0.0, 20.0),
+    )
+    with_tiny_attached_cycle = (
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (15.0, 20.0),
+        (15.0, 18.0),
+        (10.0, 18.0),
+        (9.8, 18.0),
+        (9.8, 17.8),
+        (10.0, 18.0),
+        (15.0, 18.0),
+        (15.0, 20.0),
+        (0.0, 20.0),
+    )
+
+    raw = _canonical_polygon(with_tiny_attached_cycle)
+    result = _publication_polygon(raw, degenerate_area_limit=1.0)
+
+    assert raw != _canonical_polygon(clean)
+    assert result == _canonical_polygon(clean)
+    assert len(set(result)) == len(result)
+
+
+def test_publication_polygon_keeps_non_tiny_attached_cycle_fail_closed() -> None:
+    with_non_tiny_attached_cycle = (
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (15.0, 20.0),
+        (15.0, 18.0),
+        (10.0, 18.0),
+        (8.0, 18.0),
+        (8.0, 16.0),
+        (10.0, 18.0),
+        (15.0, 18.0),
+        (15.0, 20.0),
+        (0.0, 20.0),
+    )
+
+    raw = _canonical_polygon(with_non_tiny_attached_cycle)
+    result = _publication_polygon(raw, degenerate_area_limit=1.0)
+
+    assert result == raw
+    assert len(set(result)) < len(result)
+
+
 def test_two_room_source_plan_publishes_exact_room_faces(tmp_path: Path) -> None:
     path = tmp_path / "two-room.pdf"
     _write_plan(path, with_partition=True)
