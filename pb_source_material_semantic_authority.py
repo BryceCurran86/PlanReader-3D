@@ -20,8 +20,9 @@ from typing import Mapping, Optional, Sequence
 import fitz
 from PIL import Image, ImageOps
 
-from pb_drawing_evidence_binding import DrawingViewType
+from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewType
 from pb_material_schedule_v1222 import (
+    SCHEDULE_WORDS,
     _compatible_descriptions,
     _defined_codes_in_text,
     parse_schedule_text,
@@ -260,6 +261,7 @@ def _viewport_is_authoritative(
 class _TrustedTextWord:
     observation_id: str
     page_id: str
+    source_partition_id: str
     text: str
     bbox: tuple[float, float, float, float]
     block_no: int
@@ -267,6 +269,132 @@ class _TrustedTextWord:
     word_no: int
     trusted: bool
     reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _TrustedScheduleBlock:
+    page_id: str
+    source_partition_id: str
+    block_no: int
+    scope_id: str
+    text: str
+    line_evidence: Mapping[str, tuple[str, ...]]
+
+
+def _is_material_schedule_title(value: object) -> bool:
+    text = " ".join(str(value or "").strip().casefold().split())
+    if not text or not any(token in text for token in SCHEDULE_WORDS):
+        return False
+    return (
+        DrawingViewClassifier.classify_text(str(value or "")).value
+        == DrawingViewType.SCHEDULE.value
+    )
+
+
+def _trusted_native_material_schedule_blocks(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[_TrustedScheduleBlock, ...]:
+    """Return only complete trusted native blocks headed by a material schedule.
+
+    This is an independent source-ownership route for schedules whose outer
+    vector frame is ambiguous. It never chooses a competing rectangle. The PDF
+    text structure itself must put exactly one qualified material/finish
+    schedule title at the first line of one source partition/block, followed by
+    contiguous complete trusted rows in that same block.
+    """
+
+    grouped: dict[tuple[str, int], list[_TrustedTextWord]] = {}
+    for word in words:
+        if not word.source_partition_id:
+            continue
+        grouped.setdefault(
+            (word.source_partition_id, int(word.block_no)),
+            [],
+        ).append(word)
+
+    out: list[_TrustedScheduleBlock] = []
+    for (partition_id, block_no), block_words in sorted(grouped.items()):
+        if not block_words or any(not word.trusted for word in block_words):
+            continue
+        by_line: dict[int, list[_TrustedTextWord]] = {}
+        for word in block_words:
+            by_line.setdefault(int(word.line_no), []).append(word)
+        line_numbers = sorted(by_line)
+        if len(line_numbers) < 2:
+            continue
+        if line_numbers != list(range(line_numbers[0], line_numbers[-1] + 1)):
+            continue
+
+        lines: list[tuple[str, tuple[str, ...]]] = []
+        valid = True
+        for line_no in line_numbers:
+            line_words = sorted(
+                by_line[line_no],
+                key=lambda row: (row.word_no, row.bbox[0], row.observation_id),
+            )
+            word_numbers = [int(row.word_no) for row in line_words]
+            if (
+                not word_numbers
+                or len(set(word_numbers)) != len(word_numbers)
+                or word_numbers
+                != list(range(word_numbers[0], word_numbers[-1] + 1))
+            ):
+                valid = False
+                break
+            text = " ".join(
+                row.text.strip() for row in line_words if row.text.strip()
+            ).strip()
+            if not text:
+                valid = False
+                break
+            lines.append(
+                (
+                    text,
+                    tuple(row.observation_id for row in line_words),
+                )
+            )
+        if not valid or len(lines) < 2:
+            continue
+        title_indices = [
+            index
+            for index, (text, _ids) in enumerate(lines)
+            if _is_material_schedule_title(text)
+        ]
+        if title_indices != [0]:
+            continue
+
+        page_ids = {word.page_id for word in block_words}
+        if len(page_ids) != 1:
+            continue
+        page_id = next(iter(page_ids))
+        scope_id = stable_contract_id(
+            "source_material_native_schedule_block",
+            {
+                "page_id": page_id,
+                "source_partition_id": partition_id,
+                "block_no": block_no,
+                "title": lines[0][0],
+                "observation_ids": tuple(
+                    observation_id
+                    for _text, observation_ids in lines
+                    for observation_id in observation_ids
+                ),
+            },
+            digest_chars=32,
+        )
+        out.append(
+            _TrustedScheduleBlock(
+                page_id=page_id,
+                source_partition_id=partition_id,
+                block_no=block_no,
+                scope_id=scope_id,
+                text="\n".join(text for text, _ids in lines),
+                line_evidence=MappingProxyType(
+                    {text: ids for text, ids in lines}
+                ),
+            )
+        )
+    return tuple(out)
 
 
 def _bbox_fully_inside(
@@ -348,6 +476,7 @@ def _trusted_words_by_page(
             _TrustedTextWord(
                 observation_id=str(observation_id),
                 page_id=page_id,
+                source_partition_id=str(receipt.source_partition_id or ""),
                 text=str(trusted_text or receipt.raw_text or ""),
                 bbox=bbox,
                 block_no=int(receipt.block_no or 0),
@@ -445,6 +574,7 @@ def _recover_admissible_viewport_words(
                 _TrustedTextWord(
                     observation_id=word.observation_id,
                     page_id=word.page_id,
+                    source_partition_id=word.source_partition_id,
                     text=str(raster_result.corroborated_text),
                     bbox=word.bbox,
                     block_no=word.block_no,
@@ -733,6 +863,7 @@ def _recover_admissible_viewport_lines(
             replacements[word.observation_id] = _TrustedTextWord(
                 observation_id=word.observation_id,
                 page_id=word.page_id,
+                source_partition_id=word.source_partition_id,
                 text=word.text,
                 bbox=word.bbox,
                 block_no=word.block_no,
