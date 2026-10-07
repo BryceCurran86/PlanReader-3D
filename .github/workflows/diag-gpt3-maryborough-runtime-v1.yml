@@ -36,18 +36,97 @@ jobs:
           set -o pipefail
           mkdir -p artifacts/gpt3-maryborough-runtime
           PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt3-maryborough-runtime/focused.json
-          import json,time
+          import faulthandler
+          import json
+          import time
+          from collections import defaultdict
           from pathlib import Path
-          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          import pb_live_physical_net_wall_integration as live
+
+          faulthandler.enable()
+          faulthandler.dump_traceback_later(60, repeat=True)
+
+          timings=defaultdict(float)
+          calls=defaultdict(int)
+
+          def wrap_module(name):
+              original=getattr(live,name)
+              def wrapped(*args,**kwargs):
+                  started=time.perf_counter()
+                  try:
+                      return original(*args,**kwargs)
+                  finally:
+                      elapsed=time.perf_counter()-started
+                      timings[name]+=elapsed
+                      calls[name]+=1
+                      print(f"STAGE {name} call={calls[name]} elapsed={elapsed:.3f}s total={timings[name]:.3f}s", flush=True)
+              setattr(live,name,wrapped)
+
+          for name in (
+              "compose_live_wall_opening_authority",
+              "compose_live_canonical_walls",
+              "compose_live_canonical_rooms",
+              "compose_live_canonical_spaces",
+              "compose_live_canonical_floor_surfaces",
+              "build_source_room_area_bridge",
+              "enrich_live_canonical_floor_metric_areas",
+              "enrich_live_canonical_floor_finishes",
+              "compose_live_physical_opening_voids",
+              "publish_live_opening_area_quantities",
+              "publish_live_authenticated_opening_count_quantities",
+              "compose_live_gross_wall_geometry",
+              "compose_live_whole_wall_roles",
+              "compose_live_external_physical_net_wall_publication",
+          ):
+              wrap_module(name)
+
+          original_ingest=live.SourceVisibilityProducer.ingest_native_pdf_bytes
+          def timed_ingest(self,*args,**kwargs):
+              started=time.perf_counter()
+              try:
+                  return original_ingest(self,*args,**kwargs)
+              finally:
+                  elapsed=time.perf_counter()-started
+                  timings["source_ingest"]+=elapsed
+                  calls["source_ingest"]+=1
+                  print(f"STAGE source_ingest elapsed={elapsed:.3f}s", flush=True)
+          live.SourceVisibilityProducer.ingest_native_pdf_bytes=timed_ingest
+
+          original_cross=live.CrossViewRoomAreaProducer.publish
+          def timed_cross(self,*args,**kwargs):
+              started=time.perf_counter()
+              try:
+                  return original_cross(self,*args,**kwargs)
+              finally:
+                  elapsed=time.perf_counter()-started
+                  timings["cross_view_room_area"]+=elapsed
+                  calls["cross_view_room_area"]+=1
+                  print(f"STAGE cross_view_room_area elapsed={elapsed:.3f}s", flush=True)
+          live.CrossViewRoomAreaProducer.publish=timed_cross
+
+          original_finish=live.CrossViewFloorFinishProducer.publish
+          def timed_finish(self,*args,**kwargs):
+              started=time.perf_counter()
+              try:
+                  return original_finish(self,*args,**kwargs)
+              finally:
+                  elapsed=time.perf_counter()-started
+                  timings["cross_view_floor_finish"]+=elapsed
+                  calls["cross_view_floor_finish"]+=1
+                  print(f"STAGE cross_view_floor_finish elapsed={elapsed:.3f}s", flush=True)
+          live.CrossViewFloorFinishProducer.publish=timed_finish
+
           path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           started=time.perf_counter()
-          claim=collect_live_physical_net_wall_claim(
+          claim=live.collect_live_physical_net_wall_claim(
               path,
               pages=(6,),
               topology_pages=(6,),
               room_area_support_pages=(10,),
           )
           elapsed=time.perf_counter()-started
+          faulthandler.cancel_dump_traceback_later()
+
           def norm(value):
               return " ".join(str(value or "").strip().upper().split())
           labels={norm(room.room_label) for room in claim.canonical_rooms if norm(room.room_label)}
@@ -62,6 +141,8 @@ jobs:
           assert "DRY STORE" not in firm
           print(json.dumps({
               "elapsed_seconds":elapsed,
+              "stage_timings_seconds":dict(sorted(timings.items())),
+              "stage_calls":dict(sorted(calls.items())),
               "canonical_room_count":len(claim.canonical_rooms),
               "canonical_floor_count":len(claim.canonical_floors),
               "firm_room_areas":firm,
