@@ -1,0 +1,87 @@
+name: DIAG GPT3 Maryborough Runtime V1
+
+on:
+  push:
+    branches:
+      - fix/gpt3-maryborough-runtime-v1
+
+concurrency:
+  group: diag-gpt3-maryborough-runtime-v1
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused regression tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_source_closed_project_handoff.py \
+            tests/test_live_canonical_room_composition.py
+      - name: Focused Maryborough runtime proof
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt3-maryborough-runtime
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt3-maryborough-runtime/focused.json
+          import json,time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          elapsed=time.perf_counter()-started
+          def norm(value):
+              return " ".join(str(value or "").strip().upper().split())
+          labels={norm(room.room_label) for room in claim.canonical_rooms if norm(room.room_label)}
+          firm={
+              norm(dict(q.metadata or {}).get("room_label")):float(q.value)
+              for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          }
+          assert abs(firm["FOOD PREP"]-13.270425) < 1e-9
+          assert abs(firm["COLD ROOM"]-25.37875) < 1e-9
+          assert "DRY STORE" not in labels
+          assert "DRY STORE" not in firm
+          print(json.dumps({
+              "elapsed_seconds":elapsed,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "firm_room_areas":firm,
+              "labels":sorted(labels),
+          },indent=2,sort_keys=True))
+          PY
+      - name: Full Maryborough all-family handoff
+        run: |
+          set -o pipefail
+          START=$(date +%s)
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group all \
+            --output-dir artifacts/gpt3-maryborough-runtime/full \
+            | tee artifacts/gpt3-maryborough-runtime/full.stdout.json
+          END=$(date +%s)
+          echo "{\"elapsed_seconds\":$((END-START))}" > artifacts/gpt3-maryborough-runtime/full_elapsed.json
+          cat artifacts/gpt3-maryborough-runtime/full/production_summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-runtime-v1
+          path: artifacts/gpt3-maryborough-runtime
+          retention-days: 3
