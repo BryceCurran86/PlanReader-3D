@@ -194,7 +194,8 @@ def test_publication_polygon_collapses_exact_spur_across_ring_start() -> None:
     raw = _canonical_polygon(wrapped_spur)
 
     assert raw != _canonical_polygon(clean)
-    assert _publication_polygon(raw) == _canonical_polygon(clean
+    assert _publication_polygon(raw) == _canonical_polygon(clean)
+
 
 def test_two_room_source_plan_publishes_exact_room_faces(tmp_path: Path) -> None:
     path = tmp_path / "two-room.pdf"
