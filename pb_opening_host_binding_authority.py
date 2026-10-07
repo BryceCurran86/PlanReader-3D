@@ -230,6 +230,21 @@ class _LocalHostScope:
     source_observation_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _LocalBoundaryScopeInvariantIndex:
+    """Immutable page-scope facts reused by every opening-local host proof."""
+
+    records_by_id: Mapping[str, PhysicalWallCandidateRecord]
+    evaluated_ids: frozenset[str]
+    tainted_ids: frozenset[str]
+    unsafe_ids: frozenset[str]
+    unsafe_group_bridge_member_ids: frozenset[str]
+    unsafe_equivalence_neighbors: Mapping[
+        str,
+        tuple[tuple[str, str], ...],
+    ]
+
+
 _BindingKey = tuple[str, str, str, str, str, str, str]
 
 
@@ -407,6 +422,10 @@ class OpeningHostBindingProducer:
         self._opening = physical_opening_authority
         self._universe = host_wall_universe_authority
         self._results: dict[_BindingKey, OpeningHostBindingResult] = {}
+        self._local_boundary_scope_indexes: dict[
+            tuple[str, str, str, str, str, str],
+            _LocalBoundaryScopeInvariantIndex,
+        ] = {}
 
     @classmethod
     def from_authorities(
@@ -491,6 +510,30 @@ class OpeningHostBindingProducer:
             wall_result = self._universe._resolve_physical_wall_scope(
                 host_universe_selector
             )
+            scope_key = (
+                str(host_universe_selector.document_id),
+                str(host_universe_selector.revision_id),
+                str(host_universe_selector.source_sha256),
+                str(host_universe_selector.snapshot_id),
+                str(host_universe_selector.page_id),
+                str(host_universe_selector.decision_scope_id),
+            )
+            index_cache = getattr(
+                self,
+                "_local_boundary_scope_indexes",
+                None,
+            )
+            if index_cache is None:
+                index_cache = {}
+                self._local_boundary_scope_indexes = index_cache
+            invariant_index = index_cache.get(scope_key)
+            if invariant_index is None:
+                invariant_index = _build_local_boundary_scope_invariant_index(
+                    wall_result
+                )
+                if invariant_index is not None:
+                    index_cache[scope_key] = invariant_index
+
             local_scope, local_reasons = _local_boundary_clean_host_scope(
                 wall_result,
                 geometry,
@@ -498,6 +541,7 @@ class OpeningHostBindingProducer:
                     opening.structural_pattern
                     == RASTER_FRAMED_WALL_BAND_INTERRUPTION
                 ),
+                invariant_index=invariant_index,
             )
             if local_scope is None:
                 status = (
@@ -1856,11 +1900,81 @@ def _identities_share_opening_local_ambiguity_evidence(
     )
 
 
+def _build_local_boundary_scope_invariant_index(
+    wall_result: PhysicalWallCandidateScopeResult,
+) -> Optional[_LocalBoundaryScopeInvariantIndex]:
+    """Index immutable boundary/equivalence facts once for one sealed wall scope."""
+
+    evaluation = wall_result.boundary_evaluation
+    equivalence = wall_result.equivalence
+    if (
+        evaluation is None
+        or evaluation.status != BOUNDARY_EVALUATION_EVALUATED
+        or equivalence is None
+    ):
+        return None
+
+    records_by_id = {
+        str(record.wall_candidate_id): record for record in wall_result.records
+    }
+    evaluated_ids = frozenset(
+        str(value) for value in evaluation.evaluated_wall_candidate_ids
+    )
+    tainted_ids = frozenset(
+        str(value) for value in evaluation.boundary_tainted_wall_candidate_ids
+    )
+    clean_ids = evaluated_ids - tainted_ids
+    unsafe_ids = frozenset(set(records_by_id) - set(clean_ids))
+
+    unsafe_group_bridge_member_ids: set[str] = set()
+    for group in equivalence.equivalence_groups:
+        members = {str(value) for value in group}
+        if members & unsafe_ids:
+            unsafe_group_bridge_member_ids.update(members)
+
+    unsafe_equivalence_neighbors: dict[str, list[tuple[str, str]]] = {}
+    same_value = PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value
+    ambiguous_value = (
+        PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value
+    )
+    for left, right, raw_classification in equivalence.pair_classifications:
+        classification = str(raw_classification)
+        if classification not in {same_value, ambiguous_value}:
+            continue
+        left_id = str(left)
+        right_id = str(right)
+        if left_id in unsafe_ids:
+            unsafe_equivalence_neighbors.setdefault(right_id, []).append(
+                (left_id, classification)
+            )
+        if right_id in unsafe_ids:
+            unsafe_equivalence_neighbors.setdefault(left_id, []).append(
+                (right_id, classification)
+            )
+
+    return _LocalBoundaryScopeInvariantIndex(
+        records_by_id=MappingProxyType(dict(records_by_id)),
+        evaluated_ids=evaluated_ids,
+        tainted_ids=tainted_ids,
+        unsafe_ids=unsafe_ids,
+        unsafe_group_bridge_member_ids=frozenset(
+            unsafe_group_bridge_member_ids
+        ),
+        unsafe_equivalence_neighbors=MappingProxyType(
+            {
+                wall_id: tuple(rows)
+                for wall_id, rows in unsafe_equivalence_neighbors.items()
+            }
+        ),
+    )
+
+
 def _local_boundary_clean_host_scope(
     wall_result: PhysicalWallCandidateScopeResult,
     opening: _OpeningGeometry,
     *,
     include_spanning_raster_candidates: bool = False,
+    invariant_index: Optional[_LocalBoundaryScopeInvariantIndex] = None,
 ) -> tuple[Optional[_LocalHostScope], tuple[str, ...]]:
     """Prove one opening's host search locally closed without promoting global scope.
 
@@ -1889,9 +2003,12 @@ def _local_boundary_clean_host_scope(
         return None, (HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,)
 
     evaluation = wall_result.boundary_evaluation
-    records_by_id = {
-        str(record.wall_candidate_id): record for record in wall_result.records
-    }
+    index = invariant_index or _build_local_boundary_scope_invariant_index(
+        wall_result
+    )
+    if index is None:
+        return None, (HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,)
+    records_by_id = index.records_by_id
     edge_tol = max(0.5, min(2.0, opening.length * 0.02))
     relevant_ids = {
         wall_id
@@ -1928,12 +2045,8 @@ def _local_boundary_clean_host_scope(
             "no_local_host_wall_candidates",
         )
 
-    evaluated_ids = {
-        str(value) for value in evaluation.evaluated_wall_candidate_ids
-    }
-    tainted_ids = {
-        str(value) for value in evaluation.boundary_tainted_wall_candidate_ids
-    }
+    evaluated_ids = index.evaluated_ids
+    tainted_ids = index.tainted_ids
     unevaluated_relevant = relevant_ids - evaluated_ids
     tainted_relevant = relevant_ids & tainted_ids
     if unevaluated_relevant:
@@ -1960,78 +2073,62 @@ def _local_boundary_clean_host_scope(
             "host_relevant_excluded_boundary_primitive",
         )
 
-    clean_ids = evaluated_ids - tainted_ids
     equivalence = wall_result.equivalence
-    unsafe_ids = set(records_by_id) - clean_ids
+    unsafe_ids = index.unsafe_ids
 
-    for group in equivalence.equivalence_groups:
-        members = {str(value) for value in group}
-        if members & relevant_ids and members & unsafe_ids:
+    if relevant_ids & index.unsafe_group_bridge_member_ids:
+        return None, (
+            HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+            "host_equivalence_bridges_unsafe_boundary_evidence",
+        )
+
+    # The global equivalence ledger is immutable for this wall scope. Inspect
+    # only SAME/AMBIGUOUS neighbours that are already proven unsafe instead of
+    # rescanning every pair classification for every physical opening.
+    for relevant_id in sorted(relevant_ids):
+        relevant_record = records_by_id.get(relevant_id)
+        if relevant_record is None:
             return None, (
                 HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
                 "host_equivalence_bridges_unsafe_boundary_evidence",
             )
-    for left, right, raw_classification in equivalence.pair_classifications:
-        classification = str(raw_classification)
-        if classification not in {
-            PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value,
-            PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value,
-        }:
-            continue
-        pair = {str(left), str(right)}
-        relevant_pair_ids = pair & relevant_ids
-        unsafe_pair_ids = pair & unsafe_ids
-        if not relevant_pair_ids or not unsafe_pair_ids:
-            continue
-
-        # Positive SAME remains globally authoritative and always carries
-        # unsafe boundary evidence into the opening-local proposition.
-        if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
-            return None, (
-                HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
-                "host_equivalence_bridges_unsafe_boundary_evidence",
-            )
-
-        # Global wall equivalence deliberately keeps unscaled, parallel,
-        # longitudinally-overlapping independent paths AMBIGUOUS regardless of
-        # lateral separation. That is correct for global wall publication, but
-        # it must not make every remote boundary-tainted wall contaminate every
-        # opening. Keep AMBIGUOUS fail-closed whenever immutable identity
-        # evidence connects the pair, the unsafe path can occupy this opening's
-        # source-proven wall band, or its geometry cannot be evaluated. Only an
-        # evaluable, remote, lineage-independent ambiguity is outside this
-        # opening-local proposition.
-        for relevant_id in sorted(relevant_pair_ids):
-            relevant_record = records_by_id.get(relevant_id)
-            if relevant_record is None:
+        for unsafe_id, classification in index.unsafe_equivalence_neighbors.get(
+            relevant_id, ()
+        ):
+            unsafe_record = records_by_id.get(unsafe_id)
+            if unsafe_record is None:
                 return None, (
                     HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
                     "host_equivalence_bridges_unsafe_boundary_evidence",
                 )
-            for unsafe_id in sorted(unsafe_pair_ids):
-                unsafe_record = records_by_id.get(unsafe_id)
-                if unsafe_record is None:
-                    return None, (
-                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
-                        "host_equivalence_bridges_unsafe_boundary_evidence",
-                    )
-                if _identities_share_opening_local_ambiguity_evidence(
-                    relevant_record,
-                    unsafe_record,
-                ):
-                    return None, (
-                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
-                        "host_equivalence_bridges_unsafe_boundary_evidence",
-                    )
-                local_effect = _candidate_could_affect_opening_local_band(
-                    unsafe_record,
-                    opening,
+
+            # Positive SAME remains globally authoritative and always carries
+            # unsafe boundary evidence into the opening-local proposition.
+            if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
+                return None, (
+                    HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                    "host_equivalence_bridges_unsafe_boundary_evidence",
                 )
-                if local_effect is not False:
-                    return None, (
-                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
-                        "host_equivalence_bridges_unsafe_boundary_evidence",
-                    )
+
+            # Global AMBIGUOUS remains fail-closed when immutable identity links
+            # the pair or the unsafe geometry can occupy this opening's band.
+            if _identities_share_opening_local_ambiguity_evidence(
+                relevant_record,
+                unsafe_record,
+            ):
+                return None, (
+                    HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                    "host_equivalence_bridges_unsafe_boundary_evidence",
+                )
+            local_effect = _candidate_could_affect_opening_local_band(
+                unsafe_record,
+                opening,
+            )
+            if local_effect is not False:
+                return None, (
+                    HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                    "host_equivalence_bridges_unsafe_boundary_evidence",
+                )
 
     local_records = tuple(
         records_by_id[wall_id] for wall_id in sorted(relevant_ids)
