@@ -1,0 +1,247 @@
+name: DIAG GPT2 Host Unevaluable Local Effect Reasons
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify local-effect geometry failures
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-host-unevaluable-local-effect-reasons
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json, math
+          from collections import Counter
+          from pathlib import Path
+
+          import pb_opening_host_binding_authority as host
+          from pb_live_wall_opening_authority_composition import (
+              compose_live_wall_opening_authority,
+          )
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateSelector,
+          )
+          from pb_physical_wall_identity import PhysicalEquivalenceClass
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-host-unevaluable-local-effect-reasons",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-host-unevaluable-local-effect-reasons",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","30","31"),
+          )
+          composition=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+          )
+
+          def failure_reason(record, opening):
+              wall=record.wall_candidate
+              if wall.is_curved:
+                  return "curved"
+              if len(wall.centerline_pts)<2:
+                  return "fewer_than_two_centerline_points"
+              if "non_simple_chain_topology_fallback_ordering" in wall.reason_codes:
+                  return "non_simple_chain"
+              points=tuple((float(x),float(y)) for x,y in wall.centerline_pts)
+              if any(
+                  not (math.isfinite(x) and math.isfinite(y))
+                  for x,y in points
+              ):
+                  return "nonfinite_centerline"
+              line=(points[0][0],points[0][1],points[-1][0],points[-1][1])
+              unit=host._canonical_unit(line)
+              if unit is None:
+                  return "degenerate_end_to_end_axis"
+              if abs(host._cross(unit,opening.axis))>host._PARALLEL_TOL:
+                  return "end_to_end_orientation_incompatible"
+              for start,end in zip(points,points[1:]):
+                  segment_unit=host._canonical_unit(
+                      (start[0],start[1],end[0],end[1])
+                  )
+                  if segment_unit is None:
+                      return "degenerate_segment"
+                  if abs(host._cross(segment_unit,opening.axis))>host._PARALLEL_TOL:
+                      return "segment_orientation_incompatible"
+              offsets=tuple(
+                  host._project(point,opening.origin,opening.normal)
+                  for point in points
+              )
+              if max(offsets)-min(offsets)>host.DEFAULT_GAP_SNAP_TOLERANCE_PT:
+                  return "offset_variation_exceeds_snap"
+              return "unexpected_none"
+
+          rows=[]
+          for trace in composition.opening_bindings:
+              if "host_equivalence_bridges_unsafe_boundary_evidence" not in trace.reason_codes:
+                  continue
+              binding_selector=composition.binding_selectors.get(
+                  trace.opening_identity_id
+              )
+              if binding_selector is None:
+                  continue
+              obs=ObservationSelector(
+                  document_id=binding_selector.document_id,
+                  revision_id=binding_selector.revision_id,
+                  source_sha256=binding_selector.source_sha256,
+                  snapshot_id=binding_selector.snapshot_id,
+                  observation_id=trace.representative_observation_id,
+              )
+              opening=composition.physical_opening_authority.prove_existence(
+                  obs
+              ).existence_record
+              if opening is None:
+                  continue
+              geometry=host._opening_geometry(
+                  composition.physical_opening_authority,opening
+              )
+              if geometry is None:
+                  continue
+              wall_scope=composition.physical_wall_candidate_authority.resolve_scope(
+                  PhysicalWallCandidateSelector(
+                      document_id=binding_selector.document_id,
+                      revision_id=binding_selector.revision_id,
+                      source_sha256=binding_selector.source_sha256,
+                      snapshot_id=binding_selector.snapshot_id,
+                      page_id=binding_selector.page_id,
+                      decision_scope_id=binding_selector.decision_scope_id,
+                  )
+              )
+              if wall_scope.equivalence is None or wall_scope.boundary_evaluation is None:
+                  continue
+              recs={str(r.wall_candidate_id):r for r in wall_scope.records}
+              raster_mode=(
+                  opening.structural_pattern
+                  == host.RASTER_FRAMED_WALL_BAND_INTERRUPTION
+              )
+              edge_tol=max(0.5,min(2.0,geometry.length*0.02))
+              relevant_ids={
+                  wall_id for wall_id,record in recs.items()
+                  if (
+                      host._candidate_host_roles(record,geometry)
+                      or (
+                          raster_mode
+                          and (
+                              host._raster_whole_wall_role_data(
+                                  record,geometry
+                              ) is not None
+                              or (
+                                  record.physical_identity.usable
+                                  and bool(record.physical_identity.candidate_identity_id)
+                                  and bool(tuple(
+                                      value for value
+                                      in record.physical_identity.source_primitive_ids
+                                      if str(value).strip()
+                                  ))
+                                  and host._candidate_locally_owns_opening_span(
+                                      record,geometry,edge_tol=edge_tol
+                                  )
+                              )
+                          )
+                      )
+                  )
+              }
+              ev=wall_scope.boundary_evaluation
+              evaluated={str(v) for v in ev.evaluated_wall_candidate_ids}
+              tainted={str(v) for v in ev.boundary_tainted_wall_candidate_ids}
+              clean=evaluated-tainted
+              unsafe=set(recs)-clean
+
+              trigger_rows=[]
+              for left,right,raw in wall_scope.equivalence.pair_classifications:
+                  if str(raw) != PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
+                      continue
+                  pair={str(left),str(right)}
+                  rel=sorted(pair&relevant_ids)
+                  bad=sorted(pair&unsafe)
+                  if not rel or not bad:
+                      continue
+                  for rel_id in rel:
+                      for bad_id in bad:
+                          if rel_id==bad_id:
+                              continue
+                          rel_rec=recs.get(rel_id)
+                          bad_rec=recs.get(bad_id)
+                          if rel_rec is None or bad_rec is None:
+                              continue
+                          if host._identities_share_opening_local_ambiguity_evidence(
+                              rel_rec,bad_rec
+                          ):
+                              continue
+                          if host._candidate_could_affect_opening_local_band(
+                              bad_rec,geometry
+                          ) is not None:
+                              continue
+                          reason=failure_reason(bad_rec,geometry)
+                          trigger_rows.append({
+                              "relevant_id":rel_id,
+                              "unsafe_id":bad_id,
+                              "reason":reason,
+                              "unsafe_boundary_tainted":bad_id in tainted,
+                              "unsafe_wall_is_curved":
+                                  bool(bad_rec.wall_candidate.is_curved),
+                              "unsafe_centerline_point_count":
+                                  len(bad_rec.wall_candidate.centerline_pts),
+                              "unsafe_wall_reason_codes":
+                                  list(bad_rec.wall_candidate.reason_codes),
+                          })
+              if trigger_rows:
+                  rows.append({
+                      "opening_identity_id":trace.opening_identity_id,
+                      "structural_pattern":opening.structural_pattern,
+                      "trigger_count":len(trigger_rows),
+                      "reason_counts":dict(sorted(Counter(
+                          row["reason"] for row in trigger_rows
+                      ).items())),
+                      "triggers":trigger_rows,
+                  })
+
+          triggers=[row for item in rows for row in item["triggers"]]
+          print(json.dumps({
+              "opening_count":len(composition.opening_bindings),
+              "resolved_binding_count":sum(
+                  1 for trace in composition.opening_bindings if trace.record_id
+              ),
+              "blocked_opening_count":len(rows),
+              "unevaluable_trigger_count":len(triggers),
+              "failure_reason_counts":dict(sorted(Counter(
+                  row["reason"] for row in triggers
+              ).items())),
+              "opening_failure_reason_counts":dict(sorted(Counter(
+                  reason
+                  for item in rows
+                  for reason in item["reason_counts"]
+              ).items())),
+              "structural_pattern_counts":dict(sorted(Counter(
+                  item["structural_pattern"] for item in rows
+              ).items())),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-host-unevaluable-local-effect-reasons
+          path: artifacts/gpt2-host-unevaluable-local-effect-reasons
+          retention-days: 2
