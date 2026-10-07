@@ -77,7 +77,6 @@ jobs:
               document_id="gpt2-final-real-material-proof",
               source_bytes=payload,
               source_locator="memory://maryborough.pdf",
-              page_ids=("9", "16", "18"),
           )
           import pb_source_material_semantic_authority as material
 
