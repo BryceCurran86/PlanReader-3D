@@ -1,0 +1,84 @@
+name: DIAG GPT1 Maryborough Material Boundary Gates
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace material semantic viewport ownership gates
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          import pb_viewport_segmentation as vp
+          from pb_drawing_evidence_binding import DrawingViewType
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(pdf)
+          rows=[]
+          try:
+              for page_no in (11,24,25,26,27):
+                  page=doc[page_no-1]
+                  calibration=vp.calibrate_viewport_layout(page)
+                  anchors=vp.extract_view_title_anchors(page)
+                  frames=vp.extract_vector_frames(page,calibration)
+                  fragments=vp._text_fragments(page)
+                  semantic=[]
+                  for index,anchor in enumerate(anchors):
+                      if anchor.view_type not in {
+                          DrawingViewType.SCHEDULE.value,
+                          DrawingViewType.LEGEND.value,
+                          DrawingViewType.SPECIFICATION.value,
+                      }:
+                          continue
+                      candidates=vp._frame_candidates_for_title(
+                          page,anchor,frames,calibration,anchors=anchors
+                      )
+                      semantic.append({
+                          "index":index,
+                          "text":anchor.text,
+                          "type":anchor.view_type,
+                          "bbox":list(anchor.bbox),
+                          "candidate_frames":[{
+                              "bbox":list(frame),
+                              "table":vp._frame_looks_like_table(
+                                  frame,page,calibration
+                              ),
+                              "rejected":vp._rejected_ownership_frame(
+                                  page,frame,calibration,fragments,
+                                  view_type=anchor.view_type,
+                              ),
+                          } for frame in candidates],
+                      })
+                  segmented=vp.segment_page_viewports(page,page_number=page_no)
+                  rows.append({
+                      "page":page_no,
+                      "frame_count":len(frames),
+                      "proven_title_block":vp._proven_title_block_region(page),
+                      "semantic_anchors":semantic,
+                      "segmented":[{
+                          "label":v.label,
+                          "type":v.view_type,
+                          "status":v.status,
+                          "bbox":v.bounding_box,
+                          "boundary_source":v.boundary_source,
+                          "notes":list(v.notes or ()),
+                          "provenance":dict(v.provenance or {}),
+                      } for v in segmented],
+                  })
+          finally:
+              doc.close()
+          print(json.dumps({"pages":rows},indent=2,sort_keys=True,default=str))
+          PY
