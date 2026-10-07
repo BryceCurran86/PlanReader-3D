@@ -1,0 +1,201 @@
+name: DIAG GPT3 Maryborough Focused Surfaces V2
+
+on:
+  push:
+    branches:
+      - diag/gpt3-maryborough-focused-surfaces-v2
+
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Seal source-classified Maryborough surfaces
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt3-maryborough-focused-surfaces
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt3-maryborough-focused-surfaces/stdout.json
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_source_floor_plan_page_scope import source_floor_plan_topology_scope
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+          from pb_live_floor_finish_area_source_closed_export import seal_live_floor_finish_area_run
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+          from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
+          from pb_live_ceiling_area_source_closed_export import seal_live_ceiling_area_run
+          from pb_source_closed_run_export import combine_source_closed_runs
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          project="au_qld_maryborough_service_station"
+          root=Path("artifacts/gpt3-maryborough-focused-surfaces")
+          doc=fitz.open(pdf)
+          try:
+              selected=tuple(range(doc.page_count))
+          finally:
+              doc.close()
+          scope=source_floor_plan_topology_scope(pdf, selected)
+          if scope is None or not scope.restricts:
+              raise SystemExit("source page scope unresolved")
+          topology=tuple(scope.topology_page_indices() or ())
+          support=tuple(scope.room_area_support_page_indices or ())
+          execution=tuple(sorted(set((*topology,*support))))
+          if not topology or not support:
+              raise SystemExit(f"insufficient source-classified surface scope: topology={topology} support={support}")
+
+          claim=collect_live_physical_net_wall_claim(
+              pdf,
+              pages=execution,
+              topology_pages=topology,
+              room_area_support_pages=support,
+          )
+          floor_q=tuple(q for q in publish_live_floor_area_quantities(claim) if not q.abstained and q.value is not None)
+          floor_finish_q=tuple(q for q in (getattr(claim,"floor_finish_quantity_evidence",()) or ()) if not q.abstained and q.value is not None)
+          ceiling=collect_live_ceiling_lining_claims(
+              pdf,
+              pages=execution,
+              authoritative_room_area_quantities=tuple(getattr(claim,"room_area_quantity_evidence",()) or ()),
+          )
+          ceiling_q=tuple(q for q in publish_live_ceiling_area_quantities(ceiling) if not q.abstained and q.value is not None)
+
+          runs=[]
+          if floor_q:
+              r=seal_live_floor_area_run(claim,workspace_id=1,project_id=project)
+              (root/"floor_area.sealed.json").write_text(r.to_json(),encoding="utf-8")
+              runs.append(r)
+          if floor_finish_q:
+              r=seal_live_floor_finish_area_run(claim,workspace_id=1,project_id=project)
+              (root/"floor_finish_area.sealed.json").write_text(r.to_json(),encoding="utf-8")
+              runs.append(r)
+          if ceiling_q:
+              r=seal_live_ceiling_area_run(ceiling,workspace_id=1,project_id=project)
+              (root/"ceiling_area.sealed.json").write_text(r.to_json(),encoding="utf-8")
+              runs.append(r)
+          if runs:
+              combined=combine_source_closed_runs(tuple(runs),project_id=project)
+              (root/f"{project}.json").write_text(combined.to_json(),encoding="utf-8")
+
+          anchor_tags={"D03","D07","D08","D09","D10","D13"}
+          rooms={r.canonical_room_id:r for r in claim.canonical_rooms}
+          openings=[]
+          for o in claim.canonical_openings:
+              openings.append({
+                  "physical_opening_id":o.physical_opening_id,
+                  "type_mark":o.type_mark,
+                  "host_wall_id":o.host_wall_id,
+                  "page_id":o.page_id,
+                  "opening_kind":o.opening_kind,
+                  "tag_observation_id":o.tag_observation_id,
+              })
+          room_anchors={}
+          for rid,room in rooms.items():
+              wall_ids=set(str(x) for x in (*room.bounding_wall_ids,*room.canonical_bounding_wall_ids))
+              tags=sorted({
+                  str(o.type_mark).strip().upper()
+                  for o in claim.canonical_openings
+                  if o.type_mark
+                  and str(o.type_mark).strip().upper() in anchor_tags
+                  and o.host_wall_id
+                  and str(o.host_wall_id) in wall_ids
+              })
+              room_anchors[rid]=tags
+
+          audit={
+              "page_scope":scope.to_dict(),
+              "execution_pages_zero_based":list(execution),
+              "claim_status":getattr(getattr(claim,"status",None),"value",str(getattr(claim,"status",""))),
+              "claim_reason_codes":list(getattr(claim,"reason_codes",()) or ()),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "canonical_opening_count":len(claim.canonical_openings),
+              "firm_room_areas":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "authority":q.authority,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "evidence_ids":list(q.evidence_ids),
+                  "metadata":dict(q.metadata or {}),
+              } for q in claim.room_area_quantity_evidence if not q.abstained and q.value is not None],
+              "floor_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "evidence_ids":list(q.evidence_ids),
+                  "metadata":dict(q.metadata or {}),
+              } for q in floor_q],
+              "floor_finish_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "evidence_ids":list(q.evidence_ids),
+                  "metadata":dict(q.metadata or {}),
+              } for q in floor_finish_q],
+              "ceiling_quantities":[{
+                  "quantity_id":q.quantity_id,
+                  "value":q.value,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "evidence_ids":list(q.evidence_ids),
+                  "metadata":dict(q.metadata or {}),
+              } for q in ceiling_q],
+              "rooms":[{
+                  "canonical_room_id":r.canonical_room_id,
+                  "physical_room_id":r.physical_room_id,
+                  "page_id":r.page_id,
+                  "viewport_id":r.viewport_id,
+                  "bounding_wall_ids":list(r.bounding_wall_ids),
+                  "canonical_bounding_wall_ids":list(r.canonical_bounding_wall_ids),
+                  "source_room_face_record_id":r.source_room_face_record_id,
+                  "polygon_pdf_pts":[list(p) for p in r.polygon_pdf_pts],
+                  "room_label":r.room_label,
+                  "anchor_tags":room_anchors.get(r.canonical_room_id,[]),
+              } for r in claim.canonical_rooms],
+              "floors":[{
+                  "canonical_floor_id":f.canonical_floor_id,
+                  "physical_floor_surface_id":f.physical_floor_surface_id,
+                  "room_entity_id":f.room_entity_id,
+                  "metric_area_m2":f.metric_area_m2,
+                  "metric_area_quantity_id":f.metric_area_quantity_id,
+                  "page_id":f.page_id,
+                  "viewport_id":f.viewport_id,
+              } for f in claim.canonical_floors],
+              "ceilings":[{
+                  "canonical_ceiling_id":c.canonical_ceiling_id,
+                  "room_entity_id":c.room_entity_id,
+                  "area_m2":c.area_m2,
+                  "finish_descriptor":c.finish_descriptor,
+                  "ceiling_quantity_id":c.ceiling_quantity_id,
+                  "room_area_quantity_id":c.room_area_quantity_id,
+                  "source_page":c.source_page,
+                  "viewport_id":c.viewport_id,
+              } for c in ceiling.canonical_ceilings],
+              "openings":openings,
+          }
+          (root/"audit.json").write_text(json.dumps(audit,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          print(json.dumps({
+              "execution_pages_zero_based":list(execution),
+              "firm_room_area_count":len(audit["firm_room_areas"]),
+              "floor_quantity_count":len(floor_q),
+              "floor_finish_quantity_count":len(floor_finish_q),
+              "ceiling_quantity_count":len(ceiling_q),
+              "anchored_room_count":sum(bool(v) for v in room_anchors.values()),
+              "anchor_rows":[{"room_id":k,"tags":v} for k,v in room_anchors.items() if v],
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-focused-surfaces-v2
+          path: artifacts/gpt3-maryborough-focused-surfaces
+          retention-days: 3
