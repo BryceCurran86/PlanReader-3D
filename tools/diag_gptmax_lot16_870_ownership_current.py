@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pb_opening_label_dimension_authority as labels
+import pb_opening_label_semantic_authority as semantics
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -137,6 +138,54 @@ def main():
             gap_reason_counts["no_870_label_matches_gap"] += 1
             continue
 
+        semantic_lines = semantics._trusted_native_lines(source, opening)
+        legend, legend_conflicts = semantics._legend_semantics(semantic_lines)
+        semantic_matches = []
+        for block_no, line_no, semantic_line in semantic_lines:
+            if not labels._label_matches_gap(semantic_line, gap):
+                continue
+            direct_kind, direct_conflict = semantics._explicit_word_kind(semantic_line.text)
+            compact_kind, compact_conflict = semantics.classify_compact_source_opening_text(
+                semantic_line.text
+            )
+            tokens = sorted({
+                match.group(0).upper()
+                for match in semantics._LABEL_CODE_TOKEN_RE.finditer(
+                    semantic_line.text or ""
+                )
+            })
+            legend_kinds = {
+                token: (None if legend.get(token) is None else legend[token][0])
+                for token in tokens
+                if token in legend or token in legend_conflicts
+            }
+            x0, y0, x1, y1 = semantic_line.bbox
+            center = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+            corners = ((x0, y0), (x0, y1), (x1, y0), (x1, y1))
+            along_values = [labels._dot(point, gap.axis) for point in corners]
+            cross = labels._dot(center, gap.normal)
+            semantic_matches.append({
+                "text": semantic_line.text,
+                "bbox": list(semantic_line.bbox),
+                "observation_ids": list(semantic_line.observation_ids),
+                "block_no": block_no,
+                "line_no": line_no,
+                "direct_kind": direct_kind,
+                "direct_conflict": direct_conflict,
+                "compact_kind": compact_kind,
+                "compact_conflict": compact_conflict,
+                "legend_kinds": legend_kinds,
+                "along_min": min(along_values),
+                "along_max": max(along_values),
+                "cross_center": cross,
+                "cross_delta": abs(cross - gap.cross_center),
+            })
+        opening_semantic_result = (
+            semantics.OpeningLabelSemanticProducer.from_source_visibility_producer(
+                source
+            ).publish_scope(selectors[opening_id])
+        )
+
         result = producer.publish_scope(selectors[opening_id])
         publish_status_counts[state(result.status)] += 1
         for reason in result.reason_codes:
@@ -149,7 +198,29 @@ def main():
             ),
             "structural_pattern": opening.structural_pattern,
             "aperture_bbox_pt": list(opening.aperture_bbox_pt) if opening.aperture_bbox_pt else None,
+            "gap": {
+                "axis": list(gap.axis),
+                "normal": list(gap.normal),
+                "along_min": gap.along_min,
+                "along_max": gap.along_max,
+                "cross_center": gap.cross_center,
+                "cross_spread": gap.cross_spread,
+            },
             "matching_870_lines": rows,
+            "semantic_matches": semantic_matches,
+            "opening_semantic_status": state(opening_semantic_result.status),
+            "opening_semantic_reason_codes": list(opening_semantic_result.reason_codes),
+            "opening_semantic_evidence": (
+                None
+                if opening_semantic_result.evidence is None
+                else {
+                    "semantic_kind": opening_semantic_result.evidence.semantic_kind,
+                    "raw_texts": list(opening_semantic_result.evidence.raw_texts),
+                    "source_text_observation_ids": list(
+                        opening_semantic_result.evidence.source_text_observation_ids
+                    ),
+                }
+            ),
             "published_status": state(result.status),
             "published_reason_codes": list(result.reason_codes),
             "published_evidence": None if result.evidence is None else {
