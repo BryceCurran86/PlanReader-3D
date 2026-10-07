@@ -30,6 +30,8 @@ from typing import Any
 
 class DrawingViewType(str, Enum):
     FLOOR_PLAN = "floor_plan"
+    FLOOR_FINISH_PLAN = "floor_finish_plan"
+    REFLECTED_CEILING_PLAN = "reflected_ceiling_plan"
     ROOF_PLAN = "roof_plan"
     ELEVATION = "elevation"
     SECTION = "section"
@@ -184,6 +186,12 @@ class DrawingViewClassifier:
     _PLAN_PATTERNS = (
         r"\b(?:ground\s*floor\s*plan|floor\s*plan|layout\s*plan|floor\s*layout|plan\s*:\s*floor\s*layout|first\s*floor\s*plan|level\s*\d+\s*plan)\b",
     )
+    _FLOOR_FINISH_PLAN_PATTERNS = (
+        r"\b(?:floor\s+finishes?(?:\s*&\s*partitions?)?\s+plan|floor\s+finish\s+plan)\b",
+    )
+    _REFLECTED_CEILING_PATTERNS = (
+        r"\b(?:reflected\s+ceiling\s+plan|r\.?c\.?p\.?)\b",
+    )
     _ROOF_PATTERNS = (
         r"\b(?:roof\s*plan|roof\s*layout|roofing\s*plan)\b",
     )
@@ -194,7 +202,7 @@ class DrawingViewClassifier:
         r"\b(?:section\s*[a-z0-9\-]+|cross\s*section|longitudinal\s*section)\b",
     )
     _SCHEDULE_PATTERNS = (
-        r"\b(?:schedule\s*of\s*(?:doors|windows|finishes)|window\s*schedule|door\s*schedule|finishes\s*schedule)\b",
+        r"\b(?:schedule\s*of\s*(?:doors|windows|finishes)|window\s*schedule|door\s*schedule|finish(?:es)?\s*schedule)\b",
     )
     _DETAIL_PATTERNS = (
         r"\b(?:typical\s*detail|detail\s*[a-z0-9\-]+|standard\s*detail|enlarged\s*detail|to\s*s\.e\s*detail)\b",
@@ -225,6 +233,16 @@ class DrawingViewClassifier:
             return DrawingViewType.SPECIFICATION
         if any(re.search(p, norm, re.IGNORECASE) for p in cls._REPEATED_PATTERNS):
             return DrawingViewType.REPEATED_OR_REFERENCE
+        if any(
+            re.search(p, norm, re.IGNORECASE)
+            for p in cls._FLOOR_FINISH_PLAN_PATTERNS
+        ):
+            return DrawingViewType.FLOOR_FINISH_PLAN
+        if any(
+            re.search(p, norm, re.IGNORECASE)
+            for p in cls._REFLECTED_CEILING_PATTERNS
+        ):
+            return DrawingViewType.REFLECTED_CEILING_PLAN
         if any(re.search(p, norm, re.IGNORECASE) for p in cls._ROOF_PATTERNS):
             return DrawingViewType.ROOF_PLAN
         if any(re.search(p, norm, re.IGNORECASE) for p in cls._PLAN_PATTERNS):
