@@ -104,6 +104,7 @@ class ObservedGeometrySegment:
     coordinate_space: str = CoordinateSpace.PDF_POINTS.value
     view_id: str = ""
     source_path_index: Optional[int] = None
+    source_item_index: Optional[int] = None
     stroke_width_pt: Optional[float] = None
     stroke_color_rgb: Optional[tuple[float, float, float]] = None
 
@@ -478,6 +479,7 @@ def extract_vector_segments(
                         end=end,
                         view_id=view_id,
                         source_path_index=path_index,
+                        source_item_index=item_index,
                         stroke_width_pt=(
                             float(path.get("width"))
                             if path.get("width") is not None
@@ -509,6 +511,7 @@ def extract_vector_segments(
                                 end=end,
                                 view_id=view_id,
                                 source_path_index=path_index,
+                                source_item_index=item_index,
                                 stroke_width_pt=(
                                     float(path.get("width"))
                                     if path.get("width") is not None
@@ -527,6 +530,81 @@ def extract_vector_segments(
 
 def _bbox_center(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
     return (bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0
+
+
+def _source_rectangle_tightly_wraps_observation(
+    candidate: ObservedGeometrySegment,
+    same_scope: Sequence[ObservedGeometrySegment],
+    observation_bbox: Sequence[float],
+    calibration: DimensionLayoutCalibration,
+) -> bool:
+    """Reject one native rectangle item that merely boxes the figured text.
+
+    Some CAD/PDF writers expose a text object's own clipping/background box as
+    a four-edge native rectangle. Its two long edges are then closer to the
+    text centre than the real dimension line and look like an artificial tie.
+
+    This filter is deliberately narrow: all four axis-aligned edges must come
+    from the exact same native path *and* item, and the rectangle bounds must
+    tightly match the observation's own native text bbox. Larger room, wall,
+    table or annotation rectangles remain in the candidate universe.
+    """
+
+    if (
+        candidate.source_path_index is None
+        or candidate.source_item_index is None
+        or len(observation_bbox) < 4
+    ):
+        return False
+    siblings = tuple(
+        segment
+        for segment in same_scope
+        if (
+            segment.source_page == candidate.source_page
+            and segment.source_path_index == candidate.source_path_index
+            and segment.source_item_index == candidate.source_item_index
+        )
+    )
+    if len(siblings) != 4:
+        return False
+    horizontals = tuple(
+        segment
+        for segment in siblings
+        if segment.orientation == DimensionOrientation.HORIZONTAL.value
+    )
+    verticals = tuple(
+        segment
+        for segment in siblings
+        if segment.orientation == DimensionOrientation.VERTICAL.value
+    )
+    if len(horizontals) != 2 or len(verticals) != 2:
+        return False
+
+    xs = tuple(
+        float(value)
+        for segment in siblings
+        for value in (segment.start[0], segment.end[0])
+    )
+    ys = tuple(
+        float(value)
+        for segment in siblings
+        for value in (segment.start[1], segment.end[1])
+    )
+    rectangle = (min(xs), min(ys), max(xs), max(ys))
+    text_bbox = tuple(float(observation_bbox[index]) for index in range(4))
+    if (
+        rectangle[2] <= rectangle[0]
+        or rectangle[3] <= rectangle[1]
+        or text_bbox[2] <= text_bbox[0]
+        or text_bbox[3] <= text_bbox[1]
+    ):
+        return False
+
+    tolerance = max(1e-6, float(calibration.median_word_height_pt) * 0.15)
+    return all(
+        abs(rectangle[index] - text_bbox[index]) <= tolerance
+        for index in range(4)
+    )
 
 
 def _axis_distance(point: tuple[float, float], segment: ObservedGeometrySegment) -> float:
@@ -903,7 +981,13 @@ def bind_observation_to_vector_geometry(
     ]
     candidates = [
         s for s in same_scope
-        if _axis_distance(center, s) <= calibration.line_search_distance_pt
+        if not _source_rectangle_tightly_wraps_observation(
+            s,
+            same_scope,
+            observation.bbox,
+            calibration,
+        )
+        and _axis_distance(center, s) <= calibration.line_search_distance_pt
         and _projection_contains(center, s, calibration.line_search_distance_pt)
     ]
     if not candidates:
