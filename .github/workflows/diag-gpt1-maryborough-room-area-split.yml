@@ -1,0 +1,35 @@
+name: DIAG GPT1 Maryborough Room Area Split
+
+on:
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: diag-gpt1-maryborough-room-area-split
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Split same-view and cross-view room area authority
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt1_maryborough_room_area_split.py \
+            | tee maryborough-room-area-split.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-room-area-split
+          path: maryborough-room-area-split.json
+          retention-days: 3
