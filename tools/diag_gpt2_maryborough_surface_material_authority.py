@@ -66,6 +66,38 @@ def _receipt_payload(source, published, observation_ids):
     return rows
 
 
+def _raster_probe(raster, published, observation_id: str):
+    result = raster.publish(
+        material.RasterTextCorroborationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+    )
+    record = result.record
+    return {
+        "observation_id": observation_id,
+        "status": _status(result.status),
+        "reason_codes": list(result.reason_codes or ()),
+        "corroborated_text": result.corroborated_text,
+        "backend_name": None if record is None else record.backend_name,
+        "backend_version": None if record is None else record.backend_version,
+        "views": [] if record is None else [
+            {
+                "dpi": view.dpi,
+                "line_count": view.line_count,
+                "ocr_reading": view.ocr_reading,
+                "ocr_rotation_degrees": view.ocr_rotation_degrees,
+                "clip_pt": list(view.clip_pt),
+                "image_size_px": list(view.image_size_px),
+            }
+            for view in record.views
+        ],
+    }
+
+
 def _raw_candidate_blocks(words):
     grouped = defaultdict(list)
     for word in words:
@@ -239,6 +271,36 @@ def main() -> int:
                 "parsed_rows": parsed,
             })
 
+    producer = material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+
+    # Probe only source blocks shaped like an alphabetic material-definition row:
+    # exact code line followed by description line(s). This is diagnostic-only
+    # and uses the same producer-owned raster authority as production.
+    candidate_definition_raster_probes = []
+    for block in raw_candidate_blocks:
+        lines = block.get("lines") or []
+        if (
+            len(lines) < 2
+            or str(lines[0].get("text") or "").strip().upper() not in TOKENS
+        ):
+            continue
+        probe = {
+            "page_id": block.get("page_id"),
+            "source_partition_id": block.get("source_partition_id"),
+            "block_no": block.get("block_no"),
+            "lines": [],
+        }
+        for line in lines:
+            probe["lines"].append({
+                "line_no": line.get("line_no"),
+                "text": line.get("text"),
+                "raster_results": [
+                    _raster_probe(producer._raster, published, observation_id)
+                    for observation_id in line.get("observation_ids") or ()
+                ],
+            })
+        candidate_definition_raster_probes.append(probe)
+
     # Identify the exact words that still poison an authenticated material-schedule
     # viewport after the existing narrow word/whole-line raster corroboration.
     schedule_viewport_diagnostics = []
@@ -264,14 +326,14 @@ def main() -> int:
                 recovered = material._recover_admissible_viewport_words(
                     source=source,
                     published=published,
-                    raster=material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)._raster,
+                    raster=producer._raster,
                     words=page_words,
                     viewport=viewport,
                 )
                 recovered = material._recover_admissible_viewport_lines(
                     source=source,
                     published=published,
-                    raster=material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)._raster,
+                    raster=producer._raster,
                     words=recovered,
                     viewport=viewport,
                 )
@@ -310,7 +372,6 @@ def main() -> int:
     finally:
         pdf_diag.close()
 
-    producer = material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)
     authority = producer.publish(published.revision.revision_id)
 
     definitions = []
@@ -486,6 +547,8 @@ def main() -> int:
         "native_material_schedule_blocks": native_blocks,
         "raw_finish_or_code_block_count": len(raw_candidate_blocks),
         "raw_finish_or_code_blocks": raw_candidate_blocks,
+        "candidate_definition_raster_probe_count": len(candidate_definition_raster_probes),
+        "candidate_definition_raster_probes": candidate_definition_raster_probes,
         "definition_result_count": len(definitions),
         "definition_record_count": sum(1 for row in definitions if row["code"] is not None),
         "definitions": definitions,
