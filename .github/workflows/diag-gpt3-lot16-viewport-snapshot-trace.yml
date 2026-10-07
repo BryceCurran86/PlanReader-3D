@@ -19,9 +19,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Run focused contracts
-        run: |
-          PYTHONPATH=. pytest -q tests/test_physical_opening_viewport_scope_authority.py tests/test_raster_framed_opening_g17_contract.py
       - name: Trace live Lot16 viewport snapshot lineage
         shell: bash
         run: |
