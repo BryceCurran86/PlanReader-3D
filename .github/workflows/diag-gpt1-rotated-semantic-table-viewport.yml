@@ -1,4 +1,5 @@
 name: DIAG GPT1 Rotated Semantic Table Viewport
+# Branch-local focused validation for the stacked viewport patch.
 
 on:
   push:
