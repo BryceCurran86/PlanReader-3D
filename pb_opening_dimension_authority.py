@@ -420,7 +420,13 @@ class OpeningDimensionAuthority:
         if cached is not None:
             return cached
         records: list[SourceObservationRecord] = []
+        page_ids = self._visibility.visible_observation_ids_for_page(
+            existence.snapshot_id,
+            str(existence.page_id),
+        )
         for observation_id in snapshot_ids:
+            if str(observation_id) not in page_ids:
+                continue
             result = self._visibility.resolve_visible(
                 ObservationSelector(
                     document_id=existence.document_id,
@@ -507,7 +513,12 @@ class OpeningDimensionAuthority:
             return cached
         integrity_conflict = False
         by_page: dict[str, list[tuple[str, str, tuple[float, ...]]]] = {}
+        text_ids = self._text.observation_ids_for_snapshot(
+            existence.snapshot_id
+        )
         for observation_id in snapshot_ids:
+            if str(observation_id) not in text_ids:
+                continue
             result = self._text.resolve_text(
                 ObservationSelector(
                     document_id=existence.document_id,
