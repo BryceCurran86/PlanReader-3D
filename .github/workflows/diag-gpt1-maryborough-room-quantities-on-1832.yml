@@ -1,0 +1,113 @@
+name: DIAG GPT1 Maryborough Room Quantities On 1832
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough-grid-component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run exact Maryborough room-component proof
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt1-maryborough-room-quantities-1832
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json,time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          started=time.perf_counter()
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(6,),
+              topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          elapsed=time.perf_counter()-started
+
+          def norm(value):
+              return " ".join(str(value or "").strip().upper().split())
+
+          labelled=[
+              {
+                  "label":norm(room.room_label),
+                  "canonical_room_id":room.canonical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "decision_scope_id":room.decision_scope_id,
+                  "area_page_pts2":room.area_page_pts2,
+                  "geometry_complete":room.geometry_complete,
+                  "evidence_ids":list(room.evidence_ids),
+              }
+              for room in claim.canonical_rooms if norm(room.room_label)
+          ]
+          labels=sorted({row["label"] for row in labelled})
+          firm={
+              norm(dict(q.metadata or {}).get("room_label")):float(q.value)
+              for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          }
+
+          assert abs(firm["FOOD PREP"]-13.270425) < 1e-9
+          assert abs(firm["COLD ROOM"]-25.37875) < 1e-9
+          for label in ("DRY STORE","WASH UP","M-AMB","F-AMB"):
+              assert label not in labels
+              assert label not in firm
+
+          observed={
+              name:[row for row in labelled if row["label"]==name]
+              for name in (
+                  "POS COUNTER",
+                  "FOOD SERVICE",
+                  "TRUCK DRIVER LOUNGE",
+                  "FREEZER",
+                  "OFFICE",
+                  "SALES",
+              )
+          }
+          floor_quantities=[
+              {
+                  "semantic_key":q.semantic_key,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "status":q.status,
+                  "authority":q.authority,
+                  "metadata":dict(q.metadata or {}),
+              }
+              for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          print(json.dumps({
+              "elapsed_seconds":elapsed,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "labels":labels,
+              "observed_geometry_targets":observed,
+              "firm_room_areas":firm,
+              "floor_quantity_count":len(floor_quantities),
+              "floor_quantities":floor_quantities,
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-room-quantities-1832
+          path: artifacts/gpt1-maryborough-room-quantities-1832
+          retention-days: 1
