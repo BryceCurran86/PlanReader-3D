@@ -158,6 +158,71 @@ def main():
     ambiguous_ids = set(() if equivalence is None else equivalence.ambiguous_wall_ids)
 
     visibility = composition.physical_opening_authority.source_visibility_authority()
+
+    semantic = SemanticOpeningEnumerationProducer.from_source_visibility_producer(source)
+    semantic_result = semantic.publish_page_scope(
+        revision_id=current.revision.revision_id,
+        decision_scope_id="diag:gptmax:lot16:opening-face-protection",
+        page_ids=(PAGE_ID,),
+    )
+    semantic_protected_face_ids = set()
+    semantic_two_face_opening_count = 0
+    if semantic_result.record is not None:
+        for representative_id in semantic_result.record.representative_observation_ids:
+            existence = composition.physical_opening_authority.prove_existence(
+                ObservationSelector(
+                    document_id=current.revision.document_id,
+                    revision_id=current.revision.revision_id,
+                    source_sha256=current.revision.source_sha256,
+                    snapshot_id=current.snapshot.snapshot_id,
+                    observation_id=representative_id,
+                )
+            )
+            opening = existence.existence_record
+            if (
+                existence.status is not EvidenceResolutionStatus.CORROBORATED
+                or opening is None
+                or opening.structural_pattern != JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+            ):
+                continue
+            raw_lines = {}
+            valid = True
+            for observation_id in opening.source_observation_ids:
+                resolved = visibility.resolve_visible(
+                    ObservationSelector(
+                        document_id=current.revision.document_id,
+                        revision_id=current.revision.revision_id,
+                        source_sha256=current.revision.source_sha256,
+                        snapshot_id=current.snapshot.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                observation = resolved.observation
+                if (
+                    resolved.status is not EvidenceResolutionStatus.CORROBORATED
+                    or observation is None
+                ):
+                    valid = False
+                    break
+                raw_id = raw_id_for_observation(observation)
+                geometry = tuple(float(v) for v in observation.geometry)
+                if raw_id is None or len(geometry) != 4 or raw_id in raw_lines:
+                    valid = False
+                    break
+                raw_lines[raw_id] = geometry
+            if not valid or len(raw_lines) != 6:
+                continue
+            relations = _opening_raw_relation_sets(raw_lines)
+            same_pairs = [
+                pair
+                for pair, classes in relations.items()
+                if {state(value) for value in classes} == {"same_physical_wall"}
+            ]
+            face_ids = {raw for pair in same_pairs for raw in pair}
+            if len(same_pairs) == 2 and len(face_ids) == 4:
+                semantic_two_face_opening_count += 1
+                semantic_protected_face_ids.update(face_ids)
+
     opening_rows = []
     stage_counts = Counter()
     owner_count_distribution = Counter()
