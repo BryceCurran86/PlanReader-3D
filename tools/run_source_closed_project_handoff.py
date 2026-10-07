@@ -362,7 +362,10 @@ def generate_project_handoff(
         # must never suppress unrelated valid existing output.
         ceiling_result = collect_live_ceiling_lining_claims(
             pdf_path,
-            pages=(topology_pages if topology_pages else all_pages),
+            # Ceiling semantics may live on schedules, legends and RCP support
+            # sheets. Keep the full surface execution evidence universe visible;
+            # the collector still owns topology independently.
+            pages=execution_pages,
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
