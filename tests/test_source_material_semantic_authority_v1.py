@@ -293,6 +293,89 @@ def test_unstamped_viewport_output_cannot_publish_source_semantics(monkeypatch) 
     assert result.record is None
 
 
+def test_source_defined_alphabetic_ceiling_codes_require_semantic_schedule_rows(
+    monkeypatch,
+) -> None:
+    source, published = _source(
+        _pdf(
+            (
+                "CEILING FINISH SCHEDULE",
+                "FPB Flush plasterboard ceiling lining",
+                "GRID Suspended ceiling grid system",
+            ),
+            (
+                "REFLECTED CEILING PLAN",
+                "CEILING FINISH FPB",
+                "CEILING FINISH GRID",
+            ),
+        )
+    )
+    _patch_viewports(
+        monkeypatch,
+        {1: "schedule", 2: "reflected_ceiling_plan"},
+    )
+
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    fpb = authority.resolve_definition(_definition_selector(published, "FPB"))
+    assert fpb.status is EvidenceResolutionStatus.CORROBORATED
+    assert fpb.record is not None
+    assert fpb.record.semantic_finish == "plasterboard"
+
+    grid = authority.resolve_definition(_definition_selector(published, "GRID"))
+    assert grid.status is EvidenceResolutionStatus.CORROBORATED
+    assert grid.record is not None
+    assert grid.record.semantic_finish == "ceiling_grid"
+
+    scope = authority.resolve_occurrences(
+        _occurrence_selector(published, "2", "vp-2")
+    )
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete is True
+    assert [(row.code, row.semantic_finish) for row in scope.records] == [
+        ("FPB", "plasterboard"),
+        ("GRID", "ceiling_grid"),
+    ]
+
+
+def test_bare_alphabetic_token_is_not_promoted_without_semantic_schedule_definition(
+    monkeypatch,
+) -> None:
+    source, published = _source(
+        _pdf(
+            (
+                "CEILING FINISH SCHEDULE",
+                "GRID SETOUT NOTES",
+            ),
+            (
+                "REFLECTED CEILING PLAN",
+                "CEILING FINISH GRID",
+            ),
+        )
+    )
+    _patch_viewports(
+        monkeypatch,
+        {1: "schedule", 2: "reflected_ceiling_plan"},
+    )
+
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    grid = authority.resolve_definition(_definition_selector(published, "GRID"))
+    assert grid.status is EvidenceResolutionStatus.ABSTAINED
+    assert grid.record is None
+
+    scope = authority.resolve_occurrences(
+        _occurrence_selector(published, "2", "vp-2")
+    )
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete is True
+    assert scope.records == ()
+
+
 def test_generic_schedule_code_is_source_owned_not_global_token_guess(monkeypatch) -> None:
     source, published = _source(
         _pdf(
