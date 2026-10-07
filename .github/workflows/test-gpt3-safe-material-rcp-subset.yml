@@ -4,22 +4,6 @@ on:
   push:
     branches:
       - fix/gpt3-material-rcp-safe-subset-v1
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "pb_source_material_semantic_authority.py"
-      - "pb_cross_view_ceiling_finish_authority.py"
-      - "pb_cross_view_room_area_authority.py"
-      - "pb_live_physical_net_wall_integration.py"
-      - "tools/run_source_closed_project_handoff.py"
-      - "tests/test_source_material_semantic_authority_v1.py"
-      - "tests/test_cross_view_ceiling_finish_authority.py"
-      - "tests/test_cross_view_ceiling_quantity_authority.py"
-      - "tests/test_cross_view_room_area_authority_v1.py"
-      - "tests/test_source_closed_project_handoff.py"
-      - ".github/workflows/test-gpt3-safe-material-rcp-subset.yml"
-
 concurrency:
   group: test-gpt3-safe-material-rcp-subset
   cancel-in-progress: true
