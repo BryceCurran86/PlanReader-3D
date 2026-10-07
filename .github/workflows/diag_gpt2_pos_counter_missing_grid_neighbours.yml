@@ -1,0 +1,184 @@
+name: DIAG GPT2 POS Counter Missing Grid Neighbours
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace missing neighbours
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-pos-missing-grid-neighbours
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          from shapely.geometry import LineString, Polygon
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer,
+              SourceRoomLabelSelector,
+          )
+          import pb_source_composite_room_face_authority as comp
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          TARGET="POS COUNTER"
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-pos-missing-grid-neighbours",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-pos-missing-grid-neighbours",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          live=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          wall_auth=live.physical_wall_candidate_authority
+          selectors=wall_auth.selectors_for_authenticated_viewports(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          assert len(selectors)==1
+          selector=selectors[0]
+          wall_scope=wall_auth.resolve_scope(selector)
+          room_auth=build_source_room_face_authority(wall_auth)
+          room_selector=SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          )
+          room_scope=room_auth.resolve_scope(room_selector)
+          label_scope=SourceRoomLabelProducer.from_authorities(
+              source,room_auth,page_ids=("7",)
+          ).authority().resolve_scope(SourceRoomLabelSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          ))
+          candidates=[c for c in label_scope.split_face_candidates if norm(c.label)==TARGET]
+          assert len(candidates)==1, len(candidates)
+          candidate=candidates[0]
+
+          fully,evidence=comp._fully_grid_opposed_wall_evidence(wall_scope)
+          component=comp._grid_connected_component(
+              tuple(str(v) for v in candidate.word_face_ids),
+              room_scope=room_scope,
+              fully_grid_wall_ids=fully,
+          )
+          assert component is not None
+          room_by_face={str(r.face_id):r for r in room_scope.records}
+          constituent=[room_by_face[f] for f in component]
+          owners=comp._local_edge_owners(room_scope)
+
+          edge_counts={}
+          for record in constituent:
+              for wall_id,edge in tuple(getattr(record,"boundary_wall_edges",()) or ()):
+                  key=(str(wall_id),comp._edge_key(edge))
+                  edge_counts[key]=edge_counts.get(key,0)+1
+
+          external_grid=[]
+          for (wall_id,edge),count in edge_counts.items():
+              if count!=1 or wall_id not in fully:
+                  continue
+              global_owners=list(owners.get((wall_id,edge),()))
+              external_grid.append((wall_id,edge,global_owners))
+
+          abstentions=[]
+          for abstained in tuple(room_scope.abstained_faces or ()):
+              try:
+                  polygon=Polygon(abstained.polygon_pdf_pts)
+              except Exception:
+                  continue
+              if polygon.is_empty:
+                  continue
+              boundary=polygon.boundary
+              abstentions.append({
+                  "face_id":abstained.face_id,
+                  "reason":abstained.reason,
+                  "bounding_wall_ids":list(abstained.bounding_wall_ids),
+                  "area_page_pts2":abstained.area_page_pts2,
+                  "polygon":polygon,
+              })
+
+          edge_rows=[]
+          for wall_id,edge,global_owners in external_grid:
+              line=LineString((edge[0],edge[1]))
+              touching=[]
+              for row in abstentions:
+                  hit=line.intersection(row["polygon"].boundary)
+                  if hit.is_empty:
+                      continue
+                  if float(hit.length) <= 1e-9 and hit.geom_type not in ("Point","MultiPoint"):
+                      continue
+                  touching.append({
+                      "face_id":row["face_id"],
+                      "reason":row["reason"],
+                      "bounding_wall_ids":row["bounding_wall_ids"],
+                      "area_page_pts2":row["area_page_pts2"],
+                      "boundary_intersection_type":hit.geom_type,
+                      "boundary_intersection_length":float(hit.length),
+                  })
+              edge_rows.append({
+                  "wall_id":wall_id,
+                  "edge":[list(edge[0]),list(edge[1])],
+                  "published_global_owners":global_owners,
+                  "touching_abstained_faces":touching,
+              })
+
+          print(json.dumps({
+              "room_reason_codes":list(room_scope.reason_codes),
+              "published_room_count":len(room_scope.records),
+              "abstained_face_count":len(room_scope.abstained_faces),
+              "abstention_reason_counts":{
+                  reason:sum(1 for a in room_scope.abstained_faces if a.reason==reason)
+                  for reason in sorted({a.reason for a in room_scope.abstained_faces})
+              },
+              "pos_component_count":len(component),
+              "pos_external_grid_edge_count":len(edge_rows),
+              "external_grid_edges":edge_rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-pos-missing-grid-neighbours
+          path: artifacts/gpt2-pos-missing-grid-neighbours
+          retention-days: 2
