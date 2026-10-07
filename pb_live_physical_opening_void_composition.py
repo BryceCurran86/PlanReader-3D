@@ -63,7 +63,7 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION = "1.1.0"
+LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION = "1.2.0"
 LIVE_PHYSICAL_OPENING_VOID_RESOLVED = "live_physical_opening_void_composition_resolved"
 LIVE_PHYSICAL_OPENING_VOID_PARTIAL = "live_physical_opening_void_composition_partial"
 LIVE_PHYSICAL_OPENING_VOID_UNAVAILABLE = "live_physical_opening_void_composition_unavailable"
@@ -123,6 +123,9 @@ class LiveCanonicalOpeningObject:
     geometry_complete: bool
     schedule_row_dimension_basis: str = ""
     schedule_row_basis_source: str = ""
+    # Producer-authenticated schedule semantic text. Evidence only: this
+    # field does not classify an opening or authorize a grouped quantity.
+    schedule_row_description: str = ""
     schema_version: str = LIVE_PHYSICAL_OPENING_VOID_SCHEMA_VERSION
 
     def to_dict(self) -> dict:
@@ -176,6 +179,7 @@ class LiveCanonicalOpeningObject:
             "geometry_complete": self.geometry_complete,
             "schedule_row_dimension_basis": self.schedule_row_dimension_basis,
             "schedule_row_basis_source": self.schedule_row_basis_source,
+            "schedule_row_description": self.schedule_row_description,
             "schema_version": self.schema_version,
         }
 
@@ -643,6 +647,7 @@ def compose_live_physical_opening_voids(
         schedule_count_explicit = False
         schedule_row_dimension_basis = ""
         schedule_row_basis_source = ""
+        schedule_row_description = ""
         schedule_row_observation_ids: tuple[str, ...] = ()
         tag_observation_id = (
             str(getattr(schedule, "authenticated_tag_observation_id", "") or "")
@@ -665,6 +670,9 @@ def compose_live_physical_opening_voids(
             )
             schedule_row_basis_source = str(
                 schedule_record.schedule_row_basis_source or ""
+            )
+            schedule_row_description = str(
+                schedule_record.schedule_row_description or ""
             )
             schedule_row_observation_ids = tuple(
                 schedule_record.schedule_row_observation_ids
@@ -965,6 +973,7 @@ def compose_live_physical_opening_voids(
                     geometry_complete=void_record is not None,
                     schedule_row_dimension_basis=schedule_row_dimension_basis,
                     schedule_row_basis_source=schedule_row_basis_source,
+                    schedule_row_description=schedule_row_description,
                 )
             )
 
