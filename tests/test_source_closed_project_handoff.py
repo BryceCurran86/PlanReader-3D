@@ -360,7 +360,7 @@ def test_project_handoff_without_vector_hints_delegates_topology_to_live_authori
     assert summary["combined_run_file"] is None
 
 
-def test_project_handoff_keeps_full_surface_evidence_but_scopes_room_support(
+def test_project_handoff_uses_only_source_classified_topology_and_support(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -418,12 +418,12 @@ def test_project_handoff_keeps_full_surface_evidence_but_scopes_room_support(
         output_dir=tmp_path / "out",
     )
 
-    assert seen["pages"] == (0, 1, 2, 3, 4)
+    assert seen["pages"] == (0, 2)
     assert seen["topology_pages"] == (0,)
     assert seen["room_area_support_pages"] == (2,)
     assert summary["topology_pages"] == [1]
     assert summary["room_area_support_pages"] == [3]
-    assert summary["execution_pages"] == [1, 2, 3, 4, 5]
+    assert summary["execution_pages"] == [1, 3]
     assert summary["topology_mode"] == "source_classified_scope"
 
 

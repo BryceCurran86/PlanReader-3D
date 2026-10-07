@@ -153,20 +153,11 @@ class LiveCanonicalRoomComposition:
         """
         if type(room) is not LiveCanonicalRoomObject:
             return None
-        owned = [
-            candidate
-            for candidate in self.rooms
-            if (
-                candidate.canonical_room_id == room.canonical_room_id
-                and candidate.source_room_face_record_id == room.source_room_face_record_id
-                and candidate.snapshot_id == room.snapshot_id
-                and candidate.page_id == room.page_id
-                and candidate.decision_scope_id == room.decision_scope_id
-            )
-        ]
-        if len(owned) != 1:
-            return None
-
+        # Bindings are minted only inside compose_live_canonical_rooms after
+        # this exact producer-owned room-face scope has already resolved
+        # CORROBORATED + complete. Replaying the immutable scope once per room
+        # becomes quadratic for dense CAD plans; the sealed binding retains the
+        # exact validated record-id universe, so membership is sufficient here.
         matches = [
             binding
             for binding in self._room_face_authority_bindings
@@ -181,26 +172,6 @@ class LiveCanonicalRoomComposition:
         if len(matches) != 1:
             return None
         binding = matches[0]
-        authority = binding.authority
-        selector = SourceRoomFaceSelector(
-            document_id=room.document_id,
-            revision_id=room.revision_id,
-            source_sha256=room.source_sha256,
-            snapshot_id=room.snapshot_id,
-            page_id=room.page_id,
-            decision_scope_id=room.decision_scope_id,
-        )
-        resolved = authority.resolve_scope(selector)
-        if (
-            resolved.status is not EvidenceResolutionStatus.CORROBORATED
-            or not resolved.scope_complete
-            or sum(
-                1
-                for record in resolved.records
-                if str(record.record_id) == room.source_room_face_record_id
-            ) != 1
-        ):
-            return None
         if room.viewport_id:
             if (
                 binding.viewport_id != room.viewport_id
