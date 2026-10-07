@@ -519,18 +519,9 @@ def collect_live_physical_net_wall_claim(
                 viewport_bbox = tuple(
                     float(value) for value in room_binding.viewport_bbox
                 )
-                exact_viewport = _unique_authenticated_containing_floor_plan_viewport(
-                    source=source,
-                    scope_rooms=scope_rooms,
-                    page_id=page_id,
-                    snapshot_id=snapshot_id,
-                )
                 viewport_view_type = (
-                    exact_viewport[2]
-                    if (
-                        exact_viewport is not None
-                        and exact_viewport[0] == viewport_id
-                    )
+                    str(room_binding.viewport_view_type)
+                    if room_binding.viewport_view_type
                     else DrawingViewType.FLOOR_PLAN.value
                 )
                 viewport_status = ViewportResolutionStatus.RESOLVED
