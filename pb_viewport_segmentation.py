@@ -140,6 +140,9 @@ class _TitleAnchor:
     text: str
     bbox: tuple[float, float, float, float]
     view_type: str
+    # Native text advance direction from the producer-owned PDF line.  This is
+    # retained only for spatial ownership; it never changes semantic view type.
+    direction: tuple[float, float] = (1.0, 0.0)
 
     @property
     def center(self) -> tuple[float, float]:
@@ -1132,6 +1135,117 @@ def _to_visual_bbox(page: Any, bbox: tuple[float, float, float, float]) -> tuple
         return bbox
 
 
+def _normalised_direction(value: object) -> tuple[float, float]:
+    try:
+        parts = tuple(float(item) for item in value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return (1.0, 0.0)
+    if len(parts) < 2:
+        return (1.0, 0.0)
+    dx, dy = parts[0], parts[1]
+    length = math.hypot(dx, dy)
+    if not math.isfinite(length) or length <= 1e-9:
+        return (1.0, 0.0)
+    return (dx / length, dy / length)
+
+
+def _bbox_in_text_basis(
+    bbox: Sequence[float],
+    direction: tuple[float, float],
+) -> tuple[float, float, float, float]:
+    """Project one native bbox into a title-local reading coordinate system.
+
+    Local +X follows text advance. Local +Y is the corresponding visual
+    "below" direction. For ordinary text direction (1, 0), this is identical
+    to native PDF coordinates. For vertical text this turns native left/right
+    into above/below without guessing from bbox aspect ratio.
+    """
+
+    dx, dy = _normalised_direction(direction)
+    vx, vy = -dy, dx
+    corners = (
+        (float(bbox[0]), float(bbox[1])),
+        (float(bbox[2]), float(bbox[1])),
+        (float(bbox[0]), float(bbox[3])),
+        (float(bbox[2]), float(bbox[3])),
+    )
+    local_x = tuple(x * dx + y * dy for x, y in corners)
+    local_y = tuple(x * vx + y * vy for x, y in corners)
+    return (
+        min(local_x),
+        min(local_y),
+        max(local_x),
+        max(local_y),
+    )
+
+
+def _fragment_native_direction(
+    page: Any,
+    *,
+    bbox: Sequence[float],
+    text: str,
+) -> tuple[float, float]:
+    """Recover a unique producer-owned text direction for one title fragment."""
+
+    target = _normalise_text(text)
+    if not target:
+        return (1.0, 0.0)
+    try:
+        data = _page_text(page, "dict") or {}
+    except Exception:
+        return (1.0, 0.0)
+
+    candidates: list[tuple[float, float]] = []
+    target_box = tuple(float(value) for value in bbox[:4])
+    target_area = max(_bbox_area(target_box), 1e-9)
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        for line in block.get("lines", []) or []:
+            line_bbox = line.get("bbox") or ()
+            if len(line_bbox) < 4:
+                continue
+            line_box = tuple(float(value) for value in line_bbox[:4])
+            line_text = _normalise_text(
+                " ".join(
+                    str(span.get("text", ""))
+                    for span in line.get("spans", []) or []
+                )
+            )
+            possible_boxes: list[tuple[float, float, float, float]] = []
+            if line_text == target:
+                possible_boxes.append(line_box)
+            for span in line.get("spans", []) or []:
+                if _normalise_text(str(span.get("text", ""))) != target:
+                    continue
+                span_bbox = span.get("bbox") or ()
+                if len(span_bbox) >= 4:
+                    possible_boxes.append(
+                        tuple(float(value) for value in span_bbox[:4])
+                    )
+            if not possible_boxes:
+                continue
+            if not any(
+                _bbox_overlap_area(target_box, candidate)
+                / min(target_area, max(_bbox_area(candidate), 1e-9))
+                >= 0.8
+                for candidate in possible_boxes
+            ):
+                continue
+            candidates.append(
+                _normalised_direction(line.get("dir") or (1.0, 0.0))
+            )
+
+    unique = {
+        (round(direction[0], 6), round(direction[1], 6))
+        for direction in candidates
+    }
+    if len(unique) != 1:
+        return (1.0, 0.0)
+    dx, dy = next(iter(unique))
+    return _normalised_direction((dx, dy))
+
+
 def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
     owned: Optional[list[tuple[float, float, float, float]]] = None
@@ -1154,7 +1268,18 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
             tails = _wrapped_note_tail_lines(page)
         if tails and any(text in tail_text and _point_in_bbox(_bbox_center(bbox), tail_bbox) for tail_bbox, tail_text in tails):
             continue  # the wrapped tail of a note, not a drawing-view title
-        candidates.append(_TitleAnchor(text=text, bbox=bbox, view_type=view_type))
+        candidates.append(
+            _TitleAnchor(
+                text=text,
+                bbox=bbox,
+                view_type=view_type,
+                direction=_fragment_native_direction(
+                    page,
+                    bbox=bbox,
+                    text=text,
+                ),
+            )
+        )
 
     # Prefer the tighter span when a line-level fragment duplicates it.
     candidates.sort(key=lambda a: (_bbox_area(a.bbox), a.bbox[1], a.bbox[0], a.text))
@@ -1198,7 +1323,10 @@ def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> 
         height = bbox[3] - bbox[1]
         if width < calibration.minimum_frame_span_pt or height < calibration.minimum_frame_span_pt:
             continue
-        if _frame_aspect_ratio(bbox) > _MAX_FRAME_ASPECT_RATIO:
+        if (
+            _frame_aspect_ratio(bbox) > _MAX_FRAME_ASPECT_RATIO
+            and not _frame_looks_like_table(bbox, page, calibration)
+        ):
             continue
         if _is_page_or_crop_border(bbox, calibration):
             continue
@@ -1230,7 +1358,16 @@ def _frame_candidates_for_title(
     """
 
     candidates: list[tuple[float, float, float, float]] = []
-    visual_anchor_bbox = _to_visual_bbox(page, anchor.bbox)
+    direction = _normalised_direction(anchor.direction)
+    title_is_native_vertical = (
+        str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES
+        and abs(direction[1]) > abs(direction[0])
+    )
+    visual_anchor_bbox = (
+        _bbox_in_text_basis(anchor.bbox, direction)
+        if title_is_native_vertical
+        else _to_visual_bbox(page, anchor.bbox)
+    )
     visual_title_center = _bbox_center(visual_anchor_bbox)
     for frame in frames:
         if _bbox_contains(
@@ -1241,7 +1378,11 @@ def _frame_candidates_for_title(
             candidates.append(frame)
             continue
 
-        visual_frame = _to_visual_bbox(page, frame)
+        visual_frame = (
+            _bbox_in_text_basis(frame, direction)
+            if title_is_native_vertical
+            else _to_visual_bbox(page, frame)
+        )
         overlap = min(visual_frame[2], visual_anchor_bbox[2]) - max(
             visual_frame[0], visual_anchor_bbox[0]
         )
@@ -1275,7 +1416,11 @@ def _frame_candidates_for_title(
         if any(
             other is not anchor
             and _point_in_bbox(
-                _bbox_center(_to_visual_bbox(page, other.bbox)),
+                _bbox_center(
+                    _bbox_in_text_basis(other.bbox, direction)
+                    if title_is_native_vertical
+                    else _to_visual_bbox(page, other.bbox)
+                ),
                 gap_box,
             )
             for other in anchors
