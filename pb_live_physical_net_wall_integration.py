@@ -239,28 +239,28 @@ def _merge_documented_room_area_evidence(
     same_view_by_record: dict[str, object],
     cross_view_by_record: dict[str, object],
 ) -> dict[str, object]:
-    """Merge independent documented room-area authorities fail-closed."""
-    merged: dict[str, object] = {}
-    for record_id in sorted(set(same_view_by_record) | set(cross_view_by_record)):
-        same = same_view_by_record.get(record_id)
-        cross = cross_view_by_record.get(record_id)
-        if same is None:
-            merged[record_id] = cross
-            continue
-        if cross is None:
-            merged[record_id] = same
-            continue
-        try:
-            same_value = float(getattr(same, "normalized_value"))
-            cross_value = float(getattr(cross, "normalized_value"))
-        except (TypeError, ValueError, OverflowError):
-            continue
-        same_unit = str(getattr(same, "unit", "") or "")
-        cross_unit = str(getattr(cross, "unit", "") or "")
-        if same_unit != cross_unit or abs(same_value - cross_value) > 1e-9:
-            continue
-        merged[record_id] = same
-    return merged
+    """Layer same-view room areas as fallback without regressing proven output.
+
+    Cross-view figured-dimension authority predates same-view support and is
+    independently source-owned. A newly-added same-view candidate must never
+    erase an already-corroborated cross-view room area merely because the two
+    producers selected different dimension annotations. Same-view evidence is
+    therefore additive only for source-room records that have no cross-view
+    record. This preserves fail-closed behavior inside each producer while
+    preventing a supplemental authority from destroying valid existing output.
+    """
+    merged = {
+        str(record_id): evidence
+        for record_id, evidence in same_view_by_record.items()
+        if evidence is not None
+    }
+    for record_id, evidence in cross_view_by_record.items():
+        if evidence is not None:
+            merged[str(record_id)] = evidence
+    return {
+        record_id: merged[record_id]
+        for record_id in sorted(merged)
+    }
 
 
 def collect_live_physical_net_wall_claim(
