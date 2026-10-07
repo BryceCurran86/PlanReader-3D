@@ -1,0 +1,31 @@
+name: DIAG GPT2 Maryborough A110 Physical Scale
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace A110 physical scale
+        run: |
+          mkdir -p artifacts/gpt2-maryborough-a110-physical-scale
+          PYTHONPATH=. python -u scripts/diag_gpt2_maryborough_a110_physical_scale.py \
+            | tee artifacts/gpt2-maryborough-a110-physical-scale/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-a110-physical-scale
+          path: artifacts/gpt2-maryborough-a110-physical-scale
+          retention-days: 2
