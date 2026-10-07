@@ -136,6 +136,93 @@ def test_confirmed_schedule_semantic_and_drawing_occurrence_share_source_lineage
     assert occurrence.source_sha256 == published.revision.source_sha256
 
 
+def test_incomplete_door_schedule_does_not_poison_finish_definition_universe(
+    monkeypatch,
+) -> None:
+    source, published = _source(
+        _pdf(
+            ("FINISH SCHEDULE", "WT1 Porcelain wall tile"),
+            ("DOOR SCHEDULE", "D01 Timber door"),
+            ("INTERNAL ELEVATION", "WALL FINISH WT1"),
+        )
+    )
+
+    labels = {
+        1: "FINISH SCHEDULE",
+        2: "DOOR SCHEDULE",
+        3: "INTERNAL ELEVATION",
+    }
+    view_types = {
+        1: "schedule",
+        2: "schedule",
+        3: "elevation",
+    }
+
+    def _segment(_page, *, page_number):
+        viewport = _viewport(
+            page_number,
+            view_types[page_number],
+            f"vp-{page_number}",
+        )
+        viewport.label = labels[page_number]
+        return tuple(_stamp_segment_page_viewports_product([viewport]))
+
+    monkeypatch.setattr(semantic, "segment_page_viewports", _segment)
+    real = source.text_integrity_authority()
+
+    class _IncompleteDoorSchedule:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            if (
+                result.receipt is not None
+                and str(result.receipt.page_id) == "2"
+                and result.trusted_text == "D01"
+            ):
+                reasons = (semantic.TEXT_GLYPH_MAPPING_UNVERIFIED,)
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    trusted_text=None,
+                    reason_codes=reasons,
+                    receipt=replace(
+                        result.receipt,
+                        trusted=False,
+                        reason_codes=reasons,
+                    ),
+                )
+            return result
+
+    monkeypatch.setattr(
+        source,
+        "text_integrity_authority",
+        lambda: _IncompleteDoorSchedule(),
+    )
+
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    definition = authority.resolve_definition(
+        _definition_selector(published, "WT1")
+    )
+    assert definition.status is EvidenceResolutionStatus.CORROBORATED
+    assert definition.record is not None
+    assert definition.record.semantic_finish == "tile"
+
+    scope = authority.resolve_occurrences(
+        _occurrence_selector(published, "3", "vp-3")
+    )
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete is True
+    assert len(scope.records) == 1
+    assert scope.records[0].code == "WT1"
+
+    excluded = authority.resolve_occurrences(
+        _occurrence_selector(published, "2", "vp-2")
+    )
+    assert excluded.status is EvidenceResolutionStatus.ABSTAINED
+    assert excluded.records == ()
+
+
 def test_conflicting_schedule_definition_blocks_semantic_occurrences(monkeypatch) -> None:
     source, published = _source(
         _pdf(
