@@ -54,6 +54,7 @@ from pb_cross_view_floor_finish_authority import (
     enrich_live_canonical_floor_finishes,
 )
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+from pb_same_view_room_area_authority import SameViewRoomAreaProducer
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_migration_contracts import (
     DocumentEvidence,
