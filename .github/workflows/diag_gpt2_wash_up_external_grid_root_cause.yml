@@ -1,0 +1,31 @@
+name: DIAG GPT2 Wash Up External Grid Root Cause
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace Wash Up blocker
+        run: |
+          mkdir -p artifacts/gpt2-wash-up-external-grid-root-cause
+          PYTHONPATH=. python -u scripts/diag_gpt2_wash_up_external_grid_root_cause.py \
+            | tee artifacts/gpt2-wash-up-external-grid-root-cause/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-wash-up-external-grid-root-cause
+          path: artifacts/gpt2-wash-up-external-grid-root-cause
+          retention-days: 2
