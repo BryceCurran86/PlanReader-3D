@@ -266,6 +266,8 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
         return "ceiling_grid"
     if "epoxy" in text:
         return "epoxy"
+    if "plaster tile" in text:
+        return "tile"
     if "vinyl" in text:
         return "vinyl"
     if "ceramic tile" in text or "porcelain tile" in text or "wall tile" in text or "floor tile" in text or "tiles" in text:
