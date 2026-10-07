@@ -84,6 +84,7 @@ def _quantity(*, face_id: str = "face-1") -> QuantityEvidence:
             "viewport_id": "floor-vp",
             "support_page_id": "9",
             "support_viewport_id": "rcp-vp",
+            "support_snapshot_id": "semantic-snap-1",
             "canonical_ceiling_id": "ceiling-1",
             "physical_ceiling_surface_id": "ceiling-1",
             "canonical_room_id": "canonical-room-1",
@@ -202,6 +203,7 @@ def test_canonical_ceiling_quantity_builds_complete_source_trace_and_seals() -> 
     assert trace.source_sha256 == SOURCE_SHA
     assert trace.source_page == "7"
     assert trace.viewport_id == "floor-vp"
+    assert trace.metadata["support_snapshot_id"] == "semantic-snap-1"
     assert "ceiling-1" in trace.canonical_entity_ids
     assert "canonical-room-1" in trace.canonical_entity_ids
     assert set(quantity.evidence_ids).issubset(set(trace.evidence_ids))
@@ -218,6 +220,31 @@ def test_canonical_ceiling_quantity_builds_complete_source_trace_and_seals() -> 
     assert sealed.value == 9.05352
     assert sealed.lineage_ok is True
     assert sealed.lineage_reason_codes == ()
+
+
+def test_missing_semantic_snapshot_cannot_seal() -> None:
+    quantity = _quantity()
+    tampered = replace(
+        quantity,
+        metadata={
+            **dict(quantity.metadata),
+            "support_snapshot_id": "",
+        },
+    )
+    claim = _claim(
+        tampered,
+        canonical_ceiling=replace(
+            _canonical_ceiling(quantity),
+            ceiling_quantity_id=tampered.quantity_id,
+        ),
+    )
+
+    with pytest.raises(SourceClosedRunConflictError):
+        seal_live_ceiling_lining_run(
+            claim,
+            workspace_id=1,
+            project_id="project-1",
+        )
 
 
 def test_missing_canonical_ceiling_cannot_seal() -> None:
