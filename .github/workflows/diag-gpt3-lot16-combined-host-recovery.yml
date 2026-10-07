@@ -44,6 +44,12 @@ jobs:
           set -o pipefail
           PYTHONPATH=. python -u tools/diag_gpt3_lot16_candidate_overlap.py \
             | tee lot16-candidate-overlap.json
+      - name: Run opening support origin/ownership audit
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_opening_role_origin.py \
+            | tee lot16-opening-role-origin.json
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
@@ -53,4 +59,5 @@ jobs:
             lot16-combined-host-recovery.json
             lot16-semantic-residual-current.json
             lot16-candidate-overlap.json
+            lot16-opening-role-origin.json
           retention-days: 2
