@@ -1,0 +1,32 @@
+name: DIAG GPTMAX Lot16 Candidate Physical Identity Overlap
+
+on:
+  pull_request:
+    branches:
+      - gptmax/raster-candidate-closure-current-main
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run candidate physical identity overlap census
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_lot16_candidate_physical_identity_overlap.py | tee lot16-candidate-physical-identity-overlap.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lot16-candidate-physical-identity-overlap
+          path: lot16-candidate-physical-identity-overlap.json
+          retention-days: 2
