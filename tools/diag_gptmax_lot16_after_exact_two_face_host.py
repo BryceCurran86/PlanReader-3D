@@ -9,6 +9,7 @@ from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRA
 from pb_live_opening_area_quantity_publication import publish_live_opening_area_quantities
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+from pb_opening_host_binding_authority import _resolve_two_face_lineage_host
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import JAMB_BOUNDED_TWO_FACE_INTERRUPTION
 from pb_physical_wall_candidate_authority import (
@@ -343,6 +344,47 @@ def main():
 
     exact_lineage_host_ready = []
     exact_lineage_host_blocked = Counter()
+    exact_helper_status_counts = Counter()
+    exact_helper_reason_counts = Counter()
+    exact_helper_rows = []
+    for trace in composition.opening_bindings:
+        existence = composition.physical_opening_authority.prove_existence(
+            ObservationSelector(
+                document_id=current.revision.document_id,
+                revision_id=current.revision.revision_id,
+                source_sha256=current.revision.source_sha256,
+                snapshot_id=current.snapshot.snapshot_id,
+                observation_id=trace.representative_observation_id,
+            )
+        )
+        opening_record = existence.existence_record
+        if (
+            existence.status is not EvidenceResolutionStatus.CORROBORATED
+            or opening_record is None
+            or opening_record.structural_pattern != JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+        ):
+            continue
+        helper = _resolve_two_face_lineage_host(
+            composition.physical_opening_authority,
+            opening_record,
+            wall_result.records,
+            wall_result.equivalence,
+        )
+        helper_status = "none" if helper is None else state(helper.status)
+        exact_helper_status_counts[helper_status] += 1
+        if helper is not None:
+            for reason in helper.reason_codes:
+                exact_helper_reason_counts[str(reason)] += 1
+        exact_helper_rows.append({
+            "opening_identity_id": trace.opening_identity_id,
+            "current_host_binding_status": state(trace.status),
+            "current_host_binding_reason_codes": list(trace.reason_codes),
+            "helper_status": helper_status,
+            "helper_reason_codes": [] if helper is None else list(helper.reason_codes),
+            "helper_band_count": 0 if helper is None else len(helper.bands),
+        })
+
+    exact_lineage_host_blocked = Counter()
     for opening in opening_rows:
         faces = opening["face_rows"]
         if len(faces) != 4:
@@ -413,6 +455,9 @@ def main():
         "exact_lineage_host_ready_opening_count": len(exact_lineage_host_ready),
         "exact_lineage_host_blocked_reason_counts": dict(exact_lineage_host_blocked.most_common()),
         "exact_lineage_host_ready_openings": exact_lineage_host_ready,
+        "exact_helper_status_counts": dict(exact_helper_status_counts.most_common()),
+        "exact_helper_reason_counts": dict(exact_helper_reason_counts.most_common()),
+        "exact_helper_rows": exact_helper_rows,
         "wall_candidate_count": len(wall_result.records),
         "equivalence_ambiguous_wall_count": 0 if equivalence is None else len(equivalence.ambiguous_wall_ids),
         "equivalence_pair_audit": None if equivalence is None else {
