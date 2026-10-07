@@ -1,0 +1,70 @@
+name: DIAG GPT3 Maryborough Focused Exact V1
+
+on:
+  push:
+    branches:
+      - diag/gpt3-maryborough-focused-exact-v1
+
+jobs:
+  exact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Wait for focused surface artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            COUNT=$(gh api repos/BryceCurran86/PlanReader-3D/actions/runs/37598251798/artifacts \
+              --jq '[.artifacts[] | select(.name=="gpt3-maryborough-focused-surfaces-v1")] | length')
+            if [ "$COUNT" -gt 0 ]; then
+              echo "Focused surface artifact available."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Focused surface artifact not available." >&2
+          exit 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: gpt3-maryborough-focused-surfaces-v1
+          path: artifacts/gpt3-maryborough-focused-surfaces
+          github-token: ${{ github.token }}
+          repository: BryceCurran86/PlanReader-3D
+          run-id: 37598251798
+      - name: Build exact physical-anchor identity map
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_maryborough_focused_identity_map.py \
+            | tee artifacts/gpt3-maryborough-focused-surfaces/identity-map.stdout.json
+      - name: Run exact frozen V2 reconciliation
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py \
+            --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json \
+            --sealed-run artifacts/gpt3-maryborough-focused-surfaces/au_qld_maryborough_service_station.json \
+            --identity-map artifacts/gpt3-maryborough-focused-surfaces/maryborough.identity-map.json \
+            --output artifacts/gpt3-maryborough-focused-surfaces/maryborough.exact-report.json
+          cat artifacts/gpt3-maryborough-focused-surfaces/maryborough.exact-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-focused-exact-v1
+          path: artifacts/gpt3-maryborough-focused-surfaces
+          retention-days: 3
