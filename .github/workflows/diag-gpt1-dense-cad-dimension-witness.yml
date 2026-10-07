@@ -69,6 +69,7 @@ jobs:
           finally:
               pdf.close()
           binding_by_id={row.observation_id:row for row in bundle.bindings}
+          segment_by_id={row.segment_id:row for row in bundle.observed_geometry}
           large=[]
           for obs in bundle.observations:
               try:
@@ -86,6 +87,16 @@ jobs:
                       hint=directions.get((int(word[5]),int(word[6])))
                   except Exception:
                       hint=None
+              competitor_ids=[]
+              if binding is not None:
+                  for note in binding.notes:
+                      prefix="multiple equally plausible dimension lines: "
+                      if str(note).startswith(prefix):
+                          competitor_ids=[
+                              value.strip()
+                              for value in str(note)[len(prefix):].split(",")
+                              if value.strip()
+                          ]
               large.append({
                   "dimension_id":obs.dimension_id,
                   "raw_text":obs.raw_text,
@@ -95,6 +106,19 @@ jobs:
                   "binding_status":None if binding is None else binding.status,
                   "binding_notes":[] if binding is None else list(binding.notes),
                   "bbox":None if obs.bbox is None else list(obs.bbox),
+                  "ambiguous_competitors":[
+                      {
+                          "segment_id":sid,
+                          "start":list(segment_by_id[sid].start),
+                          "end":list(segment_by_id[sid].end),
+                          "orientation":segment_by_id[sid].orientation,
+                          "source_path_index":segment_by_id[sid].source_path_index,
+                          "stroke_width_pt":segment_by_id[sid].stroke_width_pt,
+                          "stroke_color_rgb":segment_by_id[sid].stroke_color_rgb,
+                      }
+                      for sid in competitor_ids
+                      if sid in segment_by_id
+                  ],
               })
 
           print(json.dumps({
