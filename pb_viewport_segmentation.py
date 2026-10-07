@@ -838,11 +838,27 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
             raise
         rect = page.rect
         width = float(rect.width); height = float(rect.height)
-    word_heights = [
-        float(w[3]) - float(w[1])
-        for w in _page_text(page, "words")
-        if float(w[3]) > float(w[1])
-    ]
+    word_heights: list[float] = []
+    for word in _page_text(page, "words"):
+        if len(word) < 4:
+            continue
+        bbox = (
+            float(word[0]),
+            float(word[1]),
+            float(word[2]),
+            float(word[3]),
+        )
+        if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+            continue
+        # PyMuPDF exposes native user-space word boxes. On /Rotate 90 sheets
+        # visually horizontal text is commonly authored vertically, so the
+        # native Y span is the word *length*, not its typographic height.
+        # Calibrate typography in display orientation while keeping all
+        # published viewport geometry in native source coordinates.
+        visual_bbox = _to_visual_bbox(page, bbox)
+        visual_height = float(visual_bbox[3]) - float(visual_bbox[1])
+        if visual_height > 0.0 and math.isfinite(visual_height):
+            word_heights.append(visual_height)
     median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
     return ViewportLayoutCalibration(
         median_word_height_pt=median_h,
