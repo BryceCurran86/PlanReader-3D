@@ -136,18 +136,55 @@ for wall_id,edge,owners in external_grid:
     })
 
 wall_by_id={str(r.wall_candidate_id):r for r in wall_scope.records}
+metadata_table=wall_scope.source_metadata_table
+primitive_owners={}
+for record in wall_scope.records:
+    for raw_id in record.physical_identity.source_primitive_ids:
+        primitive_owners.setdefault(str(raw_id),[]).append(str(record.wall_candidate_id))
 internal_rows=[]
 for wall_id,edge,owners,is_grid in invalid_internal:
     rec=wall_by_id.get(wall_id)
+    descriptor=None if metadata_table is None else metadata_table.descriptor_for(wall_id)
+    source_ids=[] if rec is None else list(rec.physical_identity.source_primitive_ids)
     internal_rows.append({
         "wall_id":wall_id,
         "edge":[list(edge[0]),list(edge[1])],
         "published_global_owners":list(owners),
         "grid":is_grid,
         "candidate_identity_id":None if rec is None else rec.physical_identity.candidate_identity_id,
-        "source_primitive_ids":[] if rec is None else list(rec.physical_identity.source_primitive_ids),
+        "source_primitive_ids":source_ids,
+        "source_primitive_owner_counts":{
+            raw_id:len(primitive_owners.get(str(raw_id),[]))
+            for raw_id in source_ids
+        },
+        "source_primitive_wall_candidate_ids":{
+            raw_id:sorted(primitive_owners.get(str(raw_id),[]))
+            for raw_id in source_ids
+        },
         "centerline_pts":[] if rec is None else [list(p) for p in rec.wall_candidate.centerline_pts],
         "edge_ids":[] if rec is None else list(rec.physical_identity.edge_ids),
+        "source_metadata":None if descriptor is None else {
+            "source_record_count":descriptor.source_record_count,
+            "width_status":descriptor.width_status,
+            "width_values_pt":list(descriptor.width_values_pt),
+            "drawing_relative_width_ranks":[
+                {
+                    "width_pt":row.width_pt,
+                    "rank_ascending":row.rank_ascending,
+                    "distinct_width_count":row.distinct_width_count,
+                }
+                for row in descriptor.drawing_relative_width_ranks
+            ],
+            "stroke_status":descriptor.stroke_status,
+            "stroke_values":list(descriptor.stroke_values),
+            "fill_status":descriptor.fill_status,
+            "fill_values":list(descriptor.fill_values),
+            "layer_status":descriptor.layer_status,
+            "layer_values":list(descriptor.layer_values),
+            "wall_named_layer_values":list(descriptor.wall_named_layer_values),
+            "dashes_status":descriptor.dashes_status,
+            "dashes_values":list(descriptor.dashes_values),
+        },
     })
 
 print(json.dumps({
