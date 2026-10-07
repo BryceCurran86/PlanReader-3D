@@ -148,6 +148,8 @@ def _finish(*, face_id: str = "face-1"):
         definition_evidence_ids=("def-evidence",),
         occurrence_record_id="occ-grid",
         occurrence_evidence_id="occ-evidence",
+        occurrence_observation_ids=("rcp-finish-obs",),
+        occurrence_receipt_ids=("rcp-finish-receipt",),
         occurrence_bbox_pdf_pts=(100.0, 70.0, 125.0, 82.0),
         _seal=finish_authority._RECORD_SEAL,
     )
