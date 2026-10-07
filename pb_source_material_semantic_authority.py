@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import io
-import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -885,8 +884,6 @@ def _recover_admissible_viewport_lines(
 
 
 
-_NATIVE_DEFINITION_CODE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._/-]{1,15}$")
-
 
 def _native_block_line_rows(
     words: Sequence[_TrustedTextWord],
@@ -940,23 +937,21 @@ def _material_definition_candidate(
     """
 
     lines = _native_block_line_rows(words)
-    if len(lines) < 2:
+    if not lines:
         return None
-    code = lines[0][0].strip().upper()
-    if not _NATIVE_DEFINITION_CODE_RE.fullmatch(code):
-        return None
-    description = " ".join(row[0] for row in lines[1:]).strip()
-    if not description:
+    combined = " ".join(row[0] for row in lines).strip()
+    if not combined:
         return None
 
     parsed = parse_schedule_text(
-        f"{code} {description}",
+        combined,
         page_id=int(words[0].page_id) if words else 0,
         page_label=f"page:{words[0].page_id}" if words else "",
     )
     candidates = []
     for item in parsed:
-        if str(item.get("code") or "").strip().upper() != code:
+        code = str(item.get("code") or "").strip().upper()
+        if not code:
             continue
         entry = {
             "status": "Confirmed",
@@ -966,10 +961,10 @@ def _material_definition_candidate(
             "finish": str(item.get("finish") or ""),
         }
         if semantic_finish_from_schedule_entry(entry):
-            candidates.append(dict(item))
+            candidates.append((code, dict(item)))
     if len(candidates) != 1:
         return None
-    return code, candidates[0]
+    return candidates[0]
 
 
 def _raw_material_definition_candidates(
