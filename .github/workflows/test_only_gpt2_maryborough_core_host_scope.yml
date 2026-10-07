@@ -3,6 +3,18 @@ name: TEST ONLY GPT2 Maryborough Core Host Scope Proof
 on:
   pull_request:
     branches: [ main ]
+    paths:
+      - "pb_*opening*.py"
+      - "pb_*wall*.py"
+      - "pb_live_physical_net_wall_integration.py"
+      - "pb_live_wall_opening_authority_composition.py"
+      - "pb_source_visibility_authority.py"
+      - "tools/run_source_closed_project_handoff.py"
+      - ".github/workflows/test_only_gpt2_maryborough_core_host_scope.yml"
+
+concurrency:
+  group: gpt2-maryborough-core-host-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   maryborough-core:

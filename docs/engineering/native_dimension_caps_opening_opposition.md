@@ -69,3 +69,10 @@ areas are unchanged. Final GitHub replay repeats this source proof with the
 closure correction and records the raw opposition and aligned W4 alternatives.
 
 No measurement, count, commercial publication or benchmark gate is weakened.
+
+Parent #1945 was merged during this work and GitHub retargeted #1953 to main.
+The continuation integrates main 98efaabe807692512092b6c42d2b8fe8e75c3d09,
+including its source-page addressing and invariant local-host performance
+indexes. The only source-visibility merge conflict contained two independent
+addressing methods; both are retained. The scoped proof targets this draft
+branch only. No global CI configuration is changed by this continuation.

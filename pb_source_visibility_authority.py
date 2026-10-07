@@ -2173,6 +2173,53 @@ class SourceVisibilityAuthority:
                     ids.add(observation_id)
         return frozenset(ids)
 
+    def visible_observation_ids_for_page(
+        self,
+        snapshot_id: str,
+        page_id: str,
+    ) -> frozenset[str]:
+        """Return receipt-backed visible ids addressable to one source page.
+
+        Addressing is not authority. Every returned id must still pass
+        resolve_visible() before its observation can be used.
+        """
+        snapshot_id = str(snapshot_id)
+        page_id = str(page_id)
+        store = self._source_authority._store
+        snapshot = store.snapshots.get(snapshot_id)
+        if snapshot is None:
+            return frozenset()
+
+        ids: set[str] = set()
+        for receipt_snapshot_id, observation_id in self._visibility_receipts:
+            if receipt_snapshot_id != snapshot_id:
+                continue
+            record = store.observations.get((snapshot_id, observation_id))
+            if (
+                record is not None
+                and str(record.page_id) == page_id
+                and store.snapshot_contains_observation(snapshot, observation_id)
+            ):
+                ids.add(str(observation_id))
+        for (
+            receipt_snapshot_id,
+            observation_id,
+        ), receipt in self._raster_visibility_receipts.items():
+            if (
+                receipt_snapshot_id == snapshot_id
+                and str(receipt.page_id) == page_id
+            ):
+                record = store.observations.get((snapshot_id, observation_id))
+                if (
+                    record is not None
+                    and str(record.page_id) == page_id
+                    and store.snapshot_contains_observation(
+                        snapshot, observation_id
+                    )
+                ):
+                    ids.add(str(observation_id))
+        return frozenset(ids)
+
     def authenticated_visible_observations(
         self, published: "PublishedVisibleSourceSnapshot"
     ) -> tuple[tuple[str, object], ...]:

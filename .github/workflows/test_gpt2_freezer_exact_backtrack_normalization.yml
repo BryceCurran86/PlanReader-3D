@@ -3,6 +3,16 @@ name: TEST GPT2 Freezer Exact Backtrack Normalization
 on:
   pull_request:
     branches: [ main ]
+    paths:
+      - "pb_*room*.py"
+      - "pb_*wall*.py"
+      - "pb_live_physical_net_wall_integration.py"
+      - "tests/test_source_room_face_authority_v1.py"
+      - ".github/workflows/test_gpt2_freezer_exact_backtrack_normalization.yml"
+
+concurrency:
+  group: gpt2-freezer-backtrack-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   prove:

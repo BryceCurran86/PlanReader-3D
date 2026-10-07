@@ -1,7 +1,7 @@
 name: TEST GPTMAX Raster Source Band Host
 on:
   pull_request:
-    branches: [fix/gptmax-raster-swing-production-current-main-v1]
+    branches: [main]
     paths:
       - pb_opening_host_binding_authority.py
       - pb_opening_dimension_authority.py
@@ -20,6 +20,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   prove:
+    if: github.head_ref == 'fix/gptmax-raster-swing-host-source-proof-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

@@ -5,9 +5,16 @@ on:
     branches: [gpt/item19b-wall-equivalence-grid-v1]
   pull_request:
     branches: [main]
+    paths:
+      - "pb_*wall*.py"
+      - "pb_*opening*.py"
+      - "tests/*wall*.py"
+      - "tests/test_opening_host_binding_*.py"
+      - "scripts/item19b_kstvet_callout_wall_fast_shadow.py"
+      - ".github/workflows/item19b_wall_equivalence_grid_shadow.yml"
 
 concurrency:
-  group: item19b-wall-equivalence-grid-shadow-${{ github.event.pull_request.number }}
+  group: item19b-wall-equivalence-grid-shadow-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
