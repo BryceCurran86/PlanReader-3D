@@ -11,6 +11,7 @@ from pb_figured_dimension_evidence import (
     BindingStatus,
     DimensionLayoutCalibration,
     ObservedGeometrySegment,
+    _dimension_text_box_source_items,
     _native_word_orientations,
     bind_observation_to_vector_geometry,
 )
@@ -819,3 +820,56 @@ def test_larger_native_rectangle_is_not_suppressed_as_dimension_text_box() -> No
 
     assert result.status == BindingStatus.AMBIGUOUS.value
     assert result.dimension_line_id is None
+
+
+def test_page_scope_suppresses_adjacent_dimension_text_boxes_independently() -> None:
+    first = DimensionObservation(
+        dimension_id="dim-a",
+        source_page=1,
+        bbox=(100.0, 90.0, 112.0, 100.0),
+        raw_text="4200",
+        value=4200.0,
+        unit="mm",
+    )
+    second = DimensionObservation(
+        dimension_id="dim-b",
+        source_page=1,
+        bbox=(100.0, 110.0, 112.0, 120.0),
+        raw_text="4200",
+        value=4200.0,
+        unit="mm",
+    )
+    first_box = _text_box_rectangle_segments(
+        path_index=700,
+        item_index=0,
+        bbox=first.bbox,
+    )
+    second_box = tuple(
+        _segment(
+            f"second-{segment.segment_id}",
+            segment.start,
+            segment.end,
+            width=None,
+            color=None,
+            source_path_index=701,
+            source_item_index=0,
+        )
+        for segment in _text_box_rectangle_segments(
+            path_index=701,
+            item_index=0,
+            bbox=second.bbox,
+        )
+    )
+    unrelated = _text_box_rectangle_segments(
+        path_index=702,
+        item_index=0,
+        bbox=(60.0, 60.0, 160.0, 150.0),
+    )
+
+    ignored = _dimension_text_box_source_items(
+        (first, second),
+        (*first_box, *second_box, *unrelated),
+        _calibration(),
+    )
+
+    assert ignored == frozenset({(700, 0), (701, 0)})
