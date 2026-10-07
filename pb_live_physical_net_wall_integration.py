@@ -207,6 +207,35 @@ def _unique_authenticated_containing_floor_plan_viewport(
     return next(iter(containing.items()))
 
 
+def _merge_documented_room_area_evidence(
+    *,
+    same_view_by_record: dict[str, object],
+    cross_view_by_record: dict[str, object],
+) -> dict[str, object]:
+    """Merge independent documented room-area authorities fail-closed."""
+    merged: dict[str, object] = {}
+    for record_id in sorted(set(same_view_by_record) | set(cross_view_by_record)):
+        same = same_view_by_record.get(record_id)
+        cross = cross_view_by_record.get(record_id)
+        if same is None:
+            merged[record_id] = cross
+            continue
+        if cross is None:
+            merged[record_id] = same
+            continue
+        try:
+            same_value = float(getattr(same, "normalized_value"))
+            cross_value = float(getattr(cross, "normalized_value"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        same_unit = str(getattr(same, "unit", "") or "")
+        cross_unit = str(getattr(cross, "unit", "") or "")
+        if same_unit != cross_unit or abs(same_value - cross_value) > 1e-9:
+            continue
+        merged[record_id] = same
+    return merged
+
+
 def collect_live_physical_net_wall_claim(
     pdf_path: Path | str,
     *,
