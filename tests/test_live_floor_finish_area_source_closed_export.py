@@ -10,6 +10,7 @@ from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
 )
 from pb_live_floor_finish_area_source_closed_export import (
+    build_live_floor_finish_area_source_traces,
     seal_live_floor_finish_area_run,
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
@@ -142,8 +143,15 @@ def test_floor_finish_quantity_seals_on_exact_canonical_floor_lineage() -> None:
     assert row.object_identity_refs == ("floor-1",)
     assert row.lineage_ok is True
     assert set(row.trace_canonical_entity_ids) >= {"floor-1", "room-1"}
-    assert row.trace.metadata["support_page_id"] == "9"
-    assert row.trace.metadata["support_viewport_id"] == "finish-vp"
+
+    traces = build_live_floor_finish_area_source_traces(
+        _claim(),
+        workspace_id=1,
+        project_id="project-1",
+    )
+    trace = traces["floor-finish-quantity-1"]
+    assert trace.metadata["support_page_id"] == "9"
+    assert trace.metadata["support_viewport_id"] == "finish-vp"
 
 
 def test_floor_finish_export_rejects_missing_semantic_snapshot() -> None:
