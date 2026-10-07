@@ -1,0 +1,102 @@
+name: DIAG GPT1 Maryborough RCP Boundary Gates
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace page 18 RCP boundary ownership gates
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          import pb_viewport_segmentation as vp
+          from pb_native_page_frame import native_page_frame
+          from pb_drawing_evidence_binding import DrawingViewType
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(pdf)
+          try:
+              page=doc[17]
+              calibration=vp.calibrate_viewport_layout(page)
+              anchors=vp.extract_view_title_anchors(page)
+              rcp=[
+                  a for a in anchors
+                  if a.view_type==DrawingViewType.REFLECTED_CEILING_PLAN.value
+              ]
+              rows=[]
+              for anchor in rcp:
+                  sheet=vp._single_view_sheet_drawing_frames(
+                      page,anchor,calibration
+                  )
+                  title_block=vp._proven_title_block_region(page)
+                  printable=vp._single_floor_plan_printable_partition(
+                      page,anchor,calibration,page_number=18
+                  )
+                  sheet_view=vp._single_floor_plan_sheet_frame_partition(
+                      page,anchor,calibration,page_number=18
+                  )
+                  rows.append({
+                      "anchor_text":anchor.text,
+                      "anchor_bbox":list(anchor.bbox),
+                      "rotation":native_page_frame(page).rotation,
+                      "title_block":None if title_block is None else list(title_block),
+                      "sheet_candidates":[
+                          {
+                              "bbox":list(item[0]),
+                              "metadata_count":item[1],
+                              "primitive_count":item[2],
+                          }
+                          for item in sheet
+                      ],
+                      "sheet_view":None if sheet_view is None else {
+                          "status":sheet_view.status,
+                          "bbox":sheet_view.bounding_box,
+                          "provenance":dict(sheet_view.provenance or {}),
+                      },
+                      "printable_view":None if printable is None else {
+                          "status":printable.status,
+                          "bbox":printable.bounding_box,
+                          "provenance":dict(printable.provenance or {}),
+                      },
+                  })
+              segmented=vp.segment_page_viewports(page,page_number=18)
+              print(json.dumps({
+                  "calibration":{
+                      "page_width_pt":calibration.page_width_pt,
+                      "page_height_pt":calibration.page_height_pt,
+                      "median_word_height_pt":calibration.median_word_height_pt,
+                      "minimum_frame_span_pt":calibration.minimum_frame_span_pt,
+                  },
+                  "anchor_count":len(anchors),
+                  "all_anchors":[{
+                      "text":a.text,
+                      "type":a.view_type,
+                      "bbox":list(a.bbox),
+                  } for a in anchors],
+                  "rcp_gate_rows":rows,
+                  "segmented":[{
+                      "view_id":v.view_id,
+                      "view_type":v.view_type,
+                      "label":v.label,
+                      "status":v.status,
+                      "bbox":v.bounding_box,
+                      "notes":list(v.notes or ()),
+                      "provenance":dict(v.provenance or {}),
+                  } for v in segmented],
+              },indent=2,sort_keys=True,default=str))
+          finally:
+              doc.close()
+          PY
