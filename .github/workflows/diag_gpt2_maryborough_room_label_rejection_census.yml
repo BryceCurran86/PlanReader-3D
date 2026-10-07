@@ -60,12 +60,16 @@ jobs:
               page_ids=("7",),
               evidence_page_ids=(),
           )
+          current=source.published_snapshot_for_revision(
+              published.revision.revision_id
+          )
+          assert current is not None
           wall_auth=live.physical_wall_candidate_authority
           selectors=wall_auth.selectors_for_authenticated_viewports(
-              document_id=published.revision.document_id,
-              revision_id=published.revision.revision_id,
-              source_sha256=published.revision.source_sha256,
-              snapshot_id=published.snapshot.snapshot_id,
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
               page_id="7",
               view_type=DrawingViewType.FLOOR_PLAN.value,
           )
