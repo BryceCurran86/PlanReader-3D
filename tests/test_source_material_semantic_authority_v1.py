@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pb_source_material_semantic_authority as semantic
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import (
     SegmentedViewport,
@@ -426,7 +427,15 @@ def test_admissible_glyph_clip_failure_can_use_producer_owned_raster_corroborati
             return cls()
 
         def publish(self, selector):
-            source_result = source._producer.authority().resolve(selector)
+            source_result = source._producer.authority().resolve(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=selector.observation_id,
+                )
+            )
             raw = source_result.observation.raw_text
             return SimpleNamespace(
                 status=EvidenceResolutionStatus.CORROBORATED,
