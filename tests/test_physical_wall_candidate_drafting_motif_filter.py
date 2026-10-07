@@ -131,6 +131,50 @@ def test_dense_repeated_non_orthogonal_singleton_motif_is_excluded() -> None:
     assert _filter(motif) == ()
 
 
+def test_g17_proven_wall_faces_are_not_pruned_as_repeated_orthogonal_motif() -> None:
+    repeated = [
+        _line(
+            f"face-{idx}",
+            float(idx * 2),
+            0.0,
+            float(idx * 2 + 2),
+            0.0,
+            path_index=idx,
+        )
+        for idx in range(8)
+    ]
+    assert _filter(repeated) == ()
+
+    protected = _filter_repeated_non_physical_drafting_primitives(
+        repeated,
+        page_width=1000.0,
+        page_height=1000.0,
+        protected_source_primitive_ids=("face-1", "face-4"),
+    )
+    assert tuple(segment["id"] for segment in protected) == ("face-1", "face-4")
+
+
+def test_protected_wall_face_does_not_rescue_unrelated_repeated_marks() -> None:
+    repeated = [
+        _line(
+            f"motif-{idx}",
+            float(idx * 2),
+            0.0,
+            float(idx * 2 + 2),
+            0.0,
+            path_index=idx,
+        )
+        for idx in range(8)
+    ]
+    protected = _filter_repeated_non_physical_drafting_primitives(
+        repeated,
+        page_width=1000.0,
+        page_height=1000.0,
+        protected_source_primitive_ids=("motif-3",),
+    )
+    assert tuple(segment["id"] for segment in protected) == ("motif-3",)
+
+
 def test_repeated_orthogonal_short_returns_below_motif_threshold_are_preserved() -> None:
     walls = [
         _line(
