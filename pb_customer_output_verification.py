@@ -65,6 +65,45 @@ def _projection_provenance(row: Mapping[str, Any]) -> Mapping[str, Any]:
     )
 
 
+def _customer_quantity_id(row: Mapping[str, Any]) -> str:
+    direct = _clean(row.get("quantity_id"))
+    if direct:
+        return direct
+
+    provenance = row.get("commercial_projection_provenance")
+    if isinstance(provenance, Mapping):
+        qprov = provenance.get("quantity")
+        if isinstance(qprov, Mapping):
+            return _clean(qprov.get("quantity_id"))
+
+    notes = row.get("notes")
+    if not isinstance(notes, str) or not notes.strip():
+        return ""
+    try:
+        parsed = json.loads(notes)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(parsed, Mapping):
+        return ""
+    if _clean(parsed.get("adapter")) != "commercial_takeoff":
+        return ""
+    qprov = parsed.get("quantity")
+    if not isinstance(qprov, Mapping):
+        return ""
+    return _clean(qprov.get("quantity_id"))
+
+
+def _require_optional_equal(
+    name: str,
+    actual: Any,
+    expected: Any,
+    quantity_id: str,
+) -> None:
+    if actual is None or _clean(actual) == "":
+        return
+    _require_equal(name, actual, expected, quantity_id)
+
+
 def _require_equal(name: str, actual: Any, expected: Any, quantity_id: str) -> None:
     if actual != expected:
         raise CustomerOutputVerificationError(
@@ -84,64 +123,45 @@ def _verify_row_lineage(
             + ", ".join(sealed.lineage_reason_codes)
         )
 
-    _require_equal("project_id", _clean(row.get("project_id")), sealed.project_id, quantity_id)
-    _require_equal("quantity_family", _clean(row.get("quantity_family")), sealed.family, quantity_id)
-    _require_equal("semantic_key", _clean(row.get("semantic_key")), sealed.semantic_key, quantity_id)
-    _require_equal("unit", _norm_unit(row.get("unit")), _norm_unit(sealed.unit), quantity_id)
-    _require_equal("document_id", _clean(row.get("document_id")), sealed.document_id, quantity_id)
-    _require_equal(
-        "source_sha256",
-        _clean(row.get("source_sha256")).lower(),
-        sealed.source_sha256.lower(),
-        quantity_id,
-    )
-    _require_equal("source_page", _clean(row.get("source_page")), sealed.source_page, quantity_id)
-    _require_equal("viewport_id", _clean(row.get("viewport_id")), sealed.viewport_id, quantity_id)
-    _require_equal("revision_id", _clean(row.get("revision_id")), sealed.revision_id, quantity_id)
-
-    if sealed.value is None:
-        raise CustomerOutputVerificationError(
-            f"non-abstained sealed quantity {quantity_id!r} has no value"
-        )
-    try:
-        row_value = float(row.get("quantity"))
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise CustomerOutputVerificationError(
-            f"customer row {quantity_id!r} has invalid quantity"
-        ) from exc
-    _require_equal("quantity", row_value, float(sealed.value), quantity_id)
-
-    _require_equal(
-        "canonical_entity_ids",
-        _string_tuple(row.get("canonical_entity_ids")),
-        tuple(sorted(sealed.trace_canonical_entity_ids)),
-        quantity_id,
-    )
-    _require_equal(
-        "evidence_ids",
-        _string_tuple(row.get("evidence_ids")),
-        tuple(sorted(sealed.trace_evidence_ids)),
-        quantity_id,
-    )
-
-    fingerprint = _clean(row.get("commercial_projection_fingerprint")).lower()
-    if not _SHA256_RE.fullmatch(fingerprint):
-        raise CustomerOutputVerificationError(
-            f"customer row {quantity_id!r} is missing a valid projection fingerprint"
-        )
-
     provenance = _projection_provenance(row)
     qprov = provenance.get("quantity")
     tprov = provenance.get("source_trace")
-    if not isinstance(qprov, Mapping) or not isinstance(tprov, Mapping):
+    apro = provenance.get("measurement_authority")
+    if (
+        not isinstance(qprov, Mapping)
+        or not isinstance(tprov, Mapping)
+        or not isinstance(apro, Mapping)
+    ):
         raise CustomerOutputVerificationError(
             f"customer row {quantity_id!r} has incomplete projection provenance"
+        )
+    if not _clean(apro.get("method")):
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} is missing measurement authority lineage"
         )
 
     _require_equal(
         "provenance.quantity_id",
         _clean(qprov.get("quantity_id")),
         sealed.quantity_id,
+        quantity_id,
+    )
+    _require_equal(
+        "provenance.family",
+        _clean(qprov.get("family")),
+        sealed.family,
+        quantity_id,
+    )
+    _require_equal(
+        "provenance.semantic_key",
+        _clean(qprov.get("semantic_key")),
+        sealed.semantic_key,
+        quantity_id,
+    )
+    _require_equal(
+        "provenance.unit",
+        _norm_unit(qprov.get("unit")),
+        _norm_unit(sealed.unit),
         quantity_id,
     )
     _require_equal(
@@ -205,6 +225,88 @@ def _verify_row_lineage(
         quantity_id,
     )
 
+    _require_optional_equal(
+        "project_id", _clean(row.get("project_id")), sealed.project_id, quantity_id
+    )
+    _require_optional_equal(
+        "quantity_family", _clean(row.get("quantity_family")), sealed.family, quantity_id
+    )
+    _require_optional_equal(
+        "semantic_key", _clean(row.get("semantic_key")), sealed.semantic_key, quantity_id
+    )
+    _require_equal("unit", _norm_unit(row.get("unit")), _norm_unit(sealed.unit), quantity_id)
+    _require_optional_equal(
+        "document_id", _clean(row.get("document_id")), sealed.document_id, quantity_id
+    )
+    if _clean(row.get("source_sha256")):
+        _require_equal(
+            "source_sha256",
+            _clean(row.get("source_sha256")).lower(),
+            sealed.source_sha256.lower(),
+            quantity_id,
+        )
+    _require_equal("source_page", _clean(row.get("source_page")), sealed.source_page, quantity_id)
+    _require_optional_equal(
+        "viewport_id", _clean(row.get("viewport_id")), sealed.viewport_id, quantity_id
+    )
+    _require_optional_equal(
+        "revision_id", _clean(row.get("revision_id")), sealed.revision_id, quantity_id
+    )
+
+    if sealed.value is None:
+        raise CustomerOutputVerificationError(
+            f"non-abstained sealed quantity {quantity_id!r} has no value"
+        )
+    try:
+        row_value = float(row.get("quantity"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} has invalid quantity"
+        ) from exc
+    _require_equal("quantity", row_value, float(sealed.value), quantity_id)
+
+    if row.get("canonical_entity_ids") is not None:
+        _require_equal(
+            "canonical_entity_ids",
+            _string_tuple(row.get("canonical_entity_ids")),
+            tuple(sorted(sealed.trace_canonical_entity_ids)),
+            quantity_id,
+        )
+    if row.get("evidence_ids") is not None:
+        _require_equal(
+            "evidence_ids",
+            _string_tuple(row.get("evidence_ids")),
+            tuple(sorted(sealed.trace_evidence_ids)),
+            quantity_id,
+        )
+
+    fingerprint = _clean(row.get("commercial_projection_fingerprint")).lower()
+    if fingerprint and not _SHA256_RE.fullmatch(fingerprint):
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} has an invalid projection fingerprint"
+        )
+
+    source_reference = _clean(row.get("source_reference"))
+    if not source_reference:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} is missing source_reference lineage"
+        )
+    required_reference_parts = (
+        f"QuantityEvidence {quantity_id}",
+        f"document={sealed.document_id}",
+        f"sha256={sealed.source_sha256}",
+        f"viewport={sealed.viewport_id}",
+        f"revision={sealed.revision_id}",
+    )
+    missing_reference_parts = [
+        part for part in required_reference_parts if part not in source_reference
+    ]
+    if missing_reference_parts:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} source_reference lineage is incomplete: "
+            + ", ".join(missing_reference_parts)
+        )
+
 
 @dataclass(frozen=True)
 class SealedCustomerOutputVerification:
@@ -258,7 +360,7 @@ def verify_sealed_customer_output(
     for row in customer_rows:
         if not isinstance(row, Mapping):
             raise TypeError("customer_rows must contain mappings")
-        quantity_id = _clean(row.get("quantity_id"))
+        quantity_id = _customer_quantity_id(row)
         if not quantity_id:
             continue
         if quantity_id in customer_by_id:
