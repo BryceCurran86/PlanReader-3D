@@ -527,6 +527,124 @@ def _page_rectangle_primitives(page: Any) -> tuple[tuple[float, float, float, fl
     return result
 
 
+def _frame_looks_like_line_grid_table(
+    frame: Sequence[float],
+    page: Any,
+    calibration: ViewportLayoutCalibration,
+) -> bool:
+    """Prove a table from repeated source horizontal/vertical grid lines.
+
+    CAD schedules are often emitted as independent line primitives rather than
+    rectangle cells. This is a second positive table proof, not a relaxation:
+    both axis families must contain repeated, long source lines; their clustered
+    extents must span a meaningful fraction of the candidate frame; and most
+    horizontal/vertical pairs must geometrically cross.
+    """
+    frame_area = _bbox_area(frame)
+    frame_width = max(0.0, float(frame[2]) - float(frame[0]))
+    frame_height = max(0.0, float(frame[3]) - float(frame[1]))
+    if frame_area <= 0.0 or frame_width <= 0.0 or frame_height <= 0.0:
+        return False
+
+    tol = max(
+        calibration.median_word_height_pt * 0.15,
+        min(frame_width, frame_height) * 0.001,
+        0.75,
+    )
+    minimum_horizontal_span = max(
+        calibration.median_word_height_pt * 4.0,
+        frame_width * 0.35,
+    )
+    minimum_vertical_span = max(
+        calibration.median_word_height_pt * 4.0,
+        frame_height * 0.35,
+    )
+
+    horizontal: list[tuple[float, float, float]] = []
+    vertical: list[tuple[float, float, float]] = []
+    for drawing in _page_drawings(page):
+        for item in drawing.get("items", []) or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = item[1], item[2]
+            x0, y0 = float(start.x), float(start.y)
+            x1, y1 = float(end.x), float(end.y)
+            midpoint = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+            if not _point_in_bbox(midpoint, frame, margin=tol):
+                continue
+            if abs(y1 - y0) <= tol and abs(x1 - x0) >= minimum_horizontal_span:
+                horizontal.append((min(x0, x1), max(x0, x1), (y0 + y1) / 2.0))
+            elif abs(x1 - x0) <= tol and abs(y1 - y0) >= minimum_vertical_span:
+                vertical.append(((x0 + x1) / 2.0, min(y0, y1), max(y0, y1)))
+
+    if len(horizontal) < 3 or len(vertical) < 3:
+        return False
+
+    cluster_tol = max(calibration.median_word_height_pt * 0.5, 1.0)
+    y_clusters = _cluster_values([line[2] for line in horizontal], cluster_tol)
+    x_clusters = _cluster_values([line[0] for line in vertical], cluster_tol)
+    if len(y_clusters) < 3 or len(x_clusters) < 3:
+        return False
+
+    def horizontal_extent(y: float) -> tuple[float, float] | None:
+        owned = [
+            line for line in horizontal
+            if abs(line[2] - y) <= cluster_tol
+        ]
+        if not owned:
+            return None
+        return min(line[0] for line in owned), max(line[1] for line in owned)
+
+    def vertical_extent(x: float) -> tuple[float, float] | None:
+        owned = [
+            line for line in vertical
+            if abs(line[0] - x) <= cluster_tol
+        ]
+        if not owned:
+            return None
+        return min(line[1] for line in owned), max(line[2] for line in owned)
+
+    horizontal_major = [
+        (y, extent)
+        for y in y_clusters
+        for extent in (horizontal_extent(y),)
+        if extent is not None
+        and extent[1] - extent[0] >= frame_width * 0.5
+    ]
+    vertical_major = [
+        (x, extent)
+        for x in x_clusters
+        for extent in (vertical_extent(x),)
+        if extent is not None
+        and extent[1] - extent[0] >= frame_height * 0.5
+    ]
+    if len(horizontal_major) < 3 or len(vertical_major) < 3:
+        return False
+
+    crossing = 0
+    possible = len(horizontal_major) * len(vertical_major)
+    for y, (hx0, hx1) in horizontal_major:
+        for x, (vy0, vy1) in vertical_major:
+            if (
+                hx0 - tol <= x <= hx1 + tol
+                and vy0 - tol <= y <= vy1 + tol
+            ):
+                crossing += 1
+    if possible <= 0 or crossing / possible < 0.6:
+        return False
+
+    grid_bbox = (
+        min(extent[0] for _, extent in horizontal_major),
+        min(extent[0] for _, extent in vertical_major),
+        max(extent[1] for _, extent in horizontal_major),
+        max(extent[1] for _, extent in vertical_major),
+    )
+    return (
+        _bbox_area(grid_bbox) / frame_area
+        >= _TABLE_GRID_FRAME_COVERAGE_FRACTION
+    )
+
+
 def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
@@ -554,9 +672,6 @@ def _frame_looks_like_table(
         area = _bbox_area(cell)
         if 4.0 < area < 0.15 * frame_area:
             cells.append(cell)
-
-    if len(cells) < _TABLE_CELL_COUNT:
-        return False
 
     # Group by scale-invariant cell dimensions. Real table cells repeat their
     # shape; unrelated CAD rectangles should not be pooled merely because they
@@ -625,7 +740,7 @@ def _frame_looks_like_table(
             continue
         return True
 
-    return False
+    return _frame_looks_like_line_grid_table(frame, page, calibration)
 
 
 def _rejected_ownership_frame(
