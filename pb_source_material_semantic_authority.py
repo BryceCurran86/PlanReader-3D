@@ -265,8 +265,6 @@ def _bbox_intersects(
 def _trusted_words_by_page(
     source: SourceVisibilityProducer,
     published: object,
-    *,
-    raster: RasterTextCorroborationProducer,
 ) -> dict[str, tuple[_TrustedTextWord, ...]]:
     """Resolve the producer-owned PDF text-integrity receipt for every word."""
 
@@ -310,37 +308,6 @@ def _trusted_words_by_page(
         )
         reason_codes = tuple(result.reason_codes or ())
         trusted = trusted_text is not None
-        if (
-            not trusted
-            and result.status is EvidenceResolutionStatus.ABSTAINED
-            and set(reason_codes)
-            and set(reason_codes).issubset(
-                {
-                    TEXT_GLYPH_MAPPING_UNVERIFIED,
-                    TEXT_CLIP_STATE_UNRESOLVED,
-                }
-            )
-            and TEXT_GLYPH_MAPPING_UNVERIFIED in set(reason_codes)
-        ):
-            raster_result = raster.publish(
-                RasterTextCorroborationSelector(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=published.snapshot.snapshot_id,
-                    observation_id=str(observation_id),
-                )
-            )
-            if (
-                raster_result.status is EvidenceResolutionStatus.CORROBORATED
-                and raster_result.record is not None
-                and raster_result.corroborated_text
-                and str(raster_result.corroborated_text).strip()
-                == str(receipt.raw_text or "").strip()
-            ):
-                trusted_text = str(raster_result.corroborated_text)
-                trusted = True
-                reason_codes = ()
 
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
@@ -661,7 +628,6 @@ class SourceMaterialSemanticProducer:
         trusted_words = _trusted_words_by_page(
             self._source,
             published,
-            raster=self._raster,
         )
         raster = RasterTextCorroborationProducer.from_source_visibility_producer(
             self._source
