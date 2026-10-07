@@ -138,7 +138,7 @@ def test_abstained_quantity_cannot_leak_into_customer_output() -> None:
     leaked = dict(rows[0])
     leaked["quantity_id"] = "qty-abstain"
 
-    with pytest.raises(CustomerOutputVerificationError, match="no valid sealed quantity"):
+    with pytest.raises(CustomerOutputVerificationError, match="abstained quantities leaked"):
         verify_sealed_customer_output(sealed, [*rows, leaked])
 
 
