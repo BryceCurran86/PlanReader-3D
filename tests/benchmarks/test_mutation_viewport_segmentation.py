@@ -463,3 +463,52 @@ def test_plan_floor_layout_title_is_supported_without_relaxing_prose_guard():
     prose = _reopen(prose)
     assert segment_page_viewports(prose[0], page_number=1) == []
     prose.close()
+
+
+def _single_table_frame_view(title: str) -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=420)
+    outer = fitz.Rect(320, 30, 580, 350)
+    page.draw_rect(outer)
+
+    x0, y0 = 340.0, 60.0
+    cell_w, cell_h = 70.0, 60.0
+    for row in range(3):
+        for col in range(3):
+            page.draw_rect(
+                fitz.Rect(
+                    x0 + col * cell_w,
+                    y0 + row * cell_h,
+                    x0 + (col + 1) * cell_w,
+                    y0 + (row + 1) * cell_h,
+                )
+            )
+    page.insert_text((360, 325), title, fontsize=11)
+    return _reopen(doc)
+
+
+def test_gridded_finish_schedule_table_frame_can_own_schedule_viewport():
+    doc = _single_table_frame_view("FINISH SCHEDULE")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
+
+
+def test_gridded_table_frame_cannot_mint_floor_plan_viewport():
+    doc = _single_table_frame_view("GROUND FLOOR PLAN")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        plan = viewports[0]
+        assert plan.view_type == DrawingViewType.FLOOR_PLAN.value
+        assert plan.status == ViewportSegmentationStatus.UNSUPPORTED.value
+        assert plan.bounding_box is None
+    finally:
+        doc.close()
