@@ -138,6 +138,16 @@ def _bare_source_defined_alpha_token(value: Any) -> str:
         return ""
     return code
 
+def _non_alpha_schedule_codes(value: Any) -> List[str]:
+    text = str(value or "")
+    codes = set(_codes(text))
+    codes.update(
+        match.group(1).upper()
+        for match in _GENERIC_SCHEDULE_CODE_RE.finditer(text)
+    )
+    return sorted(codes)
+
+
 def _schedule_codes(value: Any) -> List[str]:
     """Return code-shaped tokens that a schedule row can define.
 
@@ -149,11 +159,7 @@ def _schedule_codes(value: Any) -> List[str]:
     """
 
     text = str(value or "")
-    codes = set(_codes(text))
-    codes.update(
-        match.group(1).upper()
-        for match in _GENERIC_SCHEDULE_CODE_RE.finditer(text)
-    )
+    codes = set(_non_alpha_schedule_codes(text))
     alpha = _source_defined_alpha_code(text)
     if alpha:
         codes.add(alpha)
@@ -295,35 +301,60 @@ def parse_schedule_text(text: Any, page_id: int = 0, page_label: str = "") -> Li
     """Extract code definitions, allowing schedule descriptions to wrap onto following lines."""
     lines = [re.sub(r"\s+", " ", raw).strip() for raw in str(text or "").splitlines() if str(raw).strip()]
     out: List[Dict[str, Any]] = []
+    consumed_continuations: set[int] = set()
+
     for idx, line in enumerate(lines):
+        if idx in consumed_continuations:
+            continue
+
         codes = _schedule_codes(line)
+
+        # A source-defined alphabetic code may occupy its own table cell/line.
+        # It is never meaningful by itself: the immediately following source
+        # line(s) must independently resolve to a material/finish family.
         if not codes:
             bare_code = _bare_source_defined_alpha_token(line)
             if bare_code:
                 preview_parts: List[str] = []
+                preview_indices: List[int] = []
                 for nxt in range(idx + 1, min(len(lines), idx + 4)):
                     if (
-                        _schedule_codes(lines[nxt])
-                        or _bare_source_defined_alpha_token(lines[nxt])
+                        _bare_source_defined_alpha_token(lines[nxt])
+                        or _non_alpha_schedule_codes(lines[nxt])
                     ):
                         break
-                    if len(_normalise(lines[nxt])) >= 3:
-                        preview_parts.append(lines[nxt])
-                    if len(" ".join(preview_parts)) >= 40:
+                    if len(_normalise(lines[nxt])) < 3:
+                        continue
+                    preview_parts.append(lines[nxt])
+                    preview_indices.append(nxt)
+                    preview = re.sub(
+                        r"\s+",
+                        " ",
+                        " ".join(preview_parts),
+                    ).strip()
+                    if (
+                        _source_defined_alpha_code(
+                            f"{bare_code} {preview}"
+                        )
+                        == bare_code
+                    ):
+                        description = preview
+                        consumed_continuations.update(preview_indices)
+                        out.append({
+                            "code": bare_code,
+                            "description": description[:300],
+                            "substrate": _infer_substrate(description),
+                            "finish": _infer_finish(description, bare_code),
+                            "page_id": int(page_id or 0),
+                            "page_label": str(page_label or ""),
+                            "source_line": line,
+                            "source_lines": tuple(
+                                [line, *(lines[i] for i in preview_indices)]
+                            ),
+                        })
                         break
-                preview = re.sub(
-                    r"\s+",
-                    " ",
-                    " ".join(preview_parts),
-                ).strip()
-                if (
-                    preview
-                    and _source_defined_alpha_code(
-                        f"{bare_code} {preview}"
-                    )
-                    == bare_code
-                ):
-                    codes = [bare_code]
+                continue
+
         if len(codes) != 1:
             continue
         code = codes[0]
@@ -340,6 +371,8 @@ def parse_schedule_text(text: Any, page_id: int = 0, page_label: str = "") -> Li
         contributing_lines = [line]
         # Many schedules use one cell/line for the code and the next cells/lines for description.
         for nxt in range(idx + 1, min(len(lines), idx + 4)):
+            if nxt in consumed_continuations:
+                continue
             if (
                 _schedule_codes(lines[nxt])
                 or _bare_source_defined_alpha_token(lines[nxt])
