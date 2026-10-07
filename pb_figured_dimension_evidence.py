@@ -591,6 +591,61 @@ def _source_rectangle_tightly_wraps_observation(
     )
 
 
+def _dimension_text_box_source_items(
+    observations: Sequence[DimensionObservation],
+    segments: Sequence[ObservedGeometrySegment],
+    calibration: DimensionLayoutCalibration,
+) -> frozenset[tuple[int, int]]:
+    """Return native source items that tightly box any figured-dimension text.
+
+    The producer sees all native figured-dimension observations before vector
+    binding.  Removing these exact text-box rectangles once at page scope
+    prevents one dimension label's box from becoming a false perpendicular
+    competitor for a neighbouring dimension label.  Only exact same-item
+    four-edge rectangles whose bounds tightly match a native dimension bbox
+    qualify; ordinary drawing rectangles remain untouched.
+    """
+
+    groups: dict[tuple[int, int], list[ObservedGeometrySegment]] = {}
+    for segment in segments:
+        if (
+            segment.source_path_index is None
+            or segment.source_item_index is None
+        ):
+            continue
+        groups.setdefault(
+            (
+                int(segment.source_path_index),
+                int(segment.source_item_index),
+            ),
+            [],
+        ).append(segment)
+
+    bboxes = tuple(
+        tuple(float(value) for value in observation.bbox)
+        for observation in observations
+        if observation.bbox is not None
+    )
+    if not bboxes:
+        return frozenset()
+
+    ignored: set[tuple[int, int]] = set()
+    for key, siblings in groups.items():
+        concrete = tuple(siblings)
+        if len(concrete) != 4:
+            continue
+        if any(
+            _source_rectangle_tightly_wraps_observation(
+                concrete,
+                bbox,
+                calibration,
+            )
+            for bbox in bboxes
+        ):
+            ignored.add(key)
+    return frozenset(ignored)
+
+
 def _axis_distance(point: tuple[float, float], segment: ObservedGeometrySegment) -> float:
     if segment.orientation == DimensionOrientation.HORIZONTAL.value:
         return abs(point[1] - (segment.start[1] + segment.end[1]) / 2.0)
@@ -1551,12 +1606,31 @@ def extract_dimension_evidence_bundle(
         ):
             orientation_hints[observation.dimension_id] = hint
 
+    ignored_text_box_items = _dimension_text_box_source_items(
+        native,
+        segments,
+        layout,
+    )
+    binding_segments = tuple(
+        segment
+        for segment in segments
+        if (
+            segment.source_path_index is None
+            or segment.source_item_index is None
+            or (
+                int(segment.source_path_index),
+                int(segment.source_item_index),
+            )
+            not in ignored_text_box_items
+        )
+    )
+
     bindings: list[DimensionAnchorBinding] = []
     bound_native: list[DimensionObservation] = []
     for observation in native:
         binding = bind_observation_to_vector_geometry(
             observation,
-            segments,
+            binding_segments,
             layout,
             text_orientation_hint=orientation_hints.get(observation.dimension_id),
         )
@@ -1566,7 +1640,7 @@ def extract_dimension_evidence_bundle(
     promoted_yearlike, promoted_bindings = _extract_witness_promoted_yearlike_observations(
         page,
         page_num=page_num,
-        segments=segments,
+        segments=binding_segments,
         calibration=layout,
         sheet=sheet,
         view_id=view_id,
