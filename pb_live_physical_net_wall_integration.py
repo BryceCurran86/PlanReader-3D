@@ -54,6 +54,7 @@ from pb_cross_view_floor_finish_authority import (
     enrich_live_canonical_floor_finishes,
 )
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+from pb_same_view_room_area_authority import SameViewRoomAreaProducer
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_migration_contracts import (
     DocumentEvidence,
@@ -206,6 +207,44 @@ def _unique_authenticated_containing_floor_plan_viewport(
     return next(iter(containing.items()))
 
 
+def _merge_documented_room_area_evidence(
+    *,
+    same_view_by_record: dict[str, object],
+    cross_view_by_record: dict[str, object],
+) -> dict[str, object]:
+    """Merge producer-owned documented room-area evidence fail-closed.
+
+    Either authority may independently supply one explicit room area. When both
+    bind the same source-room-face record they must agree exactly on numeric
+    value and unit; disagreement suppresses the explicit area for that room
+    rather than ranking one evidence path over the other.
+    """
+    merged: dict[str, object] = {}
+    record_ids = set(same_view_by_record) | set(cross_view_by_record)
+    for record_id in sorted(record_ids):
+        same = same_view_by_record.get(record_id)
+        cross = cross_view_by_record.get(record_id)
+        if same is None:
+            merged[record_id] = cross
+            continue
+        if cross is None:
+            merged[record_id] = same
+            continue
+        try:
+            same_value = float(getattr(same, "normalized_value"))
+            cross_value = float(getattr(cross, "normalized_value"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        same_unit = str(getattr(same, "unit", "") or "")
+        cross_unit = str(getattr(cross, "unit", "") or "")
+        if same_unit != cross_unit or abs(same_value - cross_value) > 1e-9:
+            continue
+        # Same-view is the direct physical-room page proposition. Prefer its
+        # evidence atom only after exact numeric agreement with cross-view.
+        merged[record_id] = same
+    return merged
+
+
 def collect_live_physical_net_wall_claim(
     pdf_path: Path | str,
     *,
@@ -356,16 +395,29 @@ def collect_live_physical_net_wall_claim(
     floor_finish_quantity_evidence: list[QuantityEvidence] = []
     cross_view_area = None
     if canonical_rooms.rooms:
-        evidence_by_record = {}
+        same_view_area = SameViewRoomAreaProducer.from_source(
+            source=source,
+            rooms=canonical_rooms,
+        ).publish()
+        same_view_by_record = dict(
+            same_view_area.evidence_by_source_room_face_record_id
+        )
+
+        cross_view_by_record = {}
         if room_area_support_selected:
             cross_view_area = CrossViewRoomAreaProducer.from_source(
                 source=source,
                 rooms=canonical_rooms,
             ).publish()
             if cross_view_area.records:
-                evidence_by_record = dict(
+                cross_view_by_record = dict(
                     cross_view_area.evidence_by_source_room_face_record_id
                 )
+
+        evidence_by_record = _merge_documented_room_area_evidence(
+            same_view_by_record=same_view_by_record,
+            cross_view_by_record=cross_view_by_record,
+        )
 
         scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
             source
