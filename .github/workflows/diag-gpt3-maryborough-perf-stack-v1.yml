@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - diag/gpt3-maryborough-perf-stack-v1
-  pull_request:
-    branches:
-      - main
 
 concurrency:
   group: diag-gpt3-maryborough-perf-stack-v1
