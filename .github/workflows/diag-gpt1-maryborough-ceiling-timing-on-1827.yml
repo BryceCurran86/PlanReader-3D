@@ -1,0 +1,40 @@
+name: DIAG GPT1 Maryborough Ceiling Timing On 1827
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Time scoped ceiling pass
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json,time
+          from pathlib import Path
+          from pb_live_ceiling_lining_integration import collect_live_ceiling_lining_claims
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          t=time.perf_counter()
+          result=collect_live_ceiling_lining_claims(
+              pdf,
+              pages=tuple(range(31)),
+              topology_pages=(6,29,30),
+              authoritative_room_area_quantities=(),
+          )
+          print(json.dumps({
+              "seconds":time.perf_counter()-t,
+              "status":getattr(result.status,"value",str(result.status)),
+              "reason_codes":list(result.reason_codes),
+              "claim_count":len(result.claims),
+              "canonical_ceiling_count":len(result.canonical_ceilings),
+          },indent=2,sort_keys=True))
+          PY
