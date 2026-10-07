@@ -4,6 +4,16 @@ on:
   push:
     branches:
       - gpt2/material-rcp-final-current-main
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "pb_source_material_semantic_authority.py"
+      - "pb_cross_view_ceiling_finish_authority.py"
+      - "tests/test_source_material_semantic_authority_v1.py"
+      - "tests/test_cross_view_ceiling_finish_authority.py"
+      - "tests/test_cross_view_ceiling_quantity_authority.py"
+      - ".github/workflows/test-gpt2-final-material-rcp.yml"
 concurrency:
   group: test-gpt2-final-material-rcp-subset
   cancel-in-progress: true
