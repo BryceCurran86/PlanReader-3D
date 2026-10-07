@@ -1,0 +1,108 @@
+name: DIAG GPT1 Maryborough Material First Gate
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace schedule viewport and parser gates
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          import fitz
+          import pb_source_material_semantic_authority as mat
+          from pb_material_schedule_v1222 import parse_schedule_text
+          from pb_raster_text_corroboration_authority import RasterTextCorroborationProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+          )
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-material-first-gate",
+              producer_version="1",
+          )
+          doc=fitz.open(stream=payload,filetype="pdf")
+          try:
+              page_ids=tuple(str(i+1) for i in range(doc.page_count))
+          finally:
+              doc.close()
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag:{hashlib.sha256(payload).hexdigest()[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=page_ids,
+          )
+          words=mat._trusted_words_by_page(source,published)
+          raster=RasterTextCorroborationProducer.from_source_visibility_producer(source)
+          rows=[]
+          doc=fitz.open(stream=payload,filetype="pdf")
+          try:
+              for index in range(doc.page_count):
+                  page_number=index+1
+                  viewports=tuple(segment_page_viewports(doc[index],page_number=page_number))
+                  non_overlap=validate_non_overlapping_viewports(viewports)
+                  for viewport in viewports:
+                      authoritative=mat._viewport_is_authoritative(
+                          viewport,
+                          sibling_non_overlapping=non_overlap,
+                      )
+                      row={
+                          "page":page_number,
+                          "view_id":viewport.view_id,
+                          "view_type":viewport.view_type,
+                          "label":viewport.label,
+                          "status":viewport.status,
+                          "bounding_box":viewport.bounding_box,
+                          "authoritative":authoritative,
+                          "is_schedule_type":viewport.view_type in mat._SCHEDULE_VIEW_TYPES,
+                      }
+                      if authoritative and viewport.bounding_box is not None:
+                          scoped=mat._recover_admissible_viewport_words(
+                              source=source,
+                              published=published,
+                              raster=raster,
+                              words=words.get(str(page_number),()),
+                              viewport=viewport,
+                          )
+                          lines,complete,reasons=mat._trusted_lines_for_viewport(
+                              scoped,
+                              viewport,
+                          )
+                          row["text_complete"]=complete
+                          row["text_reasons"]=list(reasons)
+                          row["trusted_lines"]=[line[0] for line in lines]
+                          if viewport.view_type in mat._SCHEDULE_VIEW_TYPES:
+                              text="\n".join(line[0] for line in lines)
+                              parsed=list(parse_schedule_text(
+                                  text,
+                                  page_id=page_number,
+                                  page_label=f"page:{page_number}",
+                              ))
+                              row["parsed_items"]=parsed
+                      rows.append(row)
+          finally:
+              doc.close()
+          print(json.dumps({
+              "all_viewport_count":len(rows),
+              "authoritative_schedule_count":sum(
+                  1 for r in rows if r["authoritative"] and r["is_schedule_type"]
+              ),
+              "rows":rows,
+          },indent=2,sort_keys=True,default=str))
+          PY
