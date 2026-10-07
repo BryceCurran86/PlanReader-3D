@@ -1,0 +1,122 @@
+name: DIAG GPT1 Post-1974 Surface Proof
+
+on:
+  push:
+    branches:
+      - diag/gpt1-post1974-surfaces-proof-v1
+
+concurrency:
+  group: diag-gpt1-post1974-surfaces-proof
+  cancel-in-progress: true
+
+jobs:
+  prove-surfaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Run real Maryborough and Lot16 surface handoffs
+        run: |
+          set -uo pipefail
+          ROOT=artifacts/gpt1-post1974-surfaces
+          mkdir -p "$ROOT"
+          git rev-parse HEAD | tee "$ROOT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" | tee "$ROOT/maryborough_source_sha256.txt"
+          sha256sum "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" | tee "$ROOT/lot16_source_sha256.txt"
+
+          mary_code=0
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py             --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"             --project-id au_qld_maryborough_service_station             --family-group surfaces             --workspace-id 1             --output-dir "$ROOT/maryborough"             2>&1 | tee "$ROOT/maryborough.log" || mary_code=$?
+
+          lot_code=0
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"             --project-id au_qld_lot16_power             --family-group surfaces             --workspace-id 1             --output-dir "$ROOT/lot16"             2>&1 | tee "$ROOT/lot16.log" || lot_code=$?
+
+          MARY_CODE="$mary_code" LOT_CODE="$lot_code" PYTHONPATH=. python - <<'PY'
+          import json, os
+          from collections import Counter
+          from pathlib import Path
+
+          root = Path("artifacts/gpt1-post1974-surfaces")
+          report = {
+              "head_sha": (root / "head_sha.txt").read_text().strip(),
+              "projects": {},
+              "exit_codes": {
+                  "maryborough": int(os.environ["MARY_CODE"]),
+                  "lot16": int(os.environ["LOT_CODE"]),
+              },
+          }
+
+          for key in ("maryborough", "lot16"):
+              project_root = root / key
+              summary_path = project_root / "production_summary.json"
+              item = {"summary_exists": summary_path.exists()}
+              if summary_path.exists():
+                  summary = json.loads(summary_path.read_text())
+                  item["status"] = summary.get("status")
+                  item["claim_status"] = summary.get("claim_status")
+                  item["claim_reason_codes"] = summary.get("claim_reason_codes", [])
+                  item["canonical_counts"] = summary.get("canonical_counts", {})
+                  item["family_counts"] = summary.get("family_counts", {})
+                  item["combined_quantity_count"] = summary.get("combined_quantity_count", 0)
+                  item["ceiling_authority_path"] = summary.get("ceiling_authority_path")
+                  item["topology_pages"] = summary.get("topology_pages", [])
+                  item["room_area_support_pages"] = summary.get("room_area_support_pages", [])
+                  item["execution_pages"] = summary.get("execution_pages", [])
+                  item["semantic_execution_pages"] = summary.get("semantic_execution_pages", [])
+
+                  family_details = {}
+                  for family, rel in (summary.get("family_run_files") or {}).items():
+                      path = Path(rel)
+                      if not path.exists():
+                          continue
+                      data = json.loads(path.read_text())
+                      rows = data.get("quantities") or data.get("quantity_evidence") or []
+                      values = []
+                      ids = []
+                      zeros = []
+                      for row in rows:
+                          if not isinstance(row, dict):
+                              continue
+                          qid = str(row.get("quantity_id") or row.get("id") or "")
+                          ids.append(qid)
+                          value = row.get("value")
+                          values.append(value)
+                          try:
+                              if float(value) == 0.0:
+                                  zeros.append(qid)
+                          except (TypeError, ValueError):
+                              pass
+                      duplicates = sorted(k for k, v in Counter(ids).items() if k and v > 1)
+                      family_details[family] = {
+                          "count": len(rows),
+                          "values": values,
+                          "duplicate_quantity_ids": duplicates,
+                          "zero_quantity_ids": zeros,
+                      }
+                  item["family_details"] = family_details
+              report["projects"][key] = item
+
+          (root / "proof_summary.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+          if [ "$mary_code" -ne 0 ] || [ "$lot_code" -ne 0 ]; then
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-post1974-surfaces-proof
+          path: artifacts/gpt1-post1974-surfaces
+          retention-days: 2
