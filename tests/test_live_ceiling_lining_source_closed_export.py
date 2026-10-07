@@ -52,7 +52,22 @@ def _room() -> LiveCanonicalRoomObject:
     )
 
 
-def _quantity(*, face_id: str = "face-1") -> QuantityEvidence:
+def _quantity(
+    *,
+    face_id: str = "face-1",
+    authority: str = "documented_dimension",
+) -> QuantityEvidence:
+    measurement_metadata = (
+        {
+            "figured_dimension_ids": ["dim-h", "dim-v"],
+            "scale_fingerprint": None,
+        }
+        if authority == "documented_dimension"
+        else {
+            "figured_dimension_ids": [],
+            "scale_fingerprint": "scale-fingerprint-1",
+        }
+    )
     return QuantityEvidence(
         quantity_id="qty-ceiling-1",
         family="ceiling_lining",
@@ -69,7 +84,7 @@ def _quantity(*, face_id: str = "face-1") -> QuantityEvidence:
             "occ-evidence",
             "def-evidence",
         ),
-        authority="documented_dimension",
+        authority=authority,
         status="firm",
         confidence=1.0,
         abstained=False,
@@ -87,7 +102,7 @@ def _quantity(*, face_id: str = "face-1") -> QuantityEvidence:
             "canonical_room_id": "canonical-room-1",
             "physical_room_id": "physical-room-1",
             "source_room_face_record_id": face_id,
-            "figured_dimension_ids": ["dim-h", "dim-v"],
+            **measurement_metadata,
             "finish_code": "GRID",
             "semantic_finish": "ceiling_grid",
             "finish_definition_record_id": "def-grid",
@@ -170,6 +185,29 @@ def test_ceiling_quantity_builds_complete_source_trace_and_seals() -> None:
     assert sealed.lineage_ok is True
     assert sealed.lineage_reason_codes == ()
 
+
+
+
+def test_firm_scaled_ceiling_quantity_builds_source_trace_and_seals() -> None:
+    claim = _claim(_quantity(authority="pdf_scaled"))
+
+    traces = build_live_ceiling_lining_source_traces(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+    trace = traces["qty-ceiling-1"]
+    assert trace.metadata["measurement_authority"] == "pdf_scaled"
+    assert trace.metadata["scale_fingerprint"] == "scale-fingerprint-1"
+
+    run = seal_live_ceiling_lining_run(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+    assert len(run.quantities) == 1
+    assert run.quantities[0].authority == "pdf_scaled"
+    assert run.quantities[0].lineage_ok is True
 
 def test_tampered_source_room_face_identity_cannot_seal() -> None:
     claim = _claim(_quantity(face_id="face-other"))
