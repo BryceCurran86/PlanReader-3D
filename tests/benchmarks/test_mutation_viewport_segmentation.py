@@ -160,12 +160,16 @@ def test_single_unframed_title_is_unsupported_not_whole_page_guessed():
 
 
 
-def _single_plan_with_proven_title_block(*, include_plan_vectors: bool = True) -> fitz.Document:
+def _single_plan_with_proven_title_block(
+    *,
+    include_plan_vectors: bool = True,
+    drawing_title: str = "GROUND FLOOR PLAN",
+) -> fitz.Document:
     doc = fitz.open()
     page = doc.new_page(width=1200, height=842)
 
     # One real drawing-view title in the printable drawing area.
-    page.insert_text((220, 760), "GROUND FLOOR PLAN", fontsize=11)
+    page.insert_text((220, 760), drawing_title, fontsize=11)
 
     if include_plan_vectors:
         # Positive drawing geometry outside the title block.  A title alone
@@ -220,6 +224,32 @@ def test_single_floor_plan_with_proven_title_block_owns_printable_area():
     doc.close()
 
 
+def test_single_floor_finish_plan_with_proven_title_block_owns_printable_area():
+    doc = _single_plan_with_proven_title_block(
+        drawing_title="PROP. FLOOR FINISHES & PARTITIONS PLAN",
+    )
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        plan = viewports[0]
+        assert plan.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+        assert plan.status == ViewportSegmentationStatus.DERIVED.value
+        assert plan.boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+        assert plan.bounding_box is not None
+        assert (
+            plan.provenance["partition_mode"]
+            == "single_floor_finish_plan_printable_area"
+        )
+        assert plan.provenance["single_view_validated"] is True
+        assert plan.provenance["title_block_bbox"]
+        assert plan.provenance["drawing_vector_primitive_count"] >= 2
+        assert is_authoritative_derived_viewport(plan)
+        # Surface semantics remain distinct from the opening/floor-plan helper.
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
+
+
 def test_single_floor_plan_with_title_block_but_no_drawing_geometry_stays_unsupported():
     doc = _single_plan_with_proven_title_block(include_plan_vectors=False)
     viewport = segment_page_viewports(doc[0], page_number=1)[0]
@@ -235,6 +265,7 @@ def _single_plan_with_sheet_drawing_frame(
     *,
     include_footer_metadata: bool = True,
     omit_right_frame_edge: bool = False,
+    drawing_title: str = "GROUND FLOOR PLAN",
 ) -> fitz.Document:
     doc = fitz.open()
     page = doc.new_page(width=1200, height=842)
@@ -254,7 +285,7 @@ def _single_plan_with_sheet_drawing_frame(
     page.draw_line((760, 120), (760, 600))
     page.draw_line((760, 600), (90, 600))
     page.draw_line((90, 600), (90, 120))
-    page.insert_text((180, 690), "GROUND FLOOR PLAN", fontsize=11)
+    page.insert_text((180, 690), drawing_title, fontsize=11)
 
     # Separate source-owned footer/metadata band outside the drawing frame.
     page.draw_line((left, 774), (right, 774))
@@ -288,6 +319,30 @@ def test_single_floor_plan_sheet_frame_with_separate_metadata_band_is_authoritat
     assert is_authoritative_derived_viewport(plan)
     assert len(authoritative_floor_plan_viewports(doc[0], page_number=1)) == 1
     doc.close()
+
+
+def test_single_floor_finish_plan_sheet_frame_with_metadata_is_authoritative():
+    doc = _single_plan_with_sheet_drawing_frame(
+        drawing_title="PROP. FLOOR FINISHES & PARTITIONS PLAN",
+    )
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        plan = viewports[0]
+        assert plan.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+        assert plan.status == ViewportSegmentationStatus.DERIVED.value
+        assert plan.bounding_box == pytest.approx((24.0, 24.0, 1170.0, 770.0))
+        assert (
+            plan.provenance["partition_mode"]
+            == "single_floor_finish_plan_sheet_frame"
+        )
+        assert plan.provenance["single_view_validated"] is True
+        assert plan.provenance["metadata_label_count"] >= 2
+        assert plan.provenance["drawing_vector_primitive_count"] >= 2
+        assert is_authoritative_derived_viewport(plan)
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
 
 
 def test_single_floor_plan_sheet_frame_without_metadata_band_evidence_stays_unsupported():
