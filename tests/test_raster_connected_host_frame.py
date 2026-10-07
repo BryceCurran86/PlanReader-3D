@@ -18,7 +18,7 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 from test_raster_door_swing_g17_contract import _png
 
 
-def _pdf(*, remote=False, unrelated=False, dx=0, dy=0, rotation=0, scale=1):
+def _pdf(*, remote=False, unrelated=False, text_overlay=False, dx=0, dy=0, rotation=0, scale=1):
     image = np.full((440, 1400), 255, np.uint8)
     for lo, hi in ((230, 440), (600, 800), (960, 1160)):
         cv2.rectangle(image, (lo + dx, 150 + dy), (hi + dx, 164 + dy), 0, -1)
@@ -37,6 +37,8 @@ def _pdf(*, remote=False, unrelated=False, dx=0, dy=0, rotation=0, scale=1):
         # The ordinary W4 producer owns this native segment independently of
         # the raster opening chain; no DISTINCT relation has been proved.
         page.draw_line((10., 64.25), (30., 64.25), width=.5)
+    if text_overlay:
+        page.insert_text((10.,78.),'90',fontsize=20.)
     data = doc.tobytes(garbage=4, deflate=True)
     doc.close()
     return data
@@ -109,6 +111,35 @@ def test_transformed_and_unrelated_source_content_preserves_frame_proof(kwargs):
     assert all(r.status is Status.CORROBORATED for r in results)
     assert len({r.evidence.whole_wall_frame_id for r in results}) == 1
     assert _publish(producer, bound) == results
+
+
+def test_source_owned_text_fragments_are_retained_as_opposition_on_complete_frame():
+    source,composition,producer,bound=_fixture(text_overlay=True)
+    before=asdict(_scope(producer,bound))
+    results=_publish(producer,bound)
+    assert all(r.status is Status.CORROBORATED for r in results)
+    assert len({r.evidence.whole_wall_frame_id for r in results})==1
+    assert all(r.evidence.annotation_exclusion_evidence_atoms for r in results)
+    assert all(a.status is Status.CANDIDATE and a.metadata['all_source_primitives_covered']
+        for r in results for a in r.evidence.annotation_exclusion_evidence_atoms)
+    assert asdict(_scope(producer,bound))==before
+    assert _publish(producer,bound)==results
+    voids=compose_live_physical_opening_voids(source_visibility_producer=source,
+        wall_opening_composition=composition)
+    assert publish_live_opening_area_quantities(voids)==()
+
+
+def test_text_role_does_not_hide_independent_native_wall_competitor():
+    _source,_composition,producer,bound=_fixture(text_overlay=True,remote=True)
+    assert all(r.status is Status.ABSTAINED for r in _publish(producer,bound))
+
+
+def test_text_role_source_damage_keeps_frame_unproven_after_pixel_cache_hit():
+    source,_composition,producer,bound=_fixture(text_overlay=True)
+    source._text_integrity_receipts.clear()
+    results=_publish(producer,bound)
+    assert all(r.status is Status.ABSTAINED and r.evidence is None for r in results)
+    assert all('opening_host_frame_annotation_source_integrity_unproven' in r.reason_codes for r in results)
 
 
 def test_aligned_unproven_fragment_blocks_whole_wall_extent():

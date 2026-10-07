@@ -1214,6 +1214,15 @@ class PhysicalOpeningAuthority:
         """
         return self._source_visibility_authority
 
+    def raster_text_overlay_evidence(
+        self, selector: ObservationSelector, *, source_primitive_ids: Sequence[str]
+    ) -> tuple[EvidenceAtom, ...]:
+        """Read exact source-owned text roles without exposing producer storage."""
+        if self._source_visibility_producer is None:
+            return ()
+        return self._source_visibility_producer.raster_text_overlay_evidence(
+            selector, source_primitive_ids=source_primitive_ids)
+
     @staticmethod
     def capabilities() -> dict[str, bool]:
         return {

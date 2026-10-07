@@ -320,6 +320,10 @@ def main():
         "canonical_openings": [o.to_dict() for o in voids.canonical_openings],
         "quantity_traces": [asdict(t) for t in voids.traces],
         "host_frame_traces": [asdict(t) for t in composition.host_frames],
+        "host_frame_source_role_evidence": [asdict(result.evidence)
+            for selector in composition.host_frame_selectors.values()
+            for result in (composition.opening_host_frame_authority.resolve(selector),)
+            if result.evidence is not None and result.evidence.annotation_exclusion_evidence_atoms],
         "rows": rows,
     }
     # Observability only: enumerate the exact source propositions rejected by

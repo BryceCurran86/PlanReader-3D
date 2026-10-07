@@ -465,6 +465,8 @@ class SourceObservationProducer:
         clip_pt: Optional[Sequence[float]] = None,
         include_native_frame: bool = False,
         images_only: bool = False,
+        text_only: bool = False,
+        graphics_only: bool = False,
     ):
         """Render one page from the exact immutable PDF bytes this producer ingested.
 
@@ -490,6 +492,11 @@ class SourceObservationProducer:
         in-memory page copy while retaining embedded raster images. It is intended
         only for source-owned raster primitive extraction. It cannot be combined
         with clip_pt because the redaction copy is page-scoped.
+        text_only=True instead retains native text and removes images and vector
+        line art for source-role comparison. The layer views are mutually
+        exclusive and neither changes the stored PDF or source observations.
+        graphics_only=True retains native line art and removes images and text
+        to expose coincident graphic paint hidden by identical text pixels.
 
         By default returns (png_bytes, native_pdf_page_observation). When
         include_native_frame=True it also returns the producer-derived
@@ -507,8 +514,11 @@ class SourceObservationProducer:
         if not math.isfinite(dpi_value) or dpi_value <= 0.0:
             raise ValueError("dpi must be a positive finite number")
         clip_rect = _validated_clip_pt(clip_pt)
-        if images_only and clip_rect is not None:
-            raise ValueError("images_only render cannot be combined with clip_pt")
+        if sum((bool(images_only),bool(text_only),bool(graphics_only))) > 1:
+            raise ValueError("source render layer views are mutually exclusive")
+        if (images_only or text_only or graphics_only) and clip_rect is not None:
+            layer = "images_only" if images_only else "text_only" if text_only else "graphics_only"
+            raise ValueError(f"{layer} render cannot be combined with clip_pt")
 
         current = self._store.current_revision_by_document.get(document_id)
         if current is None:
@@ -589,7 +599,7 @@ class SourceObservationProducer:
             scale = dpi_value / 72.0
             scratch = None
             render_page = page
-            if images_only:
+            if images_only or text_only or graphics_only:
                 scratch = fitz.open()
                 scratch.insert_pdf(
                     pdf,
@@ -599,9 +609,12 @@ class SourceObservationProducer:
                 render_page = scratch.load_page(0)
                 render_page.add_redact_annot(render_page.rect, fill=False)
                 render_page.apply_redactions(
-                    images=fitz.PDF_REDACT_IMAGE_NONE,
-                    graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
-                    text=fitz.PDF_REDACT_TEXT_REMOVE,
+                    images=(fitz.PDF_REDACT_IMAGE_NONE if images_only
+                            else fitz.PDF_REDACT_IMAGE_REMOVE),
+                    graphics=(fitz.PDF_REDACT_LINE_ART_NONE if graphics_only
+                              else fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED),
+                    text=(fitz.PDF_REDACT_TEXT_NONE if text_only
+                          else fitz.PDF_REDACT_TEXT_REMOVE),
                 )
             if clip_rect is None:
                 pix = render_page.get_pixmap(

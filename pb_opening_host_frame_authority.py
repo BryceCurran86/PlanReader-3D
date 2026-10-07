@@ -9,7 +9,8 @@ physical-wall candidate scope and all corroborated same-wall opening bindings.
 A local host binding is an authenticated edge between wall-band fragments; it is
 not itself global wall identity.  Aligned fragments outside the selected
 connected component must be positively DISTINCT from every component member or
-publication fails closed.  Geometry, confidence, nearest/first choice, candidate
+have complete producer-proven native text ownership of their raster primitives.
+Otherwise publication fails closed. Geometry, confidence, nearest/first choice, candidate
 IDs, or caller-provided completeness never establish physical identity.
 
 This authority does not establish physical scale, metric geometry, opening
@@ -23,7 +24,7 @@ import math
 from types import MappingProxyType
 from typing import Mapping
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import EvidenceAtom, EvidenceResolutionStatus, stable_contract_id
 import pb_opening_host_binding_authority as host_geometry
 from pb_opening_host_binding_authority import (
     OPENING_HOST_BINDING_RESOLVED,
@@ -45,7 +46,7 @@ from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityAuthority
 
-OPENING_HOST_FRAME_SCHEMA_VERSION = "1.4.0"
+OPENING_HOST_FRAME_SCHEMA_VERSION = "1.5.0"
 OPENING_HOST_FRAME_RESOLVED = "opening_host_frame_resolved"
 OPENING_HOST_FRAME_OPENING_UNAVAILABLE = "opening_host_frame_opening_unavailable"
 OPENING_HOST_FRAME_HOST_UNAVAILABLE = "opening_host_frame_host_unavailable"
@@ -184,6 +185,7 @@ class OpeningHostFrameEvidence:
     whole_wall_length_pt: float | None = None
     coordinate_unit: str = "pdf_point"
     schema_version: str = OPENING_HOST_FRAME_SCHEMA_VERSION
+    annotation_exclusion_evidence_atoms: tuple[EvidenceAtom, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -215,6 +217,7 @@ class _WholeWallFrame:
     frame_id: str
     candidate_ids: tuple[str, ...]
     source_observation_ids: tuple[str, ...]
+    annotation_exclusion_evidence_atoms: tuple[EvidenceAtom, ...] = ()
 
 
 def _blocked(
@@ -784,6 +787,7 @@ class OpeningHostFrameProducer:
 
         pair_lookup = _pair_lookup(wall_scope.equivalence)
         component_set = set(component_ids)
+        annotation_exclusions = {}
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
             if wall_id in component_set:
@@ -809,6 +813,19 @@ class OpeningHostFrameProducer:
                 excluded = min(abs(offset - face) for face in face_offsets) > face_tol
             if excluded:
                 continue
+            if raster_component:
+                try:
+                    atoms = self._opening.raster_text_overlay_evidence(
+                        ObservationSelector(document_id=binding.document_id,
+                            revision_id=binding.revision_id, source_sha256=binding.source_sha256,
+                            snapshot_id=binding.snapshot_id,
+                            observation_id=component_contexts[0].opening.source_observation_ids[0]),
+                        source_primitive_ids=record.physical_identity.source_primitive_ids)
+                except RuntimeError:
+                    return fail("opening_host_frame_annotation_source_integrity_unproven")
+                if atoms:
+                    annotation_exclusions.update((a.evidence_id, a) for a in atoms)
+                    continue
             # This is an aligned candidate on one of the selected wall faces.
             # It may be excluded only by positive DISTINCT proof against every
             # authenticated component member.  Missing/SAME/AMBIGUOUS evidence
@@ -888,6 +905,8 @@ class OpeningHostFrameProducer:
             frame_id=frame_id,
             candidate_ids=component_ids,
             source_observation_ids=source_observation_ids,
+            annotation_exclusion_evidence_atoms=tuple(annotation_exclusions[i]
+                for i in sorted(annotation_exclusions)),
         )
 
     def publish(
@@ -1036,6 +1055,9 @@ class OpeningHostFrameProducer:
             "whole_wall_length_pt": round(float(frame.whole_wall_length), 9),
             "coordinate_unit": "pdf_point",
         }
+        if frame.annotation_exclusion_evidence_atoms:
+            payload['annotation_exclusion_evidence_ids'] = tuple(
+                a.evidence_id for a in frame.annotation_exclusion_evidence_atoms)
         evidence = OpeningHostFrameEvidence(
             selector=selector,
             record_id=stable_contract_id("opening_host_frame_v2", payload, digest_chars=32),
@@ -1052,6 +1074,7 @@ class OpeningHostFrameProducer:
             u1_pt=float(frame.u1),
             wall_thickness_pt=float(frame.wall_thickness),
             whole_wall_length_pt=float(frame.whole_wall_length),
+            annotation_exclusion_evidence_atoms=frame.annotation_exclusion_evidence_atoms,
         )
         result = OpeningHostFrameResult(
             status=EvidenceResolutionStatus.CORROBORATED,

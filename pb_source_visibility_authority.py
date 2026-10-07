@@ -708,6 +708,10 @@ class SourceVisibilityProducer:
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
+        # Immutable render layers only; receipts are independently authenticated
+        # on every source-role query. Bound page cache to avoid retaining renders
+        # for an entire drawing set.
+        self._raster_text_overlay_page_cache: OrderedDict = OrderedDict()
 
     def authority(self) -> "SourceVisibilityAuthority":
         return SourceVisibilityAuthority(
@@ -1254,6 +1258,142 @@ class SourceVisibilityProducer:
             selected_ids=tuple(selected), document_id=selector.document_id, page_id=page_id,
             revision_id=selector.revision_id, source_sha256=selector.source_sha256,
             snapshot_id=selector.snapshot_id)
+
+    def raster_text_overlay_evidence(
+        self, selector: ObservationSelector, *, source_primitive_ids: Sequence[str]
+    ):
+        """Prove complete raster primitive ownership by native text paint.
+
+        A word box nominates only. The complete source component must contain no
+        image ink and exactly match the text-only layer. These opposing symbol
+        atoms do not delete geometry, establish wall identity or measure text.
+        """
+        import cv2
+        import numpy as np
+        from pb_migration_contracts import EvidenceAtom
+        from pb_wall_room_topology_typed_negative_evidence import KIND_SYMBOL, POLARITY_OPPOSING
+        from pb_raster_visible_segment_detector import raster_segment_source_component_bounds
+
+        published = self.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
+        if not source_bytes or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        required = frozenset(str(i) for i in source_primitive_ids)
+        if not required or any(not i.startswith('raster_segment:') for i in required):
+            return ()
+        # Stored records are an addressing index, not source-role authority.
+        # Reauthenticate every addressed visible primitive and receipt below.
+        addressed = {}
+        for observation_id in published.visible_observation_ids:
+            record = self._producer._store.observations.get((selector.snapshot_id, observation_id))
+            if record is None:
+                continue
+            primitive = record.source_primitive_ref.removeprefix('visible:')
+            if primitive in required:
+                if primitive in addressed:
+                    return ()
+                addressed[primitive] = observation_id
+        if required != addressed.keys():
+            return ()
+        visibility = self.authority()
+        records = {}
+        receipts = {}
+        for primitive, observation_id in addressed.items():
+            result = visibility.resolve_visible(replace(selector, observation_id=observation_id))
+            record = result.observation
+            receipt = self._raster_visibility_receipts.get((selector.snapshot_id, observation_id))
+            if (result.status is not EvidenceResolutionStatus.CORROBORATED or record is None
+                    or record.observation_kind != RASTER_PDF_VISIBLE_SEGMENT or receipt is None):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            records[primitive], receipts[primitive] = record, receipt
+        page_ids = {r.page_id for r in records.values()}
+        if len(page_ids) != 1:
+            return ()
+        page_id = next(iter(page_ids))
+        if any(r.dpi != RASTER_RENDER_DPI for r in receipts.values()):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        cache_key = (selector.source_sha256, page_id, RASTER_RENDER_DPI)
+        layers = self._raster_text_overlay_page_cache.get(cache_key)
+        if layers is None:
+            arrays, hashes = [], []
+            for options in ({}, {'images_only': True}, {'text_only': True}, {'graphics_only': True}):
+                png, _parent = self._producer.render_native_page_png(
+                    document_id=selector.document_id, revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256, snapshot_id=selector.snapshot_id,
+                    page_id=page_id, dpi=RASTER_RENDER_DPI, **options)
+                array = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+                if array is None:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                array.setflags(write=False)
+                arrays.append(array)
+                hashes.append(hashlib.sha256(png).hexdigest())
+            if len({a.shape for a in arrays}) != 1:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                rotation = pdf[int(page_id) - 1].rotation_matrix
+            layers = (tuple(arrays), tuple(hashes), rotation)
+            self._raster_text_overlay_page_cache[cache_key] = layers
+            while len(self._raster_text_overlay_page_cache) > 2:
+                self._raster_text_overlay_page_cache.popitem(last=False)
+        self._raster_text_overlay_page_cache.move_to_end(cache_key)
+        (full, images, text_pixels, graphics), hashes, rotation = layers
+        if any(r.image_sha256 != hashes[0] for r in receipts.values()):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        source_authority = self._producer.authority()
+        text_authority = self.text_integrity_authority()
+        words = []
+        for observation_id in published.text_observation_ids:
+            word_selector = replace(selector, observation_id=observation_id)
+            result = source_authority.resolve(word_selector)
+            if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if result.observation.page_id != page_id:
+                continue
+            text = text_authority.resolve_text(word_selector)
+            if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            box = fitz.Rect(text.receipt.geometry) * rotation
+            words.append((observation_id, box, text.status is EvidenceResolutionStatus.CORROBORATED))
+        owned = []
+        for primitive, record in sorted(records.items()):
+            regions = raster_segment_source_component_bounds(full,
+                pixel_geometry=receipts[primitive].pixel_geometry, dpi=RASTER_RENDER_DPI)
+            if not regions:
+                return ()
+            left, top = min(b[0] for b in regions), min(b[1] for b in regions)
+            right, bottom = max(b[2] for b in regions), max(b[3] for b in regions)
+            scale = RASTER_RENDER_DPI / 72.0
+            probe = fitz.Rect(left/scale,top/scale,right/scale,bottom/scale)
+            owners = [(i,b,trusted) for i,b,trusted in words if b.contains(probe)]
+            if len(owners) != 1 or not owners[0][2]:
+                return ()
+            word_id, _word_box, _trusted = owners[0]
+            if any(i != word_id and b.intersects(probe) for i,b,_ in words):
+                return ()
+            if not (0 <= left < right <= full.shape[1] and 0 <= top < bottom <= full.shape[0]):
+                return ()
+            full_crop, image_crop, text_crop, graphics_crop = (
+                a[top:bottom,left:right] for a in (full,images,text_pixels,graphics))
+            if (not np.all(image_crop == 255) or not np.all(graphics_crop == 255)
+                    or not np.any(text_crop < 255)
+                    or not np.array_equal(full_crop, text_crop)):
+                return ()
+            owned.append((primitive, addressed[primitive], word_id, regions))
+        metadata = dict(revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id, polarity=POLARITY_OPPOSING,
+            source_primitive_ids=tuple(sorted(required)),
+            source_observation_ids=tuple(sorted(i for _,i,_,_ in owned)),
+            text_observation_ids=tuple(sorted({i for _,_,i,_ in owned})),
+            primitive_text_ownership=tuple(owned), render_sha256=hashes,
+            all_source_primitives_covered=True)
+        return (EvidenceAtom(evidence_id=stable_contract_id('raster_native_text_overlay', metadata),
+            document_id=selector.document_id, page_id=page_id, kind=KIND_SYMBOL,
+            method='native_text_render_source_role', status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=('raster_primitive_owned_by_native_text_pixels',), metadata=metadata),)
 
     def opening_dimension_authority(self):
         """Return the read-only dimension resolver bound to this producer."""

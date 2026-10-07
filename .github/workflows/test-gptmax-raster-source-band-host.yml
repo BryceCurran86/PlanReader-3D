@@ -9,6 +9,9 @@ on:
       - pb_source_visibility_authority.py
       - pb_physical_opening_authority.py
       - pb_native_dimension_cap_evidence.py
+      - pb_source_observation_authority.py
+      - pb_raster_visible_segment_detector.py
+      - tests/test_raster_native_text_overlay_roles.py
       - tests/test_native_dimension_cap_evidence.py
       - tests/test_raster_connected_host_frame.py
       - tests/test_raster_opening_dimension_source_namespace.py
@@ -40,6 +43,10 @@ jobs:
           tests/test_native_dimension_cap_evidence.py
           tests/test_physical_opening_viewport_scope_live_gate.py
           tests/test_semantic_conflict_diagnostic_v1.py
+          tests/test_raster_native_text_overlay_roles.py
+          tests/test_raster_opening_source_primitives.py
+          tests/test_raster_source_visibility_v1.py
+          tests/test_source_observation_render_clip_v1.py
           tests/test_g17_visible_opening_existence_v1.py
           tests/test_physical_opening_candidate_structure_v1.py
           tests/test_source_opening_universe_evidence_v1.py
