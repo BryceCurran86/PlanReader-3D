@@ -99,6 +99,8 @@ def _is_explicit_non_material_schedule(viewport: SegmentedViewport) -> bool:
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
 _MATERIAL_LINE_OCR_BLANK_MARGIN_MM = 1.0
+_MATERIAL_WORD_OCR_BLANK_MARGIN_MM = 0.4
+_MATERIAL_WORD_OCR_GAP_MM = 1.2
 
 
 def _required(value: object, name: str) -> str:
@@ -790,6 +792,7 @@ def _recover_admissible_viewport_lines(
 
         readings: list[str] = []
         parent_ids: set[tuple[str, str, str]] = set()
+        full_line_exact = True
         for dpi in RASTER_TEXT_CORROBORATION_DPIS:
             try:
                 png_bytes, page_parent = source._producer.render_native_page_png(
@@ -847,16 +850,130 @@ def _recover_admissible_viewport_lines(
                 dpi=int(dpi),
             )
             if reading is None or normalize_reading(reading) != claim:
-                line_valid = False
-                break
-            readings.append(reading)
+                full_line_exact = False
+            else:
+                readings.append(reading)
 
-        if (
-            not line_valid
-            or len(parent_ids) != 1
-            or len(readings) != len(RASTER_TEXT_CORROBORATION_DPIS)
-            or len({normalize_reading(value) for value in readings}) != 1
-        ):
+        verified_reason = "raster_text_line_corroborated"
+        verified = (
+            line_valid
+            and full_line_exact
+            and len(parent_ids) == 1
+            and len(readings) == len(RASTER_TEXT_CORROBORATION_DPIS)
+            and len({normalize_reading(value) for value in readings}) == 1
+        )
+
+        # Schedule ruling lines can be rendered between otherwise exact native
+        # words and be mistaken by OCR for punctuation (for example "=").
+        # If the source-owned whole-line raster does not read exactly, make one
+        # stricter fallback view from the already-validated producer-owned word
+        # clips only.  The native word order is fixed by source word_no; no OCR
+        # token is inserted, deleted, corrected or fuzzy-matched.  Both DPI
+        # composites must still read the exact native line.
+        if line_valid and not verified:
+            composite_readings: list[str] = []
+            composite_parent_ids: set[tuple[str, str, str]] = set()
+            composite_valid = True
+            for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+                word_images: list[Image.Image] = []
+                for target in targets:
+                    try:
+                        png_bytes, page_parent = source._producer.render_native_page_png(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            page_id=source_page_id,
+                            dpi=float(dpi),
+                            clip_pt=target,
+                        )
+                    except Exception:
+                        composite_valid = False
+                        break
+                    if (
+                        page_parent.document_id != published.revision.document_id
+                        or page_parent.revision_id != published.revision.revision_id
+                        or page_parent.source_sha256 != published.revision.source_sha256
+                        or str(page_parent.source_partition_id) != source_partition_id
+                        or str(page_parent.page_id) != source_page_id
+                    ):
+                        composite_valid = False
+                        break
+                    composite_parent_ids.add(
+                        (
+                            str(page_parent.observation_id),
+                            str(page_parent.source_partition_id),
+                            str(page_parent.page_id),
+                        )
+                    )
+                    try:
+                        rendered = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                        normalized = _lossless_rotate(rendered, rotation)
+                    except Exception:
+                        composite_valid = False
+                        break
+                    word_margin_px = max(
+                        1,
+                        int(
+                            round(
+                                float(dpi)
+                                * _MATERIAL_WORD_OCR_BLANK_MARGIN_MM
+                                / 25.4
+                            )
+                        ),
+                    )
+                    word_images.append(
+                        ImageOps.expand(
+                            normalized,
+                            border=word_margin_px,
+                            fill="white",
+                        )
+                    )
+                if not composite_valid or not word_images:
+                    break
+                gap_px = max(
+                    2,
+                    int(
+                        round(
+                            float(dpi)
+                            * _MATERIAL_WORD_OCR_GAP_MM
+                            / 25.4
+                        )
+                    ),
+                )
+                height = max(image.height for image in word_images)
+                width = (
+                    sum(image.width for image in word_images)
+                    + gap_px * (len(word_images) - 1)
+                )
+                composite = Image.new("RGB", (width, height), "white")
+                offset_x = 0
+                for word_image in word_images:
+                    offset_y = max(0, (height - word_image.height) // 2)
+                    composite.paste(word_image, (offset_x, offset_y))
+                    offset_x += word_image.width + gap_px
+                reading = _single_isolated_material_line_reading(
+                    backend,
+                    composite,
+                    dpi=int(dpi),
+                )
+                if reading is None or normalize_reading(reading) != claim:
+                    composite_valid = False
+                    break
+                composite_readings.append(reading)
+
+            verified = (
+                composite_valid
+                and len(composite_parent_ids) == 1
+                and len(composite_readings) == len(RASTER_TEXT_CORROBORATION_DPIS)
+                and len(
+                    {normalize_reading(value) for value in composite_readings}
+                ) == 1
+            )
+            if verified:
+                verified_reason = "raster_text_line_word_composite_corroborated"
+
+        if not verified:
             continue
 
         for word in line:
@@ -872,7 +989,7 @@ def _recover_admissible_viewport_lines(
                 trusted=True,
                 reason_codes=tuple(
                     dict.fromkeys(
-                        (*word.reason_codes, "raster_text_line_corroborated")
+                        (*word.reason_codes, verified_reason)
                     )
                 ),
             )
