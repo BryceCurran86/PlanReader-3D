@@ -2,14 +2,14 @@
 
 This module composes already-proven facts only:
 - one source-owned canonical physical room;
-- one FIRM room-area QuantityEvidence from the live room-area bridge;
+- one FIRM documented room-area QuantityEvidence from the live room-area bridge;
 - one fail-closed cross-view RCP ceiling-finish binding.
 
-The room-area bridge may have received its explicit documented area from either
-same-view or cross-view figured-dimension authority. This module does not care
-which evidence path won; it consumes only the final FIRM quantity and its exact
-producer-owned room entity. It never remeasures geometry, infers room identity,
-infers a finish from a raw abbreviation, invents scale, or creates customer rows.
+The room-area bridge may have received its documented area from either same-view
+or cross-view figured-dimension authority. This module consumes only the final
+FIRM quantity and its exact producer-owned room entity. PDF-scaled ceiling
+publication remains on the existing scale-aware ceiling pipeline; this path does
+not invent or reconstruct scale authority.
 """
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
     LiveCanonicalRoomObject,
 )
+from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
 from pb_migration_contracts import (
     EntityEvidence,
     EvidenceResolutionStatus,
@@ -36,7 +37,7 @@ from pb_migration_contracts import (
 from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
 
 
-CROSS_VIEW_CEILING_QUANTITY_SCHEMA_VERSION = "1.1.0"
+CROSS_VIEW_CEILING_QUANTITY_SCHEMA_VERSION = "1.2.0"
 CROSS_VIEW_CEILING_QUANTITY_RESOLVED = "cross_view_ceiling_quantity_resolved"
 CROSS_VIEW_CEILING_QUANTITY_PARTIAL = "cross_view_ceiling_quantity_partial"
 CROSS_VIEW_CEILING_QUANTITY_UNAVAILABLE = "cross_view_ceiling_quantity_unavailable"
@@ -86,6 +87,8 @@ def _valid_room_area_quantity(
     if (
         quantity.family != "room_area"
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
+        or _clean(quantity.authority)
+        != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
         or _quantity_value(quantity) is None
         or len(quantity.input_entity_ids) != 1
         or quantity.input_entity_ids[0] != entity.candidate_entity_id
@@ -97,6 +100,16 @@ def _valid_room_area_quantity(
     quantity_meta = (
         quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     )
+    figured_ids = tuple(
+        {
+            _clean(item)
+            for item in (quantity_meta.get("figured_dimension_ids") or ())
+            if _clean(item)
+        }
+    )
+    if len(figured_ids) != 2:
+        return False
+
     if (
         _clean(entity_meta.get("source_sha256")).lower()
         != room.source_sha256.lower()
@@ -106,24 +119,9 @@ def _valid_room_area_quantity(
         != room.source_sha256.lower()
         or _clean(quantity_meta.get("revision_id")) != room.revision_id
         or _clean(quantity_meta.get("page_no")) != _clean(room.page_id)
+        or not _clean(quantity_meta.get("viewport_id"))
+        or not _clean(entity_meta.get("source_room_index_id"))
     ):
-        return False
-
-    authority = _clean(quantity.authority)
-    if authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
-        figured_ids = tuple(
-            {
-                _clean(item)
-                for item in (quantity_meta.get("figured_dimension_ids") or ())
-                if _clean(item)
-            }
-        )
-        if len(figured_ids) != 2:
-            return False
-    elif authority == MeasurementAuthorityType.PDF_SCALED.value:
-        if not _clean(quantity_meta.get("scale_fingerprint")):
-            return False
-    else:
         return False
     return True
 
@@ -141,6 +139,7 @@ class CrossViewCeilingQuantityRecord:
     support_page_id: str
     support_viewport_id: str
     upstream_room_area_quantity_id: str
+    canonical_ceiling: LiveCanonicalCeilingSurfaceObject
     quantity: QuantityEvidence
     schema_version: str = CROSS_VIEW_CEILING_QUANTITY_SCHEMA_VERSION
     _seal: object = None
@@ -161,6 +160,10 @@ class CrossViewCeilingQuantityResult:
     @property
     def quantities(self) -> tuple[QuantityEvidence, ...]:
         return tuple(record.quantity for record in self.records)
+
+    @property
+    def canonical_ceilings(self) -> tuple[LiveCanonicalCeilingSurfaceObject, ...]:
+        return tuple(record.canonical_ceiling for record in self.records)
 
     @property
     def records_by_ceiling_id(
@@ -262,9 +265,30 @@ def publish_cross_view_ceiling_quantities(
             if isinstance(area_quantity.metadata, Mapping)
             else {}
         )
+        entity_meta = entity.metadata if isinstance(entity.metadata, Mapping) else {}
+        figured_dimension_ids = tuple(
+            sorted(
+                {
+                    _clean(item)
+                    for item in (area_meta.get("figured_dimension_ids") or ())
+                    if _clean(item)
+                }
+            )
+        )
+        source_room_index_id = _clean(entity_meta.get("source_room_index_id"))
+        area_viewport_id = _clean(area_meta.get("viewport_id"))
+        try:
+            source_page = int(area_meta.get("page_no"))
+        except (TypeError, ValueError, OverflowError):
+            unresolved.add(physical_id)
+            continue
 
         if (
             not room.geometry_complete
+            or len(room.polygon_pdf_pts) < 3
+            or len(figured_dimension_ids) != 2
+            or not source_room_index_id
+            or not area_viewport_id
             or not _clean(room.canonical_room_id)
             or not _clean(room.source_room_face_record_id)
             or finish.source_room_face_record_id != room.source_room_face_record_id
@@ -305,7 +329,7 @@ def publish_cross_view_ceiling_quantities(
                 )
             )
         )
-        payload = {
+        quantity_payload = {
             "family": "ceiling_lining",
             "canonical_ceiling_id": canonical_ceiling_id,
             "upstream_room_area_quantity_id": area_quantity.quantity_id,
@@ -313,12 +337,13 @@ def publish_cross_view_ceiling_quantities(
             "finish_definition_record_id": finish.definition_record_id,
             "value_m2": round(area_value, 6),
         }
+        quantity_id = stable_contract_id(
+            "qty_ceiling_lining_area",
+            quantity_payload,
+            digest_chars=32,
+        )
         quantity = QuantityEvidence(
-            quantity_id=stable_contract_id(
-                "qty_ceiling_lining_area",
-                payload,
-                digest_chars=32,
-            ),
+            quantity_id=quantity_id,
             family="ceiling_lining",
             semantic_key=(
                 f"ceiling_lining:{canonical_ceiling_id}:"
@@ -327,19 +352,21 @@ def publish_cross_view_ceiling_quantities(
             value=round(area_value, 6),
             unit="m2",
             input_entity_ids=(canonical_ceiling_id,),
-            formula="reuse_firm_room_area_with_authenticated_rcp_finish",
+            formula="reuse_firm_documented_room_area_with_authenticated_rcp_finish",
             formula_version=CROSS_VIEW_CEILING_QUANTITY_SCHEMA_VERSION,
             evidence_ids=evidence_ids,
-            authority=area_quantity.authority,
+            authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
             status=AuthorityStatus.FIRM.value,
             confidence=min(float(area_quantity.confidence), 1.0),
             abstained=False,
             reason_codes=(CROSS_VIEW_CEILING_QUANTITY_FIRM,),
             metadata={
+                "document_id": room.document_id,
+                "snapshot_id": room.snapshot_id,
                 "source_sha256": room.source_sha256,
                 "revision_id": room.revision_id,
-                "page_no": room.page_id,
-                "viewport_id": room.viewport_id,
+                "page_no": source_page,
+                "viewport_id": area_viewport_id,
                 "support_page_id": finish.support_page_id,
                 "support_viewport_id": finish.support_viewport_id,
                 "support_source_partition_id": finish.support_source_partition_id,
@@ -350,13 +377,12 @@ def publish_cross_view_ceiling_quantities(
                 "canonical_ceiling_id": canonical_ceiling_id,
                 "physical_ceiling_surface_id": canonical_ceiling_id,
                 "source_room_face_record_id": room.source_room_face_record_id,
+                "source_room_index_id": source_room_index_id,
                 "upstream_room_area_entity_id": entity.candidate_entity_id,
                 "upstream_room_area_quantity_id": area_quantity.quantity_id,
-                "measurement_authority": area_quantity.authority,
-                "figured_dimension_ids": list(
-                    area_meta.get("figured_dimension_ids") or ()
-                ),
-                "scale_fingerprint": area_meta.get("scale_fingerprint"),
+                "room_area_quantity_id": area_quantity.quantity_id,
+                "measurement_authority": MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                "figured_dimension_ids": list(figured_dimension_ids),
                 "finish_code": finish.finish_code,
                 "semantic_finish": finish.semantic_finish,
                 "finish_definition_record_id": finish.definition_record_id,
@@ -365,6 +391,7 @@ def publish_cross_view_ceiling_quantities(
                 "finish_occurrence_bbox_pdf_pts": list(
                     finish.occurrence_bbox_pdf_pts
                 ),
+                "commercial_projection_allowed": False,
                 "section": "Internal",
                 "element": "Ceiling lining area",
                 "location": room.room_label,
@@ -374,6 +401,32 @@ def publish_cross_view_ceiling_quantities(
                 "row_role": "ceiling_area",
                 "quantity_handoff_only": True,
             },
+        )
+        canonical_ceiling = LiveCanonicalCeilingSurfaceObject(
+            canonical_ceiling_id=canonical_ceiling_id,
+            document_id=room.document_id,
+            snapshot_id=room.snapshot_id,
+            room_entity_id=room.canonical_room_id,
+            source_page=source_page,
+            viewport_id=area_viewport_id,
+            source_sha256=room.source_sha256,
+            revision_id=room.revision_id,
+            polygon_pdf_pts=tuple(
+                (float(point[0]), float(point[1]))
+                for point in room.polygon_pdf_pts
+            ),
+            area_m2=round(area_value, 6),
+            finish_descriptor=finish.semantic_finish,
+            room_area_quantity_id=area_quantity.quantity_id,
+            ceiling_quantity_id=quantity_id,
+            source_room_index_id=source_room_index_id,
+            evidence_ids=evidence_ids,
+            physical_scale_record_id="",
+            measurement_authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+            figured_dimension_ids=figured_dimension_ids,
+            geometry_complete=True,
+            metric_area_complete=True,
+            metric_geometry_complete=False,
         )
         records.append(
             CrossViewCeilingQuantityRecord(
@@ -388,6 +441,7 @@ def publish_cross_view_ceiling_quantities(
                 support_page_id=finish.support_page_id,
                 support_viewport_id=finish.support_viewport_id,
                 upstream_room_area_quantity_id=area_quantity.quantity_id,
+                canonical_ceiling=canonical_ceiling,
                 quantity=quantity,
                 _seal=_RECORD_SEAL,
             )
