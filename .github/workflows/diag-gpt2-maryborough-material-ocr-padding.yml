@@ -18,7 +18,7 @@ jobs:
       - name: Install Tesseract
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+        run: pip install PyMuPDF==1.28.0 Pillow==12.3.0 pytesseract==0.3.13
       - name: Probe page 9 schedule blocks
         shell: bash
         run: |
