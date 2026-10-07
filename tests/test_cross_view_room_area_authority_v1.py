@@ -638,7 +638,8 @@ def test_repeated_exact_label_annotation_blocks_can_supply_orthogonal_dimensions
     monkeypatch.setattr(
         cross_view,
         "_trusted_lines_for_page",
-        lambda source_arg, *, revision_id, page_id, candidate_labels: (
+        lambda source_arg, *, revision_id, page_id, candidate_labels,
+        allow_compound_annotations=False: (
             horizontal_line,
             vertical_line,
         ) if str(page_id) == "2" else (),
@@ -717,3 +718,154 @@ def test_repeated_label_annotation_blocks_remain_fail_closed_when_pair_is_not_un
 
     assert result.records == ()
     assert result.status is EvidenceResolutionStatus.CONFLICT
+
+
+def test_exact_and_compound_label_annotations_can_supply_unique_orthogonal_pair(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+
+    exact_line = cross_view._TrustedLine(
+        page_id="2",
+        text="TEST ROOM",
+        bbox=(120.0, 70.0, 180.0, 78.0),
+        observation_ids=("label-exact",),
+        receipt_ids=("receipt-exact",),
+        source_partition_id="partition-2",
+        block_no=10,
+        line_no=0,
+        label_members=("test room",),
+    )
+    compound_line = cross_view._TrustedLine(
+        page_id="2",
+        text="TEST ROOM / STORE",
+        bbox=(270.0, 110.0, 278.0, 170.0),
+        observation_ids=("label-group",),
+        receipt_ids=("receipt-group",),
+        source_partition_id="partition-2",
+        block_no=20,
+        line_no=0,
+        label_members=("test room", "store"),
+    )
+    horizontal = cross_view._TrustedBoundDimension(
+        dimension_id="h-3600",
+        text_observation_id="text-h",
+        text_receipt_id="text-receipt-h",
+        text_source_partition_id="partition-2",
+        text_block_no=11,
+        text_line_no=0,
+        text_word_no=0,
+        value_mm=3600.0,
+        orientation="horizontal",
+        endpoints_pt=((100.0, 80.0), (250.0, 80.0)),
+        dimension_line_observation_ids=("h-line",),
+        witness_observation_ids=("h-w1", "h-w2"),
+        witness_geometries=(
+            (100.0, 68.0, 100.0, 92.0),
+            (250.0, 68.0, 250.0, 92.0),
+        ),
+        text_bbox=(130.0, 82.0, 160.0, 90.0),
+    )
+    vertical = cross_view._TrustedBoundDimension(
+        dimension_id="v-2400",
+        text_observation_id="text-v",
+        text_receipt_id="text-receipt-v",
+        text_source_partition_id="partition-2",
+        text_block_no=20,
+        text_line_no=1,
+        text_word_no=0,
+        value_mm=2400.0,
+        orientation="vertical",
+        endpoints_pt=((280.0, 100.0), (280.0, 200.0)),
+        dimension_line_observation_ids=("v-line",),
+        witness_observation_ids=("v-w1", "v-w2"),
+        witness_geometries=(
+            (268.0, 100.0, 292.0, 100.0),
+            (268.0, 200.0, 292.0, 200.0),
+        ),
+        text_bbox=(280.0, 130.0, 290.0, 160.0),
+    )
+
+    def trusted_lines(
+        source_arg,
+        *,
+        revision_id,
+        page_id,
+        candidate_labels,
+        allow_compound_annotations=False,
+    ):
+        if str(page_id) != "2":
+            return ()
+        if allow_compound_annotations:
+            return (exact_line, compound_line)
+        return (exact_line,)
+
+    monkeypatch.setattr(cross_view, "_trusted_lines_for_page", trusted_lines)
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_native_dimensions_for_page",
+        lambda source_arg, *, revision_id, page_id, candidate_lines=(): (
+            horizontal,
+            vertical,
+        ) if str(page_id) == "2" else (),
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.area_evidence.normalized_value == 8.64
+    assert record.horizontal_dimension_id == "h-3600"
+    assert record.vertical_dimension_id == "v-2400"
+    assert record.area_evidence.metadata["source_label_support_mode"] == (
+        "repeated_label_annotation_blocks"
+    )
+
+
+def test_compound_label_alone_cannot_mint_room_area(
+    monkeypatch,
+) -> None:
+    source, rooms = _source_and_room()
+    compound_line = cross_view._TrustedLine(
+        page_id="2",
+        text="TEST ROOM / STORE",
+        bbox=(100.0, 70.0, 180.0, 78.0),
+        observation_ids=("label-group",),
+        receipt_ids=("receipt-group",),
+        source_partition_id="partition-2",
+        block_no=10,
+        line_no=0,
+        label_members=("test room", "store"),
+    )
+    horizontal = cross_view._TrustedBoundDimension(
+        "h", "th", "trh", "partition-2", 10, 1, 0, 3600.0,
+        "horizontal", ((100, 80), (250, 80)), ("hl",),
+        ("hw1", "hw2"), ((100, 68, 100, 92), (250, 68, 250, 92)),
+    )
+    vertical = cross_view._TrustedBoundDimension(
+        "v", "tv", "trv", "partition-2", 10, 1, 0, 2400.0,
+        "vertical", ((280, 100), (280, 200)), ("vl",),
+        ("vw1", "vw2"), ((268, 100, 292, 100), (268, 200, 292, 200)),
+    )
+
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_lines_for_page",
+        lambda source_arg, *, revision_id, page_id, candidate_labels,
+        allow_compound_annotations=False: (
+            (compound_line,) if allow_compound_annotations else ()
+        ),
+    )
+    monkeypatch.setattr(
+        cross_view,
+        "_trusted_native_dimensions_for_page",
+        lambda *args, **kwargs: (horizontal, vertical),
+    )
+
+    result = CrossViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
+
+    assert result.records == ()
