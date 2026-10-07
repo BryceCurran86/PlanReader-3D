@@ -182,6 +182,16 @@ def build_live_ceiling_lining_source_traces(
                 f"{quantity.quantity_id}"
             )
 
+        if (
+            not _clean(metadata.get("support_snapshot_id"))
+            or not _clean(metadata.get("support_page_id"))
+            or not _clean(metadata.get("support_viewport_id"))
+        ):
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity lacks semantic support lineage: "
+                f"{quantity.quantity_id}"
+            )
+
         if _clean(metadata.get("row_role")) != "ceiling_area":
             raise SourceClosedRunConflictError(
                 f"ceiling quantity row role mismatch: {quantity.quantity_id}"
