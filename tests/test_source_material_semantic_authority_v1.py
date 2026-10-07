@@ -969,7 +969,15 @@ def test_exact_line_proof_accepts_prior_source_bound_raster_word(monkeypatch) ->
             return cls()
 
         def publish(self, selector):
-            native = real.resolve_text(selector)
+            native = real.resolve_text(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=selector.observation_id,
+                )
+            )
             raw = str(native.receipt.raw_text) if native.receipt is not None else ""
             if raw == "WT1":
                 return SimpleNamespace(
