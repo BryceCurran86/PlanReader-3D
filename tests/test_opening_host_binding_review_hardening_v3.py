@@ -27,7 +27,7 @@ from pb_physical_wall_identity import (
     PhysicalWallEquivalenceResolution,
     PhysicalWallIdentity,
 )
-from pb_source_observation_authority import SourceObservationProducer
+from pb_source_observation_authority import ObservationSelector, SourceObservationProducer
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
@@ -231,6 +231,129 @@ def _incomplete_scope(
             contact_tolerance_pt=float(DEFAULT_GAP_SNAP_TOLERANCE_PT),
         ),
     )
+
+
+def test_publish_two_face_lineage_uses_recovered_local_scope(
+    monkeypatch,
+) -> None:
+    records = _band_records(center_offset=0.0)
+    wall_scope = _incomplete_scope(records)
+    universe_result = host.OpeningHostWallUniverseResult(
+        status=EvidenceResolutionStatus.ABSTAINED,
+        scope_complete=False,
+        records=(),
+        source_observation_ids=(),
+        document_id=wall_scope.document_id,
+        revision_id=wall_scope.revision_id,
+        source_sha256=wall_scope.source_sha256,
+        snapshot_id=wall_scope.snapshot_id,
+        page_id=wall_scope.page_id,
+        decision_scope_id=wall_scope.decision_scope_id,
+        reason_codes=("complete_authenticated_host_wall_universe_required",),
+        equivalence=None,
+    )
+    opening = SimpleNamespace(
+        record_id="opening-local-two-face",
+        document_id=wall_scope.document_id,
+        revision_id=wall_scope.revision_id,
+        source_sha256=wall_scope.source_sha256,
+        snapshot_id=wall_scope.snapshot_id,
+        page_id=wall_scope.page_id,
+        structural_pattern=host.JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+        source_observation_ids=("opening-source",),
+    )
+    existence = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        proposition=host.PHYSICAL_OPENING_EXISTS,
+        existence_record=opening,
+    )
+    identity = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        proven_same=True,
+        reason_codes=(host.PHYSICAL_OPENING_IDENTITY_RESOLVED,),
+    )
+    opening_authority = SimpleNamespace(
+        prove_existence=lambda _selector: existence,
+        compare_identity=lambda _left, _right: identity,
+    )
+    universe_authority = SimpleNamespace(
+        resolve_scope=lambda _selector: universe_result,
+        _resolve_physical_wall_scope=lambda _selector: wall_scope,
+    )
+
+    producer = object.__new__(host.OpeningHostBindingProducer)
+    producer._opening = opening_authority
+    producer._universe = universe_authority
+    producer._results = {}
+
+    monkeypatch.setattr(
+        host,
+        "_opening_geometry",
+        lambda _authority, _opening: OPENING,
+    )
+    monkeypatch.setattr(
+        host,
+        "_resolve_generic_gap_lineage_host",
+        lambda *_args, **_kwargs: None,
+    )
+
+    captured = {}
+
+    def resolve_two_face(_authority, _opening, resolved_records, resolved_equivalence):
+        captured["record_ids"] = tuple(
+            record.wall_candidate_id for record in resolved_records
+        )
+        captured["equivalence"] = resolved_equivalence
+        ids = tuple(record.wall_candidate_id for record in resolved_records)
+        return host._HostBandResolution(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            bands=(
+                host._HostBand(
+                    member_ids=ids,
+                    member_candidate_identity_ids=tuple(
+                        record.physical_identity.candidate_identity_id
+                        for record in resolved_records
+                    ),
+                    member_equivalence_groups=tuple((wall_id,) for wall_id in ids),
+                    center_offset=0.0,
+                ),
+            ),
+            reason_codes=(host.TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED,),
+        )
+
+    monkeypatch.setattr(host, "_resolve_two_face_lineage_host", resolve_two_face)
+
+    observation_selector = ObservationSelector(
+        document_id=wall_scope.document_id,
+        revision_id=wall_scope.revision_id,
+        source_sha256=wall_scope.source_sha256,
+        snapshot_id=wall_scope.snapshot_id,
+        observation_id="opening-observation",
+    )
+    universe_selector = host.OpeningHostWallUniverseSelector(
+        document_id=wall_scope.document_id,
+        revision_id=wall_scope.revision_id,
+        source_sha256=wall_scope.source_sha256,
+        snapshot_id=wall_scope.snapshot_id,
+        page_id=wall_scope.page_id,
+        decision_scope_id=wall_scope.decision_scope_id,
+    )
+
+    result = producer.publish(
+        opening_left_selector=observation_selector,
+        opening_right_selector=observation_selector,
+        host_universe_selector=universe_selector,
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    assert host.HOST_LOCAL_BOUNDARY_CLEAN_SCOPE_RESOLVED in result.reason_codes
+    assert host.TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED in result.reason_codes
+    assert captured["record_ids"] == tuple(
+        record.wall_candidate_id for record in records
+    )
+    assert captured["equivalence"] is not None
+    assert captured["equivalence"] is not universe_result.equivalence
 
 
 def test_local_host_scope_ignores_unrelated_boundary_taint() -> None:
