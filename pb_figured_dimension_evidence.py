@@ -968,8 +968,16 @@ def bind_observation_to_vector_geometry(
                 # foreground drafting primitive while every competitor is both
                 # lighter and thinner. This is only a strict tie-break; absent
                 # unanimous dominance, preserve the historical abstention.
+                # Distance is only a broad association heuristic. On dense
+                # CAD plans, unrelated perpendicular geometry can occupy the
+                # nearest-distance tie while the actual dimension line sits
+                # slightly farther away around its own text gap. Ask the
+                # stronger source proof (native text direction + complete
+                # two-endpoint witnesses + text-span bracketing) across the
+                # already-admissible nearby candidate universe. A strict style
+                # winner from the nearest tie still retains precedence below.
                 orientation_winner = _unique_orientation_witness_winner(
-                    tied,
+                    candidates,
                     observation_bbox=observation.bbox,
                     text_orientation_hint=text_orientation_hint,
                     same_scope=same_scope,
