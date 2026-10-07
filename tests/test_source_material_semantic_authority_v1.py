@@ -344,9 +344,12 @@ def test_source_defined_alphabetic_ceiling_codes_require_semantic_schedule_rows(
 
 def test_source_defined_alpha_code_can_use_following_description_line() -> None:
     rows = semantic.parse_schedule_text(
-        "FPB\nFLUSHSET PLASTERBOARD\nGRID\nVINYL FACED PLASTER TILE 600x1200"
+        "FPB\nFLUSHSET PLASTERBOARD\n"
+        "GRID\nVINYL FACED PLASTER TILE 600x1200\n"
+        "WFPB\nWET AREA FLUSHSET PLASTERBOARD"
     )
-    assert [row["code"] for row in rows] == ["FPB", "GRID"]
+    assert [row["code"] for row in rows] == ["FPB", "GRID", "WFPB"]
+    assert "WET" not in [row["code"] for row in rows]
     semantics = [
         semantic.semantic_finish_from_schedule_entry(
             {
@@ -358,7 +361,7 @@ def test_source_defined_alpha_code_can_use_following_description_line() -> None:
         )
         for row in rows
     ]
-    assert semantics == ["plasterboard", "tile"]
+    assert semantics == ["plasterboard", "tile", "plasterboard"]
 
 def test_split_native_material_rows_survive_unrelated_untrusted_schedule_text(
     monkeypatch,
