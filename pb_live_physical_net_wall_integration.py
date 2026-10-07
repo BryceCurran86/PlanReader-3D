@@ -326,38 +326,6 @@ def collect_live_physical_net_wall_claim(
         page_ids=decoded_page_ids,
     )
 
-    # Ceiling/material semantics may need support sheets intentionally excluded
-    # from the geometry claim. Decode them through a separate producer snapshot
-    # of the exact same immutable revision so they cannot enter wall/opening
-    # evidence or room-area support scope.
-    ceiling_semantic_source = source
-    if ceiling_semantic_selected:
-        ceiling_semantic_page_ids = tuple(
-            str(index + 1) for index in ceiling_semantic_selected
-        )
-        if not set(ceiling_semantic_page_ids).issubset(set(decoded_page_ids)):
-            ceiling_semantic_source = SourceVisibilityProducer(
-                producer_method="live-ceiling-semantic",
-                producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
-            )
-            semantic_published = ceiling_semantic_source.ingest_native_pdf_bytes(
-                document_id=document_id,
-                source_bytes=payload,
-                source_locator="memory://live-ceiling-semantic-source.pdf",
-                page_ids=ceiling_semantic_page_ids,
-            )
-            if (
-                semantic_published.revision.document_id
-                != published.revision.document_id
-                or semantic_published.revision.revision_id
-                != published.revision.revision_id
-                or semantic_published.revision.source_sha256
-                != published.revision.source_sha256
-            ):
-                raise ValueError(
-                    "ceiling semantic source revision does not match geometry source"
-                )
-
     try:
         wall_opening = compose_live_wall_opening_authority(
             source_visibility_producer=source,
@@ -786,6 +754,40 @@ def collect_live_physical_net_wall_claim(
         floor_finish_quantity_evidence.extend(floor_finishes.quantities)
 
     if room_area_bridges:
+        # Decode supplemental ceiling/material evidence only after source-owned
+        # room-area authority exists. These pages live in an independent
+        # snapshot of the exact same immutable revision and cannot participate
+        # in wall/opening topology or room-area support.
+        ceiling_semantic_source = source
+        if ceiling_semantic_selected:
+            ceiling_semantic_page_ids = tuple(
+                str(index + 1) for index in ceiling_semantic_selected
+            )
+            if not set(ceiling_semantic_page_ids).issubset(set(decoded_page_ids)):
+                ceiling_semantic_source = SourceVisibilityProducer(
+                    producer_method="live-ceiling-semantic",
+                    producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+                )
+                semantic_published = (
+                    ceiling_semantic_source.ingest_native_pdf_bytes(
+                        document_id=document_id,
+                        source_bytes=payload,
+                        source_locator="memory://live-ceiling-semantic-source.pdf",
+                        page_ids=ceiling_semantic_page_ids,
+                    )
+                )
+                if (
+                    semantic_published.revision.document_id
+                    != published.revision.document_id
+                    or semantic_published.revision.revision_id
+                    != published.revision.revision_id
+                    or semantic_published.revision.source_sha256
+                    != published.revision.source_sha256
+                ):
+                    raise ValueError(
+                        "ceiling semantic source revision does not match geometry source"
+                    )
+
         ceiling_finishes = CrossViewCeilingFinishProducer.from_source(
             source=ceiling_semantic_source,
             rooms=canonical_rooms,
