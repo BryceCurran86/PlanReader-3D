@@ -183,6 +183,7 @@ class SameViewRoomAreaProducer:
         unresolved.update(duplicate_room_ids)
         conflict_seen = bool(duplicate_room_ids)
         records: list[SameViewRoomAreaRecord] = []
+        dimensions_by_page: dict[str, tuple] = {}
 
         for (page_id, label), grouped_rooms in sorted(labels.items()):
             if len(grouped_rooms) != 1:
@@ -208,13 +209,20 @@ class SameViewRoomAreaProducer:
                     conflict_seen = True
                 continue
 
-            dimensions = _trusted_native_dimensions_for_page(
-                self._source,
-                revision_id=revision_id,
-                page_id=page_id,
-                candidate_lines=lines,
-                view_type=DrawingViewType.FLOOR_PLAN.value,
-            )
+            dimensions = dimensions_by_page.get(page_id)
+            if dimensions is None:
+                # Figured-dimension authentication is page/source-owned, not
+                # room-owned. Authenticate the immutable page once, then apply
+                # the existing label-inside-pair / immediate-annotation gates
+                # below separately for every room. This preserves fail-closed
+                # room ownership while avoiding repeated PDF/OCR replay.
+                dimensions = _trusted_native_dimensions_for_page(
+                    self._source,
+                    revision_id=revision_id,
+                    page_id=page_id,
+                    view_type=DrawingViewType.FLOOR_PLAN.value,
+                )
+                dimensions_by_page[page_id] = dimensions
             horizontals = tuple(
                 item
                 for item in dimensions
