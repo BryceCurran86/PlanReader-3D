@@ -246,6 +246,7 @@ def test_window_jamb_pair_rejects_jambs_on_opposite_wall_sides() -> None:
 
 def _source_obs(line, raw_id: str):
     return SimpleNamespace(
+        observation_id="obs:" + raw_id,
         geometry=tuple(float(value) for value in line),
         source_primitive_ref="visible:" + raw_id,
     )
