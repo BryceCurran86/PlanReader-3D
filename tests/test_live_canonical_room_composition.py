@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fitz
 
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_live_canonical_room_composition import (
     LIVE_CANONICAL_ROOM_PARTIAL,
     LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL,
@@ -214,7 +215,10 @@ def test_mixed_page_resolution_is_candidate_not_corroborated() -> None:
     assert len(result.rooms) == 2
 
 
-def _viewport_fallback_source():
+def _viewport_fallback_source(
+    *,
+    drawing_title: str = "GROUND FLOOR PLAN",
+):
     doc = fitz.open()
     try:
         page = doc.new_page(width=400.0, height=300.0)
@@ -225,7 +229,7 @@ def _viewport_fallback_source():
             color=(0, 0, 0),
             width=1.0,
         )
-        page.insert_text((80.0, 60.0), "GROUND FLOOR PLAN", fontsize=10.0)
+        page.insert_text((80.0, 60.0), drawing_title, fontsize=10.0)
 
         # Reference content exists elsewhere on the same sheet. The title is
         # explicit but intentionally unbounded, and one source line sits in
@@ -275,6 +279,22 @@ def _viewport_fallback_source():
     return source, wall_opening
 
 
+def test_floor_finish_support_view_cannot_mint_canonical_room_topology() -> None:
+    source, wall_opening = _viewport_fallback_source(
+        drawing_title="FLOOR FINISHES & PARTITIONS PLAN",
+    )
+
+    result = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert LIVE_CANONICAL_ROOM_UNAVAILABLE in result.reason_codes
+    assert result.rooms == ()
+    assert result.source_pages == ()
+
+
 def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewport() -> None:
     source, wall_opening = _viewport_fallback_source()
 
@@ -305,6 +325,7 @@ def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewp
         assert room_binding is not None
         assert room_binding.viewport_id == room.viewport_id
         assert room_binding.viewport_bbox is not None
+        assert room_binding.viewport_view_type == DrawingViewType.FLOOR_PLAN.value
         room_authority = result.room_face_authority_for(room)
         assert room_authority is room_binding.authority
         resolved = room_authority.resolve_scope(
