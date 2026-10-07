@@ -1,0 +1,274 @@
+name: DIAG GPT2 Host Local Equivalence Conflicts
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify local host equivalence conflicts
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-host-local-equivalence-conflicts
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import pb_opening_host_binding_authority as host
+          from pb_live_wall_opening_authority_composition import (
+              compose_live_wall_opening_authority,
+          )
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateSelector,
+          )
+          from pb_physical_wall_identity import PhysicalEquivalenceClass
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-host-local-equivalence-conflicts",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-host-local-equivalence-conflicts",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","30","31"),
+          )
+          composition=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+          )
+
+          rows=[]
+          for trace in composition.opening_bindings:
+              if host.HOST_EQUIVALENCE_AMBIGUOUS not in trace.reason_codes:
+                  continue
+              binding_selector=composition.binding_selectors.get(
+                  trace.opening_identity_id
+              )
+              if binding_selector is None:
+                  continue
+              obs=ObservationSelector(
+                  document_id=binding_selector.document_id,
+                  revision_id=binding_selector.revision_id,
+                  source_sha256=binding_selector.source_sha256,
+                  snapshot_id=binding_selector.snapshot_id,
+                  observation_id=trace.representative_observation_id,
+              )
+              existence=composition.physical_opening_authority.prove_existence(obs)
+              opening=existence.existence_record
+              if opening is None:
+                  continue
+              geometry=host._opening_geometry(
+                  composition.physical_opening_authority,opening
+              )
+              if geometry is None:
+                  continue
+              wall_scope=composition.physical_wall_candidate_authority.resolve_scope(
+                  PhysicalWallCandidateSelector(
+                      document_id=binding_selector.document_id,
+                      revision_id=binding_selector.revision_id,
+                      source_sha256=binding_selector.source_sha256,
+                      snapshot_id=binding_selector.snapshot_id,
+                      page_id=binding_selector.page_id,
+                      decision_scope_id=binding_selector.decision_scope_id,
+                  )
+              )
+              records=tuple(wall_scope.records)
+              equivalence=wall_scope.equivalence
+              scope_mode="global"
+              if not (
+                  wall_scope.status is EvidenceResolutionStatus.CORROBORATED
+                  and wall_scope.scope_complete is True
+                  and equivalence is not None
+              ):
+                  local_scope,local_reasons=host._local_boundary_clean_host_scope(
+                      wall_scope,
+                      geometry,
+                      include_spanning_raster_candidates=(
+                          opening.structural_pattern
+                          == host.RASTER_FRAMED_WALL_BAND_INTERRUPTION
+                      ),
+                  )
+                  if local_scope is None:
+                      rows.append({
+                          "opening_identity_id":trace.opening_identity_id,
+                          "structural_pattern":opening.structural_pattern,
+                          "scope_mode":"local_failed_replay",
+                          "local_reasons":list(local_reasons),
+                      })
+                      continue
+                  scope_mode="local"
+                  records=local_scope.records
+                  equivalence=local_scope.equivalence
+              if equivalence is None:
+                  continue
+
+              generic=host._resolve_generic_gap_lineage_host(
+                  composition.physical_opening_authority,
+                  opening,
+                  records,
+                  equivalence,
+              )
+              twoface=None
+              if generic is None:
+                  twoface=host._resolve_two_face_lineage_host(
+                      composition.physical_opening_authority,
+                      opening,
+                      records,
+                      equivalence,
+                  )
+              geometric=host._resolve_host_bands(
+                  records,geometry,equivalence
+              )
+
+              role_rows=[]
+              for record in records:
+                  data=host._candidate_axis_data(record,geometry)
+                  roles=host._host_roles_from_axis_data(data,geometry)
+                  if not roles:
+                      continue
+                  role_rows.append({
+                      "wall_id":record.wall_candidate_id,
+                      "roles":list(roles),
+                      "axis_data":None if data is None else list(data),
+                      "ambiguous_global":
+                          record.wall_candidate_id in set(
+                              equivalence.ambiguous_wall_ids
+                          ),
+                      "source_primitive_ids":
+                          list(record.physical_identity.source_primitive_ids),
+                      "candidate_identity_id":
+                          record.physical_identity.candidate_identity_id,
+                      "path_fingerprint":
+                          record.physical_identity.path_fingerprint,
+                  })
+              role_ids={r["wall_id"] for r in role_rows}
+              ambiguous_pairs=[]
+              for left,right,raw in equivalence.pair_classifications:
+                  if str(raw) != PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value:
+                      continue
+                  if str(left) not in role_ids or str(right) not in role_ids:
+                      continue
+                  l=next(r for r in role_rows if r["wall_id"]==str(left))
+                  r=next(r for r in role_rows if r["wall_id"]==str(right))
+                  shared_roles=sorted(set(l["roles"]) & set(r["roles"]))
+                  if not shared_roles:
+                      continue
+                  ls=set(str(v) for v in l["source_primitive_ids"])
+                  rs=set(str(v) for v in r["source_primitive_ids"])
+                  ambiguous_pairs.append({
+                      "left":str(left),
+                      "right":str(right),
+                      "shared_roles":shared_roles,
+                      "shared_source_primitive_count":len(ls&rs),
+                      "same_candidate_identity":(
+                          bool(l["candidate_identity_id"])
+                          and l["candidate_identity_id"]==r["candidate_identity_id"]
+                      ),
+                      "same_path":(
+                          l["path_fingerprint"] is not None
+                          and l["path_fingerprint"]==r["path_fingerprint"]
+                      ),
+                      "left_axis_data":l["axis_data"],
+                      "right_axis_data":r["axis_data"],
+                  })
+
+              def resolver_row(result):
+                  if result is None:
+                      return None
+                  return {
+                      "status":getattr(result.status,"value",str(result.status)),
+                      "reason_codes":list(result.reason_codes),
+                      "band_count":len(result.bands),
+                  }
+
+              origin=(
+                  "generic_lineage"
+                  if generic is not None
+                  and host.HOST_EQUIVALENCE_AMBIGUOUS in generic.reason_codes
+                  else "two_face_lineage"
+                  if twoface is not None
+                  and host.HOST_EQUIVALENCE_AMBIGUOUS in twoface.reason_codes
+                  else "geometric_roles"
+                  if host.HOST_EQUIVALENCE_AMBIGUOUS in geometric.reason_codes
+                  else "other"
+              )
+              rows.append({
+                  "opening_identity_id":trace.opening_identity_id,
+                  "page_id":trace.page_id,
+                  "structural_pattern":opening.structural_pattern,
+                  "scope_mode":scope_mode,
+                  "conflict_origin":origin,
+                  "role_count":len(role_rows),
+                  "left_role_count":sum(
+                      1 for row in role_rows if "left" in row["roles"]
+                  ),
+                  "right_role_count":sum(
+                      1 for row in role_rows if "right" in row["roles"]
+                  ),
+                  "ambiguous_same_role_pair_count":len(ambiguous_pairs),
+                  "ambiguous_same_role_pairs":ambiguous_pairs,
+                  "generic_lineage":resolver_row(generic),
+                  "two_face_lineage":resolver_row(twoface),
+                  "geometric_host_bands":resolver_row(geometric),
+              })
+
+          pairs=[
+              pair
+              for row in rows
+              for pair in row.get("ambiguous_same_role_pairs",[])
+          ]
+          print(json.dumps({
+              "opening_count":len(composition.opening_bindings),
+              "resolved_binding_count":sum(
+                  1 for trace in composition.opening_bindings if trace.record_id
+              ),
+              "ambiguous_host_opening_count":len(rows),
+              "structural_pattern_counts":dict(sorted(Counter(
+                  row.get("structural_pattern") for row in rows
+              ).items())),
+              "conflict_origin_counts":dict(sorted(Counter(
+                  row.get("conflict_origin") for row in rows
+              ).items())),
+              "scope_mode_counts":dict(sorted(Counter(
+                  row.get("scope_mode") for row in rows
+              ).items())),
+              "ambiguous_same_role_pair_count":len(pairs),
+              "shared_source_pair_count":sum(
+                  1 for pair in pairs
+                  if pair["shared_source_primitive_count"]>0
+              ),
+              "same_candidate_identity_pair_count":sum(
+                  1 for pair in pairs if pair["same_candidate_identity"]
+              ),
+              "same_path_pair_count":sum(
+                  1 for pair in pairs if pair["same_path"]
+              ),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-host-local-equivalence-conflicts
+          path: artifacts/gpt2-host-local-equivalence-conflicts
+          retention-days: 2
