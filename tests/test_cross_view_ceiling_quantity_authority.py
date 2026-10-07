@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pb_cross_view_ceiling_finish_authority as finish_authority
 import pb_cross_view_ceiling_quantity_authority as ceiling_quantity
+from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
     LiveCanonicalRoomObject,
@@ -14,6 +15,7 @@ from pb_migration_contracts import (
     QuantityEvidence,
 )
 from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
+from pb_takeoff_coverage_audit_adapter import build_runtime_coverage_publication
 
 
 SOURCE_SHA = "a" * 64
@@ -208,6 +210,34 @@ def test_scaled_room_area_stays_out_of_documented_rcp_ceiling_path() -> None:
     assert result.records == ()
     assert result.canonical_ceilings == ()
     assert result.unresolved_physical_room_ids == ("physical-room-1",)
+
+
+def test_firm_canonical_ceiling_quantity_advances_ag09_to_quantified() -> None:
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(_bridge(),),
+        finishes=_finish(),
+    )
+
+    summaries, gaps = collect_live_canonical_coverage(
+        objects=result.canonical_ceilings,
+        quantities=result.quantities,
+        registry_run_scope="cross-view-ceiling-firm",
+    )
+    assert gaps == {}
+    report = build_runtime_coverage_publication(
+        summaries,
+        family_gaps=gaps,
+    )
+    ceiling = report["family_reports"]["ceiling"]
+    assert ceiling["classification"] == "PARTIAL"
+    assert ceiling["stage_counts"] == {
+        "DETECTED": 1,
+        "AUTHENTICATED": 1,
+        "CANONICALIZED": 1,
+        "QUANTIFIED": 1,
+        "PUBLISHED": 0,
+    }
 
 
 def test_source_room_face_mismatch_remains_unresolved() -> None:
