@@ -3,6 +3,19 @@ name: DIAG GPT1 Maryborough Ceiling Seal On 1947
 on:
   pull_request:
     branches: [ main ]
+    paths:
+      - "pb_*ceiling*.py"
+      - "pb_*surface*.py"
+      - "pb_*material*.py"
+      - "tools/diag_gpt1_maryborough_ceiling_*.py"
+      - "tests/test_cross_view_ceiling_*.py"
+      - "tests/test_live_ceiling_lining_source_closed_export.py"
+      - "tests/test_source_closed_project_handoff_cross_view_ceiling.py"
+      - ".github/workflows/diag-gpt1-maryborough-ceiling-seal-post1947.yml"
+
+concurrency:
+  group: diag-gpt1-maryborough-ceiling-seal-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   prove:

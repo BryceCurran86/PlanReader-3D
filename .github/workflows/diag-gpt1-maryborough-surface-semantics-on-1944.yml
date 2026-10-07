@@ -3,6 +3,17 @@ name: DIAG GPT1 Maryborough Surface Semantics On 1944
 on:
   pull_request:
     branches: [ main ]
+    paths:
+      - "pb_*surface*.py"
+      - "pb_*material*.py"
+      - "pb_source_visibility_authority.py"
+      - "pb_drawing_evidence_binding.py"
+      - "pb_viewport_segmentation.py"
+      - ".github/workflows/diag-gpt1-maryborough-surface-semantics-on-1944.yml"
+
+concurrency:
+  group: diag-gpt1-maryborough-surface-semantics-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   diagnose:
