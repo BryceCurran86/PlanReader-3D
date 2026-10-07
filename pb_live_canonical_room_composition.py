@@ -609,15 +609,27 @@ def compose_live_canonical_rooms(
                 viewport_label_authority = None
 
             for page_id in unresolved_pages:
-                selectors = (
-                    viewport_wall_authority.selectors_for_authenticated_viewports(
-                        document_id=viewport_published.revision.document_id,
-                        revision_id=viewport_published.revision.revision_id,
-                        source_sha256=viewport_published.revision.source_sha256,
-                        snapshot_id=viewport_published.snapshot.snapshot_id,
-                        page_id=page_id,
-                        view_type=DrawingViewType.FLOOR_PLAN.value,
-                    )
+                selectors_by_scope = {}
+                for topology_view_type in (
+                    DrawingViewType.FLOOR_PLAN.value,
+                    DrawingViewType.FLOOR_FINISH_PLAN.value,
+                ):
+                    for candidate_selector in (
+                        viewport_wall_authority.selectors_for_authenticated_viewports(
+                            document_id=viewport_published.revision.document_id,
+                            revision_id=viewport_published.revision.revision_id,
+                            source_sha256=viewport_published.revision.source_sha256,
+                            snapshot_id=viewport_published.snapshot.snapshot_id,
+                            page_id=page_id,
+                            view_type=topology_view_type,
+                        )
+                    ):
+                        selectors_by_scope[
+                            candidate_selector.decision_scope_id
+                        ] = candidate_selector
+                selectors = tuple(
+                    selectors_by_scope[key]
+                    for key in sorted(selectors_by_scope)
                 )
                 page_resolved = False
                 page_face_universe_complete = True
