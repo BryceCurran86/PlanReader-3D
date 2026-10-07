@@ -9,6 +9,7 @@ import re
 import fitz
 
 import pb_source_material_semantic_authority as material
+import pb_viewport_segmentation as vpseg
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_material_schedule_v1222 import (
     parse_schedule_text,
@@ -119,6 +120,90 @@ def main() -> int:
     )
 
     words_by_page = material._trusted_words_by_page(source, published)
+
+    # Shadow the existing derived-partition logic on RCP pages. Production does
+    # not consume this; it exposes whether the 90-degree rotation veto is the
+    # only remaining viewport gate or whether the source remains ambiguous.
+    rcp_viewport_diagnostics = []
+    pdf_views = fitz.open(stream=payload, filetype="pdf")
+    try:
+        for page_number in sorted(int(v) for v in published.coverage.decoded_pages):
+            page = pdf_views.load_page(page_number - 1)
+            anchors = vpseg.extract_view_title_anchors(page)
+            rcp_anchor_indices = [
+                index for index, anchor in enumerate(anchors)
+                if anchor.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+            ]
+            if not rcp_anchor_indices:
+                continue
+            actual = tuple(segment_page_viewports(page, page_number=page_number))
+            calibration = vpseg.calibrate_viewport_layout(page)
+            frames = vpseg.extract_vector_frames(page, calibration)
+            framed, consumed = vpseg._frame_resolved_viewports(
+                page,
+                anchors,
+                frames,
+                calibration,
+                page_number=page_number,
+            )
+            unresolved = [i for i in range(len(anchors)) if i not in consumed]
+            shadow = vpseg._derived_partitions(
+                page,
+                anchors,
+                unresolved,
+                calibration,
+                page_number=page_number,
+            ) if unresolved else []
+            rcp_viewport_diagnostics.append({
+                "page_id": str(page_number),
+                "rotation": int(getattr(page, "rotation", 0) or 0),
+                "anchors": [
+                    {
+                        "index": i,
+                        "text": anchor.text,
+                        "view_type": anchor.view_type,
+                        "bbox": list(anchor.bbox),
+                    }
+                    for i, anchor in enumerate(anchors)
+                ],
+                "actual_rcp_viewports": [
+                    {
+                        "view_id": row.view_id,
+                        "label": row.label,
+                        "status": row.status,
+                        "bbox": None if row.bounding_box is None else list(row.bounding_box),
+                        "notes": list(row.notes),
+                        "provenance": dict(row.provenance or {}),
+                    }
+                    for row in actual
+                    if row.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+                ],
+                "framed_rcp_viewports": [
+                    {
+                        "view_id": row.view_id,
+                        "label": row.label,
+                        "status": row.status,
+                        "bbox": None if row.bounding_box is None else list(row.bounding_box),
+                    }
+                    for row in framed
+                    if row.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+                ],
+                "shadow_derived_rcp_viewports": [
+                    {
+                        "view_id": row.view_id,
+                        "label": row.label,
+                        "status": row.status,
+                        "bbox": None if row.bounding_box is None else list(row.bounding_box),
+                        "notes": list(row.notes),
+                        "provenance": dict(row.provenance or {}),
+                    }
+                    for row in shadow
+                    if row.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+                ],
+                "shadow_all_non_overlapping": validate_non_overlapping_viewports(tuple(framed) + tuple(shadow)),
+            })
+    finally:
+        pdf_views.close()
 
     # Independent native-block schedule ownership, before the material publisher.
     native_blocks = []
@@ -395,6 +480,7 @@ def main() -> int:
     print(json.dumps({
         "source_sha256": sha,
         "revision_id": published.revision.revision_id,
+        "rcp_viewport_diagnostics": rcp_viewport_diagnostics,
         "schedule_viewport_diagnostics": schedule_viewport_diagnostics,
         "native_material_schedule_block_count": len(native_blocks),
         "native_material_schedule_blocks": native_blocks,
