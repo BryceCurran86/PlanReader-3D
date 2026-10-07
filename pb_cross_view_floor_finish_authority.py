@@ -380,13 +380,29 @@ class CrossViewFloorFinishProducer:
         )
 
     def publish(self) -> CrossViewFloorFinishResult:
-        area_records = (
-            tuple(self._room_areas.records if self._room_areas is not None else ())
-            + tuple(
+        # Same-view documented area is supplemental. Preserve established
+        # cross-view authority for a source room when both producers resolve,
+        # exactly as the live room-area bridge does. This prevents adding a
+        # supplemental detector from duplicating or invalidating a previously
+        # valid floor-finish quantity.
+        area_by_source_room: dict[
+            str,
+            CrossViewRoomAreaRecord | SameViewRoomAreaRecord,
+        ] = {
+            str(record.source_room_face_record_id): record
+            for record in (
                 self._same_view_room_areas.records
                 if self._same_view_room_areas is not None
                 else ()
             )
+        }
+        for record in (
+            self._room_areas.records if self._room_areas is not None else ()
+        ):
+            area_by_source_room[str(record.source_room_face_record_id)] = record
+        area_records = tuple(
+            area_by_source_room[key]
+            for key in sorted(area_by_source_room)
         )
         if not area_records:
             return CrossViewFloorFinishResult(
@@ -622,23 +638,6 @@ class CrossViewFloorFinishProducer:
                     _seal=_RECORD_SEAL,
                 )
             )
-
-        records_by_floor: dict[str, list[CrossViewFloorFinishRecord]] = {}
-        for record in records:
-            records_by_floor.setdefault(record.canonical_floor_id, []).append(record)
-        duplicate_floor_ids = {
-            floor_id
-            for floor_id, floor_records in records_by_floor.items()
-            if len(floor_records) != 1
-        }
-        if duplicate_floor_ids:
-            conflict = True
-            unresolved.update(duplicate_floor_ids)
-            records = [
-                record
-                for record in records
-                if record.canonical_floor_id not in duplicate_floor_ids
-            ]
 
         records.sort(key=lambda record: record.canonical_floor_id)
         unresolved_ids = tuple(sorted(unresolved))
