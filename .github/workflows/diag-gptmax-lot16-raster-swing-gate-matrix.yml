@@ -23,10 +23,16 @@ jobs:
         run: |
           set -o pipefail
           PYTHONPATH=. python -u tools/diag_gptmax_lot16_raster_swing_gate_matrix.py | tee lot16-raster-swing-gate-matrix.json
+      - name: Trace current host funnel
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gptmax_lot16_current_host_funnel.py | tee lot16-current-host-funnel.json
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lot16-raster-swing-gate-matrix
-          path: lot16-raster-swing-gate-matrix.json
+          name: lot16-gptmax-current-main-diagnostics
+          path: |
+            lot16-raster-swing-gate-matrix.json
+            lot16-current-host-funnel.json
           retention-days: 2
