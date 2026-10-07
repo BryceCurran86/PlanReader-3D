@@ -1,0 +1,237 @@
+name: DIAG GPT2 Maryborough Host Unsafe Equivalence Census
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  census:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Census unsafe equivalence bridges
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-host-unsafe-equivalence-census
+          mkdir -p "$OUT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import pb_opening_host_binding_authority as host
+          from pb_live_wall_opening_authority_composition import (
+              compose_live_wall_opening_authority,
+          )
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import (
+              PhysicalEquivalenceClass,
+              PhysicalWallCandidateSelector,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-host-unsafe-equivalence-census",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-host-unsafe-equivalence-census",
+              source_bytes=SOURCE.read_bytes(),
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7","30","31"),
+          )
+          composition=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7","30","31"),
+          )
+
+          def relevant(record, geometry, raster_mode):
+              if host._candidate_host_roles(record, geometry):
+                  return True
+              if not raster_mode:
+                  return False
+              if host._raster_whole_wall_role_data(record, geometry) is not None:
+                  return True
+              identity=record.physical_identity
+              if (
+                  not identity.usable
+                  or not identity.candidate_identity_id
+                  or not any(str(v).strip() for v in identity.source_primitive_ids)
+              ):
+                  return False
+              edge_tol=max(0.5,min(2.0,geometry.length*0.02))
+              return host._candidate_locally_owns_opening_span(
+                  record,geometry,edge_tol=edge_tol
+              )
+
+          rows=[]
+          for trace in composition.opening_bindings:
+              if "host_equivalence_bridges_unsafe_boundary_evidence" not in trace.reason_codes:
+                  continue
+              selector=composition.binding_selectors.get(trace.opening_identity_id)
+              if selector is None:
+                  continue
+              obs=ObservationSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  observation_id=trace.representative_observation_id,
+              )
+              existence=composition.physical_opening_authority.prove_existence(obs)
+              opening=existence.existence_record
+              if opening is None:
+                  continue
+              geometry=host._opening_geometry(
+                  composition.physical_opening_authority,opening
+              )
+              if geometry is None:
+                  continue
+              wall_scope=composition.physical_wall_candidate_authority.resolve_scope(
+                  PhysicalWallCandidateSelector(
+                      document_id=selector.document_id,
+                      revision_id=selector.revision_id,
+                      source_sha256=selector.source_sha256,
+                      snapshot_id=selector.snapshot_id,
+                      page_id=selector.page_id,
+                      decision_scope_id=selector.decision_scope_id,
+                  )
+              )
+              if wall_scope.equivalence is None or wall_scope.boundary_evaluation is None:
+                  continue
+              recs={str(r.wall_candidate_id):r for r in wall_scope.records}
+              raster_mode=(
+                  opening.structural_pattern
+                  == host.RASTER_FRAMED_WALL_BAND_INTERRUPTION
+              )
+              relevant_ids={
+                  wall_id for wall_id,record in recs.items()
+                  if relevant(record,geometry,raster_mode)
+              }
+              ev=wall_scope.boundary_evaluation
+              evaluated={str(v) for v in ev.evaluated_wall_candidate_ids}
+              tainted={str(v) for v in ev.boundary_tainted_wall_candidate_ids}
+              clean=evaluated-tainted
+              unsafe=set(recs)-clean
+
+              bridges=[]
+              seen=set()
+              # equivalence_groups are positive SAME groups.
+              for group in wall_scope.equivalence.equivalence_groups:
+                  members={str(v) for v in group}
+                  rel=sorted(members & relevant_ids)
+                  bad=sorted(members & unsafe)
+                  if not rel or not bad:
+                      continue
+                  for left in rel:
+                      for right in bad:
+                          if left==right:
+                              continue
+                          key=("group_same",left,right)
+                          if key in seen: continue
+                          seen.add(key)
+                          bridges.append((key[0],left,right))
+              for left,right,raw in wall_scope.equivalence.pair_classifications:
+                  pair={str(left),str(right)}
+                  if not (pair & relevant_ids and pair & unsafe):
+                      continue
+                  classification=str(raw)
+                  if classification not in {
+                      PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value,
+                      PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value,
+                  }:
+                      continue
+                  for rel in sorted(pair & relevant_ids):
+                      for bad in sorted(pair & unsafe):
+                          if rel==bad: continue
+                          key=(classification,rel,bad)
+                          if key in seen: continue
+                          seen.add(key)
+                          bridges.append(key)
+
+              bridge_rows=[]
+              for kind,rel_id,bad_id in bridges:
+                  rel=recs.get(rel_id)
+                  bad=recs.get(bad_id)
+                  if rel is None or bad is None: continue
+                  rel_sources={
+                      str(v) for v in rel.physical_identity.source_primitive_ids
+                      if str(v).strip()
+                  }
+                  bad_sources={
+                      str(v) for v in bad.physical_identity.source_primitive_ids
+                      if str(v).strip()
+                  }
+                  bridge_rows.append({
+                      "kind":kind,
+                      "relevant_wall_id":rel_id,
+                      "unsafe_wall_id":bad_id,
+                      "unsafe_boundary_tainted":bad_id in tainted,
+                      "unsafe_boundary_unevaluated":bad_id not in evaluated,
+                      "unsafe_is_host_role_relevant":
+                          relevant(bad,geometry,raster_mode),
+                      "shared_source_primitive_count":
+                          len(rel_sources & bad_sources),
+                      "relevant_source_primitive_count":len(rel_sources),
+                      "unsafe_source_primitive_count":len(bad_sources),
+                      "relevant_path_fingerprint":
+                          list(rel.physical_identity.path_fingerprint),
+                      "unsafe_path_fingerprint":
+                          list(bad.physical_identity.path_fingerprint),
+                  })
+              rows.append({
+                  "opening_identity_id":trace.opening_identity_id,
+                  "page_id":trace.page_id,
+                  "structural_pattern":opening.structural_pattern,
+                  "relevant_wall_count":len(relevant_ids),
+                  "evaluated_wall_count":len(evaluated),
+                  "tainted_wall_count":len(tainted),
+                  "unsafe_wall_count":len(unsafe),
+                  "bridge_count":len(bridge_rows),
+                  "bridges":bridge_rows,
+              })
+
+          bridges=[b for row in rows for b in row["bridges"]]
+          print(json.dumps({
+              "opening_count":len(composition.opening_bindings),
+              "unsafe_bridge_opening_count":len(rows),
+              "bridge_count":len(bridges),
+              "bridge_kind_counts":dict(sorted(Counter(
+                  b["kind"] for b in bridges
+              ).items())),
+              "unsafe_state_counts":dict(sorted(Counter(
+                  "tainted" if b["unsafe_boundary_tainted"]
+                  else "unevaluated" if b["unsafe_boundary_unevaluated"]
+                  else "other"
+                  for b in bridges
+              ).items())),
+              "unsafe_host_role_relevant_count":sum(
+                  1 for b in bridges if b["unsafe_is_host_role_relevant"]
+              ),
+              "shared_source_lineage_bridge_count":sum(
+                  1 for b in bridges if b["shared_source_primitive_count"]>0
+              ),
+              "structural_pattern_counts":dict(sorted(Counter(
+                  row["structural_pattern"] for row in rows
+              ).items())),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-host-unsafe-equivalence-census
+          path: artifacts/gpt2-host-unsafe-equivalence-census
+          retention-days: 2
