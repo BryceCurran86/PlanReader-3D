@@ -190,6 +190,12 @@ def test_degenerate_owned_faces_use_the_existing_rule_and_match_legacy_abstentio
 
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.abstained_faces) == 1
+    abstained = result.abstained_faces[0]
+    assert abstained.boundary_wall_edges
+    assert {wall_id for wall_id, _edge in abstained.boundary_wall_edges} == set(
+        abstained.bounding_wall_ids
+    )
+    assert len(abstained.boundary_wall_edges) == len(abstained.polygon_pdf_pts)
     assert set(result.ownership_evaluation.degenerate_owned_face_ids) == {
         a.face_id for a in result.abstained_faces
     }
