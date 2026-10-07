@@ -488,3 +488,45 @@ def test_floor_finish_plan_segments_without_becoming_floor_plan_topology() -> No
         assert authoritative_floor_plan_viewports(doc[0], page_number=1) == ()
     finally:
         doc.close()
+
+
+def test_wrapped_floor_finish_title_in_one_native_block_resolves() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=350)
+    frame = fitz.Rect(30, 30, 470, 300)
+    page.draw_rect(frame)
+    page.draw_line((80, 100), (420, 100))
+    page.draw_line((80, 100), (80, 240))
+    page.insert_textbox(
+        fitz.Rect(100, 245, 420, 292),
+        "PROP. FLOOR FINISHES &\nPARTITIONS PLAN",
+        fontsize=11,
+    )
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        viewport = viewports[0]
+        assert viewport.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+        assert viewport.status == ViewportSegmentationStatus.RESOLVED.value
+        assert viewport.bounding_box == pytest.approx((30, 30, 470, 300))
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == ()
+    finally:
+        doc.close()
+
+
+def test_floor_finish_title_halves_in_separate_native_blocks_are_not_joined() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=350)
+    page.draw_rect(fitz.Rect(30, 30, 470, 300))
+    page.insert_text((100, 255), "PROP. FLOOR FINISHES &", fontsize=11)
+    page.insert_text((100, 275), "PARTITIONS PLAN", fontsize=11)
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert not any(
+            viewport.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+            for viewport in viewports
+        )
+    finally:
+        doc.close()
