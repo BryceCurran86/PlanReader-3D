@@ -1,0 +1,78 @@
+name: DIAG GPT2 Maryborough Material OCR Padding
+
+on:
+  push:
+    branches:
+      - diag/gpt2-maryborough-material-ocr-padding
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Probe page 9 schedule blocks
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import io, json
+          from pathlib import Path
+          import fitz
+          import pytesseract
+          from PIL import Image, ImageOps
+
+          pdf_path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(pdf_path)
+          page=doc.load_page(8)
+          words=page.get_text("words")
+          grouped={}
+          for w in words:
+              grouped.setdefault(int(w[5]), []).append(w)
+
+          targets={26:"FPB",27:"GRID",28:"WFPB",353:"TITLE"}
+          out={"page_rotation":int(page.rotation),"page_rect":list(page.rect),"blocks":{}}
+          for block_no,label in targets.items():
+              rows=sorted(grouped.get(block_no,[]), key=lambda w:(int(w[6]),int(w[7]),float(w[0])))
+              if not rows:
+                  out["blocks"][str(block_no)]={"label":label,"missing":True}
+                  continue
+              text=" ".join(str(w[4]) for w in rows)
+              bbox=fitz.Rect(
+                  min(float(w[0]) for w in rows),
+                  min(float(w[1]) for w in rows),
+                  max(float(w[2]) for w in rows),
+                  max(float(w[3]) for w in rows),
+              )
+              probes=[]
+              for pad_pt in (0.0,1.0,2.0,4.0,8.0,12.0):
+                  clip=fitz.Rect(
+                      max(float(page.rect.x0),bbox.x0-pad_pt),
+                      max(float(page.rect.y0),bbox.y0-pad_pt),
+                      min(float(page.rect.x1),bbox.x1+pad_pt),
+                      min(float(page.rect.y1),bbox.y1+pad_pt),
+                  )
+                  readings={}
+                  for dpi in (300,450):
+                      pix=page.get_pixmap(dpi=dpi,clip=clip,alpha=False)
+                      img=Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+                      border=max(1,round(dpi*1.0/25.4))
+                      img=ImageOps.expand(img,border=border,fill="white")
+                      raw=pytesseract.image_to_string(img,config="--psm 7")
+                      readings[str(dpi)]=" ".join(str(raw or "").split())
+                  probes.append({"pad_pt":pad_pt,"clip":list(clip),"readings":readings})
+              out["blocks"][str(block_no)]={
+                  "label":label,
+                  "native_text":text,
+                  "bbox":list(bbox),
+                  "probes":probes,
+              }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
