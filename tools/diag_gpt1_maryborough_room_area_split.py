@@ -65,6 +65,67 @@ def main() -> int:
 
     same_by = {r.source_room_face_record_id: r for r in same.records}
     cross_by = {r.source_room_face_record_id: r for r in cross.records}
+
+    binding_diagnostics = []
+    rooms_by_record = {
+        str(room.source_room_face_record_id): room
+        for room in rooms.rooms
+        if str(room.source_room_face_record_id or "").strip()
+    }
+    for record_id, area_record in sorted(cross_by.items()):
+        room = rooms_by_record.get(str(record_id))
+        row = {
+            "source_room_face_record_id": str(record_id),
+            "room_label": area_record.room_label,
+            "room_found": room is not None,
+        }
+        if room is not None:
+            row.update({
+                "canonical_room_id": room.canonical_room_id,
+                "physical_room_id": room.physical_room_id,
+                "page_id": room.page_id,
+                "viewport_id": room.viewport_id,
+                "decision_scope_id": room.decision_scope_id,
+            })
+            binding = rooms.room_face_authority_binding_for(room)
+            row["binding_found"] = binding is not None
+            if binding is not None:
+                row.update({
+                    "binding_viewport_id": binding.viewport_id,
+                    "binding_viewport_bbox": binding.viewport_bbox,
+                    "binding_viewport_view_type": binding.viewport_view_type,
+                    "binding_record_count": len(binding.source_room_face_record_ids),
+                    "binding_contains_record": str(record_id) in binding.source_room_face_record_ids,
+                })
+                from pb_source_room_face_authority import SourceRoomFaceSelector
+                selector = SourceRoomFaceSelector(
+                    document_id=room.document_id,
+                    revision_id=room.revision_id,
+                    source_sha256=room.source_sha256,
+                    snapshot_id=room.snapshot_id,
+                    page_id=room.page_id,
+                    decision_scope_id=room.decision_scope_id,
+                )
+                resolved = binding.authority.resolve_scope(selector)
+                row.update({
+                    "resolved_status": getattr(resolved.status, "value", str(resolved.status)),
+                    "resolved_scope_complete": bool(resolved.scope_complete),
+                    "resolved_record_count": len(resolved.records),
+                    "resolved_contains_record": any(
+                        str(item.record_id) == str(record_id)
+                        for item in resolved.records
+                    ),
+                    "resolved_face_id": next(
+                        (
+                            str(item.face_id)
+                            for item in resolved.records
+                            if str(item.record_id) == str(record_id)
+                        ),
+                        None,
+                    ),
+                })
+        binding_diagnostics.append(row)
+
     overlap = []
     for record_id in sorted(set(same_by) & set(cross_by)):
         a, b = same_by[record_id], cross_by[record_id]
@@ -98,6 +159,7 @@ def main() -> int:
         "cross_records": [_record(r) for r in cross.records],
         "overlap_count": len(overlap),
         "overlap": overlap,
+        "binding_diagnostics": binding_diagnostics,
     }, indent=2, sort_keys=True, default=str))
     return 0
 
