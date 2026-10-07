@@ -249,12 +249,16 @@ def collect_live_physical_net_wall_claim(
     pages: Optional[Sequence[int]] = None,
     topology_pages: Optional[Sequence[int]] = None,
     room_area_support_pages: Optional[Sequence[int]] = None,
+    surface_semantic_pages: Optional[Sequence[int]] = None,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
-    ``pages`` is the decoded evidence universe. ``topology_pages`` defaults to
-    all selected pages and, when supplied, must be a non-empty subset whose
-    linework may mint walls, openings, rooms and canonical objects.
+    ``pages`` is the decoded geometry/evidence universe. ``topology_pages``
+    defaults to all selected pages and, when supplied, must be a non-empty subset
+    whose linework may mint walls, openings, rooms and canonical objects.
+    ``surface_semantic_pages`` is an optional independent source-only semantic
+    scope for material/floor-finish/RCP binding. Those pages are never added to
+    wall/opening topology or room-area support authority.
     """
 
     path = Path(pdf_path)
@@ -280,6 +284,13 @@ def collect_live_physical_net_wall_claim(
             room_area_support_selected = _selected_page_indices(
                 page_count,
                 room_area_support_pages,
+            )
+        if surface_semantic_pages is None:
+            surface_semantic_selected: tuple[int, ...] = ()
+        else:
+            surface_semantic_selected = _selected_page_indices(
+                page_count,
+                surface_semantic_pages,
             )
         decoded_selected = tuple(
             sorted(set(selected) | set(room_area_support_selected))
@@ -722,16 +733,51 @@ def collect_live_physical_net_wall_claim(
             )
             room_area_quantity_evidence.extend(bridge.quantities)
 
+    # Surface finish semantics may live on schedules/RCP/support sheets that
+    # are intentionally excluded from the expensive geometry claim. Decode one
+    # independent semantic snapshot only after documented room-area authority
+    # exists, and share it across floor-finish and ceiling semantic consumers.
+    has_documented_surface_area = bool(
+        (same_view_area is not None and same_view_area.records)
+        or (cross_view_area is not None and cross_view_area.records)
+        or room_area_bridges
+    )
+    surface_semantic_source = source
+    if has_documented_surface_area and surface_semantic_selected:
+        surface_semantic_page_ids = tuple(
+            str(index + 1) for index in surface_semantic_selected
+        )
+        if not set(surface_semantic_page_ids).issubset(set(decoded_page_ids)):
+            surface_semantic_source = SourceVisibilityProducer(
+                producer_method="live-surface-semantic",
+                producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+            )
+            semantic_published = surface_semantic_source.ingest_native_pdf_bytes(
+                document_id=document_id,
+                source_bytes=payload,
+                source_locator="memory://live-surface-semantic-source.pdf",
+                page_ids=surface_semantic_page_ids,
+            )
+            if (
+                semantic_published.revision.document_id
+                != published.revision.document_id
+                or semantic_published.revision.revision_id
+                != published.revision.revision_id
+                or semantic_published.revision.source_sha256
+                != published.revision.source_sha256
+            ):
+                raise ValueError(
+                    "surface semantic source revision does not match geometry source"
+                )
+
     # Floor-finish authority is a downstream consumer of already-authenticated
-    # documented room areas. It must not remeasure or infer a finish. Either
-    # same-view or cross-view figured dimensions may supply the source-owned
-    # dimension box; finish occurrence ownership remains exact to that box.
+    # documented room areas. It must not remeasure or infer a finish.
     if (
         (same_view_area is not None and same_view_area.records)
         or (cross_view_area is not None and cross_view_area.records)
     ):
         floor_finishes = CrossViewFloorFinishProducer.from_source(
-            source=source,
+            source=surface_semantic_source,
             room_areas=cross_view_area,
             same_view_room_areas=same_view_area,
             floors=canonical_floors,
@@ -744,7 +790,7 @@ def collect_live_physical_net_wall_claim(
 
     if room_area_bridges:
         ceiling_finishes = CrossViewCeilingFinishProducer.from_source(
-            source=source,
+            source=surface_semantic_source,
             rooms=canonical_rooms,
         ).publish()
         if ceiling_finishes.records:

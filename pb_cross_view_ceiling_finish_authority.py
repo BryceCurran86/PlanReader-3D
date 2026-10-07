@@ -60,7 +60,7 @@ from pb_viewport_segmentation import (
 )
 
 
-CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION = "1.0.0"
+CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION = "1.1.0"
 CROSS_VIEW_CEILING_FINISH_RESOLVED = "cross_view_ceiling_finish_resolved"
 CROSS_VIEW_CEILING_FINISH_PARTIAL = "cross_view_ceiling_finish_partial"
 CROSS_VIEW_CEILING_FINISH_UNAVAILABLE = "cross_view_ceiling_finish_unavailable"
@@ -188,6 +188,10 @@ class CrossViewCeilingFinishRecord:
     occurrence_record_id: str
     occurrence_evidence_id: str
     occurrence_bbox_pdf_pts: tuple[float, float, float, float]
+    # The semantic/material source may be a page-scoped snapshot distinct from
+    # the topology snapshot that minted the canonical room. It is admissible
+    # only when both snapshots belong to the exact same immutable revision.
+    support_snapshot_id: str = ""
     schema_version: str = CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION
     _seal: object = None
 
@@ -517,8 +521,8 @@ class CrossViewCeilingFinishProducer:
         if (
             published is None
             or published.revision.document_id != document_id
+            or published.revision.revision_id != revision_id
             or published.revision.source_sha256.lower() != source_sha256
-            or published.snapshot.snapshot_id != snapshot_id
         ):
             return CrossViewCeilingFinishResult(
                 status=EvidenceResolutionStatus.CONFLICT,
@@ -626,6 +630,8 @@ class CrossViewCeilingFinishProducer:
                     definition_result.status
                     is not EvidenceResolutionStatus.CORROBORATED
                     or definition is None
+                    or occurrence.snapshot_id != published.snapshot.snapshot_id
+                    or definition.snapshot_id != published.snapshot.snapshot_id
                     or definition.record_id != occurrence.definition_record_id
                     or definition.semantic_finish != occurrence.semantic_finish
                     or not _definition_is_ceiling_finish(definition)
@@ -726,6 +732,7 @@ class CrossViewCeilingFinishProducer:
                     occurrence_record_id=occurrence.record_id,
                     occurrence_evidence_id=occurrence.source_evidence_id,
                     occurrence_bbox_pdf_pts=occurrence.bbox_pdf_pts,
+                    support_snapshot_id=published.snapshot.snapshot_id,
                     _seal=_RECORD_SEAL,
                 )
             )

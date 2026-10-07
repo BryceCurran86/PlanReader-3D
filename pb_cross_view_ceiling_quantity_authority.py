@@ -297,6 +297,7 @@ def publish_cross_view_ceiling_quantities(
             != _clean(room.room_label).casefold()
             or finish.definition_evidence_ids == ()
             or not _clean(finish.occurrence_evidence_id)
+            or not _clean(finish.support_snapshot_id)
         ):
             unresolved.add(physical_id)
             continue
@@ -369,6 +370,7 @@ def publish_cross_view_ceiling_quantities(
                 "viewport_id": area_viewport_id,
                 "support_page_id": finish.support_page_id,
                 "support_viewport_id": finish.support_viewport_id,
+                "support_snapshot_id": finish.support_snapshot_id,
                 "support_source_partition_id": finish.support_source_partition_id,
                 "support_block_no": finish.support_block_no,
                 "room_label": room.room_label,

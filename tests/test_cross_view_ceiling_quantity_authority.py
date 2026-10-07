@@ -151,6 +151,7 @@ def _finish(*, face_id: str = "face-1"):
         occurrence_record_id="occ-grid",
         occurrence_evidence_id="occ-evidence",
         occurrence_bbox_pdf_pts=(100.0, 70.0, 125.0, 82.0),
+        support_snapshot_id="semantic-snap-1",
         _seal=finish_authority._RECORD_SEAL,
     )
     return finish_authority.CrossViewCeilingFinishResult(
@@ -187,6 +188,7 @@ def test_final_documented_room_area_and_rcp_finish_publish_firm_ceiling_quantity
     assert quantity.metadata["upstream_room_area_quantity_id"] == "room-area-qty-1"
     assert quantity.metadata["support_page_id"] == "9"
     assert quantity.metadata["support_viewport_id"] == "rcp-vp"
+    assert quantity.metadata["support_snapshot_id"] == "semantic-snap-1"
     assert quantity.metadata["row_role"] == "ceiling_area"
     assert len(result.canonical_ceilings) == 1
     canonical = result.canonical_ceilings[0]

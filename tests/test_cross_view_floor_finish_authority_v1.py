@@ -151,6 +151,8 @@ def _patch_material_viewports(monkeypatch) -> None:
 
 def _source_room_area_and_floor(
     payload: bytes,
+    *,
+    page_ids: tuple[str, ...] | None = None,
 ):
     source = SourceVisibilityProducer(
         producer_method="cross-view-floor-finish-test",
@@ -160,6 +162,7 @@ def _source_room_area_and_floor(
         document_id="cross-view-floor-finish-doc",
         source_bytes=payload,
         source_locator="memory://cross-view-floor-finish.pdf",
+        page_ids=page_ids,
     )
     room = LiveCanonicalRoomObject(
         canonical_room_id="physical-room-1",
@@ -257,6 +260,7 @@ def test_confirmed_floor_tile_occurrence_binds_same_canonical_floor(
     assert record.semantic_finish == "tile"
     assert record.canonical_floor_id == floors.floors[0].canonical_floor_id
     assert record.occurrence_evidence_id
+    assert record.support_snapshot_id
 
     quantity = record.quantity
     assert quantity.family == "floor_finish_area"
@@ -266,6 +270,7 @@ def test_confirmed_floor_tile_occurrence_binds_same_canonical_floor(
     assert quantity.input_entity_ids == (floors.floors[0].canonical_floor_id,)
     assert quantity.metadata["finish_code"] == "FT1"
     assert quantity.metadata["semantic_finish"] == "tile"
+    assert quantity.metadata["support_snapshot_id"] == record.support_snapshot_id
     assert len(quantity.metadata["figured_dimension_ids"]) == 2
 
     enriched = enrich_live_canonical_floor_finishes(floors, result)
@@ -273,6 +278,91 @@ def test_confirmed_floor_tile_occurrence_binds_same_canonical_floor(
     assert enriched.floors[0].finish_descriptor == "tile"
     assert enriched.floors[0].commercial_quantity_authority is False
     assert set(quantity.evidence_ids).issubset(enriched.floors[0].evidence_ids)
+
+
+def test_floor_finish_can_use_same_revision_distinct_semantic_snapshot(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    payload = _payload()
+    geometry_source, room_areas, floors = _source_room_area_and_floor(
+        payload,
+        page_ids=("1", "2"),
+    )
+    geometry_published = geometry_source.published_snapshot_for_revision(
+        room_areas.records[0].area_evidence.metadata["room_revision_id"]
+    )
+    assert geometry_published is not None
+
+    semantic_source = SourceVisibilityProducer(
+        producer_method="cross-view-floor-finish-semantic-test",
+        producer_version="1.0",
+    )
+    semantic_published = semantic_source.ingest_native_pdf_bytes(
+        document_id=geometry_published.revision.document_id,
+        source_bytes=payload,
+        source_locator="memory://cross-view-floor-finish-semantic.pdf",
+        page_ids=("2", "3"),
+    )
+    assert (
+        semantic_published.revision.revision_id
+        == geometry_published.revision.revision_id
+    )
+    assert (
+        semantic_published.snapshot.snapshot_id
+        != geometry_published.snapshot.snapshot_id
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=semantic_source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.finish_code == "FT1"
+    assert record.support_snapshot_id == semantic_published.snapshot.snapshot_id
+    assert (
+        record.quantity.metadata["support_snapshot_id"]
+        == semantic_published.snapshot.snapshot_id
+    )
+
+
+def test_floor_finish_rejects_semantic_source_from_different_revision(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    payload = _payload()
+    geometry_source, room_areas, floors = _source_room_area_and_floor(
+        payload,
+        page_ids=("1", "2"),
+    )
+    geometry_published = geometry_source.published_snapshot_for_revision(
+        room_areas.records[0].area_evidence.metadata["room_revision_id"]
+    )
+    assert geometry_published is not None
+
+    semantic_source = SourceVisibilityProducer(
+        producer_method="cross-view-floor-finish-other-revision-test",
+        producer_version="1.0",
+    )
+    semantic_source.ingest_native_pdf_bytes(
+        document_id="different-floor-document",
+        source_bytes=payload,
+        source_locator="memory://different-floor-document.pdf",
+        page_ids=("2", "3"),
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=semantic_source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
 
 
 def test_raw_material_code_without_authenticated_schedule_cannot_bind(
