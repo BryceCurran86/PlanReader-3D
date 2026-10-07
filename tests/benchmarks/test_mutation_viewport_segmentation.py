@@ -761,36 +761,39 @@ def test_line_grid_frame_cannot_mint_floor_plan_authority() -> None:
 
 
 def _vertical_title_line_grid_schedule() -> fitz.Document:
-    """Tall/narrow native schedule whose title text advances vertically."""
+    """Semantic schedule whose producer-owned title advances vertically."""
 
     doc = fitz.open()
-    page = doc.new_page(width=640, height=420)
+    page = doc.new_page(width=720, height=420)
 
-    # Deliberately exceed the ordinary frame aspect-ratio bound. Positive
-    # repeated grid structure, not shape alone, must admit this as a table.
-    outer = fitz.Rect(180.0, 30.0, 210.0, 390.0)
+    outer = fitz.Rect(80.0, 30.0, 300.0, 390.0)
     page.draw_rect(outer)
-    xs = (184.0, 191.0, 198.0, 205.0)
+    xs = (100.0, 145.0, 190.0, 235.0, 280.0)
     ys = (55.0, 110.0, 165.0, 220.0, 275.0, 330.0)
     for x in xs:
         page.draw_line((x, 55.0), (x, 330.0))
     for y in ys:
-        page.draw_line((184.0, y), (205.0, y))
+        page.draw_line((100.0, y), (280.0, y))
 
-    # In native coordinates rotate=90 produces a vertical text line whose
-    # reading direction points upward. The table sits to its left; in the
-    # title-local basis this is the ordinary "frame above, title below" layout.
+    # Ordinary small source text keeps layout calibration representative while
+    # remaining semantically inert.
+    for index, label in enumerate(("A", "B", "C", "D", "E", "F")):
+        page.insert_text((110.0, 75.0 + index * 45.0), label, fontsize=8.0)
+
+    # rotate=90 yields a native vertical line. The table sits immediately to
+    # its left; in the title-local basis this is the ordinary
+    # "frame above, title below" ownership pattern.
     page.insert_text(
-        (225.0, 310.0),
+        (325.0, 310.0),
         "CEILING FINISHES SCHEDULE",
         fontsize=10.0,
         rotate=90,
     )
 
     # A normal drawing frame elsewhere must not steal this schedule title.
-    page.draw_rect(fitz.Rect(300.0, 30.0, 610.0, 360.0))
-    page.draw_line((330.0, 80.0), (560.0, 80.0))
-    page.draw_line((330.0, 80.0), (330.0, 300.0))
+    page.draw_rect(fitz.Rect(390.0, 30.0, 690.0, 360.0))
+    page.draw_line((420.0, 80.0), (650.0, 80.0))
+    page.draw_line((420.0, 80.0), (420.0, 300.0))
     return _reopen(doc)
 
 
@@ -808,19 +811,25 @@ def test_vertical_native_schedule_title_owns_exact_gridded_table_frame() -> None
         assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
         assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
         assert schedule.bounding_box == pytest.approx(
-            (180.0, 30.0, 210.0, 390.0)
+            (80.0, 30.0, 300.0, 390.0)
         )
         assert schedule.label == "CEILING FINISHES SCHEDULE"
     finally:
         doc.close()
 
 
-def test_skinny_non_table_frame_still_cannot_own_vertical_schedule_title() -> None:
+def test_extreme_aspect_non_table_frame_still_rejected_for_vertical_title() -> None:
     doc = fitz.open()
-    page = doc.new_page(width=640, height=420)
-    page.draw_rect(fitz.Rect(180.0, 30.0, 210.0, 390.0))
+    page = doc.new_page(width=1200, height=1000)
+    page.draw_rect(fitz.Rect(120.0, 40.0, 220.0, 940.0))
+    for index in range(8):
+        page.insert_text(
+            (400.0, 100.0 + index * 40.0),
+            f"NOTE {index}",
+            fontsize=8.0,
+        )
     page.insert_text(
-        (225.0, 310.0),
+        (245.0, 700.0),
         "CEILING FINISHES SCHEDULE",
         fontsize=10.0,
         rotate=90,
