@@ -334,19 +334,26 @@ def _definition_is_ceiling_finish(
     # The semantic family must still come from a non-empty authenticated
     # schedule meaning. The occurrence's authenticated RCP viewport supplies
     # the ceiling role; a bare raw code can never reach this function.
-    return bool(
-        _norm(
-            " ".join(
-                _clean(value)
-                for value in (
-                    definition.description,
-                    definition.substrate,
-                    definition.finish,
-                )
-                if _clean(value)
+    meaning = _norm(
+        " ".join(
+            _clean(value)
+            for value in (
+                definition.description,
+                definition.substrate,
+                definition.finish,
             )
+            if _clean(value)
         )
     )
+    if not meaning:
+        return False
+    if semantic == "tile":
+        # A generic floor/wall tile definition is not a ceiling lining merely
+        # because its code appears in a drawing. Only a source-authenticated
+        # plaster/ceiling-tile material family can receive ceiling role from an
+        # independently authenticated RCP occurrence.
+        return "plaster tile" in meaning or "ceiling tile" in meaning
+    return True
 
 
 def _occurrence_line(
