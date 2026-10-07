@@ -19,7 +19,9 @@ Safety invariants:
 - prose mentioning a view is not accepted as a drawing title;
 - one frame shared by multiple titles is ambiguous;
 - two equivalent frames competing for one title are ambiguous;
-- page borders, crop boxes, title-block panels, and table grids are not viewports;
+- page borders, crop boxes, and title-block panels are not viewports;
+- table grids are not drawing viewports; a table-like frame is admissible only
+  for an independently classified schedule/legend/specification title;
 - scale is associated only after viewport ownership; conflicting scales remain
   unresolved;
 - viewport IDs are provenance only, never semantic prediction features.
@@ -166,6 +168,13 @@ _TABLE_CELL_COUNT = 8
 _TABLE_GRID_OCCUPANCY_FRACTION = 0.75
 _TABLE_GRID_FRAME_COVERAGE_FRACTION = 0.20
 _TABLE_CELL_DIMENSION_ROUND_DIGITS = 3
+_SEMANTIC_TABLE_VIEW_TYPES = frozenset(
+    {
+        DrawingViewType.SCHEDULE.value,
+        DrawingViewType.LEGEND.value,
+        DrawingViewType.SPECIFICATION.value,
+    }
+)
 
 # Private in-process producer token. Migration authority must not be minted from
 # caller-copied provenance dictionaries. Only segment_page_viewports stamps this
@@ -622,12 +631,17 @@ def _rejected_ownership_frame(
     frame: Sequence[float],
     calibration: ViewportLayoutCalibration,
     fragments: Sequence[tuple[tuple[float, float, float, float], str]],
+    *,
+    view_type: str,
 ) -> bool:
     if _is_page_or_crop_border(frame, calibration):
         return True
     if _frame_has_title_block_labels(frame, fragments, calibration):
         return True
-    if _frame_looks_like_table(frame, page, calibration):
+    if (
+        _frame_looks_like_table(frame, page, calibration)
+        and str(view_type) not in _SEMANTIC_TABLE_VIEW_TYPES
+    ):
         return True
     return False
 
@@ -1142,9 +1156,23 @@ def _frame_resolved_viewports(
             calibration,
             anchors=anchors,
         )
+        if str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES:
+            table_candidates = [
+                frame
+                for frame in candidates
+                if _frame_looks_like_table(frame, page, calibration)
+            ]
+            if table_candidates:
+                candidates = table_candidates
         usable = [
             frame for frame in candidates
-            if not _rejected_ownership_frame(page, frame, calibration, fragments)
+            if not _rejected_ownership_frame(
+                page,
+                frame,
+                calibration,
+                fragments,
+                view_type=anchor.view_type,
+            )
         ]
         usable = _collapse_nested_band_frames(usable)
         usable = _collapse_equivalent_nested_frames(usable, calibration)
