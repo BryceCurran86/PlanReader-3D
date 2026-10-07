@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import fitz
 
+import pb_live_ceiling_lining_integration as live_module
+
 from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
 from pb_ceiling_lining_review_promotion import (
     collect_ceiling_lining_review_candidates,
@@ -355,3 +357,71 @@ def test_live_ceiling_documented_dimension_requires_figured_lineage() -> None:
         is None
     )
 
+
+
+def test_ceiling_evidence_pages_are_ingested_but_only_topology_pages_are_scanned(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    doc = fitz.open()
+    try:
+        doc.new_page(width=300.0, height=200.0)
+        doc.new_page(width=300.0, height=200.0)
+        path = tmp_path / "evidence-topology-split.pdf"
+        path.write_bytes(doc.tobytes())
+    finally:
+        doc.close()
+
+    ingested_page_ids = []
+    original_ingest = live_module.SourceVisibilityProducer.ingest_native_pdf_bytes
+
+    def _capture_ingest(self, *args, **kwargs):
+        ingested_page_ids.extend(kwargs.get("page_ids") or ())
+        return original_ingest(self, *args, **kwargs)
+
+    scanned_page_numbers = []
+
+    def _capture_floor_plans(page, *, page_number):
+        scanned_page_numbers.append(page_number)
+        return ()
+
+    monkeypatch.setattr(
+        live_module.SourceVisibilityProducer,
+        "ingest_native_pdf_bytes",
+        _capture_ingest,
+    )
+    monkeypatch.setattr(
+        live_module,
+        "authoritative_floor_plan_viewports",
+        _capture_floor_plans,
+    )
+
+    result = collect_live_ceiling_lining_claims(
+        path,
+        pages=(0, 1),
+        topology_pages=(0,),
+    )
+
+    assert ingested_page_ids == ["1", "2"]
+    assert scanned_page_numbers == [1]
+    assert result.claims == ()
+
+
+def test_ceiling_topology_pages_must_be_subset_of_evidence_pages(tmp_path) -> None:
+    import pytest
+
+    doc = fitz.open()
+    try:
+        doc.new_page(width=300.0, height=200.0)
+        doc.new_page(width=300.0, height=200.0)
+        path = tmp_path / "invalid-evidence-topology-split.pdf"
+        path.write_bytes(doc.tobytes())
+    finally:
+        doc.close()
+
+    with pytest.raises(ValueError, match="topology_pages must be a subset of pages"):
+        collect_live_ceiling_lining_claims(
+            path,
+            pages=(0,),
+            topology_pages=(1,),
+        )
