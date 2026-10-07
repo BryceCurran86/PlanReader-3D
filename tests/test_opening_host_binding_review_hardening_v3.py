@@ -875,8 +875,33 @@ def _source_obs(line, raw_id: str):
     return SimpleNamespace(
         observation_id="obs:" + raw_id,
         geometry=tuple(float(value) for value in line),
-        source_primitive_ref="visible:" + raw_id,
+        source_primitive_ref="visible:segment:" + raw_id,
     )
+
+
+def test_raw_source_primitive_id_matches_w4_native_namespace() -> None:
+    observation = SimpleNamespace(
+        source_primitive_ref="visible:segment:d53913i0"
+    )
+    assert host._raw_source_primitive_id(observation) == "d53913i0"
+
+
+def test_raw_source_primitive_id_preserves_w4_raster_namespace() -> None:
+    observation = SimpleNamespace(
+        source_primitive_ref="visible:raster_segment:r17"
+    )
+    assert host._raw_source_primitive_id(observation) == "raster_segment:r17"
+
+
+@pytest.mark.parametrize(
+    "source_ref",
+    ("", "visible:", "visible:text:abc", "segment:abc", "visible:other:abc"),
+)
+def test_raw_source_primitive_id_rejects_unknown_namespaces(
+    source_ref: str,
+) -> None:
+    observation = SimpleNamespace(source_primitive_ref=source_ref)
+    assert host._raw_source_primitive_id(observation) is None
 
 
 def test_generic_gap_host_binds_exact_source_lineage_not_nearest_wall() -> None:
