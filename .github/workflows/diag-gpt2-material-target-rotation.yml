@@ -1,0 +1,95 @@
+name: DIAG GPT2 Material Target Rotation
+
+on:
+  push:
+    branches:
+      - diag/gpt2-maryborough-material-ocr-padding
+
+jobs:
+  target-rotation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect producer-owned OCR targets
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import io, json
+          from pathlib import Path
+          from PIL import Image
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_observation_authority import ObservationSelector
+          from pb_raster_text_corroboration_authority import (
+              _producer_owned_ocr_target,
+              _lossless_rotate,
+          )
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-target-rotation",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-target-rotation",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("9",),
+          )
+          auth=source.text_integrity_authority()
+          rows=[]
+          for oid in published.text_observation_ids:
+              result=auth.resolve_text(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=oid,
+                  )
+              )
+              r=result.receipt
+              if r is None or str(r.page_id)!="9" or int(r.block_no or -1) not in {26,27,28,353}:
+                  continue
+              bbox,rotation=_producer_owned_ocr_target(
+                  source._producer,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  page_id="9",
+                  receipt=r,
+                  word_bbox=tuple(float(v) for v in r.geometry),
+                  raw_text=str(r.raw_text),
+              )
+              png,_parent=source._producer.render_native_page_png(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  page_id="9",
+                  dpi=300.0,
+                  clip_pt=bbox,
+              )
+              img=Image.open(io.BytesIO(png)).convert("RGB")
+              norm=_lossless_rotate(img,int(rotation))
+              rows.append({
+                  "block_no":int(r.block_no or 0),
+                  "line_no":int(r.line_no or 0),
+                  "word_no":int(r.word_no or 0),
+                  "text":str(r.raw_text),
+                  "reason_codes":list(r.reason_codes or ()),
+                  "sequence_number":r.sequence_number,
+                  "trace_sequence_numbers":list(r.trace_sequence_numbers or ()),
+                  "word_bbox":[float(v) for v in r.geometry],
+                  "target_bbox":[float(v) for v in bbox],
+                  "rotation":int(rotation),
+                  "render_size":[img.width,img.height],
+                  "normalized_size":[norm.width,norm.height],
+              })
+          print(json.dumps(sorted(rows,key=lambda x:(x["block_no"],x["line_no"],x["word_no"])),indent=2))
+          PY
