@@ -510,7 +510,7 @@ def test_wrapped_floor_finish_title_in_one_native_block_resolves() -> None:
         assert viewport.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
         assert viewport.status == ViewportSegmentationStatus.RESOLVED.value
         assert viewport.bounding_box == pytest.approx((30, 30, 470, 300))
-        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == ()
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     finally:
         doc.close()
 
