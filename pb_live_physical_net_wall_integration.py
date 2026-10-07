@@ -386,16 +386,29 @@ def collect_live_physical_net_wall_claim(
     floor_finish_quantity_evidence: list[QuantityEvidence] = []
     cross_view_area = None
     if canonical_rooms.rooms:
-        evidence_by_record = {}
+        same_view_area = SameViewRoomAreaProducer.from_source(
+            source=source,
+            rooms=canonical_rooms,
+        ).publish()
+        same_view_by_record = dict(
+            same_view_area.evidence_by_source_room_face_record_id
+        )
+
+        cross_view_by_record = {}
         if room_area_support_selected:
             cross_view_area = CrossViewRoomAreaProducer.from_source(
                 source=source,
                 rooms=canonical_rooms,
             ).publish()
             if cross_view_area.records:
-                evidence_by_record = dict(
+                cross_view_by_record = dict(
                     cross_view_area.evidence_by_source_room_face_record_id
                 )
+
+        evidence_by_record = _merge_documented_room_area_evidence(
+            same_view_by_record=same_view_by_record,
+            cross_view_by_record=cross_view_by_record,
+        )
 
         scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
             source
