@@ -143,7 +143,7 @@ def _room_area_with_semantic_only_page_pdf() -> bytes:
         doc.close()
 
 
-def test_ceiling_semantic_pages_use_isolated_source_without_expanding_topology(
+def test_surface_semantic_pages_use_isolated_source_without_expanding_topology(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -176,7 +176,7 @@ def test_ceiling_semantic_pages_use_isolated_source_without_expanding_topology(
         pages=(0,),
         topology_pages=(0,),
         room_area_support_pages=(1,),
-        ceiling_semantic_pages=(2,),
+        surface_semantic_pages=(2,),
     )
 
     assert seen["decoded_pages"] == (3,)
