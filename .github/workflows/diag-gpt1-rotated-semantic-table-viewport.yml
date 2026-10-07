@@ -1,0 +1,27 @@
+name: DIAG GPT1 Rotated Semantic Table Viewport
+
+on:
+  push:
+    branches:
+      - gpt1/rotated-semantic-table-viewport-v1
+
+concurrency:
+  group: diag-gpt1-rotated-semantic-table-viewport
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Compile viewport segmenter
+        run: python -m py_compile pb_viewport_segmentation.py
+      - name: Run viewport mutation suite
+        run: PYTHONPATH=. pytest -q tests/benchmarks/test_mutation_viewport_segmentation.py
