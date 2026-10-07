@@ -1,0 +1,55 @@
+name: DIAG GPT1 Maryborough Labels On Incomplete Universe Fix
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run Maryborough canonical room label proof
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          claim=collect_live_physical_net_wall_claim(
+              pdf,
+              pages=(6,8,10,29,30),
+              topology_pages=(6,29,30),
+              room_area_support_pages=(8,10),
+          )
+          labels=[r.room_label for r in claim.canonical_rooms if r.room_label]
+          rows=[{
+              "canonical_room_id":r.canonical_room_id,
+              "page_id":r.page_id,
+              "viewport_id":r.viewport_id,
+              "physical_room_id":r.physical_room_id,
+              "room_label":r.room_label,
+              "room_label_binding_record_id":r.room_label_binding_record_id,
+              "label_evidence_count":len(r.room_label_evidence_ids),
+              "geometry_complete":r.geometry_complete,
+              "source_room_face_record_id":r.source_room_face_record_id,
+          } for r in claim.canonical_rooms if r.room_label]
+          print(json.dumps({
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "labelled_room_count":len(rows),
+              "label_counts":dict(Counter(labels)),
+              "labelled_rooms":rows,
+          },indent=2,sort_keys=True))
+          PY
