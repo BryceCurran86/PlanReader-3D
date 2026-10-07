@@ -34,12 +34,26 @@ jobs:
           import time
           from pathlib import Path
 
+          from pb_cross_view_room_area_authority import (
+              _dimension_is_immediate_label_annotation,
+              _figured_pair_scale_consistent,
+              _line_inside_dimension_pair,
+              _norm_label,
+              _trusted_lines_for_page,
+              _trusted_native_dimensions_for_page,
+              _witness_systems_intersect,
+          )
+          from pb_dimension_graph_constraint_engine import DimensionOrientation
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_canonical_room_composition import LiveCanonicalRoomComposition
           from pb_live_floor_area_quantity_publication import (
               publish_live_floor_area_quantities,
           )
           from pb_live_physical_net_wall_integration import (
               collect_live_physical_net_wall_claim,
           )
+          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
 
           path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
           started=time.perf_counter()
@@ -93,6 +107,91 @@ jobs:
                   "finish_descriptor":floor.finish_descriptor,
               })
 
+          # Re-run only the same-view ownership authority against the exact
+          # canonical rooms to expose its first failing gate without changing
+          # production behavior.
+          payload=path.read_bytes()
+          debug_source=SourceVisibilityProducer(
+              producer_method="gpt1-lot16-room-area-ownership-debug",
+              producer_version="1",
+          )
+          debug_published=debug_source.ingest_native_pdf_bytes(
+              document_id=claim.canonical_rooms[0].document_id,
+              source_bytes=payload,
+              source_locator="memory://lot16-room-area-ownership-debug.pdf",
+              page_ids=("3",),
+          )
+          debug_rooms=LiveCanonicalRoomComposition(
+              status=claim.canonical_room_status,
+              reason_codes=claim.canonical_room_reason_codes,
+              rooms=claim.canonical_rooms,
+              source_pages=claim.canonical_room_source_pages,
+          )
+          same_debug=SameViewRoomAreaProducer.from_source(
+              source=debug_source,
+              rooms=debug_rooms,
+          ).publish()
+          trusted_dims=_trusted_native_dimensions_for_page(
+              debug_source,
+              revision_id=debug_published.revision.revision_id,
+              page_id="3",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          hs=tuple(d for d in trusted_dims if d.orientation==DimensionOrientation.HORIZONTAL.value)
+          vs=tuple(d for d in trusted_dims if d.orientation==DimensionOrientation.VERTICAL.value)
+          ownership_debug=[]
+          for room in claim.canonical_rooms:
+              label=_norm_label(room.room_label)
+              if not label:
+                  continue
+              lines=tuple(
+                  line for line in _trusted_lines_for_page(
+                      debug_source,
+                      revision_id=debug_published.revision.revision_id,
+                      page_id=str(room.page_id),
+                      candidate_labels=(room.room_label,),
+                  )
+                  if _norm_label(line.text)==label
+              )
+              geometric=[]
+              immediate=[]
+              if len(lines)==1:
+                  line=lines[0]
+                  for h in hs:
+                      for v in vs:
+                          if (
+                              _line_inside_dimension_pair(line,h,v)
+                              and _figured_pair_scale_consistent(
+                                  page_id=str(room.page_id),
+                                  horizontal=h,
+                                  vertical=v,
+                              )
+                              and _witness_systems_intersect(h,v)
+                          ):
+                              geometric.append([h.value_mm,v.value_mm])
+                  if not geometric:
+                      oh=tuple(d for d in hs if _dimension_is_immediate_label_annotation(line,d))
+                      ov=tuple(d for d in vs if _dimension_is_immediate_label_annotation(line,d))
+                      for h in oh:
+                          for v in ov:
+                              if _figured_pair_scale_consistent(
+                                  page_id=str(room.page_id),
+                                  horizontal=h,
+                                  vertical=v,
+                              ):
+                                  immediate.append([h.value_mm,v.value_mm])
+              ownership_debug.append({
+                  "canonical_room_id":room.canonical_room_id,
+                  "physical_room_id":room.physical_room_id,
+                  "room_label":room.room_label,
+                  "page_id":room.page_id,
+                  "label_line_count":len(lines),
+                  "geometric_pair_count":len(geometric),
+                  "geometric_pairs":geometric,
+                  "immediate_pair_count":len(immediate),
+                  "immediate_pairs":immediate,
+              })
+
           def qrows(rows):
               return [
                   {
@@ -114,6 +213,11 @@ jobs:
               "claim_status":getattr(claim.status,"value",str(claim.status)),
               "canonical_room_count":len(claim.canonical_rooms),
               "canonical_floor_count":len(claim.canonical_floors),
+              "same_view_debug_status":getattr(same_debug.status,"value",str(same_debug.status)),
+              "same_view_debug_reason_codes":list(same_debug.reason_codes),
+              "same_view_debug_record_count":len(same_debug.records),
+              "same_view_debug_unresolved_count":len(same_debug.unresolved_physical_room_ids),
+              "ownership_debug":ownership_debug,
               "metric_floor_count":len(metric_floors),
               "metric_floors":metric_floors,
               "firm_room_area_count":len(room_q),
