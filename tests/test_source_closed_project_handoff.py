@@ -385,10 +385,15 @@ def test_project_handoff_keeps_full_surface_evidence_but_scopes_room_support(
         opening_count_quantity_evidence=(),
     )
     seen = {}
+    ceiling_seen = {}
 
     def _collect(*args, **kwargs):
         seen.update(kwargs)
         return claim
+
+    def _collect_ceiling(*args, **kwargs):
+        ceiling_seen.update(kwargs)
+        return SimpleNamespace()
 
     monkeypatch.setattr(
         handoff,
@@ -398,7 +403,7 @@ def test_project_handoff_keeps_full_surface_evidence_but_scopes_room_support(
     monkeypatch.setattr(
         handoff,
         "collect_live_ceiling_lining_claims",
-        lambda *args, **kwargs: SimpleNamespace(),
+        _collect_ceiling,
     )
     monkeypatch.setattr(
         handoff,
@@ -421,6 +426,8 @@ def test_project_handoff_keeps_full_surface_evidence_but_scopes_room_support(
     assert seen["pages"] == (0, 1, 2, 3, 4)
     assert seen["topology_pages"] == (0,)
     assert seen["room_area_support_pages"] == (2,)
+    assert ceiling_seen["pages"] == (0, 1, 2, 3, 4)
+    assert ceiling_seen["topology_pages"] == (0,)
     assert summary["topology_pages"] == [1]
     assert summary["room_area_support_pages"] == [3]
     assert summary["execution_pages"] == [1, 2, 3, 4, 5]
