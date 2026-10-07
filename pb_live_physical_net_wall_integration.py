@@ -509,11 +509,7 @@ def collect_live_physical_net_wall_claim(
                 viewport_bbox = tuple(
                     float(value) for value in room_binding.viewport_bbox
                 )
-                viewport_view_type = (
-                    str(room_binding.viewport_view_type)
-                    if room_binding.viewport_view_type
-                    else DrawingViewType.FLOOR_PLAN.value
-                )
+                viewport_view_type = DrawingViewType.FLOOR_PLAN.value
                 viewport_status = ViewportResolutionStatus.RESOLVED
                 viewport_reason_codes = (
                     "producer_owned_room_face_viewport_scope",
@@ -529,9 +525,10 @@ def collect_live_physical_net_wall_claim(
                     )
                 )
                 if containing_viewport is not None:
-                    viewport_id, viewport_bbox, viewport_view_type = (
+                    viewport_id, viewport_bbox, _viewport_view_type = (
                         containing_viewport
                     )
+                    viewport_view_type = DrawingViewType.FLOOR_PLAN.value
                     viewport_status = ViewportResolutionStatus.RESOLVED
                     viewport_reason_codes = (
                         "producer_owned_authenticated_topology_plan_viewport",
@@ -634,7 +631,7 @@ def collect_live_physical_net_wall_claim(
                     (
                         resolved_viewport_id,
                         resolved_viewport_bbox,
-                        resolved_viewport_type,
+                        _resolved_viewport_type,
                     ) = containing_viewport
                     selected_scale_selector = PhysicalScaleSelector(
                         document_id=scope_rooms[0].document_id,
@@ -656,7 +653,7 @@ def collect_live_physical_net_wall_claim(
                             document_id=scope_rooms[0].document_id,
                             page_id=page_id,
                             bbox=resolved_viewport_bbox,
-                            view_type=resolved_viewport_type,
+                            view_type=DrawingViewType.FLOOR_PLAN.value,
                             status=ViewportResolutionStatus.RESOLVED,
                             evidence_ids=(),
                             confidence=1.0,
