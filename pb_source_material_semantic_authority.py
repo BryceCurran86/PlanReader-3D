@@ -1115,8 +1115,11 @@ def _trusted_native_material_schedule_cluster_blocks(
         )
 
     candidates = _raw_material_definition_candidates(words)
+    # This independent route only exists for a genuine multi-row split
+    # schedule cluster. Ordinary one-row schedules continue through the
+    # established viewport path and must not be poisoned by cluster detection.
     if len(trusted_titles) != 1 or len(candidates) < 2:
-        return (), tuple(sorted({row[3] for row in candidates} if trusted_titles else ()))
+        return (), ()
 
     title_bbox, title_ids = trusted_titles[0]
     row_bbox = (
