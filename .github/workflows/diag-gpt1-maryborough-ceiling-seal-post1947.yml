@@ -1,0 +1,40 @@
+name: DIAG GPT1 Maryborough Ceiling Seal On 1947
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "pb_*ceiling*.py"
+      - "pb_*surface*.py"
+      - "pb_*material*.py"
+      - "tools/diag_gpt1_maryborough_ceiling_*.py"
+      - "tests/test_cross_view_ceiling_*.py"
+      - "tests/test_live_ceiling_lining_source_closed_export.py"
+      - "tests/test_source_closed_project_handoff_cross_view_ceiling.py"
+      - ".github/workflows/diag-gpt1-maryborough-ceiling-seal-post1947.yml"
+
+concurrency:
+  group: diag-gpt1-maryborough-ceiling-seal-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused GPT1 ceiling regressions
+        run: |
+          PYTHONPATH=. pytest -q tests/test_cross_view_ceiling_finish_authority.py tests/test_cross_view_ceiling_quantity_authority.py tests/test_live_ceiling_lining_source_closed_export.py tests/test_source_closed_project_handoff_cross_view_ceiling.py
+      - name: Native ceiling schedule ownership proof
+        run: |
+          PYTHONPATH=. python -u tools/diag_gpt1_maryborough_ceiling_schedule_native_block.py
+      - name: Real Maryborough ceiling seal proof
+        run: |
+          PYTHONPATH=. python -u tools/diag_gpt1_maryborough_ceiling_seal_post1947.py
