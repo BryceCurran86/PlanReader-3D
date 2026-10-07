@@ -9,6 +9,7 @@ from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRA
 from pb_live_opening_area_quantity_publication import publish_live_opening_area_quantities
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+import pb_opening_host_binding_authority as host
 from pb_opening_host_binding_authority import _resolve_two_face_lineage_host
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import JAMB_BOUNDED_TWO_FACE_INTERRUPTION
@@ -347,6 +348,8 @@ def main():
     exact_helper_status_counts = Counter()
     exact_helper_reason_counts = Counter()
     exact_helper_rows = []
+    exact_geometry_stage_counts = Counter()
+    exact_geometry_rows = []
     for trace in composition.opening_bindings:
         existence = composition.physical_opening_authority.prove_existence(
             ObservationSelector(
@@ -383,6 +386,155 @@ def main():
             "helper_reason_codes": [] if helper is None else list(helper.reason_codes),
             "helper_band_count": 0 if helper is None else len(helper.bands),
         })
+
+        if (
+            helper is not None
+            and "opening_two_face_wall_lineage_geometry_mismatch"
+            in helper.reason_codes
+        ):
+            visibility = composition.physical_opening_authority.source_visibility_authority()
+            source_records = []
+            for observation_id in opening_record.source_observation_ids:
+                resolved = visibility.resolve_visible(
+                    ObservationSelector(
+                        document_id=opening_record.document_id,
+                        revision_id=opening_record.revision_id,
+                        source_sha256=opening_record.source_sha256,
+                        snapshot_id=opening_record.snapshot_id,
+                        observation_id=observation_id,
+                    )
+                )
+                if (
+                    resolved.status is EvidenceResolutionStatus.CORROBORATED
+                    and resolved.observation is not None
+                ):
+                    source_records.append(resolved.observation)
+
+            source_pairs = host._two_face_source_break_pairs(source_records)
+            opening_geometry = host._opening_geometry(
+                composition.physical_opening_authority,
+                opening_record,
+            )
+            stage = "unknown_geometry_mismatch"
+            detail = {
+                "opening_identity_id": trace.opening_identity_id,
+                "source_record_count": len(source_records),
+                "source_pairs_available": source_pairs is not None,
+                "opening_geometry_available": opening_geometry is not None,
+                "pair_rows": [],
+            }
+            if source_pairs is None:
+                stage = "source_face_pair_reconstruction_unavailable"
+            elif opening_geometry is None:
+                stage = "opening_geometry_unavailable"
+            else:
+                edge_tol = max(0.5, min(2.0, opening_geometry.length * 0.02))
+                axis_tol = max(0.5, opening_geometry.thickness * 0.05)
+                pair_roles = []
+                stage = "geometry_checks_passed"
+                for pair_index, source_pair in enumerate(source_pairs):
+                    role_rows = []
+                    resolved_roles = []
+                    pair_stage = "pair_geometry_passed"
+                    for source_record in source_pair:
+                        raw_id = host._w4_source_primitive_id(source_record)
+                        owners = [
+                            record
+                            for record in wall_result.records
+                            if record.physical_identity.usable
+                            and raw_id is not None
+                            and raw_id in set(record.physical_identity.source_primitive_ids)
+                        ]
+                        source_line = [float(value) for value in source_record.geometry]
+                        role = {
+                            "raw_id": raw_id,
+                            "source_geometry": source_line,
+                            "owner_count": len(owners),
+                            "owner_ids": [record.wall_candidate_id for record in owners],
+                        }
+                        if len(owners) != 1:
+                            pair_stage = "owner_count_not_one"
+                            role_rows.append(role)
+                            continue
+                        owner = owners[0]
+                        axis_data = host._candidate_axis_data(owner, opening_geometry)
+                        role["owner_centerline_pts"] = [
+                            [float(x), float(y)]
+                            for x, y in owner.wall_candidate.centerline_pts
+                        ]
+                        role["axis_data"] = (
+                            None
+                            if axis_data is None
+                            else [float(value) for value in axis_data]
+                        )
+                        if axis_data is None:
+                            pair_stage = "candidate_axis_data_unavailable"
+                            role_rows.append(role)
+                            continue
+                        along_min, along_max, offset = axis_data
+                        is_left = (
+                            along_min < -edge_tol
+                            and abs(along_max) <= edge_tol
+                        )
+                        is_right = (
+                            along_max > opening_geometry.length + edge_tol
+                            and abs(along_min - opening_geometry.length) <= edge_tol
+                        )
+                        role["is_left"] = bool(is_left)
+                        role["is_right"] = bool(is_right)
+                        role["offset"] = float(offset)
+                        if is_left == is_right:
+                            pair_stage = "owner_not_exact_aperture_terminus"
+                            role_rows.append(role)
+                            continue
+                        resolved_roles.append((bool(is_left), float(offset), owner.wall_candidate_id))
+                        role_rows.append(role)
+
+                    if pair_stage == "pair_geometry_passed":
+                        if len(resolved_roles) != 2:
+                            pair_stage = "pair_role_count_not_two"
+                        else:
+                            first, second = resolved_roles
+                            if abs(first[1] - second[1]) > axis_tol:
+                                pair_stage = "same_face_offset_mismatch"
+                            elif first[0] == second[0]:
+                                pair_stage = "source_face_pair_same_aperture_side"
+                    detail["pair_rows"].append({
+                        "pair_index": pair_index,
+                        "pair_stage": pair_stage,
+                        "roles": role_rows,
+                    })
+                    if pair_stage != "pair_geometry_passed":
+                        stage = pair_stage
+                    pair_roles.append(resolved_roles)
+
+                if stage == "geometry_checks_passed":
+                    if len(pair_roles) != 2 or any(len(pair) != 2 for pair in pair_roles):
+                        stage = "pair_role_structure_incomplete"
+                    else:
+                        face_offsets = [
+                            sum(role[1] for role in pair) / 2.0
+                            for pair in pair_roles
+                        ]
+                        separation = abs(face_offsets[1] - face_offsets[0])
+                        thickness_tol = max(0.75, opening_geometry.thickness * 0.15)
+                        center_offset = (face_offsets[0] + face_offsets[1]) / 2.0
+                        center_tol = max(
+                            host.DEFAULT_GAP_SNAP_TOLERANCE_PT,
+                            thickness_tol,
+                        )
+                        detail["face_offsets"] = face_offsets
+                        detail["face_separation"] = separation
+                        detail["opening_thickness"] = float(opening_geometry.thickness)
+                        detail["center_offset"] = center_offset
+                        if abs(separation - opening_geometry.thickness) > thickness_tol:
+                            stage = "face_separation_thickness_mismatch"
+                        elif abs(center_offset) > center_tol:
+                            stage = "host_center_mismatch"
+
+            detail["geometry_failure_stage"] = stage
+            exact_geometry_stage_counts[stage] += 1
+            exact_geometry_rows.append(detail)
 
     exact_lineage_host_blocked = Counter()
     for opening in opening_rows:
@@ -458,6 +610,8 @@ def main():
         "exact_helper_status_counts": dict(exact_helper_status_counts.most_common()),
         "exact_helper_reason_counts": dict(exact_helper_reason_counts.most_common()),
         "exact_helper_rows": exact_helper_rows,
+        "exact_geometry_stage_counts": dict(exact_geometry_stage_counts.most_common()),
+        "exact_geometry_rows": exact_geometry_rows,
         "wall_candidate_count": len(wall_result.records),
         "equivalence_ambiguous_wall_count": 0 if equivalence is None else len(equivalence.ambiguous_wall_ids),
         "equivalence_pair_audit": None if equivalence is None else {
