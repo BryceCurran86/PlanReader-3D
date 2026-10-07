@@ -30,6 +30,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+    JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PHYSICAL_OPENING_EXISTS,
     PHYSICAL_OPENING_IDENTITY_RESOLVED,
@@ -69,6 +70,9 @@ MULTIPLE_RASTER_SPLIT_CENTERLINE_HOSTS = (
     "multiple_authenticated_raster_split_centerline_hosts"
 )
 RASTER_SOURCE_PRIMITIVE_HOST_RESOLVED = "raster_source_primitive_host_resolved"
+JAMB_TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED = (
+    "jamb_two_face_source_lineage_host_resolved"
+)
 MULTIPLE_RASTER_SOURCE_PRIMITIVE_HOSTS = (
     "multiple_authenticated_raster_source_primitive_hosts"
 )
@@ -889,15 +893,32 @@ def _raw_source_primitive_id(record: SourceObservationRecord) -> Optional[str]:
     return raw_id or None
 
 
-def _unique_gap_source_records(
+def _positive_gap_source_record_pairs(
     records: Sequence[SourceObservationRecord],
-) -> Optional[tuple[SourceObservationRecord, SourceObservationRecord]]:
-    """Find exactly one positive collinear interruption among source records."""
-    candidates: list[tuple[SourceObservationRecord, SourceObservationRecord]] = []
+) -> tuple[
+    tuple[
+        SourceObservationRecord,
+        SourceObservationRecord,
+        Point,
+        float,
+        float,
+    ],
+    ...,
+]:
+    """Return exact positive collinear source interruptions and their stations."""
+    candidates: list[
+        tuple[
+            SourceObservationRecord,
+            SourceObservationRecord,
+            Point,
+            float,
+            float,
+        ]
+    ] = []
     for index, first_record in enumerate(records):
         first = _line(first_record)
         if first is None:
-            return None
+            return ()
         for second_record in records[index + 1:]:
             second = _line(second_record)
             if second is None or not _collinear(first, second):
@@ -912,10 +933,26 @@ def _unique_gap_source_records(
             else:
                 left_iv, right_iv = second_iv, first_iv
             if right_iv[0] - left_iv[1] > _COORD_TOL:
-                candidates.append((first_record, second_record))
+                candidates.append(
+                    (
+                        first_record,
+                        second_record,
+                        axis,
+                        float(left_iv[1]),
+                        float(right_iv[0]),
+                    )
+                )
+    return tuple(candidates)
+
+
+def _unique_gap_source_records(
+    records: Sequence[SourceObservationRecord],
+) -> Optional[tuple[SourceObservationRecord, SourceObservationRecord]]:
+    """Find exactly one positive collinear interruption among source records."""
+    candidates = _positive_gap_source_record_pairs(records)
     if len(candidates) != 1:
         return None
-    return candidates[0]
+    return (candidates[0][0], candidates[0][1])
 
 
 def _resolve_gap_lineage_host_from_records(
@@ -1036,13 +1073,183 @@ def _resolve_gap_lineage_host_from_records(
     )
 
 
+def _resolve_jamb_two_face_lineage_host_from_records(
+    opening_records: Sequence[SourceObservationRecord],
+    wall_records: Sequence[PhysicalWallCandidateRecord],
+    equivalence: PhysicalWallEquivalenceResolution,
+) -> _HostBandResolution:
+    """Bind a two-face jamb-bounded opening by its four exact wall primitives.
+
+    G17's JAMB_BOUNDED_TWO_FACE_INTERRUPTION proposition is built from two
+    source-owned collinear wall-face interruptions plus the two jambs joining
+    their aperture endpoints.  Re-prove that exact two-face topology here, map
+    only those four wall-face source primitives through W4 physical identities,
+    and preserve upstream SAME/DISTINCT/AMBIGUOUS wall equivalence.  Geometry
+    never ranks or selects a nearby host.
+    """
+
+    gaps = _positive_gap_source_record_pairs(opening_records)
+    if len(gaps) != 2:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+
+    first, second = gaps
+    first_axis, second_axis = first[2], second[2]
+    if (
+        abs(
+            abs(
+                first_axis[0] * second_axis[0]
+                + first_axis[1] * second_axis[1]
+            )
+            - 1.0
+        )
+        > _COORD_TOL
+        or abs(first[3] - second[3]) > _COORD_TOL
+        or abs(first[4] - second[4]) > _COORD_TOL
+    ):
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+
+    first_line = _line(first[0])
+    second_line = _line(second[0])
+    if (
+        first_line is None
+        or second_line is None
+        or _collinear(first_line, second_line)
+    ):
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+
+    face_records = (first[0], first[1], second[0], second[1])
+    if len({record.observation_id for record in face_records}) != 4:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+
+    raw_ids = tuple(_raw_source_primitive_id(record) for record in face_records)
+    if any(raw_id is None for raw_id in raw_ids) or len(set(raw_ids)) != 4:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNAVAILABLE,),
+        )
+
+    ambiguous_ids = set(equivalence.ambiguous_wall_ids)
+    group_lookup = _equivalence_group_lookup(equivalence)
+    role_members: list[_RoleCandidate] = []
+    for raw_id in raw_ids:
+        assert raw_id is not None
+        owners = tuple(
+            record
+            for record in wall_records
+            if record.physical_identity.usable
+            and raw_id in set(record.source_coverage_primitive_ids)
+        )
+        if not owners:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.ABSTAINED,
+                (),
+                (HOST_GAP_LINEAGE_UNMAPPED,),
+            )
+        if any(record.wall_candidate_id in ambiguous_ids for record in owners):
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT,
+                (),
+                (HOST_GAP_LINEAGE_AMBIGUOUS, HOST_EQUIVALENCE_AMBIGUOUS),
+            )
+
+        by_group: dict[
+            tuple[str, ...],
+            list[PhysicalWallCandidateRecord],
+        ] = {}
+        for record in owners:
+            group = _equivalence_group_for(
+                equivalence,
+                record.wall_candidate_id,
+                group_lookup=group_lookup,
+            )
+            by_group.setdefault(group, []).append(record)
+        if len(by_group) != 1:
+            return _HostBandResolution(
+                EvidenceResolutionStatus.CONFLICT,
+                (),
+                (HOST_GAP_LINEAGE_AMBIGUOUS,),
+            )
+        group, members = next(iter(by_group.items()))
+        chosen = sorted(
+            members,
+            key=lambda record: record.wall_candidate_id,
+        )[0]
+        role_members.append(
+            _RoleCandidate(
+                offset=0.0,
+                record=chosen,
+                candidate_group=group,
+            )
+        )
+
+    member_ids = tuple(
+        sorted({member.record.wall_candidate_id for member in role_members})
+    )
+    identity_ids = tuple(
+        sorted(
+            {
+                str(member.record.physical_identity.candidate_identity_id)
+                for member in role_members
+                if member.record.physical_identity.candidate_identity_id
+            }
+        )
+    )
+    groups = tuple(
+        sorted(
+            {
+                tuple(sorted(member.candidate_group))
+                for member in role_members
+            }
+        )
+    )
+    if not member_ids or not identity_ids:
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED,
+            (),
+            (HOST_GAP_LINEAGE_UNMAPPED,),
+        )
+
+    return _HostBandResolution(
+        EvidenceResolutionStatus.CORROBORATED,
+        (
+            _HostBand(
+                member_ids=member_ids,
+                member_candidate_identity_ids=identity_ids,
+                member_equivalence_groups=groups,
+                center_offset=0.0,
+            ),
+        ),
+        (JAMB_TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED,),
+    )
+
+
 def _resolve_generic_gap_lineage_host(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
     wall_records: Sequence[PhysicalWallCandidateRecord],
     equivalence: PhysicalWallEquivalenceResolution,
 ) -> Optional[_HostBandResolution]:
-    if opening.structural_pattern not in GENERIC_GAP_HOST_PATTERNS:
+    if (
+        opening.structural_pattern not in GENERIC_GAP_HOST_PATTERNS
+        and opening.structural_pattern != JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+    ):
         return None
     visibility = authority.source_visibility_authority()
     if type(visibility) is not SourceVisibilityAuthority:
@@ -1072,6 +1279,12 @@ def _resolve_generic_gap_lineage_host(
                 (HOST_GAP_LINEAGE_UNAVAILABLE,),
             )
         observations.append(result.observation)
+    if opening.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION:
+        return _resolve_jamb_two_face_lineage_host_from_records(
+            observations,
+            wall_records,
+            equivalence,
+        )
     return _resolve_gap_lineage_host_from_records(
         observations,
         wall_records,
@@ -1983,6 +2196,7 @@ def _host_bands(
 
 
 __all__ = [
+    "JAMB_TWO_FACE_SOURCE_LINEAGE_HOST_RESOLVED",
     "OPENING_HOST_BINDING_SCHEMA_VERSION",
     "OpeningHostBindingAuthority",
     "OpeningHostBindingProducer",
