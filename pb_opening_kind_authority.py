@@ -19,6 +19,7 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
 )
 
 
@@ -34,6 +35,7 @@ OPENING_KIND_UNAVAILABLE = "opening_kind_unavailable"
 _STRUCTURAL_KIND = {
     GAP_CORROBORATED_DOOR_JAMB_LEAF: "door",
     GAP_CORROBORATED_WINDOW_JAMB_PAIR: "window",
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION: "door",
 }
 
 
