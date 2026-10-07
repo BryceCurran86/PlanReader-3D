@@ -253,6 +253,7 @@ def main():
             owner_count_distribution[str(len(usable_ids))] += 1
             face_rows.append({
                 "raw_id": raw_id,
+                "protected_by_g17": raw_id in protected_face_ids,
                 "stage": stage,
                 "source_kind": None if segment is None else str(segment.get("source_kind") or "native"),
                 "layer": None if segment is None else str(segment.get("layer") or ""),
@@ -274,6 +275,22 @@ def main():
             "face_rows": face_rows,
         })
 
+    protected_occurrences = [
+        face
+        for opening in opening_rows
+        for face in opening["face_rows"]
+        if face["protected_by_g17"]
+    ]
+    unprotected_occurrences = [
+        face
+        for opening in opening_rows
+        for face in opening["face_rows"]
+        if not face["protected_by_g17"]
+    ]
+    opening_protection_counts = Counter(
+        sum(1 for face in opening["face_rows"] if face["protected_by_g17"])
+        for opening in opening_rows
+    )
     payload = {
         "source_sha256": actual,
         "snapshot_id": current.snapshot.snapshot_id,
@@ -281,6 +298,17 @@ def main():
         "wall_scope_complete": bool(wall_result.scope_complete),
         "wall_scope_reason_codes": list(wall_result.reason_codes),
         "protected_face_source_id_count": len(protected_face_ids),
+        "protected_face_occurrence_count": len(protected_occurrences),
+        "unprotected_face_occurrence_count": len(unprotected_occurrences),
+        "opening_protected_face_count_distribution": dict(sorted(
+            (str(key), value) for key, value in opening_protection_counts.items()
+        )),
+        "unprotected_face_stage_counts": dict(Counter(
+            face["stage"] for face in unprotected_occurrences
+        ).most_common()),
+        "unprotected_face_source_ids": sorted({
+            face["raw_id"] for face in unprotected_occurrences
+        }),
         "wall_candidate_count": len(wall_result.records),
         "equivalence_ambiguous_wall_count": 0 if equivalence is None else len(equivalence.ambiguous_wall_ids),
         "host_bound_count": sum(1 for trace in composition.opening_bindings if trace.host_wall_id),
