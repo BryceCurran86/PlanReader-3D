@@ -637,3 +637,26 @@ def test_single_reflected_ceiling_plan_can_own_printable_area_without_floor_topo
         assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     finally:
         doc.close()
+
+
+@pytest.mark.parametrize(
+    "title",
+    (
+        "INTERNAL FINISHES SCHEDULE",
+        "EXTERNAL FINISHES SCHEDULE",
+        "CEILING FINISHES SCHEDULE",
+        "FLOOR FINISHES SCHEDULE",
+    ),
+)
+def test_gridded_qualified_finish_schedule_titles_are_authoritative(title: str) -> None:
+    doc = _single_table_frame_view(title)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
