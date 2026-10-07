@@ -45,6 +45,25 @@ def main() -> None:
         page_ids=(PAGE_ID,),
     )
 
+    visibility = source.authority()
+    thin_runs = []
+    for observation_id in published.raster_opening_primitive_observation_ids:
+        resolved = visibility.resolve_raster_opening_primitive(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            resolved.status is EvidenceResolutionStatus.CORROBORATED
+            and resolved.observation is not None
+            and resolved.observation.observation_kind == "raster_thin_ink_run"
+        ):
+            thin_runs.append(resolved.observation)
+
     ratio_calls = []
     solution_calls = []
     original_ratio = g17._raster_swing_perpendicular_scale_ratio
@@ -81,6 +100,91 @@ def main() -> None:
             perpendicular_scale_ratio=perpendicular_scale_ratio,
             along_scale=along_scale,
         )
+        solution_rows = []
+        for item in solutions:
+            pad = g17._raster_scaled_px(
+                g17._RASTER_SWING_LEAF_JAMB_PAD_PT,
+                dpi,
+                along_scale,
+            )
+            expected_start = (
+                item.face_y - item.perpendicular_radius_px
+                if item.side == -1
+                else item.face_y + 1
+            )
+            expected_end = (
+                item.face_y - 1
+                if item.side == -1
+                else item.face_y + item.perpendicular_radius_px
+            )
+            expected_start, expected_end = sorted(
+                (float(expected_start), float(expected_end))
+            )
+            expected_length = max(expected_end - expected_start + 1.0, 1.0)
+            leaf_matches = []
+            leaf_near_misses = []
+            for record in thin_runs:
+                line = tuple(
+                    float(value) * float(dpi) / 72.0
+                    for value in record.geometry
+                )
+                if current["axis"] == "vertical":
+                    line = (line[1], line[0], line[3], line[2])
+                if abs(line[0] - line[2]) > 0.51:
+                    continue
+                leaf_x = (line[0] + line[2]) / 2.0
+                hinge_delta = abs(leaf_x - float(item.hinge_x))
+                run_start, run_end = sorted((line[1], line[3]))
+                overlap = max(
+                    0.0,
+                    min(run_end, expected_end)
+                    - max(run_start, expected_start)
+                    + 1.0,
+                )
+                overlap_ratio = overlap / expected_length
+                if item.side == -1:
+                    jamb_delta = abs(run_end - float(item.face_y))
+                else:
+                    jamb_delta = abs(run_start - float(item.face_y))
+                diagnostic = {
+                    "observation_id": record.observation_id,
+                    "geometry_pt": [float(value) for value in record.geometry],
+                    "hinge_delta_px": float(hinge_delta),
+                    "overlap_ratio": float(overlap_ratio),
+                    "jamb_delta_px": float(jamb_delta),
+                }
+                if (
+                    hinge_delta <= float(pad) + 0.51
+                    and overlap_ratio + 1e-12 >= g17._RASTER_SWING_LEAF_MIN_COVERAGE
+                    and jamb_delta <= float(pad) + 1.0
+                ):
+                    leaf_matches.append(diagnostic)
+                elif (
+                    hinge_delta <= float(pad) + 2.0
+                    or overlap_ratio >= 0.5
+                    or jamb_delta <= float(pad) + 2.0
+                ):
+                    leaf_near_misses.append(diagnostic)
+
+            solution_rows.append({
+                "hinge_end": str(item.hinge_end),
+                "side": int(item.side),
+                "radius_px": int(item.radius_px),
+                "perpendicular_radius_px": int(item.perpendicular_radius_px),
+                "arc_coverage": float(item.arc_coverage),
+                "leaf_coverage": float(item.leaf_coverage),
+                "strict_leaf_match_count": len(leaf_matches),
+                "strict_leaf_matches": leaf_matches,
+                "closest_leaf_near_misses": sorted(
+                    leaf_near_misses,
+                    key=lambda row: (
+                        row["hinge_delta_px"],
+                        -row["overlap_ratio"],
+                        row["jamb_delta_px"],
+                    ),
+                )[:6],
+            })
+
         solution_calls.append({
             "gap_box_pt": (
                 None if current["gap_box_pt"] is None
@@ -94,17 +198,7 @@ def main() -> None:
             "gap_length_px": int(pair.gap_x1 - pair.gap_x0 + 1),
             "pair_rows_px": [int(pair.row0), int(pair.row1)],
             "solution_count": len(solutions),
-            "solutions": [
-                {
-                    "hinge_end": str(item.hinge_end),
-                    "side": int(item.side),
-                    "radius_px": int(item.radius_px),
-                    "perpendicular_radius_px": int(item.perpendicular_radius_px),
-                    "arc_coverage": float(item.arc_coverage),
-                    "leaf_coverage": float(item.leaf_coverage),
-                }
-                for item in solutions
-            ],
+            "solutions": solution_rows,
         })
         return solutions
 
@@ -168,6 +262,11 @@ def main() -> None:
         "swing_registration_status_counts": dict(ratio_status),
         "swing_solution_call_count": len(solution_calls),
         "swing_solution_count_distribution": dict(solution_count_distribution),
+        "strict_thin_run_count": len(thin_runs),
+        "one_solution_strict_leaf_match_count_distribution": dict(Counter(
+            str(row["solutions"][0]["strict_leaf_match_count"])
+            for row in one_solution_rows
+        )),
         "one_solution_count": len(one_solution_rows),
         "multi_solution_count": len(multi_solution_rows),
         "one_solution_rows": one_solution_rows,
