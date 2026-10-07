@@ -25,6 +25,10 @@ from pb_cross_view_room_area_authority import (
     CrossViewRoomAreaRecord,
     CrossViewRoomAreaResult,
 )
+from pb_same_view_room_area_authority import (
+    SameViewRoomAreaRecord,
+    SameViewRoomAreaResult,
+)
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_canonical_floor_surface import (
     LiveCanonicalFloorSurfaceComposition,
@@ -45,7 +49,7 @@ from pb_source_material_semantic_authority import (
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
-CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION = "1.0.0"
+CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION = "1.1.0"
 CROSS_VIEW_FLOOR_FINISH_RESOLVED = "cross_view_floor_finish_resolved"
 CROSS_VIEW_FLOOR_FINISH_PARTIAL = "cross_view_floor_finish_partial"
 CROSS_VIEW_FLOOR_FINISH_UNAVAILABLE = "cross_view_floor_finish_unavailable"
@@ -147,13 +151,17 @@ def _definition_is_floor_finish(
 
 
 def _dimension_box(
-    record: CrossViewRoomAreaRecord,
+    record: CrossViewRoomAreaRecord | SameViewRoomAreaRecord,
 ) -> Optional[tuple[float, float, float, float]]:
     evidence = record.area_evidence
     if (
         evidence.status is not EvidenceResolutionStatus.CORROBORATED
         or evidence.kind != "explicit_room_area"
-        or evidence.method != "authenticated_cross_view_figured_dimensions"
+        or evidence.method
+        not in {
+            "authenticated_cross_view_figured_dimensions",
+            "authenticated_same_view_figured_dimensions",
+        }
     ):
         return None
     metadata = evidence.metadata if isinstance(evidence.metadata, Mapping) else {}
@@ -167,7 +175,9 @@ def _dimension_box(
     return box
 
 
-def _area_value(record: CrossViewRoomAreaRecord) -> Optional[float]:
+def _area_value(
+    record: CrossViewRoomAreaRecord | SameViewRoomAreaRecord,
+) -> Optional[float]:
     evidence = record.area_evidence
     if _clean(evidence.unit).lower() not in {"m2", "m²"}:
         return None
@@ -198,7 +208,7 @@ def _expected_floor_id(
 
 def _matching_floor(
     floors: LiveCanonicalFloorSurfaceComposition,
-    area_record: CrossViewRoomAreaRecord,
+    area_record: CrossViewRoomAreaRecord | SameViewRoomAreaRecord,
 ) -> Optional[LiveCanonicalFloorSurfaceObject]:
     expected_id = _expected_floor_id(
         document_id=area_record.area_evidence.document_id,
@@ -321,8 +331,9 @@ class CrossViewFloorFinishProducer:
         self,
         *,
         source: SourceVisibilityProducer,
-        room_areas: CrossViewRoomAreaResult,
+        room_areas: Optional[CrossViewRoomAreaResult],
         floors: LiveCanonicalFloorSurfaceComposition,
+        same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -331,14 +342,24 @@ class CrossViewFloorFinishProducer:
             )
         if type(source) is not SourceVisibilityProducer:
             raise TypeError("source must be exact SourceVisibilityProducer")
-        if type(room_areas) is not CrossViewRoomAreaResult:
-            raise TypeError("room_areas must be CrossViewRoomAreaResult")
+        if room_areas is not None and type(room_areas) is not CrossViewRoomAreaResult:
+            raise TypeError("room_areas must be CrossViewRoomAreaResult or None")
+        if (
+            same_view_room_areas is not None
+            and type(same_view_room_areas) is not SameViewRoomAreaResult
+        ):
+            raise TypeError(
+                "same_view_room_areas must be SameViewRoomAreaResult or None"
+            )
+        if room_areas is None and same_view_room_areas is None:
+            raise ValueError("at least one documented room-area result is required")
         if type(floors) is not LiveCanonicalFloorSurfaceComposition:
             raise TypeError(
                 "floors must be LiveCanonicalFloorSurfaceComposition"
             )
         self._source = source
         self._room_areas = room_areas
+        self._same_view_room_areas = same_view_room_areas
         self._floors = floors
 
     @classmethod
@@ -346,18 +367,27 @@ class CrossViewFloorFinishProducer:
         cls,
         *,
         source: SourceVisibilityProducer,
-        room_areas: CrossViewRoomAreaResult,
+        room_areas: Optional[CrossViewRoomAreaResult],
         floors: LiveCanonicalFloorSurfaceComposition,
+        same_view_room_areas: Optional[SameViewRoomAreaResult] = None,
     ) -> "CrossViewFloorFinishProducer":
         return cls(
             source=source,
             room_areas=room_areas,
             floors=floors,
+            same_view_room_areas=same_view_room_areas,
             _seal=_PRODUCER_SEAL,
         )
 
     def publish(self) -> CrossViewFloorFinishResult:
-        area_records = tuple(self._room_areas.records)
+        area_records = (
+            tuple(self._room_areas.records if self._room_areas is not None else ())
+            + tuple(
+                self._same_view_room_areas.records
+                if self._same_view_room_areas is not None
+                else ()
+            )
+        )
         if not area_records:
             return CrossViewFloorFinishResult(
                 status=EvidenceResolutionStatus.ABSTAINED,
