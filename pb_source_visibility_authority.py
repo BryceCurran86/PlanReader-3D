@@ -40,6 +40,11 @@ from pb_raster_compact_wall_band_segments import (
     compact_band_has_same_visible_paint,
     detect_compact_raster_wall_band_segments,
 )
+from pb_raster_terminal_wall_band_segments import (
+    TERMINAL_WALL_BAND_DETECTOR_VERSION,
+    TERMINAL_WALL_BAND_IDENTITY_VERSION,
+    detect_terminal_raster_wall_band_segments,
+)
 from pb_raster_opening_source_primitives import (
     RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
     RASTER_LINE_RUN,
@@ -226,18 +231,30 @@ class RasterSegmentVisibilityReceipt:
     visibility_render_sha256: Optional[str] = None
 
 
-def _compact_render_provenance_matches(observation, receipt) -> bool:
-    if f':{COMPACT_WALL_BAND_IDENTITY_VERSION}:' not in observation.source_primitive_ref:
+def _supplemental_raster_detector_family(primitive_ref):
+    for identity_version, detector_version in (
+        (COMPACT_WALL_BAND_IDENTITY_VERSION, COMPACT_WALL_BAND_DETECTOR_VERSION),
+        (TERMINAL_WALL_BAND_IDENTITY_VERSION, TERMINAL_WALL_BAND_DETECTOR_VERSION),
+    ):
+        if f':{identity_version}:' in primitive_ref:
+            return identity_version, detector_version
+    return None
+
+
+def _supplemental_render_provenance_matches(observation, receipt) -> bool:
+    family = _supplemental_raster_detector_family(observation.source_primitive_ref)
+    if family is None:
         return True
+    identity_version, detector_version = family
     full_hash = receipt.visibility_render_sha256
     return bool(
         isinstance(full_hash, str) and len(full_hash) == 64
         and all(c in '0123456789abcdef' for c in full_hash)
         and receipt.dpi == RASTER_OPENING_PRIMITIVE_RENDER_DPI
-        and receipt.detector_version == COMPACT_WALL_BAND_DETECTOR_VERSION
+        and receipt.detector_version == detector_version
         and observation.source_primitive_ref.startswith(
             f'visible:raster_segment:{receipt.image_sha256}:'
-            f'{COMPACT_WALL_BAND_IDENTITY_VERSION}:{full_hash}:'
+            f'{identity_version}:{full_hash}:'
         )
     )
 
@@ -1344,9 +1361,10 @@ class SourceVisibilityProducer:
         # any excluded image-derived candidate.
         compact_owned = False
         for primitive, receipt in receipts.items():
-            if f':{COMPACT_WALL_BAND_IDENTITY_VERSION}:' in records[primitive].source_primitive_ref:
+            family = _supplemental_raster_detector_family(records[primitive].source_primitive_ref)
+            if family is not None:
                 if (receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
-                        or receipt.detector_version != COMPACT_WALL_BAND_DETECTOR_VERSION):
+                        or receipt.detector_version != family[1]):
                     raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
                 compact_owned = True
             elif receipt.dpi != RASTER_RENDER_DPI:
@@ -1785,17 +1803,22 @@ class SourceVisibilityProducer:
                 # Match the existing G17 source-frame limitation. A page
                 # rotation requires its own independently proved transform.
                 if compact_render is not None and int(compact_frame.rotation) == 0:
+                    registration_scale = self.raster_opening_registration_scale(
+                        published.revision.revision_id, page_id,
+                    ) or (1.0, 1.0)
                     compact_segments = detect_compact_raster_wall_band_segments(
                         compact_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                        registration_scale=self.raster_opening_registration_scale(
-                            published.revision.revision_id, page_id,
-                        ) or (1.0, 1.0),
+                        registration_scale=registration_scale,
                     )
                     compact_segments = tuple(sorted(compact_segments, key=lambda item: (
                         item.orientation, item.geometry_pt, item.pixel_geometry,
                     )))
+                    terminal_segments = detect_terminal_raster_wall_band_segments(
+                        compact_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                        registration_scale=registration_scale,
+                    )
                     full_visibility_hash = None
-                    if compact_segments:
+                    if compact_segments or terminal_segments:
                         import cv2
                         import numpy as np
                         full_png, full_parent = self._producer.render_native_page_png(
@@ -1813,6 +1836,8 @@ class SourceVisibilityProducer:
                             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
                         compact_segments = tuple(s for s in compact_segments
                             if compact_band_has_same_visible_paint(s, isolated, full))
+                        terminal_segments = tuple(s for s in terminal_segments
+                            if compact_band_has_same_visible_paint(s, isolated, full))
                         full_visibility_hash = hashlib.sha256(full_png).hexdigest()
                     compact_hash = hashlib.sha256(compact_png).hexdigest()
                     packets.extend(
@@ -1820,6 +1845,15 @@ class SourceVisibilityProducer:
                          COMPACT_WALL_BAND_IDENTITY_VERSION, COMPACT_WALL_BAND_DETECTOR_VERSION,
                          full_visibility_hash)
                         for index, segment in enumerate(compact_segments)
+                        if _axis_aligned_geometry_fully_covered_by_rect_union(
+                            segment.geometry_pt, image_regions,
+                        )
+                    )
+                    packets.extend(
+                        (index, segment, compact_hash, RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                         TERMINAL_WALL_BAND_IDENTITY_VERSION, TERMINAL_WALL_BAND_DETECTOR_VERSION,
+                         full_visibility_hash)
+                        for index, segment in enumerate(terminal_segments)
                         if _axis_aligned_geometry_fully_covered_by_rect_union(
                             segment.geometry_pt, image_regions,
                         )
@@ -2584,7 +2618,7 @@ class SourceVisibilityAuthority:
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
             else:
                 assert raster_receipt is not None
-                if not _compact_render_provenance_matches(observation, raster_receipt):
+                if not _supplemental_render_provenance_matches(observation, raster_receipt):
                     raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
                 if (
                     observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
@@ -2687,7 +2721,7 @@ class SourceVisibilityAuthority:
                 return self._conflict(VISIBILITY_PARENT_MISMATCH)
         else:
             assert raster_receipt is not None
-            if not _compact_render_provenance_matches(observation, raster_receipt):
+            if not _supplemental_render_provenance_matches(observation, raster_receipt):
                 return self._conflict(PRODUCER_INTEGRITY_FAILURE)
             if (
                 observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT

@@ -48,15 +48,8 @@ def compact_band_has_same_visible_paint(
                 else np.array_equal(a[:, low:high + 1], b[:, low:high + 1]))
 
 
-def detect_compact_raster_wall_band_segments(
-    png_bytes: bytes, *, dpi: int,
-    registration_scale: tuple[float, float] = (1.0, 1.0),
-) -> tuple[CompactRasterBandSegment, ...]:
-    dpi = int(dpi)
-    primitives = detect_raster_opening_source_primitives(
-        png_bytes, dpi=dpi, registration_scale=registration_scale,
-    )
-    gray = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_GRAYSCALE)
+def _closed_raster_wall_band_segments(primitives, *, dpi: int):
+    """Exact four-edge boxes from the existing bounded source inventory."""
     faces = defaultdict(set)
     starts = defaultdict(set)
     ends = set()
@@ -75,7 +68,6 @@ def detect_compact_raster_wall_band_segments(
                 starts[("vertical", y0, x0)].add(x1)
 
     results = set()
-    min_line_px = max(5, int(round(_MIN_LINE_LENGTH_PT * dpi / 72.0)))
     for (orientation, along_lo, along_hi), offsets in faces.items():
         for cross_lo in offsets:
             for cross_hi in starts.get((orientation, along_lo, cross_lo), ()):
@@ -95,24 +87,40 @@ def detect_compact_raster_wall_band_segments(
                     continue
                 x0, y0, x1, y1 = (int(v) for v in box)
                 width, height = x1 - x0 + 1, y1 - y0 + 1
-                if _line_component_eligible(
-                    width, height, orientation=orientation, min_line_px=min_line_px,
-                ):
-                    continue
-                roi = gray[y0:y1 + 1, x0:x1 + 1]
-                if roi.shape != (height, width) or min(width, height) <= 2:
-                    continue
-                # Bounding edges can contain antialiased corner pixels. Require
-                # the entire inset core and every pixel supporting the exact
-                # (possibly half-pixel) centerline, including its endpoints.
-                core = roi[1:-1, 1:-1]
-                mid = (height - 1) / 2 if orientation == 'horizontal' else (width - 1) / 2
-                low, high = int(np.floor(mid)), int(np.ceil(mid))
-                line_pixels = roi[low:high + 1, :] if orientation == 'horizontal' else roi[:, low:high + 1]
-                if not np.all(core < MASS_THRESHOLD) or not np.all(line_pixels < MASS_THRESHOLD):
+                if min(width, height) <= 2:
                     continue
                 point_geometry = tuple(round(v * 72.0 / dpi, 6) for v in pixel)
                 results.add(CompactRasterBandSegment(pixel, point_geometry, orientation, (x0, y0, x1, y1)))
     return tuple(sorted(results, key=lambda item: (
         item.orientation, item.geometry_pt, item.pixel_geometry,
     )))
+
+
+def detect_compact_raster_wall_band_segments(
+    png_bytes: bytes, *, dpi: int,
+    registration_scale: tuple[float, float] = (1.0, 1.0),
+) -> tuple[CompactRasterBandSegment, ...]:
+    dpi = int(dpi)
+    primitives = detect_raster_opening_source_primitives(
+        png_bytes, dpi=dpi, registration_scale=registration_scale,
+    )
+    gray = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_GRAYSCALE)
+    results = []
+    min_line_px = max(5, int(round(_MIN_LINE_LENGTH_PT * dpi / 72.0)))
+    for segment in _closed_raster_wall_band_segments(primitives, dpi=dpi):
+        x0, y0, x1, y1 = segment.pixel_support_bounds
+        width, height = x1 - x0 + 1, y1 - y0 + 1
+        if _line_component_eligible(
+            width, height, orientation=segment.orientation, min_line_px=min_line_px,
+        ):
+            continue
+        roi = gray[y0:y1 + 1, x0:x1 + 1]
+        if roi.shape != (height, width):
+            continue
+        # Preserve the historical compact core and exact centerline proof.
+        mid = (height - 1) / 2 if segment.orientation == 'horizontal' else (width - 1) / 2
+        low, high = int(np.floor(mid)), int(np.ceil(mid))
+        line_pixels = roi[low:high + 1, :] if segment.orientation == 'horizontal' else roi[:, low:high + 1]
+        if np.all(roi[1:-1, 1:-1] < MASS_THRESHOLD) and np.all(line_pixels < MASS_THRESHOLD):
+            results.append(segment)
+    return tuple(results)

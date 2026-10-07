@@ -252,11 +252,15 @@ def main():
     sealed = seal_live_opening_area_run(voids, workspace_id=1, project_id="au_qld_lot16_power")
     Path("lot16-openings-sealed.json").write_text(sealed.to_json())
     from pb_raster_compact_wall_band_segments import COMPACT_WALL_BAND_IDENTITY_VERSION
+    from pb_raster_terminal_wall_band_segments import TERMINAL_WALL_BAND_IDENTITY_VERSION
     compact_capture = []
+    terminal_capture = []
     for observation_id, observation in source.authority().authenticated_visible_observations(current):
-        if f':{COMPACT_WALL_BAND_IDENTITY_VERSION}:' in observation.source_primitive_ref:
+        compact_owned = f':{COMPACT_WALL_BAND_IDENTITY_VERSION}:' in observation.source_primitive_ref
+        terminal_owned = f':{TERMINAL_WALL_BAND_IDENTITY_VERSION}:' in observation.source_primitive_ref
+        if compact_owned or terminal_owned:
             receipt = source._raster_visibility_receipts[(current.snapshot.snapshot_id, observation_id)]
-            compact_capture.append(dict(observation_id=observation_id,
+            (compact_capture if compact_owned else terminal_capture).append(dict(observation_id=observation_id,
                 source_primitive_ref=observation.source_primitive_ref,
                 geometry=observation.geometry, dpi=receipt.dpi,
                 render_sha256=receipt.image_sha256, detector_version=receipt.detector_version,
@@ -265,6 +269,7 @@ def main():
         "source_sha256": actual,
         "snapshot_id": current.snapshot.snapshot_id,
         "compact_raster_source_lines": compact_capture,
+        "terminal_raster_source_lines": terminal_capture,
         "native_annotation_opposition": list(annotation_opposition.values()),
         "semantic_status": state(composition.semantic_enumeration_result.status),
         "opening_count": len(composition.opening_bindings),

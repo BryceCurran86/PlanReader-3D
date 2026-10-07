@@ -12,7 +12,9 @@ on:
       - pb_source_observation_authority.py
       - pb_raster_visible_segment_detector.py
       - pb_raster_compact_wall_band_segments.py
+      - pb_raster_terminal_wall_band_segments.py
       - tests/test_raster_compact_wall_band_segments.py
+      - tests/test_raster_terminal_wall_band_segments.py
       - tests/test_raster_native_text_overlay_roles.py
       - tests/test_native_dimension_cap_evidence.py
       - tests/test_raster_connected_host_frame.py
@@ -47,6 +49,7 @@ jobs:
           tests/test_semantic_conflict_diagnostic_v1.py
           tests/test_raster_native_text_overlay_roles.py
           tests/test_raster_compact_wall_band_segments.py
+          tests/test_raster_terminal_wall_band_segments.py
           tests/test_raster_opening_source_primitives.py
           tests/test_raster_source_visibility_v1.py
           tests/test_source_observation_render_clip_v1.py
