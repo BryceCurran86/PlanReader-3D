@@ -721,15 +721,17 @@ def collect_live_physical_net_wall_claim(
             room_area_quantity_evidence.extend(bridge.quantities)
 
     # Floor-finish authority is a downstream consumer of already-authenticated
-    # documented room areas. It must not remeasure or infer a finish. When a
-    # cross-view room area exists, replay the merged source material semantic
-    # authority, bind exactly one explicit floor-role occurrence inside the
-    # proven dimension box, and retain that FIRM quantity on the same canonical
-    # floor identity.
-    if cross_view_area is not None and cross_view_area.records:
+    # documented room areas. It must not remeasure or infer a finish. Either
+    # same-view or cross-view figured dimensions may supply the source-owned
+    # dimension box; finish occurrence ownership remains exact to that box.
+    if (
+        same_view_area.records
+        or (cross_view_area is not None and cross_view_area.records)
+    ):
         floor_finishes = CrossViewFloorFinishProducer.from_source(
             source=source,
             room_areas=cross_view_area,
+            same_view_room_areas=same_view_area,
             floors=canonical_floors,
         ).publish()
         canonical_floors = enrich_live_canonical_floor_finishes(
