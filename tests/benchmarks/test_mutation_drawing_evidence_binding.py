@@ -478,3 +478,18 @@ def test_redteam_incomplete_dimensions_zero_deduction():
 def test_floor_layout_title_grammar_classifies_as_floor_plan():
     assert DrawingViewClassifier.classify_text("PLAN : FLOOR LAYOUT") == DrawingViewType.FLOOR_PLAN
     assert DrawingViewClassifier.classify_text("FLOOR LAYOUT") == DrawingViewType.FLOOR_PLAN
+
+
+def test_reflected_ceiling_plan_has_distinct_view_type() -> None:
+    assert (
+        DrawingViewClassifier.classify_text("PROP. REFLECTED CEILING PLAN")
+        is DrawingViewType.REFLECTED_CEILING_PLAN
+    )
+    assert (
+        DrawingViewClassifier.classify_text("R.C.P.")
+        is DrawingViewType.REFLECTED_CEILING_PLAN
+    )
+    assert (
+        DrawingViewClassifier.classify_text("GROUND FLOOR PLAN")
+        is DrawingViewType.FLOOR_PLAN
+    )
