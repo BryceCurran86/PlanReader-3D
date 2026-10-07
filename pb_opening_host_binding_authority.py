@@ -1430,6 +1430,79 @@ def _excluded_boundary_primitive_host_roles(
     return tuple(dict.fromkeys(roles))
 
 
+def _candidate_could_affect_opening_local_band(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> Optional[bool]:
+    """Whether one evaluable wall path can participate in this opening's band.
+
+    This is not a wall-identity classifier. It narrows only the opening-local
+    contamination proposition after global equivalence has conservatively kept
+    an independent-provenance pair AMBIGUOUS because physical scale is absent.
+
+    A locally relevant representation must be parallel to the sealed opening,
+    overlap/touch the aperture run, and lie inside the wall band already proved
+    by the opening's own jamb geometry. Non-evaluable geometry returns None so
+    callers remain fail-closed.
+    """
+
+    data = _candidate_axis_data(record, opening)
+    if data is None:
+        return None
+    along_min, along_max, offset = data
+    edge_tol = max(0.5, min(2.0, opening.length * 0.02))
+    cross_limit = (
+        opening.thickness / 2.0
+        + DEFAULT_GAP_SNAP_TOLERANCE_PT
+        + _COORD_TOL
+    )
+    return (
+        along_min <= opening.length + edge_tol
+        and along_max >= -edge_tol
+        and abs(offset) <= cross_limit
+    )
+
+
+def _identities_share_opening_local_ambiguity_evidence(
+    left: PhysicalWallCandidateRecord,
+    right: PhysicalWallCandidateRecord,
+) -> bool:
+    """Positive immutable evidence that remote ambiguity must still propagate."""
+
+    left_identity = left.physical_identity
+    right_identity = right.physical_identity
+    left_sources = {
+        str(value)
+        for value in left_identity.source_primitive_ids
+        if str(value).strip()
+    }
+    right_sources = {
+        str(value)
+        for value in right_identity.source_primitive_ids
+        if str(value).strip()
+    }
+    if left_sources & right_sources:
+        return True
+
+    left_candidate_identity = str(
+        left_identity.candidate_identity_id or ""
+    ).strip()
+    right_candidate_identity = str(
+        right_identity.candidate_identity_id or ""
+    ).strip()
+    if (
+        left_candidate_identity
+        and left_candidate_identity == right_candidate_identity
+    ):
+        return True
+
+    return (
+        left_identity.path_fingerprint is not None
+        and left_identity.path_fingerprint
+        == right_identity.path_fingerprint
+    )
+
+
 def _local_boundary_clean_host_scope(
     wall_result: PhysicalWallCandidateScopeResult,
     opening: _OpeningGeometry,
@@ -1444,6 +1517,13 @@ def _local_boundary_clean_host_scope(
     _resolve_raster_whole_wall_host, or a usable source-lineaged candidate whose
     own local chain spans the aperture for source-primitive resolution. This is
     candidate-universe preservation, not nearest-wall inference.
+
+    Page-wide wall equivalence intentionally keeps unscaled independent
+    parallel paths AMBIGUOUS because their physical separation is unknown.
+    For this narrower proposition, such ambiguity propagates unsafe boundary
+    evidence only when positive immutable identity evidence links the pair or
+    the unsafe geometry can actually participate in the source-proven opening
+    wall band. Positive SAME always blocks.
     """
     if (
         wall_result.status is not EvidenceResolutionStatus.CORROBORATED
@@ -1546,11 +1626,59 @@ def _local_boundary_clean_host_scope(
         }:
             continue
         pair = {str(left), str(right)}
-        if pair & relevant_ids and pair & unsafe_ids:
+        relevant_pair_ids = pair & relevant_ids
+        unsafe_pair_ids = pair & unsafe_ids
+        if not relevant_pair_ids or not unsafe_pair_ids:
+            continue
+
+        # Positive SAME remains globally authoritative and always carries
+        # unsafe boundary evidence into the opening-local proposition.
+        if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value:
             return None, (
                 HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
                 "host_equivalence_bridges_unsafe_boundary_evidence",
             )
+
+        # Global wall equivalence deliberately keeps unscaled, parallel,
+        # longitudinally-overlapping independent paths AMBIGUOUS regardless of
+        # lateral separation. That is correct for global wall publication, but
+        # it must not make every remote boundary-tainted wall contaminate every
+        # opening. Keep AMBIGUOUS fail-closed whenever immutable identity
+        # evidence connects the pair, the unsafe path can occupy this opening's
+        # source-proven wall band, or its geometry cannot be evaluated. Only an
+        # evaluable, remote, lineage-independent ambiguity is outside this
+        # opening-local proposition.
+        for relevant_id in sorted(relevant_pair_ids):
+            relevant_record = records_by_id.get(relevant_id)
+            if relevant_record is None:
+                return None, (
+                    HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                    "host_equivalence_bridges_unsafe_boundary_evidence",
+                )
+            for unsafe_id in sorted(unsafe_pair_ids):
+                unsafe_record = records_by_id.get(unsafe_id)
+                if unsafe_record is None:
+                    return None, (
+                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                        "host_equivalence_bridges_unsafe_boundary_evidence",
+                    )
+                if _identities_share_opening_local_ambiguity_evidence(
+                    relevant_record,
+                    unsafe_record,
+                ):
+                    return None, (
+                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                        "host_equivalence_bridges_unsafe_boundary_evidence",
+                    )
+                local_effect = _candidate_could_affect_opening_local_band(
+                    unsafe_record,
+                    opening,
+                )
+                if local_effect is not False:
+                    return None, (
+                        HOST_LOCAL_BOUNDARY_SCOPE_UNAVAILABLE,
+                        "host_equivalence_bridges_unsafe_boundary_evidence",
+                    )
 
     local_records = tuple(
         records_by_id[wall_id] for wall_id in sorted(relevant_ids)
