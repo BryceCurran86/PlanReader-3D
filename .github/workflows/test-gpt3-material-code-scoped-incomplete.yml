@@ -1,0 +1,95 @@
+name: TEST GPT3 Material Code Scoped Incomplete
+
+on:
+  push:
+    branches:
+      - fix/gpt3-material-code-scoped-incomplete-v1
+
+concurrency:
+  group: test-gpt3-material-code-scoped-incomplete
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Material and ceiling authority tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_source_material_semantic_authority_v1.py \
+            tests/test_cross_view_ceiling_finish_authority.py \
+            tests/test_cross_view_ceiling_quantity_authority.py
+
+  maryborough-surfaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Run real Maryborough surfaces
+        shell: bash
+        run: |
+          set -o pipefail
+          ROOT=artifacts/gpt3-material-code-scoped/maryborough
+          mkdir -p "$ROOT"
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group surfaces \
+            --output-dir "$ROOT" \
+            | tee "$ROOT/handoff.stdout.json"
+      - name: Audit
+        if: success()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-material-code-scoped/maryborough")
+          summary=json.loads((root/"production_summary.json").read_text())
+          combined=root/"au_qld_maryborough_service_station.surfaces.json"
+          payload=json.loads(combined.read_text()) if combined.is_file() else {}
+          q=payload.get("quantities") or []
+          out={
+            "family_counts":summary.get("family_counts"),
+            "ceiling_authority_path":summary.get("ceiling_authority_path"),
+            "combined_quantity_count":summary.get("combined_quantity_count"),
+            "lineage_conflicts":sum(not bool(x.get("lineage_ok",False)) for x in q),
+            "quantities":[{
+              "quantity_id":x.get("quantity_id"),
+              "family":x.get("family"),
+              "value":x.get("value"),
+              "unit":x.get("unit"),
+              "object_identity_refs":x.get("object_identity_refs") or [],
+              "lineage_ok":x.get("lineage_ok"),
+            } for x in q],
+          }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          (root/"audit.json").write_text(json.dumps(out,indent=2,sort_keys=True)+"\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-material-code-scoped-maryborough
+          path: artifacts/gpt3-material-code-scoped/maryborough
+          retention-days: 3
