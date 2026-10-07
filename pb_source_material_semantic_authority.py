@@ -1416,22 +1416,20 @@ class SourceMaterialSemanticProducer:
                 # the title and rows into separate blocks, through a complete
                 # raster-corroborated aligned block cluster. Neither route mints
                 # drawing occurrences.
+                native_schedule_clusters = _native_material_schedule_clusters(
+                    source=self._source,
+                    published=published,
+                    raster=raster,
+                    words=page_words,
+                )
+                native_schedule_cluster_pages.update(
+                    str(block.page_id) for block in native_schedule_clusters
+                )
                 native_schedule_blocks = (
                     *_trusted_native_material_schedule_blocks(page_words),
-                    *_native_material_schedule_clusters(
-                        source=self._source,
-                        published=published,
-                        raster=raster,
-                        words=page_words,
-                    ),
+                    *native_schedule_clusters,
                 )
                 for schedule_block in native_schedule_blocks:
-                    if schedule_block.scope_id.startswith(
-                        "source_material_native_schedule_cluster"
-                    ):
-                        native_schedule_cluster_pages.add(
-                            str(schedule_block.page_id)
-                        )
                     line_evidence = dict(schedule_block.line_evidence)
                     for item in parse_schedule_text(
                         schedule_block.text,
