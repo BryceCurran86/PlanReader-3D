@@ -1323,10 +1323,7 @@ def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> 
         height = bbox[3] - bbox[1]
         if width < calibration.minimum_frame_span_pt or height < calibration.minimum_frame_span_pt:
             continue
-        if (
-            _frame_aspect_ratio(bbox) > _MAX_FRAME_ASPECT_RATIO
-            and not _frame_looks_like_table(bbox, page, calibration)
-        ):
+        if _frame_aspect_ratio(bbox) > _MAX_FRAME_ASPECT_RATIO:
             continue
         if _is_page_or_crop_border(bbox, calibration):
             continue
