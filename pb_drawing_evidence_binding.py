@@ -194,7 +194,7 @@ class DrawingViewClassifier:
         r"\b(?:section\s*[a-z0-9\-]+|cross\s*section|longitudinal\s*section)\b",
     )
     _SCHEDULE_PATTERNS = (
-        r"\b(?:schedule\s*of\s*(?:doors|windows|finishes)|window\s*schedule|door\s*schedule|finishes\s*schedule)\b",
+        r"\b(?:schedule\s*of\s*(?:doors|windows|finishes)|window\s*schedule|door\s*schedule|finish(?:es)?\s*schedule)\b",
     )
     _DETAIL_PATTERNS = (
         r"\b(?:typical\s*detail|detail\s*[a-z0-9\-]+|standard\s*detail|enlarged\s*detail|to\s*s\.e\s*detail)\b",
