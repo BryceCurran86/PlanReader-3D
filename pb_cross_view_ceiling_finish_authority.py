@@ -88,6 +88,7 @@ _CEILING_LINING_SEMANTICS = frozenset(
         "fibre_cement",
         "insulated_panel",
         "sandwich_panel",
+        "tile",
     }
 )
 
