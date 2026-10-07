@@ -316,6 +316,27 @@ def test_duplicate_canonical_room_label_cannot_mint_cross_view_identity(
     assert ceiling.CROSS_VIEW_CEILING_FINISH_CONFLICT in result.reason_codes
 
 
+def test_plasterboard_definition_uses_authenticated_rcp_for_ceiling_role() -> None:
+    source, published = _source()
+    definition = SourceMaterialDefinitionRecord(
+        record_id="def-fpb",
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        code="FPB",
+        description="Flush plasterboard",
+        substrate="",
+        finish="",
+        semantic_finish="plasterboard",
+        source_definition_ids=("def-fpb-evidence",),
+        source_page_ids=("1",),
+        source_viewport_ids=("schedule-vp",),
+    )
+
+    assert ceiling._definition_is_ceiling_finish(definition) is True
+
+
 def test_non_ceiling_material_definition_cannot_bind(monkeypatch) -> None:
     source, published = _source()
     rooms = _rooms(published, _room(published))
