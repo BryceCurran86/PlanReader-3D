@@ -481,7 +481,7 @@ def test_reflected_ceiling_plan_segments_without_becoming_floor_plan_topology() 
         assert viewport.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
         assert viewport.status == ViewportSegmentationStatus.RESOLVED.value
         assert viewport.bounding_box == pytest.approx((30, 30, 470, 300))
-        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == ()
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     finally:
         doc.close()
 
