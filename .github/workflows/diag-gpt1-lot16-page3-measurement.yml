@@ -1,0 +1,121 @@
+name: DIAG GPT1 Lot16 Page3 Measurement
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-room-area-scope-v1
+
+concurrency:
+  group: diag-gpt1-lot16-page3-measurement
+  cancel-in-progress: true
+
+jobs:
+  measurement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Probe Lot16 page 3 measurement authority
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+
+          from pb_cross_view_room_area_authority import (
+              _trusted_native_dimensions_for_page,
+          )
+          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+          from pb_physical_scale_authority import (
+              PhysicalScaleProducer,
+              PhysicalScaleSelector,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-lot16-page3-measurement",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt1-lot16-page3-measurement",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3",),
+          )
+
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          try:
+              bundle=extract_dimension_evidence_bundle(
+                  pdf.load_page(2),
+                  page_num=3,
+              )
+          finally:
+              pdf.close()
+
+          status_counts={}
+          for binding in bundle.bindings:
+              status_counts[binding.status]=status_counts.get(binding.status,0)+1
+          orientation_counts={}
+          for obs in bundle.observations:
+              orientation_counts[obs.orientation]=orientation_counts.get(obs.orientation,0)+1
+
+          trusted=_trusted_native_dimensions_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="3",
+          )
+
+          scale_producer=PhysicalScaleProducer.from_source_visibility_producer(source)
+          scale_selector=PhysicalScaleSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="3",
+              viewport_id=None,
+          )
+          scale=scale_producer.publish_scope(scale_selector)
+
+          out={
+              "raw_dimension_observation_count":len(bundle.observations),
+              "raw_dimension_binding_count":len(bundle.bindings),
+              "raw_dimension_binding_status_counts":status_counts,
+              "raw_dimension_orientation_counts":orientation_counts,
+              "trusted_dimension_count":len(trusted),
+              "trusted_dimensions":[
+                  {
+                      "value_mm":d.value_mm,
+                      "orientation":d.orientation,
+                      "endpoints_pt":[list(x) for x in d.endpoints_pt],
+                      "text_observation_id":d.text_observation_id,
+                      "dimension_line_observation_ids":list(d.dimension_line_observation_ids),
+                      "witness_observation_ids":list(d.witness_observation_ids),
+                  }
+                  for d in trusted
+              ],
+              "physical_scale_status":getattr(scale.status,"value",str(scale.status)),
+              "physical_scale_reason_codes":list(scale.reason_codes),
+              "physical_scale_evidence":(
+                  None if scale.evidence is None else {
+                      "source_kind":scale.evidence.source_kind,
+                      "source_span_pt":scale.evidence.source_span_pt,
+                      "physical_span_mm":scale.evidence.physical_span_mm,
+                      "points_per_mm":scale.evidence.points_per_mm,
+                      "viewport_id":scale.evidence.viewport_id,
+                  }
+              ),
+          }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
