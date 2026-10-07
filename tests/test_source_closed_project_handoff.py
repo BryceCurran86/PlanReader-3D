@@ -433,6 +433,80 @@ def test_project_handoff_keeps_full_surface_evidence_but_scopes_room_support(
     assert summary["topology_mode"] == "source_classified_scope"
 
 
+def test_surface_family_group_scopes_geometry_but_keeps_full_semantic_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    monkeypatch.setattr(
+        handoff,
+        "_source_page_scopes",
+        lambda path: ((0,), (2,), 5),
+    )
+
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="abstained"),
+        reason_codes=("resolved-scope",),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_spaces=(),
+        room_area_quantity_evidence=(),
+        floor_finish_quantity_evidence=(),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+    seen = {}
+    ceiling_seen = {}
+
+    def _collect(*args, **kwargs):
+        seen.update(kwargs)
+        return claim
+
+    def _collect_ceiling(*args, **kwargs):
+        ceiling_seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        _collect,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_ceiling_lining_claims",
+        _collect_ceiling,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-a",
+        workspace_id=1,
+        output_dir=tmp_path / "out",
+        family_group="surfaces",
+    )
+
+    assert seen["pages"] == (0, 2)
+    assert seen["topology_pages"] == (0,)
+    assert seen["room_area_support_pages"] == (2,)
+    assert ceiling_seen["pages"] == (0, 1, 2, 3, 4)
+    assert summary["execution_pages"] == [1, 3]
+    assert summary["semantic_execution_pages"] == [1, 2, 3, 4, 5]
+    assert summary["topology_mode"] == "source_classified_scope"
+
+
 def test_project_handoff_rejects_family_run_from_different_source(
     tmp_path,
     monkeypatch,
