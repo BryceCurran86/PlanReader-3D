@@ -69,6 +69,32 @@ _SCHEDULE_VIEW_TYPES = frozenset(
         DrawingViewType.SPECIFICATION.value,
     }
 )
+
+
+def _is_explicit_non_material_schedule(viewport: SegmentedViewport) -> bool:
+    """Exclude source-proven door/window schedules from material semantics.
+
+    These schedules are legitimate semantic tables, but they do not define the
+    material-finish dictionary owned by this producer. An unreadable door or
+    window schedule therefore must not poison otherwise complete finish
+    schedules, legends or specifications. Ambiguous/general semantic sources
+    remain fail-closed.
+    """
+    if viewport.view_type != DrawingViewType.SCHEDULE.value:
+        return False
+    label = " ".join(
+        str(viewport.label or "").strip().casefold().replace(".", "").split()
+    )
+    return label.startswith(
+        (
+            "door schedule",
+            "window schedule",
+            "schedule of doors",
+            "schedule of windows",
+        )
+    )
+
+
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
 _MATERIAL_LINE_OCR_BLANK_MARGIN_MM = 1.0
@@ -956,6 +982,8 @@ class SourceMaterialSemanticProducer:
                 )
                 page_words = trusted_words.get(str(page_number), ())
                 for viewport in authoritative:
+                    if _is_explicit_non_material_schedule(viewport):
+                        continue
                     scoped_words = _recover_admissible_viewport_words(
                         source=self._source,
                         published=published,
