@@ -87,6 +87,75 @@ jobs:
           for page_id in ("9", "16", "18"):
               words = words_by_page.get(page_id, ())
               raw = material._raw_material_definition_candidates(words)
+
+              grouped = {}
+              for word in words:
+                  grouped.setdefault(
+                      (word.source_partition_id, int(word.block_no)), []
+                  ).append(word)
+              title_debug = []
+              code_block_debug = []
+              for (partition_id, block_no), block_words in sorted(grouped.items()):
+                  ordered = tuple(sorted(
+                      block_words,
+                      key=lambda row: (
+                          row.line_no, row.word_no, row.bbox[0], row.observation_id
+                      ),
+                  ))
+                  rows = material._native_block_line_rows(ordered)
+                  raw_text = " | ".join(row[0] for row in rows)
+                  if material._is_material_schedule_title(" ".join(row[0] for row in rows)):
+                      recovered = material._recover_native_material_block(
+                          source=source,
+                          published=published,
+                          raster=producer._raster,
+                          block_words=ordered,
+                      )
+                      title_debug.append({
+                          "partition_id": partition_id,
+                          "block_no": block_no,
+                          "raw_text": raw_text,
+                          "raw_words": [
+                              {
+                                  "text": word.text,
+                                  "trusted": bool(word.trusted),
+                                  "reasons": list(word.reason_codes),
+                              }
+                              for word in ordered
+                          ],
+                          "recovered_words": [
+                              {
+                                  "text": word.text,
+                                  "trusted": bool(word.trusted),
+                                  "reasons": list(word.reason_codes),
+                              }
+                              for word in recovered
+                          ],
+                      })
+                  first_line = rows[0][0].strip().upper() if rows else ""
+                  if first_line in {"FPB", "GRID", "WFPB"}:
+                      recovered = material._recover_native_material_block(
+                          source=source,
+                          published=published,
+                          raster=producer._raster,
+                          block_words=ordered,
+                      )
+                      code_block_debug.append({
+                          "partition_id": partition_id,
+                          "block_no": block_no,
+                          "raw_text": raw_text,
+                          "candidate": material._material_definition_candidate(ordered),
+                          "recovered_candidate": material._material_definition_candidate(recovered),
+                          "recovered_words": [
+                              {
+                                  "text": word.text,
+                                  "trusted": bool(word.trusted),
+                                  "reasons": list(word.reason_codes),
+                              }
+                              for word in recovered
+                          ],
+                      })
+
               blocks, blocked = material._trusted_native_material_schedule_cluster_blocks(
                   source=source,
                   published=published,
@@ -115,6 +184,8 @@ jobs:
                       for block in blocks
                   ],
                   "blocked_codes": list(blocked),
+                  "title_debug": title_debug,
+                  "code_block_debug": code_block_debug,
               }
 
           authority = producer.publish(published.revision.revision_id)
