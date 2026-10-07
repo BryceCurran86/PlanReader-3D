@@ -3,6 +3,16 @@ name: TEST ONLY GPT2 Maryborough Grid Component Completion
 on:
   pull_request:
     branches: [ main ]
+    paths:
+      - "pb_*room*.py"
+      - "pb_*wall*.py"
+      - "pb_live_physical_net_wall_integration.py"
+      - "tests/test_source_*room*.py"
+      - ".github/workflows/test_gpt2_maryborough_grid_component_completion.yml"
+
+concurrency:
+  group: gpt2-maryborough-grid-component-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   maryborough-grid-component:
