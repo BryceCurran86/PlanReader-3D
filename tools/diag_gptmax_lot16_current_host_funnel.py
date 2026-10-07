@@ -251,9 +251,20 @@ def main():
     from pb_live_opening_source_closed_export import seal_live_opening_area_run
     sealed = seal_live_opening_area_run(voids, workspace_id=1, project_id="au_qld_lot16_power")
     Path("lot16-openings-sealed.json").write_text(sealed.to_json())
+    from pb_raster_compact_wall_band_segments import COMPACT_WALL_BAND_IDENTITY_VERSION
+    compact_capture = []
+    for observation_id, observation in source.authority().authenticated_visible_observations(current):
+        if f':{COMPACT_WALL_BAND_IDENTITY_VERSION}:' in observation.source_primitive_ref:
+            receipt = source._raster_visibility_receipts[(current.snapshot.snapshot_id, observation_id)]
+            compact_capture.append(dict(observation_id=observation_id,
+                source_primitive_ref=observation.source_primitive_ref,
+                geometry=observation.geometry, dpi=receipt.dpi,
+                render_sha256=receipt.image_sha256, detector_version=receipt.detector_version,
+                visibility_render_sha256=receipt.visibility_render_sha256))
     payload = {
         "source_sha256": actual,
         "snapshot_id": current.snapshot.snapshot_id,
+        "compact_raster_source_lines": compact_capture,
         "native_annotation_opposition": list(annotation_opposition.values()),
         "semantic_status": state(composition.semantic_enumeration_result.status),
         "opening_count": len(composition.opening_bindings),
