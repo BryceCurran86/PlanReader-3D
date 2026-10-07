@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fitz
 
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_live_canonical_room_composition import (
     LIVE_CANONICAL_ROOM_PARTIAL,
     LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL,
@@ -301,6 +302,10 @@ def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_finish_pla
         for room in result.rooms
     )
     assert all(room.geometry_complete is True for room in result.rooms)
+    for room in result.rooms:
+        binding = result.room_face_authority_binding_for(room)
+        assert binding is not None
+        assert binding.viewport_view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
 
 
 def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewport() -> None:
@@ -333,6 +338,7 @@ def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewp
         assert room_binding is not None
         assert room_binding.viewport_id == room.viewport_id
         assert room_binding.viewport_bbox is not None
+        assert room_binding.viewport_view_type == DrawingViewType.FLOOR_PLAN.value
         room_authority = result.room_face_authority_for(room)
         assert room_authority is room_binding.authority
         resolved = room_authority.resolve_scope(
