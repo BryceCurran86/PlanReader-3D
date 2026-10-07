@@ -104,6 +104,19 @@ def test_green_stroked_insulated_panel_boundaries_are_preserved() -> None:
     assert _filter(walls) == tuple(walls)
 
 
+def test_g17_protected_face_supersedes_prior_annotation_mask_sidecar() -> None:
+    fill_edges = _fill_rect_edges(path_index=1, annotation_mask=True)
+    assert _filter(fill_edges) == ()
+
+    protected = _filter_repeated_non_physical_drafting_primitives(
+        fill_edges,
+        page_width=1000.0,
+        page_height=1000.0,
+        protected_source_primitive_ids=("fill-2",),
+    )
+    assert tuple(segment["id"] for segment in protected) == ("fill-2",)
+
+
 def test_legitimate_fill_only_rectangle_survives_without_annotation_mask_proof() -> None:
     fill_edges = _fill_rect_edges(path_index=1)
     assert _filter(fill_edges) == tuple(fill_edges)
