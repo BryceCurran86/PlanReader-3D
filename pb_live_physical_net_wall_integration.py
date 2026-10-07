@@ -499,7 +499,6 @@ def collect_live_physical_net_wall_claim(
                 viewport_bbox = tuple(
                     float(value) for value in room_binding.viewport_bbox
                 )
-                viewport_view_type = DrawingViewType.FLOOR_PLAN.value
                 viewport_status = ViewportResolutionStatus.RESOLVED
                 viewport_reason_codes = (
                     "producer_owned_room_face_viewport_scope",
@@ -516,10 +515,9 @@ def collect_live_physical_net_wall_claim(
                 )
                 if containing_viewport is not None:
                     viewport_id, viewport_bbox = containing_viewport
-                    viewport_view_type = DrawingViewType.FLOOR_PLAN.value
                     viewport_status = ViewportResolutionStatus.RESOLVED
                     viewport_reason_codes = (
-                        "producer_owned_authenticated_topology_plan_viewport",
+                        "producer_owned_authenticated_floor_plan_viewport",
                     )
                     scale_viewport_id = viewport_id
                 else:
@@ -545,7 +543,7 @@ def collect_live_physical_net_wall_claim(
                 document_id=scope_rooms[0].document_id,
                 page_id=page_id,
                 bbox=viewport_bbox,
-                view_type=viewport_view_type,
+                view_type=DrawingViewType.FLOOR_PLAN.value,
                 status=viewport_status,
                 evidence_ids=(),
                 confidence=1.0,
@@ -644,7 +642,7 @@ def collect_live_physical_net_wall_claim(
                             evidence_ids=(),
                             confidence=1.0,
                             reason_codes=(
-                                "producer_owned_authenticated_topology_plan_viewport",
+                                "producer_owned_authenticated_floor_plan_viewport",
                             ),
                         )
                         context = ProviderContext(
