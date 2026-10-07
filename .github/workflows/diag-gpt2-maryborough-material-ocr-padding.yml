@@ -74,6 +74,10 @@ jobs:
                           ("psm7","--psm 7"),
                           ("psm6","--psm 6"),
                           ("psm13","--psm 13"),
+                          ("psm4","--psm 4"),
+                          ("psm8","--psm 8"),
+                          ("psm11","--psm 11"),
+                          ("psm12","--psm 12"),
                           ("psm7_no_tables","--psm 7 -c textord_tabfind_find_tables=0"),
                       ):
                           raw=pytesseract.image_to_string(isolated,config=config)
