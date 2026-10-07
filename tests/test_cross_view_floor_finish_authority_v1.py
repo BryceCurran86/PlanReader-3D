@@ -13,6 +13,12 @@ from pb_cross_view_floor_finish_authority import (
 )
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
 from pb_geometry_takeoff_model import MeasurementAuthorityType
+import pb_same_view_room_area_authority as same_view_area_authority
+from pb_same_view_room_area_authority import (
+    SameViewRoomAreaProducer,
+    SameViewRoomAreaRecord,
+    SameViewRoomAreaResult,
+)
 from pb_live_canonical_floor_surface import (
     LiveCanonicalFloorSurfaceComposition,
     compose_live_canonical_floor_surfaces,
@@ -329,6 +335,192 @@ def test_two_valid_floor_finish_occurrences_inside_same_floor_fail_closed(
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.reason_codes == (CROSS_VIEW_FLOOR_FINISH_CONFLICT,)
     assert result.records == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
+def _same_view_payload() -> bytes:
+    doc = fitz.open()
+    try:
+        plan = doc.new_page(width=400.0, height=300.0)
+        plan.insert_text((40.0, 30.0), "GROUND FLOOR PLAN", fontsize=10.0)
+
+        plan.draw_line((100.0, 80.0), (250.0, 80.0), color=(0, 0, 0), width=1.0)
+        plan.draw_line((100.0, 68.0), (100.0, 92.0), color=(0, 0, 0), width=1.0)
+        plan.draw_line((250.0, 68.0), (250.0, 92.0), color=(0, 0, 0), width=1.0)
+        plan.insert_text((164.0, 77.0), "3600", fontsize=9.0)
+
+        plan.draw_line((280.0, 80.0), (280.0, 180.0), color=(0, 0, 0), width=1.0)
+        plan.draw_line((250.0, 80.0), (292.0, 80.0), color=(0, 0, 0), width=1.0)
+        plan.draw_line((268.0, 180.0), (292.0, 180.0), color=(0, 0, 0), width=1.0)
+        plan.insert_text((277.0, 147.0), "2400", fontsize=9.0, rotate=90)
+
+        plan.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
+        plan.insert_text((165.0, 165.0), "FT1", fontsize=9.0)
+
+        schedule = doc.new_page(width=400.0, height=300.0)
+        schedule.insert_text((40.0, 40.0), "FINISH SCHEDULE", fontsize=10.0)
+        schedule.insert_text((40.0, 70.0), "FT1 Porcelain floor tile", fontsize=10.0)
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+def test_same_view_figured_room_area_can_own_floor_finish_occurrence(
+    monkeypatch,
+) -> None:
+    payload = _same_view_payload()
+
+    def segment(_page, *, page_number):
+        view_type = "floor_plan" if page_number == 1 else "schedule"
+        return tuple(
+            _stamp_segment_page_viewports_product(
+                [_viewport(page_number, view_type, f"same-vp-{page_number}")]
+            )
+        )
+
+    monkeypatch.setattr(material_semantic, "segment_page_viewports", segment)
+
+    source = SourceVisibilityProducer(
+        producer_method="same-view-floor-finish-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="same-view-floor-finish-doc",
+        source_bytes=payload,
+        source_locator="memory://same-view-floor-finish.pdf",
+    )
+    room = LiveCanonicalRoomObject(
+        canonical_room_id="physical-room-same-1",
+        physical_room_id="physical-room-same-1",
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+        viewport_id="same-vp-1",
+        decision_scope_id="wall-source:viewport:1:same-vp-1",
+        polygon_pdf_pts=(
+            (100.0, 100.0),
+            (250.0, 100.0),
+            (250.0, 200.0),
+            (100.0, 200.0),
+        ),
+        bounding_wall_ids=("w1", "w2", "w3", "w4"),
+        canonical_bounding_wall_ids=(),
+        wall_relationships_complete=False,
+        area_page_pts2=15000.0,
+        source_room_face_record_id="source-face-same-1",
+        evidence_ids=("source-face-same-1",),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        room_label="TEST ROOM",
+        room_label_binding_record_id="label-binding:same-1",
+        room_label_evidence_ids=("label-evidence:same-1",),
+        room_label_reason_codes=("source_room_label_resolved",),
+    )
+    rooms = LiveCanonicalRoomComposition(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=(LIVE_CANONICAL_ROOM_RESOLVED,),
+        rooms=(room,),
+        source_pages=(1,),
+    )
+    room_areas = SameViewRoomAreaProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish()
+    assert room_areas.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(room_areas.records) == 1
+    assert room_areas.records[0].area_evidence.normalized_value == 8.64
+    assert (
+        room_areas.records[0].area_evidence.method
+        == "authenticated_same_view_figured_dimensions"
+    )
+    assert room_areas.records[0].area_evidence.metadata[
+        "source_dimension_box_pdf_pts"
+    ]
+
+    base_floors = compose_live_canonical_floor_surfaces(rooms)
+    floor = replace(
+        base_floors.floors[0],
+        evidence_ids=tuple(
+            dict.fromkeys(
+                (
+                    *base_floors.floors[0].evidence_ids,
+                    room_areas.records[0].area_evidence.evidence_id,
+                )
+            )
+        ),
+        metric_area_m2=8.64,
+        metric_area_quantity_id="same-room-area-quantity-1",
+        metric_area_authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+    )
+    floors = LiveCanonicalFloorSurfaceComposition(
+        status=base_floors.status,
+        reason_codes=base_floors.reason_codes,
+        floors=(floor,),
+        source_pages=base_floors.source_pages,
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=None,
+        same_view_room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.unresolved_canonical_floor_ids == ()
+    assert len(result.records) == 1
+    assert result.records[0].canonical_floor_id == floor.canonical_floor_id
+    assert result.records[0].finish_code == "FT1"
+    assert result.records[0].semantic_finish == "tile"
+    assert result.records[0].quantity.value == 8.64
+    assert result.records[0].quantity.authority == "documented_dimension"
+    assert len(result.records[0].quantity.metadata["figured_dimension_ids"]) == 2
+
+
+def test_same_and_cross_view_finish_authority_for_same_floor_conflicts(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, cross_view_areas, floors = _source_room_area_and_floor(_payload())
+    cross_record = cross_view_areas.records[0]
+    same_evidence = replace(
+        cross_record.area_evidence,
+        evidence_id="same-view-duplicate-area-evidence",
+        method="authenticated_same_view_figured_dimensions",
+    )
+    same_record = SameViewRoomAreaRecord(
+        physical_room_id=cross_record.physical_room_id,
+        source_room_face_record_id=cross_record.source_room_face_record_id,
+        room_label=cross_record.room_label,
+        source_dimension_page_id=cross_record.source_dimension_page_id,
+        source_label_observation_ids=cross_record.source_label_observation_ids,
+        source_label_receipt_ids=cross_record.source_label_receipt_ids,
+        horizontal_dimension_id=cross_record.horizontal_dimension_id,
+        vertical_dimension_id=cross_record.vertical_dimension_id,
+        area_evidence=same_evidence,
+        _seal=same_view_area_authority._RECORD_SEAL,
+    )
+    same_view_areas = SameViewRoomAreaResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("resolved",),
+        records=(same_record,),
+        unresolved_physical_room_ids=(),
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=cross_view_areas,
+        same_view_room_areas=same_view_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.quantities == ()
     assert result.unresolved_canonical_floor_ids == (
         floors.floors[0].canonical_floor_id,
     )

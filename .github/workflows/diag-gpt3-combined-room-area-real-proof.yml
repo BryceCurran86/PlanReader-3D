@@ -1,0 +1,126 @@
+name: DIAG GPT3 Combined Room Area Real Proof
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  real-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused authority contracts
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_same_view_room_area_authority_v1.py             tests/test_live_documented_room_area_merge.py
+      - name: Run real source room-area proof
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u - <<'PY' | tee combined-room-area-real-proof.json
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          cases=[
+              (
+                  "maryborough",
+                  Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"),
+                  (6,),
+                  (6,),
+                  (10,),
+              ),
+              (
+                  "lot16",
+                  Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"),
+                  (2,),
+                  (2,),
+                  None,
+              ),
+          ]
+          out={}
+          for name,path,pages,topology,support in cases:
+              claim=collect_live_physical_net_wall_claim(
+                  path,
+                  pages=pages,
+                  topology_pages=topology,
+                  room_area_support_pages=support,
+              )
+              all_room_q=list(claim.room_area_quantity_evidence)
+              room_q=[
+                  q for q in all_room_q
+                  if not q.abstained and q.value is not None
+              ]
+              floor_q=[
+                  q for q in publish_live_floor_area_quantities(claim)
+                  if not q.abstained and q.value is not None
+              ]
+              out[name]={
+                  "canonical_room_count":len(claim.canonical_rooms),
+                  "canonical_floor_count":len(claim.canonical_floors),
+                  "room_area_quantity_total":len(all_room_q),
+                  "blocked_room_area_quantities":[
+                      {
+                          "quantity_id":q.quantity_id,
+                          "authority":q.authority,
+                          "status":q.status,
+                          "blocking_reasons":list(q.blocking_reasons),
+                          "reason_codes":list(q.reason_codes),
+                          "input_entity_ids":list(q.input_entity_ids),
+                          "metadata":dict(q.metadata or {}),
+                      }
+                      for q in all_room_q
+                      if q.abstained or q.value is None
+                  ],
+                  "firm_room_area_count":len(room_q),
+                  "firm_room_areas":[
+                      {
+                          "quantity_id":q.quantity_id,
+                          "value":q.value,
+                          "unit":q.unit,
+                          "authority":q.authority,
+                          "input_entity_ids":list(q.input_entity_ids),
+                          "evidence_ids":list(q.evidence_ids),
+                          "metadata":dict(q.metadata or {}),
+                      }
+                      for q in room_q
+                  ],
+                  "floor_area_quantity_count":len(floor_q),
+                  "floor_areas":[
+                      {
+                          "quantity_id":q.quantity_id,
+                          "value":q.value,
+                          "unit":q.unit,
+                          "authority":q.authority,
+                          "input_entity_ids":list(q.input_entity_ids),
+                          "evidence_ids":list(q.evidence_ids),
+                          "metadata":dict(q.metadata or {}),
+                      }
+                      for q in floor_q
+                  ],
+              }
+          mary=out["maryborough"]
+          mary_firm={
+              str(row["metadata"].get("room_label") or "").strip().upper():float(row["value"])
+              for row in mary["firm_room_areas"]
+          }
+          assert abs(mary_firm["FOOD PREP"]-13.270425) < 1e-9, mary
+          assert abs(mary_firm["COLD ROOM"]-25.37875) < 1e-9, mary
+          assert abs(mary_firm["OFFICE"]-9.05352) < 1e-9, mary
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-combined-room-area-real-proof
+          path: combined-room-area-real-proof.json
+          retention-days: 3

@@ -28,6 +28,7 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
     compose_live_canonical_rooms,
 )
+from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
 from pb_live_canonical_wall_composition import compose_live_canonical_walls
 from pb_live_external_physical_net_wall_publication import (
     LiveCanonicalWallObject,
@@ -53,7 +54,12 @@ from pb_cross_view_floor_finish_authority import (
     CrossViewFloorFinishProducer,
     enrich_live_canonical_floor_finishes,
 )
+from pb_cross_view_ceiling_finish_authority import CrossViewCeilingFinishProducer
+from pb_cross_view_ceiling_quantity_authority import (
+    publish_cross_view_ceiling_quantities,
+)
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+from pb_same_view_room_area_authority import SameViewRoomAreaProducer
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_migration_contracts import (
     DocumentEvidence,
@@ -112,12 +118,14 @@ class LivePhysicalNetWallClaim:
     confidence: float
     publication: LiveExternalPhysicalNetWallPublication
     canonical_spaces: tuple[CanonicalSpace, ...] = ()
+    canonical_ceilings: tuple[LiveCanonicalCeilingSurfaceObject, ...] = ()
     canonical_space_status: EvidenceResolutionStatus = EvidenceResolutionStatus.ABSTAINED
     canonical_space_reason_codes: tuple[str, ...] = ()
     opening_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     floor_finish_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    ceiling_lining_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -147,7 +155,9 @@ def _unique_authenticated_containing_floor_plan_viewport(
     scope_rooms: Sequence[LiveCanonicalRoomObject],
     page_id: str,
     snapshot_id: str,
-) -> Optional[tuple[str, tuple[float, float, float, float]]]:
+) -> Optional[
+    tuple[str, tuple[float, float, float, float], str]
+]:
     """Return one producer-owned floor-plan viewport that owns the whole room scope.
 
     Page-scoped room faces can be valid even when viewport segmentation was not
@@ -167,16 +177,30 @@ def _unique_authenticated_containing_floor_plan_viewport(
         )
     )
     viewport_wall_authority = viewport_wall_producer.authority()
-    selectors = viewport_wall_authority.selectors_for_authenticated_viewports(
-        document_id=first.document_id,
-        revision_id=first.revision_id,
-        source_sha256=first.source_sha256,
-        snapshot_id=str(snapshot_id),
-        page_id=str(page_id),
-        view_type=DrawingViewType.FLOOR_PLAN.value,
-    )
-    containing: dict[str, tuple[float, float, float, float]] = {}
-    for viewport_selector in selectors:
+    selectors_by_scope = {}
+    for topology_view_type in (
+        DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.FLOOR_FINISH_PLAN.value,
+    ):
+        for candidate_selector in (
+            viewport_wall_authority.selectors_for_authenticated_viewports(
+                document_id=first.document_id,
+                revision_id=first.revision_id,
+                source_sha256=first.source_sha256,
+                snapshot_id=str(snapshot_id),
+                page_id=str(page_id),
+                view_type=topology_view_type,
+            )
+        ):
+            selectors_by_scope[candidate_selector.decision_scope_id] = (
+                candidate_selector,
+                topology_view_type,
+            )
+    containing: dict[
+        str,
+        tuple[tuple[float, float, float, float], str],
+    ] = {}
+    for viewport_selector, topology_view_type in selectors_by_scope.values():
         scope = viewport_wall_authority.resolve_scope(viewport_selector)
         bbox = getattr(scope, "viewport_bbox", None)
         viewport_id = getattr(scope, "viewport_id", None)
@@ -200,10 +224,43 @@ def _unique_authenticated_containing_floor_plan_viewport(
             )
             for room in scope_rooms
         ):
-            containing[str(viewport_id)] = (x0, y0, x1, y1)
+            containing[str(viewport_id)] = (
+                (x0, y0, x1, y1),
+                topology_view_type,
+            )
     if len(containing) != 1:
         return None
-    return next(iter(containing.items()))
+    viewport_id, (bbox, view_type) = next(iter(containing.items()))
+    return viewport_id, bbox, view_type
+
+
+def _merge_documented_room_area_evidence(
+    *,
+    same_view_by_record: dict[str, object],
+    cross_view_by_record: dict[str, object],
+) -> dict[str, object]:
+    """Layer same-view room areas as fallback without regressing proven output.
+
+    Cross-view figured-dimension authority predates same-view support and is
+    independently source-owned. A newly-added same-view candidate must never
+    erase an already-corroborated cross-view room area merely because the two
+    producers selected different dimension annotations. Same-view evidence is
+    therefore additive only for source-room records that have no cross-view
+    record. This preserves fail-closed behavior inside each producer while
+    preventing a supplemental authority from destroying valid existing output.
+    """
+    merged = {
+        str(record_id): evidence
+        for record_id, evidence in same_view_by_record.items()
+        if evidence is not None
+    }
+    for record_id, evidence in cross_view_by_record.items():
+        if evidence is not None:
+            merged[str(record_id)] = evidence
+    return {
+        record_id: merged[record_id]
+        for record_id in sorted(merged)
+    }
 
 
 def collect_live_physical_net_wall_claim(
@@ -354,18 +411,35 @@ def collect_live_physical_net_wall_claim(
 
     room_area_quantity_evidence: list[QuantityEvidence] = []
     floor_finish_quantity_evidence: list[QuantityEvidence] = []
+    ceiling_lining_quantity_evidence: list[QuantityEvidence] = []
+    canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
+    room_area_bridges = []
+    same_view_area = None
     cross_view_area = None
     if canonical_rooms.rooms:
-        evidence_by_record = {}
+        same_view_area = SameViewRoomAreaProducer.from_source(
+            source=source,
+            rooms=canonical_rooms,
+        ).publish()
+        same_view_by_record = dict(
+            same_view_area.evidence_by_source_room_face_record_id
+        )
+
+        cross_view_by_record = {}
         if room_area_support_selected:
             cross_view_area = CrossViewRoomAreaProducer.from_source(
                 source=source,
                 rooms=canonical_rooms,
             ).publish()
             if cross_view_area.records:
-                evidence_by_record = dict(
+                cross_view_by_record = dict(
                     cross_view_area.evidence_by_source_room_face_record_id
                 )
+
+        evidence_by_record = _merge_documented_room_area_evidence(
+            same_view_by_record=same_view_by_record,
+            cross_view_by_record=cross_view_by_record,
+        )
 
         scale_producer = PhysicalScaleProducer.from_source_visibility_producer(
             source
@@ -445,6 +519,11 @@ def collect_live_physical_net_wall_claim(
                 viewport_bbox = tuple(
                     float(value) for value in room_binding.viewport_bbox
                 )
+                viewport_view_type = (
+                    str(room_binding.viewport_view_type)
+                    if room_binding.viewport_view_type
+                    else DrawingViewType.FLOOR_PLAN.value
+                )
                 viewport_status = ViewportResolutionStatus.RESOLVED
                 viewport_reason_codes = (
                     "producer_owned_room_face_viewport_scope",
@@ -460,10 +539,12 @@ def collect_live_physical_net_wall_claim(
                     )
                 )
                 if containing_viewport is not None:
-                    viewport_id, viewport_bbox = containing_viewport
+                    viewport_id, viewport_bbox, viewport_view_type = (
+                        containing_viewport
+                    )
                     viewport_status = ViewportResolutionStatus.RESOLVED
                     viewport_reason_codes = (
-                        "producer_owned_authenticated_floor_plan_viewport",
+                        "producer_owned_authenticated_topology_plan_viewport",
                     )
                     scale_viewport_id = viewport_id
                 else:
@@ -481,6 +562,7 @@ def collect_live_physical_net_wall_claim(
                     viewport_reason_codes = (
                         "producer_owned_full_page_room_area_scope",
                     )
+                    viewport_view_type = DrawingViewType.FLOOR_PLAN.value
                     scale_viewport_id = None
 
             viewport = ViewportEvidence(
@@ -488,7 +570,7 @@ def collect_live_physical_net_wall_claim(
                 document_id=scope_rooms[0].document_id,
                 page_id=page_id,
                 bbox=viewport_bbox,
-                view_type=DrawingViewType.FLOOR_PLAN.value,
+                view_type=viewport_view_type,
                 status=viewport_status,
                 evidence_ids=(),
                 confidence=1.0,
@@ -559,9 +641,11 @@ def collect_live_physical_net_wall_claim(
                     )
                 )
                 if containing_viewport is not None:
-                    resolved_viewport_id, resolved_viewport_bbox = (
-                        containing_viewport
-                    )
+                    (
+                        resolved_viewport_id,
+                        resolved_viewport_bbox,
+                        resolved_viewport_type,
+                    ) = containing_viewport
                     selected_scale_selector = PhysicalScaleSelector(
                         document_id=scope_rooms[0].document_id,
                         revision_id=scope_rooms[0].revision_id,
@@ -582,12 +666,12 @@ def collect_live_physical_net_wall_claim(
                             document_id=scope_rooms[0].document_id,
                             page_id=page_id,
                             bbox=resolved_viewport_bbox,
-                            view_type=DrawingViewType.FLOOR_PLAN.value,
+                            view_type=resolved_viewport_type,
                             status=ViewportResolutionStatus.RESOLVED,
                             evidence_ids=(),
                             confidence=1.0,
                             reason_codes=(
-                                "producer_owned_authenticated_floor_plan_viewport",
+                                "producer_owned_authenticated_topology_plan_viewport",
                             ),
                         )
                         context = ProviderContext(
@@ -660,6 +744,7 @@ def collect_live_physical_net_wall_claim(
                     explicit_by_face_id if explicit_by_face_id else None
                 ),
             )
+            room_area_bridges.append(bridge)
             canonical_floors = enrich_live_canonical_floor_metric_areas(
                 canonical_floors,
                 bridge,
@@ -667,15 +752,17 @@ def collect_live_physical_net_wall_claim(
             room_area_quantity_evidence.extend(bridge.quantities)
 
     # Floor-finish authority is a downstream consumer of already-authenticated
-    # documented room areas. It must not remeasure or infer a finish. When a
-    # cross-view room area exists, replay the merged source material semantic
-    # authority, bind exactly one explicit floor-role occurrence inside the
-    # proven dimension box, and retain that FIRM quantity on the same canonical
-    # floor identity.
-    if cross_view_area is not None and cross_view_area.records:
+    # documented room areas. It must not remeasure or infer a finish. Either
+    # same-view or cross-view figured dimensions may supply the source-owned
+    # dimension box; finish occurrence ownership remains exact to that box.
+    if (
+        (same_view_area is not None and same_view_area.records)
+        or (cross_view_area is not None and cross_view_area.records)
+    ):
         floor_finishes = CrossViewFloorFinishProducer.from_source(
             source=source,
             room_areas=cross_view_area,
+            same_view_room_areas=same_view_area,
             floors=canonical_floors,
         ).publish()
         canonical_floors = enrich_live_canonical_floor_finishes(
@@ -683,6 +770,24 @@ def collect_live_physical_net_wall_claim(
             floor_finishes,
         )
         floor_finish_quantity_evidence.extend(floor_finishes.quantities)
+
+    if room_area_bridges:
+        ceiling_finishes = CrossViewCeilingFinishProducer.from_source(
+            source=source,
+            rooms=canonical_rooms,
+        ).publish()
+        if ceiling_finishes.records:
+            ceiling_quantities = publish_cross_view_ceiling_quantities(
+                rooms=canonical_rooms,
+                room_area_bridges=tuple(room_area_bridges),
+                finishes=ceiling_finishes,
+            )
+            canonical_ceiling_objects.extend(
+                ceiling_quantities.canonical_ceilings
+            )
+            ceiling_lining_quantity_evidence.extend(
+                ceiling_quantities.quantities
+            )
 
     physical_void = compose_live_physical_opening_voids(
         source_visibility_producer=source,
@@ -770,12 +875,16 @@ def collect_live_physical_net_wall_claim(
             confidence=float(evidence.confidence),
             publication=publication,
             canonical_spaces=canonical_space_core.spaces,
+            canonical_ceilings=tuple(canonical_ceiling_objects),
             canonical_space_status=canonical_space_core.status,
             canonical_space_reason_codes=canonical_space_core.reason_codes,
             opening_quantity_evidence=opening_quantity_evidence,
             opening_count_quantity_evidence=opening_count_quantity_evidence,
             room_area_quantity_evidence=tuple(room_area_quantity_evidence),
             floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
+            ceiling_lining_quantity_evidence=tuple(
+                ceiling_lining_quantity_evidence
+            ),
         )
 
     return LivePhysicalNetWallClaim(
@@ -808,12 +917,16 @@ def collect_live_physical_net_wall_claim(
         confidence=0.0,
         publication=publication,
         canonical_spaces=canonical_space_core.spaces,
+        canonical_ceilings=tuple(canonical_ceiling_objects),
         canonical_space_status=canonical_space_core.status,
         canonical_space_reason_codes=canonical_space_core.reason_codes,
         opening_quantity_evidence=opening_quantity_evidence,
         opening_count_quantity_evidence=opening_count_quantity_evidence,
         room_area_quantity_evidence=tuple(room_area_quantity_evidence),
         floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
+        ceiling_lining_quantity_evidence=tuple(
+            ceiling_lining_quantity_evidence
+        ),
     )
 
 

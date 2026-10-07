@@ -59,6 +59,7 @@ class _RoomFaceAuthorityBinding:
     source_room_face_record_ids: tuple[str, ...]
     viewport_id: Optional[str]
     viewport_bbox: Optional[tuple[float, float, float, float]]
+    viewport_view_type: Optional[str]
     authority: SourceRoomFaceAuthority = field(repr=False, compare=False)
     _seal: object = field(default=None, repr=False, compare=False)
 
@@ -167,6 +168,12 @@ class LiveCanonicalRoomComposition:
         if len(owned) != 1:
             return None
 
+        # The binding is minted only inside compose_live_canonical_rooms after
+        # this exact producer-owned room-face scope has already resolved
+        # CORROBORATED + complete. Replaying that immutable authority scope
+        # once per room is redundant and pathological on dense CAD plans. Keep
+        # the historical owned-room uniqueness check above, then validate exact
+        # membership against the sealed record-id universe below.
         matches = [
             binding
             for binding in self._room_face_authority_bindings
@@ -181,26 +188,6 @@ class LiveCanonicalRoomComposition:
         if len(matches) != 1:
             return None
         binding = matches[0]
-        authority = binding.authority
-        selector = SourceRoomFaceSelector(
-            document_id=room.document_id,
-            revision_id=room.revision_id,
-            source_sha256=room.source_sha256,
-            snapshot_id=room.snapshot_id,
-            page_id=room.page_id,
-            decision_scope_id=room.decision_scope_id,
-        )
-        resolved = authority.resolve_scope(selector)
-        if (
-            resolved.status is not EvidenceResolutionStatus.CORROBORATED
-            or not resolved.scope_complete
-            or sum(
-                1
-                for record in resolved.records
-                if str(record.record_id) == room.source_room_face_record_id
-            ) != 1
-        ):
-            return None
         if room.viewport_id:
             if (
                 binding.viewport_id != room.viewport_id
@@ -224,6 +211,7 @@ def _authority_binding(
     *,
     viewport_id: Optional[str] = None,
     viewport_bbox: Optional[Collection[float]] = None,
+    viewport_view_type: Optional[str] = None,
 ) -> Optional[_RoomFaceAuthorityBinding]:
     if type(authority) is not SourceRoomFaceAuthority:
         return None
@@ -260,6 +248,11 @@ def _authority_binding(
         source_room_face_record_ids=record_ids,
         viewport_id=(None if viewport_id is None else str(viewport_id)),
         viewport_bbox=normalized_bbox,
+        viewport_view_type=(
+            None
+            if viewport_view_type is None
+            else str(viewport_view_type)
+        ),
         authority=authority,
         _seal=_ROOM_FACE_AUTHORITY_BINDING_SEAL,
     )
@@ -623,15 +616,27 @@ def compose_live_canonical_rooms(
                 viewport_label_authority = None
 
             for page_id in unresolved_pages:
-                selectors = (
-                    viewport_wall_authority.selectors_for_authenticated_viewports(
-                        document_id=viewport_published.revision.document_id,
-                        revision_id=viewport_published.revision.revision_id,
-                        source_sha256=viewport_published.revision.source_sha256,
-                        snapshot_id=viewport_published.snapshot.snapshot_id,
-                        page_id=page_id,
-                        view_type=DrawingViewType.FLOOR_PLAN.value,
-                    )
+                selectors_by_scope = {}
+                for topology_view_type in (
+                    DrawingViewType.FLOOR_PLAN.value,
+                    DrawingViewType.FLOOR_FINISH_PLAN.value,
+                ):
+                    for candidate_selector in (
+                        viewport_wall_authority.selectors_for_authenticated_viewports(
+                            document_id=viewport_published.revision.document_id,
+                            revision_id=viewport_published.revision.revision_id,
+                            source_sha256=viewport_published.revision.source_sha256,
+                            snapshot_id=viewport_published.snapshot.snapshot_id,
+                            page_id=page_id,
+                            view_type=topology_view_type,
+                        )
+                    ):
+                        selectors_by_scope[
+                            candidate_selector.decision_scope_id
+                        ] = candidate_selector
+                selectors = tuple(
+                    selectors_by_scope[key]
+                    for key in sorted(selectors_by_scope)
                 )
                 page_resolved = False
                 page_face_universe_complete = True
@@ -711,6 +716,11 @@ def compose_live_canonical_rooms(
                             else str(wall_scope.viewport_id)
                         ),
                         viewport_bbox=getattr(wall_scope, "viewport_bbox", None),
+                        viewport_view_type=getattr(
+                            wall_scope,
+                            "viewport_view_type",
+                            None,
+                        ),
                     )
                     if binding is not None:
                         authority_bindings.append(binding)

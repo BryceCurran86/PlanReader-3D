@@ -19,7 +19,9 @@ Safety invariants:
 - prose mentioning a view is not accepted as a drawing title;
 - one frame shared by multiple titles is ambiguous;
 - two equivalent frames competing for one title are ambiguous;
-- page borders, crop boxes, title-block panels, and table grids are not viewports;
+- page borders, crop boxes, and title-block panels are not viewports;
+- table grids are not drawing viewports; a table-like frame is admissible only
+  for an independently classified schedule/legend/specification title;
 - scale is associated only after viewport ownership; conflicting scales remain
   unresolved;
 - viewport IDs are provenance only, never semantic prediction features.
@@ -166,6 +168,13 @@ _TABLE_CELL_COUNT = 8
 _TABLE_GRID_OCCUPANCY_FRACTION = 0.75
 _TABLE_GRID_FRAME_COVERAGE_FRACTION = 0.20
 _TABLE_CELL_DIMENSION_ROUND_DIGITS = 3
+_SEMANTIC_TABLE_VIEW_TYPES = frozenset(
+    {
+        DrawingViewType.SCHEDULE.value,
+        DrawingViewType.LEGEND.value,
+        DrawingViewType.SPECIFICATION.value,
+    }
+)
 
 # Private in-process producer token. Migration authority must not be minted from
 # caller-copied provenance dictionaries. Only segment_page_viewports stamps this
@@ -239,10 +248,12 @@ def _stamp_segment_page_viewports_product(
 _TITLE_SHAPE_RE = re.compile(
     r"^\s*(?:"
     r"(?:(?:PROP(?:OSED)?\.?)|(?:GROUND|FIRST|SECOND|THIRD|UPPER|LOWER|LEVEL\s*[A-Z0-9.-]+))?\s*FLOOR\s+PLAN|"
+    r"(?:(?:PROP(?:OSED)?\.?)\s*)?FLOOR\s+FINISH(?:ES)?(?:\s*&\s*PARTITIONS?)?\s+PLAN|"
+    r"(?:(?:PROP(?:OSED)?\.?)\s*)?REFLECTED\s+CEILING\s+PLAN|R\.?C\.?P\.?|"
     r"PLAN\s*:\s*FLOOR\s+LAYOUT|FLOOR\s+LAYOUT|LAYOUT\s+PLAN|ROOF(?:ING)?\s+(?:LAYOUT\s+)?PLAN|"
     r"(?:NORTH|SOUTH|EAST|WEST|FRONT|REAR|SIDE)?\s*ELEV(?:ATION)?(?:\s+[A-Z0-9.-]+)?|"
     r"SECTION(?:\s+[A-Z0-9.-]+)?|CROSS\s+SECTION|LONGITUDINAL\s+SECTION|"
-    r"(?:WINDOW|DOOR|FINISH(?:ES)?)\s+SCHEDULE|SCHEDULE\s+OF\s+(?:WINDOWS|DOORS|FINISHES)|"
+    r"(?:WINDOW|DOOR|(?:(?:INTERNAL|EXTERNAL|CEILING|FLOOR)\s+)?FINISH(?:ES)?)\s+SCHEDULE|SCHEDULE\s+OF\s+(?:WINDOWS|DOORS|FINISHES)|"
     r"(?:TYPICAL|STANDARD|ENLARGED)?\s*DETAIL(?:\s+[A-Z0-9./-]+)?|"
     r"LEGEND|SYMBOL\s+LEGEND|GENERAL\s+SPECIFICATIONS?"
     r")\s*(?:[-–—]\s*)?(?:SCALE\s*)?\d*(?:\.\d+)?\s*(?::\s*\d+(?:\.\d+)?)?\s*$",
@@ -516,6 +527,124 @@ def _page_rectangle_primitives(page: Any) -> tuple[tuple[float, float, float, fl
     return result
 
 
+def _frame_looks_like_line_grid_table(
+    frame: Sequence[float],
+    page: Any,
+    calibration: ViewportLayoutCalibration,
+) -> bool:
+    """Prove a table from repeated source horizontal/vertical grid lines.
+
+    CAD schedules are often emitted as independent line primitives rather than
+    rectangle cells. This is a second positive table proof, not a relaxation:
+    both axis families must contain repeated, long source lines; their clustered
+    extents must span a meaningful fraction of the candidate frame; and most
+    horizontal/vertical pairs must geometrically cross.
+    """
+    frame_area = _bbox_area(frame)
+    frame_width = max(0.0, float(frame[2]) - float(frame[0]))
+    frame_height = max(0.0, float(frame[3]) - float(frame[1]))
+    if frame_area <= 0.0 or frame_width <= 0.0 or frame_height <= 0.0:
+        return False
+
+    tol = max(
+        calibration.median_word_height_pt * 0.15,
+        min(frame_width, frame_height) * 0.001,
+        0.75,
+    )
+    minimum_horizontal_span = max(
+        calibration.median_word_height_pt * 4.0,
+        frame_width * 0.35,
+    )
+    minimum_vertical_span = max(
+        calibration.median_word_height_pt * 4.0,
+        frame_height * 0.35,
+    )
+
+    horizontal: list[tuple[float, float, float]] = []
+    vertical: list[tuple[float, float, float]] = []
+    for drawing in _page_drawings(page):
+        for item in drawing.get("items", []) or []:
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = item[1], item[2]
+            x0, y0 = float(start.x), float(start.y)
+            x1, y1 = float(end.x), float(end.y)
+            midpoint = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+            if not _point_in_bbox(midpoint, frame, margin=tol):
+                continue
+            if abs(y1 - y0) <= tol and abs(x1 - x0) >= minimum_horizontal_span:
+                horizontal.append((min(x0, x1), max(x0, x1), (y0 + y1) / 2.0))
+            elif abs(x1 - x0) <= tol and abs(y1 - y0) >= minimum_vertical_span:
+                vertical.append(((x0 + x1) / 2.0, min(y0, y1), max(y0, y1)))
+
+    if len(horizontal) < 3 or len(vertical) < 3:
+        return False
+
+    cluster_tol = max(calibration.median_word_height_pt * 0.5, 1.0)
+    y_clusters = _cluster_values([line[2] for line in horizontal], cluster_tol)
+    x_clusters = _cluster_values([line[0] for line in vertical], cluster_tol)
+    if len(y_clusters) < 3 or len(x_clusters) < 3:
+        return False
+
+    def horizontal_extent(y: float) -> tuple[float, float] | None:
+        owned = [
+            line for line in horizontal
+            if abs(line[2] - y) <= cluster_tol
+        ]
+        if not owned:
+            return None
+        return min(line[0] for line in owned), max(line[1] for line in owned)
+
+    def vertical_extent(x: float) -> tuple[float, float] | None:
+        owned = [
+            line for line in vertical
+            if abs(line[0] - x) <= cluster_tol
+        ]
+        if not owned:
+            return None
+        return min(line[1] for line in owned), max(line[2] for line in owned)
+
+    horizontal_major = [
+        (y, extent)
+        for y in y_clusters
+        for extent in (horizontal_extent(y),)
+        if extent is not None
+        and extent[1] - extent[0] >= frame_width * 0.5
+    ]
+    vertical_major = [
+        (x, extent)
+        for x in x_clusters
+        for extent in (vertical_extent(x),)
+        if extent is not None
+        and extent[1] - extent[0] >= frame_height * 0.5
+    ]
+    if len(horizontal_major) < 3 or len(vertical_major) < 3:
+        return False
+
+    crossing = 0
+    possible = len(horizontal_major) * len(vertical_major)
+    for y, (hx0, hx1) in horizontal_major:
+        for x, (vy0, vy1) in vertical_major:
+            if (
+                hx0 - tol <= x <= hx1 + tol
+                and vy0 - tol <= y <= vy1 + tol
+            ):
+                crossing += 1
+    if possible <= 0 or crossing / possible < 0.6:
+        return False
+
+    grid_bbox = (
+        min(extent[0] for _, extent in horizontal_major),
+        min(extent[0] for _, extent in vertical_major),
+        max(extent[1] for _, extent in horizontal_major),
+        max(extent[1] for _, extent in vertical_major),
+    )
+    return (
+        _bbox_area(grid_bbox) / frame_area
+        >= _TABLE_GRID_FRAME_COVERAGE_FRACTION
+    )
+
+
 def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
@@ -543,9 +672,6 @@ def _frame_looks_like_table(
         area = _bbox_area(cell)
         if 4.0 < area < 0.15 * frame_area:
             cells.append(cell)
-
-    if len(cells) < _TABLE_CELL_COUNT:
-        return False
 
     # Group by scale-invariant cell dimensions. Real table cells repeat their
     # shape; unrelated CAD rectangles should not be pooled merely because they
@@ -614,7 +740,7 @@ def _frame_looks_like_table(
             continue
         return True
 
-    return False
+    return _frame_looks_like_line_grid_table(frame, page, calibration)
 
 
 def _rejected_ownership_frame(
@@ -622,12 +748,17 @@ def _rejected_ownership_frame(
     frame: Sequence[float],
     calibration: ViewportLayoutCalibration,
     fragments: Sequence[tuple[tuple[float, float, float, float], str]],
+    *,
+    view_type: str,
 ) -> bool:
     if _is_page_or_crop_border(frame, calibration):
         return True
     if _frame_has_title_block_labels(frame, fragments, calibration):
         return True
-    if _frame_looks_like_table(frame, page, calibration):
+    if (
+        _frame_looks_like_table(frame, page, calibration)
+        and str(view_type) not in _SEMANTIC_TABLE_VIEW_TYPES
+    ):
         return True
     return False
 
@@ -907,6 +1038,53 @@ def _wrapped_continuation(previous: _NativeLine, current: _NativeLine) -> bool:
     return smaller > 0 and overlap >= _WRAP_MIN_ALIGNED_OVERLAP * smaller
 
 
+def _wrapped_title_fragments(
+    page: Any,
+) -> list[tuple[tuple[float, float, float, float], str]]:
+    """Return only positively title-shaped wrapped native-line runs."""
+    try:
+        data = _page_text(page, "dict") or {}
+    except Exception:
+        return []
+
+    fragments: list[tuple[tuple[float, float, float, float], str]] = []
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        lines = [
+            line
+            for line in (
+                _native_line(item) for item in block.get("lines", []) or []
+            )
+            if line is not None
+        ]
+        runs: list[list[int]] = []
+        for index, line in enumerate(lines):
+            if index and _wrapped_continuation(lines[index - 1], line):
+                runs[-1].append(index)
+            else:
+                runs.append([index])
+        for run in runs:
+            if len(run) < 2:
+                continue
+            merged = _normalise_text(" ".join(lines[index].text for index in run))
+            if not _TITLE_SHAPE_RE.match(merged):
+                continue
+            view_type = DrawingViewClassifier.classify_text(
+                _strip_scale_suffix(merged)
+            ).value
+            if view_type == DrawingViewType.UNKNOWN.value:
+                continue
+            bbox = (
+                min(lines[index].bbox[0] for index in run),
+                min(lines[index].bbox[1] for index in run),
+                max(lines[index].bbox[2] for index in run),
+                max(lines[index].bbox[3] for index in run),
+            )
+            fragments.append((bbox, merged))
+    return fragments
+
+
 def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float, float], str]]:
     """Lines (box, text) that are the wrapped tail of a note in the same native text block.
 
@@ -943,22 +1121,60 @@ def _wrapped_note_tail_lines(page: Any) -> list[tuple[tuple[float, float, float,
 
 
 def _to_visual_bbox(page: Any, bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
-    """Express a text-dict bbox in the page's visual orientation."""
+    """Express a native page-user-space bbox in visual/display orientation."""
     if not int(getattr(page, "rotation", 0) or 0):
         return bbox
     try:
         import fitz  # a rotated page object implies PyMuPDF is present
         rotated = fitz.Rect(bbox) * page.rotation_matrix
-        return (float(rotated.x0), float(rotated.y0), float(rotated.x1), float(rotated.y1))
+        return _normalized_bbox(
+            float(rotated.x0),
+            float(rotated.y0),
+            float(rotated.x1),
+            float(rotated.y1),
+        )
     except Exception:
         return bbox
+
+
+def _to_native_bbox(
+    page: Any,
+    bbox: tuple[float, float, float, float],
+) -> Optional[tuple[float, float, float, float]]:
+    """Map one visual/display bbox back into native page user space."""
+
+    if not int(getattr(page, "rotation", 0) or 0):
+        return _normalized_bbox(*bbox)
+    try:
+        import fitz
+
+        native = fitz.Rect(bbox) * page.derotation_matrix
+        result = _normalized_bbox(
+            float(native.x0),
+            float(native.y0),
+            float(native.x1),
+            float(native.y1),
+        )
+    except Exception:
+        return None
+    if (
+        result[2] <= result[0]
+        or result[3] <= result[1]
+        or not all(math.isfinite(value) for value in result)
+    ):
+        return None
+    return result
 
 
 def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
     owned: Optional[list[tuple[float, float, float, float]]] = None
     tails: Optional[list[tuple[tuple[float, float, float, float], str]]] = None
-    for bbox, text in _text_fragments(page):
+    title_fragments = [
+        *_text_fragments(page),
+        *_wrapped_title_fragments(page),
+    ]
+    for bbox, text in title_fragments:
         if not _TITLE_SHAPE_RE.match(text):
             continue
         view_type = DrawingViewClassifier.classify_text(_strip_scale_suffix(text)).value
@@ -1142,9 +1358,23 @@ def _frame_resolved_viewports(
             calibration,
             anchors=anchors,
         )
+        if str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES:
+            table_candidates = [
+                frame
+                for frame in candidates
+                if _frame_looks_like_table(frame, page, calibration)
+            ]
+            if table_candidates:
+                candidates = table_candidates
         usable = [
             frame for frame in candidates
-            if not _rejected_ownership_frame(page, frame, calibration, fragments)
+            if not _rejected_ownership_frame(
+                page,
+                frame,
+                calibration,
+                fragments,
+                view_type=anchor.view_type,
+            )
         ]
         usable = _collapse_nested_band_frames(usable)
         usable = _collapse_equivalent_nested_frames(usable, calibration)
@@ -1194,8 +1424,20 @@ def _frame_resolved_viewports(
 
 
 _AUTHORITATIVE_DERIVED_PARTITION_MODE = "columnar_title_grid"
+_ROTATED_SEMANTIC_FRAME_BAND_MODE = "rotated_semantic_frame_band"
+_PLAN_VIEW_TYPES = frozenset(
+    {
+        DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.FLOOR_FINISH_PLAN.value,
+        DrawingViewType.REFLECTED_CEILING_PLAN.value,
+    }
+)
 _SINGLE_FLOOR_PLAN_PARTITION_MODE = "single_floor_plan_printable_area"
 _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE = "single_floor_plan_sheet_frame"
+_SINGLE_FLOOR_FINISH_PARTITION_MODE = "single_floor_finish_plan_printable_area"
+_SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE = "single_floor_finish_plan_sheet_frame"
+_SINGLE_REFLECTED_CEILING_PARTITION_MODE = "single_reflected_ceiling_printable_area"
+_SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE = "single_reflected_ceiling_sheet_frame"
 
 
 def is_authoritative_derived_viewport(viewport: Any) -> bool:
@@ -1211,13 +1453,35 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
     mode = provenance.get("partition_mode")
     if mode == _AUTHORITATIVE_DERIVED_PARTITION_MODE:
         return provenance.get("grid_validated") is True
-    if mode == _SINGLE_FLOOR_PLAN_PARTITION_MODE:
+    if mode == _ROTATED_SEMANTIC_FRAME_BAND_MODE:
+        return bool(
+            provenance.get("visual_band_validated") is True
+            and int(provenance.get("rotation", 0) or 0) in (90, 270)
+            and str(provenance.get("separator_view_id") or "")
+            and int(
+                provenance.get("plan_title_count_in_band", 0) or 0
+            )
+            == 1
+            and int(
+                provenance.get("drawing_vector_primitive_count", 0) or 0
+            )
+            >= 2
+        )
+    if mode in (
+        _SINGLE_FLOOR_PLAN_PARTITION_MODE,
+        _SINGLE_FLOOR_FINISH_PARTITION_MODE,
+        _SINGLE_REFLECTED_CEILING_PARTITION_MODE,
+    ):
         return bool(
             provenance.get("single_view_validated") is True
             and provenance.get("title_block_bbox")
             and int(provenance.get("drawing_vector_primitive_count", 0) or 0) >= 2
         )
-    if mode == _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE:
+    if mode in (
+        _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE,
+        _SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE,
+        _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE,
+    ):
         return bool(
             provenance.get("single_view_validated") is True
             and int(provenance.get("metadata_label_count", 0) or 0) >= 2
@@ -1615,7 +1879,11 @@ def _single_floor_plan_sheet_frame_partition(
     *,
     page_number: int,
 ) -> Optional[SegmentedViewport]:
-    if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
+    if anchor.view_type not in (
+        DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.FLOOR_FINISH_PLAN.value,
+        DrawingViewType.REFLECTED_CEILING_PLAN.value,
+    ):
         return None
     candidates = _single_view_sheet_drawing_frames(page, anchor, calibration)
     if len(candidates) != 1:
@@ -1638,11 +1906,27 @@ def _single_floor_plan_sheet_frame_partition(
         scale_denominator=denominator,
         scale_conflict=scale_conflict,
         notes=[
-            "single floor plan owns closed native sheet drawing frame with separate metadata band",
+            (
+                "single floor plan owns closed native sheet drawing frame with separate metadata band"
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else (
+                    "single floor finish plan owns closed native sheet drawing frame with separate metadata band"
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else "single reflected ceiling plan owns closed native sheet drawing frame with separate metadata band"
+                )
+            ),
             *scale_notes,
         ],
         provenance={
-            "partition_mode": _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE,
+            "partition_mode": (
+                _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else (
+                    _SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE
+                )
+            ),
             "single_view_validated": True,
             "metadata_label_count": metadata_count,
             "drawing_vector_primitive_count": primitive_count,
@@ -1659,8 +1943,12 @@ def _single_floor_plan_printable_partition(
     *,
     page_number: int,
 ) -> Optional[SegmentedViewport]:
-    """Resolve one unframed floor plan from page ownership, fail-closed."""
-    if anchor.view_type != DrawingViewType.FLOOR_PLAN.value:
+    """Resolve one unframed semantic plan from page ownership, fail-closed."""
+    if anchor.view_type not in (
+        DrawingViewType.FLOOR_PLAN.value,
+        DrawingViewType.FLOOR_FINISH_PLAN.value,
+        DrawingViewType.REFLECTED_CEILING_PLAN.value,
+    ):
         return None
     # pb_page_title_authority deliberately works in visual/display space.
     # Until that title-block rectangle has an explicit display->native bridge,
@@ -1736,17 +2024,278 @@ def _single_floor_plan_printable_partition(
         scale_denominator=denominator,
         scale_conflict=scale_conflict,
         notes=[
-            "single floor plan owns proven printable area outside native title block",
+            (
+                "single floor plan owns proven printable area outside native title block"
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else (
+                    "single floor finish plan owns proven printable area outside native title block"
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else "single reflected ceiling plan owns proven printable area outside native title block"
+                )
+            ),
             *scale_notes,
         ],
         provenance={
-            "partition_mode": _SINGLE_FLOOR_PLAN_PARTITION_MODE,
+            "partition_mode": (
+                _SINGLE_FLOOR_PLAN_PARTITION_MODE
+                if anchor.view_type == DrawingViewType.FLOOR_PLAN.value
+                else (
+                    _SINGLE_FLOOR_FINISH_PARTITION_MODE
+                    if anchor.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+                    else _SINGLE_REFLECTED_CEILING_PARTITION_MODE
+                )
+            ),
             "single_view_validated": True,
             "title_block_bbox": title_block,
             "drawing_vector_primitive_count": primitive_count,
             "title_bbox": anchor.bbox,
         },
     )
+
+
+def _rotated_semantic_frame_band_partitions(
+    page: Any,
+    anchors: Sequence[_TitleAnchor],
+    unresolved_indices: Sequence[int],
+    framed: Sequence[SegmentedViewport],
+    calibration: ViewportLayoutCalibration,
+    *,
+    page_number: int,
+) -> tuple[list[SegmentedViewport], set[int]]:
+    """Derive plan bands on rotated sheets from an authenticated table frame.
+
+    This is intentionally much narrower than generic title partitioning.
+    A resolved semantic-table frame may act as a physical separator only when
+    exactly one unresolved plan title owns one side band, no resolved viewport
+    overlaps that band, and the band contains real drawing primitives.  All
+    reasoning is performed in display orientation; the published viewport bbox
+    is converted back to native PDF user space.
+    """
+
+    try:
+        rotation = int(native_page_frame(page).rotation) % 360
+    except NativePageFrameUnresolved:
+        return [], set()
+    if rotation not in (90, 270):
+        return [], set()
+
+    separators = [
+        viewport
+        for viewport in framed
+        if (
+            viewport.bounding_box is not None
+            and viewport.status == ViewportSegmentationStatus.RESOLVED.value
+            and viewport.view_type in _SEMANTIC_TABLE_VIEW_TYPES
+        )
+    ]
+    plan_indices = [
+        index
+        for index in unresolved_indices
+        if anchors[index].view_type in _PLAN_VIEW_TYPES
+    ]
+    if not separators or not plan_indices:
+        return [], set()
+
+    try:
+        visual_width = float(page.rect.width)
+        visual_height = float(page.rect.height)
+    except Exception:
+        return [], set()
+    if visual_width <= 0.0 or visual_height <= 0.0:
+        return [], set()
+
+    visual_anchor_boxes = {
+        index: _to_visual_bbox(page, anchors[index].bbox)
+        for index in plan_indices
+    }
+    framed_visual = [
+        (
+            viewport,
+            _to_visual_bbox(page, viewport.bounding_box),
+        )
+        for viewport in framed
+        if viewport.bounding_box is not None
+    ]
+    gap = max(calibration.median_word_height_pt * 0.25, 0.5)
+    candidates_by_index: dict[
+        int,
+        list[
+            tuple[
+                tuple[float, float, float, float],
+                tuple[float, float, float, float],
+                str,
+                str,
+                int,
+            ]
+        ],
+    ] = {}
+
+    for separator in separators:
+        assert separator.bounding_box is not None
+        visual_separator = _to_visual_bbox(
+            page,
+            separator.bounding_box,
+        )
+        side_bands = (
+            (
+                "left",
+                (
+                    0.0,
+                    0.0,
+                    max(0.0, visual_separator[0] - gap),
+                    visual_height,
+                ),
+            ),
+            (
+                "right",
+                (
+                    min(visual_width, visual_separator[2] + gap),
+                    0.0,
+                    visual_width,
+                    visual_height,
+                ),
+            ),
+            (
+                "top",
+                (
+                    0.0,
+                    0.0,
+                    visual_width,
+                    max(0.0, visual_separator[1] - gap),
+                ),
+            ),
+            (
+                "bottom",
+                (
+                    0.0,
+                    min(visual_height, visual_separator[3] + gap),
+                    visual_width,
+                    visual_height,
+                ),
+            ),
+        )
+        for side, visual_band in side_bands:
+            if (
+                visual_band[2] - visual_band[0]
+                < calibration.minimum_frame_span_pt
+                or visual_band[3] - visual_band[1]
+                < calibration.minimum_frame_span_pt
+            ):
+                continue
+
+            owning_plan_indices = [
+                index
+                for index in plan_indices
+                if _bbox_contains(
+                    visual_band,
+                    visual_anchor_boxes[index],
+                    margin=calibration.median_word_height_pt * 0.1,
+                )
+            ]
+            if len(owning_plan_indices) != 1:
+                continue
+            index = owning_plan_indices[0]
+
+            if any(
+                _bbox_overlap_area(visual_band, other_visual) > 1e-6
+                for other, other_visual in framed_visual
+            ):
+                continue
+
+            native_band = _to_native_bbox(page, visual_band)
+            if native_band is None or not _bbox_contains(
+                native_band,
+                anchors[index].bbox,
+                margin=calibration.median_word_height_pt * 0.1,
+            ):
+                continue
+
+            primitive_count = _drawing_vector_primitive_count(
+                page,
+                native_band,
+                calibration,
+            )
+            if primitive_count < 2:
+                continue
+            candidates_by_index.setdefault(index, []).append(
+                (
+                    visual_band,
+                    native_band,
+                    separator.view_id,
+                    side,
+                    primitive_count,
+                )
+            )
+
+    out: list[SegmentedViewport] = []
+    consumed: set[int] = set()
+    for index in sorted(candidates_by_index):
+        unique: dict[
+            tuple[float, float, float, float],
+            tuple[
+                tuple[float, float, float, float],
+                tuple[float, float, float, float],
+                str,
+                str,
+                int,
+            ],
+        ] = {}
+        for candidate in candidates_by_index[index]:
+            key = tuple(round(value, 6) for value in candidate[1])
+            unique[key] = candidate
+        if len(unique) != 1:
+            continue
+        (
+            visual_band,
+            native_band,
+            separator_view_id,
+            side,
+            primitive_count,
+        ) = next(iter(unique.values()))
+        anchor = anchors[index]
+        raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+            page,
+            native_band,
+        )
+        out.append(
+            SegmentedViewport(
+                view_id=f"view_p{page_number}_{index + 1}",
+                page_number=page_number,
+                view_type=anchor.view_type,
+                label=anchor.text,
+                title_bbox=anchor.bbox,
+                bounding_box=native_band,
+                status=ViewportSegmentationStatus.DERIVED.value,
+                boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+                confidence=0.9,
+                scale_raw=raw,
+                scale_denominator=denominator,
+                scale_conflict=scale_conflict,
+                notes=[
+                    (
+                        "rotated plan viewport owned by non-overlapping "
+                        "semantic-frame side band"
+                    ),
+                    *scale_notes,
+                ],
+                provenance={
+                    "partition_mode": _ROTATED_SEMANTIC_FRAME_BAND_MODE,
+                    "visual_band_validated": True,
+                    "rotation": rotation,
+                    "separator_view_id": separator_view_id,
+                    "separator_side": side,
+                    "visual_band_bbox": visual_band,
+                    "plan_title_count_in_band": 1,
+                    "drawing_vector_primitive_count": primitive_count,
+                    "title_bbox": anchor.bbox,
+                },
+            )
+        )
+        consumed.add(index)
+
+    if not validate_non_overlapping_viewports([*framed, *out]):
+        return [], set()
+    return out, consumed
 
 
 def _derived_partitions(
@@ -1909,26 +2458,47 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     except NativePageFrameUnresolved:
         return []
     if unresolved and page_rotation != 0:
-        derived = [
-            SegmentedViewport(
-                view_id=f"view_p{page_number}_{index + 1}",
+        rotated_derived, rotated_consumed = (
+            _rotated_semantic_frame_band_partitions(
+                page,
+                anchors,
+                unresolved,
+                framed,
+                calibration,
                 page_number=page_number,
-                view_type=anchors[index].view_type,
-                label=anchors[index].text,
-                title_bbox=anchors[index].bbox,
-                bounding_box=None,
-                status=ViewportSegmentationStatus.UNSUPPORTED.value,
-                boundary_source=ViewportBoundarySource.NONE.value,
-                confidence=0.0,
-                notes=[
-                    "rotated page requires producer-owned vector-frame ownership"
-                ],
-                provenance={
-                    "rotation": page_rotation,
-                    "derived_partition_disabled": True,
-                },
             )
+        )
+        remaining_unresolved = [
+            index
             for index in unresolved
+            if index not in rotated_consumed
+        ]
+        derived = [
+            *rotated_derived,
+            *[
+                SegmentedViewport(
+                    view_id=f"view_p{page_number}_{index + 1}",
+                    page_number=page_number,
+                    view_type=anchors[index].view_type,
+                    label=anchors[index].text,
+                    title_bbox=anchors[index].bbox,
+                    bounding_box=None,
+                    status=ViewportSegmentationStatus.UNSUPPORTED.value,
+                    boundary_source=ViewportBoundarySource.NONE.value,
+                    confidence=0.0,
+                    notes=[
+                        (
+                            "rotated page lacks unique producer-owned "
+                            "frame/band ownership"
+                        )
+                    ],
+                    provenance={
+                        "rotation": page_rotation,
+                        "derived_partition_disabled": True,
+                    },
+                )
+                for index in remaining_unresolved
+            ],
         ]
     else:
         derived = (
