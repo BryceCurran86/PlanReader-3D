@@ -255,6 +255,7 @@ def generate_project_handoff(
             # measurement. Surface/all execution retains the source-classified
             # support-page contract.
             room_area_support_pages=execution_room_support_pages,
+            ceiling_semantic_pages=semantic_execution_pages,
         )
     except Exception as exc:
         summary["status"] = "production_failed"
