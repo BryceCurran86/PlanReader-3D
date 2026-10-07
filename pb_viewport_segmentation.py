@@ -838,7 +838,44 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
             raise
         rect = page.rect
         width = float(rect.width); height = float(rect.height)
-    word_heights: list[float] = []
+    word_heights = [
+        float(w[3]) - float(w[1])
+        for w in _page_text(page, "words")
+        if float(w[3]) > float(w[1])
+    ]
+    median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
+    return ViewportLayoutCalibration(
+        median_word_height_pt=median_h,
+        title_frame_gap_pt=max(median_h * 4.0, 2.0),
+        minimum_frame_span_pt=max(median_h * 8.0, min(width, height) / 12.0),
+        title_separation_pt=max(median_h * 6.0, 4.0),
+        page_width_pt=width,
+        page_height_pt=height,
+    )
+
+
+def _rotated_semantic_layout_calibration(
+    page: Any,
+    fallback: ViewportLayoutCalibration,
+) -> ViewportLayoutCalibration:
+    """Calibrate only rotated semantic-table fallback geometry in display space.
+
+    Global viewport calibration deliberately remains in native source space:
+    changing it alters long-proven floor-plan ownership on rotated CAD sheets.
+    A semantic table used as a rotated band separator is different: its title
+    and side-band relationships are explicitly evaluated in display
+    orientation, so native Y spans of rotated words are word lengths rather
+    than typographic heights.  Keep that correction local to this fallback.
+    """
+
+    try:
+        rotation = int(native_page_frame(page).rotation) % 360
+    except NativePageFrameUnresolved:
+        return fallback
+    if rotation not in (90, 270):
+        return fallback
+
+    visual_heights: list[float] = []
     for word in _page_text(page, "words"):
         if len(word) < 4:
             continue
@@ -850,16 +887,16 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
         )
         if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
             continue
-        # PyMuPDF exposes native user-space word boxes. On /Rotate 90 sheets
-        # visually horizontal text is commonly authored vertically, so the
-        # native Y span is the word *length*, not its typographic height.
-        # Calibrate typography in display orientation while keeping all
-        # published viewport geometry in native source coordinates.
         visual_bbox = _to_visual_bbox(page, bbox)
-        visual_height = float(visual_bbox[3]) - float(visual_bbox[1])
-        if visual_height > 0.0 and math.isfinite(visual_height):
-            word_heights.append(visual_height)
-    median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
+        height = float(visual_bbox[3]) - float(visual_bbox[1])
+        if height > 0.0 and math.isfinite(height):
+            visual_heights.append(height)
+    if not visual_heights:
+        return fallback
+
+    median_h = statistics.median(visual_heights)
+    width = float(fallback.page_width_pt)
+    height = float(fallback.page_height_pt)
     return ViewportLayoutCalibration(
         median_word_height_pt=median_h,
         title_frame_gap_pt=max(median_h * 4.0, 2.0),
@@ -1367,18 +1404,32 @@ def _frame_resolved_viewports(
     selected: dict[int, tuple[float, float, float, float]] = {}
     out: list[SegmentedViewport] = []; consumed: set[int] = set()
     for index, anchor in enumerate(anchors):
+        anchor_calibration = calibration
+        anchor_frames: Sequence[tuple[float, float, float, float]] = frames
+        if str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES:
+            semantic_calibration = _rotated_semantic_layout_calibration(
+                page,
+                calibration,
+            )
+            if semantic_calibration is not calibration:
+                semantic_frames = extract_vector_frames(page, semantic_calibration)
+                anchor_frames = tuple(
+                    dict.fromkeys((*frames, *semantic_frames))
+                )
+                anchor_calibration = semantic_calibration
+
         candidates = _frame_candidates_for_title(
             page,
             anchor,
-            frames,
-            calibration,
+            anchor_frames,
+            anchor_calibration,
             anchors=anchors,
         )
         if str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES:
             table_candidates = [
                 frame
                 for frame in candidates
-                if _frame_looks_like_table(frame, page, calibration)
+                if _frame_looks_like_table(frame, page, anchor_calibration)
             ]
             if table_candidates:
                 candidates = table_candidates
@@ -1387,13 +1438,13 @@ def _frame_resolved_viewports(
             if not _rejected_ownership_frame(
                 page,
                 frame,
-                calibration,
+                anchor_calibration,
                 fragments,
                 view_type=anchor.view_type,
             )
         ]
         usable = _collapse_nested_band_frames(usable)
-        usable = _collapse_equivalent_nested_frames(usable, calibration)
+        usable = _collapse_equivalent_nested_frames(usable, anchor_calibration)
         if len(usable) > 1:
             out.append(SegmentedViewport(
                 view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
@@ -2095,6 +2146,8 @@ def _rotated_semantic_frame_band_partitions(
     if rotation not in (90, 270):
         return [], set()
 
+    layout_calibration = _rotated_semantic_layout_calibration(page, calibration)
+
     separators = [
         viewport
         for viewport in framed
@@ -2132,7 +2185,7 @@ def _rotated_semantic_frame_band_partitions(
         for viewport in framed
         if viewport.bounding_box is not None
     ]
-    gap = max(calibration.median_word_height_pt * 0.25, 0.5)
+    gap = max(layout_calibration.median_word_height_pt * 0.25, 0.5)
     candidates_by_index: dict[
         int,
         list[
@@ -2193,9 +2246,9 @@ def _rotated_semantic_frame_band_partitions(
         for side, visual_band in side_bands:
             if (
                 visual_band[2] - visual_band[0]
-                < calibration.minimum_frame_span_pt
+                < layout_calibration.minimum_frame_span_pt
                 or visual_band[3] - visual_band[1]
-                < calibration.minimum_frame_span_pt
+                < layout_calibration.minimum_frame_span_pt
             ):
                 continue
 
@@ -2205,7 +2258,7 @@ def _rotated_semantic_frame_band_partitions(
                 if _bbox_contains(
                     visual_band,
                     visual_anchor_boxes[index],
-                    margin=calibration.median_word_height_pt * 0.1,
+                    margin=layout_calibration.median_word_height_pt * 0.1,
                 )
             ]
             if len(owning_plan_indices) != 1:
@@ -2222,14 +2275,14 @@ def _rotated_semantic_frame_band_partitions(
             if native_band is None or not _bbox_contains(
                 native_band,
                 anchors[index].bbox,
-                margin=calibration.median_word_height_pt * 0.1,
+                margin=layout_calibration.median_word_height_pt * 0.1,
             ):
                 continue
 
             primitive_count = _drawing_vector_primitive_count(
                 page,
                 native_band,
-                calibration,
+                layout_calibration,
             )
             if primitive_count < 2:
                 continue
