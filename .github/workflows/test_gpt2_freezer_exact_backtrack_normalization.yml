@@ -29,6 +29,7 @@ jobs:
           sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
           PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
           import json
+          from collections import Counter, defaultdict
           from pathlib import Path
           from shapely.geometry import Polygon
           from shapely.validation import explain_validity
@@ -74,13 +75,50 @@ jobs:
           def norm(value):
               return " ".join(str(value or "").strip().upper().split())
 
+          def exact_walk_diagnostics(points):
+              pts=tuple(
+                  (round(float(point[0]),6),round(float(point[1]),6))
+                  for point in points
+              )
+              by_point=defaultdict(list)
+              for index,point in enumerate(pts):
+                  by_point[point].append(index)
+              repeats=[
+                  {"point":list(point),"indices":indices}
+                  for point,indices in sorted(by_point.items())
+                  if len(indices)>1
+              ]
+              balanced=[]
+              for point,indices in sorted(by_point.items()):
+                  if len(indices)<2:
+                      continue
+                  for left_pos,left in enumerate(indices[:-1]):
+                      for right in indices[left_pos+1:]:
+                          walk=pts[left:right+1]
+                          directed=Counter(zip(walk,walk[1:]))
+                          if directed and all(
+                              directed[(a,b)]==directed[(b,a)]
+                              for a,b in directed
+                          ):
+                              balanced.append({
+                                  "point":list(point),
+                                  "start_index":left,
+                                  "end_index":right,
+                                  "edge_count":len(walk)-1,
+                              })
+              return {
+                  "repeated_vertices":repeats,
+                  "balanced_exact_excursions":balanced,
+              }
+
           rows=[]
           for room in rooms.rooms:
               if not room.geometry_complete or not norm(room.room_label):
                   continue
               polygon=Polygon(room.polygon_pdf_pts)
-              rows.append({
-                  "label":norm(room.room_label),
+              label=norm(room.room_label)
+              row={
+                  "label":label,
                   "physical_room_id":room.physical_room_id,
                   "source_room_face_record_id":room.source_room_face_record_id,
                   "vertex_count":len(room.polygon_pdf_pts),
@@ -88,7 +126,14 @@ jobs:
                   "shapely_area":float(polygon.area),
                   "valid":bool(polygon.is_valid),
                   "validity_reason":explain_validity(polygon),
-              })
+              }
+              if label=="FREEZER":
+                  row["polygon_pdf_pts"]=[
+                      [round(float(point[0]),6),round(float(point[1]),6)]
+                      for point in room.polygon_pdf_pts
+                  ]
+                  row.update(exact_walk_diagnostics(room.polygon_pdf_pts))
+              rows.append(row)
           freezer=[row for row in rows if row["label"]=="FREEZER"]
           print(json.dumps({
               "wall_opening_status":getattr(wall_opening.status,"value",str(wall_opening.status)),
