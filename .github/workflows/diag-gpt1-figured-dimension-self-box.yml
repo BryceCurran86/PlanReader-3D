@@ -1,0 +1,74 @@
+name: DIAG GPT1 Figured Dimension Self Box
+
+on:
+  push:
+    branches:
+      - gpt1/figured-dimension-self-box-v1
+
+concurrency:
+  group: diag-gpt1-figured-dimension-self-box
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Focused regressions
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_figured_dimension_native_direction_style_v1.py \
+            tests/test_figured_dimension_line_fragment_merge_v1.py \
+            tests/test_same_view_room_area_authority_v1.py
+      - name: Real Lot16 page 3 trusted dimension census
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_cross_view_room_area_authority import _trusted_native_dimensions_for_page
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="gpt1-real-lot16-figured-dimension-proof",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt1-real-lot16-figured-dimension-proof",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3",),
+          )
+          dims=_trusted_native_dimensions_for_page(
+              source,
+              revision_id=published.revision.revision_id,
+              page_id="3",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          print(json.dumps({
+              "trusted_dimension_count":len(dims),
+              "dimensions":[
+                  {
+                      "value_mm":d.value_mm,
+                      "orientation":d.orientation,
+                      "endpoints_pt":[list(x) for x in d.endpoints_pt],
+                      "dimension_line_observation_ids":list(d.dimension_line_observation_ids),
+                      "witness_observation_ids":list(d.witness_observation_ids),
+                  }
+                  for d in dims
+              ],
+          },indent=2,sort_keys=True))
+          PY
