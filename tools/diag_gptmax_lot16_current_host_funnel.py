@@ -11,7 +11,10 @@ from pb_live_physical_opening_void_composition import compose_live_physical_open
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_host_binding_authority import _resolve_two_face_lineage_host
-from pb_physical_opening_authority import JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+from pb_physical_opening_authority import (
+    JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+)
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -20,6 +23,8 @@ from pb_source_visibility_authority import SourceVisibilityProducer
 PDF = Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
 EXPECTED_SHA = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
 PAGE_ID = "3"
+ALL_PAGE_IDS = tuple(str(index) for index in range(1, 14))
+EVIDENCE_PAGE_IDS = tuple(page_id for page_id in ALL_PAGE_IDS if page_id != PAGE_ID)
 SCOPE_ID = "wall-source:page-3"
 
 
@@ -41,12 +46,13 @@ def main():
         document_id=f"live-source:{EXPECTED_SHA[:32]}",
         source_bytes=source_bytes,
         source_locator="memory://live-physical-net-wall-source.pdf",
-        page_ids=(PAGE_ID,),
+        page_ids=ALL_PAGE_IDS,
     )
     composition = compose_live_wall_opening_authority(
         source_visibility_producer=source,
         revision_id=initial.revision.revision_id,
         page_ids=(PAGE_ID,),
+        evidence_page_ids=EVIDENCE_PAGE_IDS,
     )
     current = source.published_snapshot_for_revision(initial.revision.revision_id)
     if current is None:
@@ -132,6 +138,55 @@ def main():
     )
     areas = publish_live_opening_area_quantities(voids)
 
+    void_trace_by_id = {
+        trace.opening_identity_id: trace
+        for trace in voids.traces
+    }
+    binding_row_by_id = {
+        row["opening_identity_id"]: row
+        for row in rows
+    }
+    swing_openings = [
+        opening
+        for opening in voids.canonical_openings
+        if opening.structural_pattern == RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION
+    ]
+    swing_rows = []
+    for opening in swing_openings:
+        trace = void_trace_by_id.get(opening.physical_opening_id)
+        binding_row = binding_row_by_id.get(opening.physical_opening_id, {})
+        swing_rows.append({
+            "physical_opening_id": opening.physical_opening_id,
+            "representative_observation_id": opening.representative_observation_id,
+            "host_wall_id": opening.host_wall_id,
+            "binding_status": binding_row.get("binding_status"),
+            "binding_reason_codes": binding_row.get("binding_reason_codes", []),
+            "opening_kind": opening.opening_kind,
+            "type_mark": opening.type_mark,
+            "width_m": opening.width_m,
+            "height_m": opening.height_m,
+            "area_m2": opening.area_m2,
+            "area_basis": opening.area_basis,
+            "geometry_complete": opening.geometry_complete,
+            "schedule_declared_width_mm": opening.schedule_declared_width_mm,
+            "schedule_declared_height_mm": opening.schedule_declared_height_mm,
+            "schedule_binding_record_id": opening.schedule_binding_record_id,
+            "width_status": None if trace is None else state(trace.width_status),
+            "width_reason_codes": [] if trace is None else list(trace.width_reason_codes),
+            "height_status": None if trace is None else state(trace.height_status),
+            "height_reason_codes": [] if trace is None else list(trace.height_reason_codes),
+            "vertical_status": None if trace is None else state(trace.vertical_status),
+            "vertical_reason_codes": [] if trace is None else list(trace.vertical_reason_codes),
+            "schedule_binding_status": (
+                None if trace is None else state(trace.schedule_binding_status)
+            ),
+            "schedule_binding_reason_codes": (
+                [] if trace is None else list(trace.schedule_binding_reason_codes)
+            ),
+            "void_status": None if trace is None else state(trace.void_status),
+            "void_reason_codes": [] if trace is None else list(trace.void_reason_codes),
+        })
+
     payload = {
         "source_sha256": actual,
         "snapshot_id": current.snapshot.snapshot_id,
@@ -156,6 +211,22 @@ def main():
         "area_resolved_count": sum(1 for opening in voids.canonical_openings if opening.area_m2 is not None),
         "opening_area_quantity_count": len(areas),
         "opening_area_values": sorted(float(q.value) for q in areas),
+        "swing_canonical_opening_count": len(swing_openings),
+        "swing_host_bound_count": sum(1 for opening in swing_openings if opening.host_wall_id),
+        "swing_kind_resolved_count": sum(
+            1 for opening in swing_openings
+            if opening.opening_kind in {"door", "window"}
+        ),
+        "swing_width_resolved_count": sum(
+            1 for opening in swing_openings if opening.width_m is not None
+        ),
+        "swing_height_resolved_count": sum(
+            1 for opening in swing_openings if opening.height_m is not None
+        ),
+        "swing_area_resolved_count": sum(
+            1 for opening in swing_openings if opening.area_m2 is not None
+        ),
+        "swing_rows": swing_rows,
         "rows": rows,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
