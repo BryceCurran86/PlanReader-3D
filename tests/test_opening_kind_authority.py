@@ -14,6 +14,7 @@ from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
 )
 
 
@@ -27,6 +28,26 @@ def test_structural_door_pattern_classifies_without_schedule() -> None:
     assert result.schedule_kind is None
     assert OPENING_KIND_STRUCTURAL_DOOR in result.reason_codes
     assert OPENING_KIND_CORROBORATED in result.reason_codes
+
+
+def test_raster_door_swing_pattern_classifies_as_door_and_conflicts_with_window_evidence() -> None:
+    resolved = resolve_opening_kind(
+        structural_pattern=RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+    )
+    assert resolved.status is EvidenceResolutionStatus.CORROBORATED
+    assert resolved.opening_kind == "door"
+    assert resolved.structural_kind == "door"
+    assert OPENING_KIND_STRUCTURAL_DOOR in resolved.reason_codes
+
+    conflict = resolve_opening_kind(
+        structural_pattern=RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+        label_kind="window",
+    )
+    assert conflict.status is EvidenceResolutionStatus.CONFLICT
+    assert conflict.opening_kind is None
+    assert conflict.structural_kind == "door"
+    assert conflict.label_kind == "window"
+    assert OPENING_KIND_CONFLICT in conflict.reason_codes
 
 
 def test_structural_window_pattern_classifies_without_schedule() -> None:
