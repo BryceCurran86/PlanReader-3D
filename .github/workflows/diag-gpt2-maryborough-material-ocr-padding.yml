@@ -18,7 +18,7 @@ jobs:
       - name: Install Tesseract
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - name: Install dependencies
-        run: pip install PyMuPDF==1.28.0 Pillow==12.3.0 pytesseract==0.3.13 opencv-python-headless==4.14.0.94 numpy==2.3.5
+        run: pip install PyMuPDF==1.28.0 Pillow==12.3.0 pytesseract==0.3.13
       - name: Probe page 9 schedule blocks
         shell: bash
         run: |
@@ -28,21 +28,8 @@ jobs:
           import fitz
           import pytesseract
           from PIL import Image, ImageOps
-          from pb_source_visibility_authority import SourceVisibilityProducer
-
           pdf_path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
-          payload=pdf_path.read_bytes()
-          source=SourceVisibilityProducer(
-              producer_method="diag-gpt2-render-clip",
-              producer_version="1",
-          )
-          published=source.ingest_native_pdf_bytes(
-              document_id="diag-gpt2-render-clip",
-              source_bytes=payload,
-              source_locator="memory://maryborough.pdf",
-              page_ids=("9",),
-          )
-          doc=fitz.open(stream=payload,filetype="pdf")
+          doc=fitz.open(pdf_path)
           page=doc.load_page(8)
           words=page.get_text("words")
           grouped={}
@@ -73,16 +60,13 @@ jobs:
                   )
                   readings={}
                   for dpi in (300,450):
-                      png_bytes,_parent=source._producer.render_native_page_png(
-                          document_id=published.revision.document_id,
-                          revision_id=published.revision.revision_id,
-                          source_sha256=published.revision.source_sha256,
-                          snapshot_id=published.snapshot.snapshot_id,
-                          page_id="9",
-                          dpi=float(dpi),
-                          clip_pt=(float(clip.x0),float(clip.y0),float(clip.x1),float(clip.y1)),
+                      render_clip=clip * page.rotation_matrix
+                      pix=page.get_pixmap(
+                          matrix=fitz.Matrix(float(dpi)/72.0,float(dpi)/72.0),
+                          clip=render_clip,
+                          alpha=False,
                       )
-                      img=Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                      img=Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
                       border=max(1,round(dpi*1.0/25.4))
                       rotation_reads={}
                       for degrees in (0,90,-90,180):
@@ -99,16 +83,13 @@ jobs:
                       word_images=[]
                       for w in rows:
                           wb=fitz.Rect(float(w[0]),float(w[1]),float(w[2]),float(w[3]))
-                          png_bytes,_parent=source._producer.render_native_page_png(
-                              document_id=published.revision.document_id,
-                              revision_id=published.revision.revision_id,
-                              source_sha256=published.revision.source_sha256,
-                              snapshot_id=published.snapshot.snapshot_id,
-                              page_id="9",
-                              dpi=float(dpi),
-                              clip_pt=(float(wb.x0),float(wb.y0),float(wb.x1),float(wb.y1)),
+                          render_wb=wb * page.rotation_matrix
+                          pix=page.get_pixmap(
+                              matrix=fitz.Matrix(float(dpi)/72.0,float(dpi)/72.0),
+                              clip=render_wb,
+                              alpha=False,
                           )
-                          wi=Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                          wi=Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
                           wi=wi.rotate(degrees,expand=True)
                           wi=ImageOps.expand(
                               wi,
