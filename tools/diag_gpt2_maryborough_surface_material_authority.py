@@ -154,6 +154,77 @@ def main() -> int:
                 "parsed_rows": parsed,
             })
 
+    # Identify the exact words that still poison an authenticated material-schedule
+    # viewport after the existing narrow word/whole-line raster corroboration.
+    schedule_viewport_diagnostics = []
+    pdf_diag = fitz.open(stream=payload, filetype="pdf")
+    try:
+        for page_number in sorted(int(v) for v in published.coverage.decoded_pages):
+            page = pdf_diag.load_page(page_number - 1)
+            viewports = tuple(segment_page_viewports(page, page_number=page_number))
+            if not viewports:
+                continue
+            siblings_ok = validate_non_overlapping_viewports(viewports)
+            page_words = words_by_page.get(str(page_number), ())
+            for viewport in viewports:
+                if (
+                    viewport.view_type not in material._SCHEDULE_VIEW_TYPES
+                    or not material._viewport_is_authoritative(
+                        viewport,
+                        sibling_non_overlapping=siblings_ok,
+                    )
+                    or viewport.bounding_box is None
+                ):
+                    continue
+                recovered = material._recover_admissible_viewport_words(
+                    source=source,
+                    published=published,
+                    raster=material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)._raster,
+                    words=page_words,
+                    viewport=viewport,
+                )
+                recovered = material._recover_admissible_viewport_lines(
+                    source=source,
+                    published=published,
+                    raster=material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)._raster,
+                    words=recovered,
+                    viewport=viewport,
+                )
+                lines_after, complete_after, reasons_after = material._trusted_lines_for_viewport(
+                    recovered, viewport
+                )
+                remaining = []
+                for word in recovered:
+                    if not material._bbox_intersects(word.bbox, viewport.bounding_box):
+                        continue
+                    if word.trusted:
+                        continue
+                    remaining.append({
+                        "observation_id": word.observation_id,
+                        "raw_text": word.text,
+                        "source_partition_id": word.source_partition_id,
+                        "block_no": word.block_no,
+                        "line_no": word.line_no,
+                        "word_no": word.word_no,
+                        "bbox": list(word.bbox),
+                        "reason_codes": list(word.reason_codes),
+                        "fully_inside_viewport": material._bbox_fully_inside(word.bbox, viewport.bounding_box),
+                    })
+                schedule_viewport_diagnostics.append({
+                    "page_id": str(page_number),
+                    "viewport_id": viewport.view_id,
+                    "viewport_label": viewport.label,
+                    "viewport_type": viewport.view_type,
+                    "viewport_bbox": list(viewport.bounding_box),
+                    "complete_after_existing_recovery": complete_after,
+                    "reason_codes_after_existing_recovery": list(reasons_after),
+                    "trusted_line_count_after_recovery": len(lines_after),
+                    "remaining_untrusted_word_count": len(remaining),
+                    "remaining_untrusted_words": remaining,
+                })
+    finally:
+        pdf_diag.close()
+
     producer = material.SourceMaterialSemanticProducer.from_source_visibility_producer(source)
     authority = producer.publish(published.revision.revision_id)
 
@@ -324,6 +395,7 @@ def main() -> int:
     print(json.dumps({
         "source_sha256": sha,
         "revision_id": published.revision.revision_id,
+        "schedule_viewport_diagnostics": schedule_viewport_diagnostics,
         "native_material_schedule_block_count": len(native_blocks),
         "native_material_schedule_blocks": native_blocks,
         "raw_finish_or_code_block_count": len(raw_candidate_blocks),
