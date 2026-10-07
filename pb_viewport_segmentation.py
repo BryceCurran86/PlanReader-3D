@@ -2173,10 +2173,25 @@ def _rotated_semantic_frame_band_partitions(
     if visual_width <= 0.0 or visual_height <= 0.0:
         return [], set()
 
-    visual_anchor_boxes = {
-        index: _to_visual_bbox(page, anchors[index].bbox)
-        for index in plan_indices
-    }
+    visual_anchor_boxes: dict[int, tuple[float, float, float, float]] = {}
+    for index in plan_indices:
+        visual_anchor = _to_visual_bbox(page, anchors[index].bbox)
+        # Native PDF text boxes can extend fractionally beyond the physical
+        # page because glyph metrics include ink/advance outside the crop. Band
+        # ownership is page geometry, so clip only that out-of-page portion
+        # exactly instead of growing an evidence tolerance.
+        clipped_anchor = (
+            max(0.0, visual_anchor[0]),
+            max(0.0, visual_anchor[1]),
+            min(visual_width, visual_anchor[2]),
+            min(visual_height, visual_anchor[3]),
+        )
+        if (
+            clipped_anchor[2] <= clipped_anchor[0]
+            or clipped_anchor[3] <= clipped_anchor[1]
+        ):
+            continue
+        visual_anchor_boxes[index] = clipped_anchor
     framed_visual = [
         (
             viewport,
@@ -2255,7 +2270,8 @@ def _rotated_semantic_frame_band_partitions(
             owning_plan_indices = [
                 index
                 for index in plan_indices
-                if _bbox_contains(
+                if index in visual_anchor_boxes
+                and _bbox_contains(
                     visual_band,
                     visual_anchor_boxes[index],
                     margin=layout_calibration.median_word_height_pt * 0.1,
@@ -2272,10 +2288,15 @@ def _rotated_semantic_frame_band_partitions(
                 continue
 
             native_band = _to_native_bbox(page, visual_band)
-            if native_band is None or not _bbox_contains(
-                native_band,
-                anchors[index].bbox,
-                margin=layout_calibration.median_word_height_pt * 0.1,
+            native_anchor = _to_native_bbox(page, visual_anchor_boxes[index])
+            if (
+                native_band is None
+                or native_anchor is None
+                or not _bbox_contains(
+                    native_band,
+                    native_anchor,
+                    margin=layout_calibration.median_word_height_pt * 0.1,
+                )
             ):
                 continue
 
