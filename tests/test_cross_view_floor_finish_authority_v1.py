@@ -330,6 +330,41 @@ def test_floor_finish_can_use_same_revision_distinct_semantic_snapshot(
     )
 
 
+def test_floor_finish_rejects_semantic_source_from_different_revision(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    payload = _payload()
+    geometry_source, room_areas, floors = _source_room_area_and_floor(
+        payload,
+        page_ids=("1", "2"),
+    )
+    geometry_published = geometry_source.published_snapshot_for_revision(
+        room_areas.records[0].area_evidence.metadata["room_revision_id"]
+    )
+    assert geometry_published is not None
+
+    semantic_source = SourceVisibilityProducer(
+        producer_method="cross-view-floor-finish-other-revision-test",
+        producer_version="1.0",
+    )
+    semantic_source.ingest_native_pdf_bytes(
+        document_id="different-floor-document",
+        source_bytes=payload,
+        source_locator="memory://different-floor-document.pdf",
+        page_ids=("2", "3"),
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=semantic_source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+
+
 def test_raw_material_code_without_authenticated_schedule_cannot_bind(
     monkeypatch,
 ) -> None:
