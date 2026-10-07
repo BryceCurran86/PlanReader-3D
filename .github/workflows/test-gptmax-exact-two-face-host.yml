@@ -1,0 +1,28 @@
+name: TEST GPTMAX Exact Two Face Host
+
+on:
+  pull_request:
+    branches:
+      - gptmax/semantic-representative-opening-face-protection-v1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run host safety regressions
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_opening_host_binding_exact_two_face_lineage.py \
+            tests/test_opening_host_binding_remote_ambiguity_regression_v3.py \
+            tests/test_opening_host_binding_equivalence_source_integration_v3.py \
+            tests/test_opening_host_binding_review_hardening_v3.py
