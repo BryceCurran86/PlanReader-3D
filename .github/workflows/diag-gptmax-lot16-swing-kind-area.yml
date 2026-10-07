@@ -1,6 +1,9 @@
 name: DIAG GPTMAX Lot16 Swing Kind Area Real Proof
 
 on:
+  push:
+    branches:
+      - diag/gptmax-lot16-raster-swing-production-current-main-v1
   pull_request:
     branches:
       - fix/gptmax-raster-swing-production-current-main-v1
