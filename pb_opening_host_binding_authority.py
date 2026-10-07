@@ -1718,6 +1718,54 @@ def _excluded_boundary_primitive_host_roles(
     return tuple(dict.fromkeys(roles))
 
 
+def _candidate_is_definitely_orientation_incompatible(
+    record: PhysicalWallCandidateRecord,
+    opening: _OpeningGeometry,
+) -> bool:
+    """Positive proof that one source wall path cannot be this straight host band.
+
+    This predicate is intentionally narrower than _candidate_axis_data(). It
+    returns True only when the producer-owned centerline is otherwise
+    trustworthy/evaluable and its orientation is positively incompatible with
+    the sealed opening axis. Curved, non-simple, degenerate, non-finite, or
+    otherwise incomplete geometry remains unknown and must stay fail-closed.
+    """
+
+    wall = record.wall_candidate
+    if (
+        wall.is_curved
+        or len(wall.centerline_pts) < 2
+        or "non_simple_chain_topology_fallback_ordering" in wall.reason_codes
+    ):
+        return False
+
+    points = tuple((float(x), float(y)) for x, y in wall.centerline_pts)
+    if any(
+        not (math.isfinite(x) and math.isfinite(y))
+        for x, y in points
+    ):
+        return False
+
+    line_unit = _canonical_unit(
+        (points[0][0], points[0][1], points[-1][0], points[-1][1])
+    )
+    segment_units = tuple(
+        _canonical_unit((start[0], start[1], end[0], end[1]))
+        for start, end in zip(points, points[1:])
+    )
+    if line_unit is None or any(unit is None for unit in segment_units):
+        return False
+
+    return (
+        abs(_cross(line_unit, opening.axis)) > _PARALLEL_TOL
+        or any(
+            abs(_cross(unit, opening.axis)) > _PARALLEL_TOL
+            for unit in segment_units
+            if unit is not None
+        )
+    )
+
+
 def _candidate_could_affect_opening_local_band(
     record: PhysicalWallCandidateRecord,
     opening: _OpeningGeometry,
@@ -1736,6 +1784,12 @@ def _candidate_could_affect_opening_local_band(
 
     data = _candidate_axis_data(record, opening)
     if data is None:
+        # Orientation mismatch is not missing information: for an otherwise
+        # trustworthy straight-chain representation it positively proves that
+        # this wall cannot participate in the opening's source-proven straight
+        # host band. All other non-evaluable geometry remains unknown.
+        if _candidate_is_definitely_orientation_incompatible(record, opening):
+            return False
         return None
     along_min, along_max, offset = data
     edge_tol = max(0.5, min(2.0, opening.length * 0.02))
