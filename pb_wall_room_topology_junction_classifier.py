@@ -54,6 +54,11 @@ from pb_wall_room_topology_contracts import (
     TopologyRelationship,
     TopologyRelationshipType,
 )
+from pb_wall_room_topology_primitive_lineage import (
+    LINEAGE_KEY,
+    isolated_lineage,
+    lineage_from_edges,
+)
 
 # Reused for consistency with W2's own collinear-merge tolerance -- a node
 # that reaches this classifier at degree 2 with a collinear angle pattern
@@ -133,9 +138,21 @@ def deduplicate_coincident_edges(graph: Dict[str, Any]) -> Tuple[Dict[str, Any],
         key = frozenset((edge["a"], edge["b"]))
         if key in seen:
             removed_ids.append(str(edge.get("id")))
+            survivor = seen[key]
+            # Coincident-edge collapse is geometric deduplication only. Both
+            # source primitives still contributed to the exact same physical
+            # graph edge, so dropping the duplicate's lineage would make later
+            # W4 physical identities unable to prove ownership of that source
+            # primitive. Preserve the historical survivor id/geometry while
+            # unioning producer-owned provenance.
+            survivor[LINEAGE_KEY] = isolated_lineage(
+                lineage_from_edges(survivor, edge)
+            )
             continue
-        seen[key] = edge
-        kept.append(edge)
+        survivor = dict(edge)
+        survivor[LINEAGE_KEY] = isolated_lineage(edge.get(LINEAGE_KEY))
+        seen[key] = survivor
+        kept.append(survivor)
 
     nodes = [dict(n) for n in graph["nodes"]]
     adjacency: Dict[int, List[int]] = {n["id"]: [] for n in nodes}
