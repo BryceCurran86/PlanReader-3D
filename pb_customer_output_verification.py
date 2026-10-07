@@ -270,20 +270,20 @@ def verify_sealed_customer_output(
     expected_ids = set(valid)
     actual_ids = set(customer_by_id)
     missing = sorted(expected_ids - actual_ids)
-    extra = sorted(actual_ids - expected_ids)
+    leaked_abstentions = sorted(abstained_ids & actual_ids)
+    extra = sorted(actual_ids - expected_ids - abstained_ids)
     if missing:
         raise CustomerOutputVerificationError(
             "valid sealed quantities missing customer rows: " + ", ".join(missing)
         )
-    if extra:
-        raise CustomerOutputVerificationError(
-            "customer rows have no valid sealed quantity: " + ", ".join(extra)
-        )
-    leaked_abstentions = sorted(abstained_ids & actual_ids)
     if leaked_abstentions:
         raise CustomerOutputVerificationError(
             "abstained quantities leaked into customer output: "
             + ", ".join(leaked_abstentions)
+        )
+    if extra:
+        raise CustomerOutputVerificationError(
+            "customer rows have no valid sealed quantity: " + ", ".join(extra)
         )
 
     for quantity_id in sorted(expected_ids):
