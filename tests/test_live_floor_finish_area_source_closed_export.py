@@ -74,6 +74,8 @@ def _quantity() -> QuantityEvidence:
             "finish_code": "FT1",
             "semantic_finish": "tile",
             "support_snapshot_id": "semantic-snap-1",
+            "support_page_id": "9",
+            "support_viewport_id": "finish-vp",
             "finish_definition_record_id": "def-1",
             "finish_occurrence_record_id": "occ-1",
             "source_dimension_page_id": "2",
@@ -140,6 +142,8 @@ def test_floor_finish_quantity_seals_on_exact_canonical_floor_lineage() -> None:
     assert row.object_identity_refs == ("floor-1",)
     assert row.lineage_ok is True
     assert set(row.trace_canonical_entity_ids) >= {"floor-1", "room-1"}
+    assert row.trace.metadata["support_page_id"] == "9"
+    assert row.trace.metadata["support_viewport_id"] == "finish-vp"
 
 
 def test_floor_finish_export_rejects_missing_semantic_snapshot() -> None:
