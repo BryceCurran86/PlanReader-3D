@@ -450,19 +450,16 @@ class OpeningHostBindingProducer:
                 status=status,
             )
 
-        lineage_resolution = _resolve_two_face_lineage_host(
+        # Preserve the established host path first. Exact two-face lineage is
+        # a positive fallback only: it may recover an opening that the generic
+        # page-wide equivalence path would otherwise abstain/conflict on, but it
+        # must never replace an already-corroborated host.
+        lineage_resolution = _resolve_generic_gap_lineage_host(
             self._opening,
             opening,
             universe.records,
             universe.equivalence,
         )
-        if lineage_resolution is None:
-            lineage_resolution = _resolve_generic_gap_lineage_host(
-                self._opening,
-                opening,
-                universe.records,
-                universe.equivalence,
-            )
         if lineage_resolution is not None:
             band_resolution = lineage_resolution
         else:
@@ -506,6 +503,30 @@ class OpeningHostBindingProducer:
                             universe.equivalence,
                             universe.source_observation_ids,
                         )
+
+            # A complete G17 two-face opening may carry stronger local physical
+            # host evidence than page-wide wall equivalence when plan scale is
+            # unavailable. Use it only when the established path did not
+            # already produce one unique corroborated host band.
+            if (
+                opening.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+                and (
+                    band_resolution.status is not EvidenceResolutionStatus.CORROBORATED
+                    or not band_resolution.bands
+                )
+            ):
+                exact_lineage = _resolve_two_face_lineage_host(
+                    self._opening,
+                    opening,
+                    universe.records,
+                    universe.equivalence,
+                )
+                if (
+                    exact_lineage is not None
+                    and exact_lineage.status is EvidenceResolutionStatus.CORROBORATED
+                    and len(exact_lineage.bands) == 1
+                ):
+                    band_resolution = exact_lineage
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
                 *band_resolution.reason_codes,
