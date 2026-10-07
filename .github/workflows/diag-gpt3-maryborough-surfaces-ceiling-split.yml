@@ -1,0 +1,48 @@
+name: DIAG GPT3 Maryborough Surfaces After Ceiling Scope Split
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  surfaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused ceiling and handoff tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_live_ceiling_lining_integration_v1.py \
+            tests/test_source_closed_project_handoff.py
+      - name: Run Maryborough surfaces handoff
+        shell: bash
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt3-maryborough-surfaces-ceiling-split
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --workspace-id 1 \
+            --family-group surfaces \
+            --output-dir "$OUT" \
+            | tee "$OUT/handoff.stdout.json"
+          cat "$OUT/production_summary.json"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-maryborough-surfaces-ceiling-split
+          path: artifacts/gpt3-maryborough-surfaces-ceiling-split
+          retention-days: 3
