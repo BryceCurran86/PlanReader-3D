@@ -1,0 +1,56 @@
+name: DIAG GPT1 Maryborough Semantic Table Viewports
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Segment Maryborough semantic table viewports
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(pdf)
+          rows=[]
+          try:
+              for index in range(doc.page_count):
+                  page_no=index+1
+                  for view in segment_page_viewports(doc[index],page_number=page_no):
+                      if view.view_type not in {"schedule","legend","specification"}:
+                          continue
+                      rows.append({
+                          "page_no":page_no,
+                          "view_id":view.view_id,
+                          "view_type":view.view_type,
+                          "label":view.label,
+                          "status":view.status,
+                          "bbox":None if view.bounding_box is None else list(view.bounding_box),
+                          "boundary_source":view.boundary_source,
+                          "notes":list(view.notes),
+                          "provenance":dict(view.provenance or {}),
+                      })
+          finally:
+              doc.close()
+          resolved=[r for r in rows if r["status"] in {"resolved","derived"} and r["bbox"]]
+          print(json.dumps({
+              "semantic_table_viewport_count":len(rows),
+              "bounded_resolved_count":len(resolved),
+              "resolved":resolved,
+              "all":rows,
+          },indent=2,sort_keys=True))
+          PY
