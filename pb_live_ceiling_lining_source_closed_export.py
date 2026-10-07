@@ -1,8 +1,8 @@
 """Source-closed export for cross-view canonical ceiling-lining quantities.
 
-Consumes only typed ceiling_lining_quantity_evidence already published by the
-live integration. This module does not extract, bind, measure, infer a finish,
-read benchmark truth, or create a new quantity.
+Consumes only typed canonical ceilings and FIRM ceiling_lining QuantityEvidence
+already published by the live integration. This module does not extract, bind,
+measure, infer a finish, read benchmark truth, or create a new quantity.
 """
 from __future__ import annotations
 
@@ -52,6 +52,17 @@ def build_live_ceiling_lining_source_traces(
         rooms_by_canonical_id[canonical_id] = room
         rooms_by_physical_id[physical_id] = room
 
+    ceilings = {}
+    for ceiling in claim.canonical_ceilings:
+        canonical_id = _clean(ceiling.canonical_ceiling_id)
+        if not canonical_id:
+            continue
+        if canonical_id in ceilings:
+            raise SourceClosedRunConflictError(
+                f"duplicate canonical ceiling identity: {canonical_id}"
+            )
+        ceilings[canonical_id] = ceiling
+
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
     for quantity in claim.ceiling_lining_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
@@ -69,61 +80,59 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling quantity must own one canonical ceiling identity: "
                 f"{quantity.quantity_id}"
             )
-        authority = _clean(quantity.authority)
         if (
             _clean(quantity.status) != AuthorityStatus.FIRM.value
-            or authority
-            not in {
-                MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
-                MeasurementAuthorityType.PDF_SCALED.value,
-            }
+            or _clean(quantity.authority)
+            != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
         ):
             raise SourceClosedRunConflictError(
-                f"ceiling quantity lacks firm measurement authority: "
+                f"ceiling quantity is not firm documented authority: "
                 f"{quantity.quantity_id}"
             )
 
         metadata = (
             quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
         )
-        if authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
-            figured_ids = tuple(
+        figured_ids = tuple(
+            sorted(
                 {
                     _clean(value)
                     for value in (metadata.get("figured_dimension_ids") or ())
                     if _clean(value)
                 }
             )
-            if len(figured_ids) != 2:
-                raise SourceClosedRunConflictError(
-                    f"documented ceiling quantity lacks figured dimension pair: "
-                    f"{quantity.quantity_id}"
-                )
-        elif not _clean(metadata.get("scale_fingerprint")):
+        )
+        if len(figured_ids) != 2:
             raise SourceClosedRunConflictError(
-                f"scaled ceiling quantity lacks scale fingerprint: "
+                f"documented ceiling quantity lacks figured dimension pair: "
                 f"{quantity.quantity_id}"
             )
+
         canonical_ceiling_id = _clean(quantity.input_entity_ids[0])
-        if _clean(metadata.get("canonical_ceiling_id")) != canonical_ceiling_id:
+        ceiling = ceilings.get(canonical_ceiling_id)
+        if ceiling is None:
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity references unknown canonical ceiling: "
+                f"{canonical_ceiling_id}"
+            )
+        if (
+            _clean(metadata.get("canonical_ceiling_id")) != canonical_ceiling_id
+            or _clean(metadata.get("physical_ceiling_surface_id"))
+            != canonical_ceiling_id
+            or _clean(ceiling.ceiling_quantity_id) != _clean(quantity.quantity_id)
+        ):
             raise SourceClosedRunConflictError(
                 f"ceiling quantity canonical identity mismatch: "
                 f"{quantity.quantity_id}"
             )
-        if (
-            _clean(metadata.get("physical_ceiling_surface_id"))
-            != canonical_ceiling_id
-        ):
-            raise SourceClosedRunConflictError(
-                f"ceiling quantity physical identity mismatch: "
-                f"{quantity.quantity_id}"
-            )
+
         canonical_room_id = _clean(metadata.get("canonical_room_id"))
         physical_room_id = _clean(metadata.get("physical_room_id"))
         room = rooms_by_canonical_id.get(canonical_room_id)
         if (
             room is None
             or rooms_by_physical_id.get(physical_room_id) is not room
+            or _clean(ceiling.room_entity_id) != canonical_room_id
             or _clean(room.source_room_face_record_id)
             != _clean(metadata.get("source_room_face_record_id"))
         ):
@@ -131,46 +140,69 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling quantity references unknown room identity: "
                 f"{quantity.quantity_id}"
             )
+
+        try:
+            value = float(quantity.value)
+            ceiling_value = float(ceiling.area_m2)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity is not metric: {quantity.quantity_id}"
+            ) from exc
         if (
-            _clean(metadata.get("source_sha256")).lower()
-            != _clean(room.source_sha256).lower()
-            or _clean(metadata.get("revision_id")) != _clean(room.revision_id)
-            or _clean(metadata.get("page_no")) != _clean(room.page_id)
+            not math.isfinite(value)
+            or value <= 0.0
+            or not math.isfinite(ceiling_value)
+            or abs(value - ceiling_value) > 1e-9
         ):
             raise SourceClosedRunConflictError(
-                f"ceiling quantity source lineage mismatch: "
+                f"ceiling quantity disagrees with canonical ceiling area: "
                 f"{quantity.quantity_id}"
             )
-        viewport_id = _clean(metadata.get("viewport_id")) or _clean(
-            room.viewport_id
-        )
-        if not viewport_id:
+
+        if (
+            _clean(metadata.get("document_id")) != _clean(ceiling.document_id)
+            or _clean(metadata.get("source_sha256")).lower()
+            != _clean(ceiling.source_sha256).lower()
+            or _clean(metadata.get("revision_id")) != _clean(ceiling.revision_id)
+            or _clean(metadata.get("snapshot_id")) != _clean(ceiling.snapshot_id)
+            or _clean(metadata.get("page_no")) != str(ceiling.source_page)
+            or _clean(metadata.get("viewport_id")) != _clean(ceiling.viewport_id)
+            or _clean(metadata.get("upstream_room_area_quantity_id"))
+            != _clean(ceiling.room_area_quantity_id)
+            or _clean(metadata.get("source_room_index_id"))
+            != _clean(ceiling.source_room_index_id)
+            or _clean(metadata.get("semantic_finish"))
+            != _clean(ceiling.finish_descriptor)
+            or _clean(ceiling.measurement_authority)
+            != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+            or tuple(sorted(ceiling.figured_dimension_ids)) != figured_ids
+        ):
             raise SourceClosedRunConflictError(
-                f"ceiling quantity lacks owned room viewport: "
+                f"ceiling quantity canonical lineage mismatch: "
                 f"{quantity.quantity_id}"
             )
-        if _clean(room.viewport_id) and _clean(room.viewport_id) != viewport_id:
-            raise SourceClosedRunConflictError(
-                f"ceiling quantity room viewport mismatch: "
-                f"{quantity.quantity_id}"
-            )
+
         if _clean(metadata.get("row_role")) != "ceiling_area":
             raise SourceClosedRunConflictError(
                 f"ceiling quantity row role mismatch: {quantity.quantity_id}"
             )
 
-        try:
-            value = float(quantity.value)
-        except (TypeError, ValueError, OverflowError) as exc:
+        evidence_ids = tuple(
+            dict.fromkeys(
+                _clean(value)
+                for value in ceiling.evidence_ids
+                if _clean(value)
+            )
+        )
+        if not evidence_ids or not set(quantity.evidence_ids).issubset(
+            set(evidence_ids)
+        ):
             raise SourceClosedRunConflictError(
-                f"ceiling quantity is not metric: {quantity.quantity_id}"
-            ) from exc
-        if not math.isfinite(value) or value <= 0.0:
-            raise SourceClosedRunConflictError(
-                f"ceiling quantity must be positive: {quantity.quantity_id}"
+                f"canonical ceiling trace does not cover quantity evidence: "
+                f"{quantity.quantity_id}"
             )
 
-        points = tuple(room.polygon_pdf_pts or ())
+        points = tuple(ceiling.polygon_pdf_pts or ())
         source_bbox = None
         if points:
             try:
@@ -178,33 +210,21 @@ def build_live_ceiling_lining_source_traces(
                 ys = tuple(float(point[1]) for point in points)
             except (TypeError, ValueError, IndexError) as exc:
                 raise SourceClosedRunConflictError(
-                    f"ceiling source room polygon is invalid: "
+                    f"canonical ceiling polygon is invalid: "
                     f"{quantity.quantity_id}"
                 ) from exc
             if xs and ys:
                 source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
-        evidence_ids = tuple(
-            dict.fromkeys(
-                _clean(value)
-                for value in quantity.evidence_ids
-                if _clean(value)
-            )
-        )
-        if not evidence_ids:
-            raise SourceClosedRunConflictError(
-                f"ceiling quantity lacks evidence trace: {quantity.quantity_id}"
-            )
-
         trace = CommercialTakeoffSourceTrace(
             workspace_id=int(workspace_id),
             project_id=str(project_id),
-            document_id=room.document_id,
-            source_sha256=room.source_sha256,
-            source_page=str(room.page_id),
-            viewport_id=viewport_id,
-            revision_id=room.revision_id,
-            current_revision_id=room.revision_id,
+            document_id=ceiling.document_id,
+            source_sha256=ceiling.source_sha256,
+            source_page=str(ceiling.source_page),
+            viewport_id=ceiling.viewport_id,
+            revision_id=ceiling.revision_id,
+            current_revision_id=ceiling.revision_id,
             evidence_ids=evidence_ids,
             canonical_entity_ids=tuple(
                 dict.fromkeys(
@@ -223,18 +243,14 @@ def build_live_ceiling_lining_source_traces(
                 "canonical_room_id": canonical_room_id,
                 "physical_room_id": physical_room_id,
                 "source_room_face_record_id": room.source_room_face_record_id,
+                "source_room_index_id": ceiling.source_room_index_id,
+                "room_area_quantity_id": ceiling.room_area_quantity_id,
                 "support_page_id": metadata.get("support_page_id"),
                 "support_viewport_id": metadata.get("support_viewport_id"),
                 "finish_code": metadata.get("finish_code"),
                 "semantic_finish": metadata.get("semantic_finish"),
-                "measurement_authority": authority,
-                "figured_dimension_ids": tuple(
-                    metadata.get("figured_dimension_ids") or ()
-                ),
-                "scale_fingerprint": metadata.get("scale_fingerprint"),
-                "upstream_room_area_quantity_id": metadata.get(
-                    "upstream_room_area_quantity_id"
-                ),
+                "measurement_authority": ceiling.measurement_authority,
+                "figured_dimension_ids": tuple(ceiling.figured_dimension_ids),
             },
         )
         if quantity.quantity_id in traces:
