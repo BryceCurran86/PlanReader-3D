@@ -200,7 +200,7 @@ def _producer_owned_ocr_target(
         sequence_ids = (int(sequence_number),)
     else:
         sequence_ids = trace_sequence_numbers
-    if block_no is None or line_no is None or not sequence_ids:
+    if block_no is None or line_no is None:
         return word_bbox, 0
 
     source_bytes = source_producer._store.source_bytes_by_revision.get(str(revision_id))
@@ -249,6 +249,14 @@ def _producer_owned_ocr_target(
                 rotation_degrees = 90
             else:
                 return word_bbox, 0
+
+            # Rotation is source-owned line geometry and does not require
+            # texttrace character identity. When trace sequence ids are absent,
+            # keep the conservative native word bbox but still normalize the
+            # exact native line direction before OCR. Trace evidence remains
+            # required only for bbox refinement.
+            if not sequence_ids:
+                return word_bbox, rotation_degrees
 
             native_chars: list[
                 tuple[
