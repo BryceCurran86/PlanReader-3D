@@ -13,19 +13,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import io
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
 import fitz
+from PIL import Image, ImageOps
 
-from pb_drawing_evidence_binding import DrawingViewType
+from pb_drawing_evidence_binding import DrawingViewClassifier, DrawingViewType
 from pb_material_schedule_v1222 import (
+    SCHEDULE_WORDS,
     _compatible_descriptions,
     _defined_codes_in_text,
     parse_schedule_text,
     semantic_finish_from_schedule_entry,
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_pdf_text_integrity_authority import (
+    TEXT_CLIP_STATE_UNRESOLVED,
+    TEXT_GLYPH_MAPPING_UNVERIFIED,
+)
+from pb_portable_raster_ocr_authority import TesseractOCRBackend
+from pb_raster_text_corroboration_authority import (
+    RASTER_TEXT_CORROBORATION_DPIS,
+    RasterTextCorroborationProducer,
+    RasterTextCorroborationSelector,
+    _lossless_rotate,
+    _producer_owned_ocr_target,
+    normalize_reading,
+)
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import (
@@ -54,8 +70,35 @@ _SCHEDULE_VIEW_TYPES = frozenset(
         DrawingViewType.SPECIFICATION.value,
     }
 )
+
+
+def _is_explicit_non_material_schedule(viewport: SegmentedViewport) -> bool:
+    """Exclude source-proven door/window schedules from material semantics.
+
+    These schedules are legitimate semantic tables, but they do not define the
+    material-finish dictionary owned by this producer. An unreadable door or
+    window schedule therefore must not poison otherwise complete finish
+    schedules, legends or specifications. Ambiguous/general semantic sources
+    remain fail-closed.
+    """
+    if viewport.view_type != DrawingViewType.SCHEDULE.value:
+        return False
+    label = " ".join(
+        str(viewport.label or "").strip().casefold().replace(".", "").split()
+    )
+    return label.startswith(
+        (
+            "door schedule",
+            "window schedule",
+            "schedule of doors",
+            "schedule of windows",
+        )
+    )
+
+
 _PRODUCER_SEAL = object()
 _AUTHORITY_SEAL = object()
+_MATERIAL_LINE_OCR_BLANK_MARGIN_MM = 1.0
 
 
 def _required(value: object, name: str) -> str:
@@ -161,6 +204,7 @@ class SourceMaterialOccurrenceRecord:
     bbox_pdf_pts: tuple[float, float, float, float]
     raw_text: str
     source_evidence_id: str
+    source_text_observation_ids: tuple[str, ...] = ()
     schema_version: str = SOURCE_MATERIAL_SEMANTIC_SCHEMA_VERSION
 
 
@@ -217,6 +261,7 @@ def _viewport_is_authoritative(
 class _TrustedTextWord:
     observation_id: str
     page_id: str
+    source_partition_id: str
     text: str
     bbox: tuple[float, float, float, float]
     block_no: int
@@ -224,6 +269,132 @@ class _TrustedTextWord:
     word_no: int
     trusted: bool
     reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _TrustedScheduleBlock:
+    page_id: str
+    source_partition_id: str
+    block_no: int
+    scope_id: str
+    text: str
+    line_evidence: Mapping[str, tuple[str, ...]]
+
+
+def _is_material_schedule_title(value: object) -> bool:
+    text = " ".join(str(value or "").strip().casefold().split())
+    if not text or not any(token in text for token in SCHEDULE_WORDS):
+        return False
+    return (
+        DrawingViewClassifier.classify_text(str(value or "")).value
+        == DrawingViewType.SCHEDULE.value
+    )
+
+
+def _trusted_native_material_schedule_blocks(
+    words: Sequence[_TrustedTextWord],
+) -> tuple[_TrustedScheduleBlock, ...]:
+    """Return only complete trusted native blocks headed by a material schedule.
+
+    This is an independent source-ownership route for schedules whose outer
+    vector frame is ambiguous. It never chooses a competing rectangle. The PDF
+    text structure itself must put exactly one qualified material/finish
+    schedule title at the first line of one source partition/block, followed by
+    contiguous complete trusted rows in that same block.
+    """
+
+    grouped: dict[tuple[str, int], list[_TrustedTextWord]] = {}
+    for word in words:
+        if not word.source_partition_id:
+            continue
+        grouped.setdefault(
+            (word.source_partition_id, int(word.block_no)),
+            [],
+        ).append(word)
+
+    out: list[_TrustedScheduleBlock] = []
+    for (partition_id, block_no), block_words in sorted(grouped.items()):
+        if not block_words or any(not word.trusted for word in block_words):
+            continue
+        by_line: dict[int, list[_TrustedTextWord]] = {}
+        for word in block_words:
+            by_line.setdefault(int(word.line_no), []).append(word)
+        line_numbers = sorted(by_line)
+        if len(line_numbers) < 2:
+            continue
+        if line_numbers != list(range(line_numbers[0], line_numbers[-1] + 1)):
+            continue
+
+        lines: list[tuple[str, tuple[str, ...]]] = []
+        valid = True
+        for line_no in line_numbers:
+            line_words = sorted(
+                by_line[line_no],
+                key=lambda row: (row.word_no, row.bbox[0], row.observation_id),
+            )
+            word_numbers = [int(row.word_no) for row in line_words]
+            if (
+                not word_numbers
+                or len(set(word_numbers)) != len(word_numbers)
+                or word_numbers
+                != list(range(word_numbers[0], word_numbers[-1] + 1))
+            ):
+                valid = False
+                break
+            text = " ".join(
+                row.text.strip() for row in line_words if row.text.strip()
+            ).strip()
+            if not text:
+                valid = False
+                break
+            lines.append(
+                (
+                    text,
+                    tuple(row.observation_id for row in line_words),
+                )
+            )
+        if not valid or len(lines) < 2:
+            continue
+        title_indices = [
+            index
+            for index, (text, _ids) in enumerate(lines)
+            if _is_material_schedule_title(text)
+        ]
+        if title_indices != [0]:
+            continue
+
+        page_ids = {word.page_id for word in block_words}
+        if len(page_ids) != 1:
+            continue
+        page_id = next(iter(page_ids))
+        scope_id = stable_contract_id(
+            "source_material_native_schedule_block",
+            {
+                "page_id": page_id,
+                "source_partition_id": partition_id,
+                "block_no": block_no,
+                "title": lines[0][0],
+                "observation_ids": tuple(
+                    observation_id
+                    for _text, observation_ids in lines
+                    for observation_id in observation_ids
+                ),
+            },
+            digest_chars=32,
+        )
+        out.append(
+            _TrustedScheduleBlock(
+                page_id=page_id,
+                source_partition_id=partition_id,
+                block_no=block_no,
+                scope_id=scope_id,
+                text="\n".join(text for text, _ids in lines),
+                line_evidence=MappingProxyType(
+                    {text: ids for text, ids in lines}
+                ),
+            )
+        )
+    return tuple(out)
 
 
 def _bbox_fully_inside(
@@ -290,20 +461,29 @@ def _trusted_words_by_page(
         ):
             raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
         page_id = str(receipt.page_id)
+        trusted_text = (
+            str(result.trusted_text)
+            if (
+                result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.trusted_text is not None
+            )
+            else None
+        )
+        reason_codes = tuple(result.reason_codes or ())
+        trusted = trusted_text is not None
+
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
                 observation_id=str(observation_id),
                 page_id=page_id,
-                text=str(result.trusted_text or receipt.raw_text or ""),
+                source_partition_id=str(receipt.source_partition_id or ""),
+                text=str(trusted_text or receipt.raw_text or ""),
                 bbox=bbox,
                 block_no=int(receipt.block_no or 0),
                 line_no=int(receipt.line_no or 0),
                 word_no=int(receipt.word_no or 0),
-                trusted=(
-                    result.status is EvidenceResolutionStatus.CORROBORATED
-                    and result.trusted_text is not None
-                ),
-                reason_codes=tuple(result.reason_codes or ()),
+                trusted=trusted,
+                reason_codes=reason_codes,
             )
         )
     return {
@@ -321,6 +501,386 @@ def _trusted_words_by_page(
         )
         for page_id, values in rows.items()
     }
+
+
+def _recover_admissible_viewport_words(
+    *,
+    source: SourceVisibilityProducer,
+    published: object,
+    raster: RasterTextCorroborationProducer,
+    words: Sequence[_TrustedTextWord],
+    viewport: SegmentedViewport,
+) -> tuple[_TrustedTextWord, ...]:
+    """Recover only admissible words owned by one authenticated viewport.
+
+    This deliberately avoids document-wide OCR. Words outside the viewport,
+    crossing its boundary, or blocked for any reason other than the existing
+    glyph/clip pair are returned unchanged and remain fail-closed downstream.
+    """
+    assert viewport.bounding_box is not None
+    authority = source.text_integrity_authority()
+    admissible = {
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+        TEXT_CLIP_STATE_UNRESOLVED,
+    }
+    recovered: list[_TrustedTextWord] = []
+    for word in words:
+        if (
+            word.trusted
+            or not _bbox_fully_inside(word.bbox, viewport.bounding_box)
+        ):
+            recovered.append(word)
+            continue
+        reason_set = set(word.reason_codes)
+        if (
+            TEXT_GLYPH_MAPPING_UNVERIFIED not in reason_set
+            or not reason_set.issubset(admissible)
+        ):
+            recovered.append(word)
+            continue
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=word.observation_id,
+        )
+        native = authority.resolve_text(selector)
+        receipt = native.receipt
+        if (
+            native.status is not EvidenceResolutionStatus.ABSTAINED
+            or receipt is None
+            or bool(receipt.trusted)
+            or tuple(native.reason_codes or ()) != tuple(word.reason_codes)
+            or tuple(receipt.reason_codes or ()) != tuple(word.reason_codes)
+        ):
+            recovered.append(word)
+            continue
+        raster_result = raster.publish(
+            RasterTextCorroborationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=word.observation_id,
+            )
+        )
+        if (
+            raster_result.status is EvidenceResolutionStatus.CORROBORATED
+            and raster_result.record is not None
+            and str(raster_result.corroborated_text or "").strip()
+        ):
+            recovered.append(
+                _TrustedTextWord(
+                    observation_id=word.observation_id,
+                    page_id=word.page_id,
+                    source_partition_id=word.source_partition_id,
+                    text=str(raster_result.corroborated_text),
+                    bbox=word.bbox,
+                    block_no=word.block_no,
+                    line_no=word.line_no,
+                    word_no=word.word_no,
+                    trusted=True,
+                    reason_codes=tuple(
+                        dict.fromkeys(
+                            (*word.reason_codes, "raster_text_corroborated")
+                        )
+                    ),
+                )
+            )
+        else:
+            recovered.append(word)
+    return tuple(recovered)
+
+
+def _single_isolated_material_line_reading(
+    backend,
+    image: Image.Image,
+    *,
+    dpi: int,
+) -> Optional[str]:
+    """Read one already-isolated producer-owned source material line."""
+    if backend is None or not backend.is_available():
+        return None
+    if type(backend) is TesseractOCRBackend:
+        try:
+            import pytesseract
+
+            command = backend._resolved_cmd()
+            if not command:
+                return None
+            pytesseract.pytesseract.tesseract_cmd = command
+            raw = pytesseract.image_to_string(image, config="--psm 7")
+        except Exception:
+            return None
+        readings = tuple(
+            normalize_reading(line)
+            for line in str(raw or "").splitlines()
+            if normalize_reading(line)
+        )
+        return readings[0] if len(readings) == 1 else None
+    try:
+        lines = tuple(backend.extract_lines(image, dpi=int(dpi)))
+    except Exception:
+        return None
+    readings = tuple(
+        normalize_reading(getattr(line, "text", ""))
+        for line in lines
+        if normalize_reading(getattr(line, "text", ""))
+    )
+    return readings[0] if len(readings) == 1 else None
+
+
+def _recover_admissible_viewport_lines(
+    *,
+    source: SourceVisibilityProducer,
+    published: object,
+    raster: RasterTextCorroborationProducer,
+    words: Sequence[_TrustedTextWord],
+    viewport: SegmentedViewport,
+) -> tuple[_TrustedTextWord, ...]:
+    """Corroborate exact native lines when per-word OCR remains unresolved.
+
+    This is deliberately the same narrow evidence class used by source-room
+    labels: every unresolved word must be producer-owned native text blocked
+    only by glyph mapping and optional clip-state ownership; the producer-owned
+    raster targets for that exact native line are unioned; and two independent
+    renders must both read exactly the native whole line.
+    """
+    assert viewport.bounding_box is not None
+    backend = getattr(raster, "_backend", None)
+    if backend is None or not backend.is_available():
+        return tuple(words)
+
+    grouped: dict[tuple[int, int], list[_TrustedTextWord]] = {}
+    for word in words:
+        if (
+            _bbox_fully_inside(word.bbox, viewport.bounding_box)
+            and word.text.strip()
+        ):
+            grouped.setdefault((word.block_no, word.line_no), []).append(word)
+
+    replacements: dict[str, _TrustedTextWord] = {}
+    text_authority = source.text_integrity_authority()
+    source_authority = source._producer.authority()
+    admissible = {
+        TEXT_GLYPH_MAPPING_UNVERIFIED,
+        TEXT_CLIP_STATE_UNRESOLVED,
+    }
+
+    for key in sorted(grouped):
+        line = sorted(
+            grouped[key],
+            key=lambda row: (row.word_no, row.bbox[0], row.observation_id),
+        )
+        if not line or all(word.trusted for word in line):
+            continue
+        word_numbers = [word.word_no for word in line]
+        if (
+            len(set(word_numbers)) != len(word_numbers)
+            or word_numbers != list(range(word_numbers[0], word_numbers[-1] + 1))
+        ):
+            continue
+        claim = normalize_reading(
+            " ".join(word.text.strip() for word in line if word.text.strip())
+        )
+        if not claim:
+            continue
+
+        targets: list[tuple[float, float, float, float]] = []
+        rotations: set[int] = set()
+        source_partitions: set[str] = set()
+        source_page_ids: set[str] = set()
+        line_valid = True
+
+        for word in line:
+            selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=word.observation_id,
+            )
+            text_result = text_authority.resolve_text(selector)
+            receipt = text_result.receipt
+            if (
+                receipt is None
+                or tuple(float(value) for value in receipt.geometry)
+                != tuple(float(value) for value in word.bbox)
+                or str(receipt.page_id) != str(word.page_id)
+            ):
+                line_valid = False
+                break
+
+            if word.trusted:
+                if (
+                    text_result.status is not EvidenceResolutionStatus.CORROBORATED
+                    or not text_result.trusted_text
+                    or normalize_reading(text_result.trusted_text)
+                    != normalize_reading(word.text)
+                ):
+                    line_valid = False
+                    break
+            else:
+                receipt_reasons = tuple(receipt.reason_codes or ())
+                reason_set = set(receipt_reasons)
+                if (
+                    text_result.status is not EvidenceResolutionStatus.ABSTAINED
+                    or bool(receipt.trusted)
+                    or TEXT_GLYPH_MAPPING_UNVERIFIED not in reason_set
+                    or not reason_set.issubset(admissible)
+                    or tuple(text_result.reason_codes or ()) != receipt_reasons
+                    or tuple(word.reason_codes) != receipt_reasons
+                ):
+                    line_valid = False
+                    break
+
+            source_result = source_authority.resolve(selector)
+            observation = source_result.observation
+            if (
+                source_result.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+                or observation.observation_kind != "native_pdf_word"
+                or observation.origin_kind != "native"
+                or observation.viewport_id is not None
+                or observation.document_id != published.revision.document_id
+                or observation.revision_id != published.revision.revision_id
+                or observation.source_sha256 != published.revision.source_sha256
+                or str(observation.page_id) != str(word.page_id)
+                or tuple(float(value) for value in observation.geometry)
+                != tuple(float(value) for value in word.bbox)
+                or normalize_reading(observation.raw_text)
+                != normalize_reading(word.text)
+            ):
+                line_valid = False
+                break
+
+            raster_bbox, rotation = _producer_owned_ocr_target(
+                source._producer,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                page_id=str(observation.page_id),
+                receipt=receipt,
+                word_bbox=tuple(float(value) for value in word.bbox),
+                raw_text=str(observation.raw_text),
+            )
+            targets.append(raster_bbox)
+            rotations.add(int(rotation))
+            source_partitions.add(str(observation.source_partition_id))
+            source_page_ids.add(str(observation.page_id))
+
+        if (
+            not line_valid
+            or len(rotations) != 1
+            or len(source_partitions) != 1
+            or len(source_page_ids) != 1
+            or not targets
+        ):
+            continue
+
+        rotation = next(iter(rotations))
+        source_partition_id = next(iter(source_partitions))
+        source_page_id = next(iter(source_page_ids))
+        raster_bbox = (
+            min(value[0] for value in targets),
+            min(value[1] for value in targets),
+            max(value[2] for value in targets),
+            max(value[3] for value in targets),
+        )
+
+        readings: list[str] = []
+        parent_ids: set[tuple[str, str, str]] = set()
+        for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+            try:
+                png_bytes, page_parent = source._producer.render_native_page_png(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    page_id=source_page_id,
+                    dpi=float(dpi),
+                    clip_pt=raster_bbox,
+                )
+            except Exception:
+                line_valid = False
+                break
+            if (
+                page_parent.document_id != published.revision.document_id
+                or page_parent.revision_id != published.revision.revision_id
+                or page_parent.source_sha256 != published.revision.source_sha256
+                or str(page_parent.source_partition_id) != source_partition_id
+                or str(page_parent.page_id) != source_page_id
+            ):
+                line_valid = False
+                break
+            parent_ids.add(
+                (
+                    str(page_parent.observation_id),
+                    str(page_parent.source_partition_id),
+                    str(page_parent.page_id),
+                )
+            )
+            try:
+                rendered = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+                normalized = _lossless_rotate(rendered, rotation)
+            except Exception:
+                line_valid = False
+                break
+            margin_px = max(
+                1,
+                int(
+                    round(
+                        float(dpi)
+                        * _MATERIAL_LINE_OCR_BLANK_MARGIN_MM
+                        / 25.4
+                    )
+                ),
+            )
+            isolated = ImageOps.expand(
+                normalized,
+                border=margin_px,
+                fill="white",
+            )
+            reading = _single_isolated_material_line_reading(
+                backend,
+                isolated,
+                dpi=int(dpi),
+            )
+            if reading is None or normalize_reading(reading) != claim:
+                line_valid = False
+                break
+            readings.append(reading)
+
+        if (
+            not line_valid
+            or len(parent_ids) != 1
+            or len(readings) != len(RASTER_TEXT_CORROBORATION_DPIS)
+            or len({normalize_reading(value) for value in readings}) != 1
+        ):
+            continue
+
+        for word in line:
+            replacements[word.observation_id] = _TrustedTextWord(
+                observation_id=word.observation_id,
+                page_id=word.page_id,
+                source_partition_id=word.source_partition_id,
+                text=word.text,
+                bbox=word.bbox,
+                block_no=word.block_no,
+                line_no=word.line_no,
+                word_no=word.word_no,
+                trusted=True,
+                reason_codes=tuple(
+                    dict.fromkeys(
+                        (*word.reason_codes, "raster_text_line_corroborated")
+                    )
+                ),
+            )
+
+    return tuple(
+        replacements.get(word.observation_id, word)
+        for word in words
+    )
 
 
 def _trusted_lines_for_viewport(
@@ -450,6 +1010,9 @@ class SourceMaterialSemanticProducer:
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
         self._source = source_visibility_producer
+        self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
+            source_visibility_producer
+        )
         self._definition_results: dict[
             tuple[str, str, str, str, str], SourceMaterialDefinitionResult
         ] = {}
@@ -517,7 +1080,11 @@ class SourceMaterialSemanticProducer:
         ] = []
         schedule_universe_complete = True
         schedule_universe_reasons: list[str] = []
-        trusted_words = _trusted_words_by_page(self._source, published)
+        trusted_words = _trusted_words_by_page(
+            self._source,
+            published,
+        )
+        raster = self._raster
 
         pdf = fitz.open(stream=source_bytes, filetype="pdf")
         try:
@@ -525,6 +1092,44 @@ class SourceMaterialSemanticProducer:
                 if page_number < 1 or page_number > pdf.page_count:
                     continue
                 page = pdf.load_page(page_number - 1)
+                page_words = trusted_words.get(str(page_number), ())
+
+                # A native source text block headed by a qualified material
+                # schedule title is independently usable for definitions even
+                # when competing outer vector frames leave the schedule
+                # viewport ambiguous. No drawing occurrence is minted from this
+                # route; it owns schedule semantics only.
+                for schedule_block in _trusted_native_material_schedule_blocks(
+                    page_words
+                ):
+                    line_evidence = dict(schedule_block.line_evidence)
+                    for item in parse_schedule_text(
+                        schedule_block.text,
+                        page_id=page_number,
+                        page_label=f"page:{page_number}",
+                    ):
+                        code = str(item.get("code") or "").strip().upper()
+                        if not code:
+                            continue
+                        raw = dict(item)
+                        raw["source_viewport_id"] = ""
+                        raw["source_block_id"] = schedule_block.scope_id
+                        contributing_lines = tuple(
+                            item.get("source_lines")
+                            or (str(item.get("source_line") or ""),)
+                        )
+                        raw["source_text_observation_ids"] = tuple(
+                            dict.fromkeys(
+                                observation_id
+                                for source_line in contributing_lines
+                                for observation_id in line_evidence.get(
+                                    str(source_line),
+                                    (),
+                                )
+                            )
+                        )
+                        raw_definitions.setdefault(code, []).append(raw)
+
                 viewports = tuple(
                     segment_page_viewports(page, page_number=page_number)
                 )
@@ -545,10 +1150,25 @@ class SourceMaterialSemanticProducer:
                         sibling_non_overlapping=sibling_non_overlapping,
                     )
                 )
-                page_words = trusted_words.get(str(page_number), ())
                 for viewport in authoritative:
+                    if _is_explicit_non_material_schedule(viewport):
+                        continue
+                    scoped_words = _recover_admissible_viewport_words(
+                        source=self._source,
+                        published=published,
+                        raster=raster,
+                        words=page_words,
+                        viewport=viewport,
+                    )
+                    scoped_words = _recover_admissible_viewport_lines(
+                        source=self._source,
+                        published=published,
+                        raster=raster,
+                        words=scoped_words,
+                        viewport=viewport,
+                    )
                     lines, text_complete, text_reasons = _trusted_lines_for_viewport(
-                        page_words,
+                        scoped_words,
                         viewport,
                     )
                     if viewport.view_type in _SCHEDULE_VIEW_TYPES:
@@ -607,7 +1227,7 @@ class SourceMaterialSemanticProducer:
                             )
                             continue
                         drawing_viewports.append(
-                            (page_number, viewport, page_words)
+                            (page_number, viewport, scoped_words)
                         )
 
             if not schedule_universe_complete:
@@ -695,25 +1315,31 @@ class SourceMaterialSemanticProducer:
                     "status": "Confirmed",
                 }
                 semantic_finish = semantic_finish_from_schedule_entry(entry)
-                source_ids = tuple(
-                    sorted(
+                source_id_rows: list[str] = []
+                for item in items:
+                    evidence_payload = {
+                        **lineage,
+                        "page_id": str(item.get("page_id") or ""),
+                        "viewport_id": str(item.get("source_viewport_id") or ""),
+                        "code": code,
+                        "source_line": str(item.get("source_line") or ""),
+                        "source_text_observation_ids": tuple(
+                            item.get("source_text_observation_ids") or ()
+                        ),
+                    }
+                    source_block_id = str(
+                        item.get("source_block_id") or ""
+                    ).strip()
+                    if source_block_id:
+                        evidence_payload["source_block_id"] = source_block_id
+                    source_id_rows.append(
                         stable_contract_id(
                             "source_material_definition_evidence",
-                            {
-                                **lineage,
-                                "page_id": str(item.get("page_id") or ""),
-                                "viewport_id": str(item.get("source_viewport_id") or ""),
-                                "code": code,
-                                "source_line": str(item.get("source_line") or ""),
-                                "source_text_observation_ids": tuple(
-                                    item.get("source_text_observation_ids") or ()
-                                ),
-                            },
+                            evidence_payload,
                             digest_chars=32,
                         )
-                        for item in items
                     )
-                )
+                source_ids = tuple(sorted(source_id_rows))
                 payload = {
                     **lineage,
                     "code": code,
@@ -745,8 +1371,11 @@ class SourceMaterialSemanticProducer:
                     source_viewport_ids=tuple(
                         sorted(
                             {
-                                str(item.get("source_viewport_id") or "")
+                                str(item.get("source_viewport_id") or "").strip()
                                 for item in items
+                                if str(
+                                    item.get("source_viewport_id") or ""
+                                ).strip()
                             }
                         )
                     ),
@@ -841,6 +1470,9 @@ class SourceMaterialSemanticProducer:
                                 bbox_pdf_pts=normalized_bbox,
                                 raw_text=raw_text,
                                 source_evidence_id=evidence_id,
+                                source_text_observation_ids=tuple(
+                                    text_observation_ids
+                                ),
                             )
                         )
                 records.sort(key=lambda row: row.record_id)
