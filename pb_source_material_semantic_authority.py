@@ -1114,22 +1114,61 @@ def _native_material_schedule_clusters(
             len(title_keys) != 1
             or len(page_titles) != 1
             or len(row_keys) < 2
-            or {row[0] for row in page_rows} != row_keys
         ):
             continue
 
         title_key, title_lines, _title_bbox = page_titles[0]
         partition_id = title_key[1]
-        if any(row[0][1] != partition_id for row in page_rows):
+        raw_partition_rows = sorted(
+            (
+                key
+                for key in row_keys
+                if key[1] == partition_id
+            ),
+            key=lambda key: key[2],
+        )
+        if len(raw_partition_rows) < 2:
             continue
 
-        row_bboxes = [row[2] for row in page_rows]
-        common_x = min(b[2] for b in row_bboxes) > max(b[0] for b in row_bboxes)
-        common_y = min(b[3] for b in row_bboxes) > max(b[1] for b in row_bboxes)
-        if not (common_x or common_y):
-            continue
+        runs: list[list[tuple[str, str, int]]] = []
+        for key in raw_partition_rows:
+            if (
+                not runs
+                or key[2] != runs[-1][-1][2] + 1
+            ):
+                runs.append([key])
+            else:
+                runs[-1].append(key)
 
-        ordered_rows = sorted(page_rows, key=lambda row: row[0][2])
+        trusted_by_key = {row[0]: row for row in page_rows}
+        qualified_runs: list[
+            list[
+                tuple[
+                    tuple[str, str, int],
+                    tuple[tuple[str, tuple[str, ...]], ...],
+                    tuple[float, float, float, float],
+                ]
+            ]
+        ] = []
+        for run in runs:
+            if len(run) < 2 or any(key not in trusted_by_key for key in run):
+                continue
+            candidate_rows = [trusted_by_key[key] for key in run]
+            row_bboxes = [row[2] for row in candidate_rows]
+            common_x = (
+                min(b[2] for b in row_bboxes)
+                > max(b[0] for b in row_bboxes)
+            )
+            common_y = (
+                min(b[3] for b in row_bboxes)
+                > max(b[1] for b in row_bboxes)
+            )
+            if common_x or common_y:
+                qualified_runs.append(candidate_rows)
+
+        if len(qualified_runs) != 1:
+            continue
+        ordered_rows = qualified_runs[0]
         title_ids = tuple(
             dict.fromkeys(
                 observation_id
