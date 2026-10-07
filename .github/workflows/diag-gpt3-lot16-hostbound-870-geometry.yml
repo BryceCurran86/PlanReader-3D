@@ -1,0 +1,33 @@
+name: DIAG GPT3 Lot16 Hostbound 870 Geometry
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run host-bound 870 geometry diagnostic
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_hostbound_870_geometry.py | tee lot16-hostbound-870-geometry.json
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt3-lot16-hostbound-870-geometry
+          path: lot16-hostbound-870-geometry.json
+          retention-days: 2
