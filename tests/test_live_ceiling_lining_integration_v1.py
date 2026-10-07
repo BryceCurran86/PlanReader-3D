@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fitz
 
+import pb_live_ceiling_lining_integration as live_module
 from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
 from pb_ceiling_lining_review_promotion import (
     collect_ceiling_lining_review_candidates,
