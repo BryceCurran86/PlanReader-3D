@@ -32,6 +32,9 @@ from typing import Mapping, Optional, Sequence
 
 import fitz
 
+from pb_cross_view_room_area_authority import (
+    _trusted_lines_for_page as _trusted_room_lines_for_page,
+)
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
@@ -197,114 +200,47 @@ class CrossViewCeilingFinishResult:
         )
 
 
-def _trusted_lines_for_pages(
+def _trusted_room_labels_for_pages(
     source: SourceVisibilityProducer,
     *,
     revision_id: str,
     page_ids: Sequence[str],
+    candidate_labels: Sequence[str],
 ) -> Mapping[str, tuple[_TrustedLine, ...]]:
-    published = source.published_snapshot_for_revision(revision_id)
-    if published is None:
-        return MappingProxyType({})
-    wanted_pages = {_clean(page_id) for page_id in page_ids if _clean(page_id)}
-    if not wanted_pages:
-        return MappingProxyType({})
+    """Reuse the hardened cross-view room-label text authority on RCP pages."""
 
-    authority = source.text_integrity_authority()
-    grouped: dict[
-        tuple[str, str, int, int],
-        list[tuple[str, object, object]],
-    ] = {}
-
-    for observation_id in tuple(published.text_observation_ids or ()):
-        result = authority.resolve_text(
-            ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                observation_id=str(observation_id),
-            )
+    rows: dict[str, tuple[_TrustedLine, ...]] = {}
+    for page_id in sorted({_clean(value) for value in page_ids if _clean(value)}):
+        trusted = _trusted_room_lines_for_page(
+            source,
+            revision_id=revision_id,
+            page_id=page_id,
+            candidate_labels=candidate_labels,
         )
-        receipt = result.receipt
-        if (
-            receipt is None
-            or _clean(receipt.page_id) not in wanted_pages
-            or receipt.block_no is None
-            or receipt.line_no is None
-            or receipt.word_no is None
-        ):
-            continue
-        key = (
-            _clean(receipt.page_id),
-            _clean(receipt.source_partition_id),
-            int(receipt.block_no),
-            int(receipt.line_no),
-        )
-        grouped.setdefault(key, []).append(
-            (str(observation_id), result, receipt)
-        )
-
-    by_page: dict[str, list[_TrustedLine]] = {}
-    for (page_id, partition_id, block_no, line_no), items in sorted(grouped.items()):
-        word_nos = [int(item[2].word_no) for item in items]
-        if (
-            len(set(word_nos)) != len(word_nos)
-            or set(word_nos) != set(range(min(word_nos), max(word_nos) + 1))
-        ):
-            continue
-        ordered = sorted(items, key=lambda item: int(item[2].word_no))
-        if any(
-            item[1].status is not EvidenceResolutionStatus.CORROBORATED
-            or not _clean(item[1].trusted_text)
-            for item in ordered
-        ):
-            continue
-        boxes = [_finite_bbox(item[2].geometry) for item in ordered]
-        if any(box is None for box in boxes):
-            continue
-        concrete = tuple(box for box in boxes if box is not None)
-        text = " ".join(
-            _clean(item[1].trusted_text)
-            for item in ordered
-            if _clean(item[1].trusted_text)
-        )
-        if not text:
-            continue
-        by_page.setdefault(page_id, []).append(
+        converted = tuple(
             _TrustedLine(
-                page_id=page_id,
-                source_partition_id=partition_id,
-                block_no=block_no,
-                line_no=line_no,
-                text=text,
-                bbox=(
-                    min(box[0] for box in concrete),
-                    min(box[1] for box in concrete),
-                    max(box[2] for box in concrete),
-                    max(box[3] for box in concrete),
+                page_id=_clean(line.page_id),
+                source_partition_id=_clean(line.source_partition_id),
+                block_no=int(line.block_no),
+                line_no=int(line.line_no),
+                text=_clean(line.text),
+                bbox=tuple(float(value) for value in line.bbox),
+                observation_ids=tuple(
+                    _clean(value)
+                    for value in line.observation_ids
+                    if _clean(value)
                 ),
-                observation_ids=tuple(item[0] for item in ordered),
-                receipt_ids=tuple(_clean(item[2].receipt_id) for item in ordered),
+                receipt_ids=tuple(
+                    _clean(value)
+                    for value in line.receipt_ids
+                    if _clean(value)
+                ),
             )
+            for line in trusted
         )
-    return MappingProxyType(
-        {
-            page_id: tuple(
-                sorted(
-                    rows,
-                    key=lambda row: (
-                        row.source_partition_id,
-                        row.block_no,
-                        row.line_no,
-                        row.bbox,
-                    ),
-                )
-            )
-            for page_id, rows in by_page.items()
-        }
-    )
-
+        if converted:
+            rows[page_id] = converted
+    return MappingProxyType(rows)
 
 def _source_bytes(
     source: SourceVisibilityProducer,
@@ -396,20 +332,104 @@ def _definition_is_ceiling_finish(
 
 
 def _occurrence_line(
-    lines: Sequence[_TrustedLine],
+    source: SourceVisibilityProducer,
+    *,
+    revision_id: str,
     occurrence: SourceMaterialOccurrenceRecord,
 ) -> Optional[_TrustedLine]:
-    target_bbox = _bbox_key(occurrence.bbox_pdf_pts)
-    target_text = _norm(occurrence.raw_text)
-    if target_bbox is None or not target_text:
+    """Recover the exact producer-owned native line behind one occurrence.
+
+    The material semantic producer already authenticated the occurrence, which
+    may have required raster corroboration.  This function therefore does not
+    re-decide text trust.  It verifies that the preserved source observation IDs
+    still resolve to one exact native PDF partition/block/line and that their
+    union geometry/text matches the published occurrence.
+    """
+
+    published = source.published_snapshot_for_revision(revision_id)
+    observation_ids = tuple(
+        dict.fromkeys(
+            _clean(value)
+            for value in occurrence.source_text_observation_ids
+            if _clean(value)
+        )
+    )
+    if published is None or not observation_ids:
         return None
-    matches = [
-        line
-        for line in lines
-        if _bbox_key(line.bbox) == target_bbox
-        and _norm(line.text) == target_text
-    ]
-    return matches[0] if len(matches) == 1 else None
+
+    authority = source.text_integrity_authority()
+    resolved_rows: list[tuple[str, object]] = []
+    for observation_id in observation_ids:
+        result = authority.resolve_text(
+            ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        receipt = result.receipt
+        if (
+            receipt is None
+            or _clean(receipt.page_id) != _clean(occurrence.page_id)
+            or receipt.block_no is None
+            or receipt.line_no is None
+            or receipt.word_no is None
+        ):
+            return None
+        resolved_rows.append((observation_id, receipt))
+
+    keys = {
+        (
+            _clean(receipt.source_partition_id),
+            int(receipt.block_no),
+            int(receipt.line_no),
+        )
+        for _observation_id, receipt in resolved_rows
+    }
+    if len(keys) != 1:
+        return None
+    partition_id, block_no, line_no = next(iter(keys))
+
+    word_nos = [int(receipt.word_no) for _obs, receipt in resolved_rows]
+    if (
+        len(set(word_nos)) != len(word_nos)
+        or set(word_nos) != set(range(min(word_nos), max(word_nos) + 1))
+    ):
+        return None
+    ordered = sorted(resolved_rows, key=lambda item: int(item[1].word_no))
+    boxes = [_finite_bbox(receipt.geometry) for _obs, receipt in ordered]
+    if any(box is None for box in boxes):
+        return None
+    concrete = tuple(box for box in boxes if box is not None)
+    bbox = (
+        min(box[0] for box in concrete),
+        min(box[1] for box in concrete),
+        max(box[2] for box in concrete),
+        max(box[3] for box in concrete),
+    )
+    if _bbox_key(bbox) != _bbox_key(occurrence.bbox_pdf_pts):
+        return None
+
+    raw_text = " ".join(
+        _clean(receipt.raw_text)
+        for _obs, receipt in ordered
+        if _clean(receipt.raw_text)
+    )
+    if _norm(raw_text) != _norm(occurrence.raw_text):
+        return None
+
+    return _TrustedLine(
+        page_id=_clean(occurrence.page_id),
+        source_partition_id=partition_id,
+        block_no=block_no,
+        line_no=line_no,
+        text=occurrence.raw_text,
+        bbox=bbox,
+        observation_ids=tuple(observation_id for observation_id, _ in ordered),
+        receipt_ids=tuple(_clean(receipt.receipt_id) for _obs, receipt in ordered),
+    )
 
 
 class CrossViewCeilingFinishProducer:
@@ -520,10 +540,11 @@ class CrossViewCeilingFinishProducer:
                 ),
             )
         page_ids = tuple(sorted({page_id for page_id, _ in rcp_viewports}))
-        trusted_lines = _trusted_lines_for_pages(
+        trusted_lines = _trusted_room_labels_for_pages(
             self._source,
             revision_id=revision_id,
             page_ids=page_ids,
+            candidate_labels=tuple(unique_rooms),
         )
 
         material_producer = (
@@ -601,8 +622,9 @@ class CrossViewCeilingFinishProducer:
                     continue
 
                 occurrence_line = _occurrence_line(
-                    trusted_lines.get(key[0], ()),
-                    occurrence,
+                    self._source,
+                    revision_id=revision_id,
+                    occurrence=occurrence,
                 )
                 if occurrence_line is None:
                     continue
