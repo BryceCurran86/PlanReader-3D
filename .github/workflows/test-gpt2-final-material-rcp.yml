@@ -1,0 +1,227 @@
+name: TEST GPT2 Final Material RCP
+
+on:
+  push:
+    branches:
+      - gpt2/material-rcp-final-current-main
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "pb_source_material_semantic_authority.py"
+      - "pb_cross_view_ceiling_finish_authority.py"
+      - "tests/test_source_material_semantic_authority_v1.py"
+      - "tests/test_cross_view_ceiling_finish_authority.py"
+      - "tests/test_cross_view_ceiling_quantity_authority.py"
+      - ".github/workflows/test-gpt2-final-material-rcp.yml"
+concurrency:
+  group: test-gpt2-final-material-rcp-subset
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Focused authority tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_source_material_semantic_authority_v1.py \
+            tests/test_cross_view_ceiling_finish_authority.py \
+            tests/test_cross_view_ceiling_quantity_authority.py \
+            tests/test_cross_view_room_area_authority_v1.py \
+            tests/test_source_closed_project_handoff.py
+
+  maryborough-material:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Prove real Maryborough FPB and GRID definitions
+        shell: bash
+        run: |
+          set -o pipefail
+          ROOT=artifacts/gpt2-final-material-rcp/maryborough
+          mkdir -p "$ROOT"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$ROOT/material-authority.json"
+          import hashlib
+          import json
+          from pathlib import Path
+
+          from pb_source_material_semantic_authority import (
+              SourceMaterialDefinitionSelector,
+              SourceMaterialSemanticProducer,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload = path.read_bytes()
+          sha = hashlib.sha256(payload).hexdigest()
+          expected_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert sha == expected_sha, (sha, expected_sha)
+
+          source = SourceVisibilityProducer(
+              producer_method="gpt2-final-real-material-proof",
+              producer_version="1",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id="gpt2-final-real-material-proof",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+          )
+          import pb_source_material_semantic_authority as material
+
+          producer = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          words_by_page = material._trusted_words_by_page(source, published)
+          page_id = "9"
+          words = words_by_page.get(page_id, ())
+          assert words, "page 9 source words unavailable"
+
+          grouped = {}
+          for word in words:
+              grouped.setdefault(
+                  (word.source_partition_id, int(word.block_no)), []
+              ).append(word)
+
+          title_rows = []
+          code_rows = {}
+          for (partition_id, block_no), block_words in sorted(grouped.items()):
+              ordered = tuple(sorted(
+                  block_words,
+                  key=lambda row: (
+                      row.line_no, row.word_no, row.bbox[0], row.observation_id
+                  ),
+              ))
+              rows = material._native_block_line_rows(ordered)
+              if not rows:
+                  continue
+              joined = " ".join(row[0] for row in rows)
+              if material._is_material_schedule_title(joined):
+                  recovered = material._recover_native_material_block(
+                      source=source,
+                      published=published,
+                      raster=producer._raster,
+                      block_words=ordered,
+                  )
+                  title_rows.append({
+                      "partition_id": partition_id,
+                      "block_no": block_no,
+                      "text": joined,
+                      "trusted": bool(recovered) and all(
+                          word.trusted for word in recovered
+                      ),
+                  })
+              first = rows[0][0].strip().upper()
+              if first in {"FPB", "GRID", "WFPB"}:
+                  recovered = material._recover_native_material_block(
+                      source=source,
+                      published=published,
+                      raster=producer._raster,
+                      block_words=ordered,
+                  )
+                  code_rows[first] = {
+                      "partition_id": partition_id,
+                      "block_no": block_no,
+                      "text": " | ".join(row[0] for row in rows),
+                      "trusted": bool(recovered) and all(
+                          word.trusted for word in recovered
+                      ),
+                      "candidate": material._material_definition_candidate(recovered),
+                      "recovered_words": [
+                          {
+                              "text": word.text,
+                              "trusted": bool(word.trusted),
+                              "reason_codes": list(word.reason_codes),
+                          }
+                          for word in recovered
+                      ],
+                  }
+
+          blocks, blocked = material._trusted_native_material_schedule_cluster_blocks(
+              source=source,
+              published=published,
+              raster=producer._raster,
+              words=words,
+          )
+          parsed = {}
+          for block in blocks:
+              for item in material.parse_schedule_text(
+                  block.text,
+                  page_id=9,
+                  page_label="page:9",
+              ):
+                  code = str(item.get("code") or "").strip().upper()
+                  if not code:
+                      continue
+                  entry = {
+                      "status": "Confirmed",
+                      "code": code,
+                      "description": str(item.get("description") or ""),
+                      "substrate": str(item.get("substrate") or ""),
+                      "finish": str(item.get("finish") or ""),
+                  }
+                  parsed[code] = {
+                      "description": entry["description"],
+                      "semantic_finish": material.semantic_finish_from_schedule_entry(entry),
+                      "scope_id": block.scope_id,
+                  }
+
+          out = {
+              "source_sha256": sha,
+              "page_id": page_id,
+              "title_rows": title_rows,
+              "code_rows": code_rows,
+              "blocked_codes": list(blocked),
+              "trusted_cluster_blocks": [
+                  {
+                      "block_no": block.block_no,
+                      "text": block.text,
+                      "scope_id": block.scope_id,
+                  }
+                  for block in blocks
+              ],
+              "parsed_definitions": parsed,
+          }
+          print(json.dumps(out, indent=2, sort_keys=True, default=str))
+
+          assert any(row["trusted"] for row in title_rows), out
+          assert code_rows["FPB"]["trusted"], out
+          assert code_rows["WFPB"]["trusted"], out
+          assert code_rows["GRID"]["trusted"], out
+
+          assert parsed["FPB"]["semantic_finish"] == "plasterboard", out
+          assert parsed["WFPB"]["semantic_finish"] == "plasterboard", out
+
+          # The real Maryborough GRID row says "VINYL FACED PLASTER TILE
+          # 600x1200". It is readable source evidence, but it does not
+          # independently define a ceiling-grid system. Preserve the global
+          # bare-token guard: source ownership alone must not promote GRID.
+          assert code_rows["GRID"]["candidate"] is None, out
+          assert "GRID" not in parsed, out
+          assert "GRID" not in blocked, out
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-final-material-rcp-maryborough
+          path: artifacts/gpt2-final-material-rcp/maryborough
+          retention-days: 3
