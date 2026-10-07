@@ -13,7 +13,12 @@ from pb_cross_view_floor_finish_authority import (
 )
 from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
 from pb_geometry_takeoff_model import MeasurementAuthorityType
-from pb_same_view_room_area_authority import SameViewRoomAreaProducer
+import pb_same_view_room_area_authority as same_view_area_authority
+from pb_same_view_room_area_authority import (
+    SameViewRoomAreaProducer,
+    SameViewRoomAreaRecord,
+    SameViewRoomAreaResult,
+)
 from pb_live_canonical_floor_surface import (
     LiveCanonicalFloorSurfaceComposition,
     compose_live_canonical_floor_surfaces,
@@ -474,3 +479,48 @@ def test_same_view_figured_room_area_can_own_floor_finish_occurrence(
     assert result.records[0].quantity.value == 8.64
     assert result.records[0].quantity.authority == "documented_dimension"
     assert len(result.records[0].quantity.metadata["figured_dimension_ids"]) == 2
+
+
+def test_same_and_cross_view_finish_authority_for_same_floor_conflicts(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, cross_view_areas, floors = _source_room_area_and_floor(_payload())
+    cross_record = cross_view_areas.records[0]
+    same_evidence = replace(
+        cross_record.area_evidence,
+        evidence_id="same-view-duplicate-area-evidence",
+        method="authenticated_same_view_figured_dimensions",
+    )
+    same_record = SameViewRoomAreaRecord(
+        physical_room_id=cross_record.physical_room_id,
+        source_room_face_record_id=cross_record.source_room_face_record_id,
+        room_label=cross_record.room_label,
+        source_dimension_page_id=cross_record.source_dimension_page_id,
+        source_label_observation_ids=cross_record.source_label_observation_ids,
+        source_label_receipt_ids=cross_record.source_label_receipt_ids,
+        horizontal_dimension_id=cross_record.horizontal_dimension_id,
+        vertical_dimension_id=cross_record.vertical_dimension_id,
+        area_evidence=same_evidence,
+        _seal=same_view_area_authority._RECORD_SEAL,
+    )
+    same_view_areas = SameViewRoomAreaResult(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        reason_codes=("resolved",),
+        records=(same_record,),
+        unresolved_physical_room_ids=(),
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=cross_view_areas,
+        same_view_room_areas=same_view_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
