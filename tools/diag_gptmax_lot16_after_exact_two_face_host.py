@@ -383,6 +383,7 @@ def main():
         for opening in opening_rows
     )
     payload = {
+        "diagnostic_variant": "fallback-only-v2",
         "source_sha256": actual,
         "snapshot_id": current.snapshot.snapshot_id,
         "wall_scope_status": state(wall_result.status),
