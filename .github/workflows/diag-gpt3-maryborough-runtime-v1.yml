@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/gpt3-maryborough-runtime-v1
+  pull_request:
+    branches:
+      - main
 
 concurrency:
   group: diag-gpt3-maryborough-runtime-v1
