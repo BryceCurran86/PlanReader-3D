@@ -1,0 +1,35 @@
+name: DIAG GPT1 Maryborough Live Room Area Bridge
+
+on:
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: diag-gpt1-maryborough-live-room-area-bridge
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Trace live Maryborough room-area bridge
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt1_maryborough_live_room_area_bridge.py \
+            | tee maryborough-live-room-area-bridge.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-live-room-area-bridge
+          path: maryborough-live-room-area-bridge.json
+          retention-days: 3
