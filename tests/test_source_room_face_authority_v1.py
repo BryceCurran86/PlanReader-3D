@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import fitz
 
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
@@ -15,6 +15,8 @@ from pb_source_room_face_authority import (
     SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS,
     SOURCE_ROOM_FACE_SCOPE_RESOLVED,
     SourceRoomFaceSelector,
+    _canonical_polygon,
+    _publication_polygon,
     _derive_scope,
     _edge,
     _edge_contains_edge,
@@ -84,6 +86,117 @@ def _scope(path: Path):
     return room_authority.resolve_scope(room_selector)
 
 
+def test_raw_canonical_polygon_retains_retraced_spur_for_ownership_audit() -> None:
+    clean = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+    with_exact_spur = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (10.0, 8.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+
+    raw = _canonical_polygon(with_exact_spur)
+
+    assert len(raw) == 6
+    assert raw != _canonical_polygon(clean)
+    assert _publication_polygon(raw) == _canonical_polygon(clean)
+
+
+def test_publication_polygon_collapses_multiple_exact_retraced_spurs() -> None:
+    expected = (
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (0.0, 20.0),
+        (0.0, 15.0),
+    )
+    with_spurs = (
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 20.0),
+        (18.0, 20.0),
+        (20.0, 20.0),
+        (0.0, 20.0),
+        (0.0, 15.0),
+        (-3.0, 15.0),
+        (0.0, 15.0),
+    )
+
+    raw = _canonical_polygon(with_spurs)
+
+    assert len(raw) == len(with_spurs)
+    assert _publication_polygon(raw) == _canonical_polygon(expected)
+
+
+def test_publication_polygon_collapses_consecutive_duplicate_before_spur() -> None:
+    clean = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+    noisy = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (8.0, 10.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+
+    assert _publication_polygon(_canonical_polygon(noisy)) == _canonical_polygon(clean)
+
+
+def test_publication_polygon_does_not_collapse_near_backtrack() -> None:
+    near_backtrack = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (10.0, 8.0),
+        (10.000001, 10.0),
+        (0.0, 10.0),
+    )
+
+    raw = _canonical_polygon(near_backtrack)
+    result = _publication_polygon(raw)
+
+    assert len(result) == 6
+    assert result == raw
+    assert result != _canonical_polygon(
+        ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0))
+    )
+
+
+def test_publication_polygon_collapses_exact_spur_across_ring_start() -> None:
+    clean = (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+    wrapped_spur = (
+        (10.0, 8.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+    )
+
+    raw = _canonical_polygon(wrapped_spur)
+
+    assert raw != _canonical_polygon(clean)
+    assert _publication_polygon(raw) == _canonical_polygon(clean)
+
+
 def test_two_room_source_plan_publishes_exact_room_faces(tmp_path: Path) -> None:
     path = tmp_path / "two-room.pdf"
     _write_plan(path, with_partition=True)
@@ -97,7 +210,32 @@ def test_two_room_source_plan_publishes_exact_room_faces(tmp_path: Path) -> None
     assert all(record.area_page_pts2 > 0.0 for record in result.records)
     assert all(len(record.polygon_pdf_pts) >= 4 for record in result.records)
     assert all(record.bounding_wall_ids for record in result.records)
+    assert all(record.boundary_wall_edges for record in result.records)
+    assert all(
+        len(record.boundary_wall_edges) == len(record.polygon_pdf_pts)
+        for record in result.records
+    )
     assert len({record.face_id for record in result.records}) == 2
+
+    # Additive boundary-subedge provenance must not participate in the stable
+    # physical/source-room record identity. Recompute the historical payload
+    # exactly and require the same record id.
+    for record in result.records:
+        expected_payload = {
+            "face_id": record.face_id,
+            "document_id": record.document_id,
+            "revision_id": record.revision_id,
+            "source_sha256": record.source_sha256,
+            "snapshot_id": record.snapshot_id,
+            "page_id": record.page_id,
+            "decision_scope_id": record.decision_scope_id,
+            "polygon": record.polygon_pdf_pts,
+            "bounding_wall_ids": record.bounding_wall_ids,
+            "area_page_pts2": record.area_page_pts2,
+        }
+        assert record.record_id == stable_contract_id(
+            "source_room_face_record", expected_payload, digest_chars=32
+        )
 
 
 def test_single_box_cannot_mint_room_face_authority(tmp_path: Path) -> None:
@@ -241,6 +379,14 @@ def test_planar_face_split_at_partition_keeps_room_face_authority() -> None:
     assert result.reason_codes == (SOURCE_ROOM_FACE_SCOPE_RESOLVED,)
     assert len(result.records) == 2
     assert all("partition" in row.bounding_wall_ids for row in result.records)
+    partition_edges = [
+        edge
+        for row in result.records
+        for wall_id, edge in row.boundary_wall_edges
+        if wall_id == "partition"
+    ]
+    assert len(partition_edges) == 2
+    assert partition_edges[0] == partition_edges[1]
 
 def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> None:
     def record(wall_id: str, first, second):

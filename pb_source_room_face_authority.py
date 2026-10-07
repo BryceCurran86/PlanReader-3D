@@ -40,7 +40,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field, replace
 import math
 from types import MappingProxyType
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Optional
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -101,8 +101,42 @@ def _edge(first: Iterable[float], second: Iterable[float]) -> Edge:
     return (a, b) if a <= b else (b, a)
 
 
-def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
-    cleaned = tuple(_point(point) for point in points)
+def _collapse_exact_ring_backtracks(
+    points: Iterable[Point],
+) -> tuple[Point, ...]:
+    """Remove only exact zero-area A->B->A spurs from a closed boundary walk."""
+    compact: list[Point] = []
+    for point in points:
+        if compact and point == compact[-1]:
+            continue
+        compact.append(point)
+    if len(compact) > 1 and compact[0] == compact[-1]:
+        compact.pop()
+
+    while len(compact) >= 3:
+        changed = False
+        size = len(compact)
+        for index in range(size):
+            previous_index = (index - 1) % size
+            next_index = (index + 1) % size
+            if compact[previous_index] != compact[next_index]:
+                continue
+            retained = compact[previous_index]
+            reduced = [retained]
+            cursor = (next_index + 1) % size
+            while cursor != previous_index:
+                reduced.append(compact[cursor])
+                cursor = (cursor + 1) % size
+            compact = reduced
+            changed = True
+            break
+        if not changed:
+            break
+    return tuple(compact) if len(compact) >= 3 else ()
+
+
+def _canonical_cycle(points: Iterable[Point]) -> tuple[Point, ...]:
+    cleaned = tuple(points)
     if len(cleaned) < 3:
         return ()
     variants: list[tuple[Point, ...]] = []
@@ -114,6 +148,64 @@ def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
             tuple(cleaned[(start - i) % len(cleaned)] for i in range(len(cleaned)))
         )
     return min(variants)
+
+
+def _canonical_polygon(points: Iterable[Iterable[float]]) -> tuple[Point, ...]:
+    """Canonicalize the raw planar face without deleting topology evidence."""
+    return _canonical_cycle(tuple(_point(point) for point in points))
+
+
+def _publication_polygon(
+    raw_polygon: Iterable[Iterable[float]],
+) -> tuple[Point, ...]:
+    """Collapse representation-only exact retraces after authority gates."""
+    return _canonical_cycle(
+        _collapse_exact_ring_backtracks(
+            tuple(_point(point) for point in raw_polygon)
+        )
+    )
+
+
+def _publication_boundary_ownership(
+    raw_polygon: tuple[Point, ...],
+    *,
+    edge_owner: Mapping[Edge, str],
+    ownership_grid: Mapping[tuple[int, int], list[tuple[str, Edge]]],
+    ownership_oversized: list[tuple[str, Edge]],
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> Optional[
+    tuple[
+        tuple[Point, ...],
+        tuple[str, ...],
+        tuple[tuple[str, Edge], ...],
+    ]
+]:
+    """Publish a cleaned ring only when every remaining edge has one owner."""
+    polygon = _publication_polygon(raw_polygon)
+    if not polygon:
+        return None
+
+    owned_edges: list[tuple[str, Edge]] = []
+    owners: list[str] = []
+    for index, first in enumerate(polygon):
+        second = polygon[(index + 1) % len(polygon)]
+        face_edge = _edge(first, second)
+        if face_edge[0] == face_edge[1]:
+            return None
+        owner = edge_owner.get(face_edge)
+        if owner is None:
+            containing = _containing_wall_ids(
+                face_edge,
+                grid=ownership_grid,
+                oversized=ownership_oversized,
+                wall_edges=wall_edges,
+            )
+            if len(containing) != 1:
+                return None
+            owner = containing[0]
+        owners.append(owner)
+        owned_edges.append((owner, face_edge))
+    return polygon, tuple(sorted(set(owners))), tuple(owned_edges)
 
 
 def _polygon_area(points: tuple[Point, ...]) -> float:
@@ -408,6 +500,11 @@ class SourceRoomFaceRecord:
     polygon_pdf_pts: tuple[Point, ...]
     bounding_wall_ids: tuple[str, ...]
     area_page_pts2: float
+    # Exact producer-owned mapping from each planarized face subedge to its
+    # uniquely authenticated W4 wall owner. This is additive provenance: it
+    # does not change room identity or geometry and lets downstream topology
+    # distinguish one long wall chain from the local edge shared by two cells.
+    boundary_wall_edges: tuple[tuple[str, Edge], ...] = ()
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
 
 
@@ -430,6 +527,11 @@ class SourceRoomFaceAbstention:
     polygon_pdf_pts: tuple[Point, ...]
     bounding_wall_ids: tuple[str, ...]
     area_page_pts2: float
+    # Exact producer-owned subedge ownership is retained even when this face is
+    # withheld. Downstream authorities may inspect abstention provenance, but
+    # the abstention remains non-published and cannot become a room merely
+    # because this metadata exists.
+    boundary_wall_edges: tuple[tuple[str, Edge], ...] = ()
     schema_version: str = SOURCE_ROOM_FACE_SCHEMA_VERSION
 
 
@@ -882,8 +984,26 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
 
     output: list[SourceRoomFaceRecord] = []
     for face_id in sorted(resolved_faces):
-        polygon = polygons.get(face_id)
-        if polygon is None:
+        raw_polygon = polygons.get(face_id)
+        if raw_polygon is None:
+            return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+        publication = _publication_boundary_ownership(
+            raw_polygon,
+            edge_owner=edge_owner,
+            ownership_grid=ownership_grid,
+            ownership_oversized=ownership_oversized,
+            wall_edges=wall_edges,
+        )
+        if publication is None:
+            return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+        polygon, publication_wall_ids, publication_edges = publication
+        publication_area = _polygon_area(polygon)
+        if not math.isclose(
+            publication_area,
+            face_areas[face_id],
+            rel_tol=1e-12,
+            abs_tol=1e-6,
+        ):
             return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
         payload = {
             "face_id": face_id,
@@ -894,7 +1014,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             "page_id": scope.page_id,
             "decision_scope_id": scope.decision_scope_id,
             "polygon": polygon,
-            "bounding_wall_ids": face_walls[face_id],
+            "bounding_wall_ids": publication_wall_ids,
             "area_page_pts2": face_areas[face_id],
         }
         output.append(
@@ -910,8 +1030,9 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                 page_id=scope.page_id,
                 decision_scope_id=scope.decision_scope_id,
                 polygon_pdf_pts=polygon,
-                bounding_wall_ids=face_walls[face_id],
+                bounding_wall_ids=publication_wall_ids,
                 area_page_pts2=face_areas[face_id],
+                boundary_wall_edges=publication_edges,
             )
         )
 
@@ -935,6 +1056,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             polygon_pdf_pts=polygons[face_id],
             bounding_wall_ids=face_walls[face_id],
             area_page_pts2=face_areas[face_id],
+            boundary_wall_edges=face_wall_edges[face_id],
         )
         for face_id in sorted(locally_withheld_face_ids)
     )
