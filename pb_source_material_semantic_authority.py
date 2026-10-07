@@ -715,12 +715,36 @@ def _recover_admissible_viewport_lines(
                 break
 
             if word.trusted:
+                native_exact = (
+                    text_result.status is EvidenceResolutionStatus.CORROBORATED
+                    and bool(text_result.trusted_text)
+                    and normalize_reading(text_result.trusted_text)
+                    == normalize_reading(word.text)
+                )
+                raster_exact = False
                 if (
-                    text_result.status is not EvidenceResolutionStatus.CORROBORATED
-                    or not text_result.trusted_text
-                    or normalize_reading(text_result.trusted_text)
-                    != normalize_reading(word.text)
+                    not native_exact
+                    and "raster_text_corroborated" in set(word.reason_codes)
                 ):
+                    raster_result = raster.publish(
+                        RasterTextCorroborationSelector(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            observation_id=word.observation_id,
+                        )
+                    )
+                    raster_exact = (
+                        raster_result.status
+                        is EvidenceResolutionStatus.CORROBORATED
+                        and raster_result.record is not None
+                        and normalize_reading(
+                            str(raster_result.corroborated_text or "")
+                        )
+                        == normalize_reading(word.text)
+                    )
+                if not native_exact and not raster_exact:
                     line_valid = False
                     break
             else:
