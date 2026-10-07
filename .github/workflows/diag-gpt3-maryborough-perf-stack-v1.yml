@@ -1,6 +1,9 @@
 name: DIAG GPT3 Maryborough Perf Stack V1
 
 on:
+  push:
+    branches:
+      - diag/gpt3-maryborough-perf-stack-v1
   pull_request:
     branches:
       - main
