@@ -9,10 +9,14 @@ This authority composes existing source-owned facts only:
 - LiveCanonicalFloorSurfaceComposition already owns the deterministic physical
   floor identity derived from the physical room.
 
-A floor finish resolves only when exactly one authenticated drawing occurrence
-is fully inside the already-proven room dimension box and its corroborated
-schedule definition explicitly identifies a floor finish. Raw codes, nearest
-marks, room names, project coordinates and benchmark values are never inputs.
+A floor finish resolves first through the strongest same-view relationship:
+exactly one authenticated drawing occurrence fully inside the already-proven
+room dimension box. When the source places finishes on a separate floor-finish
+plan, a fallback may bind only when the room label is unique and the trusted
+room-label line and authenticated finish-occurrence line share one exact native
+PDF partition/block inside an authenticated FLOOR_FINISH_PLAN viewport. Raw
+codes, nearest marks, cross-sheet coordinate transfer, project coordinates and
+benchmark values are never inputs.
 """
 from __future__ import annotations
 
@@ -21,10 +25,17 @@ import math
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
+from pb_cross_view_ceiling_finish_authority import (
+    _occurrence_line as _cross_view_occurrence_line,
+    _source_bytes as _cross_view_source_bytes,
+    _trusted_room_labels_for_pages as _trusted_room_labels_for_pages,
+    _viewport_is_authoritative as _cross_viewport_is_authoritative,
+)
 from pb_cross_view_room_area_authority import (
     CrossViewRoomAreaRecord,
     CrossViewRoomAreaResult,
 )
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_same_view_room_area_authority import (
     SameViewRoomAreaRecord,
     SameViewRoomAreaResult,
@@ -47,6 +58,11 @@ from pb_source_material_semantic_authority import (
     SourceMaterialSemanticProducer,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_viewport_segmentation import (
+    is_segment_page_viewports_product,
+    segment_page_viewports,
+    validate_non_overlapping_viewports,
+)
 
 
 CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION = "1.2.0"
@@ -84,6 +100,10 @@ _FLOOR_FINISH_SEMANTICS = frozenset(
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def _norm(value: object) -> str:
+    return " ".join(_clean(value).casefold().split())
 
 
 def _bbox(
@@ -254,6 +274,59 @@ def _matching_floor(
     if _clean(metadata.get("room_revision_id")) != floor.revision_id:
         return None
     return floor
+
+
+def _floor_finish_viewports(
+    source: SourceVisibilityProducer,
+    *,
+    revision_id: str,
+) -> Mapping[tuple[str, str], tuple[float, float, float, float]]:
+    published = source.published_snapshot_for_revision(revision_id)
+    payload = _cross_view_source_bytes(source, revision_id)
+    if published is None or payload is None:
+        return MappingProxyType({})
+
+    import fitz
+
+    decoded = sorted({int(value) for value in published.coverage.decoded_pages})
+    output: dict[tuple[str, str], tuple[float, float, float, float]] = {}
+    pdf = fitz.open(stream=payload, filetype="pdf")
+    try:
+        for page_number in decoded:
+            if page_number < 1 or page_number > pdf.page_count:
+                continue
+            viewports = tuple(
+                segment_page_viewports(
+                    pdf.load_page(page_number - 1),
+                    page_number=page_number,
+                )
+            )
+            if (
+                not viewports
+                or any(
+                    not is_segment_page_viewports_product(viewport)
+                    for viewport in viewports
+                )
+            ):
+                continue
+            sibling_non_overlapping = validate_non_overlapping_viewports(viewports)
+            for viewport in viewports:
+                if (
+                    viewport.view_type
+                    != DrawingViewType.FLOOR_FINISH_PLAN.value
+                    or not _cross_viewport_is_authoritative(
+                        viewport,
+                        sibling_non_overlapping=sibling_non_overlapping,
+                    )
+                    or viewport.bounding_box is None
+                ):
+                    continue
+                bbox = _bbox(viewport.bounding_box)
+                if bbox is not None:
+                    output[(str(page_number), _clean(viewport.view_id))] = bbox
+    finally:
+        pdf.close()
+    return MappingProxyType(output)
 
 
 def _occurrences_on_page(
@@ -479,6 +552,149 @@ class CrossViewFloorFinishProducer:
         unresolved: set[str] = set()
         conflict = False
 
+        # Cross-view fallback: a floor-finish plan may carry the room label and
+        # finish code separately from the figured-dimension view that measured
+        # the room. Bind only through exact native source ownership: one unique
+        # documented-room label, one authenticated FLOOR_FINISH_PLAN viewport,
+        # and one material occurrence in the exact same native block.
+        by_label: dict[
+            str,
+            list[CrossViewRoomAreaRecord | SameViewRoomAreaRecord],
+        ] = {}
+        for area_record in area_records:
+            label = _norm(area_record.room_label)
+            if label:
+                by_label.setdefault(label, []).append(area_record)
+        unique_area_by_label = {
+            label: rows[0]
+            for label, rows in by_label.items()
+            if len(rows) == 1
+        }
+
+        cross_view_candidates: dict[
+            str,
+            list[
+                tuple[
+                    SourceMaterialOccurrenceRecord,
+                    SourceMaterialDefinitionRecord,
+                    object,
+                    object,
+                ]
+            ],
+        ] = {}
+        floor_finish_viewports = _floor_finish_viewports(
+            self._source,
+            revision_id=revision_id,
+        )
+        if floor_finish_viewports and unique_area_by_label:
+            support_page_ids = tuple(
+                sorted({page_id for page_id, _viewport_id in floor_finish_viewports})
+            )
+            trusted_labels = _trusted_room_labels_for_pages(
+                self._source,
+                revision_id=revision_id,
+                page_ids=support_page_ids,
+                candidate_labels=tuple(unique_area_by_label),
+            )
+            label_lines_by_view: dict[tuple[str, str], list[tuple[object, str]]] = {}
+            for (page_id, viewport_id), viewport_bbox in floor_finish_viewports.items():
+                for line in trusted_labels.get(page_id, ()):
+                    label = _norm(line.text)
+                    if (
+                        label not in unique_area_by_label
+                        or not _bbox_fully_inside(line.bbox, viewport_bbox)
+                    ):
+                        continue
+                    label_lines_by_view.setdefault(
+                        (page_id, viewport_id),
+                        [],
+                    ).append((line, label))
+
+            for result in occurrence_results:
+                if (
+                    result.status is not EvidenceResolutionStatus.CORROBORATED
+                    or not result.scope_complete
+                ):
+                    continue
+                for occurrence in result.records:
+                    key = (
+                        _clean(occurrence.page_id),
+                        _clean(occurrence.viewport_id),
+                    )
+                    viewport_bbox = floor_finish_viewports.get(key)
+                    if (
+                        viewport_bbox is None
+                        or occurrence.semantic_finish not in _FLOOR_FINISH_SEMANTICS
+                        or not _bbox_fully_inside(
+                            occurrence.bbox_pdf_pts,
+                            viewport_bbox,
+                        )
+                    ):
+                        continue
+                    definition_result = material_authority.resolve_definition(
+                        SourceMaterialDefinitionSelector(
+                            document_id=occurrence.document_id,
+                            revision_id=occurrence.revision_id,
+                            source_sha256=occurrence.source_sha256,
+                            snapshot_id=occurrence.snapshot_id,
+                            code=occurrence.code,
+                        )
+                    )
+                    definition = definition_result.record
+                    if (
+                        definition_result.status
+                        is not EvidenceResolutionStatus.CORROBORATED
+                        or definition is None
+                        or occurrence.snapshot_id != published.snapshot.snapshot_id
+                        or definition.snapshot_id != published.snapshot.snapshot_id
+                        or definition.record_id != occurrence.definition_record_id
+                        or definition.semantic_finish != occurrence.semantic_finish
+                        or not _definition_is_floor_finish(definition)
+                    ):
+                        continue
+                    occurrence_line = _cross_view_occurrence_line(
+                        self._source,
+                        revision_id=revision_id,
+                        occurrence=occurrence,
+                    )
+                    if occurrence_line is None:
+                        continue
+                    same_block_labels = [
+                        (line, label)
+                        for line, label in label_lines_by_view.get(key, ())
+                        if (
+                            line.source_partition_id
+                            == occurrence_line.source_partition_id
+                            and line.block_no == occurrence_line.block_no
+                        )
+                    ]
+                    labels = {label for _line, label in same_block_labels}
+                    if len(labels) != 1:
+                        if len(labels) > 1:
+                            conflict = True
+                        continue
+                    label = next(iter(labels))
+                    matching_label_lines = [
+                        line
+                        for line, candidate_label in same_block_labels
+                        if candidate_label == label
+                    ]
+                    if len(matching_label_lines) != 1:
+                        conflict = True
+                        continue
+                    area_record = unique_area_by_label[label]
+                    cross_view_candidates.setdefault(
+                        area_record.physical_room_id,
+                        [],
+                    ).append(
+                        (
+                            occurrence,
+                            definition,
+                            occurrence_line,
+                            matching_label_lines[0],
+                        )
+                    )
+
         for area_record in area_records:
             floor = _matching_floor(self._floors, area_record)
             if floor is None:
@@ -530,13 +746,28 @@ class CrossViewFloorFinishProducer:
                     continue
                 candidates.append((occurrence, definition))
 
-            if len(candidates) != 1:
+            binding_mode = "dimension_box"
+            support_source_partition_id = ""
+            support_block_no = None
+            if len(candidates) > 1:
                 unresolved.add(floor.canonical_floor_id)
-                if len(candidates) > 1:
-                    conflict = True
+                conflict = True
                 continue
-
-            occurrence, definition = candidates[0]
+            if len(candidates) == 1:
+                occurrence, definition = candidates[0]
+            else:
+                owned = cross_view_candidates.get(area_record.physical_room_id, ())
+                if len(owned) != 1:
+                    unresolved.add(floor.canonical_floor_id)
+                    if len(owned) > 1:
+                        conflict = True
+                    continue
+                occurrence, definition, occurrence_line, _label_line = owned[0]
+                binding_mode = "native_block_room_label"
+                support_source_partition_id = _clean(
+                    occurrence_line.source_partition_id
+                )
+                support_block_no = int(occurrence_line.block_no)
             area_value = _area_value(area_record)
             if area_value is None:
                 unresolved.add(floor.canonical_floor_id)
@@ -619,6 +850,11 @@ class CrossViewFloorFinishProducer:
                     "finish_code": occurrence.code,
                     "semantic_finish": occurrence.semantic_finish,
                     "support_snapshot_id": published.snapshot.snapshot_id,
+                    "support_page_id": occurrence.page_id,
+                    "support_viewport_id": occurrence.viewport_id,
+                    "support_source_partition_id": support_source_partition_id,
+                    "support_block_no": support_block_no,
+                    "finish_binding_mode": binding_mode,
                     "finish_definition_record_id": definition.record_id,
                     "finish_occurrence_record_id": occurrence.record_id,
                     "finish_occurrence_evidence_id": occurrence.source_evidence_id,

@@ -130,6 +130,8 @@ def build_live_floor_finish_area_source_traces(
         semantic_finish = _clean(metadata.get("semantic_finish")).lower()
         if (
             not _clean(metadata.get("support_snapshot_id"))
+            or not _clean(metadata.get("support_page_id"))
+            or not _clean(metadata.get("support_viewport_id"))
             or not semantic_finish
             or _clean(floor.finish_descriptor).lower() != semantic_finish
         ):
@@ -201,6 +203,13 @@ def build_live_floor_finish_area_source_traces(
                 "finish_code": metadata.get("finish_code"),
                 "semantic_finish": semantic_finish,
                 "support_snapshot_id": metadata.get("support_snapshot_id"),
+                "support_page_id": metadata.get("support_page_id"),
+                "support_viewport_id": metadata.get("support_viewport_id"),
+                "support_source_partition_id": metadata.get(
+                    "support_source_partition_id"
+                ),
+                "support_block_no": metadata.get("support_block_no"),
+                "finish_binding_mode": metadata.get("finish_binding_mode"),
                 "finish_definition_record_id": metadata.get(
                     "finish_definition_record_id"
                 ),
