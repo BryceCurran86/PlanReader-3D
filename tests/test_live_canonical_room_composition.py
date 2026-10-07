@@ -279,7 +279,7 @@ def _viewport_fallback_source(
     return source, wall_opening
 
 
-def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_finish_plan_viewport() -> None:
+def test_floor_finish_support_view_cannot_mint_canonical_room_topology() -> None:
     source, wall_opening = _viewport_fallback_source(
         drawing_title="FLOOR FINISHES & PARTITIONS PLAN",
     )
@@ -289,23 +289,10 @@ def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_finish_pla
         wall_opening_composition=wall_opening,
     )
 
-    assert result.status is EvidenceResolutionStatus.CORROBORATED
-    assert result.reason_codes == (
-        LIVE_CANONICAL_ROOM_RESOLVED,
-        LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED,
-    )
-    assert result.source_pages == (1,)
-    assert len(result.rooms) == 2
-    assert all(room.viewport_id for room in result.rooms)
-    assert all(
-        room.decision_scope_id.startswith("wall-source:viewport:1:")
-        for room in result.rooms
-    )
-    assert all(room.geometry_complete is True for room in result.rooms)
-    for room in result.rooms:
-        binding = result.room_face_authority_binding_for(room)
-        assert binding is not None
-        assert binding.viewport_view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert LIVE_CANONICAL_ROOM_UNAVAILABLE in result.reason_codes
+    assert result.rooms == ()
+    assert result.source_pages == ()
 
 
 def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewport() -> None:
