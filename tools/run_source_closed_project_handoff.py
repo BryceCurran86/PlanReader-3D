@@ -260,6 +260,7 @@ def generate_project_handoff(
         "openings": len(tuple(getattr(claim, "canonical_openings", ()) or ())),
         "rooms": len(tuple(getattr(claim, "canonical_rooms", ()) or ())),
         "floors": len(tuple(getattr(claim, "canonical_floors", ()) or ())),
+        "ceilings": len(tuple(getattr(claim, "canonical_ceilings", ()) or ())),
         "spaces": len(tuple(getattr(claim, "canonical_spaces", ()) or ())),
     }
 
