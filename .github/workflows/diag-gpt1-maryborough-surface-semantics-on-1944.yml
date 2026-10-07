@@ -43,7 +43,6 @@ jobs:
           pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           payload=pdf.read_bytes()
           doc=fitz.open(stream=payload,filetype="pdf")
-          page_ids=tuple(str(i+1) for i in range(doc.page_count))
           views=[]
           for index in range(doc.page_count):
               page_no=index+1
@@ -64,6 +63,12 @@ jobs:
                           "bbox":None if v.bounding_box is None else list(v.bounding_box),
                           "authoritative_derived":is_authoritative_derived_viewport(v),
                       })
+          selected_page_ids=tuple(
+              str(page_no)
+              for page_no in sorted({int(row["page_no"]) for row in views})
+          )
+          if not selected_page_ids:
+              raise AssertionError("no source-owned surface/schedule view pages resolved")
           doc.close()
 
           source=SourceVisibilityProducer(
@@ -74,7 +79,7 @@ jobs:
               document_id=f"diag:{hashlib.sha256(payload).hexdigest()[:32]}",
               source_bytes=payload,
               source_locator="memory://maryborough.pdf",
-              page_ids=page_ids,
+              page_ids=selected_page_ids,
           )
           producer=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
           producer.publish(published.revision.revision_id)
@@ -162,6 +167,7 @@ jobs:
           occurrence_doc.close()
 
           print(json.dumps({
+              "selected_page_ids":list(selected_page_ids),
               "surface_views":views,
               "definition_count":len(definitions),
               "definitions":definitions,
