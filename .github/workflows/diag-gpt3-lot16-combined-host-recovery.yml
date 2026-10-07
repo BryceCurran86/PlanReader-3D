@@ -50,6 +50,12 @@ jobs:
           set -o pipefail
           PYTHONPATH=. python -u tools/diag_gpt3_lot16_opening_role_origin.py \
             | tee lot16-opening-role-origin.json
+      - name: Run host-proven/no-area audit
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt3_lot16_hosted_no_area.py \
+            | tee lot16-hosted-no-area.json
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
@@ -60,4 +66,5 @@ jobs:
             lot16-semantic-residual-current.json
             lot16-candidate-overlap.json
             lot16-opening-role-origin.json
+            lot16-hosted-no-area.json
           retention-days: 2
