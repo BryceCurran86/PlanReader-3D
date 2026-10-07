@@ -1,0 +1,65 @@
+name: DIAG GPT1 Maryborough Floor Finish View On 1900
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove Maryborough floor finish view classification
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
+          from pb_viewport_segmentation import segment_page_viewports
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(pdf)
+          rows=[]
+          floor_pages=[]
+          try:
+              for index in range(doc.page_count):
+                  page_no=index+1
+                  segmented=segment_page_viewports(doc[index],page_number=page_no)
+                  for view in segmented:
+                      if (
+                          view.view_type==DrawingViewType.FLOOR_FINISH_PLAN.value
+                          or "FLOOR FINISH" in str(view.label or "").upper()
+                      ):
+                          rows.append({
+                              "page_no":page_no,
+                              "view_id":view.view_id,
+                              "view_type":view.view_type,
+                              "label":view.label,
+                              "status":view.status,
+                              "bounding_box":view.bounding_box,
+                              "boundary_source":view.boundary_source,
+                              "confidence":view.confidence,
+                              "provenance":dict(view.provenance or {}),
+                          })
+                  if authoritative_floor_plan_viewports(doc[index],page_number=page_no):
+                      floor_pages.append(page_no)
+          finally:
+              doc.close()
+          print(json.dumps({
+              "floor_finish_rows":rows,
+              "floor_finish_count":sum(
+                  1 for r in rows
+                  if r["view_type"]==DrawingViewType.FLOOR_FINISH_PLAN.value
+              ),
+              "authoritative_floor_plan_pages":floor_pages,
+          },indent=2,sort_keys=True,default=str))
+          PY
