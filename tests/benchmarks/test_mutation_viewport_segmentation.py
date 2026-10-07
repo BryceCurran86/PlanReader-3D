@@ -526,3 +526,114 @@ def test_gridded_internal_finishes_schedule_table_frame_is_authoritative():
         assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
     finally:
         doc.close()
+
+
+def test_surface_semantic_views_do_not_become_floor_topology() -> None:
+    for title, expected in (
+        ("PROP. REFLECTED CEILING PLAN", DrawingViewType.REFLECTED_CEILING_PLAN.value),
+        ("PROP. FLOOR FINISHES & PARTITIONS PLAN", DrawingViewType.FLOOR_FINISH_PLAN.value),
+    ):
+        doc = fitz.open()
+        page = doc.new_page(width=500, height=350)
+        frame = fitz.Rect(30, 30, 470, 300)
+        page.draw_rect(frame)
+        page.draw_line((80, 100), (420, 100))
+        page.draw_line((80, 100), (80, 240))
+        page.insert_text((95, 270), title, fontsize=11)
+        doc = _reopen(doc)
+        try:
+            viewports = segment_page_viewports(doc[0], page_number=1)
+            owned = [v for v in viewports if v.view_type == expected]
+            assert len(owned) == 1
+            assert owned[0].status == ViewportSegmentationStatus.RESOLVED.value
+            assert owned[0].bounding_box == pytest.approx((30, 30, 470, 300))
+            assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+        finally:
+            doc.close()
+
+
+def test_wrapped_floor_finish_title_in_one_native_block_resolves() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=350)
+    frame = fitz.Rect(30, 30, 470, 300)
+    page.draw_rect(frame)
+    page.draw_line((80, 100), (420, 100))
+    page.draw_line((80, 100), (80, 240))
+    page.insert_textbox(
+        fitz.Rect(100, 245, 420, 292),
+        "PROP. FLOOR FINISHES &\nPARTITIONS PLAN",
+        fontsize=11,
+    )
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        owned = [
+            v for v in viewports
+            if v.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+        ]
+        assert len(owned) == 1
+        assert owned[0].status == ViewportSegmentationStatus.RESOLVED.value
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
+
+
+def test_floor_finish_title_halves_in_separate_native_blocks_are_not_joined() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=350)
+    page.draw_rect(fitz.Rect(30, 30, 470, 300))
+    page.insert_text((100, 255), "PROP. FLOOR FINISHES &", fontsize=11)
+    page.insert_text((100, 275), "PARTITIONS PLAN", fontsize=11)
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert not any(
+            viewport.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+            for viewport in viewports
+        )
+    finally:
+        doc.close()
+
+
+def test_single_reflected_ceiling_plan_can_own_printable_area_without_floor_topology() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=842)
+    page.insert_text((220, 760), "PROP. REFLECTED CEILING PLAN", fontsize=11)
+    page.draw_line((80, 100), (780, 100))
+    page.draw_line((780, 100), (780, 620))
+    page.draw_line((780, 620), (80, 620))
+    page.draw_line((80, 620), (80, 100))
+    page.draw_line((300, 100), (300, 620))
+
+    x = 1000
+    page.insert_text((x, 520), "PROJECT TITLE", fontsize=6)
+    page.insert_text((x, 532), "SYNTHETIC RESIDENCE", fontsize=9)
+    page.insert_text((x, 556), "CLIENT", fontsize=6)
+    page.insert_text((x, 568), "EXAMPLE CLIENT", fontsize=9)
+    page.insert_text((x, 596), "DRAWING TITLE", fontsize=6)
+    page.insert_text((x, 612), "REFLECTED CEILING PLAN", fontsize=11)
+    page.insert_text((x, 650), "DRAWN", fontsize=6)
+    page.insert_text((x + 60, 650), "CHECKED", fontsize=6)
+    page.insert_text((x + 120, 650), "SCALE", fontsize=6)
+    page.insert_text((x, 662), "AB", fontsize=8)
+    page.insert_text((x + 60, 662), "CD", fontsize=8)
+    page.insert_text((x + 120, 662), "1:100", fontsize=8)
+    page.insert_text((x, 690), "DRAWING NO", fontsize=6)
+    page.insert_text((x + 120, 690), "REVISION", fontsize=6)
+    page.insert_text((x, 704), "A-501", fontsize=10)
+    page.insert_text((x + 120, 704), "A", fontsize=10)
+
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        rcp = [
+            v for v in viewports
+            if v.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+        ]
+        assert len(rcp) == 1
+        assert rcp[0].status == ViewportSegmentationStatus.DERIVED.value
+        assert rcp[0].boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+        assert is_authoritative_derived_viewport(rcp[0])
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
