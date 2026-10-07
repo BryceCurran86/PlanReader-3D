@@ -463,3 +463,243 @@ def test_plan_floor_layout_title_is_supported_without_relaxing_prose_guard():
     prose = _reopen(prose)
     assert segment_page_viewports(prose[0], page_number=1) == []
     prose.close()
+
+
+def _single_table_frame_view(title: str) -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=420)
+    outer = fitz.Rect(320, 30, 580, 350)
+    page.draw_rect(outer)
+
+    x0, y0 = 340.0, 60.0
+    cell_w, cell_h = 70.0, 60.0
+    for row in range(3):
+        for col in range(3):
+            page.draw_rect(
+                fitz.Rect(
+                    x0 + col * cell_w,
+                    y0 + row * cell_h,
+                    x0 + (col + 1) * cell_w,
+                    y0 + (row + 1) * cell_h,
+                )
+            )
+    page.insert_text((360, 325), title, fontsize=11)
+    return _reopen(doc)
+
+
+def test_gridded_finish_schedule_table_frame_can_own_schedule_viewport():
+    doc = _single_table_frame_view("FINISH SCHEDULE")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
+
+
+def test_gridded_table_frame_cannot_mint_floor_plan_viewport():
+    doc = _single_table_frame_view("GROUND FLOOR PLAN")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        plan = viewports[0]
+        assert plan.view_type == DrawingViewType.FLOOR_PLAN.value
+        assert plan.status == ViewportSegmentationStatus.UNSUPPORTED.value
+        assert plan.bounding_box is None
+    finally:
+        doc.close()
+
+
+def test_gridded_internal_finishes_schedule_table_frame_is_authoritative():
+    doc = _single_table_frame_view("INTERNAL FINISHES SCHEDULE")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
+
+
+def test_surface_semantic_views_do_not_become_floor_topology() -> None:
+    for title, expected in (
+        ("PROP. REFLECTED CEILING PLAN", DrawingViewType.REFLECTED_CEILING_PLAN.value),
+        ("PROP. FLOOR FINISHES & PARTITIONS PLAN", DrawingViewType.FLOOR_FINISH_PLAN.value),
+    ):
+        doc = fitz.open()
+        page = doc.new_page(width=500, height=350)
+        frame = fitz.Rect(30, 30, 470, 300)
+        page.draw_rect(frame)
+        page.draw_line((80, 100), (420, 100))
+        page.draw_line((80, 100), (80, 240))
+        page.insert_text((95, 270), title, fontsize=11)
+        doc = _reopen(doc)
+        try:
+            viewports = segment_page_viewports(doc[0], page_number=1)
+            owned = [v for v in viewports if v.view_type == expected]
+            assert len(owned) == 1
+            assert owned[0].status == ViewportSegmentationStatus.RESOLVED.value
+            assert owned[0].bounding_box == pytest.approx((30, 30, 470, 300))
+            assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+        finally:
+            doc.close()
+
+
+def test_wrapped_floor_finish_title_in_one_native_block_resolves() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=350)
+    frame = fitz.Rect(30, 30, 470, 300)
+    page.draw_rect(frame)
+    page.draw_line((80, 100), (420, 100))
+    page.draw_line((80, 100), (80, 240))
+    page.insert_textbox(
+        fitz.Rect(100, 245, 420, 292),
+        "PROP. FLOOR FINISHES &\nPARTITIONS PLAN",
+        fontsize=11,
+    )
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        owned = [
+            v for v in viewports
+            if v.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+        ]
+        assert len(owned) == 1
+        assert owned[0].status == ViewportSegmentationStatus.RESOLVED.value
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
+
+
+def test_floor_finish_title_halves_in_separate_native_blocks_are_not_joined() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=500, height=350)
+    page.draw_rect(fitz.Rect(30, 30, 470, 300))
+    page.insert_text((100, 255), "PROP. FLOOR FINISHES &", fontsize=11)
+    page.insert_text((100, 275), "PARTITIONS PLAN", fontsize=11)
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert not any(
+            viewport.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value
+            for viewport in viewports
+        )
+    finally:
+        doc.close()
+
+
+def test_single_reflected_ceiling_plan_can_own_printable_area_without_floor_topology() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=842)
+    page.insert_text((220, 760), "PROP. REFLECTED CEILING PLAN", fontsize=11)
+    page.draw_line((80, 100), (780, 100))
+    page.draw_line((780, 100), (780, 620))
+    page.draw_line((780, 620), (80, 620))
+    page.draw_line((80, 620), (80, 100))
+    page.draw_line((300, 100), (300, 620))
+
+    x = 1000
+    page.insert_text((x, 520), "PROJECT TITLE", fontsize=6)
+    page.insert_text((x, 532), "SYNTHETIC RESIDENCE", fontsize=9)
+    page.insert_text((x, 556), "CLIENT", fontsize=6)
+    page.insert_text((x, 568), "EXAMPLE CLIENT", fontsize=9)
+    page.insert_text((x, 596), "DRAWING TITLE", fontsize=6)
+    page.insert_text((x, 612), "REFLECTED CEILING PLAN", fontsize=11)
+    page.insert_text((x, 650), "DRAWN", fontsize=6)
+    page.insert_text((x + 60, 650), "CHECKED", fontsize=6)
+    page.insert_text((x + 120, 650), "SCALE", fontsize=6)
+    page.insert_text((x, 662), "AB", fontsize=8)
+    page.insert_text((x + 60, 662), "CD", fontsize=8)
+    page.insert_text((x + 120, 662), "1:100", fontsize=8)
+    page.insert_text((x, 690), "DRAWING NO", fontsize=6)
+    page.insert_text((x + 120, 690), "REVISION", fontsize=6)
+    page.insert_text((x, 704), "A-501", fontsize=10)
+    page.insert_text((x + 120, 704), "A", fontsize=10)
+
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        rcp = [
+            v for v in viewports
+            if v.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+        ]
+        assert len(rcp) == 1
+        assert rcp[0].status == ViewportSegmentationStatus.DERIVED.value
+        assert rcp[0].boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+        assert is_authoritative_derived_viewport(rcp[0])
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize(
+    "title",
+    (
+        "INTERNAL FINISHES SCHEDULE",
+        "EXTERNAL FINISHES SCHEDULE",
+        "CEILING FINISHES SCHEDULE",
+        "FLOOR FINISHES SCHEDULE",
+    ),
+)
+def test_gridded_qualified_finish_schedule_titles_are_authoritative(title: str) -> None:
+    doc = _single_table_frame_view(title)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
+
+
+def _single_line_grid_frame_view(title: str) -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=420)
+    outer = fitz.Rect(320, 30, 580, 350)
+    page.draw_rect(outer)
+    xs = (340.0, 410.0, 480.0, 550.0)
+    ys = (60.0, 120.0, 180.0, 240.0)
+    for x in xs:
+        page.draw_line((x, 60.0), (x, 240.0))
+    for y in ys:
+        page.draw_line((340.0, y), (550.0, y))
+    page.insert_text((350, 325), title, fontsize=11)
+    return _reopen(doc)
+
+
+def test_line_grid_finish_schedule_can_own_semantic_table_viewport() -> None:
+    doc = _single_line_grid_frame_view("INTERNAL FINISHES SCHEDULE")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
+
+
+def test_line_grid_frame_cannot_mint_floor_plan_authority() -> None:
+    doc = _single_line_grid_frame_view("GROUND FLOOR PLAN")
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        plan = viewports[0]
+        assert plan.view_type == DrawingViewType.FLOOR_PLAN.value
+        assert plan.status == ViewportSegmentationStatus.UNSUPPORTED.value
+        assert plan.bounding_box is None
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
