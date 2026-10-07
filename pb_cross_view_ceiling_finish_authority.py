@@ -187,6 +187,8 @@ class CrossViewCeilingFinishRecord:
     definition_evidence_ids: tuple[str, ...]
     occurrence_record_id: str
     occurrence_evidence_id: str
+    occurrence_observation_ids: tuple[str, ...]
+    occurrence_receipt_ids: tuple[str, ...]
     occurrence_bbox_pdf_pts: tuple[float, float, float, float]
     # The semantic/material source may be a page-scoped snapshot distinct from
     # the topology snapshot that minted the canonical room. It is admissible
@@ -731,6 +733,8 @@ class CrossViewCeilingFinishProducer:
                     definition_evidence_ids=definition.source_definition_ids,
                     occurrence_record_id=occurrence.record_id,
                     occurrence_evidence_id=occurrence.source_evidence_id,
+                    occurrence_observation_ids=occurrence_line.observation_ids,
+                    occurrence_receipt_ids=occurrence_line.receipt_ids,
                     occurrence_bbox_pdf_pts=occurrence.bbox_pdf_pts,
                     support_snapshot_id=published.snapshot.snapshot_id,
                     _seal=_RECORD_SEAL,
