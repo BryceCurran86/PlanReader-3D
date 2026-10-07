@@ -457,12 +457,22 @@ class OpeningHostBindingProducer:
             universe.equivalence,
         )
         if lineage_resolution is None:
-            lineage_resolution = _resolve_two_face_lineage_host(
+            two_face_lineage_resolution = _resolve_two_face_lineage_host(
                 self._opening,
                 opening,
                 universe.records,
                 universe.equivalence,
             )
+            # Positive source-lineage authority supersedes the weaker geometry
+            # path, and a genuine ownership conflict remains fail-closed.
+            # Mere lineage unavailability/unmapped state is an ABSTAIN, not a
+            # veto over an already-valid legacy host proof.
+            if (
+                two_face_lineage_resolution is not None
+                and two_face_lineage_resolution.status
+                is not EvidenceResolutionStatus.ABSTAINED
+            ):
+                lineage_resolution = two_face_lineage_resolution
         if lineage_resolution is not None:
             band_resolution = lineage_resolution
         else:
