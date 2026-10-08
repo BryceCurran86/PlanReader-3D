@@ -1,0 +1,147 @@
+name: DIAG GPT1 Maryborough Real Surface Quantities
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt1-maryborough-real-surfaces.yml"
+
+concurrency:
+  group: diag-gpt1-maryborough-real-surfaces
+  cancel-in-progress: true
+
+jobs:
+  production-surface-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr
+      - name: Install project dependencies
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen Full Plan V2 truth integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Real Maryborough source-to-quantity and sealing diagnostic
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt1-maryborough-real-surfaces
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt1-maryborough-real-surfaces/console.log
+          import hashlib,json,time
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+          from pb_live_floor_finish_area_source_closed_export import seal_live_floor_finish_area_run
+          from pb_live_ceiling_lining_source_closed_export import seal_live_ceiling_lining_run
+
+          source=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          manifest=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json").read_text())
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          expected=next(d["sha256"] for d in manifest["source_documents"] if d["name"]==source.name)
+          assert actual==expected, ("source SHA mismatch",actual,expected)
+          started=time.monotonic()
+          # Strict source-page diagnostic: real plan page index 6 with already
+          # established support index 10; NOT a full project or V2 scoring run.
+          claim=collect_live_physical_net_wall_claim(
+              source, pages=(6,), topology_pages=(6,),
+              room_area_support_pages=(10,),
+          )
+          floor_areas=publish_live_floor_area_quantities(claim)
+          def status(obj): return getattr(obj,"value",str(obj))
+          def qrows(seq):
+              return [
+                  {"id":str(q.quantity_id),"family":q.family,"value":q.value,
+                   "unit":q.unit,"authority":q.authority,"status":q.status,
+                   "abstained":q.abstained,"blocked":list(q.blocking_reasons),
+                   "reason_codes":list(q.reason_codes),
+                   "input_entity_ids":list(q.input_entity_ids),
+                   "source_room_label":dict(q.metadata or {}).get("room_label")}
+                  for q in tuple(seq) if q is not None
+              ]
+          rooms=[
+              {"label":r.room_label,"canonical_id":r.canonical_room_id,
+               "physical_id":r.physical_room_id,
+               "face_record_id":r.source_room_face_record_id,
+               "geometry_complete":r.geometry_complete}
+              for r in tuple(claim.canonical_rooms)
+              if r.room_label
+          ]
+          floors=[
+              {"room_id":f.room_entity_id,"id":f.canonical_floor_id,
+               "face_record_id":f.source_room_face_record_id,
+               "metric_area_m2":f.metric_area_m2,
+               "metric_area_quantity_id":f.metric_area_quantity_id,
+               "metric_area_authority":f.metric_area_authority,
+               "finish":f.finish_descriptor}
+              for f in tuple(claim.canonical_floors)
+          ]
+          families={
+              "room_area":tuple(claim.room_area_quantity_evidence),
+              "floor_area":floor_areas,
+              "floor_finish_area":tuple(claim.floor_finish_quantity_evidence),
+              "ceiling_area":tuple(claim.ceiling_lining_quantity_evidence),
+          }
+          seals={}
+          for name,publisher in (
+              ("floor_area",seal_live_floor_area_run),
+              ("floor_finish_area",seal_live_floor_finish_area_run),
+              ("ceiling_area",seal_live_ceiling_lining_run),
+          ):
+              qty=tuple(q for q in families[name] if not q.abstained and q.value is not None)
+              if not qty:
+                  seals[name]={"status":"unsupported_or_abstained","count":0}
+                  continue
+              try:
+                  sealed=publisher(claim,workspace_id=1,project_id="au_qld_maryborough_service_station")
+                  seals[name]={
+                      "status":"sealed",
+                      "count":len(sealed.quantities),
+                      "run_id":sealed.run_id,
+                      "source_sha256s":list(sealed.source_sha256s),
+                  }
+                  assert expected in sealed.source_sha256s
+              except Exception as exc:
+                  seals[name]={"status":"failed","type":type(exc).__name__,"message":str(exc)}
+          output={
+              "repo_head":__import__("subprocess").check_output(["git","rev-parse","HEAD"],text=True).strip(),
+              "source_sha_verified":True,"source_sha256":actual,
+              "scope":"test_only_page_index_6_support_page_index_10_not_full_V2",
+              "elapsed_seconds":round(time.monotonic()-started,2),
+              "claim_status":status(claim.status),
+              "claim_reason_codes":list(claim.reason_codes),
+              "rooms":rooms,"floors":floors,
+              "counts":{
+                  "canonical_rooms":len(claim.canonical_rooms),
+                  "canonical_floors":len(claim.canonical_floors),
+                  "canonical_ceilings":len(claim.canonical_ceilings),
+                  **{k:sum(not q.abstained and q.value is not None for q in v) for k,v in families.items()},
+              },
+              "room_area_quantities":qrows(families["room_area"]),
+              "floor_area_quantities":qrows(families["floor_area"]),
+              "floor_finish_quantities":qrows(families["floor_finish_area"]),
+              "ceiling_quantities":qrows(families["ceiling_area"]),
+              "family_sealing":seals,
+          }
+          p=Path("artifacts/gpt1-maryborough-real-surfaces/result.json")
+          p.write_text(json.dumps(output,indent=2,sort_keys=True,default=str)+"\n")
+          print("GPT1_REAL_SURFACE_RESULT",json.dumps({
+              "sha":actual,"status":output["claim_status"],
+              "counts":output["counts"],"sealing":seals,
+              "room_labels":sorted({r["label"] for r in rooms}),
+              "quantity_errors":[k for k,v in seals.items() if v["status"]=="failed"],
+          },sort_keys=True))
+          # A diagnostic never invents a quantity to satisfy a test. Sealing
+          # failures are real production failures and must fail this workflow.
+          assert all(item["status"]!="failed" for item in seals.values()),seals
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-real-surfaces
+          path: artifacts/gpt1-maryborough-real-surfaces/
+          retention-days: 3
