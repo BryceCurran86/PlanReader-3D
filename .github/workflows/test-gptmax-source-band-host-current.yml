@@ -1,0 +1,82 @@
+name: GPT MAX Raster Source Band Host
+on:
+  pull_request:
+    paths:
+      - pb_opening_host_binding_authority.py
+      - tests/test_raster_opening_source_band_host.py
+      - tools/diag_opening_wall_face_preservation.py
+      - .github/workflows/test-gptmax-source-band-host-current.yml
+concurrency:
+  group: gptmax-source-band-host-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  full-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Integrity and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+      - name: Full regression suite
+        run: PYTHONPATH=. python -m pytest -q tests/
+      - name: Smoke test
+        run: python tests/ci_smoke.py
+  source-proof:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Real Lot16 source, wall and host handoff
+        run: >-
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
+          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          --page-id 3 --output lot16-source-band-host-handoff.json
+      - name: Verify exact source ownership and safety cap
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('lot16-source-band-host-handoff.json').read_text())
+          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert report['primitive_safety_cap'] == 20_000
+          assert report['opening_bindings']
+          assert any('raster_source_band_host_resolved' in row['reason_codes'] for row in report['opening_bindings'])
+          assert report['source_owned_wall_scope_results']
+          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
+          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
+          assert len(ids) == len(set(ids))
+          assert 'quantities' not in report
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-source-band-host-handoff
+          path: lot16-source-band-host-handoff.json
+          retention-days: 14
