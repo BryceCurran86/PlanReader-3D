@@ -150,3 +150,84 @@ jobs:
               "scope_boundary_observation_ids":list(result.scope_boundary_observation_ids),
           },indent=2,sort_keys=True))
           PY
+
+  wall-scope-source-page-11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reproduce current source page 11 wall scope
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          doc=fitz.open(stream=payload,filetype="pdf")
+          page=doc.load_page(10)
+          segmented=segment_page_viewports(page,page_number=11)
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-current-source-page11",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-current-source-page11",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("11",),
+          )
+          source.augment_with_raster_opening_primitives(
+              published.revision.revision_id,
+              page_ids=("11",),
+          )
+          producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,
+              page_ids=("11",),
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          result=producer.authority().resolve_scope(
+              PhysicalWallCandidateSelector(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  page_id="11",
+                  decision_scope_id="wall-source:page-11",
+              )
+          )
+          print(json.dumps({
+              "page_rotation":int(page.rotation),
+              "segmented":[{
+                  "view_id":v.view_id,
+                  "view_type":v.view_type,
+                  "label":v.label,
+                  "status":v.status,
+                  "bbox":v.bounding_box,
+                  "boundary_source":v.boundary_source,
+                  "notes":list(v.notes),
+                  "provenance":dict(v.provenance),
+              } for v in segmented],
+              "wall":{
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "scope_complete":bool(result.scope_complete),
+                  "reason_codes":list(result.reason_codes),
+                  "record_count":len(result.records),
+                  "scope_boundary_observation_ids":list(result.scope_boundary_observation_ids),
+              },
+          },indent=2,sort_keys=True))
+          PY
