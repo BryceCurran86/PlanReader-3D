@@ -1,0 +1,156 @@
+name: DIAG GPT1 Lot16 Label Target Gates
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-label-target-gates-v1
+
+jobs:
+  target-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Trace target label gates
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u - <<'PY' | tee lot16-label-target-gates.json
+          import hashlib,json
+          from pathlib import Path
+
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer,
+              SourceRoomLabelSelector,
+              _normalized_room_line,
+              _point_in_polygon,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-lot16-label-target-gates",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"live-source:{sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3",),
+          )
+          wall=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("3",),
+          )
+          published=source.published_snapshot_for_revision(published.revision.revision_id)
+          room_auth=build_source_room_face_authority(wall.physical_wall_candidate_authority)
+          room_sel=SourceRoomFaceSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="3",
+              decision_scope_id="wall-source:page-3",
+          )
+          room_scope=room_auth.resolve_scope(room_sel)
+          label_prod=SourceRoomLabelProducer.from_authorities(
+              source,
+              room_auth,
+              page_ids=("3",),
+          )
+          label_sel=SourceRoomLabelSelector(
+              document_id=room_sel.document_id,
+              revision_id=room_sel.revision_id,
+              source_sha256=room_sel.source_sha256,
+              snapshot_id=room_sel.snapshot_id,
+              page_id=room_sel.page_id,
+              decision_scope_id=room_sel.decision_scope_id,
+          )
+          label_scope=label_prod.authority().resolve_scope(label_sel)
+
+          obs_auth=source._producer.authority()
+          text_auth=source.text_integrity_authority()
+          targets=[]
+          for observation_id in published.snapshot.observation_ids:
+              result=obs_auth.resolve(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+              )
+              obs=result.observation
+              if obs is None or obs.observation_kind!="native_pdf_word" or str(obs.page_id)!="3":
+                  continue
+              text=str(obs.raw_text or "").strip()
+              upper=text.upper()
+              if not any(token in upper for token in ("ENS","WIR","GARAGE")):
+                  continue
+              geometry=tuple(float(x) for x in obs.geometry)
+              if len(geometry)<4:
+                  continue
+              center=((geometry[0]+geometry[2])/2.0,(geometry[1]+geometry[3])/2.0)
+              containing=[
+                  room for room in room_scope.records
+                  if _point_in_polygon(center,room.polygon_pdf_pts)
+              ]
+              text_result=text_auth.resolve_text(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+              )
+              targets.append({
+                  "text":text,
+                  "normalized_candidate":_normalized_room_line(text),
+                  "observation_id":observation_id,
+                  "source_primitive_ref":obs.source_primitive_ref,
+                  "geometry":list(geometry),
+                  "center":list(center),
+                  "native_text_status":text_result.status.value,
+                  "native_text_reason_codes":list(text_result.reason_codes),
+                  "native_trusted_text":text_result.trusted_text,
+                  "containing_face_count":len(containing),
+                  "containing_face_ids":[room.face_id for room in containing],
+              })
+
+          out={
+              "room_face_count":len(room_scope.records),
+              "face_universe_complete":room_scope.face_universe_complete,
+              "label_scope_reason_codes":list(label_scope.reason_codes),
+              "published_labels":[r.label for r in label_scope.records],
+              "split_face_candidates":[r.label for r in label_scope.split_face_candidates],
+              "targets":targets,
+          }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-label-target-gates
+          path: lot16-label-target-gates.json
+          retention-days: 3
