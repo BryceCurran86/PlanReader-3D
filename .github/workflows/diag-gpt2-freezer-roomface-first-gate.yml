@@ -1,0 +1,148 @@
+name: DIAG GPT2 Freezer RoomFace First Gate
+
+on:
+  push:
+    branches:
+      - diag/gpt2-freezer-roomface-current-main
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Diagnose page 7 room-face authority
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+          )
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_drawing_evidence_binding import DrawingViewType
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+
+          def status(value):
+              return getattr(value,"value",str(value))
+
+          def summarize_room(result):
+              ownership=getattr(result,"ownership_evaluation",None)
+              return {
+                  "status":status(result.status),
+                  "scope_complete":bool(result.scope_complete),
+                  "face_universe_complete":bool(result.face_universe_complete),
+                  "reason_codes":list(result.reason_codes),
+                  "record_count":len(result.records),
+                  "abstained_face_count":len(getattr(result,"abstained_faces",()) or ()),
+                  "records":[{
+                      "record_id":r.record_id,
+                      "face_id":r.face_id,
+                      "vertex_count":len(r.polygon_pdf_pts),
+                      "area_page_pts2":r.area_page_pts2,
+                      "bounding_wall_count":len(r.bounding_wall_ids),
+                  } for r in result.records],
+                  "ownership":{
+                      "status":getattr(ownership,"status",None),
+                      "owned_face_count":len(getattr(ownership,"owned_face_ids",()) or ()),
+                      "unresolved_face_count":len(getattr(ownership,"unresolved_faces",()) or ()),
+                  } if ownership is not None else None,
+              }
+
+          # Page-wide authority.
+          source=SourceVisibilityProducer(producer_method="diag-gpt2-roomface-page",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-roomface-page",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          wall=PhysicalWallCandidateProducer.from_source_visibility_producer(source,page_ids=("7",))
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          authority=wall.authority()
+          selector=PhysicalWallCandidateSelector(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id="7",
+              decision_scope_id="wall-source:page-7",
+          )
+          wall_result=authority.resolve_scope(selector)
+          room_auth=build_source_room_face_authority(authority)
+          room_result=room_auth.resolve_scope(SourceRoomFaceSelector(
+              document_id=selector.document_id,
+              revision_id=selector.revision_id,
+              source_sha256=selector.source_sha256,
+              snapshot_id=selector.snapshot_id,
+              page_id=selector.page_id,
+              decision_scope_id=selector.decision_scope_id,
+          ))
+
+          # Authenticated floor-plan viewport authority.
+          source2=SourceVisibilityProducer(producer_method="diag-gpt2-roomface-view",producer_version="1")
+          published2=source2.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-roomface-view",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          view_wall=PhysicalWallCandidateProducer.from_authenticated_viewports(source2,page_ids=("7",))
+          current2=source2.published_snapshot_for_revision(published2.revision.revision_id)
+          view_auth=view_wall.authority()
+          selectors=view_auth.selectors_for_authenticated_viewports(
+              document_id=current2.revision.document_id,
+              revision_id=current2.revision.revision_id,
+              source_sha256=current2.revision.source_sha256,
+              snapshot_id=current2.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          view_room_auth=build_source_room_face_authority(view_auth)
+          viewport_rows=[]
+          for ws in selectors:
+              wr=view_auth.resolve_scope(ws)
+              rr=view_room_auth.resolve_scope(SourceRoomFaceSelector(
+                  document_id=ws.document_id,
+                  revision_id=ws.revision_id,
+                  source_sha256=ws.source_sha256,
+                  snapshot_id=ws.snapshot_id,
+                  page_id=ws.page_id,
+                  decision_scope_id=ws.decision_scope_id,
+              ))
+              viewport_rows.append({
+                  "decision_scope_id":ws.decision_scope_id,
+                  "wall_status":status(wr.status),
+                  "wall_scope_complete":bool(wr.scope_complete),
+                  "wall_reason_codes":list(wr.reason_codes),
+                  "wall_record_count":len(wr.records),
+                  "room":summarize_room(rr),
+              })
+
+          print(json.dumps({
+              "page_wide":{
+                  "wall_status":status(wall_result.status),
+                  "wall_scope_complete":bool(wall_result.scope_complete),
+                  "wall_reason_codes":list(wall_result.reason_codes),
+                  "wall_record_count":len(wall_result.records),
+                  "room":summarize_room(room_result),
+              },
+              "floor_plan_viewports":viewport_rows,
+          },indent=2,sort_keys=True))
+          PY
