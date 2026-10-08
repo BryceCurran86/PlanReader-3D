@@ -1,0 +1,90 @@
+name: DIAG GPT2 Page10 Viewport Classification
+
+on:
+  push:
+    branches:
+      - diag/gpt2-page10-viewport-classification
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify page 10 viewports
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              is_authoritative_derived_viewport,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(path)
+          page=doc.load_page(9)
+          segmented=segment_page_viewports(page,page_number=10)
+
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-page10-viewport",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-page10-viewport",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("10",),
+          )
+          producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              source,page_ids=("10",)
+          )
+          authority=producer.authority()
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          selectors=authority.selectors_for_authenticated_viewports(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id="10",
+          )
+          scopes=[]
+          for selector in selectors:
+              result=authority.resolve_scope(selector)
+              scopes.append({
+                  "decision_scope_id":selector.decision_scope_id,
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "scope_complete":bool(result.scope_complete),
+                  "reason_codes":list(result.reason_codes),
+                  "viewport_id":result.viewport_id,
+                  "viewport_view_type":result.viewport_view_type,
+                  "viewport_bbox":result.viewport_bbox,
+                  "record_count":len(result.records),
+              })
+          print(json.dumps({
+              "page_rotation":int(page.rotation),
+              "segmented":[{
+                  "view_id":v.view_id,
+                  "view_type":v.view_type,
+                  "label":v.label,
+                  "status":v.status,
+                  "bbox":v.bounding_box,
+                  "boundary_source":v.boundary_source,
+                  "authoritative":bool(is_authoritative_derived_viewport(v)),
+                  "notes":list(v.notes),
+                  "provenance":dict(v.provenance),
+              } for v in segmented],
+              "wall_viewport_scopes":scopes,
+          },indent=2,sort_keys=True))
+          PY
