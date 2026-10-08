@@ -100,3 +100,10 @@ remain required before claiming verified deployment.
 Local validation: the expanded focused workflow passes 632 tests. Provider
 isolation passes for all three production roots; frozen V2 integrity, compile
 and whitespace checks pass. Published CI and source verification are pending.
+
+Full CI exposed two detector-migration regressions in the first publication:
+the ordinary reference check used the live detector version where the frozen
+identity namespace belongs. Correct that distinction and include the existing
+Task-3 identity/wall migration suite in the focused workflow. Render receipts
+still verify the actual producer detector version; the namespace and IDs remain
+frozen. Re-run full CI and source verification on the corrected head.

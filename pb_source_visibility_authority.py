@@ -274,7 +274,7 @@ def _supplemental_render_provenance_matches(observation, receipt) -> bool:
             and receipt.detector_version == RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
             and receipt.visibility_render_sha256 is None
             and observation.source_primitive_ref.startswith(
-                f'visible:raster_segment:{image_hash}:{RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION}:'
+                f'visible:raster_segment:{image_hash}:{RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION}:'
             )
         )
     identity_version, detector_version = family

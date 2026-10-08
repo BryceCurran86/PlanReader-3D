@@ -54,6 +54,7 @@ jobs:
           tests/test_raster_connected_host_frame.py
           tests/test_raster_source_wall_frame_projection.py
           tests/test_raster_visible_receipt_identity.py
+          tests/test_source_visibility_task3_hardening.py
           tests/test_raster_swing_schedule_aperture.py
           tests/test_schedule_opening_instance_binding_authority_v1.py
           tests/test_schedule_opening_instance_binding_authority_v2_regressions.py
