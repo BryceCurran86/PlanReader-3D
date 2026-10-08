@@ -60,11 +60,11 @@ def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: 
     path = sealed_root / project_id / "sealed_run.json"
     if not path.is_file():
         return False, None, ["sealed_run_missing"]
-    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    from pb_source_closed_run_export import (SourceClosedRunExportError, sealed_source_closed_run_from_dict)
 
     try:
         sealed = sealed_source_closed_run_from_dict(_object(path))
-    except (TypeError, ValueError, KeyError) as exc:
+    except (SourceClosedRunExportError, TypeError, ValueError, KeyError):
         return False, None, ["sealed_run_integrity_invalid"]
     if sealed.project_id != project_id:
         return False, len(sealed.quantities), ["sealed_run_project_mismatch"]
