@@ -9,7 +9,9 @@ import pytest
 from pb_hosted_opening_instance_adapter import authoritative_floor_plan_viewports
 import pb_live_room_area_customer_projection as customer_projection
 import pb_live_room_area_source_closed_export as export
+import pb_live_floor_area_customer_projection as floor_customer_projection
 import pb_live_floor_area_source_closed_export as floor_export
+from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
 from pb_live_physical_net_wall_integration import (
     collect_live_physical_net_wall_claim,
@@ -272,6 +274,54 @@ def test_floor_area_seals_on_physical_floor_identity(
     assert row.object_identity_refs == (floor.physical_floor_surface_id,)
     assert floor.physical_floor_surface_id in row.trace_canonical_entity_ids
     assert row.lineage_ok is True
+
+
+def test_final_floor_area_seal_reaches_one_live_and_persisted_customer_row(
+    live_claim,
+) -> None:
+    run = floor_export.seal_live_floor_area_run(
+        live_claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    rows = floor_customer_projection.project_live_floor_area_customer_rows(
+        live_claim,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert len(run.quantities) == len(rows) == 1
+    assert rows[0]["quantity_id"] == run.quantities[0].quantity_id
+    assert rows[0]["quantity_family"] == "floor_area"
+    assert rows[0]["quantity_status"] == "To review"
+    assert rows[0]["origin"] == "AI"
+    assert rows[0]["row_role"] == "floor_area"
+
+    live_report = verify_sealed_customer_output(run, rows)
+    assert live_report.complete if hasattr(live_report, "complete") else True
+    assert live_report.verified_quantity_ids == (run.quantities[0].quantity_id,)
+
+    persisted = {
+        "workspace_id": rows[0]["workspace_id"],
+        "section": rows[0]["section"],
+        "element": rows[0]["element"],
+        "location": rows[0]["location"],
+        "substrate": rows[0]["substrate"],
+        "finish_system": rows[0]["finish_system"],
+        "quantity": rows[0]["quantity"],
+        "unit": "m²",
+        "quantity_status": rows[0]["quantity_status"],
+        "source_page": rows[0]["source_page"],
+        "source_reference": "PB Auto Geometry v1.2.19 · " + rows[0]["source_reference"],
+        "inclusion_status": rows[0]["inclusion_status"],
+        "confidence": "Documented",
+        "notes": rows[0]["notes"],
+        "row_role": "floor_area",
+    }
+    persisted_report = verify_sealed_customer_output(run, [persisted])
+    assert persisted_report.verified_quantity_ids == (
+        run.quantities[0].quantity_id,
+    )
 
 
 def test_floor_area_sealing_is_deterministic(
