@@ -24,6 +24,7 @@ from PIL import Image, ImageOps
 from typing import Mapping, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import DimensionOrientation
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_figured_dimension_authority import (
     DimensionParseError,
     parse_figured_dimension_mm,
