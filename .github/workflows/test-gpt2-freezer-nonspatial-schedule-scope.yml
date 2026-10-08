@@ -1,0 +1,121 @@
+name: TEST GPT2 Freezer Nonspatial Schedule Scope
+
+on:
+  push:
+    branches:
+      - gpt2/maryborough-nonspatial-wall-scope-fix
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "pb_physical_wall_candidate_authority.py"
+      - "tests/test_physical_wall_candidate_authority_scope_v1.py"
+      - ".github/workflows/test-gpt2-freezer-nonspatial-schedule-scope.yml"
+
+concurrency:
+  group: gpt2-freezer-nonspatial-schedule-scope-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Focused wall and room regressions
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_physical_wall_candidate_authority_scope_v1.py \
+            tests/test_source_room_face_authority_v1.py
+
+  maryborough-freezer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Prove Freezer survives bounded semantic schedule viewport
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from shapely.geometry import Polygon
+          from shapely.validation import explain_validity
+
+          from pb_live_physical_net_wall_integration import (
+              collect_live_physical_net_wall_claim,
+          )
+
+          source = Path(
+              "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
+          )
+          claim = collect_live_physical_net_wall_claim(
+              source,
+              pages=(10,),
+              topology_pages=(10,),
+              room_area_support_pages=(10,),
+          )
+
+          def norm(value):
+              return " ".join(str(value or "").strip().upper().split())
+
+          rows = []
+          for room in claim.canonical_rooms:
+              if not room.geometry_complete or not norm(room.room_label):
+                  continue
+              polygon = Polygon(room.polygon_pdf_pts)
+              rows.append(
+                  {
+                      "label": norm(room.room_label),
+                      "physical_room_id": room.physical_room_id,
+                      "source_room_face_record_id": room.source_room_face_record_id,
+                      "vertex_count": len(room.polygon_pdf_pts),
+                      "area_page_pts2": room.area_page_pts2,
+                      "shapely_area": float(polygon.area),
+                      "valid": bool(polygon.is_valid),
+                      "validity_reason": explain_validity(polygon),
+                  }
+              )
+
+          freezer = [row for row in rows if row["label"] == "FREEZER"]
+          out = {
+              "claim_status": getattr(claim.status, "value", str(claim.status)),
+              "claim_reason_codes": list(claim.reason_codes),
+              "freezer": freezer,
+              "labelled_rooms": rows,
+          }
+          print(json.dumps(out, indent=2, sort_keys=True))
+
+          assert (
+              "physical_wall_candidate_scope_bounds_unresolved"
+              not in claim.reason_codes
+          ), claim.reason_codes
+          assert (
+              "physical_wall_candidate_scope_cropped_at_viewport_boundary"
+              not in claim.reason_codes
+          ), claim.reason_codes
+          assert len(freezer) == 1, freezer
+          assert freezer[0]["valid"], freezer[0]
+          assert abs(
+              float(freezer[0]["shapely_area"])
+              - float(freezer[0]["area_page_pts2"])
+          ) < 1e-6
+          PY
