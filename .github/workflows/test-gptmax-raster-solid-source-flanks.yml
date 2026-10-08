@@ -77,8 +77,14 @@ jobs:
           keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
           old_bindings, new_bindings = keyed(baseline['opening_bindings']), keyed(report['opening_bindings'])
           assert old_bindings.keys() <= new_bindings.keys()
+          lost_hosts = [{'opening_identity_id': key, 'baseline': row, 'current': new_bindings[key]}
+                        for key, row in old_bindings.items() if row['host_wall_id'] and not new_bindings[key]['host_wall_id']]
+          gained_hosts = [{'opening_identity_id': key, 'baseline': old_bindings.get(key), 'current': row}
+                          for key, row in new_bindings.items() if row['host_wall_id'] and not (old_bindings.get(key) or {}).get('host_wall_id')]
+          print(json.dumps({'lost_host_proofs': lost_hosts, 'new_host_proofs': gained_hosts}, sort_keys=True), flush=True)
           assert all(new_bindings[key]['host_wall_id'] for key, row in old_bindings.items() if row['host_wall_id'])
           old_geometry, new_geometry = keyed(baseline['resolved_host_frame_evidence']), keyed(report['resolved_host_frame_evidence'])
+          print(json.dumps({'lost_frame_proofs': [key for key in old_geometry if key not in new_geometry], 'frame_traces': report['host_frames']}, sort_keys=True), flush=True)
           assert old_geometry.keys() <= new_geometry.keys()
           fields = ('origin_pt', 'axis_unit', 'normal_unit', 'u0_pt', 'u1_pt', 'wall_thickness_pt', 'whole_wall_length_pt')
           changes = {key: {field: [old_geometry[key][field], new_geometry[key][field]]
