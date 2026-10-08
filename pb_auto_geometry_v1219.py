@@ -1343,19 +1343,83 @@ def _try_physical_net_wall_rows(
         claim_pages: Sequence[int],
         claim: Any,
     ) -> List[Tuple[Any, ...]]:
-        """Prefer final sealed ceilings; retain legacy review fallback only."""
+        """Project every final sealed ceiling; use review replay only as fallback."""
+        from dataclasses import replace
+
+        from pb_live_ceiling_area_customer_projection import (
+            project_live_ceiling_area_customer_rows,
+        )
+        from pb_live_ceiling_area_quantity_publication import (
+            publish_live_ceiling_area_quantities,
+        )
         from pb_live_ceiling_customer_projection import (
             project_live_ceiling_customer_rows,
         )
-
-        sealed_projected = project_live_ceiling_customer_rows(
-            claim,
-            workspace_id=int(workspace_id),
-            project_id=f"customer-workspace:{int(workspace_id)}",
+        from pb_live_ceiling_lining_integration import (
+            collect_live_ceiling_lining_claims,
         )
-        if sealed_projected:
+
+        project_id = f"customer-workspace:{int(workspace_id)}"
+        projected: List[Dict[str, Any]] = list(
+            project_live_ceiling_customer_rows(
+                claim,
+                workspace_id=int(workspace_id),
+                project_id=project_id,
+            )
+        )
+
+        # Mirror source-closed handoff: retain legacy canonical ceilings only
+        # where the new RCP authority does not already own the same source room.
+        legacy_result = collect_live_ceiling_lining_claims(
+            source_path,
+            pages=tuple(claim_pages),
+            authoritative_room_area_quantities=tuple(
+                getattr(claim, "room_area_quantity_evidence", ())
+            ),
+        )
+        new_room_index_ids = {
+            str(getattr(ceiling, "source_room_index_id", "") or "").strip()
+            for ceiling in tuple(getattr(claim, "canonical_ceilings", ()) or ())
+            if str(getattr(ceiling, "source_room_index_id", "") or "").strip()
+        }
+        if new_room_index_ids:
+            retained_legacy_ceilings = tuple(
+                ceiling
+                for ceiling in legacy_result.canonical_ceilings
+                if str(ceiling.source_room_index_id or "").strip()
+                not in new_room_index_ids
+            )
+            retained_shadow_ids = {
+                str(ceiling.ceiling_quantity_id or "").strip()
+                for ceiling in retained_legacy_ceilings
+                if str(ceiling.ceiling_quantity_id or "").strip()
+            }
+            legacy_result = replace(
+                legacy_result,
+                claims=(),
+                canonical_ceilings=retained_legacy_ceilings,
+                quantity_evidence=tuple(
+                    quantity
+                    for quantity in legacy_result.quantity_evidence
+                    if str(quantity.quantity_id or "").strip()
+                    in retained_shadow_ids
+                ),
+            )
+
+        legacy_quantities = publish_live_ceiling_area_quantities(legacy_result)
+        if legacy_quantities:
+            projected.extend(
+                project_live_ceiling_area_customer_rows(
+                    legacy_result,
+                    workspace_id=int(workspace_id),
+                    project_id=project_id,
+                )
+            )
+
+        if projected:
             rows: List[Tuple[Any, ...]] = []
-            for item in sealed_projected:
+            seen_quantity_ids: set[str] = set()
+            for item in projected:
                 if (
                     str(item.get("origin") or "") != "AI"
                     or str(item.get("quantity_status") or "") != "To review"
@@ -1378,6 +1442,11 @@ def _try_physical_net_wall_rows(
                     raise ValueError(
                         "ceiling projection is missing quantity identity"
                     )
+                if quantity_id in seen_quantity_ids:
+                    raise ValueError(
+                        f"duplicate sealed ceiling customer row: {quantity_id}"
+                    )
+                seen_quantity_ids.add(quantity_id)
                 source_reference = str(item.get("source_reference") or "").strip()
                 if not source_reference:
                     raise ValueError(
@@ -1408,8 +1477,37 @@ def _try_physical_net_wall_rows(
                         preserve_quantity=True,
                     )
                 )
+
+            if legacy_result.canonical_ceilings:
+                try:
+                    from pb_live_canonical_coverage_registry import (
+                        collect_live_canonical_coverage,
+                    )
+
+                    summaries, family_gaps = collect_live_canonical_coverage(
+                        objects=legacy_result.canonical_ceilings,
+                        quantities=tuple(legacy_quantities),
+                        output_rows=(),
+                        registry_run_scope=(
+                            f"customer_workspace:{int(workspace_id)}:ceiling_legacy"
+                        ),
+                    )
+                    current_coverage["summaries"].extend(summaries)
+                    for category, reasons in family_gaps.items():
+                        current_coverage["family_gaps"].setdefault(
+                            category, []
+                        ).extend(reasons)
+                except Exception as exc:
+                    current_coverage["family_gaps"].setdefault(
+                        "ceiling", []
+                    ).append(
+                        "live_ceiling_coverage_collection_failed:"
+                        f"{type(exc).__name__}"
+                    )
             return rows
 
+        # Preserve the older review-eligible path only where no final sealed
+        # ceiling quantity exists at all.
         from pb_ceiling_lining_review_promotion import (
             collect_ceiling_lining_review_bundle,
         )
@@ -1418,7 +1516,7 @@ def _try_physical_net_wall_rows(
             source_path,
             pages=tuple(claim_pages),
             workspace_id=int(workspace_id),
-            project_id=f"customer-workspace:{int(workspace_id)}",
+            project_id=project_id,
             authoritative_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ())
             ),
@@ -1497,7 +1595,8 @@ def _try_physical_net_wall_rows(
             # rows actually present in takeoff_rows after insertion.
             summaries, family_gaps = collect_live_canonical_coverage(
                 objects=(*claim.canonical_walls, *claim.canonical_openings,
-                         *claim.canonical_rooms, *claim.canonical_floors),
+                         *claim.canonical_rooms, *claim.canonical_floors,
+                         *getattr(claim, "canonical_ceilings", ())),
                 quantities=tuple(quantities),
                 output_rows=tuple(output_rows),
                 registry_run_scope=f"customer_workspace:{int(workspace_id)}",
