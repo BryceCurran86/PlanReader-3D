@@ -4,7 +4,11 @@ from __future__ import annotations
 from dataclasses import replace
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
-from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+from pb_live_floor_area_quantity_publication import (
+    publish_live_floor_area_quantities,
+    publish_live_canonical_room_area_quantities,
+)
+from pb_live_canonical_room_composition import LiveCanonicalRoomObject
 from pb_migration_contracts import QuantityEvidence
 from tests.test_live_floor_finish_area_source_closed_export import _claim, _floor
 
@@ -164,3 +168,91 @@ def test_canonical_floor_quantity_rejects_unrelated_source_room_face() -> None:
         },
     )
     assert publish_live_floor_area_quantities(_claim_with(alien)) == ()
+
+
+def _claim_with_canonical_room(*quantities: QuantityEvidence):
+    floor = _floor()
+    room = LiveCanonicalRoomObject(
+        canonical_room_id=floor.room_entity_id,
+        physical_room_id="physical-room-1",
+        document_id=floor.document_id,
+        revision_id=floor.revision_id,
+        source_sha256=floor.source_sha256,
+        snapshot_id=floor.snapshot_id,
+        page_id=floor.page_id,
+        viewport_id=floor.viewport_id,
+        decision_scope_id="source-room-scope-1",
+        polygon_pdf_pts=floor.polygon_pdf_pts,
+        bounding_wall_ids=floor.bounding_wall_ids,
+        canonical_bounding_wall_ids=floor.canonical_bounding_wall_ids,
+        wall_relationships_complete=True,
+        area_page_pts2=floor.area_page_pts2,
+        source_room_face_record_id=floor.source_room_face_record_id,
+        evidence_ids=("ev-room",),
+        geometry_complete=True,
+        metric_geometry_complete=False,
+    )
+    return replace(
+        _claim_with(*quantities),
+        canonical_rooms=(room,),
+    )
+
+
+def test_canonical_room_reissue_preserves_approved_firm_source_evidence() -> None:
+    source = _source_area()
+    claim = _claim_with_canonical_room(source)
+    output = publish_live_canonical_room_area_quantities(claim)
+    assert len(output) == 1
+    assert output[0].status == AuthorityStatus.FIRM.value
+    assert output[0].value == source.value
+    assert output[0].evidence_ids == source.evidence_ids
+    assert output[0].input_entity_ids == ("physical-room-1",)
+
+
+def test_provisional_duplicate_replay_cannot_replace_approved_firm_room_source() -> None:
+    source = _source_area()
+    rejected = replace(
+        source,
+        status=AuthorityStatus.PROVISIONAL.value,
+        value=None,
+        abstained=True,
+        evidence_ids=("untrusted-source-replay",),
+        blocking_reasons=("not_firm",),
+    )
+    original = publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(source)
+    )
+    assert len(original) == 1
+    for order in (
+        (source, rejected),
+        (rejected, source),
+        (source, rejected, source),
+    ):
+        assert publish_live_canonical_room_area_quantities(
+            _claim_with_canonical_room(*order)
+        ) == original
+
+
+def test_conflicting_firm_duplicate_quarantines_canonical_room_quantity() -> None:
+    source = _source_area()
+    altered = replace(source, evidence_ids=("ev-room",))
+    for order in (
+        (source, altered),
+        (altered, source),
+        (source, altered, source),
+    ):
+        assert publish_live_canonical_room_area_quantities(
+            _claim_with_canonical_room(*order)
+        ) == ()
+
+
+def test_unmeasured_alternative_unit_cannot_overwrite_firm_room_source() -> None:
+    source = _source_area()
+    invalid = replace(source, unit="ft2", evidence_ids=("bad-unit",))
+    original = publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(source)
+    )
+    assert len(original) == 1
+    assert publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(source, invalid)
+    ) == original

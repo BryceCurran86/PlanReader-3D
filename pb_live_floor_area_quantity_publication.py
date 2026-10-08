@@ -196,11 +196,38 @@ def publish_live_canonical_room_area_quantities(
 
     rooms = _canonical_rooms_by_id(claim)
     floor_quantities = publish_live_floor_area_quantities(claim)
-    source_by_id = {
-        _clean(quantity.quantity_id): quantity
-        for quantity in claim.room_area_quantity_evidence
-        if isinstance(quantity, QuantityEvidence)
-    }
+    # The source ID is allowed to appear in ABSTAIN/provisional replays,
+    # but an untrusted later replay must not override the exact FIRM source
+    # that already passed the canonical floor quantity gate. The former
+    # last-write-wins dictionary could silently reissue a provisional source
+    # evidence set as FIRM canonical room output depending on input order.
+    source_by_id: dict[str, QuantityEvidence] = {}
+    conflicting_firm_ids: set[str] = set()
+    for source in claim.room_area_quantity_evidence:
+        if not isinstance(source, QuantityEvidence):
+            raise TypeError("room_area_quantity_evidence must contain QuantityEvidence")
+        if (
+            source.family != "room_area"
+            or source.abstained
+            or source.value is None
+            or _clean(source.status).lower() != AuthorityStatus.FIRM.value
+            or _clean(source.unit).lower() not in {"m2", "m²"}
+            or source.blocking_reasons
+            or _clean(source.authority) not in {
+                MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                MeasurementAuthorityType.PDF_SCALED.value,
+            }
+        ):
+            continue
+        qid = _clean(source.quantity_id)
+        if not qid or qid in conflicting_firm_ids:
+            continue
+        previous = source_by_id.get(qid)
+        if previous is not None and previous != source:
+            source_by_id.pop(qid, None)
+            conflicting_firm_ids.add(qid)
+        elif previous is None:
+            source_by_id[qid] = source
 
     out: list[QuantityEvidence] = []
     for floor_quantity in floor_quantities:
@@ -214,6 +241,23 @@ def publish_live_canonical_room_area_quantities(
         room = rooms.get(room_id)
         source = source_by_id.get(source_id)
         if room is None or source is None:
+            continue
+        # Reuse the *same* valid upstream room-area evidence that was promoted
+        # to the canonical floor. Never create a different FIRM claim by
+        # selecting another source row with the same nominal quantity ID.
+        if (
+            tuple(source.evidence_ids) != tuple(floor_quantity.evidence_ids)
+            or _clean(source.authority) != _clean(floor_quantity.authority)
+        ):
+            continue
+        try:
+            same_area = (
+                math.isfinite(float(source.value))
+                and abs(float(source.value) - float(floor_quantity.value)) <= 1e-9
+            )
+        except (TypeError, ValueError, OverflowError):
+            same_area = False
+        if not same_area:
             continue
         if not room.physical_room_id or not room.canonical_room_id:
             continue
