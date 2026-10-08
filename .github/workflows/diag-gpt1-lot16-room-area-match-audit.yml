@@ -1,0 +1,199 @@
+name: DIAG GPT1 Lot16 Room Area Match Audit
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-room-area-match-audit-v1
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Audit real Lot16 room to figured-dimension ownership
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u - <<'PY' | tee lot16-room-area-match-audit.json
+          import json
+          from pathlib import Path
+
+          from pb_cross_view_room_area_authority import (
+              _dimension_is_immediate_label_annotation,
+              _figured_pair_scale_consistent,
+              _line_inside_dimension_pair,
+              _norm_label,
+              _trusted_lines_for_page,
+              _trusted_native_dimensions_for_page,
+              _witness_systems_intersect,
+          )
+          from pb_dimension_graph_constraint_engine import DimensionOrientation
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_live_physical_net_wall_integration import (
+              collect_live_physical_net_wall_claim,
+          )
+          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
+          from pb_live_canonical_room_composition import LiveCanonicalRoomComposition
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(2,),
+              topology_pages=(2,),
+              room_area_support_pages=None,
+          )
+
+          labels=[
+              {
+                  "canonical_room_id":room.canonical_room_id,
+                  "physical_room_id":room.physical_room_id,
+                  "page_id":room.page_id,
+                  "room_label":room.room_label,
+                  "label_reason_codes":list(room.room_label_reason_codes),
+                  "geometry_complete":room.geometry_complete,
+              }
+              for room in claim.canonical_rooms
+              if str(room.room_label or "").strip()
+          ]
+
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-lot16-room-area-match-audit",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-lot16-room-area-match-audit",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3",),
+          )
+          revision_id=published.revision.revision_id
+
+          target_tokens=("GARAGE","WIR","ENS","ENSUITE")
+          target_rooms=[
+              room for room in claim.canonical_rooms
+              if any(token in _norm_label(room.room_label) for token in target_tokens)
+          ]
+
+          audits=[]
+          for room in target_rooms:
+              label=_norm_label(room.room_label)
+              lines=_trusted_lines_for_page(
+                  source,
+                  revision_id=revision_id,
+                  page_id="3",
+                  candidate_labels=(room.room_label,),
+              )
+              dimensions=_trusted_native_dimensions_for_page(
+                  source,
+                  revision_id=revision_id,
+                  page_id="3",
+                  candidate_lines=lines,
+                  view_type=DrawingViewType.FLOOR_PLAN.value,
+              )
+              hs=[d for d in dimensions if d.orientation==DimensionOrientation.HORIZONTAL.value]
+              vs=[d for d in dimensions if d.orientation==DimensionOrientation.VERTICAL.value]
+
+              pairs=[]
+              for line in lines:
+                  for h in hs:
+                      for v in vs:
+                          inside=_line_inside_dimension_pair(line,h,v)
+                          scale=_figured_pair_scale_consistent(page_id="3",horizontal=h,vertical=v)
+                          intersects=_witness_systems_intersect(h,v)
+                          h_immediate=_dimension_is_immediate_label_annotation(line,h)
+                          v_immediate=_dimension_is_immediate_label_annotation(line,v)
+                          if inside or h_immediate or v_immediate:
+                              pairs.append({
+                                  "line_text":line.text,
+                                  "line_bbox":list(line.bbox),
+                                  "line_block_no":line.block_no,
+                                  "line_no":line.line_no,
+                                  "horizontal_mm":h.value_mm,
+                                  "horizontal_id":h.dimension_id,
+                                  "horizontal_text_bbox":None if h.text_bbox is None else list(h.text_bbox),
+                                  "horizontal_endpoints":[list(x) for x in h.endpoints_pt],
+                                  "vertical_mm":v.value_mm,
+                                  "vertical_id":v.dimension_id,
+                                  "vertical_text_bbox":None if v.text_bbox is None else list(v.text_bbox),
+                                  "vertical_endpoints":[list(x) for x in v.endpoints_pt],
+                                  "line_inside_pair":inside,
+                                  "pair_scale_consistent":scale,
+                                  "witness_systems_intersect":intersects,
+                                  "horizontal_immediate":h_immediate,
+                                  "vertical_immediate":v_immediate,
+                                  "primary_match":inside and scale and intersects,
+                                  "fallback_match":h_immediate and v_immediate and scale,
+                              })
+              audits.append({
+                  "canonical_room_id":room.canonical_room_id,
+                  "physical_room_id":room.physical_room_id,
+                  "room_label":room.room_label,
+                  "trusted_label_line_count":len(lines),
+                  "trusted_label_lines":[
+                      {
+                          "text":line.text,
+                          "bbox":list(line.bbox),
+                          "block_no":line.block_no,
+                          "line_no":line.line_no,
+                          "receipt_ids":list(line.receipt_ids),
+                      }
+                      for line in lines
+                  ],
+                  "trusted_dimension_count":len(dimensions),
+                  "horizontal_values_mm":[d.value_mm for d in hs],
+                  "vertical_values_mm":[d.value_mm for d in vs],
+                  "candidate_pairs":pairs,
+                  "primary_match_count":sum(1 for p in pairs if p["primary_match"]),
+                  "fallback_match_count":sum(1 for p in pairs if p["fallback_match"]),
+              })
+
+          rooms=LiveCanonicalRoomComposition(
+              status=claim.canonical_room_status,
+              reason_codes=claim.canonical_room_reason_codes,
+              rooms=claim.canonical_rooms,
+              source_pages=claim.canonical_room_source_pages,
+          )
+          same=SameViewRoomAreaProducer.from_source(source=source,rooms=rooms).publish()
+
+          print(json.dumps({
+              "canonical_room_count":len(claim.canonical_rooms),
+              "labeled_room_count":len(labels),
+              "canonical_labels":labels,
+              "target_room_count":len(target_rooms),
+              "audits":audits,
+              "same_view_status":getattr(same.status,"value",str(same.status)),
+              "same_view_reason_codes":list(same.reason_codes),
+              "same_view_record_count":len(same.records),
+              "same_view_records":[
+                  {
+                      "room_label":r.room_label,
+                      "physical_room_id":r.physical_room_id,
+                      "area_m2":r.area_evidence.normalized_value,
+                      "horizontal_mm":r.area_evidence.metadata.get("horizontal_value_mm"),
+                      "vertical_mm":r.area_evidence.metadata.get("vertical_value_mm"),
+                  }
+                  for r in same.records
+              ],
+              "unresolved_physical_room_ids":list(same.unresolved_physical_room_ids),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-room-area-match-audit
+          path: lot16-room-area-match-audit.json
+          retention-days: 3
