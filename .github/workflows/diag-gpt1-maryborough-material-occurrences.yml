@@ -1,0 +1,116 @@
+name: DIAG GPT1 Maryborough Authenticated Material Occurrences
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt1-maryborough-material-occurrences.yml"
+
+concurrency:
+  group: diag-gpt1-maryborough-material-occurrences
+  cancel-in-progress: true
+
+jobs:
+  material-authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install OCR
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr
+      - name: Install project dependencies
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Measure REAL material definitions and occurrence authority
+        shell: bash
+        run: |
+          mkdir -p artifacts/gpt1-maryborough-material-occurrences
+          PYTHONPATH=. python -u - <<'PY'
+          import hashlib,json,time
+          from pathlib import Path
+          from collections import Counter
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          source_sha=hashlib.sha256(payload).hexdigest()
+          manifest=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json").read_text())
+          expected=next(d["sha256"] for d in manifest["source_documents"] if d["name"]==path.name)
+          assert expected==source_sha, "real source SHA mismatch"
+          started=time.monotonic()
+          source=SourceVisibilityProducer(producer_method="gpt1-real-maryborough-semantic-proof",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag:{source_sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough-real.pdf",
+              # Source-authenticated plan/schedule pages. Test-only scope;
+              # physical geometry/takeoff truth is not accessed or changed.
+              page_ids=("1","9","11","30"),
+          )
+          producer=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          authority=producer.publish(published.revision.revision_id)
+          definitions=[]
+          for result in tuple(producer._definition_results.values()):
+              record=result.record
+              definitions.append({
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "code":record.code if record else None,
+                  "semantic_finish":record.semantic_finish if record else None,
+                  "description":record.description if record else None,
+                  "page_ids":list(record.source_page_ids) if record else [],
+                  "viewport_ids":list(record.source_viewport_ids) if record else [],
+              })
+          occurrence_scopes=[]
+          occurrences=[]
+          for result in producer.published_occurrence_results():
+              occurrence_scopes.append({
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "scope_complete":result.scope_complete,
+                  "count":len(result.records),
+              })
+              for record in result.records:
+                  occurrences.append({
+                      "page_id":record.page_id,"viewport_id":record.viewport_id,
+                      "code":record.code,"semantic_finish":record.semantic_finish,
+                      "definition_record_id":record.definition_record_id,
+                      "record_id":record.record_id,
+                      "source_evidence_id":record.source_evidence_id,
+                      "bbox_pdf_pts":list(record.bbox_pdf_pts),
+                      "raw_text":record.raw_text,
+                  })
+          output={
+              "source_sha_verified":True,"source_sha256":source_sha,
+              "scope_page_ids":["1","9","11","30"],
+              "elapsed_seconds":round(time.monotonic()-started,2),
+              "definition_count":len(definitions),
+              "definition_status_counts":dict(Counter(r["status"] for r in definitions)),
+              "definitions":definitions,
+              "occurrence_count":len(occurrences),
+              "occurrence_scopes":occurrence_scopes,
+              "occurrences":occurrences,
+          }
+          Path("artifacts/gpt1-maryborough-material-occurrences/result.json").write_text(json.dumps(output,indent=2,sort_keys=True,default=str)+"\n")
+          print("GPT1_MATERIAL_PROOF",json.dumps({
+              "source_verified":True,
+              "definition_count":len(definitions),
+              "definitions":definitions,
+              "occurrence_count":len(occurrences),
+              "occurrences":[{"page_id":r["page_id"],"code":r["code"],"finish":r["semantic_finish"],"viewport_id":r["viewport_id"]} for r in occurrences],
+              "blocked_scopes":[s for s in occurrence_scopes if s["status"]!="corroborated"],
+              "elapsed_seconds":output["elapsed_seconds"],
+          },sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-material-occurrences
+          path: artifacts/gpt1-maryborough-material-occurrences
+          retention-days: 3
