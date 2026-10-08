@@ -8,6 +8,7 @@ import fitz
 import pytest
 
 import pb_auto_geometry_v1219 as auto
+from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
 from pb_live_opening_count_source_closed_export import (
     build_live_opening_count_source_traces,
@@ -142,8 +143,24 @@ def test_explicit_schedule_count_reaches_customer_runtime_row_even_without_wall_
     assert row["location"] == "W1"
     assert row["quantity"] == 1.0
     assert row["unit"] == "ea"
-    assert row["quantity_status"] == "Measured"
+    assert row["quantity_status"] == "To review"
     assert row["inclusion_status"] == "PROVISIONAL"
+    provenance = json.loads(row["notes"])
+    assert provenance["adapter"] == "commercial_takeoff"
+    assert provenance["quantity"]["quantity_id"] == count_quantity.quantity_id
+    assert provenance["source_trace"]["canonical_entity_ids"] == list(
+        count_quantity.input_entity_ids
+    )
+
+    sealed = seal_live_opening_count_run(
+        claim,
+        workspace_id=1,
+        project_id="customer-workspace:1",
+    )
+    verified = verify_sealed_customer_output(sealed, [row])
+    assert verified.valid_quantity_count == 1
+    assert verified.customer_row_count == 1
+    assert verified.verified_quantity_ids == (count_quantity.quantity_id,)
 
 
 def test_implicit_schedule_default_never_becomes_live_commercial_count(
