@@ -342,6 +342,131 @@ def test_source_defined_alphabetic_ceiling_codes_require_semantic_schedule_rows(
     ]
 
 
+
+def test_split_native_ceiling_schedule_rows_survive_misbound_outer_viewport(
+    monkeypatch,
+) -> None:
+    doc = fitz.open()
+    schedule_page = doc.new_page(width=300.0, height=220.0)
+    schedule_page.insert_text((25.0, 35.0), "CEILING FINISHES SCHEDULE", fontsize=10)
+    schedule_page.insert_text(
+        (25.0, 75.0),
+        "FPB\nFLUSHSET PLASTERBOARD",
+        fontsize=10,
+    )
+    schedule_page.insert_text(
+        (25.0, 125.0),
+        "GRID\nSUSPENDED CEILING GRID SYSTEM",
+        fontsize=10,
+    )
+    drawing_page = doc.new_page(width=300.0, height=220.0)
+    drawing_page.insert_text(
+        (25.0, 35.0),
+        "REFLECTED CEILING PLAN\nCEILING FINISH FPB\nCEILING FINISH GRID",
+        fontsize=10,
+    )
+    source_bytes = doc.tobytes()
+    doc.close()
+    source, published = _source(source_bytes)
+
+    def _segment(_page, *, page_number):
+        if page_number == 1:
+            viewport = SegmentedViewport(
+                view_id="vp-1",
+                page_number=1,
+                view_type="schedule",
+                label="CEILING FINISHES SCHEDULE",
+                title_bbox=(160.0, 10.0, 280.0, 25.0),
+                # Deliberately wrong-but-authoritative outer frame. The native
+                # schedule cluster is the independent definition authority.
+                bounding_box=(155.0, 10.0, 290.0, 210.0),
+                status=ViewportSegmentationStatus.RESOLVED.value,
+                boundary_source=ViewportBoundarySource.VECTOR_FRAME.value,
+                confidence=1.0,
+            )
+        else:
+            viewport = _viewport(
+                page_number,
+                "reflected_ceiling_plan",
+                f"vp-{page_number}",
+            )
+        return tuple(_stamp_segment_page_viewports_product([viewport]))
+
+    monkeypatch.setattr(semantic, "segment_page_viewports", _segment)
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    fpb = authority.resolve_definition(_definition_selector(published, "FPB"))
+    grid = authority.resolve_definition(_definition_selector(published, "GRID"))
+    assert fpb.status is EvidenceResolutionStatus.CORROBORATED
+    assert fpb.record is not None
+    assert fpb.record.semantic_finish == "plasterboard"
+    assert grid.status is EvidenceResolutionStatus.CORROBORATED
+    assert grid.record is not None
+    assert grid.record.semantic_finish == "ceiling_grid"
+
+    scope = authority.resolve_occurrences(
+        _occurrence_selector(published, "2", "vp-2")
+    )
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete is True
+    assert sorted(record.code for record in scope.records) == ["FPB", "GRID"]
+
+
+def test_unrelated_untrusted_schedule_text_does_not_poison_confirmed_code(
+    monkeypatch,
+) -> None:
+    source, published = _source(
+        _pdf(
+            ("FINISH SCHEDULE", "WT1 Porcelain wall tile"),
+            ("FINISH SCHEDULE", "GENERAL NOTE"),
+            ("INTERNAL ELEVATION", "WALL FINISH WT1"),
+        )
+    )
+    _patch_viewports(
+        monkeypatch,
+        {1: "schedule", 2: "schedule", 3: "elevation"},
+    )
+    real = source.text_integrity_authority()
+
+    class _BlockUnrelatedNote:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            if (
+                result.receipt is not None
+                and str(result.receipt.page_id) == "2"
+                and result.trusted_text == "NOTE"
+            ):
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    trusted_text=None,
+                    reason_codes=("forced_untrusted_unrelated_schedule_note",),
+                    receipt=result.receipt,
+                )
+            return result
+
+    monkeypatch.setattr(
+        source,
+        "text_integrity_authority",
+        lambda: _BlockUnrelatedNote(),
+    )
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    definition = authority.resolve_definition(_definition_selector(published, "WT1"))
+    assert definition.status is EvidenceResolutionStatus.CORROBORATED
+    assert definition.record is not None
+
+    scope = authority.resolve_occurrences(
+        _occurrence_selector(published, "3", "vp-3")
+    )
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete is True
+    assert [record.code for record in scope.records] == ["WT1"]
+
+
 def test_bare_alphabetic_token_is_not_promoted_without_semantic_schedule_definition(
     monkeypatch,
 ) -> None:
@@ -712,6 +837,183 @@ def test_admissible_line_fallback_requires_exact_two_render_agreement(monkeypatc
     assert definition.record.semantic_finish == "tile"
 
 
+def test_admissible_line_fallback_word_composite_recovers_exact_source_words(monkeypatch) -> None:
+    source, published = _source(
+        _pdf(
+            ("FINISH SCHEDULE", "WT1 Porcelain wall tile"),
+            ("INTERNAL ELEVATION", "WALL FINISH WT1"),
+        )
+    )
+    _patch_viewports(monkeypatch, {1: "schedule", 2: "elevation"})
+    real = source.text_integrity_authority()
+
+    class _GlyphClipScheduleCode:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            if (
+                result.receipt is not None
+                and str(result.receipt.page_id) == "1"
+                and result.trusted_text == "WT1"
+            ):
+                reasons = (
+                    semantic.TEXT_GLYPH_MAPPING_UNVERIFIED,
+                    semantic.TEXT_CLIP_STATE_UNRESOLVED,
+                )
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    trusted_text=None,
+                    reason_codes=reasons,
+                    receipt=replace(
+                        result.receipt,
+                        trusted=False,
+                        reason_codes=reasons,
+                    ),
+                )
+            return result
+
+    class _Backend:
+        def is_available(self):
+            return True
+
+    class _NoWordRaster:
+        def __init__(self):
+            self._backend = _Backend()
+
+        @classmethod
+        def from_source_visibility_producer(cls, _source):
+            return cls()
+
+        def publish(self, _selector):
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                record=None,
+                corroborated_text=None,
+            )
+
+    monkeypatch.setattr(source, "text_integrity_authority", lambda: _GlyphClipScheduleCode())
+    monkeypatch.setattr(semantic, "RasterTextCorroborationProducer", _NoWordRaster)
+    monkeypatch.setattr(
+        semantic,
+        "_producer_owned_ocr_target",
+        lambda _producer, **kwargs: (tuple(kwargs["word_bbox"]), 0),
+    )
+    readings = iter(
+        (
+            "WT1 = Porcelain wall tile",
+            "WT1 = Porcelain wall tile",
+            "WT1 Porcelain wall tile",
+            "WT1 Porcelain wall tile",
+        )
+    )
+    monkeypatch.setattr(
+        semantic,
+        "_single_isolated_material_line_reading",
+        lambda _backend, _image, *, dpi: next(readings),
+    )
+
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    definition = authority.resolve_definition(_definition_selector(published, "WT1"))
+    assert definition.status is EvidenceResolutionStatus.CORROBORATED
+    assert definition.record is not None
+    assert definition.record.semantic_finish == "tile"
+
+
+def test_exact_line_proof_accepts_prior_source_bound_raster_word(monkeypatch) -> None:
+    source, published = _source(
+        _pdf(
+            ("FINISH SCHEDULE", "WT1 Porcelain wall tile"),
+            ("INTERNAL ELEVATION", "WALL FINISH WT1"),
+        )
+    )
+    _patch_viewports(monkeypatch, {1: "schedule", 2: "elevation"})
+    real = source.text_integrity_authority()
+
+    class _MixedIntegrity:
+        def resolve_text(self, selector):
+            result = real.resolve_text(selector)
+            receipt = result.receipt
+            if (
+                receipt is not None
+                and str(receipt.page_id) == "1"
+                and str(receipt.raw_text) in {"WT1", "Porcelain"}
+            ):
+                reasons = (
+                    semantic.TEXT_GLYPH_MAPPING_UNVERIFIED,
+                    semantic.TEXT_CLIP_STATE_UNRESOLVED,
+                )
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    trusted_text=None,
+                    reason_codes=reasons,
+                    receipt=replace(
+                        receipt,
+                        trusted=False,
+                        reason_codes=reasons,
+                    ),
+                )
+            return result
+
+    class _Backend:
+        def is_available(self):
+            return True
+
+    class _MixedRaster:
+        def __init__(self):
+            self._backend = _Backend()
+
+        @classmethod
+        def from_source_visibility_producer(cls, _source):
+            return cls()
+
+        def publish(self, selector):
+            native = real.resolve_text(
+                ObservationSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    observation_id=selector.observation_id,
+                )
+            )
+            raw = str(native.receipt.raw_text) if native.receipt is not None else ""
+            if raw == "WT1":
+                return SimpleNamespace(
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    record=SimpleNamespace(record_id="raster-wt1"),
+                    corroborated_text="WT1",
+                )
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                record=None,
+                corroborated_text=None,
+            )
+
+    monkeypatch.setattr(source, "text_integrity_authority", lambda: _MixedIntegrity())
+    monkeypatch.setattr(semantic, "RasterTextCorroborationProducer", _MixedRaster)
+    monkeypatch.setattr(
+        semantic,
+        "_producer_owned_ocr_target",
+        lambda _producer, **kwargs: (tuple(kwargs["word_bbox"]), 0),
+    )
+    monkeypatch.setattr(
+        semantic,
+        "_single_isolated_material_line_reading",
+        lambda _backend, _image, *, dpi: "WT1 Porcelain wall tile",
+    )
+
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+
+    definition = authority.resolve_definition(_definition_selector(published, "WT1"))
+    assert definition.status is EvidenceResolutionStatus.CORROBORATED
+    assert definition.record is not None
+    assert definition.record.semantic_finish == "tile"
+
+
 def test_admissible_line_fallback_mismatched_second_render_remains_blocked(monkeypatch) -> None:
     source, published = _source(
         _pdf(
@@ -765,7 +1067,14 @@ def test_admissible_line_fallback_mismatched_second_render_remains_blocked(monke
                 corroborated_text=None,
             )
 
-    readings = iter(("WT1 Porcelain wall tile", "WRONG MATERIAL LINE"))
+    readings = iter(
+        (
+            "WT1 Porcelain wall tile",
+            "WRONG MATERIAL LINE",
+            "WT1 Porcelain wall tile",
+            "WRONG MATERIAL LINE",
+        )
+    )
     monkeypatch.setattr(source, "text_integrity_authority", lambda: _GlyphClipScheduleCode())
     monkeypatch.setattr(semantic, "RasterTextCorroborationProducer", _NoWordRaster)
     monkeypatch.setattr(
