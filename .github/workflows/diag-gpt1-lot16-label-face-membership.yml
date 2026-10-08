@@ -1,0 +1,96 @@
+name: DIAG GPT1 Lot16 Label Face Membership
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-label-face-membership-v1
+
+jobs:
+  membership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Trace target label membership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import pb_source_room_label_authority as labels
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          target={"WIR","GARAGE","ENS."}
+          points={}
+          auth={}
+          matches={}
+          original_auth=labels.SourceRoomLabelProducer._authorize_word
+          original_point=labels._point_in_polygon
+
+          def traced_auth(self,published,word):
+              result=original_auth(self,published,word)
+              raw=str(word.raw_text or "").strip().upper()
+              if raw in target:
+                  x0,y0,x1,y1=word.geometry
+                  point=((x0+x1)/2.0,(y0+y1)/2.0)
+                  points.setdefault(raw,[]).append({
+                      "point":point,
+                      "geometry":tuple(word.geometry),
+                      "block_no":word.block_no,
+                      "line_no":word.line_no,
+                      "word_no":word.word_no,
+                  })
+                  auth.setdefault(raw,[]).append(None if result is None else {
+                      "authority_kind":result.authority_kind,
+                      "trusted_text":result.trusted_text,
+                  })
+              return result
+
+          def traced_point(point,polygon):
+              result=original_point(point,polygon)
+              key=(round(float(point[0]),6),round(float(point[1]),6))
+              bucket=matches.setdefault(key,{"calls":0,"true":0})
+              bucket["calls"]+=1
+              if result:
+                  bucket["true"]+=1
+              return result
+
+          labels.SourceRoomLabelProducer._authorize_word=traced_auth
+          labels._point_in_polygon=traced_point
+          try:
+              claim=collect_live_physical_net_wall_claim(
+                  Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"),
+                  pages=(2,),
+                  topology_pages=(2,),
+                  room_area_support_pages=None,
+              )
+          finally:
+              labels.SourceRoomLabelProducer._authorize_word=original_auth
+              labels._point_in_polygon=original_point
+
+          rows=[]
+          for raw,entries in points.items():
+              for idx,entry in enumerate(entries):
+                  p=entry["point"]
+                  key=(round(float(p[0]),6),round(float(p[1]),6))
+                  rows.append({
+                      "raw_text":raw,
+                      **entry,
+                      "authorization":auth.get(raw,[None]*len(entries))[idx],
+                      "face_membership":matches.get(key,{"calls":0,"true":0}),
+                  })
+          print(json.dumps({
+              "targets":rows,
+              "canonical_labels":[r.room_label for r in claim.canonical_rooms if r.room_label],
+              "canonical_room_count":len(claim.canonical_rooms),
+          },indent=2,sort_keys=True))
+          PY
