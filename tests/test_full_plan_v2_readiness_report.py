@@ -83,7 +83,7 @@ def test_source_hash_checks_actual_bytes_not_just_filename(tmp_path: Path) -> No
     assert verified is False
     assert "source_file_missing:evidence.pdf" in reasons
 
- 
+
 def test_sealed_run_absent_is_explicit_and_unpublished(tmp_path: Path) -> None:
     project = next(p for p in diagnostic_report(ROOT, tmp_path, sealed_root=tmp_path)["projects"]
                    if p["project_id"] == "au_qld_lot16_power")
