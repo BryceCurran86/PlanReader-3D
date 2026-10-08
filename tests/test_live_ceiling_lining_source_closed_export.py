@@ -15,7 +15,12 @@ from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+from pb_customer_output_verification import verify_sealed_customer_output
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_quantity_takeoff_adapter import (
+    CommercialMeasurementAuthority,
+    quantity_evidence_to_takeoff_output_row,
+)
 from pb_source_closed_run_export import SourceClosedRunConflictError
 
 
@@ -220,6 +225,62 @@ def test_canonical_ceiling_quantity_builds_complete_source_trace_and_seals() -> 
     assert sealed.value == 9.05352
     assert sealed.lineage_ok is True
     assert sealed.lineage_reason_codes == ()
+
+
+def test_firm_ceiling_seals_and_projects_to_exactly_one_customer_row() -> None:
+    base = _quantity()
+    quantity = replace(
+        base,
+        metadata={
+            **dict(base.metadata),
+            "commercial_projection_allowed": True,
+            "section": "Internal",
+            "element": "Ceiling lining area",
+            "location": "OFFICE",
+            "substrate": "Other",
+            "finish_system": "ceiling_grid",
+            "inclusion_status": "INCLUSION",
+        },
+    )
+    claim = _claim(
+        quantity,
+        canonical_ceiling=replace(
+            _canonical_ceiling(base),
+            ceiling_quantity_id=quantity.quantity_id,
+        ),
+    )
+    traces = build_live_ceiling_lining_source_traces(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+    trace = traces[quantity.quantity_id]
+    authority = CommercialMeasurementAuthority(
+        method="figured_dimension",
+        figured_dimension_ids=("dim-h", "dim-v"),
+    )
+    row = quantity_evidence_to_takeoff_output_row(
+        quantity,
+        trace=trace,
+        authority=authority,
+    )
+    assert row is not None
+    assert row["quantity_id"] == quantity.quantity_id
+    assert row["quantity"] == 9.05352
+    assert row["source_sha256"] == SOURCE_SHA
+    assert row["revision_id"] == "rev-1"
+    assert row["canonical_entity_ids"] == list(trace.canonical_entity_ids)
+    assert row["evidence_ids"] == list(trace.evidence_ids)
+
+    run = seal_live_ceiling_lining_run(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+    report = verify_sealed_customer_output(run, [row])
+    assert report.valid_quantity_count == 1
+    assert report.customer_row_count == 1
+    assert report.verified_quantity_ids == (quantity.quantity_id,)
 
 
 def test_missing_semantic_snapshot_cannot_seal() -> None:
