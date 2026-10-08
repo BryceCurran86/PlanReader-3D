@@ -249,6 +249,16 @@ def _unbounded_legend_page() -> fitz.Page:
     return page
 
 
+def _bounded_schedule_page() -> fitz.Page:
+    """A framed schedule owns reference content, not physical wall topology."""
+
+    doc = fitz.open()
+    page = doc.new_page(width=_PAGE_W, height=_PAGE_H)
+    page.draw_rect(fitz.Rect(*_FRAME))
+    page.insert_text((_FRAME[0] + 4.0, _FRAME[3] - 6.0), "INTERNAL FINISHES SCHEDULE", fontsize=10)
+    return page
+
+
 def test_wall_dangling_at_viewport_edge_is_incomplete() -> None:
     page = _framed_page()
     fx0, fy0, fx1, fy1 = _FRAME
@@ -310,6 +320,22 @@ def test_unresolved_viewport_bounds_do_not_claim_completeness() -> None:
 def test_unbounded_legend_does_not_poison_physical_wall_scope() -> None:
     page = _unbounded_legend_page()
     wall = _wall(pts=((80.0, 100.0), (150.0, 100.0)))
+    reason = _scope_boundary_reason(
+        wall,
+        page=page,
+        page_number=1,
+        page_width=_PAGE_W,
+        page_height=_PAGE_H,
+    )
+    assert reason is None
+
+
+def test_bounded_schedule_does_not_poison_physical_wall_scope() -> None:
+    page = _bounded_schedule_page()
+    fx0, fy0, fx1, fy1 = _FRAME
+    wall = _wall(
+        pts=((fx0 + 30.0, (fy0 + fy1) / 2.0), (fx1, (fy0 + fy1) / 2.0))
+    )
     reason = _scope_boundary_reason(
         wall,
         page=page,
