@@ -331,6 +331,81 @@ def test_metric_area_lineage_mismatch_does_not_attach(tmp_path) -> None:
     assert all(floor.metric_area_m2 is None for floor in enriched.floors)
 
 
+def test_canonical_floor_enrichment_rejects_alien_room_snapshot_or_face(
+    tmp_path,
+) -> None:
+    path = tmp_path / "floor-area-room-source-ownership.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+    source = next(
+        q for q in bridge.quantities
+        if not q.abstained and q.value is not None
+    )
+    entity = next(
+        e for e in bridge.entities
+        if e.candidate_entity_id == source.input_entity_ids[0]
+    )
+    target_floor = next(
+        floor for floor in floors.floors
+        if floor.source_room_face_record_id in entity.evidence_ids
+    )
+
+    # Positive source ownership: the room snapshot matches, while a separate
+    # dimension-support snapshot remains legitimate and independent.
+    valid = replace(
+        source,
+        metadata={
+            **dict(source.metadata or {}),
+            "room_snapshot_id": target_floor.snapshot_id,
+            "source_room_face_record_id": target_floor.source_room_face_record_id,
+            "source_dimension_snapshot_id": "independent-dimension-support",
+        },
+    )
+    accepted = replace(
+        bridge,
+        quantities=tuple(valid if q is source else q for q in bridge.quantities),
+    )
+    positive = enrich_live_canonical_floor_metric_areas(floors, accepted)
+    positive_floor = next(
+        floor for floor in positive.floors
+        if floor.canonical_floor_id == target_floor.canonical_floor_id
+    )
+    assert positive_floor.metric_area_m2 == float(source.value)
+
+    for corrupt in (
+        {"room_snapshot_id": "alien-room-snapshot"},
+        {"source_room_face_record_id": "alien-physical-room-face"},
+    ):
+        mismatched = replace(
+            valid, metadata={**dict(valid.metadata), **corrupt}
+        )
+        rejected = replace(
+            bridge,
+            quantities=tuple(
+                mismatched if q is source else q
+                for q in bridge.quantities
+            ),
+        )
+        enriched = enrich_live_canonical_floor_metric_areas(floors, rejected)
+        rejected_floor = next(
+            floor for floor in enriched.floors
+            if floor.canonical_floor_id == target_floor.canonical_floor_id
+        )
+        assert rejected_floor.metric_area_m2 is None
+        assert rejected_floor.metric_area_quantity_id is None
+        assert rejected_floor.metric_area_authority is None
+
+
 def test_duplicate_valid_room_area_authority_conflicts(tmp_path) -> None:
     path = tmp_path / "metric-floor-duplicate.pdf"
     _write_plan(path)
