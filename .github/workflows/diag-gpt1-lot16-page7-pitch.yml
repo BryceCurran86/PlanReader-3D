@@ -1,0 +1,47 @@
+name: DIAG GPT1 Lot16 Page7 Pitch
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-page7-pitch-v1
+
+jobs:
+  pitch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install PyMuPDF
+        run: pip install PyMuPDF==1.28.0
+      - name: Inspect page 7 pitch evidence
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json,re
+          from pathlib import Path
+          import fitz
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          doc=fitz.open(path)
+          try:
+              page=doc[6]
+              words=list(page.get_text("words") or ())
+              grouped={}
+              for w in words:
+                  grouped.setdefault((int(w[5]),int(w[6])),[]).append(w)
+              rows=[]
+              pat=re.compile(r"(?:°|deg|degree|pitch|roof|raked|ceiling|section)",re.I)
+              for (block,line),ws in sorted(grouped.items()):
+                  ws=sorted(ws,key=lambda w:(int(w[7]),float(w[0])))
+                  text=" ".join(str(w[4]) for w in ws)
+                  if pat.search(text) or re.search(r"\b\d{1,2}(?:\.\d+)?\s*[°º]\b",text):
+                      rows.append({
+                          "block":block,"line":line,"text":text,
+                          "bbox":[min(float(w[0]) for w in ws),min(float(w[1]) for w in ws),max(float(w[2]) for w in ws),max(float(w[3]) for w in ws)],
+                          "words":[{"text":str(w[4]),"word_no":int(w[7]),"bbox":[float(w[0]),float(w[1]),float(w[2]),float(w[3])]} for w in ws],
+                      })
+              print(json.dumps(rows,indent=2,sort_keys=True))
+          finally:
+              doc.close()
+          PY
