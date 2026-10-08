@@ -119,6 +119,22 @@ def publish_live_floor_area_quantities(
             continue
         if _clean(metadata.get("revision_id")) != floor.revision_id:
             continue
+        # Figured same/cross-view room-area claims carry the identity of the
+        # source ROOM snapshot, which must agree with the canonical floor's
+        # source room. Dimension-support snapshots can legitimately differ.
+        # Do not use a measurement from another room-face snapshot even if
+        # its revision, quantity value and viewport happen to match.
+        room_snapshot_id = _clean(metadata.get("room_snapshot_id"))
+        if room_snapshot_id and room_snapshot_id != floor.snapshot_id:
+            continue
+        source_room_face_id = _clean(
+            metadata.get("source_room_face_record_id")
+        )
+        if (
+            source_room_face_id
+            and source_room_face_id != floor.source_room_face_record_id
+        ):
+            continue
         if _clean(metadata.get("page_no")) != str(floor.page_id):
             continue
         q_viewport = _clean(metadata.get("viewport_id"))
