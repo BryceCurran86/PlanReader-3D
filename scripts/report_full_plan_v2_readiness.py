@@ -7,8 +7,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter
 from pathlib import Path
+
+# Resolve the repository's benchmark package before any site-package namesake.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) in sys.path:
+    sys.path.remove(str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT))
 
 from benchmarks.frozen_holdout.full_plan_v2.evaluator import PROJECT_VERIFIED
 from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
