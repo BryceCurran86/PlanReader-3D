@@ -80,12 +80,12 @@ def test_semantic_enumeration_keeps_raster_positive_but_not_false_completeness()
     assert representative not in set(record.visible_observation_ids)
     assert set(record.opening_support_observation_ids) & raster_ids
 
-    # Individual raster positives may flow downstream, but framed-raster
-    # detection has no source-closed candidate-universe authority yet.
+    # The exact raster candidate path is now closed. This does not erase the
+    # independent incomplete structural/source universe on a raster-only sheet.
     assert record.physical_opening_universe_complete is False
     assert (
         SEMANTIC_OPENING_RASTER_CANDIDATE_CLOSURE_UNPROVEN
-        in record.reason_codes
+        not in record.reason_codes
     )
     assert SEMANTIC_OPENING_UNIVERSE_EXHAUSTIVENESS_UNPROVEN in record.reason_codes
 

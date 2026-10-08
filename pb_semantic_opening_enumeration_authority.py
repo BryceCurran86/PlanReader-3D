@@ -426,6 +426,7 @@ class SemanticOpeningEnumerationProducer:
         lineage_mismatch = False
         scoped_visible_ids: list[str] = []
         page_representative_observation_ids: dict[str, str] = {}
+        page_representative_raster_observation_ids: dict[str, str] = {}
         unknown_scope_resolution = False
         scoped_raster_ids: list[str] = []
 
@@ -544,6 +545,8 @@ class SemanticOpeningEnumerationProducer:
             if str(observation.page_id) not in allowed_pages:
                 continue
             scoped_raster_ids.append(observation_id)
+            page_representative_raster_observation_ids.setdefault(
+                str(observation.page_id), observation_id)
 
             if (
                 observation.document_id != selector.document_id
@@ -611,7 +614,7 @@ class SemanticOpeningEnumerationProducer:
         # gap/jamb candidates cannot disappear as isolated noncandidate lines.
         residual_ids = set(unresolved_visible_ids) - support_ids
 
-        candidate_closure_complete = not bool(scoped_raster_ids)
+        candidate_closure_complete = True
         for page_id in scoped_page_ids:
             representative_id = page_representative_observation_ids.get(page_id)
             if representative_id is None:
@@ -643,6 +646,22 @@ class SemanticOpeningEnumerationProducer:
                     unresolved_from_closure - support_ids
                 )
 
+        raster_candidate_closure_complete = True
+        for page_id, representative_id in page_representative_raster_observation_ids.items():
+            closure = physical.assess_raster_candidate_closure(ObservationSelector(
+                document_id=selector.document_id, revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256, snapshot_id=selector.snapshot_id,
+                observation_id=representative_id))
+            if (closure.status is not EvidenceResolutionStatus.CORROBORATED
+                    or not closure.candidate_universe_complete):
+                raster_candidate_closure_complete = False
+                candidate_closure_complete = False
+                if closure.status is not EvidenceResolutionStatus.CORROBORATED:
+                    unknown_scope_resolution = True
+                unresolved = set(closure.unresolved_observation_ids)
+                conflict_ids.update(unresolved & support_ids)
+                residual_ids.update(unresolved - support_ids)
+
         reasons: list[str] = []
         if not visible_ids:
             reasons.append(SEMANTIC_OPENING_NO_VISIBLE_SEGMENTS)
@@ -654,7 +673,7 @@ class SemanticOpeningEnumerationProducer:
             reasons.append(SEMANTIC_OPENING_PHYSICAL_CONFLICT)
         if residual_ids:
             reasons.append(SEMANTIC_OPENING_RESIDUAL_SOURCE_EVIDENCE)
-        if scoped_raster_ids:
+        if scoped_raster_ids and not raster_candidate_closure_complete:
             reasons.append(
                 SEMANTIC_OPENING_RASTER_CANDIDATE_CLOSURE_UNPROVEN
             )

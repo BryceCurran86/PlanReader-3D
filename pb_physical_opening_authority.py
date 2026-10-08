@@ -763,7 +763,12 @@ def _raster_pair_flanks(
     along_scale: float = 1.0,
     cross_scale: float = 1.0,
 ) -> tuple[_RasterBandPair, ...]:
-    """Pair each band only with the first real solid continuation in its row profile."""
+    """Retain every owner of the first source-occupied continuation column.
+
+    Source row occupancy proves adjacency, but an arbitrary bounding-box hit
+    cannot prove ownership. Multiple owner envelopes remain explicit ambiguous
+    hypotheses; input order must never choose which one becomes an opening.
+    """
 
     window = _raster_scaled_px(_RASTER_END_WINDOW_PT, dpi, along_scale)
     min_gap_floor = _raster_scaled_px(
@@ -772,6 +777,7 @@ def _raster_pair_flanks(
         along_scale,
     )
     width = work_thick.shape[1]
+    boxes = tuple(sorted(tuple(int(value) for value in box) for box in boxes))
     box_array = np.asarray(tuple(boxes), dtype=np.int64).reshape(-1, 4)
     pairs: list[_RasterBandPair] = []
     for a in boxes:
@@ -801,56 +807,46 @@ def _raster_pair_flanks(
         )[0]
         if hit.size == 0:
             continue
-        partner = tuple(int(value) for value in box_array[int(hit[0])])
-        reasons: list[str] = []
-        if partial_hits.size and start + int(partial_hits[0]) < position:
-            reasons.append("raster_gap_not_clean")
+        for partner_index in hit:
+            partner = tuple(int(value) for value in box_array[int(partner_index)])
+            reasons: list[str] = []
+            if hit.size > 1:
+                reasons.append("raster_continuation_owner_ambiguous")
+            if partial_hits.size and start + int(partial_hits[0]) < position:
+                reasons.append("raster_gap_not_clean")
 
-        b_rows = _raster_end_interval(
-            work_thick,
-            partner,
-            at_high_end=False,
-            window=window,
-        )
-        if b_rows is None:
-            continue
-        c0, c1 = max(r0, b_rows[0]), min(r1, b_rows[1])
-        thickness_a = r1 - r0 + 1
-        thickness_b = b_rows[1] - b_rows[0] + 1
-        if (
-            c1 < c0
-            or (c1 - c0 + 1)
-            < _RASTER_THICKNESS_OVERLAP * min(thickness_a, thickness_b)
-            or abs(thickness_a - thickness_b)
-            > _RASTER_THICKNESS_TOLERANCE * max(thickness_a, thickness_b)
-        ):
-            reasons.append("raster_flanks_not_collinear_bands")
+            b_rows = _raster_end_interval(
+                work_thick, partner, at_high_end=False, window=window)
+            if b_rows is None:
+                continue
+            c0, c1 = max(r0, b_rows[0]), min(r1, b_rows[1])
+            thickness_a = r1 - r0 + 1
+            thickness_b = b_rows[1] - b_rows[0] + 1
+            if (
+                c1 < c0
+                or (c1 - c0 + 1)
+                < _RASTER_THICKNESS_OVERLAP * min(thickness_a, thickness_b)
+                or abs(thickness_a - thickness_b)
+                > _RASTER_THICKNESS_TOLERANCE * max(thickness_a, thickness_b)
+            ):
+                reasons.append("raster_flanks_not_collinear_bands")
 
-        gap_x0 = a[2] + 1
-        gap_x1 = position - 1
-        gap = gap_x1 - gap_x0 + 1
-        thickness = max(min(thickness_a, thickness_b), 1)
-        relative_gap_floor = int(math.ceil(
-            _RASTER_MIN_GAP_THICKNESS_RATIO
-            * float(thickness)
-            * float(along_scale)
-            / float(cross_scale)
-        ))
-        if gap < max(min_gap_floor, relative_gap_floor):
-            reasons.append("raster_gap_too_small")
-        if gap < 1:
-            continue
-        pairs.append(_RasterBandPair(
-            a=a,
-            b=partner,
-            gap_x0=gap_x0,
-            gap_x1=gap_x1,
-            row0=c0 if c1 >= c0 else r0,
-            row1=c1 if c1 >= c0 else r1,
-            thickness_a=thickness_a,
-            thickness_b=thickness_b,
-            reasons=tuple(dict.fromkeys(reasons)),
-        ))
+            gap_x0 = a[2] + 1
+            gap_x1 = position - 1
+            gap = gap_x1 - gap_x0 + 1
+            thickness = max(min(thickness_a, thickness_b), 1)
+            relative_gap_floor = int(math.ceil(
+                _RASTER_MIN_GAP_THICKNESS_RATIO * float(thickness)
+                * float(along_scale) / float(cross_scale)))
+            if gap < max(min_gap_floor, relative_gap_floor):
+                reasons.append("raster_gap_too_small")
+            if gap < 1:
+                continue
+            pairs.append(_RasterBandPair(
+                a=a, b=partner, gap_x0=gap_x0, gap_x1=gap_x1,
+                row0=c0 if c1 >= c0 else r0, row1=c1 if c1 >= c0 else r1,
+                thickness_a=thickness_a, thickness_b=thickness_b,
+                reasons=tuple(dict.fromkeys(reasons))))
     return tuple(pairs)
 
 
@@ -1179,6 +1175,13 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             tuple[CandidateSemanticOpening, ...],
         ] = {}
+        # Candidate closure must see incomplete wall-band gaps too. Positive
+        # framed/swing nomination alone cannot establish the competitor universe.
+        self._raster_gap_candidate_audit_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[tuple[str, frozenset[str], tuple[float, ...]], ...],
+        ] = {}
+        self._raster_gap_audit_incomplete: set[tuple[str, str, str, str, str]] = set()
         self._raster_candidate_gap_box_cache: dict[
             str, tuple[float, float, float, float]
         ] = {}
@@ -1704,6 +1707,7 @@ class PhysicalOpeningAuthority:
         candidate_patterns: dict[str, str] = {}
         ambiguous_support_ids: set[str] = set()
         framed_gap_boxes: set[tuple[float, float, float, float]] = set()
+        gap_audit: dict[str, tuple[str, frozenset[str], tuple[float, ...]]] = {}
         for axis in ("horizontal", "vertical"):
             along_scale, cross_scale = _raster_axis_registration_scales(
                 axis,
@@ -1741,13 +1745,12 @@ class PhysicalOpeningAuthority:
                 along_scale=along_scale,
                 cross_scale=cross_scale,
             ):
-                if pair.reasons:
-                    continue
                 page_a = _raster_to_page_box(pair.a, axis)
                 page_b = _raster_to_page_box(pair.b, axis)
                 support_a = band_support(page_a, axis, high_end=True)
                 support_b = band_support(page_b, axis, high_end=False)
                 if not support_a or not support_b:
+                    self._raster_gap_audit_incomplete.add(cache_key)
                     continue
 
                 gap_box_px = _raster_gap_box_page_px(pair, axis)
@@ -1755,6 +1758,22 @@ class PhysicalOpeningAuthority:
                     round(value, 6)
                     for value in _raster_box_pt(gap_box_px, dpi)
                 )
+                gap_support = frozenset(
+                    record.observation_id for record in (*support_a, *support_b)
+                )
+                gap_id = stable_contract_id("physical_opening_raw_candidate", {
+                    "document_id": seed.document_id,
+                    "revision_id": seed.revision_id,
+                    "source_sha256": seed.source_sha256,
+                    "snapshot_id": seed.snapshot_id,
+                    "page_id": seed.page_id,
+                    "pattern": "raster_wall_band_gap_candidate",
+                    "gap_box_pt": gap_box_pt,
+                    "source_observation_ids": tuple(sorted(gap_support)),
+                }, digest_chars=32)
+                gap_audit[gap_id] = (gap_id, gap_support, gap_box_pt)
+                if pair.reasons:
+                    continue
 
                 groups = _raster_frame_line_groups(
                     work_line,
@@ -1902,6 +1921,9 @@ class PhysicalOpeningAuthority:
             ))
 
         result = tuple(candidates)
+        self._raster_gap_candidate_audit_cache[cache_key] = tuple(
+            gap_audit[key] for key in sorted(gap_audit)
+        )
         self._raster_swing_ambiguous_support_cache[cache_key] = frozenset(
             ambiguous_support_ids
         )
@@ -3161,6 +3183,103 @@ class PhysicalOpeningAuthority:
                 if complete
                 else (PHYSICAL_OPENING_CANDIDATE_CLOSURE_UNRESOLVED,)
             ),
+        )
+
+    def assess_raster_candidate_closure(
+        self, selector: ObservationSelector,
+    ) -> PhysicalOpeningCandidateClosureResult:
+        """Audit every registered raster wall-band gap, including weak gaps.
+
+        Complete receipt coverage is checked afresh before cached geometry is
+        consumed. A gap closes only when its exact aperture and every source
+        support are subsumed by an independently re-proven, viewport-owned
+        physical opening. Bare gaps, rejected/ambiguous candidates, failed
+        render paths and an empty detector result cannot establish completeness.
+        This proves the registered candidate family, not universal nonexistence.
+        """
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        visibility = self._source_visibility_authority
+        producer = self._source_visibility_producer
+
+        def blocked(status, *reasons, page_id=None):
+            return PhysicalOpeningCandidateClosureResult(
+                status=status, page_id=page_id, candidate_universe_complete=False,
+                raw_candidate_count=0, resolved_candidate_count=0,
+                unresolved_candidate_ids=(), unresolved_observation_ids=(),
+                reason_codes=_dedupe_reason_codes(tuple(reasons)),
+            )
+
+        if visibility is None or producer is None:
+            return blocked(EvidenceResolutionStatus.ABSTAINED,
+                           VISIBLE_SOURCE_AUTHORITY_REQUIRED)
+        seed_result = visibility.resolve_raster_opening_primitive(selector)
+        if (seed_result.status is not EvidenceResolutionStatus.CORROBORATED
+                or seed_result.observation is None):
+            return blocked(_source_failure_status(seed_result), *seed_result.reason_codes)
+        seed = seed_result.observation
+        published = producer.published_snapshot_for_revision(selector.revision_id)
+        if published is None or published.snapshot.snapshot_id != selector.snapshot_id:
+            return blocked(EvidenceResolutionStatus.ABSTAINED,
+                           SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE, page_id=seed.page_id)
+        ids = visibility.raster_opening_primitive_observation_ids_for_snapshot(
+            selector.snapshot_id)
+        if ids != frozenset(published.raster_opening_primitive_observation_ids):
+            return blocked(EvidenceResolutionStatus.CONFLICT,
+                           SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE, page_id=seed.page_id)
+        records = []
+        for observation_id in sorted(ids):
+            result = visibility.resolve_raster_opening_primitive(
+                replace(selector, observation_id=observation_id))
+            if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                    or result.observation is None):
+                return blocked(_source_failure_status(result),
+                               SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,
+                               *result.reason_codes, page_id=seed.page_id)
+            records.append(result.observation)
+        # Rendering rechecks immutable source bytes and the current page parent,
+        # including when candidate geometry was cached by earlier existence calls.
+        try:
+            producer.render_raster_opening_source_page(seed.revision_id, seed.page_id)
+        except Exception:
+            return blocked(EvidenceResolutionStatus.ABSTAINED,
+                           SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE, page_id=seed.page_id)
+        raw = self._raster_framed_candidates_for(seed, tuple(records))
+        scoped = self._viewport_scoped_raster_candidates_for(seed, tuple(records), raw)
+        proven = []
+        for candidate in scoped:
+            support = frozenset(candidate.source_observation_ids)
+            for observation_id in candidate.source_observation_ids:
+                existence = self.prove_existence(replace(selector, observation_id=observation_id))
+                if (existence.status is EvidenceResolutionStatus.CORROBORATED
+                        and existence.existence_record is not None
+                        and existence.candidate is not None
+                        and existence.candidate.candidate_id == candidate.candidate_id
+                        and frozenset(existence.existence_record.source_observation_ids) == support):
+                    proven.append((support, existence.existence_record.aperture_bbox_pt))
+                    break
+        key = self._visible_page_candidate_key(seed)
+        gaps = self._raster_gap_candidate_audit_cache.get(key)
+        unresolved = []
+        unresolved_support = set(self._raster_swing_ambiguous_support_cache.get(key, ()))
+        resolved_count = 0
+        for gap_id, support, aperture in gaps or ():
+            if any(support <= owner_support and aperture == owner_aperture
+                   for owner_support, owner_aperture in proven):
+                resolved_count += 1
+            else:
+                unresolved.append(gap_id)
+                unresolved_support.update(support)
+        complete = bool(gaps) and not (
+            unresolved or unresolved_support or key in self._raster_gap_audit_incomplete)
+        return PhysicalOpeningCandidateClosureResult(
+            status=EvidenceResolutionStatus.CORROBORATED, page_id=str(seed.page_id),
+            candidate_universe_complete=complete, raw_candidate_count=len(gaps or ()),
+            resolved_candidate_count=resolved_count,
+            unresolved_candidate_ids=tuple(sorted(unresolved)),
+            unresolved_observation_ids=tuple(sorted(unresolved_support)),
+            reason_codes=((PHYSICAL_OPENING_CANDIDATE_CLOSURE_RESOLVED,)
+                          if complete else (PHYSICAL_OPENING_CANDIDATE_CLOSURE_UNRESOLVED,)),
         )
 
     @staticmethod
