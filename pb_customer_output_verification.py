@@ -33,7 +33,17 @@ def _clean(value: Any) -> str:
 
 
 def _norm_unit(value: Any) -> str:
-    return _clean(value).lower().replace(" ", "")
+    clean = _clean(value).lower().replace(" ", "")
+    aliases = {
+        "m²": "m2",
+        "sqm": "m2",
+        "m³": "m3",
+        "each": "ea",
+        "no": "ea",
+        "nr": "ea",
+        "lm": "m",
+    }
+    return aliases.get(clean, clean)
 
 
 def _string_tuple(values: Any) -> tuple[str, ...]:
