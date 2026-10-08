@@ -524,12 +524,20 @@ def compose_live_canonical_rooms(
             and result.scope_complete
             and result.records
         ):
+            # Canonical physical-room identity requires a complete source face
+            # universe. A locally valid face from a known-incomplete page can
+            # change identity/adjacency/label ownership once the missing faces
+            # are recovered, so route the page through the existing authenticated
+            # FLOOR_PLAN viewport authority instead of publishing partial rooms.
+            if not result.face_universe_complete:
+                reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                reasons.extend(result.reason_codes)
+                unresolved_pages.append(str(page_id))
+                continue
+
             if str(page_id).isdigit():
                 room_pages.add(int(page_id))
-                if result.face_universe_complete:
-                    resolved_pages.add(int(page_id))
-                else:
-                    reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                resolved_pages.add(int(page_id))
             label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
             label_result = None
             if page_label_authority is not None:
@@ -676,6 +684,14 @@ def compose_live_canonical_rooms(
                     ):
                         reasons.extend(room_result.reason_codes)
                         continue
+                    if not room_result.face_universe_complete:
+                        # A viewport-local face is still not a stable physical
+                        # room identity while that exact viewport admits missing
+                        # or ambiguous faces. Preserve fail-closed behavior.
+                        page_face_universe_complete = False
+                        reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                        reasons.extend(room_result.reason_codes)
+                        continue
 
                     label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
                     label_result = None
@@ -754,9 +770,6 @@ def compose_live_canonical_rooms(
                         for record in composite_records
                     )
                     page_resolved = True
-                    if not room_result.face_universe_complete:
-                        page_face_universe_complete = False
-                        reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
                     viewport_fallback_used = True
 
                 if page_resolved and str(page_id).isdigit():
