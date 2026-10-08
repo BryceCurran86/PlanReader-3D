@@ -357,3 +357,63 @@ def test_duplicate_valid_room_area_authority_conflicts(tmp_path) -> None:
     assert enriched.status is EvidenceResolutionStatus.CONFLICT
     assert enriched.reason_codes == (LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,)
     assert any(floor.metric_area_m2 is None for floor in enriched.floors)
+
+
+def test_sequential_room_area_bridges_replay_or_conflict_without_overwrite(
+    tmp_path,
+) -> None:
+    path = tmp_path / "metric-floor-sequential-authority.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    original = _floor_composition_from_bridge(published, bridge)
+    measured = enrich_live_canonical_floor_metric_areas(original, bridge)
+    assert all(floor.metric_area_quantity_id for floor in measured.floors)
+
+    # Repeating the identical producer-owned claim is idempotent.
+    replay = enrich_live_canonical_floor_metric_areas(measured, bridge)
+    assert replay.status is EvidenceResolutionStatus.CORROBORATED
+    assert replay.floors == measured.floors
+
+    # An independently supplied FIRM record for the same physical floor
+    # must not replace the first authenticated quantity.
+    contradictory = replace(
+        bridge,
+        quantities=tuple(
+            replace(
+                quantity,
+                quantity_id=f"conflicting:{quantity.quantity_id}",
+                value=float(quantity.value) + 1.0,
+            )
+            if not quantity.abstained
+            else quantity
+            for quantity in bridge.quantities
+        ),
+    )
+    result = enrich_live_canonical_floor_metric_areas(measured, contradictory)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.reason_codes == (LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,)
+    assert result.floors == measured.floors
+
+    # Even a changed value under a replayed identifier cannot remeasure
+    # an already attached floor.
+    tampered_replay = replace(
+        bridge,
+        quantities=tuple(
+            replace(quantity, value=float(quantity.value) + 1.0)
+            if not quantity.abstained
+            else quantity
+            for quantity in bridge.quantities
+        ),
+    )
+    result = enrich_live_canonical_floor_metric_areas(measured, tampered_replay)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.floors == measured.floors
