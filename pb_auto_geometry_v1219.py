@@ -1206,11 +1206,18 @@ def _try_physical_net_wall_rows(
             project_id=f"customer-workspace:{int(workspace_id)}",
         )
         from pb_live_floor_area_quantity_publication import (
+            publish_live_canonical_room_area_quantities,
             publish_live_floor_area_quantities,
         )
         final_floor_quantities = {
             str(quantity.quantity_id): quantity
             for quantity in publish_live_floor_area_quantities(claim)
+        }
+        canonical_room_quantities = {
+            str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
+            quantity
+            for quantity in publish_live_canonical_room_area_quantities(claim)
+            if isinstance(quantity.metadata, Mapping)
         }
         rows: List[Tuple[Any, ...]] = []
         for item in projected:
@@ -1254,6 +1261,15 @@ def _try_physical_net_wall_rows(
                     f"{source_reference} · "
                     f"room_area_quantity:{upstream_room_area_quantity_id}"
                 )
+                canonical_room_quantity = canonical_room_quantities.get(
+                    upstream_room_area_quantity_id
+                )
+                if canonical_room_quantity is not None:
+                    source_reference = (
+                        f"{source_reference} · "
+                        f"canonical_room_quantity:"
+                        f"{canonical_room_quantity.quantity_id}"
+                    )
             rows.append(
                 _takeoff_row(
                     workspace_id=int(workspace_id),
