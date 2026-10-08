@@ -367,7 +367,9 @@ def _stable_projection_fingerprint_payload(
             "substrate": _clean(qmeta.get("substrate")),
             "finish_system": _clean(qmeta.get("finish_system")),
             "inclusion_status": _clean(qmeta.get("inclusion_status") or "INCLUSION"),
-            "row_role": _clean(qmeta.get("row_role") or "work"),
+            "row_role": _clean(
+                qmeta.get("row_role") if "row_role" in qmeta else "work"
+            ),
         },
         "source_trace": {
             "workspace_id": trace.workspace_id,
@@ -458,7 +460,9 @@ def quantity_evidence_to_takeoff_output_row(
         "inclusion_status": _clean(qmeta.get("inclusion_status") or "INCLUSION"),
         "confidence": float(quantity.confidence),
         "notes": canonical_contract_json(provenance),
-        "row_role": _clean(qmeta.get("row_role") or "work"),
+        "row_role": _clean(
+                qmeta.get("row_role") if "row_role" in qmeta else "work"
+            ),
         "origin": "AI",
         "ai_baseline_quantity": float(quantity.value),
         "quantity_id": quantity.quantity_id,
