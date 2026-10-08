@@ -1,0 +1,148 @@
+name: DIAG GPT1 Lot16 Room Label Authority
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-room-label-authority-v1
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Inspect Lot16 source room-label authority
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u - <<'PY' | tee lot16-room-label-authority.json
+          import hashlib, json
+          from pathlib import Path
+
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer,
+              SourceRoomLabelSelector,
+              _normalized_room_line,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-lot16-room-label-authority",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"live-source:{sha[:32]}",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3",),
+          )
+          wall=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("3",),
+          )
+          published=source.published_snapshot_for_revision(published.revision.revision_id)
+          room_auth=build_source_room_face_authority(
+              wall.physical_wall_candidate_authority
+          )
+          room_sel=SourceRoomFaceSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="3",
+              decision_scope_id="wall-source:page-3",
+          )
+          room_scope=room_auth.resolve_scope(room_sel)
+          label_prod=SourceRoomLabelProducer.from_authorities(
+              source,
+              room_auth,
+              page_ids=("3",),
+          )
+          label_scope=label_prod.authority().resolve_scope(
+              SourceRoomLabelSelector(
+                  document_id=room_sel.document_id,
+                  revision_id=room_sel.revision_id,
+                  source_sha256=room_sel.source_sha256,
+                  snapshot_id=room_sel.snapshot_id,
+                  page_id=room_sel.page_id,
+                  decision_scope_id=room_sel.decision_scope_id,
+              )
+          )
+
+          raw_lines=[]
+          for obs in source.observation_authority().published_observations():
+              if str(getattr(obs,"page_id",""))!="3":
+                  continue
+              text=str(getattr(obs,"raw_text","") or "").strip()
+              if not text:
+                  continue
+              upper=text.upper()
+              if any(token in upper for token in ("ENS","WIR","GARAGE","WC","LINEN")):
+                  raw_lines.append({
+                      "text":text,
+                      "normalized_candidate":_normalized_room_line(text),
+                      "observation_id":getattr(obs,"observation_id",None),
+                      "geometry":list(getattr(obs,"geometry",()) or ()),
+                      "source_partition_id":getattr(obs,"source_partition_id",None),
+                      "block_no":getattr(obs,"block_no",None),
+                      "line_no":getattr(obs,"line_no",None),
+                      "word_no":getattr(obs,"word_no",None),
+                  })
+
+          out={
+              "room_scope_status":room_scope.status.value,
+              "room_scope_reason_codes":list(room_scope.reason_codes),
+              "room_face_count":len(room_scope.records),
+              "face_universe_complete":room_scope.face_universe_complete,
+              "label_scope_status":label_scope.status.value,
+              "label_scope_reason_codes":list(label_scope.reason_codes),
+              "label_record_count":len(label_scope.records),
+              "labels":[
+                  {
+                      "label":r.label,
+                      "face_id":r.face_id,
+                      "record_id":r.record_id,
+                      "bbox":list(r.source_bbox),
+                      "word_count":len(r.word_evidence),
+                      "authority_kinds":[w.authority_kind for w in r.word_evidence],
+                  }
+                  for r in label_scope.records
+              ],
+              "split_face_candidates":[
+                  {
+                      "label":r.label,
+                      "word_face_ids":list(r.word_face_ids),
+                      "source_room_face_record_ids":list(r.source_room_face_record_ids),
+                      "bbox":list(r.source_bbox),
+                  }
+                  for r in label_scope.split_face_candidates
+              ],
+              "target_raw_observations":raw_lines,
+          }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-room-label-authority
+          path: lot16-room-label-authority.json
+          retention-days: 3
