@@ -87,6 +87,8 @@ def _valid_room_area_quantity(
     if (
         quantity.family != "room_area"
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
+        or _clean(quantity.unit).lower() not in {"m2", "m²"}
+        or quantity.blocking_reasons
         or _clean(quantity.authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
         or _quantity_value(quantity) is None
