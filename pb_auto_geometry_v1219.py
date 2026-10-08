@@ -1361,6 +1361,7 @@ def _try_physical_net_wall_rows(
         source_path: Path,
         claim_pages: Sequence[int],
         claim: Any,
+        topology_pages: Optional[Sequence[int]] = None,
     ) -> List[Tuple[Any, ...]]:
         """Project every final sealed ceiling; use review replay only as fallback."""
         from dataclasses import replace
@@ -1392,6 +1393,9 @@ def _try_physical_net_wall_rows(
         legacy_result = collect_live_ceiling_lining_claims(
             source_path,
             pages=tuple(claim_pages),
+            topology_pages=(
+                tuple(topology_pages) if topology_pages is not None else None
+            ),
             authoritative_room_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ())
             ),
@@ -1772,6 +1776,7 @@ def _try_physical_net_wall_rows(
                         group["path"],
                         claim_pages,
                         claim,
+                        topology_pages=claim_kwargs.get("topology_pages"),
                     )
                 )
             except Exception as ceiling_output_exc:
