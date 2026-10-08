@@ -356,3 +356,44 @@ def test_conflicting_room_area_quantity_id_order_cannot_select_winner() -> None:
         )
         assert result.status is EvidenceResolutionStatus.CONFLICT
         assert not result.quantities
+
+
+def test_non_metric_documented_room_area_cannot_promote_firm_rcp_ceiling_m2() -> None:
+    bridge = _bridge()
+    invalid = replace(
+        bridge,
+        quantities=(replace(bridge.quantities[0], unit="ft2"),),
+    )
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(invalid,),
+        finishes=_finish(),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.canonical_ceilings == ()
+
+
+def test_blocked_firm_room_area_does_not_publish_rcp_ceiling_m2() -> None:
+    bridge = _bridge()
+    blocked = replace(
+        bridge,
+        quantities=(
+            replace(
+                bridge.quantities[0],
+                blocking_reasons=("measurement_authority_unresolved",),
+            ),
+        ),
+    )
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(blocked,),
+        finishes=_finish(),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.canonical_ceilings == ()
