@@ -1396,6 +1396,7 @@ _SINGLE_FLOOR_FINISH_PARTITION_MODE = "single_floor_finish_plan_printable_area"
 _SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE = "single_floor_finish_plan_sheet_frame"
 _SINGLE_REFLECTED_CEILING_PARTITION_MODE = "single_reflected_ceiling_printable_area"
 _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE = "single_reflected_ceiling_sheet_frame"
+_TITLE_BLOCK_SINGLE_FLOOR_PLAN_MODE = "title_block_single_view_floor_plan"
 
 
 def is_authoritative_derived_viewport(viewport: Any) -> bool:
@@ -1429,6 +1430,16 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
         return bool(
             provenance.get("single_view_validated") is True
             and int(provenance.get("metadata_label_count", 0) or 0) >= 2
+            and int(provenance.get("drawing_vector_primitive_count", 0) or 0) >= 2
+        )
+    if mode == _TITLE_BLOCK_SINGLE_FLOOR_PLAN_MODE:
+        return bool(
+            provenance.get("single_view_validated") is True
+            and provenance.get("title_block_bbox")
+            and provenance.get("boundary_evidence") in {
+                "closed_native_drawing_frame",
+                "title_block_layout_band",
+            }
             and int(provenance.get("drawing_vector_primitive_count", 0) or 0) >= 2
         )
     return False
@@ -2108,6 +2119,84 @@ def _derived_partitions(
     return out
 
 
+def _title_block_single_floor_plan_partition(
+    page: Any,
+    existing: Sequence[SegmentedViewport],
+    *,
+    page_number: int,
+) -> Optional[SegmentedViewport]:
+    """Promote only a producer-owned title-block single-view proof.
+
+    The title supplies semantic classification only. Geometry remains source-drawn
+    and is accepted only through the independently fail-closed single-view proof.
+    The local import avoids a module cycle: the proof module itself reuses public
+    F.07 calibration/frame helpers.
+    """
+    try:
+        from pb_title_block_viewport_shadow import (
+            TITLE_BLOCK_VIEWPORT_CANDIDATE,
+            propose_title_block_floor_plan_viewport,
+        )
+    except Exception:
+        return None
+    try:
+        proposal = propose_title_block_floor_plan_viewport(
+            page,
+            page_number=page_number,
+            f07_viewports=existing,
+        )
+    except Exception:
+        return None
+    if (
+        proposal.reason_codes != (TITLE_BLOCK_VIEWPORT_CANDIDATE,)
+        or not proposal.is_candidate
+        or proposal.view_type != DrawingViewType.FLOOR_PLAN.value
+        or proposal.bounding_box is None
+        or proposal.viewport_id is None
+    ):
+        return None
+    title_block_bbox = (
+        list(proposal.furniture_boxes[0])
+        if proposal.furniture_boxes
+        else None
+    )
+    raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+        page,
+        proposal.bounding_box,
+    )
+    return SegmentedViewport(
+        view_id=str(proposal.viewport_id),
+        page_number=int(page_number),
+        view_type=DrawingViewType.FLOOR_PLAN.value,
+        label=str(proposal.title_text or "FLOOR PLAN"),
+        title_bbox=(
+            tuple(float(v) for v in proposal.furniture_boxes[0])
+            if proposal.furniture_boxes
+            else tuple(float(v) for v in proposal.bounding_box)
+        ),
+        bounding_box=tuple(float(v) for v in proposal.bounding_box),
+        status=ViewportSegmentationStatus.DERIVED.value,
+        boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+        confidence=0.9,
+        scale_raw=raw,
+        scale_denominator=denominator,
+        scale_conflict=scale_conflict,
+        notes=[
+            "single floor plan owns source-drawn region from explicit title-block title",
+            *scale_notes,
+        ],
+        provenance={
+            "partition_mode": _TITLE_BLOCK_SINGLE_FLOOR_PLAN_MODE,
+            "single_view_validated": True,
+            "title_block_bbox": title_block_bbox,
+            "drawing_vector_primitive_count": int(proposal.content_segment_count),
+            "boundary_evidence": str(proposal.boundary_evidence),
+            "candidate_regions": [list(row) for row in proposal.candidate_regions],
+            "page_title_authority_owned": True,
+        },
+    )
+
+
 def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:
     try:
         calibration = calibrate_viewport_layout(page)
@@ -2194,6 +2283,23 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
         framed + derived,
         key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id),
     )
+    if not any(
+        viewport.view_type == DrawingViewType.FLOOR_PLAN.value
+        and viewport.bounding_box is not None
+        and (
+            viewport.status == ViewportSegmentationStatus.RESOLVED.value
+            or is_authoritative_derived_viewport(viewport)
+        )
+        for viewport in ordered
+    ):
+        title_block_floor_plan = _title_block_single_floor_plan_partition(
+            page,
+            ordered,
+            page_number=page_number,
+        )
+        if title_block_floor_plan is not None:
+            ordered.append(title_block_floor_plan)
+            ordered.sort(key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id))
     return _stamp_segment_page_viewports_product(ordered)
 
 
