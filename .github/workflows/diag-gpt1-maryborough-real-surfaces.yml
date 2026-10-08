@@ -38,6 +38,50 @@ jobs:
           from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
           from pb_live_floor_finish_area_source_closed_export import seal_live_floor_finish_area_run
           from pb_live_ceiling_lining_source_closed_export import seal_live_ceiling_lining_run
+          from pb_cross_view_floor_finish_authority import CrossViewFloorFinishProducer
+          from pb_cross_view_ceiling_finish_authority import CrossViewCeilingFinishProducer
+          import pb_live_physical_net_wall_integration as integration
+
+          # Log authority stage results without substituting a detector or
+          # overriding a gate. These wrappers delegate to production unchanged.
+          publisher_events=[]
+          old_floor_publish=CrossViewFloorFinishProducer.publish
+          old_ceiling_finish_publish=CrossViewCeilingFinishProducer.publish
+          old_ceiling_quantity_publish=integration.publish_cross_view_ceiling_quantities
+          def trace_floor_publish(self):
+              result=old_floor_publish(self)
+              publisher_events.append({
+                  "stage":"cross_view_floor_finish",
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reasons":list(result.reason_codes),
+                  "records":len(result.records),
+                  "unresolved":len(result.unresolved_canonical_floor_ids),
+                  "documented_cross_view_area_records":len(self._room_areas.records) if self._room_areas is not None else 0,
+                  "documented_same_view_area_records":len(self._same_view_room_areas.records) if self._same_view_room_areas is not None else 0,
+              })
+              return result
+          def trace_ceiling_finish_publish(self):
+              result=old_ceiling_finish_publish(self)
+              publisher_events.append({
+                  "stage":"cross_view_ceiling_finish",
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reasons":list(result.reason_codes),
+                  "records":len(result.records),
+              })
+              return result
+          def trace_ceiling_quantity_publish(**kwargs):
+              result=old_ceiling_quantity_publish(**kwargs)
+              publisher_events.append({
+                  "stage":"cross_view_ceiling_quantity",
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reasons":list(result.reason_codes),
+                  "records":len(result.records),
+                  "quantities":len(result.quantities),
+              })
+              return result
+          CrossViewFloorFinishProducer.publish=trace_floor_publish
+          CrossViewCeilingFinishProducer.publish=trace_ceiling_finish_publish
+          integration.publish_cross_view_ceiling_quantities=trace_ceiling_quantity_publish
 
           source=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           manifest=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json").read_text())
@@ -50,6 +94,10 @@ jobs:
           claim=collect_live_physical_net_wall_claim(
               source, pages=(6,), topology_pages=(6,),
               room_area_support_pages=(10,),
+              # Test-only source-owned RCP / internal finishes / material
+              # schedule support scope (zero-indexed PDF pages 8-11). This
+              # is deliberately not a production page constant.
+              surface_semantic_pages=(7,8,9,10),
           )
           floor_areas=publish_live_floor_area_quantities(claim)
           def status(obj): return getattr(obj,"value",str(obj))
@@ -126,6 +174,11 @@ jobs:
               "floor_finish_quantities":qrows(families["floor_finish_area"]),
               "ceiling_quantities":qrows(families["ceiling_area"]),
               "family_sealing":seals,
+              "publisher_events":publisher_events,
+              "canonical_floor_status":status(claim.canonical_floor_status),
+              "canonical_floor_reasons":list(claim.canonical_floor_reason_codes),
+              "canonical_room_status":status(claim.canonical_room_status),
+              "canonical_room_reasons":list(claim.canonical_room_reason_codes),
           }
           p=Path("artifacts/gpt1-maryborough-real-surfaces/result.json")
           p.write_text(json.dumps(output,indent=2,sort_keys=True,default=str)+"\n")
@@ -134,6 +187,9 @@ jobs:
               "counts":output["counts"],"sealing":seals,
               "room_labels":sorted({r["label"] for r in rooms}),
               "quantity_errors":[k for k,v in seals.items() if v["status"]=="failed"],
+              "publisher_events":publisher_events,
+              "canonical_floor_status":output["canonical_floor_status"],
+              "canonical_floor_reasons":output["canonical_floor_reasons"],
           },sort_keys=True))
           # A diagnostic never invents a quantity to satisfy a test. Sealing
           # failures are real production failures and must fail this workflow.
