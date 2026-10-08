@@ -1121,122 +1121,67 @@ def _try_physical_net_wall_rows(
     seen_opening_quantity_ids: set[str] = set()
 
     def opening_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
+        """Project only source-closed opening quantities into AI-review rows."""
         from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+        from pb_live_opening_customer_projection import (
+            project_live_opening_customer_rows,
+        )
 
         if type(claim) is not LivePhysicalNetWallClaim:
             return []
 
-        openings = {
-            opening.canonical_opening_id: opening
-            for opening in claim.canonical_openings
-            if opening.canonical_opening_id
-        }
-        quantities = (
-            *getattr(claim, "opening_quantity_evidence", ()),
-            *getattr(claim, "opening_count_quantity_evidence", ()),
+        projected = project_live_opening_customer_rows(
+            claim,
+            workspace_id=int(workspace_id),
+            project_id=f"customer-workspace:{int(workspace_id)}",
         )
         rows: List[Tuple[Any, ...]] = []
-        for quantity in quantities:
+        for item in projected:
             if (
-                quantity.quantity_id in seen_opening_quantity_ids
-                or quantity.abstained
-                or quantity.value is None
-                or str(quantity.status or "").strip().lower()
-                not in {"firm", "corroborated"}
-                or not _is_finite_number(quantity.value)
-                or float(quantity.value) <= 0.0
+                str(item.get("origin") or "") != "AI"
+                or str(item.get("quantity_status") or "") != "To review"
             ):
+                raise ValueError("opening projection bypassed customer review state")
+
+            quantity_id = str(item.get("quantity_id") or "").strip()
+            if not quantity_id:
+                raise ValueError("opening projection is missing quantity identity")
+            if quantity_id in seen_opening_quantity_ids:
                 continue
 
-            target_ids = tuple(quantity.input_entity_ids)
-            target_openings = [openings.get(entity_id) for entity_id in target_ids]
-            if (
-                not target_ids
-                or any(opening is None for opening in target_openings)
-            ):
-                continue
-            resolved_openings = [opening for opening in target_openings if opening is not None]
-            if any(
-                opening.source_sha256 != resolved_openings[0].source_sha256
-                or opening.revision_id != resolved_openings[0].revision_id
-                or opening.document_id != resolved_openings[0].document_id
-                for opening in resolved_openings[1:]
-            ):
-                continue
-
-            kinds = {
-                str(opening.opening_kind or "").strip().lower()
-                for opening in resolved_openings
+            required = {
+                name: str(item.get(name) or "").strip()
+                for name in ("section", "element", "location", "substrate")
             }
-            if len(kinds) != 1 or next(iter(kinds)) not in {"door", "window"}:
-                continue
-            opening_kind = next(iter(kinds))
-            metadata = (
-                quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-            )
+            if not all(required.values()):
+                raise ValueError("opening projection is missing customer row identity")
 
-            if quantity.family == "opening_area":
-                if metadata.get("commercial_projection_allowed") is not True:
-                    continue
-                element = str(
-                    metadata.get("element") or f"{opening_kind.title()} area"
-                )
-                location = str(
-                    metadata.get("location")
-                    or resolved_openings[0].type_mark
-                    or opening_kind.title()
-                )
+            unit = str(item.get("unit") or "").strip().lower()
+            if unit == "m2":
                 unit = "m²"
-            elif quantity.family == "opening_count":
-                if metadata.get("schedule_corroborated") is not True:
-                    continue
-                mark = str(metadata.get("opening_mark") or "").strip().upper()
-                if not mark:
-                    continue
-                element = f"{opening_kind.title()} count"
-                location = mark
-                unit = "ea"
-            else:
-                continue
+            source_reference = str(item.get("source_reference") or "").strip()
+            if not source_reference:
+                raise ValueError("opening projection is missing source lineage")
 
-            page_ids = sorted(
-                {
-                    str(opening.page_id)
-                    for opening in resolved_openings
-                    if str(opening.page_id).strip()
-                },
-                key=lambda value: (
-                    (0, int(value)) if value.isdigit() else (1, value)
-                ),
-            )
-            source_page = ", ".join(f"p{page_id}" for page_id in page_ids)
-            source_ref = (
-                f"{SOURCE_PREFIX} · opening_quantity:{quantity.quantity_id}"
-            )
-            notes = (
-                f"Source-authenticated {quantity.family}; "
-                f"formula={quantity.formula}; "
-                f"canonical_openings={','.join(target_ids)}"
-            )
             rows.append(
                 _takeoff_row(
-                    workspace_id=workspace_id,
-                    section="Openings",
-                    element=element,
-                    location=location,
-                    substrate="Other",
-                    quantity=float(quantity.value),
-                    status="Measured",
-                    source_page=source_page or "Selected PDF pages",
-                    source_reference=source_ref,
+                    workspace_id=int(workspace_id),
+                    section=required["section"],
+                    element=required["element"],
+                    location=required["location"],
+                    substrate=required["substrate"],
+                    quantity=float(item["quantity"]),
+                    status="To review",
+                    source_page=str(item.get("source_page") or ""),
+                    source_reference=f"{SOURCE_PREFIX} · {source_reference}",
                     confidence="Documented",
-                    notes=notes,
+                    notes=str(item.get("notes") or ""),
                     row_role="",
                     unit=unit,
                     preserve_quantity=True,
                 )
             )
-            seen_opening_quantity_ids.add(quantity.quantity_id)
+            seen_opening_quantity_ids.add(quantity_id)
         return rows
 
     def room_area_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
