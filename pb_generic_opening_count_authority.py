@@ -718,6 +718,15 @@ class GenericOpeningCountProducer:
 
         count = len(matched_instance_ids)
 
+        matched_families = {
+            opening_families.get(op_id, "unknown")
+            for op_id in matched_instance_ids
+            if opening_families.get(op_id, "unknown") != "unknown"
+        }
+        resolved_customer_family = str(selector.opening_family or "").strip().lower()
+        if not resolved_customer_family and len(matched_families) == 1:
+            resolved_customer_family = next(iter(matched_families))
+
         # Caller schedule_declared_counts never decide corroboration or conflict.
         schedule_corroborated = False
         if (
@@ -850,13 +859,20 @@ class GenericOpeningCountProducer:
             metadata={
                 "schedule_corroborated": schedule_corroborated,
                 "opening_mark": selector.opening_mark,
-                "opening_family": selector.opening_family,
+                "opening_family": (
+                    resolved_customer_family or selector.opening_family
+                ),
                 "commercial_projection_allowed": bool(schedule_corroborated),
                 "section": "Openings",
                 "element": (
-                    f"{str(selector.opening_family or 'Opening').strip().title()} count"
+                    f"{str(resolved_customer_family or selector.opening_family or 'Opening').strip().title()} count"
                 ),
-                "location": str(selector.opening_mark or selector.opening_family or "Opening"),
+                "location": str(
+                    selector.opening_mark
+                    or resolved_customer_family
+                    or selector.opening_family
+                    or "Opening"
+                ),
                 "substrate": "Other",
                 "inclusion_status": "PROVISIONAL",
                 "row_role": "",
