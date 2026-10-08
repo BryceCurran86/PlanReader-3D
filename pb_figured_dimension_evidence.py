@@ -883,6 +883,105 @@ def _strict_style_dominator(
     return winners[0] if len(winners) == 1 else None
 
 
+def _tight_text_enclosure_path_indices(
+    observation_bbox: Sequence[float],
+    segments: Sequence[ObservedGeometrySegment],
+    calibration: DimensionLayoutCalibration,
+) -> frozenset[int]:
+    """Identify native four-edge paths that only frame this text observation.
+
+    Some CAD/PDF producers emit a tight vector rectangle around dimension text
+    (often a wipeout/background frame).  Its two opposite edges can be closer
+    to the text centre than the real split dimension line and therefore look
+    like two equally plausible dimension candidates.  Such a frame is not
+    measurement geometry and must not supply endpoint witnesses either.
+
+    Filtering is deliberately narrow and source-structural:
+    * all four edges belong to one native source path;
+    * the path contains exactly two horizontal and two vertical edges; and
+    * the path bounding box matches the observation bbox within a tolerance
+      derived from this page's own median text height.
+
+    Larger boxes, incomplete paths and distinct source paths remain untouched.
+    """
+    if len(observation_bbox) < 4:
+        return frozenset()
+    try:
+        ox0, oy0, ox1, oy1 = (float(observation_bbox[i]) for i in range(4))
+    except (TypeError, ValueError):
+        return frozenset()
+    if not all(math.isfinite(v) for v in (ox0, oy0, ox1, oy1)):
+        return frozenset()
+
+    by_path: dict[int, list[ObservedGeometrySegment]] = {}
+    for segment in segments:
+        if segment.source_path_index is None:
+            continue
+        by_path.setdefault(int(segment.source_path_index), []).append(segment)
+
+    edge_tolerance = max(
+        1e-3,
+        float(calibration.median_word_height_pt) * 0.20,
+    )
+    excluded: set[int] = set()
+    for path_index, path_segments in by_path.items():
+        if len(path_segments) != 4:
+            continue
+        horizontal = [
+            segment
+            for segment in path_segments
+            if segment.orientation == DimensionOrientation.HORIZONTAL.value
+        ]
+        vertical = [
+            segment
+            for segment in path_segments
+            if segment.orientation == DimensionOrientation.VERTICAL.value
+        ]
+        if len(horizontal) != 2 or len(vertical) != 2:
+            continue
+
+        xs = [
+            float(point[0])
+            for segment in path_segments
+            for point in (segment.start, segment.end)
+        ]
+        ys = [
+            float(point[1])
+            for segment in path_segments
+            for point in (segment.start, segment.end)
+        ]
+        px0, px1 = min(xs), max(xs)
+        py0, py1 = min(ys), max(ys)
+
+        if max(
+            abs(px0 - ox0),
+            abs(py0 - oy0),
+            abs(px1 - ox1),
+            abs(py1 - oy1),
+        ) > edge_tolerance:
+            continue
+
+        # Require a real closed rectangle, not merely four nearby segments.
+        if not all(
+            min(abs(segment.start[1] - py0), abs(segment.start[1] - py1))
+            <= edge_tolerance
+            and min(abs(segment.end[1] - py0), abs(segment.end[1] - py1))
+            <= edge_tolerance
+            for segment in horizontal
+        ):
+            continue
+        if not all(
+            min(abs(segment.start[0] - px0), abs(segment.start[0] - px1))
+            <= edge_tolerance
+            and min(abs(segment.end[0] - px0), abs(segment.end[0] - px1))
+            <= edge_tolerance
+            for segment in vertical
+        ):
+            continue
+        excluded.add(path_index)
+    return frozenset(excluded)
+
+
 def bind_observation_to_vector_geometry(
     observation: DimensionObservation,
     segments: Sequence[ObservedGeometrySegment],
@@ -894,12 +993,21 @@ def bind_observation_to_vector_geometry(
     if observation.bbox is None:
         return DimensionAnchorBinding(observation.dimension_id, BindingStatus.UNSUPPORTED.value, notes=["observation has no PDF-space bbox"])
     center = _bbox_center(observation.bbox)
+    excluded_text_frame_paths = _tight_text_enclosure_path_indices(
+        observation.bbox,
+        segments,
+        calibration,
+    )
     same_scope = [
         s for s in segments
         if s.source_page == observation.source_page
         and s.coordinate_space == CoordinateSpace.PDF_POINTS.value
         and (not observation.view_id or not s.view_id or s.view_id == observation.view_id)
         and s.orientation != DimensionOrientation.UNKNOWN.value
+        and (
+            s.source_path_index is None
+            or int(s.source_path_index) not in excluded_text_frame_paths
+        )
     ]
     candidates = [
         s for s in same_scope
