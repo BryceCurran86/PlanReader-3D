@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from collections import Counter
 from pathlib import Path
 
@@ -79,6 +80,80 @@ def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: 
         reasons.append("sealed_run_missing_physical_identity")
     return not reasons, len(sealed.quantities), reasons
 
+
+def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tuple) -> list[str]:
+    """Prove quantity projection from authenticated production IDs, never V2 truth.
+
+    Firm sealed quantities must be represented exactly once; an ABSTAIN may be
+    omitted but must remain ABSTAIN if supplied. Trade category is separately
+    authenticated upstream and is not inferred from benchmark descriptions.
+    """
+    blockers: list[str] = []
+    by_id: dict[str, dict] = {}
+    for item in produced:
+        quantity_id = item.get("quantity_id")
+        if not isinstance(quantity_id, str) or not quantity_id.strip():
+            blockers.append("produced_quantity_id_missing")
+            continue
+        if quantity_id in by_id:
+            blockers.append(f"duplicate_produced_quantity_id:{quantity_id}")
+        by_id[quantity_id] = item
+    sealed_by_id = {row.quantity_id: row for row in sealed_quantities}
+    if len(sealed_by_id) != len(sealed_quantities):
+        blockers.append("duplicate_sealed_quantity_ids")
+    for quantity_id, row in sealed_by_id.items():
+        item = by_id.get(quantity_id)
+        if item is None:
+            if not row.abstained:
+                blockers.append(f"firm_sealed_quantity_not_projected:{quantity_id}")
+            continue
+        if type(item.get("abstained")) is not bool or item["abstained"] != row.abstained:
+            blockers.append(f"projection_abstention_mismatch:{quantity_id}")
+        if type(item.get("lineage_ok")) is not bool or item["lineage_ok"] != row.lineage_ok:
+            blockers.append(f"projection_lineage_mismatch:{quantity_id}")
+        if not isinstance(item.get("unit"), str) or item["unit"].strip().lower() != row.unit.strip().lower():
+            blockers.append(f"projection_unit_mismatch:{quantity_id}")
+        value = item.get("value")
+        if row.abstained:
+            if value is not None:
+                blockers.append(f"abstained_projection_has_value:{quantity_id}")
+        elif (
+            type(value) not in (int, float)
+            or not math.isfinite(value)
+            or row.value is None
+            or value != row.value
+        ):
+            blockers.append(f"projection_value_mismatch:{quantity_id}")
+        refs = item.get("object_refs")
+        if (
+            not isinstance(refs, list)
+            or any(not isinstance(ref, str) or not ref.strip() for ref in refs)
+            or len(set(refs)) != len(refs)
+            or set(refs) != set(row.object_identity_refs)
+        ):
+            blockers.append(f"projection_object_identity_mismatch:{quantity_id}")
+        category = item.get("trade_category")
+        if not isinstance(category, str) or not category.strip():
+            blockers.append(f"projection_trade_category_missing:{quantity_id}")
+    for quantity_id in set(by_id) - set(sealed_by_id):
+        blockers.append(f"unsealed_produced_quantity:{quantity_id}")
+    return sorted(set(blockers))
+
+
+def _sealed_projection_proof(
+    sealed_root: Path | None, project_id: str, produced: list[dict], sealed_run_verified: bool
+) -> tuple[bool, list[str]]:
+    if not sealed_run_verified or sealed_root is None:
+        return False, ["produced_sealed_parity_not_proven"]
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+    sealed = sealed_source_closed_run_from_dict(
+        _object(sealed_root / project_id / "sealed_run.json")
+    )
+    blockers = produced_sealed_parity_blockers(produced, sealed.quantities)
+    return not blockers, blockers
+
+
 def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None = None, sealed_root: Path | None = None) -> dict:
     suite = _object(root / "manifest.json")
     project_ids = suite["projects"]
@@ -115,6 +190,10 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         expected_shas = {doc["sha256"] for doc in manifest.get("source_documents", ())}
         seal_verified, sealed_count, seal_reasons = _sealed_run_proof(sealed_root, project_id, expected_shas)
         blockers.extend(seal_reasons)
+        parity_verified, parity_reasons = _sealed_projection_proof(sealed_root, project_id, produced, seal_verified) if exists else (False, ["produced_sealed_parity_not_proven"])
+        blockers.extend(parity_reasons)
+        if exists:
+            blockers.append("commercial_trade_authority_not_independently_verified")
         if manifest.get("status") != "VERIFIED":
             blockers.insert(0, "frozen_manifest_not_verified")
         if not exists:
@@ -137,6 +216,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             "source_sha_verified": source_verified,
             "sealed_run_verified": seal_verified,
             "sealed_quantity_count": sealed_count,
+            "produced_sealed_parity_verified": parity_verified,
+            "commercial_trade_authority_verified": False,
             "reconciliation_complete": False,
             "blockers": sorted(set(blockers)),
             "coverage_accuracy": None,
