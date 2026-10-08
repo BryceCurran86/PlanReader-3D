@@ -276,6 +276,55 @@ def test_duplicate_physical_opening_identity_fails_closed() -> None:
         )
 
 
+
+def test_duplicate_with_abstained_member_cannot_hide_opening_identity_conflict() -> None:
+    firm = _opening()
+    unsupported = replace(
+        firm,
+        opening_kind=None,
+        area_m2=None,
+        figured_area_record_id=None,
+        evidence_ids=("opening-1", "source-observation-2"),
+    )
+    assert _opening_quantity(firm) is not None
+    assert _opening_quantity(unsupported) is None
+    with pytest.raises(ValueError, match="duplicate canonical opening identity"):
+        publish_live_opening_area_quantities(
+            _composition(firm, unsupported)
+        )
+
+
+def test_duplicate_physical_id_across_distinct_canonical_ids_fails_closed() -> None:
+    firm = _opening()
+    unsupported = replace(
+        _opening(canonical_id="opening-conflicting"),
+        physical_opening_id=firm.physical_opening_id,
+    )
+    # Neither the conflicting canonical ID nor the duplicate physical ID
+    # can be selected opportunistically based on which candidate has area.
+    assert _opening_quantity(unsupported) is None
+    with pytest.raises(ValueError, match="duplicate physical opening identity"):
+        publish_live_opening_area_quantities(
+            _composition(firm, unsupported)
+        )
+
+
+def test_independent_partial_opening_does_not_suppress_valid_hosted_quantity() -> None:
+    firm = _opening()
+    unresolved = replace(
+        _opening(canonical_id="unresolved-opening"),
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+    )
+    assert _opening_quantity(unresolved) is None
+    quantities = publish_live_opening_area_quantities(
+        _composition(firm, unresolved)
+    )
+    assert len(quantities) == 1
+    assert quantities[0].input_entity_ids == ("opening-1",)
+
+
 def test_figured_opening_quantity_is_sealable_and_commercially_projectable() -> None:
     opening = _opening()
     quantity = _opening_quantity(opening)
