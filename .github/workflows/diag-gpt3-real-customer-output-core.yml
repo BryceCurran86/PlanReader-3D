@@ -1,0 +1,53 @@
+name: DIAG GPT3 Real Customer Output Core
+
+on:
+  push:
+    branches:
+      - diag/gpt3-real-customer-output-core-v1
+
+concurrency:
+  group: diag-gpt3-real-customer-output-core
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project_id: au_qld_maryborough_service_station
+            pdf: documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+            slug: maryborough
+          - project_id: au_qld_lot16_power
+            pdf: documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf
+            slug: lot16
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Verify real core customer rows
+        shell: bash
+        run: |
+          ROOT="artifacts/gpt3-real-customer-output-core/${{ matrix.slug }}"
+          mkdir -p "$ROOT"
+          PYTHONPATH=. python -u tools/diag_gpt3_real_customer_output_core.py \
+            --pdf "${{ matrix.pdf }}" \
+            --project-id "${{ matrix.project_id }}" \
+            --output-dir "$ROOT" \
+            | tee "$ROOT/stdout.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-real-customer-output-core-${{ matrix.slug }}
+          path: artifacts/gpt3-real-customer-output-core/${{ matrix.slug }}
+          retention-days: 3
