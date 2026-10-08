@@ -969,6 +969,38 @@ def test_replay_same_immutable_observation_reuses_both_verified_dpi_reads() -> N
     assert setup.producer.authority().resolve(selector) == first
 
 
+def test_cached_raster_positive_is_invalidated_by_source_byte_tampering() -> None:
+    """Cached OCR cannot outlive integrity of its actual immutable source."""
+    reads: list[int] = []
+
+    def exact(image: Image.Image, dpi: int):
+        reads.append(int(dpi))
+        return (_line(image, "150mm"),)
+
+    setup = _Setup(
+        _glyph_unverified_pdf([("150mm", 40, 120)]),
+        MockOCRBackend(responder=exact),
+    )
+    selector = setup.selector(setup.oid_of("150mm"))
+    first = setup.producer.publish(selector)
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS)
+
+    revision = setup.published.revision.revision_id
+    setup.svp._producer._store.source_bytes_by_revision[revision] = (
+        b"%PDF-1.7\nsource unexpectedly changed"
+    )
+    failed = setup.producer.publish(selector)
+    assert failed.status is EvidenceResolutionStatus.CONFLICT
+    assert failed.record is None
+    assert RASTER_TEXT_SOURCE_LINEAGE_UNRESOLVED in failed.reason_codes
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS)
+    assert (
+        setup.producer.authority().resolve(selector).reason_codes
+        == (RASTER_TEXT_RECORD_UNAVAILABLE,)
+    )
+
+
 def test_replay_abstention_never_retries_or_upgrades_ocr_failure() -> None:
     """An unchanged failed proof stays ABSTAIN despite backend later changing."""
     reads: list[int] = []
