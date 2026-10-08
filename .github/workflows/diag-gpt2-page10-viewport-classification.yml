@@ -88,3 +88,65 @@ jobs:
               "wall_viewport_scopes":scopes,
           },indent=2,sort_keys=True))
           PY
+
+  wall-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reproduce live page 10 wall scope
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+          )
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-current-wall-scope",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-current-wall-scope",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("10",),
+          )
+          source.augment_with_raster_opening_primitives(
+              published.revision.revision_id,
+              page_ids=("10",),
+          )
+          producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,
+              page_ids=("10",),
+          )
+          current=source.published_snapshot_for_revision(published.revision.revision_id)
+          result=producer.authority().resolve_scope(
+              PhysicalWallCandidateSelector(
+                  document_id=current.revision.document_id,
+                  revision_id=current.revision.revision_id,
+                  source_sha256=current.revision.source_sha256,
+                  snapshot_id=current.snapshot.snapshot_id,
+                  page_id="10",
+                  decision_scope_id="wall-source:page-10",
+              )
+          )
+          print(json.dumps({
+              "status":getattr(result.status,"value",str(result.status)),
+              "scope_complete":bool(result.scope_complete),
+              "reason_codes":list(result.reason_codes),
+              "record_count":len(result.records),
+              "scope_boundary_observation_ids":list(result.scope_boundary_observation_ids),
+          },indent=2,sort_keys=True))
+          PY
