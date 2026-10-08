@@ -61,6 +61,7 @@ from pb_source_observation_authority import (
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationProducer,
+    SourceObservationRecord,
     SourceRevisionRecord,
 )
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
@@ -527,6 +528,38 @@ def _raster_segment_observation_id(
         "index": int(index),
     }
     return stable_contract_id("source_observation", payload, digest_chars=32)
+
+
+def _raster_segment_receipt_matches_parent(
+    receipt: RasterSegmentVisibilityReceipt, parent: SourceObservationRecord,
+) -> bool:
+    """Bind registration facts to the authenticated immutable source parent.
+
+    Detector version remains provenance; the historical identity version is
+    fixed independently. A replaced receipt cannot change pixel geometry,
+    render identity or DPI while borrowing an already verified source record.
+    """
+    if receipt.dpi != RASTER_RENDER_DPI:
+        return False
+    try:
+        prefix, render_sha, identity_version, index = str(parent.source_primitive_ref).split(":")
+        if (prefix != "raster_segment" or render_sha != receipt.image_sha256
+                or identity_version != RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION):
+            return False
+        expected_geometry = tuple(round(float(value) * 72.0 / receipt.dpi, 6)
+                                  for value in receipt.pixel_geometry)
+        if expected_geometry != tuple(receipt.geometry):
+            return False
+        expected_id = _raster_segment_observation_id(
+            document_id=receipt.document_id, revision_id=receipt.revision_id,
+            page_id=receipt.page_id, partition_id=receipt.source_partition_id,
+            image_sha256=receipt.image_sha256, identity_version=identity_version,
+            pixel_geometry=receipt.pixel_geometry, geometry=receipt.geometry,
+            index=int(index),
+        )
+        return expected_id == parent.observation_id
+    except (TypeError, ValueError, OverflowError, ZeroDivisionError):
+        return False
 
 
 def _axis_aligned_geometry_fully_covered_by_rect_union(
@@ -2256,6 +2289,35 @@ class SourceVisibilityAuthority:
         )
         return frozenset(ids)
 
+    def raster_opening_primitive_observation_ids_for_snapshot(
+        self, snapshot_id: str
+    ) -> frozenset[str]:
+        """Address isolated raster observations without granting authority.
+
+        Include the sealed snapshot inventory as well as the receipt index so
+        a missing receipt cannot hide an opening from a completeness audit.
+        Every returned ID must still pass ``resolve_visible``.
+        """
+        snapshot_id = str(snapshot_id)
+        ids = {
+            observation_id
+            for receipt_snapshot_id, observation_id
+            in self._raster_opening_primitive_receipts
+            if receipt_snapshot_id == snapshot_id
+        }
+        store = self._source_authority._store
+        snapshot = store.snapshots.get(snapshot_id)
+        if snapshot is not None:
+            for observation_id in snapshot.observation_ids:
+                record = store.observations.get((snapshot_id, observation_id))
+                if (
+                    record is None
+                    or record.origin_kind
+                    == RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND
+                ):
+                    ids.add(observation_id)
+        return frozenset(ids)
+
     def visible_observation_ids_for_page(
         self,
         snapshot_id: str,
@@ -2441,6 +2503,7 @@ class SourceVisibilityAuthority:
                 parent = _record(raster_receipt.parent_observation_id)
                 if (
                     parent.observation_kind != RASTER_PDF_SEGMENT
+                    or not _raster_segment_receipt_matches_parent(raster_receipt, parent)
                     or parent.origin_kind != RASTER_SEGMENT_ORIGIN_KIND
                     or parent.derivation_parent_ids
                     != (raster_receipt.page_parent_observation_id,)
@@ -2554,6 +2617,7 @@ class SourceVisibilityAuthority:
                 return self._blocked(OBSERVATION_UNAVAILABLE)
             if (
                 parent.observation_kind != RASTER_PDF_SEGMENT
+                or not _raster_segment_receipt_matches_parent(raster_receipt, parent)
                 or parent.origin_kind != RASTER_SEGMENT_ORIGIN_KIND
                 or parent.derivation_parent_ids
                 != (raster_receipt.page_parent_observation_id,)
