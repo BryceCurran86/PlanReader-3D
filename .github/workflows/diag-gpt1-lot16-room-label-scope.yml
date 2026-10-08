@@ -1,0 +1,95 @@
+name: DIAG GPT1 Lot16 Room Label Scope
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-room-label-scope-v1
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Capture real Lot16 room-label authority
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          import pb_source_room_label_authority as labels
+
+          captured=[]
+          original=labels.SourceRoomLabelAuthority.resolve_scope
+          def traced(self, selector):
+              result=original(self, selector)
+              if str(selector.page_id)=="3":
+                  captured.append(result)
+              return result
+          labels.SourceRoomLabelAuthority.resolve_scope=traced
+          try:
+              claim=collect_live_physical_net_wall_claim(
+                  Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"),
+                  pages=(2,),
+                  topology_pages=(2,),
+                  room_area_support_pages=None,
+              )
+          finally:
+              labels.SourceRoomLabelAuthority.resolve_scope=original
+
+          out=[]
+          seen=set()
+          for result in captured:
+              key=(result.page_id,result.decision_scope_id,tuple(r.record_id for r in result.records),tuple(r.record_id for r in result.split_face_candidates))
+              if key in seen:
+                  continue
+              seen.add(key)
+              out.append({
+                  "page_id":result.page_id,
+                  "decision_scope_id":result.decision_scope_id,
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "records":[{
+                      "label":r.label,
+                      "face_id":r.face_id,
+                      "source_room_face_record_id":r.source_room_face_record_id,
+                      "source_bbox":list(r.source_bbox),
+                      "observation_ids":list(r.observation_ids),
+                      "word_evidence":[{
+                          "text":w.trusted_text,
+                          "authority_kind":w.authority_kind,
+                          "geometry":list(w.geometry),
+                          "word_no":w.word_no,
+                      } for w in r.word_evidence],
+                  } for r in result.records],
+                  "split_face_candidates":[{
+                      "label":r.label,
+                      "record_id":r.record_id,
+                      "source_bbox":list(r.source_bbox),
+                      "word_face_ids":list(r.word_face_ids),
+                      "source_room_face_record_ids":list(r.source_room_face_record_ids),
+                      "observation_ids":list(r.observation_ids),
+                      "word_evidence":[{
+                          "text":w.trusted_text,
+                          "authority_kind":w.authority_kind,
+                          "geometry":list(w.geometry),
+                          "word_no":w.word_no,
+                      } for w in r.word_evidence],
+                  } for r in result.split_face_candidates],
+              })
+          print(json.dumps({
+              "captured_scopes":out,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_labels":[r.room_label for r in claim.canonical_rooms if r.room_label],
+          },indent=2,sort_keys=True))
+          PY
