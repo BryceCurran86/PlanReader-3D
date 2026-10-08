@@ -25,12 +25,26 @@ jobs:
           import json,re
           from pathlib import Path
           import fitz
+          from pb_viewport_segmentation import segment_page_viewports
           path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
           doc=fitz.open(path)
           rows=[]
+          view_rows=[]
           try:
               for pno in range(doc.page_count):
                   page=doc[pno]
+                  viewports=segment_page_viewports(page,page_number=pno+1)
+                  for vp in viewports:
+                      if vp.bounding_box is None:
+                          continue
+                      view_rows.append({
+                          "page":pno+1,
+                          "view_id":vp.view_id,
+                          "view_type":vp.view_type,
+                          "status":vp.status,
+                          "bbox":list(vp.bounding_box),
+                          "label":vp.label,
+                      })
                   words=page.get_text("words") or []
                   lines={}
                   for word in words:
@@ -48,19 +62,75 @@ jobs:
                           or "°" in text
                           or re.search(r"\b\d+(?:\.\d+)?\s*(?:DEG|DEGREES?)\b",upper)
                       ):
+                          bbox=[
+                              min(float(w[0]) for w in group),
+                              min(float(w[1]) for w in group),
+                              max(float(w[2]) for w in group),
+                              max(float(w[3]) for w in group),
+                          ]
+                          containing=[
+                              vp for vp in viewports
+                              if vp.bounding_box is not None
+                              and bbox[0] >= float(vp.bounding_box[0])
+                              and bbox[1] >= float(vp.bounding_box[1])
+                              and bbox[2] <= float(vp.bounding_box[2])
+                              and bbox[3] <= float(vp.bounding_box[3])
+                          ]
                           rows.append({
                               "page":pno+1,
                               "block":key[0],
                               "line":key[1],
                               "text":text,
-                              "bbox":[
-                                  min(float(w[0]) for w in group),
-                                  min(float(w[1]) for w in group),
-                                  max(float(w[2]) for w in group),
-                                  max(float(w[3]) for w in group),
+                              "bbox":bbox,
+                              "viewports":[
+                                  {
+                                      "view_id":vp.view_id,
+                                      "view_type":vp.view_type,
+                                      "status":vp.status,
+                                      "label":vp.label,
+                                  }
+                                  for vp in containing
+                              ],
+                          })
+                  # Also capture room-name references that may tie a section/
+                  # elevation pitch to the physical raked-ceiling rooms.
+                  for key,group in lines.items():
+                      group=sorted(group,key=lambda w:int(w[7]) if len(w)>7 else 0)
+                      text=" ".join(str(w[4]) for w in group).strip()
+                      upper=text.upper()
+                      if any(token in upper for token in ("ENS","WIR","GARAGE")):
+                          bbox=[
+                              min(float(w[0]) for w in group),
+                              min(float(w[1]) for w in group),
+                              max(float(w[2]) for w in group),
+                              max(float(w[3]) for w in group),
+                          ]
+                          containing=[
+                              vp for vp in viewports
+                              if vp.bounding_box is not None
+                              and bbox[0] >= float(vp.bounding_box[0])
+                              and bbox[1] >= float(vp.bounding_box[1])
+                              and bbox[2] <= float(vp.bounding_box[2])
+                              and bbox[3] <= float(vp.bounding_box[3])
+                          ]
+                          rows.append({
+                              "page":pno+1,
+                              "block":key[0],
+                              "line":key[1],
+                              "text":text,
+                              "bbox":bbox,
+                              "room_reference":True,
+                              "viewports":[
+                                  {
+                                      "view_id":vp.view_id,
+                                      "view_type":vp.view_type,
+                                      "status":vp.status,
+                                      "label":vp.label,
+                                  }
+                                  for vp in containing
                               ],
                           })
           finally:
               doc.close()
-          print(json.dumps({"matches":rows},indent=2,sort_keys=True))
+          print(json.dumps({"matches":rows,"viewports":view_rows},indent=2,sort_keys=True))
           PY
