@@ -1460,15 +1460,18 @@ def _all_viewports(page: fitz.Page, *, page_number: int) -> Optional[list]:
 
 
 def _wall_scope_relevant_viewports(all_viewports):
-    """Discard only unbounded non-spatial reference regions from wall scope.
+    """Return only viewport types that can bound physical wall topology.
 
-    Legends, schedules, and specifications cannot by themselves define or crop
-    physical wall topology when viewport segmentation has no bounding box for
-    them. Physical drawing types, unknown types, and any viewport with actual
-    bounds remain conservative and fail-closed.
+    Legends, schedules, and specifications are semantic/reference regions. Their
+    frames may be source-authenticated and useful to downstream semantic
+    authorities, but those frames cannot crop or complete a physical wall
+    universe merely because wall linework exists elsewhere on the same sheet.
+
+    Physical drawing types, unknown types, and their authenticated bounds remain
+    conservative and fail-closed.
     """
 
-    non_spatial_unbounded_types = {
+    non_spatial_reference_types = {
         DrawingViewType.LEGEND.value,
         DrawingViewType.SCHEDULE.value,
         DrawingViewType.SPECIFICATION.value,
@@ -1476,9 +1479,8 @@ def _wall_scope_relevant_viewports(all_viewports):
     return [
         viewport
         for viewport in all_viewports
-        if getattr(viewport, "bounding_box", None) is not None
-        or str(getattr(viewport, "view_type", "") or "")
-        not in non_spatial_unbounded_types
+        if str(getattr(viewport, "view_type", "") or "")
+        not in non_spatial_reference_types
     ]
 
 
