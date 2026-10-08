@@ -1,0 +1,85 @@
+name: DIAG GPT2 Freezer Page10 Current Main
+
+on:
+  push:
+    branches:
+      - diag/gpt2-freezer-page10-current-main
+
+concurrency:
+  group: gpt2-freezer-backtrack-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused room-face tests
+        run: PYTHONPATH=. pytest -q tests/test_source_room_face_authority_v1.py
+      - name: Prove real support-room polygon validity
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-freezer-backtrack-proof
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          from shapely.geometry import Polygon
+          from shapely.validation import explain_validity
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          source=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          claim=collect_live_physical_net_wall_claim(
+              source,
+              pages=(10,),
+              topology_pages=(10,),
+              room_area_support_pages=(10,),
+          )
+          def norm(value):
+              return " ".join(str(value or "").strip().upper().split())
+          rows=[]
+          for room in claim.canonical_rooms:
+              if not room.geometry_complete or not norm(room.room_label):
+                  continue
+              polygon=Polygon(room.polygon_pdf_pts)
+              rows.append({
+                  "label":norm(room.room_label),
+                  "physical_room_id":room.physical_room_id,
+                  "source_room_face_record_id":room.source_room_face_record_id,
+                  "vertex_count":len(room.polygon_pdf_pts),
+                  "area_page_pts2":room.area_page_pts2,
+                  "shapely_area":float(polygon.area),
+                  "valid":bool(polygon.is_valid),
+                  "validity_reason":explain_validity(polygon),
+              })
+          freezer=[row for row in rows if row["label"]=="FREEZER"]
+          print(json.dumps({
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+              "labelled_rooms":rows,
+              "freezer":freezer,
+          },indent=2,sort_keys=True))
+          assert len(freezer)==1, freezer
+          assert freezer[0]["valid"], freezer[0]
+          assert abs(
+              float(freezer[0]["shapely_area"])
+              - float(freezer[0]["area_page_pts2"])
+          ) < 1e-6
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-freezer-backtrack-proof
+          path: artifacts/gpt2-freezer-backtrack-proof
+          retention-days: 2
