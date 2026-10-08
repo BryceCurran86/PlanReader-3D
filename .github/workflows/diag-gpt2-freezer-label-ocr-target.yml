@@ -1,0 +1,150 @@
+name: DIAG GPT2 Freezer Label OCR Target
+
+on:
+  push:
+    branches:
+      - diag/gpt2-freezer-label-ocr-target
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Probe room-label OCR targets
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import io
+          import json
+          from pathlib import Path
+          from PIL import Image, ImageOps
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_portable_raster_ocr_authority import TesseractOCRBackend
+          from pb_raster_text_corroboration_authority import (
+              RASTER_TEXT_CORROBORATION_DPIS,
+              RasterTextCorroborationProducer,
+              RasterTextCorroborationSelector,
+              _lossless_rotate,
+              _producer_owned_ocr_target,
+              normalize_reading,
+          )
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload=Path(
+              "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
+          ).read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-freezer-label-ocr",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-freezer-label-ocr",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("11",),
+          )
+          text_auth=source.text_integrity_authority()
+          raster=RasterTextCorroborationProducer.from_source_visibility_producer(source)
+          backend=TesseractOCRBackend()
+          rows=[]
+          wanted={
+              "FREEZER","COLD","ROOM","FOOD","PREP","OFFICE",
+              "POS","COUNTER","WASH","UP"
+          }
+          for oid in published.text_observation_ids:
+              selector=ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=oid,
+              )
+              source_result=source._producer.authority().resolve(selector)
+              observation=source_result.observation
+              if observation is None or str(observation.page_id)!="11":
+                  continue
+              text=normalize_reading(str(observation.raw_text or "")).upper()
+              if text not in wanted:
+                  continue
+              native=text_auth.resolve_text(selector)
+              receipt=native.receipt
+              if receipt is None:
+                  continue
+              bbox,rotation=_producer_owned_ocr_target(
+                  source._producer,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  page_id="11",
+                  receipt=receipt,
+                  word_bbox=tuple(float(v) for v in receipt.geometry),
+                  raw_text=str(observation.raw_text),
+              )
+              current=raster.publish(
+                  RasterTextCorroborationSelector(
+                      document_id=selector.document_id,
+                      revision_id=selector.revision_id,
+                      source_sha256=selector.source_sha256,
+                      snapshot_id=selector.snapshot_id,
+                      observation_id=selector.observation_id,
+                  )
+              )
+              manual={}
+              for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+                  png,_=source._producer.render_native_page_png(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      page_id="11",
+                      dpi=float(dpi),
+                      clip_pt=bbox,
+                  )
+                  img=Image.open(io.BytesIO(png)).convert("RGB")
+                  variants={}
+                  for label,rot in (("current",int(rotation)),("zero",0),("plus90",90),("minus90",-90),("180",180)):
+                      view=_lossless_rotate(img,rot)
+                      margin=max(1,round(float(dpi)*1.0/25.4))
+                      isolated=ImageOps.expand(view,border=margin,fill="white")
+                      reading=backend.read_line(isolated,dpi=int(dpi))
+                      variants[label]=None if reading is None else normalize_reading(reading.text)
+                  manual[str(dpi)]=variants
+              rows.append({
+                  "text":str(observation.raw_text),
+                  "observation_id":oid,
+                  "block_no":receipt.block_no,
+                  "line_no":receipt.line_no,
+                  "word_no":receipt.word_no,
+                  "sequence_number":receipt.sequence_number,
+                  "trace_sequence_numbers":list(receipt.trace_sequence_numbers or ()),
+                  "native_status":getattr(native.status,"value",str(native.status)),
+                  "native_reason_codes":list(native.reason_codes or ()),
+                  "receipt_reason_codes":list(receipt.reason_codes or ()),
+                  "word_bbox":[float(v) for v in receipt.geometry],
+                  "target_bbox":[float(v) for v in bbox],
+                  "target_rotation":int(rotation),
+                  "raster_status":getattr(current.status,"value",str(current.status)),
+                  "raster_reason_codes":list(current.reason_codes or ()),
+                  "raster_record":None if current.record is None else {
+                      "text":current.record.corroborated_text,
+                      "views":[{
+                          "dpi":view.dpi,
+                          "ocr_reading":view.ocr_reading,
+                          "ocr_rotation_degrees":view.ocr_rotation_degrees,
+                      } for view in current.record.views],
+                  },
+                  "manual":manual,
+              })
+          print(json.dumps(rows,indent=2,sort_keys=True))
+          assert any(row["text"].strip().upper()=="FREEZER" for row in rows), rows
+          PY
