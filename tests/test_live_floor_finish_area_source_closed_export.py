@@ -13,6 +13,10 @@ from pb_live_floor_finish_area_source_closed_export import (
     build_live_floor_finish_area_source_traces,
     seal_live_floor_finish_area_run,
 )
+from pb_live_floor_finish_customer_projection import (
+    project_live_floor_finish_customer_rows,
+)
+from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_source_closed_run_export import SourceClosedRunConflictError
@@ -80,6 +84,14 @@ def _quantity() -> QuantityEvidence:
             "finish_definition_record_id": "def-1",
             "finish_occurrence_record_id": "occ-1",
             "source_dimension_page_id": "2",
+            "figured_dimension_ids": ["dim-x", "dim-y"],
+            "section": "Internal",
+            "element": "Floor finish area",
+            "location": "OFFICE",
+            "substrate": "Other",
+            "finish_system": "tile",
+            "inclusion_status": "INCLUSION",
+            "row_role": "floor_area",
         },
     )
 
@@ -154,6 +166,55 @@ def test_floor_finish_quantity_seals_on_exact_canonical_floor_lineage() -> None:
     trace = traces[quantity_id]
     assert trace.metadata["support_page_id"] == "9"
     assert trace.metadata["support_viewport_id"] == "finish-vp"
+
+
+def test_floor_finish_seal_reaches_one_live_and_persisted_customer_row() -> None:
+    claim = _claim()
+    run = seal_live_floor_finish_area_run(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+
+    assert len(run.quantities) == len(rows) == 1
+    assert rows[0]["quantity_id"] == run.quantities[0].quantity_id
+    assert rows[0]["quantity_family"] == "floor_finish_area"
+    assert rows[0]["measurement_method"] == "figured_dimension"
+    assert rows[0]["figured_dimension_ids"] == ["dim-x", "dim-y"]
+    assert rows[0]["finish_system"] == "tile"
+    assert rows[0]["quantity_status"] == "To review"
+
+    live = verify_sealed_customer_output(run, rows)
+    assert live.valid_quantity_count == live.customer_row_count == 1
+
+    persisted = {
+        "workspace_id": rows[0]["workspace_id"],
+        "section": rows[0]["section"],
+        "element": rows[0]["element"],
+        "location": rows[0]["location"],
+        "substrate": rows[0]["substrate"],
+        "finish_system": rows[0]["finish_system"],
+        "quantity": rows[0]["quantity"],
+        "unit": "m²",
+        "quantity_status": rows[0]["quantity_status"],
+        "source_page": rows[0]["source_page"],
+        "source_reference": "PB Auto Geometry v1.2.19 · " + rows[0]["source_reference"],
+        "inclusion_status": rows[0]["inclusion_status"],
+        "confidence": "Documented",
+        "notes": rows[0]["notes"],
+        "row_role": rows[0]["row_role"],
+    }
+    persisted_report = verify_sealed_customer_output(run, [persisted])
+    assert persisted_report.valid_quantity_count == 1
+    assert persisted_report.customer_row_count == 1
+    assert persisted_report.verified_quantity_ids == (
+        run.quantities[0].quantity_id,
+    )
 
 
 def test_floor_finish_export_rejects_missing_semantic_snapshot() -> None:
