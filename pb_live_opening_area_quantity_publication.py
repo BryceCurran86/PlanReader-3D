@@ -175,7 +175,10 @@ def _opening_quantity(
             "commercial_projection_allowed": True,
             "section": "Openings",
             "element": f"{opening_kind.title()} area",
-            "row_role": opening_kind,
+            "location": str(opening.type_mark or "").strip() or opening_kind.title(),
+            "substrate": "Other",
+            "inclusion_status": "PROVISIONAL",
+            "row_role": "",
         },
     )
 
