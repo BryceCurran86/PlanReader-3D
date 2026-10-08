@@ -298,7 +298,8 @@ def test_final_floor_area_seal_reaches_one_live_and_persisted_customer_row(
     assert rows[0]["row_role"] == "floor_area"
 
     live_report = verify_sealed_customer_output(run, rows)
-    assert live_report.complete if hasattr(live_report, "complete") else True
+    assert live_report.valid_quantity_count == 1
+    assert live_report.customer_row_count == 1
     assert live_report.verified_quantity_ids == (run.quantities[0].quantity_id,)
 
     persisted = {
@@ -319,6 +320,8 @@ def test_final_floor_area_seal_reaches_one_live_and_persisted_customer_row(
         "row_role": "floor_area",
     }
     persisted_report = verify_sealed_customer_output(run, [persisted])
+    assert persisted_report.valid_quantity_count == 1
+    assert persisted_report.customer_row_count == 1
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
