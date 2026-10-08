@@ -325,6 +325,31 @@ def enrich_live_canonical_floor_metric_areas(
 
         quantity = candidates[0]
         value = float(quantity.value)
+        # A later bridge must not silently replace an independently
+        # authenticated measurement already attached to this physical floor.
+        # The exact same claim may be replayed, but contradictory identities,
+        # values, or measurement authorities are a conflict.
+        if (
+            floor.metric_area_quantity_id is not None
+            or floor.metric_area_m2 is not None
+            or floor.metric_area_authority is not None
+        ):
+            try:
+                same_claim = (
+                    str(floor.metric_area_quantity_id or "").strip()
+                    == str(quantity.quantity_id or "").strip()
+                    and str(floor.metric_area_authority or "").strip()
+                    == str(quantity.authority or "").strip()
+                    and floor.metric_area_m2 is not None
+                    and math.isfinite(float(floor.metric_area_m2))
+                    and abs(float(floor.metric_area_m2) - value) <= 1e-9
+                )
+            except (TypeError, ValueError, OverflowError):
+                same_claim = False
+            if not same_claim:
+                conflict = True
+                enriched.append(floor)
+                continue
         enriched.append(
             replace(
                 floor,
