@@ -1195,6 +1195,38 @@ def _recover_native_material_block(
     )
 
 
+def _group_native_material_block_words(
+    words: Sequence[_TrustedTextWord],
+) -> dict[tuple[str, int], tuple[_TrustedTextWord, ...]]:
+    """Group source-owned words without repeated tuple copying or sorting.
+
+    Preserve per-block first-seen order and the original provenance-based
+    total sort key. This only reorganizes immutable receipts: it never changes
+    their trust, source partition, geometry or authentication status.
+    """
+    collected: dict[tuple[str, int], list[_TrustedTextWord]] = {}
+    for word in words:
+        if not word.source_partition_id:
+            continue
+        collected.setdefault(
+            (word.source_partition_id, int(word.block_no)), []
+        ).append(word)
+    return {
+        key: tuple(
+            sorted(
+                block_words,
+                key=lambda row: (
+                    row.line_no,
+                    row.word_no,
+                    row.bbox[0],
+                    row.observation_id,
+                ),
+            )
+        )
+        for key, block_words in collected.items()
+    }
+
+
 def _trusted_native_material_schedule_cluster_blocks(
     *,
     source: SourceVisibilityProducer,
@@ -1213,22 +1245,11 @@ def _trusted_native_material_schedule_cluster_blocks(
     authenticate every source word.
     """
 
-    grouped: dict[tuple[str, int], tuple[_TrustedTextWord, ...]] = {}
-    for word in words:
-        if not word.source_partition_id:
-            continue
-        key = (word.source_partition_id, int(word.block_no))
-        grouped[key] = tuple(
-            sorted(
-                (*grouped.get(key, ()), word),
-                key=lambda row: (
-                    row.line_no,
-                    row.word_no,
-                    row.bbox[0],
-                    row.observation_id,
-                ),
-            )
-        )
+    # Collect each native block in one pass. Rebuilding and sorting a tuple
+    # for every word copies the existing prefix repeatedly (quadratic on
+    # dense CAD-exported text blocks). The immutable, deterministic sorted
+    # tuples are materialized once, after all producer-owned words are read.
+    grouped = _group_native_material_block_words(words)
 
     trusted_titles: list[tuple[tuple[float, float, float, float], tuple[str, ...]]] = []
     for block_words in grouped.values():
