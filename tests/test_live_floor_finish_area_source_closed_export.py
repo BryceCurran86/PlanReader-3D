@@ -9,6 +9,10 @@ from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_external_physical_net_wall_publication import (
     LiveExternalPhysicalNetWallPublication,
 )
+from pb_customer_output_verification import verify_sealed_customer_output
+from pb_live_floor_finish_customer_projection import (
+    project_live_floor_finish_customer_rows,
+)
 from pb_live_floor_finish_area_source_closed_export import (
     build_live_floor_finish_area_source_traces,
     seal_live_floor_finish_area_run,
@@ -189,3 +193,31 @@ def test_floor_finish_export_rejects_semantic_drift_from_canonical_floor() -> No
             workspace_id=1,
             project_id="project-1",
         )
+
+
+def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
+    claim = _claim()
+    run = seal_live_floor_finish_area_run(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+    rows = project_live_floor_finish_customer_rows(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+
+    assert len(run.quantities) == len(rows) == 1
+    row = rows[0]
+    assert row["quantity_id"] == run.quantities[0].quantity_id
+    assert row["quantity_family"] == "floor_finish_area"
+    assert row["quantity_status"] == "To review"
+    assert row["origin"] == "AI"
+    assert row["row_role"] == "floor_area"
+    assert row["finish_system"] == "tile"
+
+    report = verify_sealed_customer_output(run, rows)
+    assert report.valid_quantity_count == 1
+    assert report.customer_row_count == 1
+    assert report.verified_quantity_ids == (run.quantities[0].quantity_id,)
