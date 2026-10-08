@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import fitz
+
 from pb_dimension_graph_constraint_engine import (
     DimensionObservation,
     DimensionOrientation,
@@ -11,6 +13,7 @@ from pb_figured_dimension_evidence import (
     ObservedGeometrySegment,
     _tight_text_enclosure_path_indices,
     bind_observation_to_vector_geometry,
+    extract_dimension_evidence_bundle,
 )
 
 
@@ -142,3 +145,55 @@ def test_distinct_paths_are_never_collapsed_into_one_text_frame() -> None:
     )
 
     assert excluded == frozenset()
+
+
+
+def test_yearlike_number_requires_explicit_geometric_view_before_promotion() -> None:
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=300.0, height=220.0)
+        page.draw_line((60.0, 100.0), (180.0, 100.0), width=1.0)
+        page.draw_line((60.0, 80.0), (60.0, 120.0), width=1.0)
+        page.draw_line((180.0, 80.0), (180.0, 120.0), width=1.0)
+        page.insert_text((110.0, 97.0), "2000", fontsize=10.0)
+        payload = doc.tobytes()
+    finally:
+        doc.close()
+
+    unknown_doc = fitz.open(stream=payload, filetype="pdf")
+    try:
+        unknown = extract_dimension_evidence_bundle(
+            unknown_doc[0],
+            page_num=1,
+        )
+    finally:
+        unknown_doc.close()
+
+    floor_doc = fitz.open(stream=payload, filetype="pdf")
+    try:
+        floor = extract_dimension_evidence_bundle(
+            floor_doc[0],
+            page_num=1,
+            view_type=DrawingViewType.FLOOR_PLAN.value,
+        )
+    finally:
+        floor_doc.close()
+
+    assert not any(
+        observation.raw_text == "2000"
+        and observation.extraction_method == "native_text_witness_promoted"
+        for observation in unknown.observations
+    )
+    promoted = [
+        observation
+        for observation in floor.observations
+        if observation.raw_text == "2000"
+        and observation.extraction_method == "native_text_witness_promoted"
+    ]
+    assert len(promoted) == 1
+    binding = next(
+        item
+        for item in floor.bindings
+        if item.observation_id == promoted[0].dimension_id
+    )
+    assert binding.status == BindingStatus.WITNESS_BOUND.value
