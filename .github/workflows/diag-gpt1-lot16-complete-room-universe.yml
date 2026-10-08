@@ -37,6 +37,59 @@ jobs:
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          # Workflow-only source geometry trace. No production gate is changed.
+          import sys
+          import pb_source_room_face_authority as face_authority
+          original_extract=face_authority.extract_planar_faces
+          original_derive=face_authority._derive_scope_outcome
+          original_blocked=face_authority._blocked
+
+          def trace_faces(segments, *args, **kwargs):
+              faces=original_extract(segments, *args, **kwargs)
+              areas=sorted(
+                  face_authority._polygon_area(polygon)
+                  for face in faces
+                  if (polygon := face_authority._canonical_polygon(face))
+              )
+              largest=areas[-1] if areas else 0.0
+              print("LOT16_FACE_DIAG", json.dumps({
+                  "input_segment_count":len(segments),
+                  "raw_face_count":len(faces),
+                  "small_absolute_count":sum(a < face_authority._ABSOLUTE_DEGENERATE_AREA_PT2 for a in areas),
+                  "small_relative_count":sum(a < largest*face_authority._TINY_RELATIVE_THRESHOLD for a in areas),
+                  "largest_area_pt2":largest,
+                  "median_area_pt2":areas[len(areas)//2] if areas else None,
+                  "sample_smallest_areas_pt2":areas[:15],
+                  "sample_largest_areas_pt2":areas[-5:],
+              },sort_keys=True),file=sys.stderr,flush=True)
+              return faces
+
+          def trace_blocked(scope, reason):
+              print("LOT16_ROOM_GATE",json.dumps({
+                  "page_id":getattr(scope,"page_id",None),
+                  "decision_scope_id":getattr(scope,"decision_scope_id",None),
+                  "viewport_id":getattr(scope,"viewport_id",None),
+                  "wall_scope_complete":getattr(scope,"scope_complete",None),
+                  "reason":reason,
+              },sort_keys=True),file=sys.stderr,flush=True)
+              return original_blocked(scope, reason)
+
+          def trace_derive(scope):
+              records=tuple(getattr(scope,"records",()) or ())
+              print("LOT16_WALL_SCOPE",json.dumps({
+                  "page_id":getattr(scope,"page_id",None),
+                  "decision_scope_id":getattr(scope,"decision_scope_id",None),
+                  "viewport_id":getattr(scope,"viewport_id",None),
+                  "wall_scope_complete":getattr(scope,"scope_complete",None),
+                  "wall_scope_status":str(getattr(scope,"status",None)),
+                  "wall_record_count":len(records),
+                  "wall_edge_count":sum(len(face_authority._wall_edges(r)) for r in records),
+              },sort_keys=True),file=sys.stderr,flush=True)
+              return original_derive(scope)
+
+          face_authority.extract_planar_faces=trace_faces
+          face_authority._blocked=trace_blocked
+          face_authority._derive_scope_outcome=trace_derive
 
           path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
           claim=collect_live_physical_net_wall_claim(
