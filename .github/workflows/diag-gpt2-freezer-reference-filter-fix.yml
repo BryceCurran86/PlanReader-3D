@@ -1,0 +1,86 @@
+name: DIAG GPT2 Freezer Page10 Components
+
+on:
+  push:
+    branches:
+      - diag/gpt2-freezer-reference-filter-fix
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Split page10 wall and room authority
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_live_canonical_wall_composition import compose_live_canonical_walls
+          from pb_live_canonical_room_composition import compose_live_canonical_rooms
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-freezer-page10-components",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-freezer-page10-components",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("11",),
+          )
+          wall_opening=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("11",),
+              evidence_page_ids=(),
+          )
+          walls=compose_live_canonical_walls(
+              source_visibility_producer=source,
+              wall_opening_composition=wall_opening,
+          )
+          rooms=compose_live_canonical_rooms(
+              source_visibility_producer=source,
+              wall_opening_composition=wall_opening,
+              canonical_wall_ids_by_candidate=walls.candidate_to_canonical_wall_id,
+              unresolved_wall_candidate_ids=walls.unresolved_wall_candidate_ids,
+          )
+          def status(v): return getattr(v,"value",str(v))
+          def norm(v): return " ".join(str(v or "").strip().upper().split())
+          labelled=[
+              {
+                  "label":norm(r.room_label),
+                  "page_id":r.page_id,
+                  "viewport_id":r.viewport_id,
+                  "source_room_face_record_id":r.source_room_face_record_id,
+                  "vertex_count":len(r.polygon_pdf_pts),
+                  "area_page_pts2":r.area_page_pts2,
+                  "geometry_complete":bool(r.geometry_complete),
+              }
+              for r in rooms.rooms if norm(r.room_label)
+          ]
+          print(json.dumps({
+              "decoded_pages":list(published.coverage.decoded_pages),
+              "wall_opening_status":status(wall_opening.status),
+              "wall_opening_reason_codes":list(wall_opening.reason_codes),
+              "wall_count":len(walls.walls),
+              "canonical_room_status":status(rooms.status),
+              "canonical_room_reason_codes":list(rooms.reason_codes),
+              "canonical_room_count":len(rooms.rooms),
+              "labelled_rooms":labelled,
+              "freezer":[x for x in labelled if x["label"]=="FREEZER"],
+          },indent=2,sort_keys=True))
+          PY
