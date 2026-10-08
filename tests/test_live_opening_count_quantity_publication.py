@@ -149,6 +149,7 @@ def test_explicit_schedule_count_reaches_customer_runtime_row_even_without_wall_
     provenance = json.loads(row["notes"])
     assert provenance["adapter"] == "commercial_takeoff"
     assert provenance["quantity"]["quantity_id"] == count_quantity.quantity_id
+    assert provenance["measurement_authority"]["method"] == "direct_evidence"
     assert provenance["source_trace"]["canonical_entity_ids"] == list(
         count_quantity.input_entity_ids
     )
