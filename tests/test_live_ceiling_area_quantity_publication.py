@@ -4,6 +4,10 @@ from dataclasses import replace
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 import pb_live_ceiling_area_source_closed_export as ceiling_export
+from pb_customer_output_verification import verify_sealed_customer_output
+from pb_live_ceiling_area_customer_projection import (
+    project_live_ceiling_area_customer_rows,
+)
 from pb_live_ceiling_area_quantity_publication import (
     LIVE_CEILING_AREA_QUANTITY_RESOLVED,
     publish_live_ceiling_area_quantities,
@@ -257,3 +261,84 @@ def test_canonical_ceiling_reaches_quantified_without_customer_row() -> None:
         "QUANTIFIED": 1,
         "PUBLISHED": 0,
     }
+
+
+def test_legacy_canonical_ceiling_seal_reaches_one_persisted_customer_row() -> None:
+    result = _result()
+    run = ceiling_export.seal_live_ceiling_area_run(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    rows = project_live_ceiling_area_customer_rows(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert len(run.quantities) == len(rows) == 1
+    row = rows[0]
+    assert row["quantity_id"] == run.quantities[0].quantity_id
+    assert row["quantity_family"] == "ceiling_lining"
+    assert row["quantity_status"] == "To review"
+    assert row["origin"] == "AI"
+    assert row["row_role"] == "ceiling_area"
+    assert row["finish_system"] == "plasterboard"
+    assert row["measurement_method"] == "figured_dimension"
+    assert row["figured_dimension_ids"] == ["dim-h", "dim-v"]
+
+    live_report = verify_sealed_customer_output(run, rows)
+    assert live_report.valid_quantity_count == 1
+    assert live_report.customer_row_count == 1
+
+    persisted = {
+        "workspace_id": row["workspace_id"],
+        "section": row["section"],
+        "element": row["element"],
+        "location": row["location"],
+        "substrate": row["substrate"],
+        "finish_system": row["finish_system"],
+        "quantity": row["quantity"],
+        "unit": "m²",
+        "quantity_status": row["quantity_status"],
+        "source_page": row["source_page"],
+        "source_reference": "PB Auto Geometry v1.2.19 · " + row["source_reference"],
+        "inclusion_status": row["inclusion_status"],
+        "confidence": "Documented",
+        "notes": row["notes"],
+        "row_role": row["row_role"],
+    }
+    persisted_report = verify_sealed_customer_output(run, [persisted])
+    assert persisted_report.verified_quantity_ids == (
+        run.quantities[0].quantity_id,
+    )
+
+
+def test_scaled_legacy_ceiling_customer_projection_preserves_scale_authority() -> None:
+    ceiling = _ceiling(
+        authority=MeasurementAuthorityType.PDF_SCALED.value,
+        physical_scale_record_id="physical-scale-1",
+        figured_dimension_ids=(),
+    )
+    result = _result(ceiling=ceiling)
+    run = ceiling_export.seal_live_ceiling_area_run(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+    rows = project_live_ceiling_area_customer_rows(
+        result,
+        workspace_id=7,
+        project_id="source-project",
+    )
+
+    assert len(run.quantities) == len(rows) == 1
+    row = rows[0]
+    assert row["quantity_id"] == run.quantities[0].quantity_id
+    assert row["measurement_method"] == "scaled_geometry"
+    assert row["resolved_scale_id"] == "physical-scale-1"
+    assert row["scale_status"] == "resolved"
+    assert row["scale_conflicts"] == []
+
+    report = verify_sealed_customer_output(run, rows)
+    assert report.verified_quantity_ids == (run.quantities[0].quantity_id,)
