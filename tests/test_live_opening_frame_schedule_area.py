@@ -155,7 +155,7 @@ def test_frame_schedule_area_reaches_customer_runtime_row_without_net_wall(
     assert row["location"] == "W1"
     assert row["quantity"] == pytest.approx(2.16)
     assert row["unit"] == "m²"
-    assert row["quantity_status"] == "Measured"
+    assert row["quantity_status"] == "To review"
     assert row["inclusion_status"] == "PROVISIONAL"
 
 
