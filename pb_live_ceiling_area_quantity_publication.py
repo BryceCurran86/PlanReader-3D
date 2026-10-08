@@ -33,14 +33,24 @@ def _source_quantities(
     result: LiveCeilingLiningResult,
 ) -> dict[str, QuantityEvidence]:
     out: dict[str, QuantityEvidence] = {}
+    contradictory_ids: set[str] = set()
     for quantity in result.quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("quantity_evidence must contain QuantityEvidence")
         qid = _clean(quantity.quantity_id)
         if not qid:
             continue
-        if qid in out:
-            raise ValueError(f"duplicate ceiling quantity id: {qid}")
+        if qid in contradictory_ids:
+            continue
+        prior = out.get(qid)
+        if prior is not None:
+            if prior != quantity:
+                # Source ID collisions are untrustworthy even when one
+                # candidate happens to equal a canonical ceiling's area.
+                # Never choose the first or last replay as a winner.
+                out.pop(qid, None)
+                contradictory_ids.add(qid)
+            continue
         out[qid] = quantity
     return out
 
@@ -85,6 +95,7 @@ def _publish_one(
         or source.blocking_reasons
         or _clean(source.quantity_id) != _clean(ceiling.ceiling_quantity_id)
         or _clean(source.family) != "ceiling_lining"
+        or _clean(source.unit).lower() not in {"m2", "m²"}
         or _clean(source.status) != AuthorityStatus.PROVISIONAL.value
         or _clean(source.authority) != MeasurementAuthorityType.MODEL_DERIVED.value
         or tuple(source.input_entity_ids) != (_clean(ceiling.room_entity_id),)
