@@ -428,6 +428,44 @@ def test_sequential_room_area_bridges_replay_or_conflict_without_overwrite(
     assert all(floor.metric_area_m2 is None for floor in result.floors)
 
 
+def test_blocked_or_model_derived_firm_area_cannot_enrich_canonical_floor(tmp_path) -> None:
+    path = tmp_path / "floor-measurement-authority-failclosed.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+    assert any(not q.abstained for q in bridge.quantities)
+
+    for mutate in (
+        lambda q: replace(q, blocking_reasons=("unresolved_measurement",)),
+        lambda q: replace(q, authority="model_derived"),
+        lambda q: replace(q, authority="schedule_extracted"),
+    ):
+        suspect = replace(
+            bridge,
+            quantities=tuple(
+                mutate(q) if not q.abstained else q
+                for q in bridge.quantities
+            ),
+        )
+        enriched = enrich_live_canonical_floor_metric_areas(floors, suspect)
+        assert all(floor.metric_area_m2 is None for floor in enriched.floors)
+        assert all(floor.metric_area_quantity_id is None for floor in enriched.floors)
+        assert all(floor.metric_area_authority is None for floor in enriched.floors)
+
+    # The same real producer-owned FIRM scaled evidence still enriches.
+    accepted = enrich_live_canonical_floor_metric_areas(floors, bridge)
+    assert all(floor.metric_area_m2 for floor in accepted.floors)
+
+
 def test_metric_floor_status_closes_after_separate_source_bridges(tmp_path) -> None:
     path = tmp_path / "separate-room-bridge-metric-closure.pdf"
     _write_plan(path)
