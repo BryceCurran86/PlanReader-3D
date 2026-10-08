@@ -1,0 +1,47 @@
+name: DIAG GPT2 Page11 Viewport Current
+
+on:
+  push:
+    branches:
+      - diag/gpt2-page11-viewport-current
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Classify source page 11
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports, is_authoritative_derived_viewport
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(path)
+          page=doc.load_page(10)
+          rows=segment_page_viewports(page,page_number=11)
+          print(json.dumps({
+              "rotation":int(page.rotation),
+              "viewports":[{
+                  "view_id":v.view_id,
+                  "view_type":v.view_type,
+                  "label":v.label,
+                  "status":v.status,
+                  "bbox":v.bounding_box,
+                  "boundary_source":v.boundary_source,
+                  "authoritative":bool(is_authoritative_derived_viewport(v)),
+                  "notes":list(v.notes),
+                  "provenance":dict(v.provenance),
+              } for v in rows],
+          },indent=2,sort_keys=True))
+          PY
