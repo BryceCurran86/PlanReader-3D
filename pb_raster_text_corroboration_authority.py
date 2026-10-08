@@ -565,6 +565,20 @@ class RasterTextCorroborationProducer:
         # and the two independent DPI corroboration readings.
         cached = self._results.get(selector.key)
         if cached is not None:
+            # Recheck the producer-owned immutable source envelope on replay.
+            # The source store memoizes an already hash-verified byte identity,
+            # so ordinary reuse is O(1); replacing/missing bytes invalidates
+            # rather than replaying a formerly positive source claim.
+            store = self._source_producer._store
+            source_bytes = store.source_bytes_by_revision.get(selector.revision_id)
+            if (
+                not isinstance(source_bytes, bytes)
+                or not store.source_bytes_match_revision(
+                    selector.revision_id, source_bytes, selector.source_sha256
+                )
+            ):
+                self._results.pop(selector.key, None)
+                return _conflict(RASTER_TEXT_SOURCE_LINEAGE_UNRESOLVED)
             return cached
         return self._store(selector, self._evaluate(selector))
 
