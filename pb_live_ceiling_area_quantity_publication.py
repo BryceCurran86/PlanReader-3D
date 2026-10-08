@@ -197,6 +197,24 @@ def publish_live_ceiling_area_quantities(
     if type(result) is not LiveCeilingLiningResult:
         raise TypeError("result must be LiveCeilingLiningResult")
 
+    # Validate the complete producer-owned ceiling universe before filtering
+    # unsupported candidates. Otherwise one FIRM ceiling can publish while a
+    # second ABSTAIN/CONFLICT candidate secretly reuses its canonical identity.
+    # This mirrors the source-closed opening identity quarantine boundary.
+    canonical_ids: set[str] = set()
+    for ceiling in result.canonical_ceilings:
+        if type(ceiling) is not LiveCanonicalCeilingSurfaceObject:
+            raise TypeError(
+                "canonical_ceilings must contain LiveCanonicalCeilingSurfaceObject"
+            )
+        ceiling_id = _clean(ceiling.canonical_ceiling_id)
+        if ceiling_id and ceiling_id in canonical_ids:
+            raise ValueError(
+                f"duplicate canonical ceiling identity in quantity publication: {ceiling_id}"
+            )
+        if ceiling_id:
+            canonical_ids.add(ceiling_id)
+
     source_by_id = _source_quantities(result)
     out: list[QuantityEvidence] = []
     seen_entity_ids: set[str] = set()
