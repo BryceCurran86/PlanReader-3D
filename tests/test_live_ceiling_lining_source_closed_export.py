@@ -430,3 +430,25 @@ def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
     assert report.valid_quantity_count == 1
     assert report.customer_row_count == 1
     assert report.verified_quantity_ids == (run.quantities[0].quantity_id,)
+
+    persisted = {
+        "workspace_id": row["workspace_id"],
+        "section": row["section"],
+        "element": row["element"],
+        "location": row["location"],
+        "substrate": row["substrate"],
+        "finish_system": row["finish_system"],
+        "quantity": row["quantity"],
+        "unit": "m²",
+        "quantity_status": row["quantity_status"],
+        "source_page": row["source_page"],
+        "source_reference": "PB Auto Geometry v1.2.19 · " + row["source_reference"],
+        "inclusion_status": row["inclusion_status"],
+        "confidence": "Documented",
+        "notes": row["notes"],
+        "row_role": row["row_role"],
+    }
+    persisted_report = verify_sealed_customer_output(run, [persisted])
+    assert persisted_report.verified_quantity_ids == (
+        run.quantities[0].quantity_id,
+    )
