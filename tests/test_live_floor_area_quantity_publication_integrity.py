@@ -119,3 +119,48 @@ def test_unsupported_firm_authority_cannot_publish_canonical_floor_quantity() ->
             canonical_floors=(floor,),
         )
         assert publish_live_floor_area_quantities(claim) == ()
+
+
+def test_figured_room_snapshot_and_physical_face_identity_match_canonical_floor() -> None:
+    source = _source_area()
+    floor = _floor()
+    evidence = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "room_snapshot_id": floor.snapshot_id,
+            "source_room_face_record_id": floor.source_room_face_record_id,
+            # The independent dimension support view is allowed to use a
+            # different snapshot without changing physical room ownership.
+            "source_dimension_snapshot_id": "support-snapshot-other",
+        },
+    )
+    assert len(publish_live_floor_area_quantities(_claim_with(evidence))) == 1
+
+
+def test_canonical_floor_quantity_rejects_cross_snapshot_figured_area() -> None:
+    source = _source_area()
+    floor = _floor()
+    alien = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "room_snapshot_id": "other-physical-room-snapshot",
+            "source_room_face_record_id": floor.source_room_face_record_id,
+        },
+    )
+    assert publish_live_floor_area_quantities(_claim_with(alien)) == ()
+
+
+def test_canonical_floor_quantity_rejects_unrelated_source_room_face() -> None:
+    source = _source_area()
+    floor = _floor()
+    alien = replace(
+        source,
+        metadata={
+            **source.metadata,
+            "room_snapshot_id": floor.snapshot_id,
+            "source_room_face_record_id": "other-room-face",
+        },
+    )
+    assert publish_live_floor_area_quantities(_claim_with(alien)) == ()
