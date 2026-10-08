@@ -27,7 +27,7 @@ jobs:
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
       - name: Focused figured-dimension tests
         run: |
-          PYTHONPATH=. pytest -q             tests/test_figured_dimension_text_enclosure_filter_v1.py             tests/test_figured_dimension_line_fragment_merge_v1.py             tests/test_figured_dimension_native_direction_style_v1.py             tests/test_figured_dimension_page_parse_cache_v1.py
+          PYTHONPATH=. pytest -q             tests/test_figured_dimension_text_enclosure_filter_v1.py             tests/test_figured_dimension_line_fragment_merge_v1.py             tests/test_figured_dimension_native_direction_style_v1.py             tests/test_figured_dimension_page_parse_cache_v1.py             tests/test_same_view_room_area_authority_v1.py
       - name: Probe real Lot16 page 3 dimensions
         run: |
           PYTHONPATH=. python - <<'PY'
@@ -90,6 +90,7 @@ jobs:
               source,
               revision_id=published.revision.revision_id,
               page_id="3",
+              view_type="floor_plan",
           )
           print(json.dumps({
               "target_bindings":targets,
