@@ -54,6 +54,12 @@ def test_whole_line_semantics_accept_room_labels_not_embedded_equipment_notes() 
     assert _normalized_room_line("PWD") == "PWD"
     assert _normalized_room_line("M-AMB") == "M-AMB"
     assert _normalized_room_line("F-AMB") == "F-AMB"
+    assert _normalized_room_line("ENS") == "ENS"
+    assert _normalized_room_line("WIR") == "WIR"
+    assert _normalized_room_line("GARAGE") == "GARAGE"
+    assert _normalized_room_line("ENS NOTE") is None
+    assert _normalized_room_line("WIR NOTE") is None
+    assert _normalized_room_line("GARAGE NOTE") is None
     assert _normalized_room_line("POS COUNTER") == "POS COUNTER"
     assert _normalized_room_line("WC & SHOWER") == "WC & SHOWER"
     assert (

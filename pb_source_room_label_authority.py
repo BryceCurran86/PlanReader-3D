@@ -81,6 +81,7 @@ _COMMERCIAL_ROOM_EXACT = frozenset(
         "chiller",
         "cleaner",
         "coolroom",
+        "ens",
         "freezer",
         "f-amb",
         "kiosk",
