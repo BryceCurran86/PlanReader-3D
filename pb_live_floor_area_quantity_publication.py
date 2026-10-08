@@ -47,6 +47,7 @@ def publish_live_floor_area_quantities(
         raise TypeError("claim must be LivePhysicalNetWallClaim")
 
     source_quantities: dict[str, QuantityEvidence] = {}
+    conflicting_quantity_ids: set[str] = set()
     for quantity in claim.room_area_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError("room_area_quantity_evidence must contain QuantityEvidence")
@@ -55,13 +56,25 @@ def publish_live_floor_area_quantities(
             or quantity.abstained
             or quantity.value is None
             or _clean(quantity.status).lower() != AuthorityStatus.FIRM.value
+            or _clean(quantity.unit).lower() not in {"m2", "m²"}
+            or quantity.blocking_reasons
         ):
             continue
         qid = _clean(quantity.quantity_id)
         if not qid:
             continue
-        if qid in source_quantities:
-            raise ValueError(f"duplicate firm room-area quantity id: {qid}")
+        if qid in conflicting_quantity_ids:
+            continue
+        previous = source_quantities.get(qid)
+        if previous is not None:
+            if previous != quantity:
+                # The same identity cannot denote two independently different
+                # FIRM measurements or provenance records. Quarantine it; a
+                # later replay of either claim must not restore publication.
+                source_quantities.pop(qid, None)
+                conflicting_quantity_ids.add(qid)
+            # Exact producer-owned replays are idempotent.
+            continue
         source_quantities[qid] = quantity
 
     floors_by_quantity: dict[str, list[LiveCanonicalFloorSurfaceObject]] = {}
