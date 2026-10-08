@@ -82,3 +82,23 @@ def test_source_hash_checks_actual_bytes_not_just_filename(tmp_path: Path) -> No
     verified, reasons = _source_sha_proof(manifest, tmp_path, "project-x")
     assert verified is False
     assert "source_file_missing:evidence.pdf" in reasons
+
+ 
+def test_sealed_run_absent_is_explicit_and_unpublished(tmp_path: Path) -> None:
+    project = next(p for p in diagnostic_report(ROOT, tmp_path, sealed_root=tmp_path)["projects"]
+                   if p["project_id"] == "au_qld_lot16_power")
+    assert project["sealed_run_verified"] is False
+    assert project["sealed_quantity_count"] is None
+    assert "sealed_run_missing" in project["blockers"]
+    assert project["coverage_accuracy"] is None
+
+
+def test_tampered_sealed_run_cannot_claim_verified(tmp_path: Path) -> None:
+    from scripts.report_full_plan_v2_readiness import _sealed_run_proof
+    folder = tmp_path / "project-x"
+    folder.mkdir()
+    (folder / "sealed_run.json").write_text('{"project_id":"project-x","quantities":[]}', encoding="utf-8")
+    verified, count, blockers = _sealed_run_proof(tmp_path, "project-x", set())
+    assert verified is False
+    assert count is None
+    assert blockers == ["sealed_run_integrity_invalid"]

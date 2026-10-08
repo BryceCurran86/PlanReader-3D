@@ -52,7 +52,34 @@ def _source_sha_proof(manifest: dict, source_root: Path | None, project_id: str)
             reasons.append(f"source_file_sha_mismatch:{name}")
     return not reasons, reasons
 
-def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None = None) -> dict:
+
+def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: set[str]) -> tuple[bool, int | None, list[str]]:
+    """Verify complete production seal fingerprints, lineage and source envelope."""
+    if sealed_root is None:
+        return False, None, ["sealed_run_not_supplied"]
+    path = sealed_root / project_id / "sealed_run.json"
+    if not path.is_file():
+        return False, None, ["sealed_run_missing"]
+    from pb_source_closed_run_export import (SourceClosedRunExportError, sealed_source_closed_run_from_dict)
+
+    try:
+        sealed = sealed_source_closed_run_from_dict(_object(path))
+    except (SourceClosedRunExportError, TypeError, ValueError, KeyError):
+        return False, None, ["sealed_run_integrity_invalid"]
+    if sealed.project_id != project_id:
+        return False, len(sealed.quantities), ["sealed_run_project_mismatch"]
+    reasons: list[str] = []
+    if set(sealed.source_sha256s) != expected_shas:
+        reasons.append("sealed_run_source_envelope_mismatch")
+    if not sealed.quantities:
+        reasons.append("sealed_run_empty")
+    if any(not row.lineage_ok for row in sealed.quantities):
+        reasons.append("sealed_run_lineage_conflict")
+    if any(not row.object_identity_refs and not row.abstained for row in sealed.quantities):
+        reasons.append("sealed_run_missing_physical_identity")
+    return not reasons, len(sealed.quantities), reasons
+
+def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None = None, sealed_root: Path | None = None) -> dict:
     suite = _object(root / "manifest.json")
     project_ids = suite["projects"]
     required_count = suite["required_project_count"]
@@ -85,6 +112,9 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         blockers = list(manifest.get("reason_codes") or ())
         source_verified, source_reasons = _source_sha_proof(manifest, source_root, project_id)
         blockers.extend(source_reasons)
+        expected_shas = {doc["sha256"] for doc in manifest.get("source_documents", ())}
+        seal_verified, sealed_count, seal_reasons = _sealed_run_proof(sealed_root, project_id, expected_shas)
+        blockers.extend(seal_reasons)
         if manifest.get("status") != "VERIFIED":
             blockers.insert(0, "frozen_manifest_not_verified")
         if not exists:
@@ -105,6 +135,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             "abstention_count": sum(item.get("abstained") is True for item in produced) if exists else None,
             "duplicate_quantity_ids": duplicate_ids,
             "source_sha_verified": source_verified,
+            "sealed_run_verified": seal_verified,
+            "sealed_quantity_count": sealed_count,
             "reconciliation_complete": False,
             "blockers": sorted(set(blockers)),
             "coverage_accuracy": None,
@@ -124,9 +156,10 @@ def main() -> int:
     parser.add_argument("--benchmark-root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--produced-root", type=Path, required=True)
     parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--sealed-root", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    report = diagnostic_report(args.benchmark_root, args.produced_root, args.source_root)
+    report = diagnostic_report(args.benchmark_root, args.produced_root, args.source_root, args.sealed_root)
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
