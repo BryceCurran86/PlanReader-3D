@@ -243,15 +243,26 @@ def publish_cross_view_ceiling_quantities(
             )
         ]
         deduped: dict[str, tuple[EntityEvidence, QuantityEvidence]] = {}
+        contradictory_ids: set[str] = set()
         for entity, quantity in area_candidates:
             qid = _clean(quantity.quantity_id)
-            if qid:
-                deduped[qid] = (entity, quantity)
+            if not qid or qid in contradictory_ids:
+                continue
+            pair = (entity, quantity)
+            earlier = deduped.get(qid)
+            if earlier is not None and earlier != pair:
+                # Quantity IDs are an identity contract, not a last-writer-wins
+                # map. A replay with changed area or provenance must revoke
+                # the room's ceiling measurement instead of selecting either.
+                contradictory_ids.add(qid)
+                deduped.pop(qid, None)
+                continue
+            deduped[qid] = pair
         area_candidates = list(deduped.values())
 
-        if len(area_candidates) != 1:
+        if contradictory_ids or len(area_candidates) != 1:
             unresolved.add(physical_id)
-            if len(area_candidates) > 1:
+            if contradictory_ids or len(area_candidates) > 1:
                 conflict = True
             continue
 
