@@ -2231,7 +2231,14 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
         ])
     anchors = extract_view_title_anchors(page)
     if not anchors:
-        return []
+        title_block_floor_plan = _title_block_single_floor_plan_partition(
+            page,
+            (),
+            page_number=page_number,
+        )
+        return _stamp_segment_page_viewports_product(
+            [title_block_floor_plan] if title_block_floor_plan is not None else []
+        )
     frames = extract_vector_frames(page, calibration)
     framed, consumed = _frame_resolved_viewports(
         page,
