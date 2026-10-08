@@ -62,6 +62,8 @@ tuned heuristic.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -317,6 +319,39 @@ def test_unbounded_legend_does_not_poison_physical_wall_scope() -> None:
         page_width=_PAGE_W,
         page_height=_PAGE_H,
     )
+    assert reason is None
+
+
+def test_bounded_schedule_does_not_poison_physical_wall_scope(monkeypatch) -> None:
+    import pb_physical_wall_candidate_authority as module
+
+    schedule = SimpleNamespace(
+        view_type="schedule",
+        status="resolved",
+        bounding_box=_FRAME,
+    )
+    monkeypatch.setattr(
+        module,
+        "segment_page_viewports",
+        lambda page, *, page_number: [schedule],
+    )
+
+    doc, page = _new_page()
+    try:
+        fx0, fy0, fx1, fy1 = _FRAME
+        wall = _wall(
+            pts=((fx0 + 30.0, (fy0 + fy1) / 2.0), (fx1, (fy0 + fy1) / 2.0))
+        )
+        reason = _scope_boundary_reason(
+            wall,
+            page=page,
+            page_number=1,
+            page_width=_PAGE_W,
+            page_height=_PAGE_H,
+        )
+    finally:
+        doc.close()
+
     assert reason is None
 
 
