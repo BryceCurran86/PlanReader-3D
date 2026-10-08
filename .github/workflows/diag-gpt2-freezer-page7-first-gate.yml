@@ -1,0 +1,84 @@
+name: DIAG GPT2 Freezer Page7 First Gate
+
+on:
+  push:
+    branches:
+      - diag/gpt2-freezer-page7-current-main
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Diagnose page 7 wall-opening authority
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-freezer-page7",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-freezer-page7",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("7",),
+          )
+          comp=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("7",),
+              evidence_page_ids=(),
+          )
+          def status(value):
+              return getattr(value,"value",str(value))
+          def trace(row):
+              return {
+                  "page_id":getattr(row,"page_id",None),
+                  "opening_identity_id":getattr(row,"opening_identity_id",None),
+                  "status":status(getattr(row,"status",None)),
+                  "reason_codes":list(getattr(row,"reason_codes",()) or ()),
+                  "scope_complete":getattr(row,"scope_complete",None),
+                  "record_id":getattr(row,"record_id",None),
+                  "host_wall_id":getattr(row,"host_wall_id",None),
+                  "wall_candidate_count":len(getattr(row,"wall_candidate_ids",()) or ()),
+                  "member_wall_candidate_count":len(getattr(row,"member_wall_candidate_ids",()) or ()),
+              }
+          out={
+              "status":status(comp.status),
+              "reason_codes":list(comp.reason_codes),
+              "semantic":{
+                  "status":status(comp.semantic_enumeration_result.status),
+                  "reason_codes":list(comp.semantic_enumeration_result.reason_codes),
+                  "has_record":comp.semantic_enumeration_result.record is not None,
+              },
+              "opening_universes":{
+                  k:{
+                      "status":status(v.status),
+                      "reason_codes":list(v.reason_codes),
+                      "has_record":v.record is not None,
+                      "scope_complete":bool(getattr(v,"decision_scope_complete",False)),
+                  }
+                  for k,v in comp.opening_universe_results.items()
+              },
+              "wall_scopes":[trace(v) for v in comp.wall_scopes],
+              "opening_bindings":[trace(v) for v in comp.opening_bindings],
+              "host_frames":[trace(v) for v in comp.host_frames],
+          }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
