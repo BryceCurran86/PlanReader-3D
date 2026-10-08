@@ -73,6 +73,7 @@ jobs:
                   "dimension_line_id":b.dimension_line_id,
                   "witness_line_ids":list(b.witness_line_ids),
                   "endpoints":None if b.endpoints is None else [list(x) for x in b.endpoints],
+                  "notes":list(b.notes),
                   "extraction_method":o.extraction_method,
               })
 
