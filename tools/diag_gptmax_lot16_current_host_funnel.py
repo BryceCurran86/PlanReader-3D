@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pb_live_opening_area_quantity_publication import publish_live_opening_area_quantities
 from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
+from pb_opening_host_frame_authority import OpeningHostFrameProducer
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
@@ -70,6 +71,10 @@ def main():
     )
 
     physical = composition.physical_opening_authority
+    frame_projection_producer = OpeningHostFrameProducer.from_authorities(
+        physical_opening_authority=physical,
+        host_binding_authority=composition.opening_host_binding_authority,
+        physical_wall_candidate_authority=composition.physical_wall_candidate_authority)
     binding_status_counts = Counter()
     binding_reason_counts = Counter()
     pattern_counts = Counter()
@@ -149,6 +154,10 @@ def main():
                     near_source = any(item["axis_data"] is not None and abs(item["axis_data"][2]) <= geometry.thickness / 2 + 5 and item["axis_data"][0] <= geometry.length + 5 and item["axis_data"][1] >= -5 for item in shared_lines)
                     if near or near_source or local_span:
                         boundary = wall_result.boundary_evaluation
+                        source_projection = None
+                        if data is None and candidate.wall_candidate_id in trace.member_wall_candidate_ids:
+                            source_projection = frame_projection_producer._raster_source_projection(
+                                record=candidate, opening=record, geometry=geometry, wall_scope=wall_result)
                         candidates.append({"wall_id": candidate.wall_candidate_id,
                             "centerline": candidate.wall_candidate.centerline_pts,
                             "axis_data": data, "roles": host._candidate_host_roles(candidate, geometry),
@@ -156,6 +165,8 @@ def main():
                             "local_span": local_span, "identity_usable": candidate.physical_identity.usable,
                             "candidate_identity_id": candidate.physical_identity.candidate_identity_id,
                             "source_primitive_ids": candidate.physical_identity.source_primitive_ids,
+                            "source_edge_fragments": [asdict(f) for f in candidate.source_edge_fragments],
+                            "source_frame_projection": source_projection,
                             "source_lines": shared_lines,
                             "equivalence_ambiguous": candidate.wall_candidate_id in wall_result.equivalence.ambiguous_wall_ids,
                             "boundary_clean": boundary is not None and candidate.wall_candidate_id in boundary.evaluated_wall_candidate_ids and candidate.wall_candidate_id not in boundary.boundary_tainted_wall_candidate_ids})

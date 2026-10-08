@@ -45,8 +45,9 @@ from pb_physical_wall_candidate_authority import (
 from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityAuthority
+from pb_raster_source_wall_frame_projection import source_edge_axis_projection
 
-OPENING_HOST_FRAME_SCHEMA_VERSION = "1.5.0"
+OPENING_HOST_FRAME_SCHEMA_VERSION = "1.6.0"
 OPENING_HOST_FRAME_RESOLVED = "opening_host_frame_resolved"
 OPENING_HOST_FRAME_OPENING_UNAVAILABLE = "opening_host_frame_opening_unavailable"
 OPENING_HOST_FRAME_HOST_UNAVAILABLE = "opening_host_frame_host_unavailable"
@@ -328,6 +329,32 @@ class OpeningHostFrameProducer:
             return None
         return left_node, right_node
 
+    def _raster_source_projection(self, *, record, opening, geometry, wall_scope):
+        """Authenticate all source ancestors before deriving a local interval."""
+        lines = host_geometry._authenticated_raster_source_lines(
+            self._opening, opening, wall_scope.source_observation_ids)
+        projection = source_edge_axis_projection(record, geometry, lines)
+        if projection is None:
+            return None
+        required = set(record.physical_identity.source_primitive_ids)
+        ownership: dict[str, set[str]] = {primitive_id: set() for primitive_id in required}
+        visibility = self._opening.source_visibility_authority()
+        for observation_id in wall_scope.source_observation_ids:
+            result = visibility.resolve_visible(ObservationSelector(
+                document_id=opening.document_id, revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                observation_id=observation_id))
+            observation = result.observation
+            if result.status is not EvidenceResolutionStatus.CORROBORATED or observation is None:
+                continue
+            primitive_id = str(observation.source_primitive_ref or "").removeprefix("visible:")
+            if (primitive_id in required and observation.page_id == opening.page_id
+                    and host_geometry._line(observation) == lines[primitive_id]):
+                ownership[primitive_id].add(observation_id)
+        if any(not ids for ids in ownership.values()):
+            return None
+        return projection, tuple(sorted({oid for ids in ownership.values() for oid in ids}))
+
     def _raster_binding_nodes(self, *, opening, binding, geometry, wall_scope):
         """Re-prove each two-member edge before putting it in the frame graph."""
         if opening.structural_pattern not in host_geometry.RASTER_WALL_BAND_HOST_PATTERNS:
@@ -348,7 +375,11 @@ class OpeningHostFrameProducer:
         for wall_id in proof.bands[0].member_ids:
             data = host_geometry._candidate_axis_data(records[wall_id], geometry)
             if data is None:
-                return None
+                source = self._raster_source_projection(record=records[wall_id],
+                    opening=opening, geometry=geometry, wall_scope=wall_scope)
+                if source is None:
+                    return None
+                data, _observation_ids = source
             lo, hi, _offset = data
             if lo < -tolerance and abs(hi) <= tolerance:
                 role = "left"
@@ -752,10 +783,20 @@ class OpeningHostFrameProducer:
         face_tol = max(0.5, float(geometry.thickness) * 0.05)
         axis_values: list[float] = []
         component_offsets: list[float] = []
+        projection_observation_ids: set[str] = set()
         for wall_id in component_ids:
             if raster_component and host_geometry._candidate_axis_data(records_by_id[wall_id], geometry) is None:
-                return fail("opening_host_frame_raster_component_geometry_unproven")
-            projection = self._record_projection(records_by_id[wall_id], axis, normal)
+                source = self._raster_source_projection(record=records_by_id[wall_id],
+                    opening=opening, geometry=geometry, wall_scope=wall_scope)
+                if source is None:
+                    return fail("opening_host_frame_raster_component_geometry_unproven")
+                data, observation_ids = source
+                projection_observation_ids.update(observation_ids)
+                projection = (data[0] + _dot(geometry.origin, axis),
+                    data[1] + _dot(geometry.origin, axis),
+                    data[2] + _dot(geometry.origin, normal))
+            else:
+                projection = self._record_projection(records_by_id[wall_id], axis, normal)
             if projection is None:
                 return None
             u_min, u_max, offset = projection
@@ -869,7 +910,7 @@ class OpeningHostFrameProducer:
 
         source_observation_ids = tuple(
             sorted(
-                {
+                projection_observation_ids | {
                     observation_id
                     for context in component_contexts
                     for observation_id in context.opening.source_observation_ids

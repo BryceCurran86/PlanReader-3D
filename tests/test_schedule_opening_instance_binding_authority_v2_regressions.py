@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import fitz
 import math
+import pytest
 from types import SimpleNamespace
 
 import pb_schedule_opening_instance_binding_authority as binding
@@ -134,9 +135,11 @@ def test_tag_on_adjacent_wall_segment_is_not_inside_opening_aperture() -> None:
     assert result.record is None
 
 
-def test_raster_sealed_aperture_bbox_can_own_schedule_tag_without_scale() -> None:
+@pytest.mark.parametrize('pattern', [binding.RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+    binding.RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION])
+def test_raster_sealed_aperture_bbox_can_own_schedule_tag_without_scale(pattern) -> None:
     opening = SimpleNamespace(
-        structural_pattern=binding.RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+        structural_pattern=pattern,
         aperture_bbox_pt=(100.0, 100.0, 140.0, 110.0),
     )
     aperture = binding._opening_aperture_for_physical_opening(object(), opening)
@@ -149,7 +152,9 @@ def test_raster_sealed_aperture_bbox_can_own_schedule_tag_without_scale() -> Non
     )
 
 
-def test_raster_schedule_aperture_abstains_without_valid_sealed_bbox() -> None:
+@pytest.mark.parametrize('pattern', [binding.RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+    binding.RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION])
+def test_raster_schedule_aperture_abstains_without_valid_sealed_bbox(pattern) -> None:
     for bbox in (
         None,
         (),
@@ -159,7 +164,7 @@ def test_raster_schedule_aperture_abstains_without_valid_sealed_bbox() -> None:
         (140.0, 100.0, 100.0, 110.0),
     ):
         opening = SimpleNamespace(
-            structural_pattern=binding.RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            structural_pattern=pattern,
             aperture_bbox_pt=bbox,
         )
         assert (

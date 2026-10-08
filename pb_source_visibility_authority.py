@@ -78,7 +78,7 @@ from pb_source_observation_authority import (
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
 
-SOURCE_VISIBILITY_SCHEMA_VERSION = "1.3.0"
+SOURCE_VISIBILITY_SCHEMA_VERSION = "1.4.0"
 NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
 RASTER_PDF_SEGMENT = "raster_pdf_segment"
 RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
@@ -242,9 +242,41 @@ def _supplemental_raster_detector_family(primitive_ref):
 
 
 def _supplemental_render_provenance_matches(observation, receipt) -> bool:
+    """Authenticate the frozen identity and render provenance in every family."""
+    image_hash = receipt.image_sha256
+    if not (isinstance(image_hash, str) and len(image_hash) == 64
+            and all(c in '0123456789abcdef' for c in image_hash)):
+        return False
     family = _supplemental_raster_detector_family(observation.source_primitive_ref)
+    parts = observation.source_primitive_ref.removeprefix('visible:').split(':')
+    if len(parts) != (4 if family is None else 5) or parts[0] != 'raster_segment':
+        return False
+    try:
+        index = int(parts[-1])
+        if index < 0 or str(index) != parts[-1]:
+            return False
+        expected_parent = _raster_segment_observation_id(
+            document_id=receipt.document_id, revision_id=receipt.revision_id,
+            page_id=receipt.page_id, partition_id=receipt.source_partition_id,
+            image_sha256=image_hash, identity_version=parts[2],
+            pixel_geometry=receipt.pixel_geometry, geometry=receipt.geometry, index=index)
+        expected_visible = _raster_visible_observation_id(
+            document_id=receipt.document_id, revision_id=receipt.revision_id,
+            page_id=receipt.page_id, partition_id=receipt.source_partition_id,
+            parent_observation_id=expected_parent, geometry=receipt.geometry)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if expected_parent != receipt.parent_observation_id or expected_visible != observation.observation_id:
+        return False
     if family is None:
-        return True
+        return bool(
+            receipt.dpi == RASTER_RENDER_DPI
+            and receipt.detector_version == RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
+            and receipt.visibility_render_sha256 is None
+            and observation.source_primitive_ref.startswith(
+                f'visible:raster_segment:{image_hash}:{RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION}:'
+            )
+        )
     identity_version, detector_version = family
     full_hash = receipt.visibility_render_sha256
     return bool(

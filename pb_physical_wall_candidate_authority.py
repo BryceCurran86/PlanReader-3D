@@ -86,7 +86,7 @@ from pb_wall_room_topology_typed_negative_evidence import (
 )
 
 
-PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.2.0"
+PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION = "1.3.0"
 PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED = "physical_wall_candidate_scope_resolved"
 PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE = "physical_wall_candidate_scope_unavailable"
 PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED = (
@@ -205,11 +205,26 @@ class PhysicalWallCandidateSelector:
 
 
 @dataclass(frozen=True)
+class PhysicalWallSourceEdgeFragment:
+    """Producer-owned graph edge facts; consumers must re-prove source support.
+
+    W2 edge coordinates may differ from W4's snapped node path. Merged edge
+    coordinates are not necessarily exact source geometry, so retaining them
+    is not itself a straightness, wall, frame or measurement proposition.
+    """
+
+    edge_id: str
+    geometry: Line
+    source_primitive_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PhysicalWallCandidateRecord:
     wall_candidate_id: str
     wall_candidate: WallCandidate
     physical_identity: PhysicalWallIdentity
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
+    source_edge_fragments: tuple[PhysicalWallSourceEdgeFragment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2773,6 +2788,7 @@ def _assemble_scope_result(
         viewport_id=scope_id,
     )
     identities = collect_physical_wall_identities(walls, graph)
+    graph_edges = {str(edge["id"]): edge for edge in graph["edges"]}
 
     ordered_walls = sorted(walls, key=lambda item: item.candidate_id)
     records: list[PhysicalWallCandidateRecord] = []
@@ -2786,6 +2802,19 @@ def _assemble_scope_result(
                 wall_candidate_id=wall.candidate_id,
                 wall_candidate=wall,
                 physical_identity=identity,
+                source_edge_fragments=tuple(
+                    PhysicalWallSourceEdgeFragment(
+                        edge_id=str(edge_id),
+                        geometry=_segment_geometry(graph_edges[str(edge_id)]),
+                        source_primitive_ids=tuple(sorted(set(
+                            str(value) for value in
+                            (graph_edges[str(edge_id)].get(LINEAGE_KEY) or {}).get(
+                                "source_primitive_ids", ())
+                        ))),
+                    )
+                    for edge_id in sorted(identity.edge_ids)
+                    if str(edge_id) in graph_edges
+                ),
             )
         )
         ordered_identities.append(identity)
@@ -3630,6 +3659,7 @@ __all__ = [
     "PhysicalWallCandidateAuthority",
     "PhysicalWallCandidateProducer",
     "PhysicalWallCandidateRecord",
+    "PhysicalWallSourceEdgeFragment",
     "PhysicalWallCandidateScopeResult",
     "PhysicalWallCandidateSelector",
 ]

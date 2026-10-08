@@ -6,6 +6,9 @@ on:
       - pb_opening_host_binding_authority.py
       - pb_opening_dimension_authority.py
       - pb_opening_host_frame_authority.py
+      - pb_physical_wall_candidate_authority.py
+      - pb_raster_source_wall_frame_projection.py
+      - pb_schedule_opening_instance_binding_authority.py
       - pb_source_visibility_authority.py
       - pb_physical_opening_authority.py
       - pb_native_dimension_cap_evidence.py
@@ -18,9 +21,14 @@ on:
       - tests/test_raster_native_text_overlay_roles.py
       - tests/test_native_dimension_cap_evidence.py
       - tests/test_raster_connected_host_frame.py
+      - tests/test_raster_source_wall_frame_projection.py
+      - tests/test_raster_visible_receipt_identity.py
+      - tests/test_raster_swing_schedule_aperture.py
+      - tests/test_schedule_opening_instance_binding_authority_v2_regressions.py
       - tests/test_raster_opening_dimension_source_namespace.py
       - tests/test_raster_opening_source_band_host.py
       - tools/diag_gptmax_lot16_current_host_funnel.py
+      - tools/diag_gptmax_lot16_dimension_count_gates.py
       - .github/workflows/test-gptmax-raster-source-band-host.yml
 concurrency:
   group: gptmax-source-band-${{ github.head_ref || github.ref }}
@@ -44,6 +52,12 @@ jobs:
           tests/test_raster_opening_source_band_host.py
           tests/test_raster_opening_dimension_source_namespace.py
           tests/test_raster_connected_host_frame.py
+          tests/test_raster_source_wall_frame_projection.py
+          tests/test_raster_visible_receipt_identity.py
+          tests/test_raster_swing_schedule_aperture.py
+          tests/test_schedule_opening_instance_binding_authority_v1.py
+          tests/test_schedule_opening_instance_binding_authority_v2_regressions.py
+          tests/test_pb_opening_height_authority.py
           tests/test_native_dimension_cap_evidence.py
           tests/test_physical_opening_viewport_scope_live_gate.py
           tests/test_semantic_conflict_diagnostic_v1.py
@@ -72,6 +86,8 @@ jobs:
           tests/test_opening_host_binding_remote_ambiguity_regression_v3.py
       - name: Real SHA-pinned Lot16 proof and sealed areas
         run: PYTHONPATH=. python -u tools/diag_gptmax_lot16_current_host_funnel.py > lot16-source-band-proof.json
+      - name: All-page dimension and count source gates
+        run: PYTHONPATH=. python -u tools/diag_gptmax_lot16_dimension_count_gates.py > lot16-dimension-count-gates.json
       - name: Upload proof
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,4 +96,5 @@ jobs:
           path: |
             lot16-source-band-proof.json
             lot16-openings-sealed.json
+            lot16-dimension-count-gates.json
           retention-days: 7
