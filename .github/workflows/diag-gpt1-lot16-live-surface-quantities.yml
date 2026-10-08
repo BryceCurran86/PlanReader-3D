@@ -79,7 +79,7 @@ jobs:
           out={
               "canonical_room_count":len(claim.canonical_rooms),
               "canonical_floor_count":len(claim.canonical_floors),
-              "canonical_ceiling_count":len(claim.canonical_ceiling_objects),
+              "canonical_ceiling_count":len(claim.canonical_ceilings),
               "firm_room_area_count":len(room_q),
               "room_areas":[clean_quantity(q) for q in room_q],
               "floor_area_quantity_count":len(floor_q),
