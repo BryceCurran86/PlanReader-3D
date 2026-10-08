@@ -943,6 +943,84 @@ def test_generic_portable_ocr_evidence_remains_candidate_only() -> None:
 # Determinism and invariance
 # ---------------------------------------------------------------------------
 
+def test_replay_same_immutable_observation_reuses_both_verified_dpi_reads() -> None:
+    """A source selector is OCR-evaluated once without dropping either DPI."""
+    reads: list[int] = []
+
+    def exact(image: Image.Image, dpi: int):
+        reads.append(int(dpi))
+        return (_line(image, "150mm"),)
+
+    setup = _Setup(
+        _glyph_unverified_pdf([("150mm", 40, 120)]),
+        MockOCRBackend(responder=exact),
+    )
+    selector = setup.selector(setup.oid_of("150mm"))
+    first = setup.producer.publish(selector)
+    assert first.status is EvidenceResolutionStatus.CORROBORATED
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS)
+    assert first.record is not None
+    assert tuple(view.dpi for view in first.record.views) == RASTER_TEXT_CORROBORATION_DPIS
+
+    # Idempotent replay returns exactly the first producer-owned result.
+    for _ in range(4):
+        assert setup.producer.publish(selector) is first
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS)
+    assert setup.producer.authority().resolve(selector) == first
+
+
+def test_replay_abstention_never_retries_or_upgrades_ocr_failure() -> None:
+    """An unchanged failed proof stays ABSTAIN despite backend later changing."""
+    reads: list[int] = []
+    ocr_value = ["not the claimed text"]
+
+    def mismatched(image: Image.Image, dpi: int):
+        reads.append(int(dpi))
+        return (_line(image, ocr_value[0]),)
+
+    setup = _Setup(
+        _glyph_unverified_pdf([("150mm", 40, 120)]),
+        MockOCRBackend(responder=mismatched),
+    )
+    selector = setup.selector(setup.oid_of("150mm"))
+    first = setup.producer.publish(selector)
+    assert first.status is EvidenceResolutionStatus.ABSTAINED
+    assert first.record is None
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS)
+
+    # Never choose a newly favourable reading for the same source claim.
+    ocr_value[0] = "150mm"
+    assert setup.producer.publish(selector) is first
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS)
+    assert setup.producer.authority().resolve(selector) == first
+
+
+def test_replay_cache_is_partitioned_by_observation_and_source_producer() -> None:
+    """Different native words and source producers cannot borrow OCR evidence."""
+    reads: list[int] = []
+
+    def claim_one(image: Image.Image, dpi: int):
+        reads.append(int(dpi))
+        return (_line(image, "150mm"),)
+
+    payload = _glyph_unverified_pdf(
+        [("150mm", 40, 120), ("210mm", 120, 160)]
+    )
+    source_a = _Setup(payload, MockOCRBackend(responder=claim_one))
+    a = source_a.selector(source_a.oid_of("150mm"))
+    b = source_a.selector(source_a.oid_of("210mm"))
+    assert source_a.producer.publish(a).status is EvidenceResolutionStatus.CORROBORATED
+    assert source_a.producer.publish(b).status is EvidenceResolutionStatus.ABSTAINED
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS) * 2
+
+    # Same source bytes in a different producer still require their own
+    # first independent two-DPI corroboration.
+    source_b = _Setup(payload, MockOCRBackend(responder=claim_one))
+    c = source_b.selector(source_b.oid_of("150mm"))
+    assert source_b.producer.publish(c).status is EvidenceResolutionStatus.CORROBORATED
+    assert reads == list(RASTER_TEXT_CORROBORATION_DPIS) * 3
+
+
 def test_replay_is_deterministic_within_and_across_producers() -> None:
     pdf = _glyph_unverified_pdf([("150mm", 40, 120)])
     a = _Setup(pdf, _both("150mm"))
