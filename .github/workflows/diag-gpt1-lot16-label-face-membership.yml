@@ -1,4 +1,4 @@
-name: DIAG GPT1 Lot16 Label Face Membership
+name: DIAG GPT1 Lot16 Label Face Coverage
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - diag/gpt1-lot16-label-face-membership-v1
 
 jobs:
-  membership:
+  coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 70
     steps:
@@ -21,76 +21,81 @@ jobs:
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-      - name: Trace target label membership
+      - name: Trace target label coverage
         run: |
           PYTHONPATH=. python -u - <<'PY'
-          import json
+          import json, math
           from pathlib import Path
-          import pb_source_room_label_authority as labels
+          import fitz
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
-          target={"WIR","GARAGE","ENS."}
-          points={}
-          auth={}
-          matches={}
-          original_auth=labels.SourceRoomLabelProducer._authorize_word
-          original_point=labels._point_in_polygon
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(2,),
+              topology_pages=(2,),
+              room_area_support_pages=None,
+          )
 
-          def traced_auth(self,published,word):
-              result=original_auth(self,published,word)
-              raw=str(word.raw_text or "").strip().upper()
-              if raw in target:
-                  x0,y0,x1,y1=word.geometry
-                  point=((x0+x1)/2.0,(y0+y1)/2.0)
-                  points.setdefault(raw,[]).append({
-                      "point":point,
-                      "geometry":tuple(word.geometry),
-                      "block_no":word.block_no,
-                      "line_no":word.line_no,
-                      "word_no":word.word_no,
-                  })
-                  auth.setdefault(raw,[]).append(None if result is None else {
-                      "authority_kind":result.authority_kind,
-                      "trusted_text":result.trusted_text,
-                  })
-              return result
+          rooms=[]
+          for room in claim.canonical_rooms:
+              pts=tuple(room.polygon_pdf_pts or ())
+              if not pts:
+                  continue
+              xs=[float(p[0]) for p in pts]
+              ys=[float(p[1]) for p in pts]
+              rooms.append({
+                  "room_id":room.physical_room_id,
+                  "label":room.room_label,
+                  "bbox":[min(xs),min(ys),max(xs),max(ys)],
+                  "point_count":len(pts),
+              })
 
-          def traced_point(point,polygon):
-              result=original_point(point,polygon)
-              key=(round(float(point[0]),6),round(float(point[1]),6))
-              bucket=matches.setdefault(key,{"calls":0,"true":0})
-              bucket["calls"]+=1
-              if result:
-                  bucket["true"]+=1
-              return result
-
-          labels.SourceRoomLabelProducer._authorize_word=traced_auth
-          labels._point_in_polygon=traced_point
+          doc=fitz.open(path)
           try:
-              claim=collect_live_physical_net_wall_claim(
-                  Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"),
-                  pages=(2,),
-                  topology_pages=(2,),
-                  room_area_support_pages=None,
-              )
+              words=list(doc[2].get_text("words") or ())
           finally:
-              labels.SourceRoomLabelProducer._authorize_word=original_auth
-              labels._point_in_polygon=original_point
+              doc.close()
+          target={"WIR","GARAGE","WC","LINEN","ENS."}
+          labels=[]
+          for w in words:
+              raw=str(w[4] or "").strip().upper()
+              if raw not in target:
+                  continue
+              x0,y0,x1,y1=map(float,w[:4])
+              labels.append({
+                  "raw_text":raw,
+                  "block_no":int(w[5]),
+                  "line_no":int(w[6]),
+                  "point":[(x0+x1)/2.0,(y0+y1)/2.0],
+                  "bbox":[x0,y0,x1,y1],
+              })
 
-          rows=[]
-          for raw,entries in points.items():
-              for idx,entry in enumerate(entries):
-                  p=entry["point"]
-                  key=(round(float(p[0]),6),round(float(p[1]),6))
-                  rows.append({
-                      "raw_text":raw,
-                      **entry,
-                      "authorization":auth.get(raw,[None]*len(entries))[idx],
-                      "face_membership":matches.get(key,{"calls":0,"true":0}),
+          for item in labels:
+              x,y=item["point"]
+              ranked=[]
+              for room in rooms:
+                  x0,y0,x1,y1=room["bbox"]
+                  dx=max(x0-x,0.0,x-x1)
+                  dy=max(y0-y,0.0,y-y1)
+                  ranked.append({
+                      "room_id":room["room_id"],
+                      "label":room["label"],
+                      "bbox":room["bbox"],
+                      "bbox_distance":math.hypot(dx,dy),
+                      "inside_bbox":x0<=x<=x1 and y0<=y<=y1,
                   })
+              ranked.sort(key=lambda r:(r["bbox_distance"],r["room_id"]))
+              item["nearest_rooms"]=ranked[:8]
+
           print(json.dumps({
-              "targets":rows,
-              "canonical_labels":[r.room_label for r in claim.canonical_rooms if r.room_label],
-              "canonical_room_count":len(claim.canonical_rooms),
+              "room_count":len(rooms),
+              "room_bbox_union":[
+                  min(r["bbox"][0] for r in rooms),
+                  min(r["bbox"][1] for r in rooms),
+                  max(r["bbox"][2] for r in rooms),
+                  max(r["bbox"][3] for r in rooms),
+              ] if rooms else None,
+              "targets":labels,
           },indent=2,sort_keys=True))
           PY
