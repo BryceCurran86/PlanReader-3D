@@ -307,7 +307,6 @@ def enrich_live_canonical_floor_metric_areas(
             source_entities_by_face_record.setdefault(evidence_id, []).append(entity)
 
     enriched: list[LiveCanonicalFloorSurfaceObject] = []
-    resolved_count = 0
     conflict = False
     for floor in floor_composition.floors:
         source_entities = source_entities_by_face_record.get(
@@ -400,7 +399,6 @@ def enrich_live_canonical_floor_metric_areas(
                 commercial_quantity_authority=False,
             )
         )
-        resolved_count += 1
 
     if conflict:
         return LiveCanonicalFloorSurfaceComposition(
@@ -410,22 +408,56 @@ def enrich_live_canonical_floor_metric_areas(
             source_pages=floor_composition.source_pages,
         )
 
-    if resolved_count == len(floor_composition.floors):
+    # Each input bridge covers one exact page/scope; a canonical floor may
+    # already have a valid measurement from an earlier bridge. Resolve status
+    # from the CUMULATIVE floor state, not just matches in this bridge.
+    def _measured(floor: LiveCanonicalFloorSurfaceObject) -> bool:
+        if not floor.metric_area_quantity_id or not floor.metric_area_authority:
+            return False
+        try:
+            area = float(floor.metric_area_m2)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        return math.isfinite(area) and area > 0.0
+
+    measured_count = sum(_measured(floor) for floor in enriched)
+    metric_reasons = {
+        LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
+        LIVE_CANONICAL_FLOOR_METRIC_AREA_PARTIAL,
+        LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE,
+    }
+    base_reasons = tuple(
+        reason
+        for reason in floor_composition.reason_codes
+        if reason not in metric_reasons
+    )
+
+    if measured_count == len(enriched):
+        # Only a previously source-corroborated floor universe may regain
+        # CORROBORATED after all its separate measurement bridges close.
+        topology_complete = (
+            LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED in base_reasons
+            and LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL not in base_reasons
+        )
         return LiveCanonicalFloorSurfaceComposition(
-            status=floor_composition.status,
+            status=(
+                EvidenceResolutionStatus.CORROBORATED
+                if topology_complete
+                else floor_composition.status
+            ),
             reason_codes=(
-                *floor_composition.reason_codes,
+                *base_reasons,
                 LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
             ),
             floors=tuple(enriched),
             source_pages=floor_composition.source_pages,
         )
 
-    if resolved_count:
+    if measured_count:
         return LiveCanonicalFloorSurfaceComposition(
             status=EvidenceResolutionStatus.CANDIDATE,
             reason_codes=(
-                LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL,
+                *base_reasons,
                 LIVE_CANONICAL_FLOOR_METRIC_AREA_PARTIAL,
             ),
             floors=tuple(enriched),
@@ -435,7 +467,7 @@ def enrich_live_canonical_floor_metric_areas(
     return LiveCanonicalFloorSurfaceComposition(
         status=floor_composition.status,
         reason_codes=(
-            *floor_composition.reason_codes,
+            *base_reasons,
             LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE,
         ),
         floors=tuple(enriched),
