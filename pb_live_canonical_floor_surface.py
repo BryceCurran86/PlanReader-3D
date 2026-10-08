@@ -281,6 +281,11 @@ def enrich_live_canonical_floor_metric_areas(
         raise TypeError("room_area_bridge must be SourceRoomAreaBridgeResult")
     if not floor_composition.floors:
         return floor_composition
+    if floor_composition.status is EvidenceResolutionStatus.CONFLICT:
+        # A conflicted physical floor must not regain FIRM quantity merely
+        # because a third producer's bridge happens to arrive later. Keep
+        # the fail-closed composition immutable across sequential replays.
+        return floor_composition
 
     quantities_by_room: dict[str, list] = {}
     for quantity in room_area_bridge.quantities:
