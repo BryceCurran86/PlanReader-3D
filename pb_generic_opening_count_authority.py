@@ -851,6 +851,15 @@ class GenericOpeningCountProducer:
                 "schedule_corroborated": schedule_corroborated,
                 "opening_mark": selector.opening_mark,
                 "opening_family": selector.opening_family,
+                "commercial_projection_allowed": bool(schedule_corroborated),
+                "section": "Openings",
+                "element": (
+                    f"{str(selector.opening_family or 'Opening').strip().title()} count"
+                ),
+                "location": str(selector.opening_mark or selector.opening_family or "Opening"),
+                "substrate": "Other",
+                "inclusion_status": "PROVISIONAL",
+                "row_role": "",
             },
         )
 
