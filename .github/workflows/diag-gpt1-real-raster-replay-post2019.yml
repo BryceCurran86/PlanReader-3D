@@ -1,0 +1,112 @@
+name: DIAG GPT1 Maryborough Raster Replay After 2019
+
+on:
+  push:
+    branches: [diag/gpt1-real-raster-replay-post2019]
+
+concurrency:
+  group: diag-gpt1-real-raster-replay-post2019
+  cancel-in-progress: true
+
+jobs:
+  real-source-raster-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install production OCR
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 manifest integrity check
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Real source and raster corroboration replay profile
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt1-raster-replay-post2019
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt1-raster-replay-post2019/console.log
+          import hashlib,json,time,subprocess
+          from collections import Counter
+          from pathlib import Path
+          import pb_raster_text_corroboration_authority as raster
+          from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_migration_contracts import EvidenceResolutionStatus
+
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=pdf.read_bytes()
+          actual=hashlib.sha256(payload).hexdigest()
+          manifest=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json").read_text())
+          expected=next(d["sha256"] for d in manifest["source_documents"] if d["name"]==pdf.name)
+          assert actual==expected
+          call_keys=Counter()
+          evaluated_keys=Counter()
+          native= raster.RasterTextCorroborationProducer
+          original_publish=native.publish
+          original_evaluate=native._evaluate
+          def counted_publish(self,selector):
+              call_keys[selector.key]+=1
+              return original_publish(self,selector)
+          def counted_evaluate(self,selector):
+              evaluated_keys[selector.key]+=1
+              return original_evaluate(self,selector)
+          native.publish=counted_publish
+          native._evaluate=counted_evaluate
+
+          started=time.perf_counter()
+          source=SourceVisibilityProducer(producer_method="gpt1-real-raster-replay-post2019",producer_version="1")
+          published=source.ingest_native_pdf_bytes(
+              document_id=f"diag:{actual[:32]}",
+              source_bytes=payload,source_locator="memory://maryborough-real.pdf",
+              page_ids=("1","9","11","30"),
+          )
+          ingested=time.perf_counter()
+          producer=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          producer.publish(published.revision.revision_id)
+          total=time.perf_counter()
+          definitions=tuple(producer._definition_results.values())
+          published_definitions=[
+              {"code":x.record.code,"semantic_finish":x.record.semantic_finish}
+              for x in definitions
+              if x.status is EvidenceResolutionStatus.CORROBORATED and x.record is not None
+          ]
+          scopes=producer.published_occurrence_results()
+          out={
+              "source_sha_verified":True,"source_sha256":actual,
+              "repo_sha":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
+              "scope_page_ids":["1","9","11","30"],
+              "baseline_profile_seconds":654.651,
+              "baseline_material_seconds":641.448,
+              "source_ingest_seconds":round(ingested-started,3),
+              "material_publish_seconds":round(total-ingested,3),
+              "total_seconds":round(total-started,3),
+              "definition_count":len(published_definitions),
+              "definitions":published_definitions,
+              "occurrence_count":sum(len(s.records) for s in scopes),
+              "raster_publish_calls":sum(call_keys.values()),
+              "raster_evaluate_calls":sum(evaluated_keys.values()),
+              "replayed_selector_calls":sum(max(0,n-1) for n in call_keys.values()),
+              "reused_calls":sum(call_keys.values())-sum(evaluated_keys.values()),
+              "distinct_selectors":len(call_keys),
+              "evaluation_max_per_selector":max(evaluated_keys.values(),default=0),
+          }
+          assert out["raster_evaluate_calls"]<=out["raster_publish_calls"]
+          assert out["evaluation_max_per_selector"]<=1
+          assert out["occurrence_count"]==0
+          assert {d["code"] for d in published_definitions}>={"FPB","WFPB","IPF1"}
+          Path("artifacts/gpt1-raster-replay-post2019/result.json").write_text(
+              json.dumps(out,indent=2,sort_keys=True)+"\n"
+          )
+          print("GPT1_REAL_RASTER_REPLAY",json.dumps(out,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-real-raster-replay-post2019
+          path: artifacts/gpt1-raster-replay-post2019
+          retention-days: 5
