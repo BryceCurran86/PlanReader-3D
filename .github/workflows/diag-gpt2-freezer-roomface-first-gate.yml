@@ -152,7 +152,7 @@ jobs:
                       "label":" ".join(str(row.label or "").strip().upper().split()),
                       "face_id":str(row.face_id),
                       "label_record_id":row.record_id,
-                      "label_evidence_ids":list(row.evidence_ids),
+                      "label_observation_ids":list(row.observation_ids),
                       "face_record_id":None if face is None else face.record_id,
                       "vertex_count":None if face is None else len(face.polygon_pdf_pts),
                       "area_page_pts2":None if face is None else face.area_page_pts2,
