@@ -75,6 +75,17 @@ def _foreground_mask(gray: np.ndarray) -> np.ndarray | None:
     return candidates[0][1]
 
 
+def _line_component_eligible(
+    width: int, height: int, *, orientation: str, min_line_px: int,
+) -> bool:
+    """The historical morphology component gate, shared without new limits."""
+    if orientation == "horizontal":
+        return width >= min_line_px and width >= max(3, 3 * height)
+    if orientation == "vertical":
+        return height >= min_line_px and height >= max(3, 3 * width)
+    raise ValueError("orientation must be horizontal or vertical")
+
+
 def _component_segments(
     mask: np.ndarray,
     *,
