@@ -53,6 +53,11 @@ def source_face_report(source_bytes: bytes, *, page_ids: tuple[str, ...]) -> dic
         ],
         "opening_bindings": [asdict(row) for row in composition.opening_bindings],
         "host_frames": [asdict(row) for row in composition.host_frames],
+        "resolved_host_frame_evidence": [
+            asdict(result.evidence)
+            for selector in composition.host_frame_selectors.values()
+            if (result := composition.opening_host_frame_authority.resolve(selector)).evidence is not None
+        ],
         "semantic_inventory": asdict(composition.semantic_enumeration_result),
         "summary": {
             "physical_existence_claims": len(composition.opening_bindings),
