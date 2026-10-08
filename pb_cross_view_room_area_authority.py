@@ -737,6 +737,7 @@ def _trusted_native_dimensions_for_page(
     revision_id: str,
     page_id: str,
     candidate_lines: Sequence[_TrustedLine] = (),
+    view_type: str = DrawingViewType.UNKNOWN.value,
 ) -> tuple[_TrustedBoundDimension, ...]:
     """Resolve source-owned native figured dimensions without trusting raw text.
 
@@ -776,6 +777,7 @@ def _trusted_native_dimensions_for_page(
             bundle = extract_dimension_evidence_bundle(
                 pdf.load_page(page_number - 1),
                 page_num=page_number,
+                view_type=view_type,
             )
         finally:
             pdf.close()
