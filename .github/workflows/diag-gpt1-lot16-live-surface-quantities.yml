@@ -91,6 +91,117 @@ jobs:
           }
           print(json.dumps(out,indent=2,sort_keys=True))
           PY
+      - name: Trace Lot16 same-view room-area ownership
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pb_live_physical_net_wall_integration as integration
+          from pb_dimension_graph_constraint_engine import DimensionOrientation
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
+          from pb_cross_view_room_area_authority import (
+              _trusted_lines_for_page,
+              _trusted_native_dimensions_for_page,
+              _line_inside_dimension_pair,
+              _figured_pair_scale_consistent,
+              _witness_systems_intersect,
+              _dimension_is_immediate_label_annotation,
+          )
+
+          captured={}
+          original_publish=SameViewRoomAreaProducer.publish
+          def traced_publish(self):
+              result=original_publish(self)
+              captured["source"]=self._source
+              captured["rooms"]=self._rooms
+              captured["result"]=result
+              return result
+          SameViewRoomAreaProducer.publish=traced_publish
+          try:
+              integration.collect_live_physical_net_wall_claim(
+                  Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"),
+                  pages=(2,),
+                  topology_pages=(2,),
+                  room_area_support_pages=None,
+              )
+          finally:
+              SameViewRoomAreaProducer.publish=original_publish
+
+          source=captured["source"]
+          rooms=captured["rooms"]
+          result=captured["result"]
+          rows=[]
+          for room in rooms.rooms:
+              label=" ".join(str(room.room_label or "").strip().casefold().split())
+              lines=tuple(
+                  line for line in _trusted_lines_for_page(
+                      source,
+                      revision_id=room.revision_id,
+                      page_id=str(room.page_id),
+                      candidate_labels=(room.room_label,),
+                  )
+                  if " ".join(str(line.text or "").strip().casefold().split()) == label
+              )
+              dims=_trusted_native_dimensions_for_page(
+                  source,
+                  revision_id=room.revision_id,
+                  page_id=str(room.page_id),
+                  candidate_lines=lines,
+                  view_type=DrawingViewType.FLOOR_PLAN.value,
+              )
+              hs=[d for d in dims if d.orientation == DimensionOrientation.HORIZONTAL.value]
+              vs=[d for d in dims if d.orientation == DimensionOrientation.VERTICAL.value]
+              pairs=[]
+              if len(lines)==1:
+                  line=lines[0]
+                  for h in hs:
+                      for v in vs:
+                          inside=_line_inside_dimension_pair(line,h,v)
+                          scale=_figured_pair_scale_consistent(page_id=str(room.page_id),horizontal=h,vertical=v)
+                          intersect=_witness_systems_intersect(h,v)
+                          immediate_h=_dimension_is_immediate_label_annotation(line,h)
+                          immediate_v=_dimension_is_immediate_label_annotation(line,v)
+                          if inside or (immediate_h and immediate_v):
+                              pairs.append({
+                                  "h_mm":h.value_mm,
+                                  "v_mm":v.value_mm,
+                                  "inside":inside,
+                                  "scale_consistent":scale,
+                                  "witness_intersect":intersect,
+                                  "immediate_h":immediate_h,
+                                  "immediate_v":immediate_v,
+                                  "h_id":h.dimension_id,
+                                  "v_id":v.dimension_id,
+                              })
+              rows.append({
+                  "physical_room_id":room.physical_room_id,
+                  "page_id":room.page_id,
+                  "room_label":room.room_label,
+                  "label_line_count":len(lines),
+                  "trusted_dimension_count":len(dims),
+                  "horizontal_count":len(hs),
+                  "vertical_count":len(vs),
+                  "candidate_pairs":pairs,
+              })
+          print(json.dumps({
+              "same_view_status":getattr(result.status,"value",str(result.status)),
+              "same_view_reason_codes":list(result.reason_codes),
+              "record_count":len(result.records),
+              "unresolved_count":len(result.unresolved_physical_room_ids),
+              "records":[{
+                  "physical_room_id":r.physical_room_id,
+                  "room_label":r.room_label,
+                  "horizontal_dimension_id":r.horizontal_dimension_id,
+                  "vertical_dimension_id":r.vertical_dimension_id,
+                  "area_m2":r.area_evidence.normalized_value,
+              } for r in result.records],
+              "rooms":rows,
+          },indent=2,sort_keys=True))
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
