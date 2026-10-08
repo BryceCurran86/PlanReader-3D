@@ -14,3 +14,6 @@ def first_observed_surface_gate(room, floors):
     if floor.metric_area_m2 is None or not floor.metric_area_quantity_id or not floor.metric_area_authority:
         return "metric_floor_area_authority_unavailable"
     return "metric_floor_area_producer_present_not_yet_sealing_verified"
+
+
+# A producer-present area is not equivalent to a sealed commercial quantity.
