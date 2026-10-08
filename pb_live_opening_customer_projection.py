@@ -16,6 +16,7 @@ from pb_live_opening_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
+from pb_source_closed_run_export import seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     quantities_to_takeoff_output_rows,
@@ -135,12 +136,20 @@ def project_live_opening_customer_rows(
                 },
             )
         authorities[quantity.quantity_id] = authority
-    rows = quantities_to_takeoff_output_rows(
-        quantities,
-        traces_by_quantity_id=traces,
-        authorities_by_quantity_id=authorities,
+    rows = tuple(
+        quantities_to_takeoff_output_rows(
+            quantities,
+            traces_by_quantity_id=traces,
+            authorities_by_quantity_id=authorities,
+        )
     )
-    return tuple(rows)
+    sealed = seal_source_closed_run(
+        quantities,
+        project_id=project_id,
+        traces_by_quantity_id=traces,
+    )
+    verify_sealed_customer_output(sealed, rows)
+    return rows
 
 
 __all__ = [
