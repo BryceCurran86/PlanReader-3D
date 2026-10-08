@@ -12,6 +12,7 @@ from pb_figured_dimension_evidence import (
     DimensionLayoutCalibration,
     ObservedGeometrySegment,
     _tight_text_enclosure_path_indices,
+    _without_dimension_text_enclosure_paths,
     bind_observation_to_vector_geometry,
     extract_dimension_evidence_bundle,
 )
@@ -111,6 +112,46 @@ def test_real_split_dimension_line_resolves_after_text_frame_is_removed() -> Non
     assert "dimension-right" in result.dimension_line_id
     assert result.witness_line_ids == ("left-witness", "right-witness")
     assert result.endpoints == ((60.0, 100.0), (160.0, 100.0))
+
+
+def test_neighbor_dimension_text_frame_is_removed_from_binding_universe() -> None:
+    own_frame = _tight_text_frame()
+    neighbor_frame = (
+        _seg("neighbor-top", (78.0, 90.0), (96.0, 90.0), path=50),
+        _seg("neighbor-right", (96.0, 90.0), (96.0, 110.0), path=50),
+        _seg("neighbor-bottom", (96.0, 110.0), (78.0, 110.0), path=50),
+        _seg("neighbor-left", (78.0, 110.0), (78.0, 90.0), path=50),
+    )
+    real_geometry = (
+        _seg("dimension-left", (60.0, 100.0), (95.0, 100.0), path=60),
+        _seg("dimension-right", (125.0, 100.0), (160.0, 100.0), path=61),
+        _seg("left-witness", (60.0, 80.0), (60.0, 120.0), path=62),
+        _seg("right-witness", (160.0, 80.0), (160.0, 120.0), path=63),
+    )
+    segments = (*own_frame, *neighbor_frame, *real_geometry)
+
+    filtered = _without_dimension_text_enclosure_paths(
+        segments,
+        (
+            (100.0, 90.0, 120.0, 110.0),
+            (78.0, 90.0, 96.0, 110.0),
+        ),
+        _calibration(),
+    )
+
+    remaining_ids = {segment.segment_id for segment in filtered}
+    assert not any(segment_id.startswith("frame-") for segment_id in remaining_ids)
+    assert not any(segment_id.startswith("neighbor-") for segment_id in remaining_ids)
+    assert {segment.segment_id for segment in real_geometry} <= remaining_ids
+
+    result = bind_observation_to_vector_geometry(
+        _observation(),
+        filtered,
+        _calibration(),
+        text_orientation_hint=DimensionOrientation.HORIZONTAL.value,
+    )
+    assert result.status == BindingStatus.WITNESS_BOUND.value
+    assert result.witness_line_ids == ("left-witness", "right-witness")
 
 
 def test_larger_rectangle_is_not_filtered_as_text_enclosure() -> None:
