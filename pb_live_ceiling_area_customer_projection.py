@@ -11,6 +11,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from pb_customer_output_verification import verify_sealed_customer_output
+
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_live_ceiling_area_quantity_publication import (
     publish_live_ceiling_area_quantities,
@@ -20,6 +22,7 @@ from pb_live_ceiling_area_source_closed_export import (
 )
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
 from pb_migration_contracts import QuantityEvidence
+from pb_source_closed_run_export import seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     quantities_to_takeoff_output_rows,
@@ -145,13 +148,20 @@ def project_live_ceiling_area_customer_rows(
         workspace_id=int(workspace_id),
         project_id=project_id,
     )
-    return tuple(
+    rows = tuple(
         quantities_to_takeoff_output_rows(
             tuple(projected_quantities),
             traces_by_quantity_id=traces,
             authorities_by_quantity_id=authorities,
         )
     )
+    sealed = seal_source_closed_run(
+        original,
+        project_id=project_id,
+        traces_by_quantity_id=traces,
+    )
+    verify_sealed_customer_output(sealed, rows)
+    return rows
 
 
 __all__ = [
