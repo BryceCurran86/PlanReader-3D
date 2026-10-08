@@ -21,51 +21,35 @@ jobs:
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-      - name: Trace real Lot16 same-view ownership
+      - name: Trace real Lot16 source room-label authority
         shell: bash
         run: |
           set -o pipefail
-          PYTHONPATH=. python -u - <<'PY' | tee lot16-same-view-ownership.json
+          PYTHONPATH=. python -u - <<'PY' | tee lot16-room-label-authority.json
           import hashlib
           import json
+          import traceback
           from pathlib import Path
 
-          from pb_drawing_evidence_binding import DrawingViewType
-          from pb_live_canonical_room_composition import LiveCanonicalRoomComposition
           from pb_live_physical_net_wall_integration import (
               LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
-              collect_live_physical_net_wall_claim,
+          )
+          from pb_live_wall_opening_authority_composition import (
+              compose_live_wall_opening_authority,
           )
           from pb_migration_contracts import EvidenceResolutionStatus
-          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
-          from pb_source_visibility_authority import SourceVisibilityProducer
-          from pb_cross_view_room_area_authority import (
-              _dimension_is_immediate_label_annotation,
-              _figured_pair_scale_consistent,
-              _line_inside_dimension_pair,
-              _norm_label,
-              _trusted_lines_for_page,
-              _trusted_native_dimensions_for_page,
-              _witness_systems_intersect,
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
           )
-          from pb_dimension_graph_constraint_engine import DimensionOrientation
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer,
+              SourceRoomLabelSelector,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
 
           path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
           payload=path.read_bytes()
-          claim=collect_live_physical_net_wall_claim(
-              path,
-              pages=(2,),
-              topology_pages=(2,),
-              room_area_support_pages=None,
-          )
-
-          rooms=LiveCanonicalRoomComposition(
-              status=claim.canonical_room_status,
-              reason_codes=claim.canonical_room_reason_codes,
-              rooms=claim.canonical_rooms,
-              source_pages=claim.canonical_room_source_pages,
-          )
-
           source_sha=hashlib.sha256(payload).hexdigest()
           source=SourceVisibilityProducer(
               producer_method="live-physical-net-wall",
@@ -78,134 +62,84 @@ jobs:
               page_ids=("3",),
           )
 
-          same=SameViewRoomAreaProducer.from_source(
-              source=source,
-              rooms=rooms,
-          ).publish()
-
-          groups={}
-          for room in rooms.rooms:
-              groups.setdefault(
-                  (str(room.page_id), _norm_label(room.room_label)),
-                  [],
-              ).append(room)
-
-          census=[]
-          for room in rooms.rooms:
-              label=_norm_label(room.room_label)
-              key=(str(room.page_id),label)
-              duplicate_count=len(groups.get(key,()))
-              row={
-                  "physical_room_id":room.physical_room_id,
-                  "room_label":room.room_label,
-                  "normalized_label":label,
-                  "page_id":room.page_id,
-                  "geometry_complete":room.geometry_complete,
-                  "has_source_face":bool(str(room.source_room_face_record_id or "").strip()),
-                  "has_label_binding":bool(str(room.room_label_binding_record_id or "").strip()),
-                  "label_evidence_count":len(room.room_label_evidence_ids),
-                  "same_page_label_duplicate_count":duplicate_count,
-                  "trusted_label_line_count":0,
-                  "trusted_dimension_count":0,
-                  "horizontal_count":0,
-                  "vertical_count":0,
-                  "strict_pair_count":0,
-                  "immediate_pair_count":0,
-                  "pair_values":[],
-              }
-              if (
-                  room.geometry_complete
-                  and label
-                  and duplicate_count == 1
-                  and str(room.room_label_binding_record_id or "").strip()
-                  and room.room_label_evidence_ids
-              ):
-                  lines=tuple(
-                      line
-                      for line in _trusted_lines_for_page(
-                          source,
-                          revision_id=published.revision.revision_id,
-                          page_id=str(room.page_id),
-                          candidate_labels=(room.room_label,),
-                      )
-                      if _norm_label(line.text) == label
-                  )
-                  row["trusted_label_line_count"]=len(lines)
-                  if len(lines)==1:
-                      dims=_trusted_native_dimensions_for_page(
-                          source,
-                          revision_id=published.revision.revision_id,
-                          page_id=str(room.page_id),
-                          candidate_lines=lines,
-                          view_type=DrawingViewType.FLOOR_PLAN.value,
-                      )
-                      hs=tuple(d for d in dims if d.orientation==DimensionOrientation.HORIZONTAL.value)
-                      vs=tuple(d for d in dims if d.orientation==DimensionOrientation.VERTICAL.value)
-                      row["trusted_dimension_count"]=len(dims)
-                      row["horizontal_count"]=len(hs)
-                      row["vertical_count"]=len(vs)
-                      line=lines[0]
-                      strict=[]
-                      for h in hs:
-                          for v in vs:
-                              if (
-                                  _line_inside_dimension_pair(line,h,v)
-                                  and _figured_pair_scale_consistent(
-                                      page_id=str(room.page_id),
-                                      horizontal=h,
-                                      vertical=v,
-                                  )
-                                  and _witness_systems_intersect(h,v)
-                              ):
-                                  strict.append((h,v))
-                      owned_h=tuple(d for d in hs if _dimension_is_immediate_label_annotation(line,d))
-                      owned_v=tuple(d for d in vs if _dimension_is_immediate_label_annotation(line,d))
-                      immediate=[]
-                      for h in owned_h:
-                          for v in owned_v:
-                              if _figured_pair_scale_consistent(
-                                  page_id=str(room.page_id),
-                                  horizontal=h,
-                                  vertical=v,
-                              ):
-                                  immediate.append((h,v))
-                      row["strict_pair_count"]=len(strict)
-                      row["immediate_pair_count"]=len(immediate)
-                      pairs=strict if strict else immediate
-                      row["pair_values"]=[
-                          {
-                              "horizontal_mm":h.value_mm,
-                              "vertical_mm":v.value_mm,
-                              "horizontal_id":h.dimension_id,
-                              "vertical_id":v.dimension_id,
-                          }
-                          for h,v in pairs[:20]
-                      ]
-              census.append(row)
+          wall_opening=compose_live_wall_opening_authority(
+              source_visibility_producer=source,
+              revision_id=published.revision.revision_id,
+              page_ids=("3",),
+          )
+          published=source.published_snapshot_for_revision(published.revision.revision_id)
+          room_authority=build_source_room_face_authority(
+              wall_opening.physical_wall_candidate_authority
+          )
+          room_selector=SourceRoomFaceSelector(
+              document_id=published.revision.document_id,
+              revision_id=published.revision.revision_id,
+              source_sha256=published.revision.source_sha256,
+              snapshot_id=published.snapshot.snapshot_id,
+              page_id="3",
+              decision_scope_id="wall-source:page-3",
+          )
+          room_scope=room_authority.resolve_scope(room_selector)
 
           out={
-              "canonical_room_count":len(rooms.rooms),
-              "same_view_status":same.status.value,
-              "same_view_reason_codes":list(same.reason_codes),
-              "same_view_record_count":len(same.records),
-              "same_view_unresolved_count":len(same.unresolved_physical_room_ids),
-              "records":[
-                  {
-                      "physical_room_id":r.physical_room_id,
-                      "room_label":r.room_label,
-                      "horizontal_dimension_id":r.horizontal_dimension_id,
-                      "vertical_dimension_id":r.vertical_dimension_id,
-                      "area_m2":r.area_evidence.normalized_value,
-                  }
-                  for r in same.records
-              ],
-              "census":census,
+              "room_scope_status":room_scope.status.value,
+              "room_scope_reason_codes":list(room_scope.reason_codes),
+              "room_scope_complete":room_scope.scope_complete,
+              "room_face_count":len(room_scope.records),
+              "face_universe_complete":room_scope.face_universe_complete,
           }
+
+          try:
+              producer=SourceRoomLabelProducer.from_authorities(
+                  source,
+                  room_authority,
+                  page_ids=("3",),
+              )
+              results=producer.published_results()
+              out["producer_exception"]=None
+              out["label_results"]=[
+                  {
+                      "status":result.status.value,
+                      "reason_codes":list(result.reason_codes),
+                      "record_count":len(result.records),
+                      "records":[
+                          {
+                              "label":record.label,
+                              "face_id":record.face_id,
+                              "source_room_face_record_id":record.source_room_face_record_id,
+                              "source_bbox":list(record.source_bbox),
+                              "observation_ids":list(record.observation_ids),
+                              "authority_kinds":[w.authority_kind for w in record.word_evidence],
+                          }
+                          for record in result.records
+                      ],
+                      "split_face_candidate_count":len(result.split_face_candidates),
+                      "split_face_candidates":[
+                          {
+                              "label":candidate.label,
+                              "word_face_ids":list(candidate.word_face_ids),
+                              "source_room_face_record_ids":list(candidate.source_room_face_record_ids),
+                              "source_bbox":list(candidate.source_bbox),
+                              "observation_ids":list(candidate.observation_ids),
+                          }
+                          for candidate in result.split_face_candidates
+                      ],
+                  }
+                  for result in results
+              ]
+          except Exception as exc:
+              out["producer_exception"]={
+                  "type":type(exc).__name__,
+                  "message":str(exc),
+                  "traceback":traceback.format_exc(),
+              }
+              out["label_results"]=[]
+
           print(json.dumps(out,indent=2,sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: lot16-same-view-ownership
-          path: lot16-same-view-ownership.json
+          name: lot16-room-label-authority
+          path: lot16-room-label-authority.json
           retention-days: 3
