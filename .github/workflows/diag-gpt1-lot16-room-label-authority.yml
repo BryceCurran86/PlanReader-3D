@@ -88,11 +88,24 @@ jobs:
               )
           )
 
+          from pb_source_observation_authority import ObservationSelector
+
           raw_lines=[]
-          for obs in source.observation_authority().published_observations():
-              if str(getattr(obs,"page_id",""))!="3":
+          obs_auth=source.observation_authority()
+          for observation_id in published.snapshot.observation_ids:
+              resolved=obs_auth.resolve(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=observation_id,
+                  )
+              )
+              obs=resolved.observation
+              if obs is None or str(obs.page_id)!="3":
                   continue
-              text=str(getattr(obs,"raw_text","") or "").strip()
+              text=str(obs.raw_text or "").strip()
               if not text:
                   continue
               upper=text.upper()
@@ -100,12 +113,11 @@ jobs:
                   raw_lines.append({
                       "text":text,
                       "normalized_candidate":_normalized_room_line(text),
-                      "observation_id":getattr(obs,"observation_id",None),
-                      "geometry":list(getattr(obs,"geometry",()) or ()),
-                      "source_partition_id":getattr(obs,"source_partition_id",None),
-                      "block_no":getattr(obs,"block_no",None),
-                      "line_no":getattr(obs,"line_no",None),
-                      "word_no":getattr(obs,"word_no",None),
+                      "observation_id":obs.observation_id,
+                      "geometry":list(obs.geometry or ()),
+                      "source_partition_id":obs.source_partition_id,
+                      "source_primitive_ref":obs.source_primitive_ref,
+                      "observation_kind":obs.observation_kind,
                   })
 
           out={
