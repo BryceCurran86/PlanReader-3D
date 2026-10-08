@@ -1110,6 +1110,16 @@ def _try_physical_net_wall_rows(
         app._live_room_area_takeoff_rows_by_workspace = room_area_rows_by_workspace
     room_area_rows_by_workspace[int(workspace_id)] = []
 
+    floor_finish_rows_by_workspace = getattr(
+        app, "_live_floor_finish_takeoff_rows_by_workspace", None
+    )
+    if not isinstance(floor_finish_rows_by_workspace, dict):
+        floor_finish_rows_by_workspace = {}
+        app._live_floor_finish_takeoff_rows_by_workspace = (
+            floor_finish_rows_by_workspace
+        )
+    floor_finish_rows_by_workspace[int(workspace_id)] = []
+
     ceiling_rows_by_workspace = getattr(
         app, "_live_ceiling_takeoff_rows_by_workspace", None
     )
@@ -1185,27 +1195,25 @@ def _try_physical_net_wall_rows(
         return rows
 
     def room_area_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
-        """Project only source-closed room areas into AI review rows."""
-        from pb_live_floor_area_quantity_publication import (
-            publish_live_canonical_room_area_quantities,
-            publish_live_floor_area_quantities,
-        )
-        from pb_live_room_area_customer_projection import (
-            project_live_room_area_customer_rows,
+        """Project final source-closed canonical floor areas into AI review rows."""
+        from pb_live_floor_area_customer_projection import (
+            project_live_floor_area_customer_rows,
         )
 
-        projected = project_live_room_area_customer_rows(
+        projected = project_live_floor_area_customer_rows(
             claim,
             workspace_id=int(workspace_id),
             project_id=f"customer-workspace:{int(workspace_id)}",
         )
-        floor_quantities = {
-            str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
-            quantity
+        from pb_live_floor_area_quantity_publication import (
+            publish_live_canonical_room_area_quantities,
+            publish_live_floor_area_quantities,
+        )
+        final_floor_quantities = {
+            str(quantity.quantity_id): quantity
             for quantity in publish_live_floor_area_quantities(claim)
-            if isinstance(quantity.metadata, Mapping)
         }
-        room_quantities = {
+        canonical_room_quantities = {
             str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
             quantity
             for quantity in publish_live_canonical_room_area_quantities(claim)
@@ -1217,32 +1225,51 @@ def _try_physical_net_wall_rows(
                 str(item.get("origin") or "") != "AI"
                 or str(item.get("quantity_status") or "") != "To review"
                 or str(item.get("row_role") or "") != "floor_area"
+                or str(item.get("quantity_family") or "") != "floor_area"
             ):
-                raise ValueError("room-area projection bypassed customer review state")
+                raise ValueError("floor-area projection bypassed customer review state")
             required = {
                 name: str(item.get(name) or "").strip()
                 for name in ("section", "element", "location", "substrate")
             }
             if not all(required.values()):
-                raise ValueError("room-area projection is missing customer row identity")
+                raise ValueError("floor-area projection is missing customer row identity")
             quantity_id = str(item.get("quantity_id") or "").strip()
             if not quantity_id:
-                raise ValueError("room-area projection is missing quantity identity")
+                raise ValueError("floor-area projection is missing quantity identity")
             unit = str(item.get("unit") or "").strip().lower()
             if unit == "m2":
                 unit = "m²"
-            floor_quantity = floor_quantities.get(quantity_id)
-            room_quantity = room_quantities.get(quantity_id)
-            floor_quantity_suffix = (
-                f" · floor_quantity:{floor_quantity.quantity_id}"
-                if floor_quantity is not None
-                else ""
+            source_reference = str(item.get("source_reference") or "").strip()
+            if not source_reference:
+                raise ValueError("floor-area projection is missing source lineage")
+            final_quantity = final_floor_quantities.get(quantity_id)
+            final_metadata = (
+                final_quantity.metadata
+                if final_quantity is not None
+                and isinstance(final_quantity.metadata, Mapping)
+                else {}
             )
-            room_quantity_suffix = (
-                f" · canonical_room_quantity:{room_quantity.quantity_id}"
-                if room_quantity is not None
-                else ""
+            upstream_room_area_quantity_id = str(
+                final_metadata.get("upstream_room_area_quantity_id") or ""
+            ).strip()
+            source_reference = (
+                f"{source_reference} · floor_quantity:{quantity_id}"
             )
+            if upstream_room_area_quantity_id:
+                source_reference = (
+                    f"{source_reference} · "
+                    f"room_area_quantity:{upstream_room_area_quantity_id}"
+                )
+                canonical_room_quantity = canonical_room_quantities.get(
+                    upstream_room_area_quantity_id
+                )
+                if canonical_room_quantity is not None:
+                    source_reference = (
+                        f"{source_reference} · "
+                        f"canonical_room_quantity:"
+                        f"{canonical_room_quantity.quantity_id}"
+                    )
             rows.append(
                 _takeoff_row(
                     workspace_id=int(workspace_id),
@@ -1252,15 +1279,78 @@ def _try_physical_net_wall_rows(
                     substrate=required["substrate"],
                     quantity=float(item["quantity"]),
                     status="To review",
-                    source_page=str(item.get("source_page") or "Selected PDF pages"),
-                    source_reference=(
-                        f"{SOURCE_PREFIX} · room_area_quantity:{quantity_id}"
-                        f"{floor_quantity_suffix}"
-                        f"{room_quantity_suffix}"
-                    ),
+                    source_page=str(item.get("source_page") or ""),
+                    source_reference=f"{SOURCE_PREFIX} · {source_reference}",
                     confidence="Documented",
                     notes=str(item.get("notes") or ""),
                     row_role="floor_area",
+                    unit=unit,
+                    preserve_quantity=True,
+                )
+            )
+        return rows
+
+    def floor_finish_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
+        """Project final source-closed floor finishes into AI review rows."""
+        from pb_live_floor_finish_customer_projection import (
+            project_live_floor_finish_customer_rows,
+        )
+
+        projected = project_live_floor_finish_customer_rows(
+            claim,
+            workspace_id=int(workspace_id),
+            project_id=f"customer-workspace:{int(workspace_id)}",
+        )
+        rows: List[Tuple[Any, ...]] = []
+        for item in projected:
+            if (
+                str(item.get("origin") or "") != "AI"
+                or str(item.get("quantity_status") or "") != "To review"
+                or str(item.get("quantity_family") or "") != "floor_finish_area"
+            ):
+                raise ValueError(
+                    "floor-finish projection bypassed customer review state"
+                )
+            required = {
+                name: str(item.get(name) or "").strip()
+                for name in ("section", "element", "location", "substrate")
+            }
+            if not all(required.values()):
+                raise ValueError(
+                    "floor-finish projection is missing customer row identity"
+                )
+            quantity_id = str(item.get("quantity_id") or "").strip()
+            if not quantity_id:
+                raise ValueError(
+                    "floor-finish projection is missing quantity identity"
+                )
+            source_reference = str(item.get("source_reference") or "").strip()
+            if not source_reference:
+                raise ValueError(
+                    "floor-finish projection is missing source lineage"
+                )
+            unit = str(item.get("unit") or "").strip().lower()
+            if unit == "m2":
+                unit = "m²"
+            row_role = str(item.get("row_role") or "").strip() or "floor_area"
+            rows.append(
+                _takeoff_row(
+                    workspace_id=int(workspace_id),
+                    section=required["section"],
+                    element=required["element"],
+                    location=required["location"],
+                    substrate=required["substrate"],
+                    finish_system=str(item.get("finish_system") or ""),
+                    quantity=float(item["quantity"]),
+                    status="To review",
+                    source_page=str(item.get("source_page") or ""),
+                    source_reference=f"{SOURCE_PREFIX} · {source_reference}",
+                    inclusion_status=str(
+                        item.get("inclusion_status") or "INCLUSION"
+                    ),
+                    confidence="Documented",
+                    notes=str(item.get("notes") or ""),
+                    row_role=row_role,
                     unit=unit,
                     preserve_quantity=True,
                 )
@@ -1271,8 +1361,176 @@ def _try_physical_net_wall_rows(
         source_path: Path,
         claim_pages: Sequence[int],
         claim: Any,
+        topology_pages: Optional[Sequence[int]] = None,
     ) -> List[Tuple[Any, ...]]:
-        """Project only explicit ceiling-review promotions into customer rows."""
+        """Project every final sealed ceiling; use review replay only as fallback."""
+        from dataclasses import replace
+
+        from pb_live_ceiling_area_customer_projection import (
+            project_live_ceiling_area_customer_rows,
+        )
+        from pb_live_ceiling_area_quantity_publication import (
+            publish_live_ceiling_area_quantities,
+        )
+        from pb_live_ceiling_customer_projection import (
+            project_live_ceiling_customer_rows,
+        )
+        from pb_live_ceiling_lining_integration import (
+            collect_live_ceiling_lining_claims,
+        )
+
+        project_id = f"customer-workspace:{int(workspace_id)}"
+        projected: List[Dict[str, Any]] = list(
+            project_live_ceiling_customer_rows(
+                claim,
+                workspace_id=int(workspace_id),
+                project_id=project_id,
+            )
+        )
+
+        # Mirror source-closed handoff: retain legacy canonical ceilings only
+        # where the new RCP authority does not already own the same source room.
+        legacy_result = collect_live_ceiling_lining_claims(
+            source_path,
+            pages=tuple(claim_pages),
+            topology_pages=(
+                tuple(topology_pages) if topology_pages is not None else None
+            ),
+            authoritative_room_area_quantities=tuple(
+                getattr(claim, "room_area_quantity_evidence", ())
+            ),
+        )
+        new_room_index_ids = {
+            str(getattr(ceiling, "source_room_index_id", "") or "").strip()
+            for ceiling in tuple(getattr(claim, "canonical_ceilings", ()) or ())
+            if str(getattr(ceiling, "source_room_index_id", "") or "").strip()
+        }
+        if new_room_index_ids:
+            retained_legacy_ceilings = tuple(
+                ceiling
+                for ceiling in legacy_result.canonical_ceilings
+                if str(ceiling.source_room_index_id or "").strip()
+                not in new_room_index_ids
+            )
+            retained_shadow_ids = {
+                str(ceiling.ceiling_quantity_id or "").strip()
+                for ceiling in retained_legacy_ceilings
+                if str(ceiling.ceiling_quantity_id or "").strip()
+            }
+            legacy_result = replace(
+                legacy_result,
+                claims=(),
+                canonical_ceilings=retained_legacy_ceilings,
+                quantity_evidence=tuple(
+                    quantity
+                    for quantity in legacy_result.quantity_evidence
+                    if str(quantity.quantity_id or "").strip()
+                    in retained_shadow_ids
+                ),
+            )
+
+        legacy_quantities = publish_live_ceiling_area_quantities(legacy_result)
+        if legacy_quantities:
+            projected.extend(
+                project_live_ceiling_area_customer_rows(
+                    legacy_result,
+                    workspace_id=int(workspace_id),
+                    project_id=project_id,
+                )
+            )
+
+        if projected:
+            rows: List[Tuple[Any, ...]] = []
+            seen_quantity_ids: set[str] = set()
+            for item in projected:
+                if (
+                    str(item.get("origin") or "") != "AI"
+                    or str(item.get("quantity_status") or "") != "To review"
+                    or str(item.get("quantity_family") or "") != "ceiling_lining"
+                    or str(item.get("row_role") or "") != "ceiling_area"
+                ):
+                    raise ValueError(
+                        "ceiling projection bypassed customer review state"
+                    )
+                required = {
+                    name: str(item.get(name) or "").strip()
+                    for name in ("section", "element", "location", "substrate")
+                }
+                if not all(required.values()):
+                    raise ValueError(
+                        "ceiling projection is missing customer row identity"
+                    )
+                quantity_id = str(item.get("quantity_id") or "").strip()
+                if not quantity_id:
+                    raise ValueError(
+                        "ceiling projection is missing quantity identity"
+                    )
+                if quantity_id in seen_quantity_ids:
+                    raise ValueError(
+                        f"duplicate sealed ceiling customer row: {quantity_id}"
+                    )
+                seen_quantity_ids.add(quantity_id)
+                source_reference = str(item.get("source_reference") or "").strip()
+                if not source_reference:
+                    raise ValueError(
+                        "ceiling projection is missing source lineage"
+                    )
+                unit = str(item.get("unit") or "").strip().lower()
+                if unit == "m2":
+                    unit = "m²"
+                rows.append(
+                    _takeoff_row(
+                        workspace_id=int(workspace_id),
+                        section=required["section"],
+                        element=required["element"],
+                        location=required["location"],
+                        substrate=required["substrate"],
+                        finish_system=str(item.get("finish_system") or ""),
+                        quantity=float(item["quantity"]),
+                        status="To review",
+                        source_page=str(item.get("source_page") or ""),
+                        source_reference=f"{SOURCE_PREFIX} · {source_reference}",
+                        inclusion_status=str(
+                            item.get("inclusion_status") or "INCLUSION"
+                        ),
+                        confidence="Documented",
+                        notes=str(item.get("notes") or ""),
+                        row_role="ceiling_area",
+                        unit=unit,
+                        preserve_quantity=True,
+                    )
+                )
+
+            if legacy_result.canonical_ceilings:
+                try:
+                    from pb_live_canonical_coverage_registry import (
+                        collect_live_canonical_coverage,
+                    )
+
+                    summaries, family_gaps = collect_live_canonical_coverage(
+                        objects=legacy_result.canonical_ceilings,
+                        quantities=tuple(legacy_quantities),
+                        output_rows=(),
+                        registry_run_scope=(
+                            f"customer_workspace:{int(workspace_id)}:ceiling_legacy"
+                        ),
+                    )
+                    current_coverage["summaries"].extend(summaries)
+                    for category, reasons in family_gaps.items():
+                        current_coverage["family_gaps"].setdefault(
+                            category, []
+                        ).extend(reasons)
+                except Exception as exc:
+                    current_coverage["family_gaps"].setdefault(
+                        "ceiling", []
+                    ).append(
+                        "live_ceiling_coverage_collection_failed:"
+                        f"{type(exc).__name__}"
+                    )
+            return rows
+
+        # Preserve the older review-eligible path only where no final sealed
+        # ceiling quantity exists at all.
         from pb_ceiling_lining_review_promotion import (
             collect_ceiling_lining_review_bundle,
         )
@@ -1281,7 +1539,7 @@ def _try_physical_net_wall_rows(
             source_path,
             pages=tuple(claim_pages),
             workspace_id=int(workspace_id),
-            project_id=f"customer-workspace:{int(workspace_id)}",
+            project_id=project_id,
             authoritative_area_quantities=tuple(
                 getattr(claim, "room_area_quantity_evidence", ())
             ),
@@ -1339,6 +1597,8 @@ def _try_physical_net_wall_rows(
                     *getattr(claim, "opening_quantity_evidence", ()),
                     *getattr(claim, "opening_count_quantity_evidence", ()),
                     *getattr(claim, "room_area_quantity_evidence", ()),
+                    *getattr(claim, "floor_finish_quantity_evidence", ()),
+                    *getattr(claim, "ceiling_lining_quantity_evidence", ()),
                     *publish_live_canonical_room_area_quantities(claim),
                     *publish_live_floor_area_quantities(claim),
                 )
@@ -1358,7 +1618,8 @@ def _try_physical_net_wall_rows(
             # rows actually present in takeoff_rows after insertion.
             summaries, family_gaps = collect_live_canonical_coverage(
                 objects=(*claim.canonical_walls, *claim.canonical_openings,
-                         *claim.canonical_rooms, *claim.canonical_floors),
+                         *claim.canonical_rooms, *claim.canonical_floors,
+                         *getattr(claim, "canonical_ceilings", ())),
                 quantities=tuple(quantities),
                 output_rows=tuple(output_rows),
                 registry_run_scope=f"customer_workspace:{int(workspace_id)}",
@@ -1467,6 +1728,8 @@ def _try_physical_net_wall_rows(
                 *getattr(claim, "opening_quantity_evidence", ()),
                 *getattr(claim, "opening_count_quantity_evidence", ()),
                 *getattr(claim, "room_area_quantity_evidence", ()),
+                *getattr(claim, "floor_finish_quantity_evidence", ()),
+                *getattr(claim, "ceiling_lining_quantity_evidence", ()),
             ):
                 if blocked_quantity is None:
                     continue
@@ -1497,11 +1760,23 @@ def _try_physical_net_wall_rows(
                     f"{type(room_output_exc).__name__}"
                 )
             try:
+                floor_finish_rows_by_workspace[int(workspace_id)].extend(
+                    floor_finish_rows_for_claim(claim)
+                )
+            except Exception as floor_finish_output_exc:
+                current_coverage["family_gaps"].setdefault(
+                    "floor_finish", []
+                ).append(
+                    "live_floor_finish_customer_projection_failed:"
+                    f"{type(floor_finish_output_exc).__name__}"
+                )
+            try:
                 ceiling_rows_by_workspace[int(workspace_id)].extend(
                     ceiling_rows_for_source(
                         group["path"],
                         claim_pages,
                         claim,
+                        topology_pages=claim_kwargs.get("topology_pages"),
                     )
                 )
             except Exception as ceiling_output_exc:
@@ -2059,6 +2334,11 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
             int(workspace_id), ()
         )
     )
+    floor_finish_rows = list(
+        getattr(app, "_live_floor_finish_takeoff_rows_by_workspace", {}).get(
+            int(workspace_id), ()
+        )
+    )
     ceiling_rows = list(
         getattr(app, "_live_ceiling_takeoff_rows_by_workspace", {}).get(
             int(workspace_id), ()
@@ -2069,6 +2349,7 @@ def analyse_workspace(app: Any, workspace_id: int) -> Dict[str, Any]:
         + facade_rows
         + opening_rows
         + room_area_rows
+        + floor_finish_rows
         + ceiling_rows
         + partition_rows
         + finish_rows
