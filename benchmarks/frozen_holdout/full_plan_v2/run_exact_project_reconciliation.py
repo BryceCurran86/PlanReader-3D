@@ -71,6 +71,7 @@ def build_exact_project_report(
     manifest_path: Path,
     sealed_run_path: Path,
     identity_map_path: Path,
+    source_root: Path | None = None,
 ) -> dict:
     manifest = load_project_manifest(manifest_path)
     sealed = sealed_source_closed_run_from_dict(_json_object(sealed_run_path))
@@ -92,18 +93,50 @@ def build_exact_project_report(
     expected_hashes = {doc.sha256 for doc in manifest.source_documents}
     run_hashes = set(sealed.source_sha256s)
     map_hashes = set(identity_map.source_sha256s)
-    source_sha_verified = bool(
+    source_envelope_verified = bool(
         run_hashes
         and run_hashes.issubset(expected_hashes)
         and map_hashes
         and map_hashes.issubset(expected_hashes)
     )
+    # The envelope only repeats claimed hashes; it cannot prove actual PDF
+    # bytes. Reuse the already-merged #2010 source-file proof.
+    from scripts.report_full_plan_v2_readiness import _source_sha_proof
+
+    source_sha_verified, source_reasons = _source_sha_proof(
+        {"source_documents": [asdict(doc) for doc in manifest.source_documents]},
+        source_root,
+        manifest.project_id,
+    )
+    # A frozen benchmark trade category is not production-authenticated trade
+    # evidence. The existing sealed schema contains family, not source-backed
+    # commercial trade ownership. Keep this report diagnostic until that
+    # upstream handoff exists; do not publish evaluator-derived percentages.
+    trade_classification_verified = False
+    blockers = list(manifest.reason_codes) + list(source_reasons)
+    if manifest.status != "VERIFIED":
+        blockers.append("frozen_manifest_not_verified")
+    if not source_envelope_verified:
+        blockers.append("sealed_source_envelope_mismatch")
+    if not produced:
+        blockers.append("sealed_production_quantities_empty")
+    if result.lineage_conflicts:
+        blockers.append("sealed_production_lineage_conflict")
+    if not trade_classification_verified:
+        blockers.append("source_authenticated_trade_classification_missing")
+    reconciliation_complete = not blockers
 
     return {
         "project_id": manifest.project_id,
         "source_sha_verified": source_sha_verified,
+        "source_envelope_verified": source_envelope_verified,
         "source_sha256s": sorted(run_hashes),
-        "reconciliation_complete": True,
+        "trade_classification_verified": trade_classification_verified,
+        "manifest_status": manifest.status,
+        "publication_status": "UNPUBLISHED",
+        "score_claim": False,
+        "reason_codes": sorted(set(blockers)),
+        "reconciliation_complete": reconciliation_complete,
         "denominator": result.truth_denominator,
         "matched_within_tolerance": result.matched_within_tolerance,
         "matched_outside_tolerance": result.matched_outside_tolerance,
@@ -111,8 +144,8 @@ def build_exact_project_report(
         "partial": result.partial,
         "unresolved": result.unresolved,
         "unsupported_extra": result.unsupported_extra,
-        "coverage_accuracy": result.observed_accuracy,
-        "precision_adjusted_accuracy": result.precision_adjusted_accuracy,
+        "coverage_accuracy": None,
+        "precision_adjusted_accuracy": None,
         "abstained_outputs": result.abstained_outputs,
         "lineage_conflicts": result.lineage_conflicts,
         "produced_items": [asdict(item) for item in produced],
@@ -128,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--identity-map", type=Path, required=True)
+    parser.add_argument("--source-root", type=Path, default=None, help="Real source PDF root, organised as <root>/<project_id>/<manifest filename>.")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
@@ -135,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         manifest_path=args.manifest,
         sealed_run_path=args.sealed_run,
         identity_map_path=args.identity_map,
+        source_root=args.source_root,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
