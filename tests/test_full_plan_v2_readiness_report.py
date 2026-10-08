@@ -1,10 +1,11 @@
 """GPT3 readiness diagnostics must never turn absent production into a score."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
-from scripts.report_full_plan_v2_readiness import diagnostic_report
+from scripts.report_full_plan_v2_readiness import diagnostic_report, _source_sha_proof
 
 ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 
@@ -60,3 +61,24 @@ def test_empty_production_is_not_a_successful_reconciliation(tmp_path: Path) -> 
     assert project["produced_file_present"] is True
     assert "empty_produced_items_unverified" in project["blockers"]
     assert project["reconciliation_complete"] is False
+
+
+def test_source_hash_checks_actual_bytes_not_just_filename(tmp_path: Path) -> None:
+    folder = tmp_path / "project-x"
+    folder.mkdir()
+    source = folder / "evidence.pdf"
+    source.write_bytes(b"true source")
+    manifest = {"source_documents": [{
+        "name": "evidence.pdf",
+        "size_bytes": len(b"true source"),
+        "sha256": hashlib.sha256(b"true source").hexdigest(),
+    }]}
+    assert _source_sha_proof(manifest, tmp_path, "project-x") == (True, [])
+    source.write_bytes(b"fake source")
+    verified, reasons = _source_sha_proof(manifest, tmp_path, "project-x")
+    assert verified is False
+    assert "source_file_sha_mismatch:evidence.pdf" in reasons
+    source.unlink()
+    verified, reasons = _source_sha_proof(manifest, tmp_path, "project-x")
+    assert verified is False
+    assert "source_file_missing:evidence.pdf" in reasons

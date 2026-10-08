@@ -6,6 +6,7 @@ files. It deliberately does not import, alter, or invoke the benchmark evaluator
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from collections import Counter
 from pathlib import Path
@@ -20,7 +21,38 @@ def _object(path: Path) -> dict:
     return value
 
 
-def diagnostic_report(root: Path, produced_root: Path) -> dict:
+def _source_sha_proof(manifest: dict, source_root: Path | None, project_id: str) -> tuple[bool, list[str]]:
+    """Hash real source files against the frozen name, size, and SHA-256."""
+    documents = manifest.get("source_documents")
+    if not isinstance(documents, list) or not documents:
+        return False, ["source_manifest_documents_missing"]
+    if source_root is None:
+        return False, ["source_files_not_supplied"]
+    reasons: list[str] = []
+    for document in documents:
+        if not isinstance(document, dict):
+            raise ValueError("source manifest document must be an object")
+        name, expected_sha, expected_size = document.get("name"), document.get("sha256"), document.get("size_bytes")
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            raise ValueError("source document name must be a plain filename")
+        if not isinstance(expected_sha, str) or len(expected_sha) != 64:
+            raise ValueError("source manifest sha256 invalid")
+        source = source_root / project_id / name
+        if not source.is_file():
+            reasons.append(f"source_file_missing:{name}")
+            continue
+        if source.stat().st_size != expected_size:
+            reasons.append(f"source_file_size_mismatch:{name}")
+            continue
+        digest = hashlib.sha256()
+        with source.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha.lower():
+            reasons.append(f"source_file_sha_mismatch:{name}")
+    return not reasons, reasons
+
+def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None = None) -> dict:
     suite = _object(root / "manifest.json")
     project_ids = suite["projects"]
     required_count = suite["required_project_count"]
@@ -51,6 +83,8 @@ def diagnostic_report(root: Path, produced_root: Path) -> dict:
         eligible = manifest.get("verified_takeoff_items", [])
         denominator = sum(item.get("denominator_eligible", True) is True for item in eligible)
         blockers = list(manifest.get("reason_codes") or ())
+        source_verified, source_reasons = _source_sha_proof(manifest, source_root, project_id)
+        blockers.extend(source_reasons)
         if manifest.get("status") != "VERIFIED":
             blockers.insert(0, "frozen_manifest_not_verified")
         if not exists:
@@ -70,7 +104,7 @@ def diagnostic_report(root: Path, produced_root: Path) -> dict:
             "lineage_conflict_count": sum(item.get("lineage_ok") is not True for item in produced) if exists else None,
             "abstention_count": sum(item.get("abstained") is True for item in produced) if exists else None,
             "duplicate_quantity_ids": duplicate_ids,
-            "source_sha_verified": False,
+            "source_sha_verified": source_verified,
             "reconciliation_complete": False,
             "blockers": sorted(set(blockers)),
             "coverage_accuracy": None,
@@ -89,9 +123,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark-root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--produced-root", type=Path, required=True)
+    parser.add_argument("--source-root", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    report = diagnostic_report(args.benchmark_root, args.produced_root)
+    report = diagnostic_report(args.benchmark_root, args.produced_root, args.source_root)
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
