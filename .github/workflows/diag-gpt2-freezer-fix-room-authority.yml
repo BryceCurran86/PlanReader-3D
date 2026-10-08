@@ -1,0 +1,155 @@
+name: DIAG GPT2 Freezer Fix Room Authority
+
+on:
+  push:
+    branches:
+      - diag/gpt2-freezer-fix-room-authority
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove source-page-11 Freezer room authority
+        shell: bash
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from shapely.geometry import Polygon
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,
+              PhysicalWallCandidateSelector,
+          )
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer,
+              SourceRoomLabelSelector,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          payload=Path(
+              "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
+          ).read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt2-freezer-fix-room-authority",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt2-freezer-fix-room-authority",
+              source_bytes=payload,
+              source_locator="memory://maryborough.pdf",
+              page_ids=("11",),
+          )
+          source.augment_with_raster_opening_primitives(
+              published.revision.revision_id,
+              page_ids=("11",),
+          )
+          wall_producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,
+              page_ids=("11",),
+          )
+          current=source.published_snapshot_for_revision(
+              published.revision.revision_id
+          )
+          wall_authority=wall_producer.authority()
+          wall_selector=PhysicalWallCandidateSelector(
+              document_id=current.revision.document_id,
+              revision_id=current.revision.revision_id,
+              source_sha256=current.revision.source_sha256,
+              snapshot_id=current.snapshot.snapshot_id,
+              page_id="11",
+              decision_scope_id="wall-source:page-11",
+          )
+          wall=wall_authority.resolve_scope(wall_selector)
+
+          room_authority=build_source_room_face_authority(wall_authority)
+          room_selector=SourceRoomFaceSelector(
+              document_id=wall_selector.document_id,
+              revision_id=wall_selector.revision_id,
+              source_sha256=wall_selector.source_sha256,
+              snapshot_id=wall_selector.snapshot_id,
+              page_id=wall_selector.page_id,
+              decision_scope_id=wall_selector.decision_scope_id,
+          )
+          rooms=room_authority.resolve_scope(room_selector)
+          label_authority=SourceRoomLabelProducer.from_authorities(
+              source,
+              room_authority,
+              page_ids=("11",),
+          ).authority()
+          labels=label_authority.resolve_scope(
+              SourceRoomLabelSelector(
+                  document_id=room_selector.document_id,
+                  revision_id=room_selector.revision_id,
+                  source_sha256=room_selector.source_sha256,
+                  snapshot_id=room_selector.snapshot_id,
+                  page_id=room_selector.page_id,
+                  decision_scope_id=room_selector.decision_scope_id,
+              )
+          )
+          faces={str(row.face_id):row for row in rooms.records}
+          freezer=[]
+          for row in labels.records:
+              if " ".join(str(row.label).upper().split()) != "FREEZER":
+                  continue
+              face=faces.get(str(row.face_id))
+              if face is None:
+                  continue
+              polygon=Polygon(face.polygon_pdf_pts)
+              freezer.append({
+                  "label_record_id":row.record_id,
+                  "face_record_id":face.record_id,
+                  "vertex_count":len(face.polygon_pdf_pts),
+                  "area_page_pts2":face.area_page_pts2,
+                  "shapely_area":float(polygon.area),
+                  "valid":bool(polygon.is_valid),
+              })
+
+          print(json.dumps({
+              "wall_status":getattr(wall.status,"value",str(wall.status)),
+              "wall_scope_complete":bool(wall.scope_complete),
+              "wall_reason_codes":list(wall.reason_codes),
+              "wall_record_count":len(wall.records),
+              "room_status":getattr(rooms.status,"value",str(rooms.status)),
+              "room_scope_complete":bool(rooms.scope_complete),
+              "room_reason_codes":list(rooms.reason_codes),
+              "room_record_count":len(rooms.records),
+              "label_status":getattr(labels.status,"value",str(labels.status)),
+              "label_reason_codes":list(labels.reason_codes),
+              "label_record_count":len(labels.records),
+              "freezer":freezer,
+          },indent=2,sort_keys=True))
+
+          assert wall.status is EvidenceResolutionStatus.CORROBORATED
+          assert wall.scope_complete
+          assert (
+              "physical_wall_candidate_scope_bounds_unresolved"
+              not in wall.reason_codes
+          )
+          assert (
+              "physical_wall_candidate_scope_cropped_at_viewport_boundary"
+              not in wall.reason_codes
+          )
+          assert rooms.status is EvidenceResolutionStatus.CORROBORATED
+          assert rooms.scope_complete
+          assert labels.status is EvidenceResolutionStatus.CORROBORATED
+          assert len(freezer)==1, freezer
+          assert freezer[0]["valid"], freezer[0]
+          assert abs(
+              float(freezer[0]["shapely_area"])
+              - float(freezer[0]["area_page_pts2"])
+          ) < 1e-6
+          PY
