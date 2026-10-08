@@ -258,6 +258,16 @@ def _valid_metric_area_quantity(
         return False
     if str(metadata.get("revision_id") or "") != floor.revision_id:
         return False
+    # A dimension-support snapshot may legitimately differ from the room
+    # snapshot. But if the source quantity declares the physical ROOM's
+    # source snapshot or source face, it must match the floor being enriched.
+    # Otherwise two same-value room areas can cross-bind by page/viewport.
+    room_snapshot = str(metadata.get("room_snapshot_id") or "").strip()
+    if room_snapshot and room_snapshot != floor.snapshot_id:
+        return False
+    source_face = str(metadata.get("source_room_face_record_id") or "").strip()
+    if source_face and source_face != floor.source_room_face_record_id:
+        return False
     if str(metadata.get("page_no") or "") != str(floor.page_id):
         return False
     quantity_evidence_ids = tuple(str(value) for value in (quantity.evidence_ids or ()))
