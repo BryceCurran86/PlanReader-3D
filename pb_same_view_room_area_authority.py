@@ -25,6 +25,7 @@ from pb_cross_view_room_area_authority import (
     _witness_systems_intersect,
 )
 from pb_dimension_graph_constraint_engine import DimensionOrientation
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
     LiveCanonicalRoomObject,
@@ -212,6 +213,7 @@ class SameViewRoomAreaProducer:
                 revision_id=revision_id,
                 page_id=page_id,
                 candidate_lines=lines,
+                view_type=DrawingViewType.FLOOR_PLAN.value,
             )
             horizontals = tuple(
                 item
