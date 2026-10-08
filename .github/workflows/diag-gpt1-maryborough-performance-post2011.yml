@@ -1,0 +1,121 @@
+name: DIAG GPT1 Maryborough Performance After 2011
+
+on:
+  push:
+    branches: [diag/gpt1-real-maryborough-performance-post2011]
+
+concurrency:
+  group: diag-gpt1-post2011-real-maryborough
+  cancel-in-progress: true
+
+jobs:
+  real-production-profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install OCR
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Check frozen V2 truth integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Real identical-scope Maryborough performance and quantity profile
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt1-post2011-maryborough
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt1-post2011-maryborough/console.log
+          from collections import defaultdict
+          from functools import wraps
+          from pathlib import Path
+          import hashlib,json,time,subprocess
+          import pb_live_physical_net_wall_integration as live
+          import pb_cross_view_room_area_authority as cross
+          import pb_same_view_room_area_authority as same
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+
+          measurements=defaultdict(lambda:{"calls":0,"seconds":0.0})
+          def instrument(owner,name,label):
+              original=getattr(owner,name)
+              @wraps(original)
+              def traced(*args,**kwargs):
+                  started=time.perf_counter()
+                  try:
+                      return original(*args,**kwargs)
+                  finally:
+                      row=measurements[label]
+                      row["calls"]+=1
+                      row["seconds"]+=time.perf_counter()-started
+              setattr(owner,name,traced)
+
+          instrument(SourceVisibilityProducer,"ingest_native_pdf_bytes","source_visibility_ingest")
+          instrument(live,"compose_live_wall_opening_authority","wall_and_opening_composition")
+          instrument(live,"compose_live_canonical_rooms","canonical_room_composition")
+          instrument(live,"compose_live_canonical_floor_surfaces","canonical_floor_projection")
+          instrument(same.SameViewRoomAreaProducer,"publish","same_view_room_area")
+          instrument(cross.CrossViewRoomAreaProducer,"publish","cross_view_room_area")
+          instrument(cross,"_trusted_native_dimensions_for_page","native_dimension_authority")
+          instrument(cross,"extract_dimension_evidence_bundle","raw_native_dimension_geometry")
+          instrument(live,"compose_live_physical_opening_voids","physical_opening_voids")
+          instrument(live,"compose_live_gross_wall_geometry","gross_wall_geometry")
+          instrument(live,"compose_live_whole_wall_roles","whole_wall_roles")
+          instrument(live,"compose_live_external_physical_net_wall_publication","external_net_wall_publication")
+
+          source=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          manifest=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json").read_text())
+          expected=next(doc["sha256"] for doc in manifest["source_documents"] if doc["name"]==source.name)
+          sha=hashlib.sha256(source.read_bytes()).hexdigest()
+          assert sha==expected,(sha,expected)
+          start=time.perf_counter()
+          # Identical production input scope to first pre-PR2011 control
+          # Actions run 37739938946: geometry index 6, room-area support 10,
+          # NO semantic support pages. Test constants only; never production.
+          claim=live.collect_live_physical_net_wall_claim(
+              source,pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
+          )
+          elapsed_source=time.perf_counter()-start
+          qty=tuple(publish_live_floor_area_quantities(claim))
+          firm=tuple(q for q in qty if not q.abstained and q.value is not None)
+          sealed=seal_live_floor_area_run(
+              claim,workspace_id=1,project_id="au_qld_maryborough_service_station"
+          ) if firm else None
+          total=time.perf_counter()-start
+          labelled={str(q.metadata.get("room_label") or "").strip().upper():float(q.value) for q in claim.room_area_quantity_evidence if not q.abstained and q.value is not None}
+          for label,truth in (("FOOD PREP",13.270425),("OFFICE",9.05352),("COLD ROOM",25.37875)):
+              assert abs(labelled[label]-truth)<1e-8,(label,labelled)
+          assert len(firm)==3
+          assert sealed is not None and len(sealed.quantities)==3
+          assert all(q.lineage_ok for q in sealed.quantities)
+          results={
+              "source_sha_verified":True,
+              "source_sha256":sha,
+              "repo_sha":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
+              "scope":"identical_to_pre2011_run_37739938946",
+              "pre2011_control_seconds":1592.2,
+              "source_seconds":round(elapsed_source,3),
+              "total_seconds":round(total,3),
+              "measurements":{key:{"calls":value["calls"],"seconds":round(value["seconds"],3)} for key,value in sorted(measurements.items())},
+              "firm_room_area":labelled,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "floor_area_count":len(firm),
+              "sealed_floor_area_count":len(sealed.quantities),
+              "sealed_run_id":sealed.run_id,
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+          }
+          Path("artifacts/gpt1-post2011-maryborough/result.json").write_text(json.dumps(results,indent=2,sort_keys=True)+"\n")
+          print("GPT1_REAL_POST2011_PERF",json.dumps(results,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-real-maryborough-post2011-performance
+          path: artifacts/gpt1-post2011-maryborough
+          retention-days: 5
