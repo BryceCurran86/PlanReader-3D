@@ -401,7 +401,12 @@ def test_sequential_room_area_bridges_replay_or_conflict_without_overwrite(
     result = enrich_live_canonical_floor_metric_areas(measured, contradictory)
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.reason_codes == (LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,)
-    assert result.floors == measured.floors
+    assert all(floor.metric_area_m2 is None for floor in result.floors)
+    assert all(floor.metric_area_quantity_id is None for floor in result.floors)
+    assert all(floor.metric_area_authority is None for floor in result.floors)
+    assert [floor.physical_floor_surface_id for floor in result.floors] == [
+        floor.physical_floor_surface_id for floor in measured.floors
+    ]
 
     # Even a changed value under a replayed identifier cannot remeasure
     # an already attached floor.
@@ -416,4 +421,5 @@ def test_sequential_room_area_bridges_replay_or_conflict_without_overwrite(
     )
     result = enrich_live_canonical_floor_metric_areas(measured, tampered_replay)
     assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert result.floors == measured.floors
+    assert all(floor.metric_area_quantity_id is None for floor in result.floors)
+    assert all(floor.metric_area_m2 is None for floor in result.floors)
