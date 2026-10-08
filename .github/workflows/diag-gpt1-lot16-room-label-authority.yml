@@ -91,7 +91,7 @@ jobs:
           from pb_source_observation_authority import ObservationSelector
 
           raw_lines=[]
-          obs_auth=source.observation_authority()
+          obs_auth=source._producer.authority()
           for observation_id in published.snapshot.observation_ids:
               resolved=obs_auth.resolve(
                   ObservationSelector(
