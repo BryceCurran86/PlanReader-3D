@@ -4,6 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import json
 import fitz
 import pytest
 
