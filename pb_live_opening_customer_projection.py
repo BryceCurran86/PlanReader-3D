@@ -113,10 +113,7 @@ def project_live_opening_customer_rows(
         measurement_record_id = _clean(metadata.get("measurement_record_id"))
         if (
             quantity.family == "opening_area"
-            and basis in {
-                "figured_opening_label",
-                "authenticated_elevation_frame",
-            }
+            and basis == "figured_opening_label"
             and measurement_record_id
         ):
             authority = CommercialMeasurementAuthority(
