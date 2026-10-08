@@ -281,6 +281,11 @@ def enrich_live_canonical_floor_metric_areas(
         raise TypeError("room_area_bridge must be SourceRoomAreaBridgeResult")
     if not floor_composition.floors:
         return floor_composition
+    if floor_composition.status is EvidenceResolutionStatus.CONFLICT:
+        # A conflicted physical floor must not regain FIRM quantity merely
+        # because a third producer's bridge happens to arrive later. Keep
+        # the fail-closed composition immutable across sequential replays.
+        return floor_composition
 
     quantities_by_room: dict[str, list] = {}
     for quantity in room_area_bridge.quantities:
@@ -317,7 +322,15 @@ def enrich_live_canonical_floor_metric_areas(
         ]
         if len(candidates) > 1:
             conflict = True
-            enriched.append(floor)
+            # No quantity may escape for a face with competing FIRM claims.
+            enriched.append(
+                replace(
+                    floor,
+                    metric_area_m2=None,
+                    metric_area_quantity_id=None,
+                    metric_area_authority=None,
+                )
+            )
             continue
         if not candidates:
             enriched.append(floor)
@@ -325,6 +338,42 @@ def enrich_live_canonical_floor_metric_areas(
 
         quantity = candidates[0]
         value = float(quantity.value)
+        # A later bridge must not silently replace an independently
+        # authenticated measurement already attached to this physical floor.
+        # The exact same claim may be replayed, but contradictory identities,
+        # values, or measurement authorities are a conflict.
+        if (
+            floor.metric_area_quantity_id is not None
+            or floor.metric_area_m2 is not None
+            or floor.metric_area_authority is not None
+        ):
+            try:
+                same_claim = (
+                    str(floor.metric_area_quantity_id or "").strip()
+                    == str(quantity.quantity_id or "").strip()
+                    and str(floor.metric_area_authority or "").strip()
+                    == str(quantity.authority or "").strip()
+                    and floor.metric_area_m2 is not None
+                    and math.isfinite(float(floor.metric_area_m2))
+                    and abs(float(floor.metric_area_m2) - value) <= 1e-9
+                )
+            except (TypeError, ValueError, OverflowError):
+                same_claim = False
+            if not same_claim:
+                conflict = True
+                # Retain physical identity and provenance, but revoke the
+                # contested metric measurement from this claim's output.
+                # Otherwise the downstream floor quantity publisher could
+                # still seal the original value despite the CONFLICT.
+                enriched.append(
+                    replace(
+                        floor,
+                        metric_area_m2=None,
+                        metric_area_quantity_id=None,
+                        metric_area_authority=None,
+                    )
+                )
+                continue
         enriched.append(
             replace(
                 floor,
