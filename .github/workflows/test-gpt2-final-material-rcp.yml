@@ -1,4 +1,5 @@
 name: TEST GPT2 Final Material RCP
+# Re-run real source semantic authority on updated main (GPT2 verification 2026-10-08).
 
 on:
   push:
