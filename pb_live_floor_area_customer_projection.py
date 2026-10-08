@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from pb_customer_output_verification import verify_sealed_customer_output
+
 from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
 )
@@ -17,6 +19,7 @@ from pb_live_floor_area_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
+from pb_source_closed_run_export import seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     quantities_to_takeoff_output_rows,
@@ -133,13 +136,20 @@ def project_live_floor_area_customer_rows(
 
     # Missing measurement authority remains a hard adapter failure rather than
     # silently dropping an otherwise valid sealed floor quantity.
-    return tuple(
+    rows = tuple(
         quantities_to_takeoff_output_rows(
             quantities,
             traces_by_quantity_id=traces,
             authorities_by_quantity_id=authorities,
         )
     )
+    sealed = seal_source_closed_run(
+        quantities,
+        project_id=project_id,
+        traces_by_quantity_id=traces,
+    )
+    verify_sealed_customer_output(sealed, rows)
+    return rows
 
 
 __all__ = [
