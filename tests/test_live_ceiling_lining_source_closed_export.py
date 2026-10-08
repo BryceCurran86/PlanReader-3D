@@ -6,6 +6,7 @@ from dataclasses import replace
 import pytest
 
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
+from pb_live_ceiling_customer_projection import project_live_ceiling_customer_rows
 from pb_live_ceiling_lining_source_closed_export import (
     build_live_ceiling_lining_source_traces,
     seal_live_ceiling_lining_run,
@@ -400,3 +401,54 @@ def test_scaled_quantity_is_not_admitted_to_documented_rcp_export() -> None:
             workspace_id=1,
             project_id="project-1",
         )
+
+
+def test_firm_ceiling_live_projection_matches_sealed_quantity() -> None:
+    quantity = _quantity()
+    claim = _claim(quantity)
+    run = seal_live_ceiling_lining_run(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+    rows = project_live_ceiling_customer_rows(
+        claim,
+        workspace_id=1,
+        project_id="project-1",
+    )
+
+    assert len(run.quantities) == len(rows) == 1
+    row = rows[0]
+    assert row["quantity_id"] == run.quantities[0].quantity_id
+    assert row["quantity_family"] == "ceiling_lining"
+    assert row["quantity_status"] == "To review"
+    assert row["origin"] == "AI"
+    assert row["row_role"] == "ceiling_area"
+    assert row["finish_system"] == "ceiling_grid"
+
+    report = verify_sealed_customer_output(run, rows)
+    assert report.valid_quantity_count == 1
+    assert report.customer_row_count == 1
+    assert report.verified_quantity_ids == (run.quantities[0].quantity_id,)
+
+    persisted = {
+        "workspace_id": row["workspace_id"],
+        "section": row["section"],
+        "element": row["element"],
+        "location": row["location"],
+        "substrate": row["substrate"],
+        "finish_system": row["finish_system"],
+        "quantity": row["quantity"],
+        "unit": "m²",
+        "quantity_status": row["quantity_status"],
+        "source_page": row["source_page"],
+        "source_reference": "PB Auto Geometry v1.2.19 · " + row["source_reference"],
+        "inclusion_status": row["inclusion_status"],
+        "confidence": "Documented",
+        "notes": row["notes"],
+        "row_role": row["row_role"],
+    }
+    persisted_report = verify_sealed_customer_output(run, [persisted])
+    assert persisted_report.verified_quantity_ids == (
+        run.quantities[0].quantity_id,
+    )
