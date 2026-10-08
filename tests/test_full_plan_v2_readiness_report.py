@@ -74,7 +74,7 @@ def test_source_hash_checks_actual_bytes_not_just_filename(tmp_path: Path) -> No
         "sha256": hashlib.sha256(b"true source").hexdigest(),
     }]}
     assert _source_sha_proof(manifest, tmp_path, "project-x") == (True, [])
-    source.write_bytes(b"false data")
+    source.write_bytes(b"fake source")
     verified, reasons = _source_sha_proof(manifest, tmp_path, "project-x")
     assert verified is False
     assert "source_file_sha_mismatch:evidence.pdf" in reasons
