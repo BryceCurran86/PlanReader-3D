@@ -982,6 +982,38 @@ def _tight_text_enclosure_path_indices(
     return frozenset(excluded)
 
 
+def _without_dimension_text_enclosure_paths(
+    segments: Sequence[ObservedGeometrySegment],
+    text_bboxes: Sequence[Sequence[float]],
+    calibration: DimensionLayoutCalibration,
+) -> tuple[ObservedGeometrySegment, ...]:
+    """Remove only native paths proven to tightly frame dimension-like text.
+
+    The raw segment universe is preserved by the caller for provenance. This
+    filtered tuple is used only for dimension-line/witness association so the
+    text frame for one nearby dimension cannot become geometry for another.
+    """
+    excluded: set[int] = set()
+    for bbox in text_bboxes:
+        excluded.update(
+            _tight_text_enclosure_path_indices(
+                bbox,
+                segments,
+                calibration,
+            )
+        )
+    if not excluded:
+        return tuple(segments)
+    return tuple(
+        segment
+        for segment in segments
+        if (
+            segment.source_path_index is None
+            or int(segment.source_path_index) not in excluded
+        )
+    )
+
+
 def bind_observation_to_vector_geometry(
     observation: DimensionObservation,
     segments: Sequence[ObservedGeometrySegment],
@@ -1543,6 +1575,33 @@ def extract_dimension_evidence_bundle(
         view_type=view_type,
     )
     native_words = list(_native_words(page))
+    dimension_like_text_bboxes: list[tuple[float, float, float, float]] = []
+    for index, word in enumerate(native_words):
+        try:
+            text = str(word[4]).strip()
+            preceding = _same_line_preceding_context(native_words, index)
+            token = classify_dimension_token(text, preceding_context=preceding)
+            if (
+                not token.is_linear_dimension
+                and token.kind != DimensionTokenKind.YEAR.value
+            ):
+                continue
+            dimension_like_text_bboxes.append(
+                (
+                    float(word[0]),
+                    float(word[1]),
+                    float(word[2]),
+                    float(word[3]),
+                )
+            )
+        except (IndexError, TypeError, ValueError):
+            continue
+    binding_segments = _without_dimension_text_enclosure_paths(
+        segments,
+        dimension_like_text_bboxes,
+        layout,
+    )
+
     word_orientations = _native_word_orientations(page)
     orientation_hints: dict[str, str] = {}
     prefix = f"native_dim_p{page_num}_"
@@ -1566,7 +1625,7 @@ def extract_dimension_evidence_bundle(
     for observation in native:
         binding = bind_observation_to_vector_geometry(
             observation,
-            segments,
+            binding_segments,
             layout,
             text_orientation_hint=orientation_hints.get(observation.dimension_id),
         )
@@ -1576,7 +1635,7 @@ def extract_dimension_evidence_bundle(
     promoted_yearlike, promoted_bindings = _extract_witness_promoted_yearlike_observations(
         page,
         page_num=page_num,
-        segments=segments,
+        segments=binding_segments,
         calibration=layout,
         sheet=sheet,
         view_id=view_id,
