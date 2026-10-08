@@ -1,0 +1,88 @@
+name: DIAG GPT1 Maryborough Semantic Viewport Inventory
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt1-maryborough-semantic-viewport-inventory.yml"
+
+concurrency:
+  group: diag-gpt1-maryborough-semantic-viewport-inventory
+  cancel-in-progress: true
+
+jobs:
+  native-viewport-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install source viewport dependencies
+        run: pip install -q -r requirements.txt
+      - name: Verify frozen Full Plan V2 reference integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Inventory all real Maryborough RCP and floor finish viewports
+        run: |
+          mkdir -p artifacts/gpt1-maryborough-semantic-views
+          PYTHONPATH=. python -u - <<'PY'
+          import fitz,hashlib,json
+          from pathlib import Path
+          from collections import Counter
+          from pb_viewport_segmentation import (
+              segment_page_viewports,validate_non_overlapping_viewports,
+              is_authoritative_derived_viewport,
+          )
+          from pb_drawing_evidence_binding import DrawingViewType
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          manifest=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json").read_text())
+          expected=next(row["sha256"] for row in manifest["source_documents"] if row["name"]==path.name)
+          sha=hashlib.sha256(path.read_bytes()).hexdigest()
+          assert sha==expected
+          wanted={
+              DrawingViewType.REFLECTED_CEILING_PLAN.value,
+              DrawingViewType.FLOOR_FINISH_PLAN.value,
+              DrawingViewType.SCHEDULE.value,
+              DrawingViewType.LEGEND.value,
+              DrawingViewType.SPECIFICATION.value,
+          }
+          pages=[]
+          with fitz.open(path) as doc:
+              for i,page in enumerate(doc):
+                  views=tuple(segment_page_viewports(page,page_number=i+1))
+                  siblings_valid=validate_non_overlapping_viewports(views) if views else False
+                  candidates=[]
+                  for v in views:
+                      if v.view_type not in wanted: continue
+                      candidates.append({
+                          "view_id":v.view_id,"label":v.label,
+                          "view_type":v.view_type,"status":v.status,
+                          "boundary_source":v.boundary_source,
+                          "bbox":list(v.bounding_box) if v.bounding_box else None,
+                          "authoritative_derived":bool(is_authoritative_derived_viewport(v)),
+                          "sibling_nonoverlapping":siblings_valid,
+                      })
+                  if candidates:
+                      pages.append({"page_no":i+1,"candidates":candidates})
+          output={
+              "source_sha256_verified":True,"source_sha256":sha,
+              "page_count":i+1,"pages":pages,
+              "view_type_counts":dict(Counter(v["view_type"] for p in pages for v in p["candidates"])),
+              "resolved_view_type_counts":dict(Counter(v["view_type"] for p in pages for v in p["candidates"] if v["status"]=="resolved")),
+          }
+          dest=Path("artifacts/gpt1-maryborough-semantic-views/result.json")
+          dest.write_text(json.dumps(output,indent=2,sort_keys=True,default=str)+"\n")
+          print("GPT1_SEMANTIC_VIEWS",json.dumps({
+              "source_verified":True,"page_count":output["page_count"],
+              "view_type_counts":output["view_type_counts"],
+              "resolved_view_type_counts":output["resolved_view_type_counts"],
+              "pages":[{"page":x["page_no"],"types":[{"type":v["view_type"],"status":v["status"],"label":v["label"]} for v in x["candidates"]]} for x in pages],
+          },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-maryborough-semantic-viewport-inventory
+          path: artifacts/gpt1-maryborough-semantic-views
+          retention-days: 3
