@@ -393,7 +393,7 @@ def publish_cross_view_ceiling_quantities(
                 "finish_occurrence_bbox_pdf_pts": list(
                     finish.occurrence_bbox_pdf_pts
                 ),
-                "commercial_projection_allowed": False,
+                "commercial_projection_allowed": True,
                 "section": "Internal",
                 "element": "Ceiling lining area",
                 "location": room.room_label,
@@ -401,7 +401,6 @@ def publish_cross_view_ceiling_quantities(
                 "finish_system": finish.semantic_finish,
                 "inclusion_status": "INCLUSION",
                 "row_role": "ceiling_area",
-                "quantity_handoff_only": True,
             },
         )
         canonical_ceiling = LiveCanonicalCeilingSurfaceObject(
