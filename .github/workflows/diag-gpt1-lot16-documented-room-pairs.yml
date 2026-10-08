@@ -1,0 +1,104 @@
+name: DIAG GPT1 Lot16 Documented Room Pairs
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-documented-room-pairs-v1
+
+jobs:
+  pairs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Probe target label/dimension ownership
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_dimension_graph_constraint_engine import DimensionOrientation
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_cross_view_room_area_authority import (
+              _trusted_lines_for_page,
+              _trusted_native_dimensions_for_page,
+              _line_inside_dimension_pair,
+              _figured_pair_scale_consistent,
+              _witness_systems_intersect,
+              _dimension_is_immediate_label_annotation,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-lot16-documented-room-pairs",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-lot16-documented-rooms",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3",),
+          )
+
+          output=[]
+          for label in ("GARAGE","WIR","ENS."):
+              lines=_trusted_lines_for_page(
+                  source,
+                  revision_id=published.revision.revision_id,
+                  page_id="3",
+                  candidate_labels=(label,),
+              )
+              rows=[]
+              for line in lines:
+                  dims=_trusted_native_dimensions_for_page(
+                      source,
+                      revision_id=published.revision.revision_id,
+                      page_id="3",
+                      candidate_lines=(line,),
+                      view_type=DrawingViewType.FLOOR_PLAN.value,
+                  )
+                  hs=[d for d in dims if d.orientation==DimensionOrientation.HORIZONTAL.value]
+                  vs=[d for d in dims if d.orientation==DimensionOrientation.VERTICAL.value]
+                  strict=[]
+                  fallback=[]
+                  for h in hs:
+                      for v in vs:
+                          scale=_figured_pair_scale_consistent(page_id="3",horizontal=h,vertical=v)
+                          inside=_line_inside_dimension_pair(line,h,v)
+                          intersect=_witness_systems_intersect(h,v)
+                          ih=_dimension_is_immediate_label_annotation(line,h)
+                          iv=_dimension_is_immediate_label_annotation(line,v)
+                          item={
+                              "h_mm":h.value_mm,"v_mm":v.value_mm,
+                              "h_id":h.dimension_id,"v_id":v.dimension_id,
+                              "inside":inside,"intersect":intersect,
+                              "scale":scale,"immediate_h":ih,"immediate_v":iv,
+                              "area_m2":round(h.value_mm*v.value_mm/1_000_000.0,6),
+                          }
+                          if inside and scale and intersect:
+                              strict.append(item)
+                          if ih and iv and scale:
+                              fallback.append(item)
+                  dedup={(x["h_id"],x["v_id"]):x for x in (*strict,*fallback)}
+                  rows.append({
+                      "text":line.text,
+                      "bbox":list(line.bbox),
+                      "observation_ids":list(line.observation_ids),
+                      "dimension_count":len(dims),
+                      "strict_matches":strict,
+                      "fallback_matches":fallback,
+                      "deduped_match_count":len(dedup),
+                      "deduped_matches":list(dedup.values()),
+                  })
+              output.append({"label":label,"trusted_line_count":len(lines),"lines":rows})
+          print(json.dumps(output,indent=2,sort_keys=True))
+          PY
