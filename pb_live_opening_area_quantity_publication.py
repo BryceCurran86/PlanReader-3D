@@ -192,8 +192,31 @@ def publish_live_opening_area_quantities(
             "composition must be LivePhysicalOpeningVoidComposition"
         )
 
+    # Check the *whole producer-owned canonical inventory* before narrowing
+    # it to quantities. If an unsupported/ABSTAIN opening reuses the physical
+    # identity of a FIRM opening, filtering first would silently publish the
+    # favourable member and conceal contradictory identity lineage.
+    canonical_ids: set[str] = set()
+    physical_ids: set[str] = set()
+    for opening in composition.canonical_openings:
+        if type(opening) is not LiveCanonicalOpeningObject:
+            raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
+        canonical_id = str(opening.canonical_opening_id or "").strip()
+        physical_id = str(opening.physical_opening_id or "").strip()
+        if canonical_id and canonical_id in canonical_ids:
+            raise ValueError(
+                f"duplicate canonical opening identity in quantity publication: {canonical_id}"
+            )
+        if physical_id and physical_id in physical_ids:
+            raise ValueError(
+                f"duplicate physical opening identity in quantity publication: {physical_id}"
+            )
+        if canonical_id:
+            canonical_ids.add(canonical_id)
+        if physical_id:
+            physical_ids.add(physical_id)
+
     quantities: list[QuantityEvidence] = []
-    seen_entity_ids: set[str] = set()
     seen_quantity_ids: set[str] = set()
     for opening in sorted(
         composition.canonical_openings,
@@ -202,16 +225,10 @@ def publish_live_opening_area_quantities(
         quantity = _opening_quantity(opening)
         if quantity is None:
             continue
-        entity_id = quantity.input_entity_ids[0]
-        if entity_id in seen_entity_ids:
-            raise ValueError(
-                f"duplicate canonical opening identity in quantity publication: {entity_id}"
-            )
         if quantity.quantity_id in seen_quantity_ids:
             raise ValueError(
                 f"duplicate opening quantity id: {quantity.quantity_id}"
             )
-        seen_entity_ids.add(entity_id)
         seen_quantity_ids.add(quantity.quantity_id)
         quantities.append(quantity)
     return tuple(quantities)
