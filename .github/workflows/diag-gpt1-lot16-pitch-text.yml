@@ -1,0 +1,64 @@
+name: DIAG GPT1 Lot16 Pitch Text
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-pitch-text-v1
+
+jobs:
+  pitch-text:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Inspect native pitch text
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json,re
+          from pathlib import Path
+          import fitz
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          doc=fitz.open(path)
+          rows=[]
+          try:
+              for pno in range(doc.page_count):
+                  page=doc[pno]
+                  words=page.get_text("words") or []
+                  lines={}
+                  for word in words:
+                      key=(int(word[5]),int(word[6]))
+                      lines.setdefault(key,[]).append(word)
+                  for key,group in lines.items():
+                      group=sorted(group,key=lambda w:int(w[7]) if len(w)>7 else 0)
+                      text=" ".join(str(w[4]) for w in group).strip()
+                      upper=text.upper()
+                      if (
+                          "PITCH" in upper
+                          or "DEG" in upper
+                          or "°" in text
+                          or re.search(r"\b\d+(?:\.\d+)?\s*(?:DEG|DEGREES?)\b",upper)
+                      ):
+                          rows.append({
+                              "page":pno+1,
+                              "block":key[0],
+                              "line":key[1],
+                              "text":text,
+                              "bbox":[
+                                  min(float(w[0]) for w in group),
+                                  min(float(w[1]) for w in group),
+                                  max(float(w[2]) for w in group),
+                                  max(float(w[3]) for w in group),
+                              ],
+                          })
+          finally:
+              doc.close()
+          print(json.dumps({"matches":rows},indent=2,sort_keys=True))
+          PY
