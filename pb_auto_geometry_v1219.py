@@ -1185,64 +1185,40 @@ def _try_physical_net_wall_rows(
         return rows
 
     def room_area_rows_for_claim(claim: Any) -> List[Tuple[Any, ...]]:
-        """Project only source-closed room areas into AI review rows."""
-        from pb_live_floor_area_quantity_publication import (
-            publish_live_canonical_room_area_quantities,
-            publish_live_floor_area_quantities,
-        )
-        from pb_live_room_area_customer_projection import (
-            project_live_room_area_customer_rows,
+        """Project final source-closed canonical floor areas into AI review rows."""
+        from pb_live_floor_area_customer_projection import (
+            project_live_floor_area_customer_rows,
         )
 
-        projected = project_live_room_area_customer_rows(
+        projected = project_live_floor_area_customer_rows(
             claim,
             workspace_id=int(workspace_id),
             project_id=f"customer-workspace:{int(workspace_id)}",
         )
-        floor_quantities = {
-            str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
-            quantity
-            for quantity in publish_live_floor_area_quantities(claim)
-            if isinstance(quantity.metadata, Mapping)
-        }
-        room_quantities = {
-            str(quantity.metadata.get("upstream_room_area_quantity_id") or ""):
-            quantity
-            for quantity in publish_live_canonical_room_area_quantities(claim)
-            if isinstance(quantity.metadata, Mapping)
-        }
         rows: List[Tuple[Any, ...]] = []
         for item in projected:
             if (
                 str(item.get("origin") or "") != "AI"
                 or str(item.get("quantity_status") or "") != "To review"
                 or str(item.get("row_role") or "") != "floor_area"
+                or str(item.get("quantity_family") or "") != "floor_area"
             ):
-                raise ValueError("room-area projection bypassed customer review state")
+                raise ValueError("floor-area projection bypassed customer review state")
             required = {
                 name: str(item.get(name) or "").strip()
                 for name in ("section", "element", "location", "substrate")
             }
             if not all(required.values()):
-                raise ValueError("room-area projection is missing customer row identity")
+                raise ValueError("floor-area projection is missing customer row identity")
             quantity_id = str(item.get("quantity_id") or "").strip()
             if not quantity_id:
-                raise ValueError("room-area projection is missing quantity identity")
+                raise ValueError("floor-area projection is missing quantity identity")
             unit = str(item.get("unit") or "").strip().lower()
             if unit == "m2":
                 unit = "m²"
-            floor_quantity = floor_quantities.get(quantity_id)
-            room_quantity = room_quantities.get(quantity_id)
-            floor_quantity_suffix = (
-                f" · floor_quantity:{floor_quantity.quantity_id}"
-                if floor_quantity is not None
-                else ""
-            )
-            room_quantity_suffix = (
-                f" · canonical_room_quantity:{room_quantity.quantity_id}"
-                if room_quantity is not None
-                else ""
-            )
+            source_reference = str(item.get("source_reference") or "").strip()
+            if not source_reference:
+                raise ValueError("floor-area projection is missing source lineage")
             rows.append(
                 _takeoff_row(
                     workspace_id=int(workspace_id),
@@ -1252,12 +1228,8 @@ def _try_physical_net_wall_rows(
                     substrate=required["substrate"],
                     quantity=float(item["quantity"]),
                     status="To review",
-                    source_page=str(item.get("source_page") or "Selected PDF pages"),
-                    source_reference=(
-                        f"{SOURCE_PREFIX} · room_area_quantity:{quantity_id}"
-                        f"{floor_quantity_suffix}"
-                        f"{room_quantity_suffix}"
-                    ),
+                    source_page=str(item.get("source_page") or ""),
+                    source_reference=f"{SOURCE_PREFIX} · {source_reference}",
                     confidence="Documented",
                     notes=str(item.get("notes") or ""),
                     row_role="floor_area",
