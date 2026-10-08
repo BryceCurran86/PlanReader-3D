@@ -88,7 +88,9 @@ def test_unrelated_non_firm_replay_does_not_poison_a_firm_source_id() -> None:
     rejected = replace(
         source,
         status=AuthorityStatus.PROVISIONAL.value,
+        value=None,
         abstained=True,
+        blocking_reasons=("not_firm",),
     )
 
     published = publish_live_floor_area_quantities(
