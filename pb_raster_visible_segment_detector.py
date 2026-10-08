@@ -75,6 +75,17 @@ def _foreground_mask(gray: np.ndarray) -> np.ndarray | None:
     return candidates[0][1]
 
 
+def _line_component_eligible(
+    width: int, height: int, *, orientation: str, min_line_px: int,
+) -> bool:
+    """The historical morphology component gate, shared without new limits."""
+    if orientation == "horizontal":
+        return width >= min_line_px and width >= max(3, 3 * height)
+    if orientation == "vertical":
+        return height >= min_line_px and height >= max(3, 3 * width)
+    raise ValueError("orientation must be horizontal or vertical")
+
+
 def _component_segments(
     mask: np.ndarray,
     *,
@@ -95,16 +106,16 @@ def _component_segments(
         if area <= 0:
             continue
 
+        if not _line_component_eligible(
+            width, height, orientation=orientation, min_line_px=min_line_px,
+        ):
+            continue
         if orientation == "horizontal":
-            if width < min_line_px or width < max(3, 3 * height):
-                continue
             center_y = y + (height - 1) / 2.0
             segments.append(
                 (float(x), float(center_y), float(x + width - 1), float(center_y))
             )
         else:
-            if height < min_line_px or height < max(3, 3 * width):
-                continue
             center_x = x + (width - 1) / 2.0
             segments.append(
                 (float(center_x), float(y), float(center_x), float(y + height - 1))
@@ -178,6 +189,50 @@ def _snap_intersections(
         final_h.append((left, y0, right, y0))
 
     return _dedupe(final_h), _dedupe(snapped_v)
+
+
+def raster_segment_source_component_bounds(
+    gray: np.ndarray, *, pixel_geometry: tuple[float, float, float, float], dpi: int
+) -> tuple[tuple[int, int, int, int], ...]:
+    """Conservative pixel support of a receipted detector centerline.
+
+    Retain every source morphology component compatible with the detector's
+    exact perpendicular coordinate and endpoint snapping budget. The horizontal
+    path has two snap passes; the vertical path has one. No component is ranked.
+    This reconstructs source support only and does not classify a primitive.
+    """
+    foreground = _foreground_mask(gray)
+    if foreground is None or dpi <= 0:
+        return ()
+    x0,y0,x1,y1 = pixel_geometry
+    horizontal = y0 == y1 and x0 < x1
+    vertical = x0 == x1 and y0 < y1
+    if not horizontal and not vertical:
+        return ()
+    pixels_per_point = dpi / 72.0
+    minimum = max(5, int(round(_MIN_LINE_LENGTH_PT * pixels_per_point)))
+    orientation = 'horizontal' if horizontal else 'vertical'
+    kernel = np.ones((1,minimum) if horizontal else (minimum,1), np.uint8)
+    mask = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, kernel)
+    eligible = set(_component_segments(mask, orientation=orientation, min_line_px=minimum))
+    count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    allowance = (2 if horizontal else 1) * max(1.0,pixels_per_point)
+    bounds = set()
+    for index in range(1,int(count)):
+        x,y,width,height,_area = (int(v) for v in stats[index])
+        center = y+(height-1)/2 if horizontal else x+(width-1)/2
+        raw = ((float(x),center,float(x+width-1),center) if horizontal
+               else (center,float(y),center,float(y+height-1)))
+        if raw not in eligible:
+            continue
+        if horizontal:
+            compatible = center == y0 and abs(raw[0]-x0) <= allowance and abs(raw[2]-x1) <= allowance
+        else:
+            compatible = center == x0 and abs(raw[1]-y0) <= allowance and abs(raw[3]-y1) <= allowance
+        if compatible:
+            bounds.add((min(x,math.floor(x0)),min(y,math.floor(y0)),
+                max(x+width,math.ceil(x1)+1),max(y+height,math.ceil(y1)+1)))
+    return tuple(sorted(bounds))
 
 
 def detect_axis_aligned_raster_segments(

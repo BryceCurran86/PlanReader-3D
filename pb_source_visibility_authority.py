@@ -27,11 +27,23 @@ import math
 from typing import Any, Mapping, Optional, Sequence
 
 import fitz
+from pb_native_page_frame import NativePageFrameUnresolved
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_raster_visible_segment_detector import (
     RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
     detect_axis_aligned_raster_segments,
+)
+from pb_raster_compact_wall_band_segments import (
+    COMPACT_WALL_BAND_DETECTOR_VERSION,
+    COMPACT_WALL_BAND_IDENTITY_VERSION,
+    compact_band_has_same_visible_paint,
+    detect_compact_raster_wall_band_segments,
+)
+from pb_raster_terminal_wall_band_segments import (
+    TERMINAL_WALL_BAND_DETECTOR_VERSION,
+    TERMINAL_WALL_BAND_IDENTITY_VERSION,
+    detect_terminal_raster_wall_band_segments,
 )
 from pb_raster_opening_source_primitives import (
     RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
@@ -66,7 +78,7 @@ from pb_source_observation_authority import (
 from pb_vector_geometry_v130 import extract_native_page, native_word_primitive_ref
 
 
-SOURCE_VISIBILITY_SCHEMA_VERSION = "1.3.0"
+SOURCE_VISIBILITY_SCHEMA_VERSION = "1.4.0"
 NATIVE_PDF_VISIBLE_SEGMENT = "native_pdf_visible_segment"
 RASTER_PDF_SEGMENT = "raster_pdf_segment"
 RASTER_PDF_VISIBLE_SEGMENT = "raster_pdf_visible_segment"
@@ -216,6 +228,67 @@ class RasterSegmentVisibilityReceipt:
     pixel_geometry: tuple[float, float, float, float]
     geometry: tuple[float, float, float, float]
     detector_version: str = RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
+    visibility_render_sha256: Optional[str] = None
+
+
+def _supplemental_raster_detector_family(primitive_ref):
+    for identity_version, detector_version in (
+        (COMPACT_WALL_BAND_IDENTITY_VERSION, COMPACT_WALL_BAND_DETECTOR_VERSION),
+        (TERMINAL_WALL_BAND_IDENTITY_VERSION, TERMINAL_WALL_BAND_DETECTOR_VERSION),
+    ):
+        if f':{identity_version}:' in primitive_ref:
+            return identity_version, detector_version
+    return None
+
+
+def _supplemental_render_provenance_matches(observation, receipt) -> bool:
+    """Authenticate the frozen identity and render provenance in every family."""
+    image_hash = receipt.image_sha256
+    if not (isinstance(image_hash, str) and len(image_hash) == 64
+            and all(c in '0123456789abcdef' for c in image_hash)):
+        return False
+    family = _supplemental_raster_detector_family(observation.source_primitive_ref)
+    parts = observation.source_primitive_ref.removeprefix('visible:').split(':')
+    if len(parts) != (4 if family is None else 5) or parts[0] != 'raster_segment':
+        return False
+    try:
+        index = int(parts[-1])
+        if index < 0 or str(index) != parts[-1]:
+            return False
+        expected_parent = _raster_segment_observation_id(
+            document_id=receipt.document_id, revision_id=receipt.revision_id,
+            page_id=receipt.page_id, partition_id=receipt.source_partition_id,
+            image_sha256=image_hash, identity_version=parts[2],
+            pixel_geometry=receipt.pixel_geometry, geometry=receipt.geometry, index=index)
+        expected_visible = _raster_visible_observation_id(
+            document_id=receipt.document_id, revision_id=receipt.revision_id,
+            page_id=receipt.page_id, partition_id=receipt.source_partition_id,
+            parent_observation_id=expected_parent, geometry=receipt.geometry)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if expected_parent != receipt.parent_observation_id or expected_visible != observation.observation_id:
+        return False
+    if family is None:
+        return bool(
+            receipt.dpi == RASTER_RENDER_DPI
+            and receipt.detector_version == RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
+            and receipt.visibility_render_sha256 is None
+            and observation.source_primitive_ref.startswith(
+                f'visible:raster_segment:{image_hash}:{RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION}:'
+            )
+        )
+    identity_version, detector_version = family
+    full_hash = receipt.visibility_render_sha256
+    return bool(
+        isinstance(full_hash, str) and len(full_hash) == 64
+        and all(c in '0123456789abcdef' for c in full_hash)
+        and receipt.dpi == RASTER_OPENING_PRIMITIVE_RENDER_DPI
+        and receipt.detector_version == detector_version
+        and observation.source_primitive_ref.startswith(
+            f'visible:raster_segment:{receipt.image_sha256}:'
+            f'{identity_version}:{full_hash}:'
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -708,6 +781,10 @@ class SourceVisibilityProducer:
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
+        # Immutable render layers only; receipts are independently authenticated
+        # on every source-role query. Bound page cache to avoid retaining renders
+        # for an entire drawing set.
+        self._raster_text_overlay_page_cache: OrderedDict = OrderedDict()
 
     def authority(self) -> "SourceVisibilityAuthority":
         return SourceVisibilityAuthority(
@@ -1191,6 +1268,220 @@ class SourceVisibilityProducer:
             return False
         finally:
             pdf.close()
+    def native_dimension_cap_evidence(
+        self, selector: ObservationSelector, *, opening_support_ids: Sequence[str]
+    ):
+        """Reprove exact native annotation opposition from this source only.
+
+        Missing or damaged source receipts raise the existing integrity error;
+        consumers must not mistake failed authentication for no opposition.
+        Results are candidate EvidenceAtoms, never metric or non-existence authority.
+        """
+        from pb_native_dimension_cap_evidence import collect_native_dimension_cap_evidence
+
+        published = self.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        visibility = self.authority()
+        selected = frozenset(opening_support_ids)
+        if selector.observation_id not in selected:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        rows = visibility.authenticated_visible_observations(published)
+        records = {i: r for i, r in rows if r.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT}
+        if not selected or not selected <= records.keys():
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        page_id = records[selector.observation_id].page_id
+        if any(records[i].page_id != page_id for i in selected):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        segments = {i: tuple(r.geometry) for i, r in records.items() if r.page_id == page_id}
+        source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
+        if source_bytes is None:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        try:
+            with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                page = pdf[int(page_id) - 1]
+                directions = {(bi, li): tuple(line.get('dir', (0., 0.)))
+                    for bi, block in enumerate(page.get_text('dict', flags=fitz.TEXTFLAGS_WORDS)['blocks'])
+                    for li, line in enumerate(block.get('lines', []))}
+        except (ValueError, IndexError, RuntimeError):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        text_authority = self.text_integrity_authority()
+        source_authority = self._producer.authority()
+        words = []
+        for observation_id in published.text_observation_ids:
+            word_selector = replace(selector, observation_id=observation_id)
+            source_result = source_authority.resolve(word_selector)
+            record = source_result.observation
+            if source_result.status is not EvidenceResolutionStatus.CORROBORATED or record is None:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if record.page_id != page_id:
+                continue
+            text = text_authority.resolve_text(word_selector)
+            if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
+                continue
+            receipt = text.receipt
+            words.append(dict(id=observation_id, text=text.trusted_text,
+                bbox=receipt.geometry,
+                axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+        return collect_native_dimension_cap_evidence(segments=segments, words=words,
+            selected_ids=tuple(selected), document_id=selector.document_id, page_id=page_id,
+            revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id)
+
+    def raster_text_overlay_evidence(
+        self, selector: ObservationSelector, *, source_primitive_ids: Sequence[str]
+    ):
+        """Prove complete raster primitive ownership by native text paint.
+
+        A word box nominates only. The complete source component must contain no
+        image ink and exactly match the text-only layer. These opposing symbol
+        atoms do not delete geometry, establish wall identity or measure text.
+        """
+        import cv2
+        import numpy as np
+        from pb_migration_contracts import EvidenceAtom
+        from pb_wall_room_topology_typed_negative_evidence import KIND_SYMBOL, POLARITY_OPPOSING
+        from pb_raster_visible_segment_detector import raster_segment_source_component_bounds
+
+        published = self.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
+        if not source_bytes or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        required = frozenset(str(i) for i in source_primitive_ids)
+        if not required or any(not i.startswith('raster_segment:') for i in required):
+            return ()
+        # Stored records are an addressing index, not source-role authority.
+        # Reauthenticate every addressed visible primitive and receipt below.
+        addressed = {}
+        for observation_id in published.visible_observation_ids:
+            record = self._producer._store.observations.get((selector.snapshot_id, observation_id))
+            if record is None:
+                continue
+            primitive = record.source_primitive_ref.removeprefix('visible:')
+            if primitive in required:
+                if primitive in addressed:
+                    return ()
+                addressed[primitive] = observation_id
+        if required != addressed.keys():
+            return ()
+        visibility = self.authority()
+        records = {}
+        receipts = {}
+        for primitive, observation_id in addressed.items():
+            result = visibility.resolve_visible(replace(selector, observation_id=observation_id))
+            record = result.observation
+            receipt = self._raster_visibility_receipts.get((selector.snapshot_id, observation_id))
+            if (result.status is not EvidenceResolutionStatus.CORROBORATED or record is None
+                    or record.observation_kind != RASTER_PDF_VISIBLE_SEGMENT or receipt is None):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            records[primitive], receipts[primitive] = record, receipt
+        page_ids = {r.page_id for r in records.values()}
+        if len(page_ids) != 1:
+            return ()
+        page_id = next(iter(page_ids))
+        # A compact solid-band line comes from the isolated image layer. It
+        # cannot be excluded as a native-text copy. Authenticate every requested
+        # primitive above, then leave ordinary DISTINCT proof responsible for
+        # any excluded image-derived candidate.
+        compact_owned = False
+        for primitive, receipt in receipts.items():
+            family = _supplemental_raster_detector_family(records[primitive].source_primitive_ref)
+            if family is not None:
+                if (receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
+                        or receipt.detector_version != family[1]):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                compact_owned = True
+            elif receipt.dpi != RASTER_RENDER_DPI:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        if compact_owned:
+            return ()
+        cache_key = (selector.source_sha256, page_id, RASTER_RENDER_DPI)
+        layers = self._raster_text_overlay_page_cache.get(cache_key)
+        if layers is None:
+            arrays, hashes = [], []
+            for options in ({}, {'images_only': True}, {'text_only': True}, {'graphics_only': True}):
+                png, _parent = self._producer.render_native_page_png(
+                    document_id=selector.document_id, revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256, snapshot_id=selector.snapshot_id,
+                    page_id=page_id, dpi=RASTER_RENDER_DPI, **options)
+                array = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+                if array is None:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                array.setflags(write=False)
+                arrays.append(array)
+                hashes.append(hashlib.sha256(png).hexdigest())
+            if len({a.shape for a in arrays}) != 1:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                rotation = pdf[int(page_id) - 1].rotation_matrix
+            layers = (tuple(arrays), tuple(hashes), rotation)
+            self._raster_text_overlay_page_cache[cache_key] = layers
+            while len(self._raster_text_overlay_page_cache) > 2:
+                self._raster_text_overlay_page_cache.popitem(last=False)
+        self._raster_text_overlay_page_cache.move_to_end(cache_key)
+        (full, images, text_pixels, graphics), hashes, rotation = layers
+        if any(r.image_sha256 != hashes[0] for r in receipts.values()):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        source_authority = self._producer.authority()
+        text_authority = self.text_integrity_authority()
+        words = []
+        for observation_id in published.text_observation_ids:
+            word_selector = replace(selector, observation_id=observation_id)
+            result = source_authority.resolve(word_selector)
+            if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if result.observation.page_id != page_id:
+                continue
+            text = text_authority.resolve_text(word_selector)
+            if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            box = fitz.Rect(text.receipt.geometry) * rotation
+            words.append((observation_id, box, text.status is EvidenceResolutionStatus.CORROBORATED))
+        owned = []
+        for primitive, record in sorted(records.items()):
+            regions = raster_segment_source_component_bounds(full,
+                pixel_geometry=receipts[primitive].pixel_geometry, dpi=RASTER_RENDER_DPI)
+            if not regions:
+                return ()
+            left, top = min(b[0] for b in regions), min(b[1] for b in regions)
+            right, bottom = max(b[2] for b in regions), max(b[3] for b in regions)
+            scale = RASTER_RENDER_DPI / 72.0
+            probe = fitz.Rect(left/scale,top/scale,right/scale,bottom/scale)
+            owners = [(i,b,trusted) for i,b,trusted in words if b.contains(probe)]
+            if len(owners) != 1 or not owners[0][2]:
+                return ()
+            word_id, _word_box, _trusted = owners[0]
+            if any(i != word_id and b.intersects(probe) for i,b,_ in words):
+                return ()
+            if not (0 <= left < right <= full.shape[1] and 0 <= top < bottom <= full.shape[0]):
+                return ()
+            full_crop, image_crop, text_crop, graphics_crop = (
+                a[top:bottom,left:right] for a in (full,images,text_pixels,graphics))
+            if (not np.all(image_crop == 255) or not np.all(graphics_crop == 255)
+                    or not np.any(text_crop < 255)
+                    or not np.array_equal(full_crop, text_crop)):
+                return ()
+            owned.append((primitive, addressed[primitive], word_id, regions))
+        metadata = dict(revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id, polarity=POLARITY_OPPOSING,
+            source_primitive_ids=tuple(sorted(required)),
+            source_observation_ids=tuple(sorted(i for _,i,_,_ in owned)),
+            text_observation_ids=tuple(sorted({i for _,_,i,_ in owned})),
+            primitive_text_ownership=tuple(owned), render_sha256=hashes,
+            all_source_primitives_covered=True)
+        return (EvidenceAtom(evidence_id=stable_contract_id('raster_native_text_overlay', metadata),
+            document_id=selector.document_id, page_id=page_id, kind=KIND_SYMBOL,
+            method='native_text_render_source_role', status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=('raster_primitive_owned_by_native_text_pixels',), metadata=metadata),)
+
     def opening_dimension_authority(self):
         """Return the read-only dimension resolver bound to this producer."""
         from pb_opening_dimension_authority import (
@@ -1497,10 +1788,6 @@ class SourceVisibilityProducer:
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
             )
-            # Once render + detection complete successfully, repeating the same
-            # immutable revision/page cannot produce new source evidence.
-            self._raster_visibility_attempted_pages.add(raster_attempt_key)
-
             if page_id in pages_with_visible and image_regions:
                 segments = tuple(
                     segment
@@ -1509,9 +1796,6 @@ class SourceVisibilityProducer:
                         segment.geometry_pt, image_regions
                     )
                 )
-            if not segments:
-                continue
-
             # Visibility publishes each proven source-owned primitive regardless
             # of whether enough neighbouring primitives exist to prove a wall or
             # opening. Object-completeness gates belong downstream. Re-sort using
@@ -1527,6 +1811,91 @@ class SourceVisibilityProducer:
                     ),
                 )
             )
+            packets = [
+                (index, segment, image_sha256, RASTER_RENDER_DPI,
+                 RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION, RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION, None)
+                for index, segment in enumerate(segments)
+            ]
+            if image_regions:
+                try:
+                    compact_render = self._producer.render_native_page_png(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=snapshot.snapshot_id, page_id=page_id,
+                        dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                        include_native_frame=True, images_only=True,
+                    )
+                except NativePageFrameUnresolved:
+                    compact_render = None
+                if compact_render is not None:
+                    compact_png, compact_parent, compact_frame = compact_render
+                if compact_render is not None and compact_parent.observation_id != page_parent.observation_id:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                # Match the existing G17 source-frame limitation. A page
+                # rotation requires its own independently proved transform.
+                if compact_render is not None and int(compact_frame.rotation) == 0:
+                    registration_scale = self.raster_opening_registration_scale(
+                        published.revision.revision_id, page_id,
+                    ) or (1.0, 1.0)
+                    compact_segments = detect_compact_raster_wall_band_segments(
+                        compact_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                        registration_scale=registration_scale,
+                    )
+                    compact_segments = tuple(sorted(compact_segments, key=lambda item: (
+                        item.orientation, item.geometry_pt, item.pixel_geometry,
+                    )))
+                    terminal_segments = detect_terminal_raster_wall_band_segments(
+                        compact_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                        registration_scale=registration_scale,
+                    )
+                    full_visibility_hash = None
+                    if compact_segments or terminal_segments:
+                        import cv2
+                        import numpy as np
+                        full_png, full_parent = self._producer.render_native_page_png(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=snapshot.snapshot_id, page_id=page_id,
+                            dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                        )
+                        if full_parent.observation_id != page_parent.observation_id:
+                            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                        isolated = cv2.imdecode(np.frombuffer(compact_png, np.uint8), cv2.IMREAD_GRAYSCALE)
+                        full = cv2.imdecode(np.frombuffer(full_png, np.uint8), cv2.IMREAD_GRAYSCALE)
+                        if isolated is None or full is None:
+                            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                        compact_segments = tuple(s for s in compact_segments
+                            if compact_band_has_same_visible_paint(s, isolated, full))
+                        terminal_segments = tuple(s for s in terminal_segments
+                            if compact_band_has_same_visible_paint(s, isolated, full))
+                        full_visibility_hash = hashlib.sha256(full_png).hexdigest()
+                    compact_hash = hashlib.sha256(compact_png).hexdigest()
+                    packets.extend(
+                        (index, segment, compact_hash, RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                         COMPACT_WALL_BAND_IDENTITY_VERSION, COMPACT_WALL_BAND_DETECTOR_VERSION,
+                         full_visibility_hash)
+                        for index, segment in enumerate(compact_segments)
+                        if _axis_aligned_geometry_fully_covered_by_rect_union(
+                            segment.geometry_pt, image_regions,
+                        )
+                    )
+                    packets.extend(
+                        (index, segment, compact_hash, RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                         TERMINAL_WALL_BAND_IDENTITY_VERSION, TERMINAL_WALL_BAND_DETECTOR_VERSION,
+                         full_visibility_hash)
+                        for index, segment in enumerate(terminal_segments)
+                        if _axis_aligned_geometry_fully_covered_by_rect_union(
+                            segment.geometry_pt, image_regions,
+                        )
+                    )
+            # Both producer-owned detectors have completed. Preserve every
+            # historical ordinary index; supplemental lines have their own
+            # render/identity namespace and are appended as new observations.
+            self._raster_visibility_attempted_pages.add(raster_attempt_key)
+            if not packets:
+                continue
 
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
@@ -1534,22 +1903,26 @@ class SourceVisibilityProducer:
                 tuple[str, RasterSegmentVisibilityReceipt]
             ] = []
 
-            for index, segment in enumerate(segments):
+            for index, segment, render_hash, render_dpi, identity_version, detector_version, visibility_hash in packets:
                 segment_id = _raster_segment_observation_id(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
                     page_id=page_id,
                     partition_id=page_parent.source_partition_id,
-                    image_sha256=image_sha256,
-                    identity_version=RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                    image_sha256=render_hash,
+                    identity_version=identity_version,
                     pixel_geometry=segment.pixel_geometry,
                     geometry=segment.geometry_pt,
                     index=index,
                 )
                 segment_ref = (
-                    f"raster_segment:{image_sha256}:"
-                    f"{RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION}:{index}"
+                    f"raster_segment:{render_hash}:"
+                    f"{identity_version}:{index}"
                 )
+                if visibility_hash is not None:
+                    segment_ref = (
+                        f"raster_segment:{render_hash}:{identity_version}:{visibility_hash}:{index}"
+                    )
                 segment_specs.append(
                     {
                         "page_id": page_id,
@@ -1601,11 +1974,12 @@ class SourceVisibilityProducer:
                             source_sha256=published.revision.source_sha256,
                             page_id=page_id,
                             source_partition_id=page_parent.source_partition_id,
-                            image_sha256=image_sha256,
-                            dpi=RASTER_RENDER_DPI,
+                            image_sha256=render_hash,
+                            dpi=render_dpi,
                             pixel_geometry=tuple(segment.pixel_geometry),
                             geometry=tuple(segment.geometry_pt),
-                            detector_version=RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
+                            detector_version=detector_version,
+                            visibility_render_sha256=visibility_hash,
                         ),
                     )
                 )
@@ -2085,6 +2459,30 @@ class SourceVisibilityAuthority:
         )
         return frozenset(ids)
 
+    def raster_opening_primitive_observation_ids_for_snapshot(
+        self, snapshot_id: str
+    ) -> frozenset[str]:
+        """Address isolated source observations; each ID needs a valid receipt.
+
+        Inventory the sealed snapshot as well as receipts so a missing receipt
+        cannot hide an opening from a downstream whole-wall completeness check.
+        This index itself supplies no existence or geometry authority.
+        """
+        snapshot_id = str(snapshot_id)
+        ids = {
+            observation_id
+            for receipt_snapshot_id, observation_id in self._raster_opening_primitive_receipts
+            if receipt_snapshot_id == snapshot_id
+        }
+        store = self._source_authority._store
+        snapshot = store.snapshots.get(snapshot_id)
+        if snapshot is not None:
+            for observation_id in snapshot.observation_ids:
+                record = store.observations.get((snapshot_id, observation_id))
+                if record is None or record.origin_kind == RASTER_OPENING_VISIBLE_PRIMITIVE_ORIGIN_KIND:
+                    ids.add(observation_id)
+        return frozenset(ids)
+
     def visible_observation_ids_for_page(
         self,
         snapshot_id: str,
@@ -2252,6 +2650,8 @@ class SourceVisibilityAuthority:
                     raise RuntimeError(VISIBILITY_PARENT_MISMATCH)
             else:
                 assert raster_receipt is not None
+                if not _supplemental_render_provenance_matches(observation, raster_receipt):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
                 if (
                     observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
                     or observation.origin_kind != RASTER_VISIBLE_SEGMENT_ORIGIN_KIND
@@ -2353,6 +2753,8 @@ class SourceVisibilityAuthority:
                 return self._conflict(VISIBILITY_PARENT_MISMATCH)
         else:
             assert raster_receipt is not None
+            if not _supplemental_render_provenance_matches(observation, raster_receipt):
+                return self._conflict(PRODUCER_INTEGRITY_FAILURE)
             if (
                 observation.observation_kind != RASTER_PDF_VISIBLE_SEGMENT
                 or observation.origin_kind != RASTER_VISIBLE_SEGMENT_ORIGIN_KIND
