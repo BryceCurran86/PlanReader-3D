@@ -34,6 +34,10 @@ jobs:
               SourceRoomFaceSelector,
               build_source_room_face_authority,
           )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer,
+              SourceRoomLabelSelector,
+          )
           from pb_source_visibility_authority import SourceVisibilityProducer
           from pb_drawing_evidence_binding import DrawingViewType
 
@@ -115,10 +119,24 @@ jobs:
               view_type=DrawingViewType.FLOOR_PLAN.value,
           )
           view_room_auth=build_source_room_face_authority(view_auth)
+          label_auth=SourceRoomLabelProducer.from_authorities(
+              source2,
+              view_room_auth,
+              page_ids=("7",),
+          ).authority()
           viewport_rows=[]
           for ws in selectors:
               wr=view_auth.resolve_scope(ws)
-              rr=view_room_auth.resolve_scope(SourceRoomFaceSelector(
+              room_selector=SourceRoomFaceSelector(
+                  document_id=ws.document_id,
+                  revision_id=ws.revision_id,
+                  source_sha256=ws.source_sha256,
+                  snapshot_id=ws.snapshot_id,
+                  page_id=ws.page_id,
+                  decision_scope_id=ws.decision_scope_id,
+              )
+              rr=view_room_auth.resolve_scope(room_selector)
+              lr=label_auth.resolve_scope(SourceRoomLabelSelector(
                   document_id=ws.document_id,
                   revision_id=ws.revision_id,
                   source_sha256=ws.source_sha256,
@@ -126,6 +144,22 @@ jobs:
                   page_id=ws.page_id,
                   decision_scope_id=ws.decision_scope_id,
               ))
+              by_face={str(r.face_id):r for r in rr.records}
+              labelled=[]
+              for row in lr.records:
+                  face=by_face.get(str(row.face_id))
+                  labelled.append({
+                      "label":" ".join(str(row.label or "").strip().upper().split()),
+                      "face_id":str(row.face_id),
+                      "label_record_id":row.record_id,
+                      "label_evidence_ids":list(row.evidence_ids),
+                      "face_record_id":None if face is None else face.record_id,
+                      "vertex_count":None if face is None else len(face.polygon_pdf_pts),
+                      "area_page_pts2":None if face is None else face.area_page_pts2,
+                      "bounding_wall_count":None if face is None else len(face.bounding_wall_ids),
+                      "polygon_pdf_pts":None if face is None else [list(p) for p in face.polygon_pdf_pts],
+                  })
+              freezer=[row for row in labelled if row["label"]=="FREEZER"]
               viewport_rows.append({
                   "decision_scope_id":ws.decision_scope_id,
                   "wall_status":status(wr.status),
@@ -133,6 +167,18 @@ jobs:
                   "wall_reason_codes":list(wr.reason_codes),
                   "wall_record_count":len(wr.records),
                   "room":summarize_room(rr),
+                  "label_status":status(lr.status),
+                  "label_reason_codes":list(lr.reason_codes),
+                  "label_record_count":len(lr.records),
+                  "freezer":freezer,
+                  "selected_labels":[
+                      row for row in labelled
+                      if row["label"] in {
+                          "FREEZER","COLD ROOM","FOOD PREP","OFFICE",
+                          "POS COUNTER","FOOD SERVICE","WASH UP",
+                          "TRUCK DRIVER LOUNGE","M-AMB","F-AMB","DRY STORE"
+                      }
+                  ],
               })
 
           print(json.dumps({
