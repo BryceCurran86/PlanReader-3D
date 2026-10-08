@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import io
 import math
 from types import MappingProxyType
+from weakref import WeakKeyDictionary
 
 import fitz
 from PIL import Image, ImageOps
@@ -89,6 +90,14 @@ CROSS_VIEW_ROOM_AREA_EVIDENCE_RESOLVED = (
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
+
+# Source-owned acceleration only: exact PDF-derived dimension bundles may be
+# reused for other labels on the SAME producer, revision, snapshot, page and
+# view type. Per-label native text, raster corroboration and physical witness
+# authority below always run anew; no pre-authenticated quantity is cached.
+# A weak producer key prevents retained PDF evidence after producer lifetime.
+_DIMENSION_BUNDLE_CACHE: WeakKeyDictionary = WeakKeyDictionary()
+_DIMENSION_BUNDLE_CACHE_MAX_PAGES = 8
 
 
 def _norm_label(value: object) -> str:
@@ -769,19 +778,30 @@ def _trusted_native_dimensions_for_page(
     ):
         return ()
 
+    cache_key = (
+        str(revision_id),
+        str(published.snapshot.snapshot_id),
+        int(page_number),
+        str(view_type),
+    )
     try:
-        pdf = fitz.open(stream=source_bytes, filetype="pdf")
-        if page_number < 1 or page_number > pdf.page_count:
-            pdf.close()
-            return ()
-        try:
-            bundle = extract_dimension_evidence_bundle(
-                pdf.load_page(page_number - 1),
-                page_num=page_number,
-                view_type=view_type,
-            )
-        finally:
-            pdf.close()
+        producer_bundles = _DIMENSION_BUNDLE_CACHE.setdefault(source, {})
+        bundle = producer_bundles.get(cache_key)
+        if bundle is None:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+            try:
+                if page_number < 1 or page_number > pdf.page_count:
+                    return ()
+                bundle = extract_dimension_evidence_bundle(
+                    pdf.load_page(page_number - 1),
+                    page_num=page_number,
+                    view_type=view_type,
+                )
+            finally:
+                pdf.close()
+            if len(producer_bundles) >= _DIMENSION_BUNDLE_CACHE_MAX_PAGES:
+                producer_bundles.pop(next(iter(producer_bundles)))
+            producer_bundles[cache_key] = bundle
     except Exception:
         return ()
 
