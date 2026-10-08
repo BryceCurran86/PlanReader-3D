@@ -1,0 +1,88 @@
+name: DIAG GPT1 Lot16 Target Label Trust
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-room-label-scope-v1
+
+jobs:
+  trust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect exact target label text authority
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_raster_text_corroboration_authority import (
+              RasterTextCorroborationProducer,
+              RasterTextCorroborationSelector,
+          )
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-lot16-label-trust",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-gpt1-lot16-label-trust",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3",),
+          )
+          text=source.text_integrity_authority()
+          raster=RasterTextCorroborationProducer.from_source_visibility_producer(source)
+          wanted={"WIR","GARAGE","ENS.","WC","LINEN"}
+          rows=[]
+          for obs_id in published.text_observation_ids:
+              result=text.resolve_text(ObservationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=obs_id,
+              ))
+              receipt=result.receipt
+              if receipt is None or str(receipt.page_id)!="3":
+                  continue
+              raw=str(receipt.raw_text or "").strip()
+              if raw.upper() not in wanted:
+                  continue
+              rr=raster.publish(RasterTextCorroborationSelector(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=published.revision.source_sha256,
+                  snapshot_id=published.snapshot.snapshot_id,
+                  observation_id=obs_id,
+              ))
+              rows.append({
+                  "raw_text":raw,
+                  "observation_id":obs_id,
+                  "block_no":receipt.block_no,
+                  "line_no":receipt.line_no,
+                  "word_no":receipt.word_no,
+                  "geometry":list(receipt.geometry),
+                  "native_status":getattr(result.status,"value",str(result.status)),
+                  "native_trusted_text":result.trusted_text,
+                  "native_reason_codes":list(result.reason_codes),
+                  "receipt_trusted":bool(receipt.trusted),
+                  "raster_status":getattr(rr.status,"value",str(rr.status)),
+                  "raster_text":rr.corroborated_text,
+                  "raster_reason_codes":list(rr.reason_codes),
+              })
+          print(json.dumps(rows,indent=2,sort_keys=True))
+          PY
