@@ -212,6 +212,7 @@ class SameViewRoomAreaProducer:
                 revision_id=revision_id,
                 page_id=page_id,
                 candidate_lines=lines,
+                view_type=DrawingViewType.FLOOR_PLAN.value,
             )
             horizontals = tuple(
                 item
