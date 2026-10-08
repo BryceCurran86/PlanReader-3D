@@ -56,6 +56,8 @@ def publish_live_floor_area_quantities(
             or quantity.abstained
             or quantity.value is None
             or _clean(quantity.status).lower() != AuthorityStatus.FIRM.value
+            or _clean(quantity.unit).lower() not in {"m2", "m²"}
+            or quantity.blocking_reasons
         ):
             continue
         qid = _clean(quantity.quantity_id)
