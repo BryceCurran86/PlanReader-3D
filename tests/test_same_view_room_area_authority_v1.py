@@ -138,7 +138,7 @@ def test_yearlike_dimension_is_promoted_only_by_floor_plan_witness_geometry() ->
     record = result.records[0]
     assert record.area_evidence.normalized_value == 7.2
     assert record.area_evidence.method == "authenticated_same_view_figured_dimensions"
-    assert record.area_evidence.metadata["vertical_dimension_mm"] == 2000.0
+    assert record.area_evidence.metadata["vertical_value_mm"] == 2000
 
 
 def test_duplicate_same_page_room_label_fails_closed() -> None:
