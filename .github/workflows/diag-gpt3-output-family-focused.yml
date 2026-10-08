@@ -1,0 +1,31 @@
+name: DIAG GPT3 Output Family Focused
+
+on:
+  push:
+    branches:
+      - diag/gpt3-output-family-focused-v1
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Customer output family tests
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_customer_output_verification.py \
+            tests/test_live_opening_customer_projection.py \
+            tests/test_live_room_area_source_closed_export.py \
+            tests/test_live_floor_finish_area_source_closed_export.py \
+            tests/test_live_ceiling_lining_source_closed_export.py \
+            tests/test_live_ceiling_area_quantity_publication.py \
+            tests/test_live_canonical_family_coverage.py
