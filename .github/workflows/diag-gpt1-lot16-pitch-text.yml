@@ -42,6 +42,8 @@ jobs:
                       upper=text.upper()
                       if (
                           "PITCH" in upper
+                          or "RAKED" in upper
+                          or "RAKE" in upper
                           or "DEG" in upper
                           or "°" in text
                           or re.search(r"\b\d+(?:\.\d+)?\s*(?:DEG|DEGREES?)\b",upper)
