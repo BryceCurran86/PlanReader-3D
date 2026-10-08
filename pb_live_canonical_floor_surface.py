@@ -317,7 +317,15 @@ def enrich_live_canonical_floor_metric_areas(
         ]
         if len(candidates) > 1:
             conflict = True
-            enriched.append(floor)
+            # No quantity may escape for a face with competing FIRM claims.
+            enriched.append(
+                replace(
+                    floor,
+                    metric_area_m2=None,
+                    metric_area_quantity_id=None,
+                    metric_area_authority=None,
+                )
+            )
             continue
         if not candidates:
             enriched.append(floor)
@@ -348,7 +356,18 @@ def enrich_live_canonical_floor_metric_areas(
                 same_claim = False
             if not same_claim:
                 conflict = True
-                enriched.append(floor)
+                # Retain physical identity and provenance, but revoke the
+                # contested metric measurement from this claim's output.
+                # Otherwise the downstream floor quantity publisher could
+                # still seal the original value despite the CONFLICT.
+                enriched.append(
+                    replace(
+                        floor,
+                        metric_area_m2=None,
+                        metric_area_quantity_id=None,
+                        metric_area_authority=None,
+                    )
+                )
                 continue
         enriched.append(
             replace(
