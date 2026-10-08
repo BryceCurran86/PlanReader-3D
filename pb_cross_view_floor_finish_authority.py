@@ -34,6 +34,7 @@ from pb_cross_view_ceiling_finish_authority import (
 from pb_cross_view_room_area_authority import (
     CrossViewRoomAreaRecord,
     CrossViewRoomAreaResult,
+    _trusted_lines_for_page,
 )
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_same_view_room_area_authority import (
@@ -96,6 +97,35 @@ _FLOOR_FINISH_SEMANTICS = frozenset(
         "epoxy",
     }
 )
+
+# Exact self-describing whole-line finish descriptors allowed only as the
+# lowest-priority same-view fallback inside an already-proven room dimension
+# box. These are semantic words, never opaque drawing codes.
+_LITERAL_FLOOR_FINISH_DESCRIPTORS = MappingProxyType(
+    {
+        "tile": "tile",
+        "tiles": "tile",
+        "vinyl": "vinyl",
+    }
+)
+
+
+@dataclass(frozen=True)
+class _LiteralFloorFinishOccurrence:
+    code: str
+    semantic_finish: str
+    record_id: str
+    source_evidence_id: str
+    bbox_pdf_pts: tuple[float, float, float, float]
+    page_id: str
+    viewport_id: str
+
+
+@dataclass(frozen=True)
+class _LiteralFloorFinishDefinition:
+    record_id: str
+    semantic_finish: str
+    source_definition_ids: tuple[str, ...]
 
 
 def _clean(value: object) -> str:
@@ -756,18 +786,91 @@ class CrossViewFloorFinishProducer:
             if len(candidates) == 1:
                 occurrence, definition = candidates[0]
             else:
-                owned = cross_view_candidates.get(area_record.physical_room_id, ())
-                if len(owned) != 1:
-                    unresolved.add(floor.canonical_floor_id)
-                    if len(owned) > 1:
-                        conflict = True
-                    continue
-                occurrence, definition, occurrence_line, _label_line = owned[0]
-                binding_mode = "native_block_room_label"
-                support_source_partition_id = _clean(
-                    occurrence_line.source_partition_id
+                # Lowest-priority same-view semantic fallback. A literal finish
+                # descriptor is allowed only when the exact trusted whole line
+                # is uniquely contained by this room's already-proven figured-
+                # dimension box. No nearest-text matching or opaque code
+                # interpretation is performed.
+                literal_lines = tuple(
+                    line
+                    for line in _trusted_lines_for_page(
+                        self._source,
+                        revision_id=revision_id,
+                        page_id=area_record.source_dimension_page_id,
+                        candidate_labels=tuple(
+                            sorted(_LITERAL_FLOOR_FINISH_DESCRIPTORS)
+                        ),
+                    )
+                    if _bbox_fully_inside(line.bbox, box)
+                    and _norm(line.text) in _LITERAL_FLOOR_FINISH_DESCRIPTORS
                 )
-                support_block_no = int(occurrence_line.block_no)
+                if len(literal_lines) > 1:
+                    unresolved.add(floor.canonical_floor_id)
+                    conflict = True
+                    continue
+                if len(literal_lines) == 1:
+                    line = literal_lines[0]
+                    semantic_finish = _LITERAL_FLOOR_FINISH_DESCRIPTORS[
+                        _norm(line.text)
+                    ]
+                    if not line.observation_ids:
+                        unresolved.add(floor.canonical_floor_id)
+                        continue
+                    literal_payload = {
+                        "document_id": floor.document_id,
+                        "revision_id": floor.revision_id,
+                        "source_sha256": floor.source_sha256,
+                        "snapshot_id": published.snapshot.snapshot_id,
+                        "page_id": line.page_id,
+                        "source_partition_id": line.source_partition_id,
+                        "block_no": line.block_no,
+                        "line_no": line.line_no,
+                        "text": line.text,
+                        "semantic_finish": semantic_finish,
+                        "observation_ids": tuple(line.observation_ids),
+                    }
+                    definition = _LiteralFloorFinishDefinition(
+                        record_id=stable_contract_id(
+                            "literal_floor_finish_semantic",
+                            literal_payload,
+                            digest_chars=32,
+                        ),
+                        semantic_finish=semantic_finish,
+                        source_definition_ids=tuple(line.observation_ids),
+                    )
+                    occurrence = _LiteralFloorFinishOccurrence(
+                        code=line.text,
+                        semantic_finish=semantic_finish,
+                        record_id=stable_contract_id(
+                            "literal_floor_finish_occurrence",
+                            literal_payload,
+                            digest_chars=32,
+                        ),
+                        source_evidence_id=str(line.observation_ids[0]),
+                        bbox_pdf_pts=line.bbox,
+                        page_id=line.page_id,
+                        viewport_id=_clean(floor.viewport_id),
+                    )
+                    binding_mode = "same_view_literal_descriptor"
+                    support_source_partition_id = _clean(
+                        line.source_partition_id
+                    )
+                    support_block_no = int(line.block_no)
+                else:
+                    owned = cross_view_candidates.get(
+                        area_record.physical_room_id, ()
+                    )
+                    if len(owned) != 1:
+                        unresolved.add(floor.canonical_floor_id)
+                        if len(owned) > 1:
+                            conflict = True
+                        continue
+                    occurrence, definition, occurrence_line, _label_line = owned[0]
+                    binding_mode = "native_block_room_label"
+                    support_source_partition_id = _clean(
+                        occurrence_line.source_partition_id
+                    )
+                    support_block_no = int(occurrence_line.block_no)
             area_value = _area_value(area_record)
             if area_value is None:
                 unresolved.add(floor.canonical_floor_id)
@@ -828,7 +931,11 @@ class CrossViewFloorFinishProducer:
                 value=round(area_value, 6),
                 unit="m2",
                 input_entity_ids=(floor.canonical_floor_id,),
-                formula="authenticated_cross_view_room_area_with_source_finish",
+                formula=(
+                    "authenticated_documented_room_area_with_literal_finish"
+                    if binding_mode == "same_view_literal_descriptor"
+                    else "authenticated_cross_view_room_area_with_source_finish"
+                ),
                 formula_version=CROSS_VIEW_FLOOR_FINISH_SCHEMA_VERSION,
                 evidence_ids=evidence_ids,
                 authority=MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
@@ -858,6 +965,11 @@ class CrossViewFloorFinishProducer:
                     "finish_definition_record_id": definition.record_id,
                     "finish_occurrence_record_id": occurrence.record_id,
                     "finish_occurrence_evidence_id": occurrence.source_evidence_id,
+                    "literal_finish_descriptor": (
+                        occurrence.code
+                        if binding_mode == "same_view_literal_descriptor"
+                        else None
+                    ),
                     "finish_occurrence_bbox_pdf_pts": list(
                         occurrence.bbox_pdf_pts
                     ),
