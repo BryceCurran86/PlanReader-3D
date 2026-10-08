@@ -5,8 +5,10 @@ from dataclasses import replace
 from pb_live_canonical_floor_surface import (
     LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,
     LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
+    LIVE_CANONICAL_FLOOR_METRIC_AREA_PARTIAL,
     LIVE_CANONICAL_FLOOR_METRIC_AREA_UNAVAILABLE,
     LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED,
+    LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL,
     LIVE_CANONICAL_FLOOR_SURFACE_UNAVAILABLE,
     LiveCanonicalFloorSurfaceComposition,
     LiveCanonicalFloorSurfaceObject,
@@ -424,3 +426,83 @@ def test_sequential_room_area_bridges_replay_or_conflict_without_overwrite(
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert all(floor.metric_area_quantity_id is None for floor in result.floors)
     assert all(floor.metric_area_m2 is None for floor in result.floors)
+
+
+def test_metric_floor_status_closes_after_separate_source_bridges(tmp_path) -> None:
+    path = tmp_path / "separate-room-bridge-metric-closure.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    original = _floor_composition_from_bridge(published, bridge)
+    firm = tuple(q for q in bridge.quantities if not q.abstained)
+    assert len(original.floors) == len(firm) == 2
+
+    first = replace(bridge, quantities=(firm[0],))
+    second = replace(bridge, quantities=(firm[1],))
+    partial = enrich_live_canonical_floor_metric_areas(original, first)
+    assert partial.status is EvidenceResolutionStatus.CANDIDATE
+    assert partial.reason_codes == (
+        LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED,
+        LIVE_CANONICAL_FLOOR_METRIC_AREA_PARTIAL,
+    )
+    assert sum(bool(floor.metric_area_quantity_id) for floor in partial.floors) == 1
+
+    complete = enrich_live_canonical_floor_metric_areas(partial, second)
+    assert complete.status is EvidenceResolutionStatus.CORROBORATED
+    assert complete.reason_codes == (
+        LIVE_CANONICAL_FLOOR_SURFACE_RESOLVED,
+        LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
+    )
+    assert all(floor.metric_area_quantity_id for floor in complete.floors)
+    assert enrich_live_canonical_floor_metric_areas(complete, first) == complete
+
+    # Independent source-bridge order must not alter complete floor state.
+    other_order = enrich_live_canonical_floor_metric_areas(
+        enrich_live_canonical_floor_metric_areas(original, second),
+        first,
+    )
+    assert other_order == complete
+
+
+def test_metric_completion_does_not_override_partial_physical_room_universe(
+    tmp_path,
+) -> None:
+    path = tmp_path / "partial-room-topology-metric-closure.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    original = _floor_composition_from_bridge(published, bridge)
+    upstream_partial = replace(
+        original,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        reason_codes=(
+            LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL,
+            "source_room_universe_incomplete",
+        ),
+    )
+    enriched = enrich_live_canonical_floor_metric_areas(
+        upstream_partial, bridge
+    )
+    assert all(floor.metric_area_quantity_id for floor in enriched.floors)
+    assert enriched.status is EvidenceResolutionStatus.CANDIDATE
+    assert enriched.reason_codes == (
+        LIVE_CANONICAL_FLOOR_SURFACE_PARTIAL,
+        "source_room_universe_incomplete",
+        LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
+    )
