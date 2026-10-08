@@ -1096,3 +1096,102 @@ def test_admissible_line_fallback_mismatched_second_render_remains_blocked(monke
     assert definition.status is EvidenceResolutionStatus.ABSTAINED
     assert definition.record is None
     assert semantic.SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED in definition.reason_codes
+
+
+def test_native_schedule_block_grouping_preserves_trusted_source_order() -> None:
+    """Interleaved CAD words retain exact partition, block and receipt lineage."""
+    def word(
+        receipt: str,
+        partition: str,
+        block: int,
+        line: int,
+        index: int,
+        *,
+        x: float = 2.0,
+        trusted: bool = True,
+    ) -> semantic._TrustedTextWord:
+        return semantic._TrustedTextWord(
+            observation_id=receipt,
+            page_id="9",
+            source_partition_id=partition,
+            text=receipt,
+            bbox=(x, 4.0, x + 2.0, 8.0),
+            block_no=block,
+            line_no=line,
+            word_no=index,
+            trusted=trusted,
+            reason_codes=() if trusted else ("untrusted_source_receipt",),
+        )
+
+    # Source words are interleaved across partitions/blocks; tie breakers are
+    # geometric X then immutable receipt ID. One missing source partition
+    # must not be promoted into source-owned schedule text.
+    words = (
+        word("row-b", "cad-partition-b", 1, 0, 0),
+        word("last", "cad-partition-a", 4, 1, 2),
+        word("word-z", "cad-partition-a", 4, 0, 0, x=10.0),
+        word("word-a", "cad-partition-a", 4, 0, 0, x=10.0),
+        word("untrusted", "cad-partition-a", 4, 1, 1, trusted=False),
+        word("unowned", "", 4, 0, 1),
+        word("first", "cad-partition-a", 4, 0, 0, x=2.0),
+    )
+    initial = tuple(words)
+    grouped = semantic._group_native_material_block_words(words)
+    assert words == initial
+    assert tuple(grouped) == (
+        ("cad-partition-b", 1),
+        ("cad-partition-a", 4),
+    )
+    assert tuple(w.observation_id for w in grouped["cad-partition-a", 4]) == (
+        "first", "word-a", "word-z", "untrusted", "last"
+    )
+    assert grouped["cad-partition-a", 4][3] is words[4]
+    assert grouped["cad-partition-a", 4][3].trusted is False
+    assert grouped["cad-partition-a", 4][3].reason_codes == (
+        "untrusted_source_receipt",
+    )
+    assert tuple(w.observation_id for w in grouped["cad-partition-b", 1]) == (
+        "row-b",
+    )
+    assert semantic._group_native_material_block_words(()) == {}
+
+
+def test_dense_native_schedule_grouping_keeps_each_receipt_exactly_once() -> None:
+    """Dense native CAD blocks cannot duplicate, reorder or lose evidence."""
+    words = tuple(
+        semantic._TrustedTextWord(
+            observation_id=f"source-word-{i:04d}",
+            page_id="1",
+            source_partition_id="source-partition",
+            text=f"T{i}",
+            bbox=(float(i), 0.0, float(i + 1), 1.0),
+            block_no=i % 3,
+            line_no=i // 30,
+            word_no=i % 10,
+            trusted=True,
+            reason_codes=(),
+        )
+        for i in range(1200)
+    )
+    grouped = semantic._group_native_material_block_words(tuple(reversed(words)))
+    assert set(grouped) == {
+        ("source-partition", 0),
+        ("source-partition", 1),
+        ("source-partition", 2),
+    }
+    assert sum(map(len, grouped.values())) == len(words)
+    assert {id(word) for block in grouped.values() for word in block} == {
+        id(word) for word in words
+    }
+    for block in grouped.values():
+        assert block == tuple(
+            sorted(
+                block,
+                key=lambda row: (
+                    row.line_no,
+                    row.word_no,
+                    row.bbox[0],
+                    row.observation_id,
+                ),
+            )
+        )
