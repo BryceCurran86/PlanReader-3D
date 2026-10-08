@@ -684,6 +684,10 @@ def compose_live_canonical_rooms(
                     ):
                         reasons.extend(room_result.reason_codes)
                         continue
+                    if not room_result.face_universe_complete:
+                        reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                        reasons.extend(room_result.reason_codes)
+                        continue
 
                     label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
                     label_result = None
@@ -762,9 +766,6 @@ def compose_live_canonical_rooms(
                         for record in composite_records
                     )
                     page_resolved = True
-                    if not room_result.face_universe_complete:
-                        page_face_universe_complete = False
-                        reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
                     viewport_fallback_used = True
 
                 if page_resolved and str(page_id).isdigit():
