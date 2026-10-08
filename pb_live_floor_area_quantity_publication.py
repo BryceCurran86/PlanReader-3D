@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
-from pb_geometry_takeoff_model import AuthorityStatus
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_canonical_room_composition import LiveCanonicalRoomObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
@@ -58,6 +58,10 @@ def publish_live_floor_area_quantities(
             or _clean(quantity.status).lower() != AuthorityStatus.FIRM.value
             or _clean(quantity.unit).lower() not in {"m2", "m²"}
             or quantity.blocking_reasons
+            or _clean(quantity.authority) not in {
+                MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+                MeasurementAuthorityType.PDF_SCALED.value,
+            }
         ):
             continue
         qid = _clean(quantity.quantity_id)

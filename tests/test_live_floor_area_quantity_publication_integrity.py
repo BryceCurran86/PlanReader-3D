@@ -107,3 +107,15 @@ def test_unsupported_area_units_and_blocked_claims_do_not_publish_m2() -> None:
     )
     for invalid in invalid_claims:
         assert publish_live_floor_area_quantities(_claim_with(invalid)) == ()
+
+
+def test_unsupported_firm_authority_cannot_publish_canonical_floor_quantity() -> None:
+    source = _source_area()
+    for authority in ("model_derived", "schedule_extracted", "ai_detected"):
+        unsupported = replace(source, authority=authority)
+        floor = replace(_floor(), metric_area_authority=authority)
+        claim = replace(
+            _claim_with(unsupported),
+            canonical_floors=(floor,),
+        )
+        assert publish_live_floor_area_quantities(claim) == ()
