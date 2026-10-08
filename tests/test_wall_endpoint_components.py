@@ -8,3 +8,12 @@ def test_exact_transitive_wall_endpoint_ownership():
         'a': frozenset(('a', 'b')),
         'c': frozenset(('c',)),
     }
+
+def test_duplicate_wall_ids_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        exact_endpoint_components(('a', 'a'), {'a': {(1.0, 2.0)}})
+
+
+def test_empty_universe_is_empty():
+    assert exact_endpoint_components((), {}) == {}
