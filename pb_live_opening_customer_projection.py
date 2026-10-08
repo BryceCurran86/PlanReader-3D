@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from pb_customer_output_verification import verify_sealed_customer_output
+
 from pb_live_opening_count_source_closed_export import (
     build_live_opening_count_source_traces,
 )
