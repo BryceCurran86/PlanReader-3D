@@ -555,6 +555,17 @@ class RasterTextCorroborationProducer:
     def publish(self, selector: RasterTextCorroborationSelector) -> RasterTextCorroborationResult:
         if type(selector) is not RasterTextCorroborationSelector:
             raise TypeError("selector must be RasterTextCorroborationSelector")
+        # A producer owns one immutable source revision and one OCR backend.
+        # Repeated consumers of the *exact same native observation* must
+        # replay its complete source-backed outcome, rather than re-rendering
+        # and re-reading both DPI clips. The selector key includes the source
+        # SHA, snapshot, revision and observation ID. Cache both positive and
+        # fail-closed outcomes, never a result under another source selector.
+        # A first evaluation still performs every lineage/text-integrity check
+        # and the two independent DPI corroboration readings.
+        cached = self._results.get(selector.key)
+        if cached is not None:
+            return cached
         return self._store(selector, self._evaluate(selector))
 
     def _evaluate(self, selector: RasterTextCorroborationSelector) -> RasterTextCorroborationResult:
