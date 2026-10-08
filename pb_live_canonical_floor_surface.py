@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 import math
 from typing import Optional
 
+from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
     LiveCanonicalRoomObject,
@@ -218,6 +219,13 @@ def _valid_metric_area_quantity(
     if str(quantity.status or "").lower() != "firm":
         return False
     if str(quantity.unit or "").lower() not in {"m2", "m²"}:
+        return False
+    if quantity.blocking_reasons:
+        return False
+    if str(quantity.authority or "").strip() not in {
+        MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
+        MeasurementAuthorityType.PDF_SCALED.value,
+    }:
         return False
     source_room_id = str(source_room_entity.candidate_entity_id or "").strip()
     if not source_room_id:
