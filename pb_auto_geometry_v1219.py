@@ -1478,9 +1478,15 @@ def _try_physical_net_wall_rows(
                     current_coverage["blocked_commercial_claim_keys"].append(
                         blocked_key
                     )
-            opening_rows_by_workspace[int(workspace_id)].extend(
-                opening_rows_for_claim(claim)
-            )
+            try:
+                opening_rows_by_workspace[int(workspace_id)].extend(
+                    opening_rows_for_claim(claim)
+                )
+            except Exception as opening_output_exc:
+                current_coverage["family_gaps"].setdefault("opening", []).append(
+                    "live_opening_customer_projection_failed:"
+                    f"{type(opening_output_exc).__name__}"
+                )
             try:
                 room_area_rows_by_workspace[int(workspace_id)].extend(
                     room_area_rows_for_claim(claim)
