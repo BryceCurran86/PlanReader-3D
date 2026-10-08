@@ -366,6 +366,86 @@ def test_floor_finish_rejects_semantic_source_from_different_revision(
     assert result.records == ()
 
 
+def test_exact_tiles_literal_inside_documented_room_binds_floor_finish(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _payload(
+            detail_codes=("TILES",),
+            schedule_lines=(),
+        )
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.finish_code == "TILES"
+    assert record.semantic_finish == "tile"
+    assert record.quantity.value == 8.64
+    assert (
+        record.quantity.metadata["finish_binding_mode"]
+        == "same_view_literal_descriptor"
+    )
+    assert record.quantity.metadata["literal_finish_descriptor"] == "TILES"
+
+
+def test_exact_vinyl_literal_inside_documented_room_binds_floor_finish(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _payload(
+            detail_codes=("VINYL",),
+            schedule_lines=(),
+        )
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].semantic_finish == "vinyl"
+    assert (
+        result.records[0].quantity.metadata["finish_binding_mode"]
+        == "same_view_literal_descriptor"
+    )
+
+
+def test_two_literal_finish_descriptors_inside_same_room_fail_closed(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(
+        _payload(
+            detail_codes=("TILES", "VINYL"),
+            schedule_lines=(),
+        )
+    )
+
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )
+
+
 def test_raw_material_code_without_authenticated_schedule_cannot_bind(
     monkeypatch,
 ) -> None:
