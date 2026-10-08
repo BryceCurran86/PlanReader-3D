@@ -1195,6 +1195,13 @@ def _try_physical_net_wall_rows(
             workspace_id=int(workspace_id),
             project_id=f"customer-workspace:{int(workspace_id)}",
         )
+        from pb_live_floor_area_quantity_publication import (
+            publish_live_floor_area_quantities,
+        )
+        final_floor_quantities = {
+            str(quantity.quantity_id): quantity
+            for quantity in publish_live_floor_area_quantities(claim)
+        }
         rows: List[Tuple[Any, ...]] = []
         for item in projected:
             if (
@@ -1219,6 +1226,21 @@ def _try_physical_net_wall_rows(
             source_reference = str(item.get("source_reference") or "").strip()
             if not source_reference:
                 raise ValueError("floor-area projection is missing source lineage")
+            final_quantity = final_floor_quantities.get(quantity_id)
+            final_metadata = (
+                final_quantity.metadata
+                if final_quantity is not None
+                and isinstance(final_quantity.metadata, Mapping)
+                else {}
+            )
+            upstream_room_area_quantity_id = str(
+                final_metadata.get("upstream_room_area_quantity_id") or ""
+            ).strip()
+            if upstream_room_area_quantity_id:
+                source_reference = (
+                    f"{source_reference} · "
+                    f"room_area_quantity:{upstream_room_area_quantity_id}"
+                )
             rows.append(
                 _takeoff_row(
                     workspace_id=int(workspace_id),
