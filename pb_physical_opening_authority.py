@@ -19,7 +19,7 @@ from typing import Optional, Sequence
 import cv2
 import numpy as np
 
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import EvidenceAtom, EvidenceResolutionStatus, stable_contract_id
 from pb_plan_opening_detection_v171 import (
     Segment as LegacyPlanSegment,
     detect_door_candidates,
@@ -192,6 +192,7 @@ class PhysicalOpeningExistenceResult:
     candidate: Optional[CandidateSemanticOpening] = None
     existence_record: Optional[PhysicalOpeningExistenceRecord] = None
     missing_upstream_capability: Optional[str] = None
+    opposing_evidence_atoms: tuple[EvidenceAtom, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1211,6 +1212,52 @@ class PhysicalOpeningAuthority:
         reaching through this class's private storage.
         """
         return self._source_visibility_authority
+
+    def native_unstroked_fill_evidence(
+        self, selector: ObservationSelector, *, source_primitive_ids: Sequence[str]
+    ) -> tuple[EvidenceAtom, ...]:
+        """Reauthenticate complete native paint-role support for frame opposition."""
+        if self._source_visibility_producer is None or not source_primitive_ids:
+            return ()
+        required = frozenset(source_primitive_ids)
+        if any(str(i).startswith('raster_segment:') for i in required):
+            return ()
+        published = self._source_visibility_producer.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError('producer_integrity_failure')
+        rows = self._source_visibility_producer.authority().authenticated_visible_observations(published)
+        addressed = tuple((r.source_primitive_ref.removeprefix('visible:segment:'), i)
+            for i,r in rows if r.source_primitive_ref.removeprefix('visible:segment:') in required)
+        if {primitive for primitive,_ in addressed} != required:
+            return ()
+        ids = tuple(sorted({i for _,i in addressed}))
+        return self._source_visibility_producer.native_unstroked_fill_evidence(
+            replace(selector, observation_id=ids[0]), support_observation_ids=ids)
+
+    def native_dimension_annotation_evidence(
+        self, selector: ObservationSelector, *, source_primitive_ids: Sequence[str]
+    ) -> tuple[EvidenceAtom, ...]:
+        """Prove the complete native component role, without measuring text."""
+        if self._source_visibility_producer is None or not source_primitive_ids:
+            return ()
+        required = frozenset(source_primitive_ids)
+        if any(str(i).startswith('raster_segment:') for i in required):
+            return ()
+        published = self._source_visibility_producer.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError('producer_integrity_failure')
+        rows = self._source_visibility_producer.authority().authenticated_visible_observations(published)
+        addressed = tuple((r.source_primitive_ref.removeprefix('visible:segment:'), i)
+            for i, r in rows if r.source_primitive_ref.removeprefix('visible:segment:') in required)
+        if {primitive for primitive, _ in addressed} != required:
+            return ()
+        ids = tuple(sorted({i for _, i in addressed}))
+        return self._source_visibility_producer.native_dimension_cap_evidence(
+            replace(selector, observation_id=ids[0]), opening_support_ids=ids)
 
     @staticmethod
     def capabilities() -> dict[str, bool]:
@@ -3118,10 +3165,29 @@ class PhysicalOpeningAuthority:
         promotable, viewport_decisions, viewport_reasons = (
             self._viewport_scoped_visible_candidates_for(seed, records)
         )
-        proven_supports = tuple(
-            frozenset(candidate.source_observation_ids)
-            for candidate in promotable
-        )
+        # Structural membership is not existence authority. A selected source
+        # hypothesis opposed by complete annotation evidence remains unresolved
+        # in closure; retain its raw support instead of silently discarding it.
+        proven_supports = []
+        for candidate in promotable:
+            support = frozenset(candidate.source_observation_ids)
+            for observation_id in candidate.source_observation_ids:
+                existence = self.prove_existence(
+                    replace(selector, observation_id=observation_id)
+                )
+                if (
+                    existence.status is EvidenceResolutionStatus.CORROBORATED
+                    and existence.existence_record is not None
+                    and frozenset(existence.existence_record.source_observation_ids)
+                    == support
+                ):
+                    proven_supports.append(support)
+                    break
+                if (
+                    existence.candidate is not None
+                    and existence.candidate.candidate_id == candidate.candidate_id
+                ):
+                    raw_candidates[candidate.candidate_id] = support
         typed_non_plan_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven
@@ -3604,6 +3670,32 @@ class PhysicalOpeningAuthority:
             ))
 
         candidate = containing[0]
+        if (self._source_visibility_producer is not None
+                and candidate.structural_pattern == JAMB_BOUNDED_TWO_FACE_INTERRUPTION):
+            opposition_reason = "native_dimension_annotation_opposes_opening"
+            try:
+                opposing = self._source_visibility_producer.native_dimension_cap_evidence(
+                    selector, opening_support_ids=candidate.source_observation_ids)
+                if not opposing:
+                    opposing = self._source_visibility_producer.native_unstroked_fill_evidence(
+                        selector, support_observation_ids=candidate.source_observation_ids)
+                    opposition_reason = 'native_unstroked_fill_boundary_opposes_opening'
+            except RuntimeError:
+                return cache_visible(PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=('opening_annotation_source_integrity_unproven',),
+                    source_observation=source_result, candidate=candidate))
+            if opposing:
+                # Retain the complete hypothesis and its exact opposing source
+                # evidence. Annotation opposition is not non-existence proof
+                # and does not dispose the raw universe for count authority.
+                return cache_visible(PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.ABSTAINED, proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=(opposition_reason,),
+                    source_observation=source_result, candidate=candidate,
+                    opposing_evidence_atoms=opposing))
         physical_geometry = _physical_opening_geometry_identity(candidate, records)
         if not physical_geometry:
             return cache_visible(PhysicalOpeningExistenceResult(
