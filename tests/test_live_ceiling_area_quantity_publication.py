@@ -375,6 +375,51 @@ def test_conflicting_shadow_quantity_id_never_publishes_ceiling_area() -> None:
             assert publish_live_ceiling_area_quantities(result) == ()
 
 
+
+def test_duplicate_canonical_ceiling_cannot_hide_in_abstained_candidate() -> None:
+    firm = _ceiling()
+    unsupported = replace(
+        firm,
+        metric_area_complete=False,
+        area_m2=0.0,
+    )
+    assert len(publish_live_ceiling_area_quantities(_result(ceiling=firm))) == 1
+    assert publish_live_ceiling_area_quantities(_result(ceiling=unsupported)) == ()
+    result = replace(
+        _result(),
+        canonical_ceilings=(firm, unsupported),
+    )
+    import pytest
+    with pytest.raises(ValueError, match="duplicate canonical ceiling identity"):
+        publish_live_ceiling_area_quantities(result)
+
+
+def test_duplicate_unmeasured_ceiling_id_is_still_quarantined() -> None:
+    unresolved = replace(_ceiling(), metric_area_complete=False, area_m2=0.0)
+    result = replace(
+        _result(),
+        canonical_ceilings=(unresolved, unresolved),
+    )
+    import pytest
+    with pytest.raises(ValueError, match="duplicate canonical ceiling identity"):
+        publish_live_ceiling_area_quantities(result)
+
+
+def test_distinct_unresolved_ceiling_does_not_suppress_firm_ceiling() -> None:
+    firm = _ceiling()
+    unrelated = replace(
+        _ceiling(),
+        canonical_ceiling_id="canonical-ceiling-unmeasured",
+        ceiling_quantity_id="shadow-unavailable",
+        metric_area_complete=False,
+        area_m2=0.0,
+    )
+    result = replace(_result(), canonical_ceilings=(firm, unrelated))
+    quantities = publish_live_ceiling_area_quantities(result)
+    assert len(quantities) == 1
+    assert quantities[0].input_entity_ids == (firm.canonical_ceiling_id,)
+
+
 def test_provisional_ceiling_source_unit_must_be_square_metres() -> None:
     non_metric = replace(_shadow_quantity(), unit="ft2")
     result = _result(shadow=non_metric)
