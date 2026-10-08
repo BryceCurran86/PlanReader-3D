@@ -1,0 +1,104 @@
+name: DIAG GPT1 Material Source Authority Stage Timings
+
+on:
+  push:
+    branches: [diag/gpt1-material-authority-perf-profile]
+
+concurrency:
+  group: diag-gpt1-real-material-stage-timings
+  cancel-in-progress: true
+
+jobs:
+  real-source-timings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install OCR
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 source/truth integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Profile exact real Maryborough material scope
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt1-material-authority-timings
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt1-material-authority-timings/console.log
+          import hashlib,json,time,subprocess
+          from collections import defaultdict
+          from functools import wraps
+          from pathlib import Path
+          import pb_source_material_semantic_authority as material
+          from pb_source_visibility_authority import SourceVisibilityProducer
+
+          elapsed=defaultdict(lambda:{"calls":0,"seconds":0.0})
+          def wrap(owner,name,label):
+              original=getattr(owner,name)
+              @wraps(original)
+              def measured(*args,**kwargs):
+                  start=time.perf_counter()
+                  try:
+                      return original(*args,**kwargs)
+                  finally:
+                      row=elapsed[label]
+                      row["calls"]+=1
+                      row["seconds"]+=time.perf_counter()-start
+              setattr(owner,name,measured)
+          wrap(SourceVisibilityProducer,"ingest_native_pdf_bytes","source_visibility_pdf_ingest")
+          wrap(material.SourceMaterialSemanticProducer,"publish","material_publish_total")
+          for method in (
+              "_trusted_words_by_page",
+              "_trusted_native_material_schedule_cluster_blocks",
+              "_trusted_native_material_schedule_blocks",
+              "_recover_native_material_block",
+              "_recover_admissible_viewport_words",
+              "_recover_admissible_viewport_lines",
+              "_trusted_lines_for_viewport",
+              "segment_page_viewports",
+              "parse_schedule_text",
+          ):
+              wrap(material,method,method)
+          source=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=source.read_bytes()
+          actual=hashlib.sha256(payload).hexdigest()
+          manifest=json.loads(Path("benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json").read_text())
+          expected=next(row["sha256"] for row in manifest["source_documents"] if row["name"]==source.name)
+          assert actual==expected
+          started=time.perf_counter()
+          visibility=SourceVisibilityProducer(producer_method="gpt1-material-stage-profile",producer_version="1")
+          published=visibility.ingest_native_pdf_bytes(
+              document_id=f"diag:{actual[:32]}",
+              source_bytes=payload,
+              source_locator="memory://maryborough-real.pdf",
+              page_ids=("1","9","11","30"),
+          )
+          material_producer=material.SourceMaterialSemanticProducer.from_source_visibility_producer(visibility)
+          material_producer.publish(published.revision.revision_id)
+          definitions=tuple(material_producer._definition_results.values())
+          occurrence_scopes=material_producer.published_occurrence_results()
+          result={
+              "source_sha_verified":True,
+              "source_sha256":actual,
+              "scope_page_ids":["1","9","11","30"],
+              "repo_sha":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
+              "total_seconds":round(time.perf_counter()-started,3),
+              "stage_timings":{label:{"calls":v["calls"],"seconds":round(v["seconds"],3)} for label,v in sorted(elapsed.items())},
+              "definition_count":len(definitions),
+              "occurrence_count":sum(len(s.records) for s in occurrence_scopes),
+              "scope_results":[{"status":getattr(s.status,"value",str(s.status)),"reasons":list(s.reason_codes),"count":len(s.records),"complete":s.scope_complete} for s in occurrence_scopes],
+          }
+          Path("artifacts/gpt1-material-authority-timings/result.json").write_text(json.dumps(result,indent=2,sort_keys=True)+"\n")
+          print("GPT1_REAL_MATERIAL_TIMINGS",json.dumps(result,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-real-material-stage-timings
+          path: artifacts/gpt1-material-authority-timings
+          retention-days: 5
