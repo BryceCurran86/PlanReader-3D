@@ -3,9 +3,11 @@ from __future__ import annotations
 import fitz
 import pytest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import pb_physical_wall_candidate_authority as wall_candidate_module
 
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE,
@@ -239,3 +241,31 @@ def test_page_viewport_segmentation_reused_for_authenticated_fallback() -> None:
         # instead of reopening and segmenting the same immutable page again.
         assert all_viewports.call_count == 1
 
+
+
+
+def test_bounded_reference_viewports_do_not_crop_page_wall_scope() -> None:
+    reference_rows = [
+        SimpleNamespace(
+            view_type=view_type,
+            bounding_box=(10.0, 10.0, 90.0, 90.0),
+        )
+        for view_type in (
+            DrawingViewType.LEGEND.value,
+            DrawingViewType.SCHEDULE.value,
+            DrawingViewType.SPECIFICATION.value,
+        )
+    ]
+    floor_plan = SimpleNamespace(
+        view_type=DrawingViewType.FLOOR_PLAN.value,
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+    )
+    unknown = SimpleNamespace(
+        view_type=DrawingViewType.UNKNOWN.value,
+        bounding_box=(0.0, 0.0, 100.0, 100.0),
+    )
+
+    assert wall_candidate_module._wall_scope_relevant_viewports(reference_rows) == []
+    assert wall_candidate_module._wall_scope_relevant_viewports(
+        [*reference_rows, floor_plan, unknown]
+    ) == [floor_plan, unknown]
