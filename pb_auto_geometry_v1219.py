@@ -1246,6 +1246,9 @@ def _try_physical_net_wall_rows(
             upstream_room_area_quantity_id = str(
                 final_metadata.get("upstream_room_area_quantity_id") or ""
             ).strip()
+            source_reference = (
+                f"{source_reference} · floor_quantity:{quantity_id}"
+            )
             if upstream_room_area_quantity_id:
                 source_reference = (
                     f"{source_reference} · "
