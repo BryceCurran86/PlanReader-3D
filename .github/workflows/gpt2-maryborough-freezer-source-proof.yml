@@ -1,0 +1,64 @@
+name: GPT2 Maryborough Freezer Source Proof
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/gpt2-maryborough-freezer-source-proof.yml"
+  workflow_dispatch:
+jobs:
+  freezer-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies and OCR
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen benchmark integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Focused physical wall and room regression
+        run: PYTHONPATH=. pytest -q tests/test_physical_wall_candidate_authority_scope_v1.py tests/test_source_room_face_authority_v1.py
+      - name: Maryborough real source room proof
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from shapely.geometry import Polygon
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          source = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          assert source.is_file(), f"source PDF missing: {source}"
+          claim = collect_live_physical_net_wall_claim(
+              source, pages=(10,), topology_pages=(10,), room_area_support_pages=(10,)
+          )
+          rows = []
+          for room in claim.canonical_rooms:
+              if not room.geometry_complete or not str(room.room_label or "").strip():
+                  continue
+              polygon = Polygon(room.polygon_pdf_pts)
+              rows.append({
+                  "label": " ".join(str(room.room_label).upper().split()),
+                  "physical_room_id": room.physical_room_id,
+                  "source_room_face_record_id": room.source_room_face_record_id,
+                  "valid": bool(polygon.is_valid),
+                  "area_page_pts2": float(room.area_page_pts2),
+                  "shapely_area": float(polygon.area),
+              })
+          freezer = [row for row in rows if row["label"] == "FREEZER"]
+          print(json.dumps({
+              "status": getattr(claim.status, "value", str(claim.status)),
+              "reason_codes": list(claim.reason_codes),
+              "freezer": freezer,
+              "all_labelled_rooms": rows,
+          }, indent=2, sort_keys=True))
+          assert "physical_wall_candidate_scope_bounds_unresolved" not in claim.reason_codes
+          assert "physical_wall_candidate_scope_cropped_at_viewport_boundary" not in claim.reason_codes
+          assert len(freezer) == 1, "Expected exactly one source-closed FREEZER"
+          assert freezer[0]["valid"], "FREEZER polygon invalid"
+          assert abs(freezer[0]["shapely_area"] - freezer[0]["area_page_pts2"]) < 1e-6
+          PY
