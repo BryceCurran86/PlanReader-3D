@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from pb_customer_output_verification import verify_sealed_customer_output
@@ -76,15 +77,51 @@ def project_live_ceiling_customer_rows(
         workspace_id=int(workspace_id),
         project_id=project_id,
     )
-    authorities = {
-        quantity.quantity_id: authority
-        for quantity in quantities
-        for authority in (_figured_authority(quantity),)
-        if authority is not None
+    ceilings = {
+        _clean(ceiling.canonical_ceiling_id): ceiling
+        for ceiling in claim.canonical_ceilings
+        if _clean(ceiling.canonical_ceiling_id)
     }
+    projected_quantities: list[QuantityEvidence] = []
+    authorities: dict[str, CommercialMeasurementAuthority] = {}
+    for quantity in quantities:
+        if len(quantity.input_entity_ids) != 1:
+            continue
+        ceiling = ceilings.get(_clean(quantity.input_entity_ids[0]))
+        if ceiling is None:
+            continue
+        metadata = (
+            dict(quantity.metadata)
+            if isinstance(quantity.metadata, Mapping)
+            else {}
+        )
+        metadata.update(
+            {
+                "commercial_projection_allowed": True,
+                "section": "Internal",
+                "element": "Ceiling lining area",
+                "location": _clean(
+                    metadata.get("physical_room_id")
+                    or metadata.get("canonical_room_id")
+                    or ceiling.room_entity_id
+                ),
+                "substrate": "Other",
+                "finish_system": _clean(
+                    metadata.get("semantic_finish")
+                    or ceiling.finish_descriptor
+                ),
+                "inclusion_status": "INCLUSION",
+                "row_role": "ceiling_area",
+            }
+        )
+        customer_quantity = replace(quantity, metadata=metadata)
+        projected_quantities.append(customer_quantity)
+        authority = _figured_authority(customer_quantity)
+        if authority is not None:
+            authorities[quantity.quantity_id] = authority
     rows = tuple(
         quantities_to_takeoff_output_rows(
-            quantities,
+            tuple(projected_quantities),
             traces_by_quantity_id=traces,
             authorities_by_quantity_id=authorities,
         )
