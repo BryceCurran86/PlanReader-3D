@@ -407,6 +407,7 @@ def test_sequential_room_area_bridges_replay_or_conflict_without_overwrite(
     assert [floor.physical_floor_surface_id for floor in result.floors] == [
         floor.physical_floor_surface_id for floor in measured.floors
     ]
+    assert enrich_live_canonical_floor_metric_areas(result, bridge) == result
 
     # Even a changed value under a replayed identifier cannot remeasure
     # an already attached floor.
