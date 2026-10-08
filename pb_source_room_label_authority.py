@@ -96,6 +96,14 @@ _COMMERCIAL_ROOM_EXACT = frozenset(
         "utility",
     }
 )
+_SOURCE_ROOM_ABBREVIATION_EXACT = frozenset(
+    {
+        # Common architectural room abbreviation. Punctuation is stripped by
+        # _normalized_room_line before membership is tested, so "ENS." remains
+        # literal source evidence while becoming eligible for ensuite semantics.
+        "ens",
+    }
+)
 _COMMERCIAL_ROOM_PHRASES = frozenset(
     {
         "accessible toilet",
@@ -265,7 +273,11 @@ def _normalized_room_line(text: str) -> Optional[str]:
         return None
     if len(words) == 1:
         token = re.sub(r"^[^a-z]+|[^a-z]+$", "", normalized)
-        if token in ROOM_LABEL_EXACT or token in _COMMERCIAL_ROOM_EXACT:
+        if (
+            token in ROOM_LABEL_EXACT
+            or token in _COMMERCIAL_ROOM_EXACT
+            or token in _SOURCE_ROOM_ABBREVIATION_EXACT
+        ):
             return compact
         return None
     if (
