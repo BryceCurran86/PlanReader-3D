@@ -102,6 +102,8 @@ def test_real_opening_seal_projects_one_complete_persisted_customer_row(tmp_path
     assert row["substrate"] == "Other"
     assert row["inclusion_status"] == "PROVISIONAL"
     assert row["row_role"] == ""
+    assert row["measurement_method"] == "figured_dimension"
+    assert row["figured_dimension_ids"]
     assert json.loads(row["notes"])["adapter"] == "commercial_takeoff"
 
     live = verify_sealed_customer_output(sealed, rows)
