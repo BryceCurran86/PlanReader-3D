@@ -1,6 +1,8 @@
 """Tests for firm ceiling quantity publication from final room-area authority."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pb_cross_view_ceiling_finish_authority as finish_authority
 import pb_cross_view_ceiling_quantity_authority as ceiling_quantity
 from pb_live_canonical_coverage_registry import collect_live_canonical_coverage
@@ -292,3 +294,65 @@ def test_ceiling_identity_and_quantity_id_are_deterministic() -> None:
         first.records[0].quantity.quantity_id
         == second.records[0].quantity.quantity_id
     )
+
+
+def test_identical_room_area_quantity_id_replay_is_idempotent() -> None:
+    bridge = _bridge()
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(bridge, bridge),
+        finishes=_finish(),
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.unresolved_physical_room_ids == ()
+    assert len(result.quantities) == 1
+    assert result.quantities[0].value == 9.05352
+
+
+def test_conflicting_room_area_quantity_id_replay_does_not_publish_ceiling() -> None:
+    bridge = _bridge()
+    original_quantity = bridge.quantities[0]
+    mismatched_claims = (
+        replace(original_quantity, value=10.0),
+        replace(
+            original_quantity,
+            metadata={
+                **original_quantity.metadata,
+                "figured_dimension_ids": ["different-h", "different-v"],
+            },
+        ),
+        replace(original_quantity, evidence_ids=("face-1", "different-source-evidence")),
+    )
+    for mismatched in mismatched_claims:
+        contradictory_bridge = replace(bridge, quantities=(mismatched,))
+        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+            rooms=_rooms(),
+            room_area_bridges=(bridge, contradictory_bridge),
+            finishes=_finish(),
+        )
+
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert result.reason_codes == (
+            ceiling_quantity.CROSS_VIEW_CEILING_QUANTITY_CONFLICT,
+        )
+        assert result.unresolved_physical_room_ids == ("physical-room-1",)
+        assert result.records == ()
+        assert result.quantities == ()
+        assert result.canonical_ceilings == ()
+
+
+def test_conflicting_room_area_quantity_id_order_cannot_select_winner() -> None:
+    bridge = _bridge()
+    changed = replace(
+        bridge,
+        quantities=(replace(bridge.quantities[0], value=10.0),),
+    )
+    for bridges in ((bridge, changed), (changed, bridge)):
+        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+            rooms=_rooms(),
+            room_area_bridges=bridges,
+            finishes=_finish(),
+        )
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert not result.quantities
