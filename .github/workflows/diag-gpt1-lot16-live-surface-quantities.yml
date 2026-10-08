@@ -1,0 +1,99 @@
+name: DIAG GPT1 Lot16 Live Surface Quantities
+
+on:
+  push:
+    branches:
+      - gpt1/figured-dimension-text-enclosure-filter-v1
+
+concurrency:
+  group: diag-gpt1-lot16-live-surface-quantities
+  cancel-in-progress: true
+
+jobs:
+  real-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Focused authority contracts
+        run: |
+          PYTHONPATH=. pytest -q             tests/test_figured_dimension_text_enclosure_filter_v1.py             tests/test_same_view_room_area_authority_v1.py             tests/test_live_documented_room_area_merge.py             tests/test_cross_view_floor_finish_authority_v1.py             tests/test_cross_view_ceiling_quantity_authority.py
+      - name: Run real Lot16 surface proof
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u - <<'PY' | tee lot16-live-surface-quantities.json
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          claim=collect_live_physical_net_wall_claim(
+              path,
+              pages=(2,),
+              topology_pages=(2,),
+              room_area_support_pages=None,
+          )
+
+          def clean_quantity(q):
+              return {
+                  "quantity_id":q.quantity_id,
+                  "family":q.family,
+                  "value":q.value,
+                  "unit":q.unit,
+                  "status":q.status,
+                  "authority":q.authority,
+                  "abstained":q.abstained,
+                  "input_entity_ids":list(q.input_entity_ids),
+                  "evidence_ids":list(q.evidence_ids),
+                  "metadata":dict(q.metadata or {}),
+              }
+
+          room_q=[
+              q for q in claim.room_area_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          floor_q=[
+              q for q in publish_live_floor_area_quantities(claim)
+              if not q.abstained and q.value is not None
+          ]
+          floor_finish_q=[
+              q for q in claim.floor_finish_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          ceiling_q=[
+              q for q in claim.ceiling_lining_quantity_evidence
+              if not q.abstained and q.value is not None
+          ]
+          out={
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "canonical_ceiling_count":len(claim.canonical_ceiling_objects),
+              "firm_room_area_count":len(room_q),
+              "room_areas":[clean_quantity(q) for q in room_q],
+              "floor_area_quantity_count":len(floor_q),
+              "floor_areas":[clean_quantity(q) for q in floor_q],
+              "floor_finish_quantity_count":len(floor_finish_q),
+              "floor_finishes":[clean_quantity(q) for q in floor_finish_q],
+              "ceiling_quantity_count":len(ceiling_q),
+              "ceilings":[clean_quantity(q) for q in ceiling_q],
+          }
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-live-surface-quantities
+          path: lot16-live-surface-quantities.json
+          retention-days: 3
