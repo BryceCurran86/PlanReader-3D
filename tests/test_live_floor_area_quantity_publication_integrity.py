@@ -97,3 +97,13 @@ def test_unrelated_non_firm_replay_does_not_poison_a_firm_source_id() -> None:
         _claim_with(source, rejected)
     )
     assert len(published) == 1
+
+
+def test_unsupported_area_units_and_blocked_claims_do_not_publish_m2() -> None:
+    source = _source_area()
+    invalid_claims = (
+        replace(source, unit="ft2"),
+        replace(source, blocking_reasons=("unresolved_source_authority",)),
+    )
+    for invalid in invalid_claims:
+        assert publish_live_floor_area_quantities(_claim_with(invalid)) == ()
