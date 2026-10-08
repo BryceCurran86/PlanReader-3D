@@ -1,0 +1,116 @@
+name: DIAG GPT1 Lot16 Room Face Abstentions
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-room-face-abstentions-v1
+
+jobs:
+  abstentions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Capture target face publication/abstention
+        run: |
+          PYTHONPATH=. python -u - <<'PY'
+          import json, math
+          from pathlib import Path
+          import fitz
+          import pb_source_room_face_authority as faces
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          captured=[]
+          original=faces.SourceRoomFaceAuthority.resolve_scope
+          def traced(self,selector):
+              result=original(self,selector)
+              if str(selector.page_id)=="3":
+                  captured.append(result)
+              return result
+          faces.SourceRoomFaceAuthority.resolve_scope=traced
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          try:
+              collect_live_physical_net_wall_claim(
+                  path,
+                  pages=(2,),
+                  topology_pages=(2,),
+                  room_area_support_pages=None,
+              )
+          finally:
+              faces.SourceRoomFaceAuthority.resolve_scope=original
+
+          doc=fitz.open(path)
+          try:
+              words=list(doc[2].get_text("words") or ())
+          finally:
+              doc.close()
+          target={"WIR","GARAGE","WC","LINEN","ENS."}
+          labels=[]
+          for w in words:
+              raw=str(w[4] or "").strip().upper()
+              if raw in target:
+                  x0,y0,x1,y1=map(float,w[:4])
+                  labels.append({"raw_text":raw,"point":((x0+x1)/2.0,(y0+y1)/2.0),"bbox":(x0,y0,x1,y1),"block_no":int(w[5]),"line_no":int(w[6])})
+
+          def point_in_poly(point,poly):
+              x,y=point
+              inside=False
+              pts=[(float(p[0]),float(p[1])) for p in poly]
+              for i,(x1,y1) in enumerate(pts):
+                  x2,y2=pts[(i+1)%len(pts)]
+                  if ((y1>y)!=(y2>y)) and x < (x2-x1)*(y-y1)/(y2-y1)+x1:
+                      inside=not inside
+              return inside
+
+          unique={}
+          for result in captured:
+              key=(result.page_id,result.decision_scope_id,tuple(r.face_id for r in result.records),tuple(a.face_id for a in result.abstained_faces))
+              unique[key]=result
+
+          scopes=[]
+          for result in unique.values():
+              candidates=[]
+              for status,items in (("published",result.records),("abstained",result.abstained_faces)):
+                  for item in items:
+                      pts=tuple(item.polygon_pdf_pts or ())
+                      if not pts:
+                          continue
+                      xs=[float(p[0]) for p in pts]; ys=[float(p[1]) for p in pts]
+                      bbox=(min(xs),min(ys),max(xs),max(ys))
+                      hits=[]
+                      for label in labels:
+                          if point_in_poly(label["point"],pts):
+                              hits.append(label["raw_text"])
+                      if hits:
+                          candidates.append({
+                              "status":status,
+                              "face_id":item.face_id,
+                              "reason":getattr(item,"reason",None),
+                              "area_page_pts2":item.area_page_pts2,
+                              "bbox":bbox,
+                              "label_hits":hits,
+                              "bounding_wall_ids":list(item.bounding_wall_ids),
+                          })
+              scopes.append({
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "scope_complete":result.scope_complete,
+                  "published_count":len(result.records),
+                  "abstained_count":len(result.abstained_faces),
+                  "ownership_status":result.ownership_evaluation.status,
+                  "ownership_reason":result.ownership_evaluation.reason_code,
+                  "ownership_unresolved_count":len(result.ownership_evaluation.unresolved_faces),
+                  "target_faces":candidates,
+              })
+          print(json.dumps({"labels":labels,"scopes":scopes},indent=2,sort_keys=True))
+          PY
