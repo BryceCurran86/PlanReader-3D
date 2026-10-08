@@ -1,63 +1,74 @@
-"""Unpublished Full Plan V2 readiness diagnostics; never a benchmark score.
+"""Unpublished Full Plan V2 readiness diagnostics; never an accuracy score.
 
-Only the frozen evaluator can publish an accuracy score. Missing production files
-are reported as missing, never converted to empty successful extractions.
+This read-only utility inspects frozen manifests and optional real production
+files. It deliberately does not import, alter, or invoke the benchmark evaluator.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import Counter
 from pathlib import Path
-
-# Resolve the repository's benchmark package before any site-package namesake.
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) in sys.path:
-    sys.path.remove(str(REPO_ROOT))
-sys.path.insert(0, str(REPO_ROOT))
-
-from benchmarks.frozen_holdout.full_plan_v2.evaluator import PROJECT_VERIFIED
-from benchmarks.frozen_holdout.full_plan_v2.manifest_io import (
-    load_produced_items,
-    load_suite_manifests,
-)
 
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 
 
+def _object(path: Path) -> dict:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return value
+
+
 def diagnostic_report(root: Path, produced_root: Path) -> dict:
-    """Report readiness without evaluating or exposing unpublished accuracy."""
-    manifests = load_suite_manifests(root)
+    suite = _object(root / "manifest.json")
+    project_ids = suite["projects"]
+    required_count = suite["required_project_count"]
+    if (
+        not isinstance(project_ids, list)
+        or not isinstance(required_count, int)
+        or len(project_ids) != required_count
+        or len(set(project_ids)) != required_count
+    ):
+        raise ValueError("invalid frozen suite project list")
     projects = []
-    for manifest in manifests:
-        path = produced_root / manifest.project_id / "produced_items.json"
+    for project_id in project_ids:
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError("invalid frozen project id")
+        manifest = _object(root / "projects" / project_id / "source_manifest.json")
+        if manifest.get("project_id") != project_id:
+            raise ValueError(f"frozen project identity mismatch: {project_id}")
+        path = produced_root / project_id / "produced_items.json"
         exists = path.is_file()
-        produced = load_produced_items(path) if exists else ()
-        ids = [item.quantity_id for item in produced]
-        duplicate_ids = sorted(
-            key for key, count in Counter(ids).items() if count > 1
-        )
-        denominator = sum(item.denominator_eligible for item in manifest.verified_items)
-        blockers = list(manifest.reason_codes)
-        if manifest.status != PROJECT_VERIFIED:
+        if exists:
+            produced = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(produced, list) or any(not isinstance(x, dict) for x in produced):
+                raise ValueError(f"{path} must contain a JSON list of objects")
+            ids = [str(item["quantity_id"]) for item in produced]
+        else:
+            produced, ids = [], []
+        duplicate_ids = sorted(k for k, count in Counter(ids).items() if count > 1)
+        eligible = manifest.get("verified_takeoff_items", [])
+        denominator = sum(item.get("denominator_eligible", True) is True for item in eligible)
+        blockers = list(manifest.get("reason_codes") or ())
+        if manifest.get("status") != "VERIFIED":
             blockers.insert(0, "frozen_manifest_not_verified")
         if not exists:
             blockers.append("production_items_missing")
         if duplicate_ids:
             blockers.append("duplicate_produced_quantity_ids")
-        if any(not item.lineage_ok for item in produced):
-            blockers.append("production_lineage_conflict")
+        if any(item.get("lineage_ok") is not True for item in produced):
+            blockers.append("production_lineage_conflict_or_unverified")
         if not produced and exists:
             blockers.append("empty_produced_items_unverified")
         projects.append({
-            "project_id": manifest.project_id,
-            "manifest_status": manifest.status,
+            "project_id": project_id,
+            "manifest_status": manifest.get("status"),
             "denominator": denominator,
             "produced_file_present": exists,
             "produced_count": len(produced) if exists else None,
-            "lineage_conflict_count": sum(not item.lineage_ok for item in produced) if exists else None,
-            "abstention_count": sum(item.abstained for item in produced) if exists else None,
+            "lineage_conflict_count": sum(item.get("lineage_ok") is not True for item in produced) if exists else None,
+            "abstention_count": sum(item.get("abstained") is True for item in produced) if exists else None,
             "duplicate_quantity_ids": duplicate_ids,
             "source_sha_verified": False,
             "reconciliation_complete": False,
@@ -69,7 +80,7 @@ def diagnostic_report(root: Path, produced_root: Path) -> dict:
         "report_type": "FULL_PLAN_V2_READINESS_DIAGNOSTIC",
         "publication_status": "UNPUBLISHED",
         "score_claim": False,
-        "required_project_count": len(manifests),
+        "required_project_count": required_count,
         "projects": projects,
     }
 
