@@ -1,0 +1,27 @@
+name: DIAG GPT3 PR1988 Floor Output
+
+on:
+  push:
+    branches:
+      - diag/gpt3-pr1988-floor-output-v1
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Floor customer output regressions
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_live_room_area_source_closed_export.py \
+            tests/test_customer_wall_source_scope.py \
+            tests/test_ag09_customer_coverage_runtime.py
