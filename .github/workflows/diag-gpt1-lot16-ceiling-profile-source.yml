@@ -1,0 +1,124 @@
+name: DIAG GPT1 Lot16 Ceiling Profile Source
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-ceiling-profile-source-v1
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Inspect Lot16 ceiling-profile source evidence
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          import fitz
+
+          from pb_migration_contracts import EvidenceResolutionStatus
+          from pb_source_observation_authority import ObservationSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          payload=path.read_bytes()
+          source=SourceVisibilityProducer(
+              producer_method="diag-gpt1-lot16-ceiling-profile",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="diag-lot16-ceiling-profile",
+              source_bytes=payload,
+              source_locator="memory://lot16.pdf",
+              page_ids=("3","7"),
+          )
+          authority=source.text_integrity_authority()
+          grouped={}
+          for oid in published.text_observation_ids:
+              result=authority.resolve_text(
+                  ObservationSelector(
+                      document_id=published.revision.document_id,
+                      revision_id=published.revision.revision_id,
+                      source_sha256=published.revision.source_sha256,
+                      snapshot_id=published.snapshot.snapshot_id,
+                      observation_id=oid,
+                  )
+              )
+              receipt=result.receipt
+              if receipt is None or str(receipt.page_id) not in {"3","7"}:
+                  continue
+              if receipt.block_no is None or receipt.line_no is None or receipt.word_no is None:
+                  continue
+              key=(str(receipt.page_id),str(receipt.source_partition_id),int(receipt.block_no),int(receipt.line_no))
+              grouped.setdefault(key,[]).append({
+                  "word_no":int(receipt.word_no),
+                  "raw":str(receipt.raw_text or ""),
+                  "trusted":str(result.trusted_text or ""),
+                  "status":getattr(result.status,"value",str(result.status)),
+                  "reason_codes":list(result.reason_codes),
+                  "observation_id":str(oid),
+                  "receipt_id":str(receipt.receipt_id),
+                  "bbox":[float(v) for v in receipt.geometry[:4]],
+              })
+
+          pattern=re.compile(r"(CEIL|RAK|FLAT|PITCH|DEG|°|ENS|WIR|GARAGE|VINYL|TILE|ROOF)",re.I)
+          lines=[]
+          page7_all=[]
+          for key,words in sorted(grouped.items()):
+              words=sorted(words,key=lambda x:x["word_no"])
+              raw=" ".join(x["raw"] for x in words).strip()
+              trusted_complete=all(
+                  x["status"]==EvidenceResolutionStatus.CORROBORATED.value and x["trusted"]
+                  for x in words
+              )
+              trusted=" ".join(x["trusted"] for x in words).strip() if trusted_complete else ""
+              row={
+                  "page_id":key[0],
+                  "partition_id":key[1],
+                  "block_no":key[2],
+                  "line_no":key[3],
+                  "raw_text":raw,
+                  "trusted_text":trusted,
+                  "trusted_complete":trusted_complete,
+                  "words":words,
+              }
+              if key[0]=="7":
+                  page7_all.append(row)
+              if pattern.search(raw) or pattern.search(trusted):
+                  lines.append(row)
+
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          try:
+              viewports={}
+              for page_no in (3,7):
+                  viewports[str(page_no)]=[
+                      {
+                          "view_id":v.view_id,
+                          "view_type":v.view_type,
+                          "status":v.status,
+                          "label":v.label,
+                          "bbox":None if v.bounding_box is None else list(v.bounding_box),
+                      }
+                      for v in segment_page_viewports(pdf.load_page(page_no-1),page_number=page_no)
+                  ]
+          finally:
+              pdf.close()
+
+          print(json.dumps({
+              "keyword_lines":lines,
+              "page7_all_lines":page7_all,
+              "viewports":viewports,
+          },indent=2,sort_keys=True))
+          PY
