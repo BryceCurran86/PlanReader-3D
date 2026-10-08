@@ -192,6 +192,8 @@ def test_final_documented_room_area_and_rcp_finish_publish_firm_ceiling_quantity
     assert quantity.metadata["support_viewport_id"] == "rcp-vp"
     assert quantity.metadata["support_snapshot_id"] == "semantic-snap-1"
     assert quantity.metadata["row_role"] == "ceiling_area"
+    assert quantity.metadata["commercial_projection_allowed"] is True
+    assert quantity.metadata.get("quantity_handoff_only") is not True
     assert len(result.canonical_ceilings) == 1
     canonical = result.canonical_ceilings[0]
     assert canonical.canonical_ceiling_id == record.canonical_ceiling_id
