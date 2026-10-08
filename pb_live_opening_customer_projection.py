@@ -106,16 +106,38 @@ def project_live_opening_customer_rows(
             for quantity in count_quantities
         )
 
-    authorities = {
-        quantity.quantity_id: CommercialMeasurementAuthority(
-            method="direct_evidence",
-            metadata={
-                "source": "live_opening_customer_projection",
-                "quantity_id": quantity.quantity_id,
-            },
-        )
-        for quantity in quantities
-    }
+    authorities = {}
+    for quantity in quantities:
+        metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        basis = _clean(metadata.get("area_basis")).lower()
+        measurement_record_id = _clean(metadata.get("measurement_record_id"))
+        if (
+            quantity.family == "opening_area"
+            and basis in {
+                "figured_opening_label",
+                "authenticated_elevation_frame",
+            }
+            and measurement_record_id
+        ):
+            authority = CommercialMeasurementAuthority(
+                method="figured_dimension",
+                figured_dimension_ids=(measurement_record_id,),
+                metadata={
+                    "source": "live_opening_customer_projection",
+                    "quantity_id": quantity.quantity_id,
+                    "area_basis": basis,
+                },
+            )
+        else:
+            authority = CommercialMeasurementAuthority(
+                method="direct_evidence",
+                metadata={
+                    "source": "live_opening_customer_projection",
+                    "quantity_id": quantity.quantity_id,
+                    "area_basis": basis or None,
+                },
+            )
+        authorities[quantity.quantity_id] = authority
     rows = quantities_to_takeoff_output_rows(
         quantities,
         traces_by_quantity_id=traces,
