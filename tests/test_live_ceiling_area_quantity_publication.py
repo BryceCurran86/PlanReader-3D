@@ -342,3 +342,40 @@ def test_scaled_legacy_ceiling_customer_projection_preserves_scale_authority() -
 
     report = verify_sealed_customer_output(run, rows)
     assert report.verified_quantity_ids == (run.quantities[0].quantity_id,)
+
+
+def test_exact_shadow_quantity_replay_is_idempotent() -> None:
+    shadow = _shadow_quantity()
+    result = replace(
+        _result(),
+        quantity_evidence=(shadow, shadow),
+    )
+    assert publish_live_ceiling_area_quantities(result) == (
+        publish_live_ceiling_area_quantities(_result())
+    )
+
+
+def test_conflicting_shadow_quantity_id_never_publishes_ceiling_area() -> None:
+    shadow = _shadow_quantity()
+    conflicting = (
+        replace(shadow, value=14.0),
+        replace(
+            shadow,
+            metadata={**shadow.metadata, "viewport_id": "conflicting-viewport"},
+        ),
+        replace(shadow, evidence_ids=("ev-dim-h", "ev-different", "ev-finish")),
+    )
+    for other in conflicting:
+        for values in (
+            (shadow, other),
+            (other, shadow),
+            (shadow, other, shadow),
+        ):
+            result = replace(_result(), quantity_evidence=values)
+            assert publish_live_ceiling_area_quantities(result) == ()
+
+
+def test_provisional_ceiling_source_unit_must_be_square_metres() -> None:
+    non_metric = replace(_shadow_quantity(), unit="ft2")
+    result = _result(shadow=non_metric)
+    assert publish_live_ceiling_area_quantities(result) == ()
