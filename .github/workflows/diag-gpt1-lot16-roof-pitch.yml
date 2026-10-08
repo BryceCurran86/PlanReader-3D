@@ -1,0 +1,84 @@
+name: DIAG GPT1 Lot16 Roof Pitch
+
+on:
+  push:
+    branches:
+      - diag/gpt1-lot16-roof-pitch-v1
+
+jobs:
+  pitch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Probe source-owned Lot16 gable pitch
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          import fitz
+
+          from pb_source_roof_covering_authority import (
+              extract_elevation_segments_from_page,
+              extract_roof_material_annotations,
+              get_elevation_viewport_search_bbox,
+              resolve_gable_apex_in_viewport,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          doc=fitz.open(path)
+          rows=[]
+          try:
+              for p_idx in range(doc.page_count):
+                  page=doc[p_idx]
+                  viewports=segment_page_viewports(page,page_number=p_idx+1)
+                  for vp in viewports:
+                      if vp.view_type!="elevation":
+                          continue
+                      bbox=get_elevation_viewport_search_bbox(vp,viewports,page.rect)
+                      diags,verts=extract_elevation_segments_from_page(page,bbox)
+                      evidence,reasons=resolve_gable_apex_in_viewport(
+                          diags,
+                          verts,
+                          source_viewport_id=vp.view_id,
+                          source_page=p_idx+1,
+                          source_scale_denominator=(
+                              float(vp.scale_denominator)
+                              if getattr(vp,"scale_denominator",None) is not None
+                              else None
+                          ),
+                          material_annotations=extract_roof_material_annotations(page,bbox),
+                      )
+                      rows.append({
+                          "page":p_idx+1,
+                          "viewport_id":vp.view_id,
+                          "viewport_status":vp.status,
+                          "scale_denominator":getattr(vp,"scale_denominator",None),
+                          "diagonal_count":len(diags),
+                          "vertical_count":len(verts),
+                          "reason_codes":list(reasons),
+                          "pitch_deg":None if evidence is None else evidence.pitch_deg,
+                          "left_pitch_deg":None if evidence is None else evidence.left_pitch_deg,
+                          "right_pitch_deg":None if evidence is None else evidence.right_pitch_deg,
+                          "left_run_pt":None if evidence is None else evidence.left_run_pt,
+                          "right_run_pt":None if evidence is None else evidence.right_run_pt,
+                          "source_page":None if evidence is None else evidence.source_page,
+                          "material_annotations":[] if evidence is None else list(evidence.material_annotations),
+                      })
+          finally:
+              doc.close()
+          print(json.dumps({
+              "elevation_viewport_count":len(rows),
+              "resolved_gable_count":sum(1 for row in rows if row["pitch_deg"] is not None),
+              "rows":rows,
+          },indent=2,sort_keys=True))
+          PY
