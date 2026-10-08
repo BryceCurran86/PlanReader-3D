@@ -724,3 +724,73 @@ def test_separate_floor_finish_plan_nearby_code_in_different_block_abstains(
 
     assert result.records == ()
     assert result.quantities == ()
+
+
+def test_floor_finish_requires_exact_area_evidence_on_canonical_floor(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    valid = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=floors,
+    ).publish()
+    assert len(valid.quantities) == 1
+
+    # Same room, same numeric m² and same authenticated material code are
+    # insufficient when this floor does not own that exact area evidence.
+    original = floors.floors[0]
+    unrelated = replace(
+        floors,
+        floors=(
+            replace(
+                original,
+                evidence_ids=tuple(
+                    value
+                    for value in original.evidence_ids
+                    if value != room_areas.records[0].area_evidence.evidence_id
+                ),
+            ),
+        ),
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=room_areas,
+        floors=unrelated,
+    ).publish()
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        original.canonical_floor_id,
+    )
+
+
+def test_unresolved_documented_area_evidence_cannot_publish_floor_finish(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    area_record = room_areas.records[0]
+    compromised = replace(
+        room_areas,
+        records=(
+            replace(
+                area_record,
+                area_evidence=replace(
+                    area_record.area_evidence,
+                    status=EvidenceResolutionStatus.CANDIDATE,
+                ),
+            ),
+        ),
+    )
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source,
+        room_areas=compromised,
+        floors=floors,
+    ).publish()
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
+    )

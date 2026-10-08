@@ -247,6 +247,17 @@ def _matching_floor(
     if len(matches) != 1:
         return None
     floor = matches[0]
+    # The floor finish may borrow only the exact corroborated figured-area
+    # evidence already attached to this canonical floor. Matching the numeric
+    # area and physical room alone must not cross-bind another area claim.
+    area_evidence = area_record.area_evidence
+    if (
+        area_evidence.status is not EvidenceResolutionStatus.CORROBORATED
+        or not _clean(area_evidence.evidence_id)
+        or _clean(area_evidence.evidence_id)
+        not in {_clean(value) for value in floor.evidence_ids}
+    ):
+        return None
     value = _area_value(area_record)
     if value is None:
         return None
