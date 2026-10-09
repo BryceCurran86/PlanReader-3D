@@ -89,6 +89,7 @@ def _valid_room_area_quantity(
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
         or _clean(quantity.unit).lower() not in {"m2", "m²"}
         or quantity.blocking_reasons
+        or not quantity.evidence_ids
         or _clean(quantity.authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
         or _quantity_value(quantity) is None
@@ -110,6 +111,18 @@ def _valid_room_area_quantity(
         }
     )
     if len(figured_ids) != 2:
+        return False
+
+    # Some documented dimension bridges carry explicit physical-room ownership
+    # receipts in addition to the support-sheet snapshot. When present these
+    # must agree with the canonical room, not just the page and revision.
+    room_snapshot_id = _clean(quantity_meta.get("room_snapshot_id"))
+    source_face_id = _clean(quantity_meta.get("source_room_face_record_id"))
+    if (
+        room_snapshot_id and room_snapshot_id != _clean(room.snapshot_id)
+    ) or (
+        source_face_id and source_face_id != _clean(room.source_room_face_record_id)
+    ):
         return False
 
     if (
@@ -207,11 +220,20 @@ def publish_cross_view_ceiling_quantities(
     for bridge in room_area_bridges:
         if bridge.status is not EvidenceResolutionStatus.CORROBORATED:
             continue
-        entities = {
-            _clean(entity.candidate_entity_id): entity
-            for entity in bridge.entities
-            if _clean(entity.candidate_entity_id)
-        }
+        # The same source-room identity cannot resolve to competing entity
+        # receipts. Never allow a dict comprehension to select the last one.
+        entities: dict[str, EntityEvidence] = {}
+        contradictory_entity_ids: set[str] = set()
+        for entity in bridge.entities:
+            entity_id = _clean(entity.candidate_entity_id)
+            if not entity_id or entity_id in contradictory_entity_ids:
+                continue
+            prior = entities.get(entity_id)
+            if prior is not None and prior != entity:
+                entities.pop(entity_id, None)
+                contradictory_entity_ids.add(entity_id)
+                continue
+            entities[entity_id] = entity
         for quantity in bridge.quantities:
             if len(quantity.input_entity_ids) != 1:
                 continue
