@@ -22,7 +22,14 @@ def test_bare_code_no_material_definition():
     assert _material_definition_candidate(_words("FPB")) is None
 
 
-def test_multiline_ambiguous_block_does_not_invent_material_definition():
-    assert _material_definition_candidate(_words(
+def test_multiline_native_specification_is_candidate_only():
+    # A source schedule may legitimately contain separate code, role and
+    # specification cells. Parsing a candidate does not authenticate its
+    # source words or schedule ownership.
+    candidate = _material_definition_candidate(_words(
         "IPF1", "CONTRACTOR", "13mm FLUSH-SET PLASTERBOARD CEILING LININGS"
-    )) is None
+    ))
+    assert candidate is not None
+    assert candidate[0] == "IPF1"
+    assert "13mm" in candidate[1]["description"]
+    assert "PLASTERBOARD" in candidate[1]["description"]
