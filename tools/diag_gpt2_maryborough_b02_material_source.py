@@ -55,7 +55,7 @@ if __name__=="__main__":
                     # source-word authenticity or schedule-row ownership.
                     parsed_rows = []
                     if exact_code_line and following_lines:
-                        combined = " ".join([val, *following_lines])
+                        combined = "\n".join([val, *following_lines])
                         for item in parse_schedule_text(
                             combined, page_id=n, page_label=f"page:{n}"
                         ):
