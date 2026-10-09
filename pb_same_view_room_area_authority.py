@@ -131,10 +131,12 @@ class SameViewRoomAreaProducer:
         revision_ids = {str(room.revision_id) for room in rooms}
         document_ids = {str(room.document_id) for room in rooms}
         source_hashes = {str(room.source_sha256).lower() for room in rooms}
+        source_snapshots = {str(room.snapshot_id) for room in rooms}
         if (
             len(revision_ids) != 1
             or len(document_ids) != 1
             or len(source_hashes) != 1
+            or len(source_snapshots) != 1
         ):
             unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return SameViewRoomAreaResult(
@@ -154,6 +156,7 @@ class SameViewRoomAreaProducer:
             published is None
             or published.revision.document_id != next(iter(document_ids))
             or published.revision.source_sha256.lower() != next(iter(source_hashes))
+            or published.snapshot.snapshot_id != next(iter(source_snapshots))
         ):
             unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return SameViewRoomAreaResult(
