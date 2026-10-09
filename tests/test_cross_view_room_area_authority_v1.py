@@ -471,7 +471,7 @@ def test_cross_view_duplicate_physical_room_across_distinct_labels_fails_closed(
 
 
 def test_cross_view_eligibility_does_not_compare_room_polygons(monkeypatch):
-    source, rooms = _source_and_room(duplicate_room_label=True)
+    source, rooms = _source_and_room()
     monkeypatch.setattr(
         LiveCanonicalRoomObject, "__eq__",
         lambda self, other: (_ for _ in ()).throw(
@@ -481,8 +481,9 @@ def test_cross_view_eligibility_does_not_compare_room_polygons(monkeypatch):
     result = CrossViewRoomAreaProducer.from_source(
         source=source, rooms=rooms,
     ).publish()
-    assert result.status is EvidenceResolutionStatus.CONFLICT
-    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_evidence.normalized_value == 8.64
 
 
 def test_duplicate_canonical_room_label_fails_closed_before_cross_view_binding():
