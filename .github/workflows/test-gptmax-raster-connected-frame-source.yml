@@ -10,7 +10,7 @@ on:
       - tests/test_raster_source_wall_frame_projection.py
       - tests/test_raster_visibility_receipt_registration.py
       - tools/diag_opening_wall_face_preservation.py
-      - .github/workflows/test-gptmax-raster-connected-frame-current.yml
+      - .github/workflows/test-gptmax-raster-connected-frame-source.yml
 concurrency:
   group: gptmax-raster-connected-frame-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -85,7 +85,45 @@ jobs:
           name: lot16-connected-frame-source-handoff
           path: lot16-connected-frame-source-handoff.json
           retention-days: 14
-  maryborough-source-proof:
+  maryborough-source-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: e73b2e76e31e2ed1174398758ef17bebe0333c6b
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Produce prerequisite Maryborough source report
+        run: |
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --page-id 7 --page-id 30 --page-id 31 \
+            --output maryborough-source-baseline.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('maryborough-source-baseline.json').read_text())
+          assert report['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert report['primitive_safety_cap'] == 20_000
+          assert report['opening_bindings']
+          assert report['source_owned_wall_scope_results']
+          assert 'quantities' not in report
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maryborough-source-baseline
+          path: maryborough-source-baseline.json
+          retention-days: 14
+  maryborough-source-current:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
@@ -100,30 +138,72 @@ jobs:
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Compare real Maryborough source and host identities with prerequisite
+      - name: Produce current Maryborough source report
         run: |
-          git worktree add /tmp/gptmax-maryborough-prerequisite e73b2e76e31e2ed1174398758ef17bebe0333c6b
-          (cd /tmp/gptmax-maryborough-prerequisite && PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output /tmp/maryborough-source-baseline.json)
-          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
-          cp /tmp/maryborough-source-baseline.json maryborough-source-baseline.json
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --page-id 7 --page-id 30 --page-id 31 \
+            --output maryborough-connected-frame-source-handoff.json
           python - <<'PY'
           import json
           from pathlib import Path
-          baseline = json.loads(Path('maryborough-source-baseline.json').read_text())
-          current = json.loads(Path('maryborough-connected-frame-source-handoff.json').read_text())
-          assert current['source_sha256'] == baseline['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
-          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
-          assert keyed(current['opening_bindings']) == keyed(baseline['opening_bindings'])
-          assert len(current['opening_bindings']) == len(keyed(current['opening_bindings']))
-          old_frames, new_frames = keyed(baseline['host_frames']), keyed(current['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          assert 'quantities' not in current
-          print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'host_identity_parity': True, 'existing_frame_identity_parity': True}))
+          report = json.loads(Path('maryborough-connected-frame-source-handoff.json').read_text())
+          assert report['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert report['primitive_safety_cap'] == 20_000
+          assert report['opening_bindings']
+          assert report['source_owned_wall_scope_results']
+          assert 'quantities' not in report
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: maryborough-connected-frame-source-handoff
-          path: maryborough-*.json
+          name: maryborough-source-current
+          path: maryborough-connected-frame-source-handoff.json
           retention-days: 14
+  maryborough-source-parity:
+    runs-on: ubuntu-latest
+    needs: [maryborough-source-baseline, maryborough-source-current]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: maryborough-source-baseline
+          path: artifacts/maryborough-source-baseline
+      - uses: actions/download-artifact@v4
+        with:
+          name: maryborough-source-current
+          path: artifacts/maryborough-source-current
+      - name: Compare exact opening hosts and preserved frames
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          baseline = json.loads(Path('artifacts/maryborough-source-baseline/maryborough-source-baseline.json').read_text())
+          current = json.loads(Path('artifacts/maryborough-source-current/maryborough-connected-frame-source-handoff.json').read_text())
+          assert current['source_sha256'] == baseline['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
+
+          def keyed(rows):
+              result = {row['opening_identity_id']: row for row in rows}
+              assert len(result) == len(rows)
+              return result
+
+          baseline_bindings = keyed(baseline['opening_bindings'])
+          current_bindings = keyed(current['opening_bindings'])
+          assert current_bindings == baseline_bindings
+          old_frames = keyed(baseline['host_frames'])
+          new_frames = keyed(current['host_frames'])
+          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          assert 'quantities' not in current
+          print(json.dumps({
+              'baseline': baseline['summary'],
+              'current': current['summary'],
+              'host_identity_parity': True,
+              'existing_frame_identity_parity': True,
+          }, sort_keys=True))
+          PY
