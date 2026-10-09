@@ -78,6 +78,39 @@ jobs:
               lines=tuple(v for v in _trusted_lines_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_labels=(room.room_label,)) if _norm_label(v.text)==_norm_label(room.room_label))
               dims=_trusted_native_dimensions_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_lines=lines,view_type=DrawingViewType.FLOOR_PLAN.value)
               witnesses.append({"label":room.room_label,"trusted_labels":len(lines),"dimensions":len(dims),"horizontal":sum(v.orientation==DimensionOrientation.HORIZONTAL.value for v in dims),"vertical":sum(v.orientation==DimensionOrientation.VERTICAL.value for v in dims)})
+          from pb_cross_view_room_area_authority import (
+              _line_inside_dimension_pair, _figured_pair_scale_consistent,
+              _witness_systems_intersect, _dimension_is_immediate_label_annotation,
+          )
+          pair_gates=[]
+          for room in trace_rooms.rooms:
+              if room.room_label not in ("WC","LINEN"): continue
+              lines=tuple(v for v in _trusted_lines_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_labels=(room.room_label,)) if _norm_label(v.text)==_norm_label(room.room_label))
+              dims=_trusted_native_dimensions_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_lines=lines,view_type=DrawingViewType.FLOOR_PLAN.value)
+              horizontal=tuple(v for v in dims if v.orientation==DimensionOrientation.HORIZONTAL.value)
+              vertical=tuple(v for v in dims if v.orientation==DimensionOrientation.VERTICAL.value)
+              counts={"candidate_pairs":len(horizontal)*len(vertical),"label_inside":0,"scale_consistent":0,"witness_intersect":0,"inside_and_scale":0,"inside_scale_and_witness":0,"label_immediate_horizontal":0,"label_immediate_vertical":0,"immediate_and_scale":0}
+              candidates=[]
+              if len(lines)==1:
+                  line=lines[0]
+                  owned_h=[v for v in horizontal if _dimension_is_immediate_label_annotation(line,v)]
+                  owned_v=[v for v in vertical if _dimension_is_immediate_label_annotation(line,v)]
+                  counts["label_immediate_horizontal"]=len(owned_h)
+                  counts["label_immediate_vertical"]=len(owned_v)
+                  for h in horizontal:
+                      for v in vertical:
+                          inside=_line_inside_dimension_pair(line,h,v)
+                          scale=_figured_pair_scale_consistent(page_id=room.page_id,horizontal=h,vertical=v)
+                          witness=_witness_systems_intersect(h,v)
+                          counts["label_inside"]+=int(inside)
+                          counts["scale_consistent"]+=int(scale)
+                          counts["witness_intersect"]+=int(witness)
+                          counts["inside_and_scale"]+=int(inside and scale)
+                          counts["inside_scale_and_witness"]+=int(inside and scale and witness)
+                          if h in owned_h and v in owned_v and scale: counts["immediate_and_scale"]+=1
+                          if inside and scale:
+                              candidates.append({"h_mm":h.value_mm,"v_mm":v.value_mm,"witness_intersect":witness,"h_id":h.dimension_id,"v_id":v.dimension_id})
+              pair_gates.append({"label":room.room_label,"physical_room_id":room.physical_room_id,"source_face":room.source_room_face_record_id,"gate_counts":counts,"inside_scaled_candidates":candidates[:16]})
           scale_producer=PhysicalScaleProducer.from_source_visibility_producer(trace_source)
           scale_by_scope={}
           for room in claim.canonical_rooms:
@@ -101,6 +134,7 @@ jobs:
               "canonical_room_reasons":list(claim.canonical_room_reason_codes),
               "labelled_rooms":[{"label":x.room_label,"face_record_id":x.source_room_face_record_id,"geometry_complete":x.geometry_complete} for x in claim.canonical_rooms if x.room_label],
               "dimension_witnesses":witnesses,
+              "wc_linen_pair_gates":pair_gates,
               "same_view_status":status(same_view.status),
               "same_view_reasons":list(same_view.reason_codes),
               "same_view_record_count":len(same_view.records),
