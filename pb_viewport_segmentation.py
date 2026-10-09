@@ -1350,6 +1350,46 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     return anchors
 
 
+def _source_image_placement_groups(page: Any) -> tuple[dict[str, Any], ...]:
+    """Inspect producer image placements without synthesizing drawing frames.
+
+    Repeated XObjects are evidence of raster tiling, not of a drawing viewport.
+    Retain independent xref identity and physical placement coordinates.  This
+    function deliberately cannot create an authenticated SegmentedViewport.
+    """
+    get_images = getattr(page, "get_images", None)
+    get_rects = getattr(page, "get_image_rects", None)
+    if not callable(get_images) or not callable(get_rects):
+        return ()
+    try:
+        images = get_images(full=True)
+    except (RuntimeError, ValueError, TypeError):
+        return ()
+    groups = []
+    for image in images:
+        if not image:
+            continue
+        xref = image[0]
+        try:
+            placements = get_rects(xref)
+        except (RuntimeError, ValueError, TypeError):
+            continue
+        boxes = sorted({
+            tuple(float(v) for v in (r.x0, r.y0, r.x1, r.y1))
+            for r in placements
+            if float(r.x1) > float(r.x0) and float(r.y1) > float(r.y0)
+        })
+        if not boxes:
+            continue
+        groups.append({
+            "xref": int(xref),
+            "placements": len(boxes),
+            "native_bboxes": tuple(boxes),
+            "source_region_complete": False,
+        })
+    return tuple(sorted(groups, key=lambda row: row["xref"]))
+
+
 def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
@@ -2602,6 +2642,10 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
+    # Keep genuine source raster placement evidence available for unresolved
+    # views. Image XObjects may repeat across the sheet; neither a placement
+    # nor the union of placements proves a unique drawing boundary.
+    source_image_groups = _source_image_placement_groups(page) if not frames else ()
     framed, consumed = _frame_resolved_viewports(
         page,
         anchors,
@@ -2669,6 +2713,17 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
             if unresolved
             else []
         )
+    if source_image_groups:
+        for viewport in derived:
+            if viewport.bounding_box is None and viewport.status in (
+                ViewportSegmentationStatus.UNSUPPORTED.value,
+                ViewportSegmentationStatus.AMBIGUOUS.value,
+            ):
+                viewport.provenance["source_image_group_count"] = len(source_image_groups)
+                viewport.provenance["source_image_placement_count"] = sum(
+                    group["placements"] for group in source_image_groups
+                )
+                viewport.provenance["source_image_groups_not_authoritative"] = True
     ordered = sorted(
         framed + derived,
         key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id),
