@@ -81,7 +81,7 @@ jobs:
                   "metric_area_quantity_id":x.metric_area_quantity_id,
                   "reason":(
                       "physical_face_geometry_incomplete" if not x.geometry_complete
-                      else "no_authenticated_figured_dimensions_or_physical_scale"
+                      else "metric_area_upstream_authority_unavailable"
                       if x.metric_area_quantity_id is None
                       else "metric_area_attached"
                   )
