@@ -57,7 +57,7 @@ jobs:
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Compare real Lot16 authority stages with verified prerequisite
         run: |
-          git show 824c7c9e47a5aa7ed08e0706dabfa63423c45ea9:tools/diag_gptmax_source_authority_stages.py > /tmp/gptmax-source-stages.py
+          git show 184e32bf832746fe57e7ae3134fe11248f568a87:tools/diag_gptmax_source_authority_stages.py > /tmp/gptmax-source-stages.py
           git worktree add /tmp/gptmax-measurement-prerequisite 772c9ac153844eabb6d2203f9a0ad9bf541bf60f
           (cd /tmp/gptmax-measurement-prerequisite && PYTHONPATH=. python -u /tmp/gptmax-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output /tmp/lot16-measurement-source-baseline.json)
           cp /tmp/lot16-measurement-source-baseline.json lot16-measurement-source-baseline.json
