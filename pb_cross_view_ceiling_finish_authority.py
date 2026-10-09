@@ -525,6 +525,7 @@ class CrossViewCeilingFinishProducer:
             or published.revision.document_id != document_id
             or published.revision.revision_id != revision_id
             or published.revision.source_sha256.lower() != source_sha256
+            or published.snapshot.snapshot_id != snapshot_id
         ):
             return CrossViewCeilingFinishResult(
                 status=EvidenceResolutionStatus.CONFLICT,
