@@ -36,6 +36,10 @@ jobs:
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
           from pb_live_opening_area_quantity_publication import _opening_quantity
+          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
+          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_geometry_takeoff_model import DrawingViewType
 
           project="au_qld_lot16_power"
           source=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
@@ -70,6 +74,16 @@ jobs:
               "canonical_floor_reasons":list(claim.canonical_floor_reason_codes),
               "canonical_floor_metric_count":sum(x.metric_area_m2 is not None for x in claim.canonical_floors),
               "canonical_floor_area_quantities":len(floors),
+              "documented_room_area_gate":"same_view_and_cross_view_witnesses_required_before_metric_floor_publication",
+              "labelled_room_first_gate":[{
+                  "label":x.room_label,
+                  "face_id":x.source_room_face_record_id,
+                  "label_binding_id":x.room_label_binding_record_id,
+                  "label_evidence_ids":list(x.room_label_evidence_ids),
+                  "viewport_id":x.viewport_id,
+                  "geometry_complete":x.geometry_complete,
+                  "metric_floor_area":next((v.metric_area_m2 for v in claim.canonical_floors if v.room_entity_id==x.canonical_room_id),None)
+              } for x in claim.canonical_rooms if x.room_label],
               "floor_first_gates":[{
                   "floor_id":x.physical_floor_surface_id,
                   "room_entity_id":x.room_entity_id,
