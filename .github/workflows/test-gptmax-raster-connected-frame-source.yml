@@ -1,4 +1,4 @@
-name: GPT MAX Raster Connected Frame Source
+name: GPT MAX Four Member Raster Source Discovery
 on:
   pull_request:
     paths:
@@ -10,7 +10,10 @@ on:
       - tests/test_raster_source_wall_frame_projection.py
       - tests/test_raster_visibility_receipt_registration.py
       - tools/diag_opening_wall_face_preservation.py
-      - .github/workflows/test-gptmax-raster-connected-frame-current.yml
+      - .github/workflows/test-gptmax-raster-connected-frame-source.yml
+permissions:
+  contents: read
+  actions: read
 concurrency:
   group: gptmax-raster-connected-frame-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -58,6 +61,12 @@ jobs:
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37830114626
+          name: lot16-connected-frame-source-handoff
+          path: prerequisite-lot16
       - name: Real Lot16 source, wall and host handoff
         run: >-
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
@@ -78,6 +87,16 @@ jobs:
           ids = [row['opening_identity_id'] for row in report['opening_bindings']]
           assert len(ids) == len(set(ids))
           assert 'quantities' not in report
+          baseline = json.loads(Path('prerequisite-lot16/lot16-connected-frame-source-handoff.json').read_text())
+          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
+          assert baseline['source_sha256'] == report['source_sha256']
+          assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
+          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
+          old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
+          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          advanced = [key for key, row in old_frames.items() if 'opening_host_frame_selected_opening_not_discovered' in row['reason_codes'] and 'opening_host_frame_selected_opening_not_discovered' not in new_frames[key]['reason_codes']]
+          assert advanced, 'No previously undiscovered source frame reached its geometry gate'
+          print({'source_discovery_advanced': advanced, 'bindings_and_proved_frames_retained': True})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
@@ -100,12 +119,16 @@ jobs:
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37830114626
+          name: maryborough-connected-frame-source-handoff
+          path: prerequisite-maryborough
       - name: Compare real Maryborough source and host identities with prerequisite
         run: |
-          git worktree add /tmp/gptmax-maryborough-prerequisite e73b2e76e31e2ed1174398758ef17bebe0333c6b
-          (cd /tmp/gptmax-maryborough-prerequisite && PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output /tmp/maryborough-source-baseline.json)
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
-          cp /tmp/maryborough-source-baseline.json maryborough-source-baseline.json
+          cp prerequisite-maryborough/maryborough-connected-frame-source-handoff.json maryborough-source-baseline.json
           python - <<'PY'
           import json
           from pathlib import Path
