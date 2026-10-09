@@ -921,8 +921,17 @@ def test_rotated_rcps_can_use_resolved_schedule_as_nonoverlapping_band_separator
         if viewport.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
     ]
     assert len(schedule) == 1
+    from pb_viewport_segmentation import (
+        calibrate_viewport_layout, extract_vector_frames,
+        extract_view_title_anchors, _frame_candidates_for_title, _frame_looks_like_table,
+    )
+    calibration = calibrate_viewport_layout(doc[0])
+    frames = extract_vector_frames(doc[0], calibration)
+    schedule_anchor = next(a for a in extract_view_title_anchors(doc[0]) if a.view_type == DrawingViewType.SCHEDULE.value)
+    candidates = _frame_candidates_for_title(doc[0], schedule_anchor, frames, calibration)
     assert schedule[0].status == ViewportSegmentationStatus.RESOLVED.value, (
         "schedule authority prerequisite not met",
+        {"anchor": repr(schedule_anchor), "frames": frames, "candidates": candidates, "table_proofs": [(f, _frame_looks_like_table(f, doc[0], calibration)) for f in candidates]},
         [(v.label, v.status, v.notes, v.provenance) for v in viewports],
     )
     assert len(rcps) == 2
