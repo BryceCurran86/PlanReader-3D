@@ -1350,10 +1350,54 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     return anchors
 
 
+def _split_path_closed_rectangles(
+    drawings: Sequence[Any], *, tol: float, max_lines: int = 96,
+) -> list[tuple[float, float, float, float]]:
+    """Recover only exact, source-drawn four-edge frames split across paths.
+
+    Do not build a rectangle from arbitrary long drafting lines: each edge
+    must be a single dedicated source path; all four corners must close.
+    A large primitive universe abstains to avoid combinatorial geometry.
+    """
+    lines: list[Any] = []
+    for drawing in drawings:
+        items = drawing.get("items", []) or []
+        if len(items) != 1 or not items[0] or items[0][0] != "l":
+            continue
+        lines.append(items[0])
+        if len(lines) > max_lines:
+            return []
+    horizontal: list[tuple[float, float, float, Any]] = []
+    vertical: list[tuple[float, float, float, Any]] = []
+    for item in lines:
+        a, b = item[1], item[2]
+        x0, y0, x1, y1 = float(a.x), float(a.y), float(b.x), float(b.y)
+        if abs(y1-y0) <= tol and abs(x1-x0) > tol:
+            horizontal.append((min(x0,x1),max(x0,x1),(y0+y1)/2,item))
+        elif abs(x1-x0) <= tol and abs(y1-y0) > tol:
+            vertical.append((min(y0,y1),max(y0,y1),(x0+x1)/2,item))
+    result: list[tuple[float, float, float, float]] = []
+    for i, top in enumerate(horizontal):
+        for bottom in horizontal[i+1:]:
+            if abs(top[2]-bottom[2]) <= tol:
+                continue
+            if abs(top[0]-bottom[0]) > tol or abs(top[1]-bottom[1]) > tol:
+                continue
+            top_y, bottom_y = sorted((top[2],bottom[2]))
+            left_x, right_x = top[0],top[1]
+            left = [v for v in vertical if abs(v[2]-left_x)<=tol and abs(v[0]-top_y)<=tol and abs(v[1]-bottom_y)<=tol]
+            right = [v for v in vertical if abs(v[2]-right_x)<=tol and abs(v[0]-top_y)<=tol and abs(v[1]-bottom_y)<=tol]
+            if len(left) == len(right) == 1:
+                result.append((left_x,top_y,right_x,bottom_y))
+    return result
+
+
 def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
-    for drawing in _page_drawings(page):
+    drawings = _page_drawings(page)
+    frames.extend(_split_path_closed_rectangles(drawings, tol=tol))
+    for drawing in drawings:
         items = drawing.get("items", []) or []
         closed = _closed_four_line_rect(items, tol=tol)
         if closed is not None:
