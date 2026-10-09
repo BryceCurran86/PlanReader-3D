@@ -142,6 +142,10 @@ def publish_live_floor_area_quantities(
             continue
         if floor.viewport_id and _clean(floor.viewport_id) != q_viewport:
             continue
+        # Empty receipts must not vacuously pass the source lineage subset
+        # test and become commercially publishable metric quantities.
+        if not quantity.evidence_ids or not floor.evidence_ids:
+            continue
         if not set(quantity.evidence_ids).issubset(set(floor.evidence_ids)):
             continue
 
