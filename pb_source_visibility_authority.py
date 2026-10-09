@@ -707,6 +707,8 @@ class SourceVisibilityProducer:
         self._text_integrity_receipts: dict[
             tuple[str, str], PdfTextIntegrityReceipt
         ] = {}
+        self._native_paint_page_cache: OrderedDict = OrderedDict()
+        self._native_dimension_component_page_cache: OrderedDict = OrderedDict()
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
 
     def authority(self) -> "SourceVisibilityAuthority":
@@ -799,6 +801,175 @@ class SourceVisibilityProducer:
         ):
             return None
         return (float(first_x), float(first_y))
+
+    def native_unstroked_fill_evidence(
+        self, selector: ObservationSelector, *, support_observation_ids: Sequence[str]
+    ):
+        """Reprove that all selected native edges are unpainted white-fill paths.
+
+        Raw geometry remains available. These candidate opposing atoms neither
+        assert physical non-existence nor close the opening candidate universe.
+        Cached paint facts never replace observation/receipt authentication.
+        """
+        from pb_migration_contracts import EvidenceAtom
+        from pb_vector_geometry_v130 import extract_native_page
+        from pb_wall_room_topology_typed_negative_evidence import (
+            KIND_ANNOTATION_BORDER, POLARITY_OPPOSING,
+        )
+
+        published = self.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
+        if not source_bytes or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        selected = frozenset(str(i) for i in support_observation_ids)
+        if not selected or selector.observation_id not in selected:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        records = {}
+        visibility = self.authority()
+        for observation_id in sorted(selected):
+            result = visibility.resolve_visible(replace(selector, observation_id=observation_id))
+            if result.status is not EvidenceResolutionStatus.CORROBORATED or result.observation is None:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            records[observation_id] = result.observation
+        if any(r.observation_kind != NATIVE_PDF_VISIBLE_SEGMENT for r in records.values()):
+            return ()
+        page_ids = {r.page_id for r in records.values()}
+        if len(page_ids) != 1:
+            return ()
+        page_id = next(iter(page_ids))
+        cache_key = (selector.source_sha256, page_id)
+        paint = self._native_paint_page_cache.get(cache_key)
+        if paint is None:
+            try:
+                with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                    page = pdf[int(page_id) - 1]
+                    drawings = page.get_drawings()
+                    segments = extract_native_page(page)['segments']
+                    paint = {}
+                    for segment in segments:
+                        drawing = drawings[segment['path_index']]
+                        paint[segment['id']] = (
+                            tuple(segment[k] for k in ('x1','y1','x2','y2')),
+                            segment['kind'], drawing.get('type'), drawing.get('color'),
+                            drawing.get('fill'), drawing.get('fill_opacity'),
+                            drawing.get('seqno'),
+                        )
+            except (ValueError, IndexError, KeyError, RuntimeError):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            self._native_paint_page_cache[cache_key] = paint
+            while len(self._native_paint_page_cache) > 2:
+                self._native_paint_page_cache.popitem(last=False)
+        self._native_paint_page_cache.move_to_end(cache_key)
+        owned = []
+        for observation_id, record in sorted(records.items()):
+            primitive = record.source_primitive_ref.removeprefix('visible:segment:')
+            facts = paint.get(primitive)
+            if facts is None or tuple(record.geometry) != facts[0]:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            geometry, kind, paint_type, color, fill, opacity, seqno = facts
+            if (kind != 'rect_edge' or paint_type != 'f' or color is not None
+                    or fill is None or tuple(fill) != (1.,1.,1.) or opacity != 1.):
+                return ()
+            owned.append((primitive, observation_id, geometry, seqno))
+        metadata = dict(revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id, polarity=POLARITY_OPPOSING,
+            source_primitive_ids=tuple(sorted(p for p,_,_,_ in owned)),
+            source_observation_ids=tuple(sorted(selected)),
+            primitive_paint_ownership=tuple(owned),
+            all_source_primitives_covered=True, paint_type='f', fill=(1.,1.,1.),
+            fill_opacity=1., stroke=None)
+        return (EvidenceAtom(evidence_id=stable_contract_id('native_unstroked_white_fill', metadata),
+            document_id=selector.document_id, page_id=page_id, kind=KIND_ANNOTATION_BORDER,
+            method='native_pdf_unstroked_fill_source_role', status=EvidenceResolutionStatus.CANDIDATE,
+            reason_codes=('native_unstroked_white_fill_boundary',), metadata=metadata),)
+
+    def native_dimension_cap_evidence(
+        self, selector: ObservationSelector, *, opening_support_ids: Sequence[str]
+    ):
+        """Reprove exact native annotation opposition from this source only.
+
+        Missing or damaged source receipts raise the existing integrity error;
+        consumers must not mistake failed authentication for no opposition.
+        Results are candidate EvidenceAtoms, never metric or non-existence authority.
+        """
+        from pb_native_dimension_cap_evidence import (
+            compile_native_dimension_cap_components,
+            native_dimension_cap_evidence_from_components,
+        )
+
+        published = self.published_snapshot_for_revision(selector.revision_id)
+        if (published is None or published.snapshot.snapshot_id != selector.snapshot_id
+                or published.revision.document_id != selector.document_id
+                or published.revision.source_sha256 != selector.source_sha256):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        visibility = self.authority()
+        selected = frozenset(opening_support_ids)
+        if selector.observation_id not in selected:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        rows = visibility.authenticated_visible_observations(published)
+        records = {i: r for i, r in rows if r.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT}
+        if not selected or not selected <= records.keys():
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        page_id = records[selector.observation_id].page_id
+        if any(records[i].page_id != page_id for i in selected):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        segments = {i: tuple(r.geometry) for i, r in records.items() if r.page_id == page_id}
+        source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
+        if source_bytes is None or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        try:
+            with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                page = pdf[int(page_id) - 1]
+                directions = {(bi, li): tuple(line.get('dir', (0., 0.)))
+                    for bi, block in enumerate(page.get_text('dict', flags=fitz.TEXTFLAGS_WORDS)['blocks'])
+                    for li, line in enumerate(block.get('lines', []))}
+        except (ValueError, IndexError, RuntimeError):
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        text_authority = self.text_integrity_authority()
+        source_authority = self._producer.authority()
+        words = []
+        for observation_id in published.text_observation_ids:
+            word_selector = replace(selector, observation_id=observation_id)
+            source_result = source_authority.resolve(word_selector)
+            record = source_result.observation
+            if source_result.status is not EvidenceResolutionStatus.CORROBORATED or record is None:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if record.page_id != page_id:
+                continue
+            text = text_authority.resolve_text(word_selector)
+            if text.receipt is None or text.status is EvidenceResolutionStatus.CONFLICT:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if text.status is not EvidenceResolutionStatus.CORROBORATED or text.receipt is None:
+                continue
+            receipt = text.receipt
+            words.append(dict(id=observation_id, text=text.trusted_text,
+                bbox=receipt.geometry,
+                axis=directions.get((receipt.block_no, receipt.line_no), (0., 0.))))
+        # Cache immutable geometry facts only. Every source byte, observation
+        # and text receipt above is reauthenticated before even a cache hit.
+        # The full authenticated inputs key the cache, not a caller's role or
+        # a source address alone. Fresh EvidenceAtoms are built for each query.
+        fingerprint = stable_contract_id('native_dimension_component_inputs', {
+            'segments': tuple(sorted(segments.items())),
+            'words': tuple(sorted((w['id'], w['text'], tuple(w['bbox']), tuple(w['axis']))
+                for w in words)),
+        })
+        cache_key = (selector.source_sha256, selector.snapshot_id, page_id, fingerprint)
+        components = self._native_dimension_component_page_cache.get(cache_key)
+        if components is None:
+            components = compile_native_dimension_cap_components(segments=segments, words=words)
+            self._native_dimension_component_page_cache[cache_key] = components
+            while len(self._native_dimension_component_page_cache) > 2:
+                self._native_dimension_component_page_cache.popitem(last=False)
+        self._native_dimension_component_page_cache.move_to_end(cache_key)
+        return native_dimension_cap_evidence_from_components(components=components,
+            selected_ids=tuple(selected), document_id=selector.document_id, page_id=page_id,
+            revision_id=selector.revision_id, source_sha256=selector.source_sha256,
+            snapshot_id=selector.snapshot_id)
 
     def raster_opening_image_placements(
         self,
