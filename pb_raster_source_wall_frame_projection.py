@@ -66,12 +66,27 @@ def source_edge_axis_projection(record, geometry, source_lines: Mapping[str, Seq
         if data is None or not fragment.source_primitive_ids:
             return None
         lo, hi, offset = data
+        coverage = []
         for primitive_id in fragment.source_primitive_ids:
             source = source_lines.get(primitive_id)
             parent = None if source is None else line_data(source)
-            if (parent is None or abs(parent[2] - offset) > _COORD_TOL
-                    or lo < parent[0] - _COORD_TOL or hi > parent[1] + _COORD_TOL):
+            if parent is None or abs(parent[2] - offset) > _COORD_TOL:
                 return None
+            start, end = max(lo, parent[0]), min(hi, parent[1])
+            # Every claimed ancestor must contribute to this local edge.
+            # Clip first: a remote parent extent never enlarges ownership.
+            if end - start <= _COORD_TOL:
+                return None
+            coverage.append((start, end))
+        start, covered_end = sorted(coverage)[0]
+        if start > lo + _COORD_TOL:
+            return None
+        for start, end in sorted(coverage)[1:]:
+            if start > covered_end + _COORD_TOL:
+                return None
+            covered_end = max(covered_end, end)
+        if covered_end < hi - _COORD_TOL:
+            return None
         intervals.append((lo, hi))
         offsets.append(offset)
     if max(offsets) - min(offsets) > _COORD_TOL:
