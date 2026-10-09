@@ -69,6 +69,15 @@ jobs:
               source_pages=(3,),
           )
           same_view=SameViewRoomAreaProducer.from_source(source=trace_source,rooms=trace_rooms).publish()
+          from pb_cross_view_room_area_authority import _trusted_lines_for_page, _trusted_native_dimensions_for_page, _norm_label
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_dimension_graph_constraint_engine import DimensionOrientation
+          witnesses=[]
+          for room in trace_rooms.rooms:
+              if room.room_label not in ("WC","LINEN"): continue
+              lines=tuple(v for v in _trusted_lines_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_labels=(room.room_label,)) if _norm_label(v.text)==_norm_label(room.room_label))
+              dims=_trusted_native_dimensions_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_lines=lines,view_type=DrawingViewType.FLOOR_PLAN.value)
+              witnesses.append({"label":room.room_label,"trusted_labels":len(lines),"dimensions":len(dims),"horizontal":sum(v.orientation==DimensionOrientation.HORIZONTAL.value for v in dims),"vertical":sum(v.orientation==DimensionOrientation.VERTICAL.value for v in dims)})
           scale_producer=PhysicalScaleProducer.from_source_visibility_producer(trace_source)
           scale_by_scope={}
           for room in claim.canonical_rooms:
@@ -91,6 +100,7 @@ jobs:
               "canonical_room_status":status(claim.canonical_room_status),
               "canonical_room_reasons":list(claim.canonical_room_reason_codes),
               "labelled_rooms":[{"label":x.room_label,"face_record_id":x.source_room_face_record_id,"geometry_complete":x.geometry_complete} for x in claim.canonical_rooms if x.room_label],
+              "dimension_witnesses":witnesses,
               "same_view_status":status(same_view.status),
               "same_view_reasons":list(same_view.reason_codes),
               "same_view_record_count":len(same_view.records),
