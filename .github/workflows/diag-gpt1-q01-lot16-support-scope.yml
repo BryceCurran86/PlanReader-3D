@@ -54,8 +54,21 @@ jobs:
                   found.append({"page":ix+1,"exact_native_labels":lines})
                   if ix!=2:
                       support.append(ix)
+          # Search only actual PDF-native textual area claims. This is a
+          # candidate inventory, never an area/scale or room ownership proof.
+          import re
+          area_texts=[]
+          area_pattern=re.compile(r"\\b\\d+(?:[.,]\\d+)?\\s*(?:m\\s*(?:2|²)|sq\\.?\\s*m|square\\s+met(?:re|er)s?)\\b",re.I)
+          for index in range(pdf.page_count):
+              for block in pdf[index].get_text("dict").get("blocks",()):
+                  for line in block.get("lines",()):
+                      text_line="".join(span.get("text","") for span in line.get("spans",())).strip()
+                      if area_pattern.search(text_line):
+                          area_texts.append({"page":index+1,"native_text":text_line[:150]})
           pdf.close()
           result={"source_sha_verified":True,"source_sha":actual,
+              "candidate_native_metric_area_lines":area_texts[:100],
+              "candidate_native_metric_area_line_count":len(area_texts),
               "code_sha":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
               "scope":"architectural_native_label_support_pages_not_frozen_benchmark",
               "native_exact_room_labels":found,"candidate_support_page_indices":support,
