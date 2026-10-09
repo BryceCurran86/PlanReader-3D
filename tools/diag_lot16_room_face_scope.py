@@ -12,6 +12,8 @@ from collections import Counter
 from pathlib import Path
 
 import pb_source_room_face_authority as face_authority
+import pb_source_room_label_authority as label_authority
+import pb_same_view_room_area_authority as same_view_authority
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
 
@@ -20,6 +22,54 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
     observations = []
     original_derive = face_authority._derive_scope_outcome
     original_extract = face_authority.extract_planar_faces
+    original_label_resolve = label_authority.SourceRoomLabelAuthority.resolve_scope
+    original_witness_intersect = same_view_authority._witness_systems_intersect
+    label_scopes = []
+    witness_audit = {
+        "attempted_pairs": 0,
+        "intersecting_pairs": 0,
+        "nonintersecting_pairs": 0,
+        "failed_pair_samples": [],
+    }
+
+    def traced_label_resolve(authority, selector):
+        result = original_label_resolve(authority, selector)
+        label_scopes.append({
+            "page_id": str(selector.page_id),
+            "decision_scope_id": str(selector.decision_scope_id),
+            "status": str(getattr(result.status, "value", result.status)),
+            "reasons": list(result.reason_codes),
+            "bound_label_count": len(result.records),
+            "split_face_candidate_count": len(result.split_face_candidates),
+            "bound_labels": [
+                {
+                    "label": record.label,
+                    "face_id": record.face_id,
+                    "source_room_face_record_id": record.source_room_face_record_id,
+                }
+                for record in result.records
+            ],
+        })
+        return result
+
+    def traced_witness_intersect(horizontal, vertical):
+        proven = original_witness_intersect(horizontal, vertical)
+        witness_audit["attempted_pairs"] += 1
+        witness_audit[
+            "intersecting_pairs" if proven else "nonintersecting_pairs"
+        ] += 1
+        if not proven and len(witness_audit["failed_pair_samples"]) < 50:
+            witness_audit["failed_pair_samples"].append({
+                "horizontal_dimension_id": str(horizontal.dimension_id),
+                "vertical_dimension_id": str(vertical.dimension_id),
+                "horizontal_value_mm": float(horizontal.value_mm),
+                "vertical_value_mm": float(vertical.value_mm),
+                "horizontal_endpoints_pt": horizontal.endpoints_pt,
+                "vertical_endpoints_pt": vertical.endpoints_pt,
+                "horizontal_witness_count": len(horizontal.witness_geometries),
+                "vertical_witness_count": len(vertical.witness_geometries),
+            })
+        return proven
 
     def traced_extract(segments, *args, **kwargs):
         faces = original_extract(segments, *args, **kwargs)
@@ -69,6 +119,8 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
     try:
         face_authority._derive_scope_outcome = traced_derive
         face_authority.extract_planar_faces = traced_extract
+        label_authority.SourceRoomLabelAuthority.resolve_scope = traced_label_resolve
+        same_view_authority._witness_systems_intersect = traced_witness_intersect
         claim = collect_live_physical_net_wall_claim(
             pdf, pages=(page_index,), topology_pages=(page_index,),
             room_area_support_pages=None,
@@ -78,6 +130,8 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "source_page_index_zero_based": page_index,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
+            "source_label_scope_diagnostic": label_scopes,
+            "same_view_witness_intersection_audit": witness_audit,
             "label_ownership_diagnostic": {
                 "labelled_room_count": sum(bool(room.room_label) for room in claim.canonical_rooms),
                 "unlabelled_room_count": sum(not bool(room.room_label) for room in claim.canonical_rooms),
@@ -127,6 +181,8 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
     finally:
         face_authority._derive_scope_outcome = original_derive
         face_authority.extract_planar_faces = original_extract
+        label_authority.SourceRoomLabelAuthority.resolve_scope = original_label_resolve
+        same_view_authority._witness_systems_intersect = original_witness_intersect
 
 
 def main() -> None:
