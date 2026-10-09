@@ -397,3 +397,40 @@ def test_blocked_firm_room_area_does_not_publish_rcp_ceiling_m2() -> None:
     assert result.records == ()
     assert result.quantities == ()
     assert result.canonical_ceilings == ()
+
+
+
+def test_foreign_room_area_source_receipts_cannot_publish_ceiling() -> None:
+    """Do not turn foreign source, revision or page receipts into ceiling m²."""
+    bridge = _bridge()
+    base_quantity = bridge.quantities[0]
+    base_entity = bridge.entities[0]
+    for entity_changes, quantity_changes in (
+        ({"source_sha256": "b" * 64}, {}),
+        ({}, {"source_sha256": "b" * 64}),
+        ({"revision_id": "foreign-revision"}, {}),
+        ({}, {"revision_id": "foreign-revision"}),
+        ({"page_id": "8"}, {}),
+        ({}, {"page_no": 8}),
+        ({"source_room_index_id": ""}, {}),
+        ({}, {"viewport_id": ""}),
+    ):
+        changed_entity = replace(
+            base_entity, metadata={**base_entity.metadata, **entity_changes}
+        )
+        changed_quantity = replace(
+            base_quantity, metadata={**base_quantity.metadata, **quantity_changes}
+        )
+        altered = replace(
+            bridge, entities=(changed_entity,), quantities=(changed_quantity,)
+        )
+        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+            rooms=_rooms(),
+            room_area_bridges=(altered,),
+            finishes=_finish(),
+        )
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert result.unresolved_physical_room_ids == ("physical-room-1",)
+        assert result.records == ()
+        assert result.quantities == ()
+        assert result.canonical_ceilings == ()
