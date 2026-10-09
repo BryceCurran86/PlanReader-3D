@@ -279,6 +279,19 @@ def test_cross_view_room_area_reaches_same_canonical_floor_without_scale(
     }
     assert len(result.canonical_floors) == 2
 
+    # An authenticated cross-view OFFICE measurement must not erase the
+    # independent same-view authority's first-failure provenance.
+    first_failures = dict(result.same_view_room_area_first_failure_codes)
+    assert set(first_failures) == {
+        room.physical_room_id for room in result.canonical_rooms
+    }
+    assert set(first_failures.values()) == {
+        "same_view_dimension_orientation_pair_unavailable"
+    }
+    assert result.same_view_room_area_first_failure_codes == tuple(
+        sorted(result.same_view_room_area_first_failure_codes)
+    )
+
     resolved_floors = [
         floor for floor in result.canonical_floors
         if floor.metric_area_m2 is not None

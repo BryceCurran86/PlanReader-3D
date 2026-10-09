@@ -126,6 +126,9 @@ class LivePhysicalNetWallClaim:
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     floor_finish_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     ceiling_lining_quantity_evidence: tuple[QuantityEvidence, ...] = ()
+    # Source-authenticated same-view measurement first-gate receipts; a separate
+    # cross-view or scaled authority may independently resolve the room area.
+    same_view_room_area_first_failure_codes: tuple[tuple[str, str], ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -902,6 +905,10 @@ def collect_live_physical_net_wall_claim(
             ceiling_lining_quantity_evidence=tuple(
                 ceiling_lining_quantity_evidence
             ),
+            same_view_room_area_first_failure_codes=(
+                same_view_area.unresolved_first_failure_codes
+                if same_view_area is not None else ()
+            ),
         )
 
     return LivePhysicalNetWallClaim(
@@ -943,6 +950,10 @@ def collect_live_physical_net_wall_claim(
         floor_finish_quantity_evidence=tuple(floor_finish_quantity_evidence),
         ceiling_lining_quantity_evidence=tuple(
             ceiling_lining_quantity_evidence
+        ),
+        same_view_room_area_first_failure_codes=(
+            same_view_area.unresolved_first_failure_codes
+            if same_view_area is not None else ()
         ),
     )
 
