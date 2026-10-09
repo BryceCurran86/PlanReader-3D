@@ -46,7 +46,7 @@ if __name__=="__main__":
                 code in row["codes"] and row["proof"]["source_definition_candidate_only"]
                 for row in report["matches"]
             ),
-            "authenticated_definition_count": 0,
+            "definition_authority_evaluated": False,
         } for code in ("FPB", "WFPB", "IPF1", "GRID")
     }
     doc.close()
