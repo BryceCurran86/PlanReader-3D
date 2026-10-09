@@ -84,6 +84,37 @@ jobs:
           out = Path("artifacts/gpt1-q02-rcp/source-rcp-inventory.json")
           out.write_text(json.dumps(data, indent=2, sort_keys=True))
           print("GPT1_LOT16_RCP_SOURCE_GATES", json.dumps({k:v for k,v in data.items() if k!="per_page_source_viewports"},sort_keys=True))
+          import re
+          titles = []
+          structural_rcp = []
+          for document in manifest["source_documents"]:
+              file_path = Path("documents/sources") / document["name"]
+              assert file_path.exists(), "Manifest-declared source missing"
+              assert hashlib.sha256(file_path.read_bytes()).hexdigest() == document["sha256"], "Source integrity mismatch"
+              other = fitz.open(file_path)
+              for index in range(other.page_count):
+                  p = other.load_page(index)
+                  lines = p.get_text("text").splitlines()
+                  matching = [line.strip()[:140] for line in lines if re.search(r"\\b(?:RCP|CEILING)\\b", line, re.IGNORECASE)]
+                  if matching:
+                      titles.append({"source": document["name"], "page_number": index+1, "native_text_lines": matching[:25]})
+                  if document["name"] == source.name:
+                      continue
+                  views = tuple(segment_page_viewports(p, page_number=index+1))
+                  valid = bool(views) and all(is_segment_page_viewports_product(v) for v in views)
+                  siblings_ok = validate_non_overlapping_viewports(views) if valid else False
+                  for v in views:
+                      if (
+                          valid
+                          and v.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+                          and _viewport_is_authoritative(v, sibling_non_overlapping=siblings_ok)
+                          and v.bounding_box is not None
+                      ):
+                          structural_rcp.append({"source":document["name"],"page_number":index+1,"viewport_id":str(v.view_id)})
+              other.close()
+          extended = {"source_sha_verified":True,"source_documents_checked":len(manifest["source_documents"]),"native_ceiling_title_witnesses":titles,"additional_source_authenticated_rcp_viewports":structural_rcp}
+          Path("artifacts/gpt1-q02-rcp/extended-support-inventory.json").write_text(json.dumps(extended,indent=2,sort_keys=True))
+          print("GPT1_LOT16_RCP_SUPPORT_GATES",json.dumps(extended,sort_keys=True))
           PY
       - name: Upload source-gate receipt
         if: always()
