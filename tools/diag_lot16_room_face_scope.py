@@ -78,6 +78,15 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "source_page_index_zero_based": page_index,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
+            "same_view_prerequisite_breakdown": {
+                "room_count": len(claim.canonical_rooms),
+                "geometry_incomplete": sum(not room.geometry_complete for room in claim.canonical_rooms),
+                "physical_room_id_missing": sum(not str(room.physical_room_id or "").strip() for room in claim.canonical_rooms),
+                "source_face_id_missing": sum(not str(room.source_room_face_record_id or "").strip() for room in claim.canonical_rooms),
+                "room_label_missing": sum(not str(room.room_label or "").strip() for room in claim.canonical_rooms),
+                "room_label_binding_missing": sum(not str(room.room_label_binding_record_id or "").strip() for room in claim.canonical_rooms),
+                "room_label_evidence_missing": sum(not bool(room.room_label_evidence_ids) for room in claim.canonical_rooms),
+            },
             "downstream": {
                 "canonical_room_count": len(claim.canonical_rooms),
                 "canonical_room_status": str(getattr(claim.canonical_room_status, "value", claim.canonical_room_status)),
