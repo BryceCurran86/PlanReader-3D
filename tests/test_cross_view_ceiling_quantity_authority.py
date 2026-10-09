@@ -382,6 +382,36 @@ def test_abstained_or_invalid_confidence_firm_room_area_never_mints_ceiling() ->
         assert result.canonical_ceilings == ()
 
 
+def test_conflicting_source_room_entity_replays_cannot_select_ceiling_winner() -> None:
+    bridge = _bridge()
+    authentic = bridge.entities[0]
+    foreign = replace(
+        authentic,
+        metadata={**authentic.metadata, "source_sha256": "b" * 64},
+    )
+    for entity_rows in (
+        (authentic, foreign),
+        (foreign, authentic),
+        (authentic, foreign, authentic),
+    ):
+        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+            rooms=_rooms(),
+            room_area_bridges=(replace(bridge, entities=entity_rows),),
+            finishes=_finish(),
+        )
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert result.records == ()
+        assert result.quantities == ()
+
+    # An exact producer-owned replay is not an independent source claimant.
+    replay = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(replace(bridge, entities=(authentic, authentic)),),
+        finishes=_finish(),
+    )
+    assert len(replay.quantities) == 1
+
+
 def test_non_metric_documented_room_area_cannot_promote_firm_rcp_ceiling_m2() -> None:
     bridge = _bridge()
     invalid = replace(
