@@ -1,0 +1,19 @@
+name: TEST GPT2 B02 Native Material Row Ownership
+on:
+  push:
+    branches:
+      - gpt2/b02-native-cluster-row-ownership-20261009
+  workflow_dispatch:
+jobs:
+  native-material:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - run: PYTHONPATH=. pytest -q tests/test_gpt2_native_schedule_cluster_ownership.py tests/test_source_material_semantic_authority_v1.py
