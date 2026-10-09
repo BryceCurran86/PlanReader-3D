@@ -12,7 +12,7 @@ from pb_viewport_segmentation import (
     calibrate_viewport_layout, extract_vector_frames,
     extract_view_title_anchors, _frame_candidates_for_title,
     _frame_looks_like_table, _source_image_placement_groups,
-    _raster_placement_components,
+    _raster_placement_components, _raster_ink_gutter_evidence,
 )
 
 SOURCE = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
@@ -37,6 +37,11 @@ if __name__ == "__main__":
         if page_no in (1, 7, 9, 11, 30):
             page = doc[index]
             calibration = calibrate_viewport_layout(page)
+            if page_no == 1:
+                print("B01_SOURCE_RASTER_INK_GUTTERS", json.dumps({
+                    "page": page_no,
+                    **_raster_ink_gutter_evidence(page),
+                }, sort_keys=True, default=str))
             frames = extract_vector_frames(page, calibration)
             # Distinguish no source vectors from unsupported source paths;
             # this is diagnostic evidence only, never viewport authority.
