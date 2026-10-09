@@ -1,0 +1,111 @@
+"""Diagnostic-only Lot16 room-face source geometry trace (no authority changes).
+
+Run: PYTHONPATH=. python tools/diag_lot16_room_face_scope.py --pdf "documents/sources/3. Architectural - Lot 16 Power.pdf" --page-index 2 --output lot16-room-face-scope.json
+The PDF path must be an actual source file; no benchmark gold is loaded.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from collections import Counter
+from pathlib import Path
+
+import pb_source_room_face_authority as face_authority
+from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+
+def inspect_source(pdf: Path, page_index: int) -> dict:
+    payload = pdf.read_bytes()
+    observations = []
+    original_derive = face_authority._derive_scope_outcome
+    original_extract = face_authority.extract_planar_faces
+
+    def traced_extract(segments, *args, **kwargs):
+        faces = original_extract(segments, *args, **kwargs)
+        areas = sorted(
+            (round(face_authority._polygon_area(face_authority._canonical_polygon(face)), 6)
+             for face in faces if face_authority._canonical_polygon(face))
+        )
+        observations[-1]["planar_faces"] = {
+            "count": len(faces),
+            "canonical_count": len(areas),
+            "areas_pt2_sorted": areas[:1000],
+            "areas_truncated": len(areas) > 1000,
+            "under_absolute_threshold": sum(
+                area < face_authority._ABSOLUTE_DEGENERATE_AREA_PT2 for area in areas
+            ),
+            "under_relative_threshold": sum(
+                area < (areas[-1] * face_authority._TINY_RELATIVE_THRESHOLD)
+                for area in areas
+            ) if areas else 0,
+        }
+        return faces
+
+    def traced_derive(scope):
+        records = tuple(getattr(scope, "records", ()) or ())
+        edges_by_wall = {}
+        for record in records:
+            wall_id = str(getattr(record, "wall_candidate_id", "") or "")
+            if wall_id:
+                edges_by_wall[wall_id] = face_authority._wall_edges(record)
+        observation = {
+            "page_id": str(getattr(scope, "page_id", "") or ""),
+            "decision_scope_id": str(getattr(scope, "decision_scope_id", "") or ""),
+            "scope_status": str(getattr(getattr(scope, "status", None), "value", getattr(scope, "status", None))),
+            "scope_complete": bool(getattr(scope, "scope_complete", False)),
+            "source_wall_record_count": len(records),
+            "source_wall_identity_count": len(edges_by_wall),
+            "source_wall_edge_count": sum(map(len, edges_by_wall.values())),
+            "source_wall_zero_edge_count": sum(not edges for edges in edges_by_wall.values()),
+        }
+        observations.append(observation)
+        outcome = original_derive(scope)
+        observation["outcome_status"] = str(getattr(getattr(outcome, "status", None), "value", getattr(outcome, "status", None)))
+        observation["outcome_reasons"] = list(getattr(outcome, "reason_codes", ()) or ())
+        observation["published_face_count"] = len(getattr(outcome, "records", ()) or ())
+        return outcome
+
+    try:
+        face_authority._derive_scope_outcome = traced_derive
+        face_authority.extract_planar_faces = traced_extract
+        claim = collect_live_physical_net_wall_claim(
+            pdf, pages=(page_index,), topology_pages=(page_index,),
+            room_area_support_pages=None,
+        )
+        return {
+            "diagnostic_only": True, "pdf_sha256": hashlib.sha256(payload).hexdigest(),
+            "source_page_index_zero_based": page_index,
+            "scope_outcomes": observations,
+            "claim_type": type(claim).__name__,
+            "scope_reason_frequency": dict(Counter(
+                reason for item in observations for reason in item["outcome_reasons"]
+            )),
+        }
+    finally:
+        face_authority._derive_scope_outcome = original_derive
+        face_authority.extract_planar_faces = original_extract
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pdf", required=True, type=Path)
+    parser.add_argument("--page-index", type=int, default=2)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    if args.page_index < 0:
+        parser.error("--page-index must be >= 0")
+    if not args.pdf.is_file():
+        parser.error(f"source PDF unavailable: {args.pdf}")
+    report = inspect_source(args.pdf, args.page_index)
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({
+        "pdf_sha256": report["pdf_sha256"],
+        "scope_count": len(report["scope_outcomes"]),
+        "scope_reason_frequency": report["scope_reason_frequency"],
+        "output": str(args.output),
+    }, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
