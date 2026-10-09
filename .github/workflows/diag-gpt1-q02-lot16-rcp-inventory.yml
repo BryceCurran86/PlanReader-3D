@@ -95,7 +95,7 @@ jobs:
               for index in range(other.page_count):
                   p = other.load_page(index)
                   lines = p.get_text("text").splitlines()
-                  matching = [line.strip()[:140] for line in lines if re.search(r"\\b(?:RCP|CEILING)\\b", line, re.IGNORECASE)]
+                  matching = [line.strip()[:140] for line in lines if re.search(r"(?<![A-Za-z0-9])(?:RCP|CEILING)(?![A-Za-z0-9])", line, re.IGNORECASE)]
                   if matching:
                       titles.append({"source": document["name"], "page_number": index+1, "native_text_lines": matching[:25]})
                   if document["name"] == source.name:
