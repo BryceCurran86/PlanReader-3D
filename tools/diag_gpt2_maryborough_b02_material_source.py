@@ -6,7 +6,7 @@ import fitz
 from pb_viewport_segmentation import segment_page_viewports
 from pb_material_schedule_v1222 import parse_schedule_text, semantic_finish_from_schedule_entry
 SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
-CODES=re.compile(r"(?<![A-Z0-9])(?:FPB|WFPB|IPF1|GRID)(?![A-Z0-9])",re.I)
+CODES=re.compile(r"(?<![A-Z0-9])(?:FPB|WFPB|IPF1|GRID|FT2|FT3)(?![A-Z0-9])",re.I)
 SCHEDULE=re.compile(r"(?:FINISH|MATERIAL|CEILING|FLOOR|LINING).{0,40}(?:SCHEDULE|LEGEND)|(?:SCHEDULE|LEGEND).{0,40}(?:FINISH|MATERIAL|CEILING|FLOOR|LINING)",re.I)
 if __name__=="__main__":
     payload=SOURCE.read_bytes()
@@ -106,7 +106,7 @@ if __name__=="__main__":
                 for row in report["matches"]
             ),
             "definition_authority_evaluated": False,
-        } for code in ("FPB", "WFPB", "IPF1", "GRID")
+        } for code in ("FPB", "WFPB", "IPF1", "GRID", "FT2", "FT3")
     }
     doc.close()
     Path("maryborough_b02_material_source_audit.json").write_text(json.dumps(report,indent=2,default=str))
