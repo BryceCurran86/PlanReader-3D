@@ -118,6 +118,12 @@ def test_ceiling_quantity_requires_nonempty_source_and_canonical_receipts() -> N
     assert publish_live_ceiling_area_quantities(_result(ceiling=ceiling)) == ()
 
 
+def test_ceiling_quantity_rejects_invalid_source_confidence() -> None:
+    for confidence in (float("nan"), float("inf"), float("-inf"), -0.01, 1.01):
+        shadow = replace(_shadow_quantity(), confidence=confidence)
+        assert publish_live_ceiling_area_quantities(_result(shadow=shadow)) == ()
+
+
 def test_scaled_canonical_ceiling_requires_physical_scale_record() -> None:
     missing = _ceiling(
         authority=MeasurementAuthorityType.PDF_SCALED.value,
