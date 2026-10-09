@@ -89,6 +89,33 @@ def test_live_physical_net_wall_accepts_no_quantity_truth_inputs() -> None:
     assert not (parameters & forbidden)
 
 
+
+def test_live_chain_reuses_one_source_owned_physical_scale_producer(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from pb_physical_scale_authority import PhysicalScaleProducer
+
+    path = tmp_path / "physical-net-wall-scale-reuse.pdf"
+    path.write_bytes(_complete_void_pdf())
+
+    original_init = PhysicalScaleProducer.__init__
+    construction_count = 0
+
+    def counted_init(self, *args, **kwargs):
+        nonlocal construction_count
+        construction_count += 1
+        return original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(PhysicalScaleProducer, "__init__", counted_init)
+
+    result = collect_live_physical_net_wall_claim(path, pages=(0,))
+
+    assert construction_count == 1
+    assert result.canonical_walls
+    assert result.canonical_openings
+
+
 def _two_room_cross_view_area_pdf() -> bytes:
     doc = fitz.open()
     try:
