@@ -881,6 +881,7 @@ class ScheduleOpeningInstanceBindingProducer:
 
         trusted_by_page: dict[str, list[tuple[str, str, tuple[float, ...]]]] = {}
         native_words: dict[str, tuple[str, str, int, int, int]] = {}
+        native_census_authenticated = True
         for observation_id in published.text_observation_ids:
             text_result = text_integrity.resolve_text(
                 ObservationSelector(
@@ -896,6 +897,7 @@ class ScheduleOpeningInstanceBindingProducer:
                 or text_result.trusted_text is None
                 or text_result.receipt is None
             ):
+                native_census_authenticated = False
                 continue
             receipt = text_result.receipt
             if all(
@@ -906,6 +908,8 @@ class ScheduleOpeningInstanceBindingProducer:
                     text_result.trusted_text, receipt.page_id,
                     receipt.block_no, receipt.line_no, receipt.word_no,
                 )
+            else:
+                native_census_authenticated = False
             trusted_by_page.setdefault(receipt.page_id, []).append(
                 (
                     observation_id,
@@ -1035,7 +1039,7 @@ class ScheduleOpeningInstanceBindingProducer:
         entry, schedule_row_observation_ids, schedule_page_id = matching_rows[0]
         description = _source_owned_description(
             str(entry.description or ""), schedule_row_observation_ids, native_words,
-        )
+        ) if native_census_authenticated else ""
         payload = {
             "schema_version": SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION,
             "document_id": opening.document_id,

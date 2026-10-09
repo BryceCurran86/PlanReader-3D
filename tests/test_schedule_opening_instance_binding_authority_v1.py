@@ -215,7 +215,8 @@ def test_real_binding_resolves_via_contained_tag_and_matching_row() -> None:
     ("IPF3 SOLID CORE", EvidenceResolutionStatus.CORROBORATED),
     ("SOLID CORE FLUSH FACED TIMBER DOOR PAINT FINISH IPF3", EvidenceResolutionStatus.ABSTAINED),
 ])
-def test_description_retention_does_not_override_table_ownership(description, expected_status) -> None:
+@pytest.mark.parametrize("untrusted_tail", [False, True])
+def test_description_retention_does_not_override_table_ownership(description, expected_status, untrusted_tail, monkeypatch) -> None:
     """Downstream semantic grouping needs the exact producer-authenticated row text.
 
     Retaining this field must not classify the row or mint a quantity; it only
@@ -260,6 +261,21 @@ def test_description_retention_does_not_override_table_ownership(description, ex
     published = _ingest(src, payload, "sched-description")
     opening_selector = _opening_selector(published, src.authority())
 
+    if untrusted_tail:
+        assert src.physical_opening_authority().prove_existence(opening_selector).proposition == PHYSICAL_OPENING_EXISTS
+        from dataclasses import replace
+        authority_type = type(src.text_integrity_authority())
+        original = authority_type.resolve_text
+
+        def without_tail(self, selector):
+            result = original(self, selector)
+            if result.trusted_text == "CORE":
+                return replace(result, status=EvidenceResolutionStatus.ABSTAINED,
+                               trusted_text=None, receipt=None)
+            return result
+
+        monkeypatch.setattr(authority_type, "resolve_text", without_tail)
+
     result = _bind(src, opening_selector)
 
     assert result.status is expected_status, result.reason_codes
@@ -270,7 +286,7 @@ def test_description_retention_does_not_override_table_ownership(description, ex
     assert result.record is not None
     assert result.record.tag_mark == "D1"
     assert result.record.schedule_row_type_mark == "D01"
-    assert result.record.schedule_row_description == description
+    assert result.record.schedule_row_description == ("" if untrusted_tail else description)
     assert result.record.schedule_row_observation_ids
 
 
