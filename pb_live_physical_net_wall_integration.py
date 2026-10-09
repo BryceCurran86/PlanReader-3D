@@ -502,6 +502,25 @@ def collect_live_physical_net_wall_claim(
                 if record_id in face_id_by_record
             }
 
+            # Resolve the authenticated viewport at most once per room scope.
+            # A missing or ambiguous owner is cached as None, never promoted.
+            containing_viewport_checked = False
+            containing_viewport = None
+
+            def authenticated_containing_viewport():
+                nonlocal containing_viewport_checked, containing_viewport
+                if not containing_viewport_checked:
+                    containing_viewport = (
+                        _unique_authenticated_containing_floor_plan_viewport(
+                            source=source,
+                            scope_rooms=scope_rooms,
+                            page_id=page_id,
+                            snapshot_id=snapshot_id,
+                        )
+                    )
+                    containing_viewport_checked = True
+                return containing_viewport
+
             if (
                 room_binding.viewport_id is not None
                 and room_binding.viewport_bbox is not None
@@ -516,14 +535,7 @@ def collect_live_physical_net_wall_claim(
                 )
                 scale_viewport_id = viewport_id
             else:
-                containing_viewport = (
-                    _unique_authenticated_containing_floor_plan_viewport(
-                        source=source,
-                        scope_rooms=scope_rooms,
-                        page_id=page_id,
-                        snapshot_id=snapshot_id,
-                    )
-                )
+                containing_viewport = authenticated_containing_viewport()
                 if containing_viewport is not None:
                     viewport_id, viewport_bbox = containing_viewport
                     viewport_status = ViewportResolutionStatus.RESOLVED
@@ -616,14 +628,7 @@ def collect_live_physical_net_wall_claim(
                     PHYSICAL_SCALE_VIEWPORT_REQUIRED,
                 )
             ):
-                containing_viewport = (
-                    _unique_authenticated_containing_floor_plan_viewport(
-                        source=source,
-                        scope_rooms=scope_rooms,
-                        page_id=page_id,
-                        snapshot_id=snapshot_id,
-                    )
-                )
+                containing_viewport = authenticated_containing_viewport()
                 if containing_viewport is not None:
                     resolved_viewport_id, resolved_viewport_bbox = (
                         containing_viewport
