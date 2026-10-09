@@ -89,6 +89,7 @@ def _valid_room_area_quantity(
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
         or _clean(quantity.unit).lower() not in {"m2", "m²"}
         or quantity.blocking_reasons
+        or not quantity.evidence_ids
         or _clean(quantity.authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
         or _quantity_value(quantity) is None
@@ -110,6 +111,18 @@ def _valid_room_area_quantity(
         }
     )
     if len(figured_ids) != 2:
+        return False
+
+    # Some documented dimension bridges carry explicit physical-room ownership
+    # receipts in addition to the support-sheet snapshot. When present these
+    # must agree with the canonical room, not just the page and revision.
+    room_snapshot_id = _clean(quantity_meta.get("room_snapshot_id"))
+    source_face_id = _clean(quantity_meta.get("source_room_face_record_id"))
+    if (
+        room_snapshot_id and room_snapshot_id != _clean(room.snapshot_id)
+    ) or (
+        source_face_id and source_face_id != _clean(room.source_room_face_record_id)
+    ):
         return False
 
     if (
