@@ -504,3 +504,19 @@ def test_foreign_room_area_source_receipts_cannot_publish_ceiling() -> None:
         assert result.records == ()
         assert result.quantities == ()
         assert result.canonical_ceilings == ()
+
+
+def test_unconfirmed_room_entity_cannot_promote_firm_area_to_ceiling() -> None:
+    # A FIRM area cannot upgrade an uncorroborated source-room identity.
+    original = _bridge()
+    weakened = replace(
+        original,
+        entities=(replace(original.entities[0], status=EvidenceResolutionStatus.CANDIDATE),),
+    )
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(), room_area_bridges=(weakened,), finishes=_finish(),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
