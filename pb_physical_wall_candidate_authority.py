@@ -74,7 +74,7 @@ from pb_viewport_segmentation import (
 )
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_junction_classifier import classify_junctions
-from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY, SNAP_COLLAPSE_REASON
 from pb_wall_room_topology_stage_a import (
     DEFAULT_GAP_SNAP_TOLERANCE_PT,
     build_wall_graph_for_viewport,
@@ -219,12 +219,22 @@ class PhysicalWallSourceEdgeFragment:
 
 
 @dataclass(frozen=True)
+class PhysicalWallSnapCollapsedFragment(PhysicalWallSourceEdgeFragment):
+    """An exact source-loss negative, not an edge in the surviving graph."""
+
+    reason_code: str = SNAP_COLLAPSE_REASON
+
+
+@dataclass(frozen=True)
 class PhysicalWallCandidateRecord:
     wall_candidate_id: str
     wall_candidate: WallCandidate
     physical_identity: PhysicalWallIdentity
     schema_version: str = PHYSICAL_WALL_CANDIDATE_AUTHORITY_SCHEMA_VERSION
     source_edge_fragments: tuple[PhysicalWallSourceEdgeFragment, ...] = ()
+    # Observability only: these source fragments disappeared during W2
+    # snapping. They are not surviving graph edges or continuity authority.
+    source_snap_collapsed_fragments: tuple[PhysicalWallSnapCollapsedFragment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2725,6 +2735,62 @@ def _apply_trusted_relation_overrides(
     )
 
 
+def _source_snap_collapsed_fragment_inventory(graph, identities):
+    """Retain exact W2 negatives beside their uniquely adjacent W4 owner.
+
+    Both source endpoints need surviving same-ancestor edges meeting at the
+    same snapped node, and one usable identity must own both. This is a
+    source-loss audit, never permission to bridge a missing graph edge.
+    """
+    endpoints = defaultdict(list)
+    owners = defaultdict(set)
+    for candidate_id, identity in identities.items():
+        if identity.usable:
+            for edge_id in identity.edge_ids:
+                owners[str(edge_id)].add(candidate_id)
+    for edge in graph.get("edges", ()):
+        line = _line(_segment_geometry(edge))
+        parents = frozenset(str(p) for p in (edge.get(LINEAGE_KEY) or {}).get(
+            "source_primitive_ids", ()))
+        if line is None or not parents:
+            continue
+        for point, node in ((line[:2], edge.get("a")), (line[2:], edge.get("b"))):
+            if node is not None:
+                for parent in parents:
+                    endpoints[(point, parent)].append((str(edge["id"]), node, parents))
+    inventory = defaultdict(list)
+    surviving_ids = {str(edge["id"]) for edge in graph.get("edges", ())}
+    collapsed = tuple(graph.get("snap_collapsed_fragments", ()))
+    id_counts = Counter(str(fragment.get("id") or "") for fragment in collapsed)
+    for fragment in collapsed:
+        fragment_id = str(fragment.get("id") or "")
+        line = _line(_segment_geometry(fragment))
+        parents = frozenset(str(p) for p in (fragment.get(LINEAGE_KEY) or {}).get(
+            "source_primitive_ids", ()))
+        if (fragment.get("reason") != SNAP_COLLAPSE_REASON or not fragment_id
+                or fragment_id in surviving_ids or id_counts[fragment_id] != 1
+                or line is None or not parents):
+            continue
+        parent = min(parents)  # Index only; all parents are checked below.
+        candidates = set()
+        for left_id, left_node, left_parents in endpoints[(line[:2], parent)]:
+            for right_id, right_node, right_parents in endpoints[(line[2:], parent)]:
+                if (left_id == right_id or left_node != right_node
+                        or not parents <= left_parents & right_parents):
+                    continue
+                candidates.update(owners[left_id] & owners[right_id])
+        if len(candidates) != 1:
+            continue
+        candidate_id = next(iter(candidates))
+        if not parents <= set(identities[candidate_id].source_primitive_ids):
+            continue
+        inventory[candidate_id].append(PhysicalWallSnapCollapsedFragment(
+            edge_id=fragment_id, geometry=line,
+            source_primitive_ids=tuple(sorted(parents))))
+    return {candidate_id: tuple(sorted(rows, key=lambda row: row.edge_id))
+            for candidate_id, rows in inventory.items()}
+
+
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2788,6 +2854,7 @@ def _assemble_scope_result(
         viewport_id=scope_id,
     )
     identities = collect_physical_wall_identities(walls, graph)
+    collapsed_source_fragments = _source_snap_collapsed_fragment_inventory(graph, identities)
     graph_edges = {str(edge["id"]): edge for edge in graph["edges"]}
 
     ordered_walls = sorted(walls, key=lambda item: item.candidate_id)
@@ -2802,6 +2869,7 @@ def _assemble_scope_result(
                 wall_candidate_id=wall.candidate_id,
                 wall_candidate=wall,
                 physical_identity=identity,
+                source_snap_collapsed_fragments=collapsed_source_fragments.get(wall.candidate_id, ()),
                 source_edge_fragments=tuple(
                     PhysicalWallSourceEdgeFragment(
                         edge_id=str(edge_id),
@@ -3658,6 +3726,7 @@ __all__ = [
     "PhysicalWallCandidateProducer",
     "PhysicalWallCandidateRecord",
     "PhysicalWallSourceEdgeFragment",
+    "PhysicalWallSnapCollapsedFragment",
     "PhysicalWallCandidateScopeResult",
     "PhysicalWallCandidateSelector",
 ]

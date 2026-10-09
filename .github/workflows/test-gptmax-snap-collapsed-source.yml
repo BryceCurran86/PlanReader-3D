@@ -1,0 +1,56 @@
+name: GPT MAX Snap Collapsed Source Retention
+on:
+  pull_request:
+    paths:
+      - pb_physical_wall_candidate_authority.py
+      - tests/test_source_snap_collapsed_fragment_inventory.py
+      - .github/workflows/test-gptmax-snap-collapsed-source.yml
+concurrency:
+  group: gptmax-snap-source-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  source-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source ancestry and negative regressions
+        run: PYTHONPATH=. python -m pytest -q tests/test_source_snap_collapsed_fragment_inventory.py tests/test_raster_source_wall_frame_projection.py tests/test_wall_topology_primitive_lineage.py
+      - name: Original source authority retention
+        run: |
+          cp tools/diag_gptmax_source_authority_stages.py /tmp/snap-source-stages.py
+          git worktree add /tmp/snap-source-baseline ${{ github.event.pull_request.base.sha }}
+          (cd /tmp/snap-source-baseline && PYTHONPATH=. python -u /tmp/snap-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output /tmp/snap-source-baseline.json)
+          PYTHONPATH=. python -u /tmp/snap-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output snap-source-current.json
+          cp /tmp/snap-source-baseline.json snap-source-baseline.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          old = json.loads(Path('snap-source-baseline.json').read_text())
+          new = json.loads(Path('snap-source-current.json').read_text())
+          assert old['source_sha256'] == new['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert old['primitive_safety_cap'] == new['primitive_safety_cap'] == 20_000
+          def remove_negative_sidecar(value):
+              if isinstance(value, dict):
+                  return {k: (sorted(v) if k in {'void_reason_codes', 'opening_void_reason_codes'} else remove_negative_sidecar(v)) for k,v in value.items() if k != 'source_snap_collapsed_fragments'}
+              if isinstance(value, list):
+                  return [remove_negative_sidecar(v) for v in value]
+              return value
+          assert remove_negative_sidecar(old) == remove_negative_sidecar(new)
+          assert 'quantities' not in new
+          print({'source_authority_unchanged': True, 'summary': new['summary']})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snap-collapsed-source-retention
+          path: snap-source-*.json
+          retention-days: 14
