@@ -938,7 +938,7 @@ def test_rotated_rcps_can_use_resolved_schedule_as_nonoverlapping_band_separator
     assert all(
         viewport.status == ViewportSegmentationStatus.DERIVED.value
         for viewport in rcps
-    ), [(v.label, v.status, v.notes, v.provenance) for v in viewports]
+    ), "\n".join(f"{v.label}: {v.status}; notes={v.notes}; provenance={v.provenance}" for v in viewports)
     assert all(is_authoritative_derived_viewport(viewport) for viewport in rcps)
     assert {
         viewport.provenance.get("separator_side")
