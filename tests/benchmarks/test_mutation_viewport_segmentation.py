@@ -1059,3 +1059,25 @@ def _rotated_two_rcps_with_central_schedule() -> fitz.Document:
     )
     return _reopen(doc)
 
+
+
+def test_rotated_semantic_band_rejects_competing_nonplan_title() -> None:
+    """An elevation title sharing the RCP side band must revoke ownership."""
+    doc = _rotated_two_rcps_with_central_schedule()
+    page = doc[0]
+    page.insert_text(
+        (480.0, 740.0), "NORTH ELEVATION", fontsize=11, rotate=90
+    )
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        left = [
+            viewport for viewport in viewports
+            if viewport.label == "REFLECTED CEILING PLAN"
+        ]
+        assert len(left) == 1
+        assert not is_authoritative_derived_viewport(left[0])
+        assert left[0].bounding_box is None
+        assert validate_non_overlapping_viewports(viewports)
+    finally:
+        doc.close()
