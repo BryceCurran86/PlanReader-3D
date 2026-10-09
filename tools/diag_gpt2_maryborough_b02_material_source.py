@@ -29,7 +29,17 @@ if __name__=="__main__":
                 if codes:
                     heading_lines = [i for i, line in enumerate(lines) if SCHEDULE.search(line)]
                     description = CODES.sub("", val).strip(" :;-")
+                    exact_code_line = len(codes) == 1 and val.upper() == codes[0]
+                    next_line = lines[line_idx + 1].strip() if line_idx + 1 < len(lines) else ""
+                    next_line_is_description = bool(
+                        exact_code_line and next_line
+                        and not CODES.search(next_line)
+                        and not SCHEDULE.search(next_line)
+                        and re.search(r"[A-Z]{3,}", next_line, re.I)
+                    )
                     proof = {
+                        "next_native_line": next_line if next_line_is_description else None,
+                        "same_block_code_description_pair": next_line_is_description,
                         "native_block_schedule_heading_lines": heading_lines,
                         "same_block_schedule_heading": bool(heading_lines),
                         "same_line_description_present": bool(description),
