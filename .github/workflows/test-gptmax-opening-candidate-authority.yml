@@ -1,0 +1,74 @@
+name: GPT MAX Opening Candidate Authority
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - pb_physical_opening_authority.py
+      - pb_semantic_opening_enumeration_authority.py
+      - pb_source_visibility_authority.py
+      - tests/test_raster_framed_opening_g17_contract.py
+      - tests/test_raster_continuation_owner_ambiguity.py
+      - tests/test_raster_opening_live_enumeration.py
+      - tests/test_gptmax_physical_authority_handoff.py
+      - tools/diag_gptmax_physical_authority_handoff.py
+      - .github/workflows/test-gptmax-opening-candidate-authority.yml
+concurrency:
+  group: gptmax-opening-authority-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  source-proof:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Candidate, identity, source-integrity and count-gate regressions
+        run: >-
+          PYTHONPATH=. python -m pytest -q
+          tests/test_raster_framed_opening_g17_contract.py
+          tests/test_raster_continuation_owner_ambiguity.py
+          tests/test_raster_opening_live_enumeration.py
+          tests/test_gptmax_physical_authority_handoff.py
+          tests/test_generic_opening_count_authority_v1.py
+          tests/test_physical_opening_identity_stability.py
+          tests/test_source_visibility_task3_hardening.py
+          tests/test_semantic_opening_enumeration_authority_v1.py
+          tests/test_opening_universe_completeness_source_adapter_v1.py
+          tests/test_physical_wall_candidate_drafting_motif_filter.py
+      - name: Real Lot16 source candidate audit
+        run: >-
+          PYTHONPATH=. python -u tools/diag_gptmax_physical_authority_handoff.py
+          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          --page-id 3 --candidate-only --output lot16-opening-candidate-audit.json
+      - name: Verify source provenance and retained authority gates
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('lot16-opening-candidate-audit.json').read_text())
+          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert report['primitive_safety_cap'] == 20_000
+          assert not report['all_page_native_decode_audit']['failed_pages']
+          assert report['raster_audit_available']
+          assert report['raster_candidate_audits']
+          assert all(not audit['candidate_universe_complete'] for audit in report['raster_candidate_audits'])
+          assert all(audit['unresolved_candidate_ids'] for audit in report['raster_candidate_audits'])
+          ids = [row['record_id'] for row in report['physical_openings']]
+          assert len(ids) == len(set(ids))
+          assert all(row['source_sha256'] == report['source_sha256'] for row in report['physical_openings'])
+          assert all(row['source_observation_ids'] for row in report['physical_openings'])
+          assert 'quantities' not in report
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-opening-candidate-authority
+          path: lot16-opening-candidate-audit.json
+          retention-days: 14
