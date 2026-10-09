@@ -129,6 +129,9 @@ class LivePhysicalNetWallClaim:
     # Source-authenticated same-view measurement first-gate receipts; a separate
     # cross-view or scaled authority may independently resolve the room area.
     same_view_room_area_first_failure_codes: tuple[tuple[str, str], ...] = ()
+    # Source-owned physical-scale failures are independent of documented area.
+    # Each entry owns an exact physical-room ID and the scale producer's reasons.
+    physical_scale_first_failure_codes: tuple[tuple[str, tuple[str, ...]], ...] = ()
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 
 
@@ -408,6 +411,7 @@ def collect_live_physical_net_wall_claim(
     ceiling_lining_quantity_evidence: list[QuantityEvidence] = []
     canonical_ceiling_objects: list[LiveCanonicalCeilingSurfaceObject] = []
     room_area_bridges = []
+    physical_scale_failures_by_room: dict[str, tuple[str, ...]] = {}
     same_view_area = None
     cross_view_area = None
     if canonical_rooms.rooms:
@@ -596,6 +600,7 @@ def collect_live_physical_net_wall_claim(
             )
 
             scale_calibration = None
+            scale_bridge_reasons: tuple[str, ...] = ()
             scale_selector = PhysicalScaleSelector(
                 document_id=scope_rooms[0].document_id,
                 revision_id=scope_rooms[0].revision_id,
@@ -708,11 +713,32 @@ def collect_live_physical_net_wall_claim(
                     viewport=viewport,
                     page_no=page_no,
                 )
+                scale_bridge_reasons = tuple(scale_bridge.reason_codes)
                 if (
                     scale_bridge.status is EvidenceResolutionStatus.CORROBORATED
                     and scale_bridge.calibration is not None
                 ):
                     scale_calibration = scale_bridge.calibration
+
+            if scale_calibration is None:
+                # A documented figured area can resolve without physical
+                # scale, so preserve this as an independent failure receipt.
+                failure_reasons = (
+                    scale_bridge_reasons
+                    or tuple(scale_result.reason_codes)
+                    or ("physical_scale_calibration_unavailable",)
+                )
+                for room in scope_rooms:
+                    physical_id = str(room.physical_room_id or "").strip()
+                    if not physical_id:
+                        continue
+                    prior = physical_scale_failures_by_room.get(physical_id)
+                    if prior is not None and prior != failure_reasons:
+                        physical_scale_failures_by_room[physical_id] = (
+                            "physical_scale_conflicting_room_scope_receipts",
+                        )
+                    else:
+                        physical_scale_failures_by_room[physical_id] = failure_reasons
 
             if not explicit_by_face_id and scale_calibration is None:
                 continue
@@ -909,6 +935,9 @@ def collect_live_physical_net_wall_claim(
                 same_view_area.unresolved_first_failure_codes
                 if same_view_area is not None else ()
             ),
+            physical_scale_first_failure_codes=tuple(sorted(
+                physical_scale_failures_by_room.items()
+            )),
         )
 
     return LivePhysicalNetWallClaim(
@@ -955,6 +984,9 @@ def collect_live_physical_net_wall_claim(
             same_view_area.unresolved_first_failure_codes
             if same_view_area is not None else ()
         ),
+        physical_scale_first_failure_codes=tuple(sorted(
+            physical_scale_failures_by_room.items()
+        )),
     )
 
 
