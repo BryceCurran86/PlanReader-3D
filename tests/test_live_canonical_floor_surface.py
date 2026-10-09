@@ -620,3 +620,28 @@ def test_metric_completion_does_not_override_partial_physical_room_universe(
         "source_room_universe_incomplete",
         LIVE_CANONICAL_FLOOR_METRIC_AREA_RESOLVED,
     )
+
+
+def test_candidate_source_room_entity_does_not_enrich_metric_floor(tmp_path) -> None:
+    path = tmp_path / "metric-floor-candidate-entity.pdf"
+    _write_plan(path)
+    published, room_faces, selector = _authority(path)
+    bridge = build_source_room_area_bridge(
+        room_face_authority=room_faces,
+        selector=selector,
+        context=_context(published),
+        document=_document(published),
+        viewport=_viewport(published),
+        page_no=1,
+        scale_calibration=_firm_scale(published),
+    )
+    floors = _floor_composition_from_bridge(published, bridge)
+    candidate_entities = tuple(
+        replace(entity, status=EvidenceResolutionStatus.CANDIDATE)
+        for entity in bridge.entities
+    )
+    weakened_bridge = replace(bridge, entities=candidate_entities)
+    result = enrich_live_canonical_floor_metric_areas(floors, weakened_bridge)
+    assert len(result.floors) == len(floors.floors)
+    assert all(floor.metric_area_m2 is None for floor in result.floors)
+    assert all(floor.metric_area_quantity_id is None for floor in result.floors)
