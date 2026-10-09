@@ -131,16 +131,23 @@ class SameViewRoomAreaProducer:
         revision_ids = {str(room.revision_id) for room in rooms}
         document_ids = {str(room.document_id) for room in rooms}
         source_hashes = {str(room.source_sha256).lower() for room in rooms}
+        source_snapshots = {str(room.snapshot_id) for room in rooms}
         if (
             len(revision_ids) != 1
             or len(document_ids) != 1
             or len(source_hashes) != 1
+            or len(source_snapshots) != 1
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return SameViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (SAME_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "same_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
 
         revision_id = next(iter(revision_ids))
@@ -149,12 +156,18 @@ class SameViewRoomAreaProducer:
             published is None
             or published.revision.document_id != next(iter(document_ids))
             or published.revision.source_sha256.lower() != next(iter(source_hashes))
+            or published.snapshot.snapshot_id != next(iter(source_snapshots))
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return SameViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (SAME_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "same_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
 
         eligible: list[LiveCanonicalRoomObject] = [
@@ -180,6 +193,30 @@ class SameViewRoomAreaProducer:
             if len(group) != 1
             for room in group
         }
+        # Two canonical rows asserting one physical room, even under different
+        # labels, cannot independently claim two figured areas. Validate the
+        # complete room universe, including candidates failing eligibility.
+        physical_counts: dict[str, int] = {}
+        for source_room in rooms:
+            physical_id = str(source_room.physical_room_id or "").strip()
+            if physical_id:
+                physical_counts[physical_id] = physical_counts.get(physical_id, 0) + 1
+        duplicate_physical_ids = {
+            room_id for room_id, count in physical_counts.items() if count > 1
+        }
+        source_face_ids: dict[str, list[str]] = {}
+        for source_room in rooms:
+            face_id = str(source_room.source_room_face_record_id or "").strip()
+            if face_id:
+                source_face_ids.setdefault(face_id, []).append(
+                    str(source_room.physical_room_id)
+                )
+        duplicate_face_room_ids = {
+            room_id
+            for physical_ids in source_face_ids.values()
+            if len(physical_ids) > 1
+            for room_id in physical_ids
+        }
         eligible_object_ids = {id(room) for room in eligible}
         unresolved: set[str] = {
             str(room.physical_room_id)
@@ -195,13 +232,30 @@ class SameViewRoomAreaProducer:
             room_id: "same_view_room_label_duplicate"
             for room_id in duplicate_room_ids
         })
-        conflict_seen = bool(duplicate_room_ids)
+        unresolved.update(duplicate_physical_ids)
+        first_failures.update({
+            room_id: "same_view_physical_room_identity_conflict"
+            for room_id in duplicate_physical_ids
+        })
+        unresolved.update(duplicate_face_room_ids)
+        first_failures.update({
+            room_id: "same_view_source_room_face_identity_conflict"
+            for room_id in duplicate_face_room_ids
+        })
+        conflict_seen = bool(
+            duplicate_room_ids or duplicate_physical_ids or duplicate_face_room_ids
+        )
         records: list[SameViewRoomAreaRecord] = []
 
         for (page_id, label), grouped_rooms in sorted(labels.items()):
             if len(grouped_rooms) != 1:
                 continue
             room = grouped_rooms[0]
+            if (
+                str(room.physical_room_id) in duplicate_physical_ids
+                or str(room.physical_room_id) in duplicate_face_room_ids
+            ):
+                continue
 
             lines = tuple(
                 line

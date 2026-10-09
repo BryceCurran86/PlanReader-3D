@@ -154,6 +154,120 @@ def test_yearlike_dimension_is_promoted_only_by_floor_plan_witness_geometry() ->
     assert record.area_evidence.metadata["vertical_value_mm"] == 2000
 
 
+def test_same_view_conflicting_source_lineage_reports_each_unresolved_room() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    foreign_room = replace(rooms.rooms[1], source_sha256="b" * 64)
+    conflicting = replace(rooms, rooms=(rooms.rooms[0], foreign_room))
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=conflicting,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == (
+        "physical-room-1", "physical-room-3",
+    )
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_lineage_conflict",
+        "physical-room-3": "same_view_source_lineage_conflict",
+    }
+
+
+def test_same_view_absent_producer_revision_reports_lineage_gate() -> None:
+    source, rooms = _source_and_rooms()
+    foreign = replace(
+        rooms,
+        rooms=(replace(rooms.rooms[0], source_sha256="b" * 64),),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=foreign,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_lineage_conflict",
+    }
+
+
+def test_mixed_or_stale_room_snapshots_never_publish_same_view_area() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    mixed = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(rooms.rooms[1], snapshot_id="foreign-snapshot"),
+        ),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=mixed,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_lineage_conflict",
+        "physical-room-3": "same_view_source_lineage_conflict",
+    }
+
+    stale = replace(
+        rooms,
+        rooms=(replace(rooms.rooms[0], snapshot_id="foreign-snapshot"),),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=stale,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_lineage_conflict",
+    }
+
+
+def test_duplicate_source_room_face_cannot_own_two_physical_room_areas() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    shared_face = rooms.rooms[0].source_room_face_record_id
+    conflicting = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(rooms.rooms[1], source_room_face_record_id=shared_face),
+        ),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=conflicting,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == (
+        "physical-room-1", "physical-room-3",
+    )
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_room_face_identity_conflict",
+        "physical-room-3": "same_view_source_room_face_identity_conflict",
+    }
+
+
+def test_same_physical_room_with_two_labels_cannot_publish_any_area() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    physical_id = rooms.rooms[0].physical_room_id
+    conflicting = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(rooms.rooms[1], physical_room_id=physical_id),
+        ),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=conflicting,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == (physical_id,)
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        physical_id: "same_view_physical_room_identity_conflict",
+    }
+
+
 def test_duplicate_same_page_room_label_fails_closed() -> None:
     source, rooms = _source_and_rooms(duplicate_label=True)
     result = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
