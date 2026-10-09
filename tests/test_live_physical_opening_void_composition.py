@@ -26,10 +26,14 @@ def _complete_void_pdf(
     tag: str = "W1",
     include_joinery_note: bool = False,
     include_schedule: bool = True,
+    schedule_description: str = "",
 ) -> bytes:
     doc = fitz.open()
     try:
-        page = doc.new_page(width=760.0, height=650.0)
+        page = doc.new_page(
+            width=1000.0 if schedule_description else 760.0,
+            height=650.0,
+        )
         for first, second in (
             ((20.0, 100.0), (100.0, 100.0)),
             ((145.0, 100.0), (220.0, 100.0)),
@@ -51,15 +55,19 @@ def _complete_void_pdf(
             )
 
         if include_schedule:
-            headings = (
+            headings = [
                 "MARK",
                 "ROWDTH-MM",
                 "ROHT-MM",
                 "ROUGH-OPENING-SILL-MM",
                 "ROUGH-OPENING-HEAD-MM",
-            )
-            values = (tag, "900", "2100" if include_height else "", "900", "3000")
-            xs = (50.0, 150.0, 250.0, 350.0, 550.0)
+            ]
+            values = [tag, "900", "2100" if include_height else "", "900", "3000"]
+            xs = [50.0, 150.0, 250.0, 350.0, 550.0]
+            if schedule_description:
+                headings.append("DESCRIPTION")
+                values.append(schedule_description)
+                xs.append(750.0)
             for text, x in zip(headings, xs):
                 page.insert_text(fitz.Point(x, 500.0), text)
             for text, x in zip(values, xs):
@@ -114,6 +122,36 @@ def test_plan_tag_survives_without_matching_schedule_row() -> None:
     assert opening.tag_observation_id
     assert opening.schedule_binding_record_id is None
     assert opening.schedule_page_id is None
+
+
+def test_canonical_opening_retains_authenticated_schedule_row_description() -> None:
+    source = SourceVisibilityProducer(
+        producer_method="live-opening-schedule-description-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="live-opening-schedule-description",
+        source_bytes=_complete_void_pdf(
+            tag="D1",
+            schedule_description="IPF3 SOLID CORE",
+        ),
+        source_locator="memory://live-opening-schedule-description.pdf",
+    )
+    wall_opening = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    composition = compose_live_physical_opening_voids(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert len(composition.canonical_openings) == 1
+    opening = composition.canonical_openings[0]
+    assert opening.type_mark == "D1"
+    assert opening.schedule_row_description == "IPF3 SOLID CORE"
+    assert opening.to_dict()["schedule_row_description"] == "IPF3 SOLID CORE"
 
 
 def test_canonical_area_prefers_authenticated_elevation_frame_when_void_is_incomplete() -> None:

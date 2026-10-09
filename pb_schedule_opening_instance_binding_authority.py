@@ -29,7 +29,7 @@ from pb_physical_opening_authority import (
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import SourceVisibilityProducer
 
-SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION = "2.2.0"
+SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION = "2.3.0"
 
 BINDING_RESOLVED = "schedule_opening_instance_binding_resolved"
 BINDING_OPENING_UNRESOLVED = "schedule_opening_instance_binding_opening_unresolved"
@@ -103,6 +103,10 @@ class ScheduleOpeningInstanceBindingRecord:
     # Physical meaning is parser-owned from explicit schedule headings only.
     schedule_row_dimension_basis: str = ""
     schedule_row_basis_source: str = ""
+    # Exact authenticated schedule-row semantic text retained additively for
+    # downstream grouping/classification. It is evidence, not a derived class
+    # and never authorizes a quantity by itself.
+    schedule_row_description: str = ""
     schema_version: str = SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION
 
 
@@ -477,6 +481,42 @@ def _aperture_contains_bbox(aperture: _OpeningAperture, bbox: BBox) -> bool:
     return along_overlap and normal_overlap
 
 
+def _source_owned_description(
+    parsed_description: str,
+    row_ids: Sequence[str],
+    native_words: Mapping[str, tuple[str, str, int, int, int]],
+) -> str:
+    """Retain a complete native line only inside an already unique source row.
+
+    Native line membership does not select a table or establish row uniqueness.
+    A description prefix in the middle of a line, a missing native word, or a
+    line crossing the selected table window cannot prove a complete description.
+    """
+    if not parsed_description:
+        return ""
+    owned = set(row_ids)
+    starts = [
+        value for observation_id, value in native_words.items()
+        if observation_id in owned and value[0] == parsed_description
+        and value[4] == 0
+    ]
+    if len(starts) != 1:
+        return ""
+    start = starts[0]
+    line = [
+        (observation_id, value)
+        for observation_id, value in native_words.items()
+        if value[1:4] == start[1:4]
+    ]
+    line.sort(key=lambda item: item[1][4])
+    if (
+        any(observation_id not in owned for observation_id, _value in line)
+        or [value[4] for _observation_id, value in line] != list(range(len(line)))
+    ):
+        return ""
+    return " ".join(value[0] for _observation_id, value in line)
+
+
 def _row_groups_for_page(
     words: Sequence[tuple[str, str, Sequence[float]]],
     *,
@@ -844,6 +884,8 @@ class ScheduleOpeningInstanceBindingProducer:
             )
 
         trusted_by_page: dict[str, list[tuple[str, str, tuple[float, ...]]]] = {}
+        native_words: dict[str, tuple[str, str, int, int, int]] = {}
+        native_census_authenticated = True
         for observation_id in published.text_observation_ids:
             text_result = text_integrity.resolve_text(
                 ObservationSelector(
@@ -859,8 +901,19 @@ class ScheduleOpeningInstanceBindingProducer:
                 or text_result.trusted_text is None
                 or text_result.receipt is None
             ):
+                native_census_authenticated = False
                 continue
             receipt = text_result.receipt
+            if all(
+                isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                for value in (receipt.block_no, receipt.line_no, receipt.word_no)
+            ):
+                native_words[observation_id] = (
+                    text_result.trusted_text, receipt.page_id,
+                    receipt.block_no, receipt.line_no, receipt.word_no,
+                )
+            else:
+                native_census_authenticated = False
             trusted_by_page.setdefault(receipt.page_id, []).append(
                 (
                     observation_id,
@@ -988,6 +1041,9 @@ class ScheduleOpeningInstanceBindingProducer:
             )
 
         entry, schedule_row_observation_ids, schedule_page_id = matching_rows[0]
+        description = _source_owned_description(
+            str(entry.description or ""), schedule_row_observation_ids, native_words,
+        ) if native_census_authenticated else ""
         payload = {
             "schema_version": SCHEDULE_OPENING_INSTANCE_BINDING_SCHEMA_VERSION,
             "document_id": opening.document_id,
@@ -1008,6 +1064,7 @@ class ScheduleOpeningInstanceBindingProducer:
             "schedule_row_count_explicit": bool(entry.count_explicit),
             "schedule_row_dimension_basis": str(entry.dimension_basis or ""),
             "schedule_row_basis_source": str(entry.basis_source or ""),
+            "schedule_row_description": description,
         }
         record = ScheduleOpeningInstanceBindingRecord(
             record_id=stable_contract_id(
@@ -1032,6 +1089,7 @@ class ScheduleOpeningInstanceBindingProducer:
             schedule_row_count_explicit=bool(entry.count_explicit),
             schedule_row_dimension_basis=str(entry.dimension_basis or ""),
             schedule_row_basis_source=str(entry.basis_source or ""),
+            schedule_row_description=description,
         )
         return self._store(
             key,

@@ -1,0 +1,147 @@
+name: GPT MAX Native Schedule Description Retention
+on:
+  pull_request:
+    paths:
+      - pb_schedule_opening_instance_binding_authority.py
+      - pb_live_physical_opening_void_composition.py
+      - tests/test_schedule_opening_instance_binding_authority_v1.py
+      - tests/test_schedule_native_description_lineage.py
+      - tests/test_live_physical_opening_void_composition.py
+      - .github/workflows/test-gptmax-native-description-source.yml
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: gptmax-native-description-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  full-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Integrity and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+      - name: Full regression suite
+        run: PYTHONPATH=. python -m pytest -q tests/
+      - name: Smoke test
+        run: python tests/ci_smoke.py
+  source-proof:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37830114626
+          name: lot16-connected-frame-source-handoff
+          path: prerequisite-lot16
+      - name: Real Lot16 source, wall and host handoff
+        run: >-
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
+          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          --page-id 3 --output lot16-connected-frame-source-handoff.json
+      - name: Verify exact source ownership and safety cap
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('lot16-connected-frame-source-handoff.json').read_text())
+          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert report['primitive_safety_cap'] == 20_000
+          assert report['opening_bindings']
+          assert any('raster_source_band_host_resolved' in row['reason_codes'] for row in report['opening_bindings'])
+          assert report['source_owned_wall_scope_results']
+          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
+          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
+          assert len(ids) == len(set(ids))
+          assert 'quantities' not in report
+          baseline = json.loads(Path('prerequisite-lot16/lot16-connected-frame-source-handoff.json').read_text())
+          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
+          assert baseline['source_sha256'] == report['source_sha256']
+          assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
+          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
+          old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
+          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-connected-frame-source-handoff
+          path: lot16-connected-frame-source-handoff.json
+          retention-days: 14
+  maryborough-source-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37830114626
+          name: maryborough-connected-frame-source-handoff
+          path: prerequisite-maryborough
+      - name: Compare real Maryborough source and host identities with prerequisite
+        run: |
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
+          cp prerequisite-maryborough/maryborough-connected-frame-source-handoff.json maryborough-source-baseline.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          baseline = json.loads(Path('maryborough-source-baseline.json').read_text())
+          current = json.loads(Path('maryborough-connected-frame-source-handoff.json').read_text())
+          assert current['source_sha256'] == baseline['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
+          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
+          assert keyed(current['opening_bindings']) == keyed(baseline['opening_bindings'])
+          assert len(current['opening_bindings']) == len(keyed(current['opening_bindings']))
+          old_frames, new_frames = keyed(baseline['host_frames']), keyed(current['host_frames'])
+          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          assert 'quantities' not in current
+          print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'host_identity_parity': True, 'existing_frame_identity_parity': True}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maryborough-connected-frame-source-handoff
+          path: maryborough-*.json
+          retention-days: 14
