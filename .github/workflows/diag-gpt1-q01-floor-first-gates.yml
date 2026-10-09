@@ -111,6 +111,40 @@ jobs:
                           if inside and scale:
                               pair_candidates.append({"h_mm":h.value_mm,"v_mm":v.value_mm,"witness_intersect":witness,"h_id":h.dimension_id,"v_id":v.dimension_id})
               pair_gates.append({"label":room.room_label,"physical_room_id":room.physical_room_id,"source_face":room.source_room_face_record_id,"gate_counts":counts,"inside_scaled_candidates":pair_candidates[:16]})
+          room_source_anchor_gates=[]
+          for room in trace_rooms.rooms:
+              if room.room_label not in ("WC","LINEN"): continue
+              xs=[float(point[0]) for point in room.polygon_pdf_pts]
+              ys=[float(point[1]) for point in room.polygon_pdf_pts]
+              bbox=(min(xs),min(ys),max(xs),max(ys))
+              label_lines=tuple(v for v in _trusted_lines_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_labels=(room.room_label,)) if _norm_label(v.text)==_norm_label(room.room_label))
+              ds=_trusted_native_dimensions_for_page(trace_source,revision_id=room.revision_id,page_id=room.page_id,candidate_lines=label_lines,view_type=DrawingViewType.FLOOR_PLAN.value)
+              dw=bbox[2]-bbox[0]
+              dh=bbox[3]-bbox[1]
+              # Source-points only. These comparisons do not assert or mint scale.
+              tol=max(1e-6,min(dw,dh)*0.02)
+              observed=[]
+              for d in ds:
+                  a,b=d.endpoints_pt
+                  if d.orientation==DimensionOrientation.HORIZONTAL.value:
+                      span=sorted((float(a[0]),float(b[0])))
+                      edge=tuple(abs(span[i]-bbox[2*i]) for i in range(2))
+                      axis_span=dw
+                  else:
+                      span=sorted((float(a[1]),float(b[1])))
+                      edge=(abs(span[0]-bbox[1]),abs(span[1]-bbox[3]))
+                      axis_span=dh
+                  observed.append({"id":d.dimension_id,"orientation":d.orientation,
+                      "figured_mm":d.value_mm,"segment_span_pt":round(abs(span[1]-span[0]),4),
+                      "source_witness_geometry_count":len(d.witness_geometries),
+                      "source_dim_line_observation_count":len(d.dimension_line_observation_ids),
+                      "source_witness_observation_count":len(d.witness_observation_ids),
+                      "room_axis_span_pt":round(axis_span,4),
+                      "room_side_offset_pt":list(round(v,4) for v in edge),
+                      "both_room_edges_match":all(v<=tol for v in edge)})
+              room_source_anchor_gates.append({"label":room.room_label,"face_record_id":room.source_room_face_record_id,
+                  "bbox_pt":list(round(v,4) for v in bbox),"edge_tolerance_pt":round(tol,4),
+                  "dimensions":observed})
           scale_producer=PhysicalScaleProducer.from_source_visibility_producer(trace_source)
           scale_by_scope={}
           for room in claim.canonical_rooms:
@@ -135,6 +169,7 @@ jobs:
               "labelled_rooms":[{"label":x.room_label,"face_record_id":x.source_room_face_record_id,"geometry_complete":x.geometry_complete} for x in claim.canonical_rooms if x.room_label],
               "dimension_witnesses":witnesses,
               "wc_linen_pair_gates":pair_gates,
+              "wc_linen_room_source_anchor_gates":room_source_anchor_gates,
               "same_view_status":status(same_view.status),
               "same_view_reasons":list(same_view.reason_codes),
               "same_view_record_count":len(same_view.records),
