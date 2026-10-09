@@ -865,7 +865,7 @@ def test_rotated_rcps_can_use_resolved_schedule_as_nonoverlapping_band_separator
         if viewport.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
     ]
     assert len(schedule) == 1
-    assert schedule[0].status == ViewportSegmentationStatus.RESOLVED.value
+    assert schedule[0].status == ViewportSegmentationStatus.RESOLVED.value, [(v.label, v.status, v.notes, v.provenance) for v in viewports]
     assert len(rcps) == 2
     assert all(
         viewport.status == ViewportSegmentationStatus.DERIVED.value
