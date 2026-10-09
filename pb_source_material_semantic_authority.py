@@ -1103,7 +1103,6 @@ def _material_definition_candidate(
             and code_line.isalpha()
             and code_line.isupper()
             and len(description_line.split()) >= 2
-            and not description_line.upper() == description_line.replace(" ", "")
         ):
             parsed = parse_schedule_text(
                 f"{code_line} {description_line}",
