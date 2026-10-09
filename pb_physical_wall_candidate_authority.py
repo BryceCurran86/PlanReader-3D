@@ -37,7 +37,10 @@ from pb_pdf_text_integrity_authority import (
 )
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_drawing_evidence_binding import DrawingViewType
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
+from pb_physical_opening_authority import (
+    JAMB_BOUNDED_TWO_FACE_INTERRUPTION, PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority,
+    PhysicalOpeningExistenceRecord,
+)
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_RESOLVED,
     PhysicalScaleProducer,
@@ -715,6 +718,7 @@ def _filter_repeated_non_physical_drafting_primitives(
     *,
     page_width: float,
     page_height: float,
+    preserved_source_primitive_ids: frozenset[str] = frozenset(),
 ) -> tuple[dict, ...]:
     """Exclude only source-proven dense singleton drafting motifs.
 
@@ -786,6 +790,12 @@ def _filter_repeated_non_physical_drafting_primitives(
         # text-associated annotation mask and proved it does not participate in
         # a physical wall/object. Missing proof preserves the source geometry.
         if _is_proven_annotation_mask_edge(segment):
+            continue
+        if str(segment.get("id") or "") in preserved_source_primitive_ids:
+            # This set is derived internally from independently re-proven source
+            # openings, never a caller's physical-wall assertion. Only the four
+            # wall-face primitives are protected; jambs and motifs are not.
+            kept.append(segment)
             continue
         if id(segment) not in singleton_ids:
             kept.append(segment)
@@ -2061,6 +2071,127 @@ def _opening_raw_relation_sets(
     return relation_sets
 
 
+def _producer_proven_page_opening_records(
+    *, source_producer: SourceVisibilityProducer, published, page_id: str,
+    physical_opening_authority: PhysicalOpeningAuthority,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+) -> tuple[PhysicalOpeningExistenceRecord, ...]:
+    """Share the full-page positive proof inventory, with fresh integrity.
+
+    This is individual existence evidence only. It never supplies a count or
+    semantic universe completeness. Prove every authenticated page observation
+    once; no caller candidate list or preflight geometry narrows that universe.
+    """
+    if type(physical_opening_authority) is not PhysicalOpeningAuthority:
+        raise TypeError("physical_opening_authority must be producer-owned")
+    reader = physical_opening_authority._source_visibility_authority
+    if (reader is None
+            or reader._source_authority._store is not source_producer._producer._store
+            or (physical_opening_authority._source_visibility_producer is not None
+                and physical_opening_authority._source_visibility_producer is not source_producer)):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    visibility = source_producer.authority()
+    # A damaged competitor can invalidate a cached uniqueness proof even when
+    # the opening's own six source observations are unchanged.
+    authenticated = visibility.authenticated_visible_observations(published)
+    rows = tuple(row for row in authenticated if str(row[1].page_id) == str(page_id))
+    if (resolved_visible_observations is not None
+            and (len(resolved_visible_observations) != len(rows)
+                 or dict(resolved_visible_observations) != dict(rows))):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    key = (published.revision.document_id, published.revision.revision_id,
+           published.revision.source_sha256, published.snapshot.snapshot_id, str(page_id))
+    cached = physical_opening_authority._wall_source_opening_page_proof_cache.get(key)
+    if cached is not None:
+        return cached
+    # A six-visible-support G17 pattern is impossible with fewer than six page
+    # observations. Preserve the existing small-page path without constructing
+    # a second viewport segmentation. This says nothing about other opening
+    # families or universal nonexistence.
+    if len(rows) < 6:
+        physical_opening_authority._wall_source_opening_page_proof_cache[key] = ()
+        return ()
+    proven: dict[str, PhysicalOpeningExistenceRecord] = {}
+    for observation_id, observation in rows:
+        if str(observation.page_id) != str(page_id):
+            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+        result = physical_opening_authority.prove_existence(ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
+        opening = result.existence_record
+        if (result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.proposition == PHYSICAL_OPENING_EXISTS
+                and opening is not None and str(opening.page_id) == str(page_id)):
+            proven[opening.record_id] = opening
+    records = tuple(proven[record_id] for record_id in sorted(proven))
+    physical_opening_authority._wall_source_opening_page_proof_cache[key] = records
+    return records
+
+
+def _producer_proven_opening_wall_face_source_ids(
+    *, source_producer: SourceVisibilityProducer, published, page_id: str,
+    physical_opening_authority: PhysicalOpeningAuthority,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+) -> frozenset[str]:
+    """Reauthenticate complete opening representatives before motif pruning.
+
+    Global enumeration completeness is not required for an individual positive
+    object. Every contributing opening and all six supports are independently
+    re-proven against the same producer snapshot; only its two SAME face pairs
+    may preserve geometry. The result establishes neither counts nor wall role.
+    """
+    visibility = source_producer.authority()
+    try:
+        # A damaged competitor outside an opening's six supports can invalidate
+        # the old uniqueness proof. Reauthenticate the complete source snapshot
+        # before consuming any cached positive opening representative.
+        openings = _producer_proven_page_opening_records(
+            source_producer=source_producer, published=published, page_id=page_id,
+            physical_opening_authority=physical_opening_authority,
+            resolved_visible_observations=resolved_visible_observations)
+    except RuntimeError:
+        return frozenset()
+    protected: set[str] = set()
+    for opening in openings:
+        if (opening.snapshot_id != published.snapshot.snapshot_id
+                or str(opening.page_id) != str(page_id)
+                or opening.structural_pattern != JAMB_BOUNDED_TWO_FACE_INTERRUPTION
+                or len(opening.source_observation_ids) != 6):
+            continue
+        raw_lines: dict[str, Line] = {}
+        for observation_id in opening.source_observation_ids:
+            resolved = visibility.resolve_visible(ObservationSelector(
+                document_id=opening.document_id, revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256, snapshot_id=opening.snapshot_id,
+                observation_id=observation_id))
+            observation = resolved.observation
+            if (resolved.status is not EvidenceResolutionStatus.CORROBORATED
+                    or observation is None or str(observation.page_id) != str(page_id)):
+                break
+            prefix = ("visible:segment:" if observation.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT
+                      else "visible:" if observation.observation_kind == RASTER_PDF_VISIBLE_SEGMENT
+                      else None)
+            ref = str(observation.source_primitive_ref or "")
+            if prefix is None or not ref.startswith(prefix):
+                break
+            raw_id = ref[len(prefix):]
+            line = _line(observation.geometry)
+            if not raw_id or raw_id in raw_lines or line is None:
+                break
+            raw_lines[raw_id] = line
+        if len(raw_lines) != 6:
+            continue
+        relations = _opening_raw_relation_sets(raw_lines)
+        same_pairs = [pair for pair, classes in relations.items()
+                      if classes == {PhysicalEquivalenceClass.SAME_PHYSICAL_WALL}]
+        faces = {raw_id for pair in same_pairs for raw_id in pair}
+        if len(same_pairs) == 2 and len(faces) == 4:
+            protected.update(faces)
+    return frozenset(protected)
+
+
 def _producer_opening_relation_overrides(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2088,7 +2219,6 @@ def _producer_opening_relation_overrides(
         if physical_opening_authority is not None
         else PhysicalOpeningAuthority.from_source_visibility_producer(source_producer)
     )
-    proven_records: dict[str, object] = {}
 
     if resolved_visible_observations is None:
         page_visible_rows: list[tuple[str, object]] = []
@@ -2118,35 +2248,18 @@ def _producer_opening_relation_overrides(
 
     prefix = "visible:segment:"
 
-    # Preserve the #969 authority contract exactly: every authenticated visible
-    # observation on this page is proved once. The page index removes repeated
-    # document-wide ownership scans, but does not narrow the opening authority's
-    # evidence universe or preflight candidate membership.
-    for observation_id, observation in page_visible_rows:
-        if str(observation.page_id) != str(page_id):
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        selector = ObservationSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            observation_id=observation_id,
-        )
-        result = opening_authority.prove_existence(selector)
-        existence = result.existence_record
-        if (
-            result.status is EvidenceResolutionStatus.CORROBORATED
-            and result.proposition == PHYSICAL_OPENING_EXISTS
-            and existence is not None
-            and existence.page_id == page_id
-        ):
-            proven_records[existence.record_id] = existence
+    # Preserve #969's once-per-page full inventory contract. Pre-motif face
+    # preservation and W4 consume the same producer-owned positive proofs.
+    proven_records = _producer_proven_page_opening_records(
+        source_producer=source_producer, published=published, page_id=page_id,
+        physical_opening_authority=opening_authority,
+        resolved_visible_observations=page_visible_rows)
 
     candidate_relation_sets: dict[
         tuple[str, str], set[PhysicalEquivalenceClass]
     ] = {}
 
-    for existence in proven_records.values():
+    for existence in proven_records:
         raw_lines: dict[str, Line] = {}
         valid = True
         for observation_id in existence.source_observation_ids:  # type: ignore[attr-defined]
@@ -2748,10 +2861,17 @@ def _assemble_scope_result(
     authenticated_frame_edge_primitive_count: int = 0,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
+    protected_faces = (
+        _producer_proven_opening_wall_face_source_ids(
+            source_producer=source_producer, published=published, page_id=page_id,
+            physical_opening_authority=physical_opening_authority,
+            resolved_visible_observations=resolved_visible_observations)
+        if physical_opening_authority is not None else frozenset())
     topology_segments = _filter_repeated_non_physical_drafting_primitives(
         segments,
         page_width=page_width,
         page_height=page_height,
+        preserved_source_primitive_ids=protected_faces,
     )
     if len(topology_segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
         return _blocked(
