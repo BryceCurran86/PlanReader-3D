@@ -78,6 +78,20 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "source_page_index_zero_based": page_index,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
+            "downstream": {
+                "canonical_room_count": len(claim.canonical_rooms),
+                "canonical_room_status": str(getattr(claim.canonical_room_status, "value", claim.canonical_room_status)),
+                "canonical_room_reasons": list(claim.canonical_room_reason_codes),
+                "canonical_floor_count": len(claim.canonical_floors),
+                "canonical_floor_status": str(getattr(claim.canonical_floor_status, "value", claim.canonical_floor_status)),
+                "canonical_floor_reasons": list(claim.canonical_floor_reason_codes),
+                "metric_floor_count": sum(bool(getattr(floor, "metric_area_complete", False)) for floor in claim.canonical_floors),
+                "room_area_quantity_count": len(claim.room_area_quantity_evidence),
+                "floor_finish_quantity_count": len(claim.floor_finish_quantity_evidence),
+                "same_view_first_failures": list(claim.same_view_room_area_first_failure_codes),
+                "cross_view_first_failures": list(claim.cross_view_room_area_first_failure_codes),
+                "physical_scale_first_failures": list(claim.physical_scale_first_failure_codes),
+            },
             "scope_reason_frequency": dict(Counter(
                 reason for item in observations for reason in item["outcome_reasons"]
             )),
