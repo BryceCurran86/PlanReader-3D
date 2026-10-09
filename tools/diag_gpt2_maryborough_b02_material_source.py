@@ -4,6 +4,7 @@ from pathlib import Path
 import hashlib, json, re
 import fitz
 from pb_viewport_segmentation import segment_page_viewports
+from pb_material_schedule_v1222 import parse_schedule_text, semantic_finish_from_schedule_entry
 SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
 CODES=re.compile(r"(?<![A-Z0-9])(?:FPB|WFPB|IPF1|GRID)(?![A-Z0-9])",re.I)
 SCHEDULE=re.compile(r"(?:FINISH|MATERIAL|CEILING|FLOOR|LINING).{0,40}(?:SCHEDULE|LEGEND)|(?:SCHEDULE|LEGEND).{0,40}(?:FINISH|MATERIAL|CEILING|FLOOR|LINING)",re.I)
@@ -49,7 +50,33 @@ if __name__=="__main__":
                         and not SCHEDULE.search(t)
                     ]
                     ambiguous_multiline = len(following_lines) > 1
+                    # Exercise the *actual* production schedule parser, not a
+                    # hand-coded acronym dictionary. Parsing alone is never
+                    # source-word authenticity or schedule-row ownership.
+                    parsed_rows = []
+                    if exact_code_line and following_lines:
+                        combined = " ".join([val, *following_lines])
+                        for item in parse_schedule_text(
+                            combined, page_id=n, page_label=f"page:{n}"
+                        ):
+                            parsed_code = str(item.get("code") or "").upper()
+                            if parsed_code != codes[0]:
+                                continue
+                            entry = {
+                                "status": "Confirmed",
+                                "code": parsed_code,
+                                "description": str(item.get("description") or ""),
+                                "substrate": str(item.get("substrate") or ""),
+                                "finish": str(item.get("finish") or ""),
+                            }
+                            parsed_rows.append({
+                                "code": parsed_code,
+                                "description": entry["description"],
+                                "semantic_finish_candidate": semantic_finish_from_schedule_entry(entry),
+                            })
                     proof = {
+                        "production_parser_candidates": parsed_rows,
+                        "parser_is_not_authority": True,
                         "candidate_description_lines": candidate_description_lines,
                         "multiline_row_requires_independent_binding": ambiguous_multiline,
                         "following_native_lines": following_lines,
