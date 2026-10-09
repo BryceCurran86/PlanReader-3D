@@ -89,6 +89,16 @@ def publish_live_floor_area_quantities(
         if qid:
             floors_by_quantity.setdefault(qid, []).append(floor)
 
+    # A canonical surface cannot carry competing room-area source identities,
+    # even when each individual source ID appears on exactly one floor row.
+    # Quarantine the complete physical floor rather than selecting a winner.
+    physical_floor_claim_ids: dict[str, set[str]] = {}
+    for source_id, associated_floors in floors_by_quantity.items():
+        for candidate_floor in associated_floors:
+            physical_id = _clean(candidate_floor.physical_floor_surface_id)
+            if physical_id:
+                physical_floor_claim_ids.setdefault(physical_id, set()).add(source_id)
+
     out: list[QuantityEvidence] = []
     for source_id, quantity in sorted(source_quantities.items()):
         floors = floors_by_quantity.get(source_id, ())
@@ -98,6 +108,8 @@ def publish_live_floor_area_quantities(
         if not floor.physical_floor_surface_identity_resolved:
             continue
         if not floor.physical_floor_surface_id or not floor.canonical_floor_id:
+            continue
+        if len(physical_floor_claim_ids.get(_clean(floor.physical_floor_surface_id), ())) != 1:
             continue
         try:
             qvalue = float(quantity.value)
