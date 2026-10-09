@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ee5f0d87954ae13f87f0b268023cdfd8db01eedc
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -79,6 +81,23 @@ jobs:
                   source,pages=(2,),topology_pages=(2,),room_area_support_pages=tuple(support),
               )
               result["cross_view_attempted"]=True
+              cross_failures=dict(claim.cross_view_room_area_first_failure_codes)
+              same_failures=dict(claim.same_view_room_area_first_failure_codes)
+              scale_failures=dict(claim.physical_scale_first_failure_codes)
+              result["wc_linen_first_gates"]=[
+                  {
+                      "room":room.room_label,
+                      "physical_id":room.physical_room_id,
+                      "same_view":same_failures.get(room.physical_room_id),
+                      "cross_view":cross_failures.get(room.physical_room_id),
+                      "physical_scale":list(scale_failures.get(room.physical_room_id,())),
+                  }
+                  for room in claim.canonical_rooms if room.room_label in ("WC","LINEN")
+              ]
+              from collections import Counter
+              result["cross_view_first_failure_counts"]=dict(sorted(
+                  Counter(cross_failures.values()).items()
+              ))
               room_text_ownership=[]
               for room in claim.canonical_rooms:
                   if room.room_label not in ("WC","LINEN"):
