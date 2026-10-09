@@ -58,6 +58,25 @@ def test_unique_firm_room_area_publishes_exactly_one_canonical_floor_quantity() 
     assert result.metadata["upstream_room_area_quantity_id"] == "room-area-1"
 
 
+def test_competing_room_area_sources_for_one_physical_floor_fail_closed() -> None:
+    source = _source_area()
+    floor = _floor()
+    other_source = replace(source, quantity_id="room-area-competing")
+    other_floor = replace(
+        floor,
+        canonical_floor_id="canonical-floor-competing",
+        metric_area_quantity_id=other_source.quantity_id,
+    )
+    claim = replace(
+        _claim_with(source, other_source),
+        canonical_floors=(floor, other_floor),
+    )
+    assert publish_live_floor_area_quantities(claim) == ()
+
+    # Removing the competing source restores one authentic floor quantity.
+    assert len(publish_live_floor_area_quantities(_claim_with(source))) == 1
+
+
 def test_identical_source_room_area_replay_is_idempotent() -> None:
     source = _source_area()
 
