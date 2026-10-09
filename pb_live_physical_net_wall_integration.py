@@ -129,6 +129,8 @@ class LivePhysicalNetWallClaim:
     # Source-authenticated same-view measurement first-gate receipts; a separate
     # cross-view or scaled authority may independently resolve the room area.
     same_view_room_area_first_failure_codes: tuple[tuple[str, str], ...] = ()
+    # The support-sheet producer independently owns exact cross-view failures.
+    cross_view_room_area_first_failure_codes: tuple[tuple[str, str], ...] = ()
     # Source-owned physical-scale failures are independent of documented area.
     # Each entry owns an exact physical-room ID and the scale producer's reasons.
     physical_scale_first_failure_codes: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -969,6 +971,10 @@ def collect_live_physical_net_wall_claim(
                 same_view_area.unresolved_first_failure_codes
                 if same_view_area is not None else ()
             ),
+            cross_view_room_area_first_failure_codes=(
+                cross_view_area.unresolved_first_failure_codes
+                if cross_view_area is not None else ()
+            ),
             physical_scale_first_failure_codes=tuple(sorted(
                 physical_scale_failures_by_room.items()
             )),
@@ -1017,6 +1023,10 @@ def collect_live_physical_net_wall_claim(
         same_view_room_area_first_failure_codes=(
             same_view_area.unresolved_first_failure_codes
             if same_view_area is not None else ()
+        ),
+        cross_view_room_area_first_failure_codes=(
+            cross_view_area.unresolved_first_failure_codes
+            if cross_view_area is not None else ()
         ),
         physical_scale_first_failure_codes=tuple(sorted(
             physical_scale_failures_by_room.items()
