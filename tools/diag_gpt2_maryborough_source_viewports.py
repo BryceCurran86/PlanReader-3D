@@ -13,6 +13,7 @@ from pb_viewport_segmentation import (
     extract_view_title_anchors, _frame_candidates_for_title,
     _frame_looks_like_table, _source_image_placement_groups,
     _raster_placement_components, _raster_ink_gutter_evidence,
+    _raster_ink_title_cell_evidence,
 )
 
 SOURCE = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
@@ -38,9 +39,18 @@ if __name__ == "__main__":
             page = doc[index]
             calibration = calibrate_viewport_layout(page)
             if page_no == 1:
+                ink_evidence = _raster_ink_gutter_evidence(page)
                 print("B01_SOURCE_RASTER_INK_GUTTERS", json.dumps({
                     "page": page_no,
-                    **_raster_ink_gutter_evidence(page),
+                    **ink_evidence,
+                }, sort_keys=True, default=str))
+                cells = _raster_ink_title_cell_evidence(
+                    page, extract_view_title_anchors(page), ink_evidence
+                )
+                print("B01_SOURCE_RASTER_TITLE_CELL_EVIDENCE", json.dumps({
+                    "page": page_no,
+                    "title_cells": cells,
+                    "authenticated_viewports": 0,
                 }, sort_keys=True, default=str))
             frames = extract_vector_frames(page, calibration)
             # Distinguish no source vectors from unsupported source paths;
