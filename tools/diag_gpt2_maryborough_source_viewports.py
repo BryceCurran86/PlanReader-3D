@@ -34,7 +34,7 @@ if __name__ == "__main__":
     for index in range(len(doc)):
         page_no = index + 1
         viewports = segment_page_viewports(doc[index], page_number=page_no)
-        if page_no in (1, 9, 11, 30):
+        if page_no in (1, 7, 9, 11, 30):
             page = doc[index]
             calibration = calibrate_viewport_layout(page)
             frames = extract_vector_frames(page, calibration)
