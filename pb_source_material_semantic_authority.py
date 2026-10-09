@@ -1084,19 +1084,11 @@ def _material_definition_candidate(
     if not combined:
         return None
 
-    # A longer block with a standalone code and multiple unrelated cells
-    # cannot establish which cell owns the definition (e.g. role versus
-    # material specification). Preserve abstention rather than concatenating
-    # the block into a plausible but unsupported definition.
-    if len(lines) > 2:
-        first_cell = str(lines[0][0]).strip()
-        if (
-            2 <= len(first_cell) <= 6
-            and first_cell.isascii()
-            and first_cell.isalnum()
-            and first_cell.isupper()
-        ):
-            return None
+    # A multi-line material description remains a *candidate* only. Its
+    # physical native block, every contributing source word and the owning
+    # material schedule are independently verified by the downstream producer.
+    # Rejecting all code-led 3+ line blocks would suppress real authenticated
+    # specifications without proving they are ambiguous.
 
     parsed = parse_schedule_text(
         combined,
