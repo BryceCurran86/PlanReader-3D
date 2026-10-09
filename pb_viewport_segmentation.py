@@ -1458,6 +1458,96 @@ def _raster_component_is_sheetwide(
     )
 
 
+def _raster_ink_gutter_evidence(
+    page: Any, *, max_render_dimension: int = 800,
+) -> dict[str, Any]:
+    """Find large empty corridors in a bounded rendering of source geometry.
+
+    Returned corridors are *candidate separation evidence*, never viewport
+    boundaries. Rendered ink includes text, title blocks and drawing symbols,
+    and a white corridor alone cannot prove which plan owns either side.
+    Coordinates use visual page orientation, not PDF native user space.
+    """
+    unavailable = {
+        "vertical_gutters_visual_pts": (),
+        "horizontal_gutters_visual_pts": (),
+        "raster_gutters_are_authoritative": False,
+    }
+    try:
+        width = float(page.rect.width)
+        height = float(page.rect.height)
+        if width <= 0 or height <= 0 or not math.isfinite(width + height):
+            return unavailable
+        scale = min(1.0, float(max_render_dimension) / max(width, height))
+        if scale <= 0 or max_render_dimension < 64:
+            return unavailable
+        pix = page.get_pixmap(
+            matrix=fitz.Matrix(scale, scale),
+            colorspace=fitz.csGRAY,
+            alpha=False,
+            annots=False,
+        )
+        if pix.n != 1 or pix.width < 10 or pix.height < 10:
+            return unavailable
+        buf = memoryview(pix.samples)
+        dark_cols = [0] * pix.width
+        dark_rows = [0] * pix.height
+        # 220 intentionally ignores antialiasing haze but counts actual ink.
+        for y in range(pix.height):
+            offset = y * pix.stride
+            dark_count = 0
+            for x in range(pix.width):
+                if buf[offset + x] < 220:
+                    dark_cols[x] += 1
+                    dark_count += 1
+            dark_rows[y] = dark_count
+        if not any(dark_cols) or not any(dark_rows):
+            return unavailable
+
+        def gutters(counts: Sequence[int], cross_span: int, page_span: float):
+            size = len(counts)
+            min_run = max(8, math.ceil(size * 0.025))
+            threshold = max(1, math.floor(cross_span * 0.002))
+            # Exclude page margins; require substantial ink on both sides.
+            cumulative = [0]
+            for count in counts:
+                cumulative.append(cumulative[-1] + count)
+            total = cumulative[-1]
+            if total <= 0:
+                return ()
+            result = []
+            start = None
+            for index in range(size + 1):
+                blank = (
+                    index < size and counts[index] <= threshold
+                    and math.ceil(size * 0.04) <= index < math.floor(size * 0.96)
+                )
+                if blank and start is None:
+                    start = index
+                if not blank and start is not None:
+                    end = index
+                    if (
+                        end - start >= min_run
+                        and cumulative[start] >= total * 0.15
+                        and total - cumulative[end] >= total * 0.15
+                    ):
+                        result.append((
+                            round(page_span * start / size, 3),
+                            round(page_span * end / size, 3),
+                        ))
+                    start = None
+            return tuple(result)
+
+        return {
+            "vertical_gutters_visual_pts": gutters(dark_cols, pix.height, width),
+            "horizontal_gutters_visual_pts": gutters(dark_rows, pix.width, height),
+            "render_dimensions": (pix.width, pix.height),
+            "raster_gutters_are_authoritative": False,
+        }
+    except (RuntimeError, ValueError, TypeError, OverflowError):
+        return unavailable
+
+
 def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
