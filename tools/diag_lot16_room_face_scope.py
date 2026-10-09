@@ -164,6 +164,9 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
                         "label_binding_id": room.room_label_binding_record_id,
                         "label_evidence_count": len(room.room_label_evidence_ids),
                         "label_reason_codes": list(room.room_label_reason_codes),
+                        "polygon_pdf_pts": [list(point) for point in room.polygon_pdf_pts],
+                        "bounding_wall_ids": list(room.bounding_wall_ids),
+                        "polygon_area_page_pts2": float(room.area_page_pts2),
                     }
                     for room in claim.canonical_rooms if room.room_label
                 ],
