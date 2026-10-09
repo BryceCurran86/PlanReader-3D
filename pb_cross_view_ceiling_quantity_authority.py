@@ -217,6 +217,21 @@ def publish_cross_view_ceiling_quantities(
         if physical_id:
             finishes_by_physical.setdefault(physical_id, []).append(record)
 
+    # A single exact source material occurrence cannot be owned by multiple
+    # distinct physical rooms. Quarantine *all* owners rather than allowing
+    # individually unique per-room rows to publish duplicated ceiling areas.
+    occurrence_owners: dict[str, set[str]] = {}
+    for finish_record in finishes.records:
+        occurrence_id = _clean(finish_record.occurrence_record_id)
+        physical_id = _clean(finish_record.physical_room_id)
+        if occurrence_id and physical_id:
+            occurrence_owners.setdefault(occurrence_id, set()).add(physical_id)
+    conflicting_occurrence_ids = {
+        occurrence_id
+        for occurrence_id, owners in occurrence_owners.items()
+        if len(owners) > 1
+    }
+
     bridge_pairs: list[tuple[EntityEvidence, QuantityEvidence]] = []
     for bridge in room_area_bridges:
         if bridge.status is not EvidenceResolutionStatus.CORROBORATED:
@@ -258,6 +273,15 @@ def publish_cross_view_ceiling_quantities(
 
         room = room_rows[0]
         finish = finish_rows[0]
+        if (
+            not _clean(finish.occurrence_record_id)
+            or not _clean(finish.definition_record_id)
+            or _clean(finish.occurrence_record_id) in conflicting_occurrence_ids
+        ):
+            unresolved.add(physical_id)
+            if _clean(finish.occurrence_record_id) in conflicting_occurrence_ids:
+                conflict = True
+            continue
         area_candidates = [
             (entity, quantity)
             for entity, quantity in bridge_pairs
