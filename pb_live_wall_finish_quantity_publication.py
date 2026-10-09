@@ -32,6 +32,17 @@ def publish_bound_wall_finish_quantity(
     if not record.physical_surface_ids:
         raise ValueError("resolved wall-finish quantity lacks physical surface identities")
 
+    # A corroborated record cannot mint a commercial finish quantity if its
+    # scope, bindings, or net-wall evidence receipts are absent or blank.
+    if (
+        not str(record.finish_scope_record_id).strip()
+        or not record.finish_binding_ids
+        or not record.net_wall_record_ids
+        or any(not str(value).strip() for value in record.finish_binding_ids)
+        or any(not str(value).strip() for value in record.net_wall_record_ids)
+    ):
+        raise ValueError("resolved wall-finish quantity lacks source lineage receipts")
+
     evidence_ids = tuple(
         dict.fromkeys(
             (

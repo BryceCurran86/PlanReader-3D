@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
+
 from pb_bound_wall_finish_customer_bridge import (
     bound_wall_finish_record_to_takeoff_row,
 )
@@ -129,3 +134,19 @@ def test_customer_row_value_change_cannot_publish_finish_surface():
     counts = report["family_reports"]["finish_surface"]["stage_counts"]
     assert counts["QUANTIFIED"] == 1
     assert counts["PUBLISHED"] == 0
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"finish_scope_record_id": ""},
+        {"finish_binding_ids": ()},
+        {"finish_binding_ids": ("",)},
+        {"net_wall_record_ids": ()},
+        {"net_wall_record_ids": ("",)},
+    ],
+)
+def test_wall_finish_publisher_rejects_missing_source_receipts(changes):
+    record, _surface = _resolved_record_and_surface()
+    with pytest.raises(ValueError, match="source lineage receipts"):
+        publish_bound_wall_finish_quantity(replace(record, **changes))
