@@ -1,0 +1,24 @@
+name: DIAG GPT2 Maryborough B02 Materials
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_maryborough_b02_material_source.py
+      - .github/workflows/diag-gpt2-maryborough-b02-materials.yml
+  workflow_dispatch:
+jobs:
+  material-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: PYTHONPATH=. python -u tools/diag_gpt2_maryborough_b02_material_source.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maryborough-b02-material-source-audit
+          path: maryborough_b02_material_source_audit.json
