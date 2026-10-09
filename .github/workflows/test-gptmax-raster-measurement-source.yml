@@ -1,0 +1,97 @@
+name: GPT MAX Raster Measurement Source Handoff
+on:
+  pull_request:
+    paths:
+      - pb_opening_dimension_authority.py
+      - pb_schedule_opening_instance_binding_authority.py
+      - tests/test_raster_measurement_source_handoff.py
+      - .github/workflows/test-gptmax-raster-measurement-source.yml
+concurrency:
+  group: gptmax-raster-measurement-source-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  full-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Integrity and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+      - name: Source handoff regressions
+        run: PYTHONPATH=. python -m pytest -q tests/test_raster_measurement_source_handoff.py
+      - name: Full regression suite
+        run: PYTHONPATH=. python -m pytest -q tests/
+      - name: Smoke test
+        run: python tests/ci_smoke.py
+  source-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Compare real Lot16 authority stages with verified prerequisite
+        run: |
+          git show 824c7c9e47a5aa7ed08e0706dabfa63423c45ea9:tools/diag_gptmax_source_authority_stages.py > /tmp/gptmax-source-stages.py
+          git worktree add /tmp/gptmax-measurement-prerequisite 772c9ac153844eabb6d2203f9a0ad9bf541bf60f
+          (cd /tmp/gptmax-measurement-prerequisite && PYTHONPATH=. python -u /tmp/gptmax-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output /tmp/lot16-measurement-source-baseline.json)
+          cp /tmp/lot16-measurement-source-baseline.json lot16-measurement-source-baseline.json
+          PYTHONPATH=. python -u /tmp/gptmax-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output lot16-measurement-source-current.json
+      - name: Verify physical ownership retention and report actual authority gates
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          baseline = json.loads(Path('lot16-measurement-source-baseline.json').read_text())
+          current = json.loads(Path('lot16-measurement-source-current.json').read_text())
+          assert baseline['source_sha256'] == current['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert current['primitive_safety_cap'] == 20_000
+          assert current['source_decode_coverage'] == baseline['source_decode_coverage']
+          assert current['opening_bindings'] == baseline['opening_bindings']
+          assert current['resolved_host_frame_evidence'] == baseline['resolved_host_frame_evidence']
+          old = {row['physical_opening_id']: row for row in baseline['canonical_openings']}
+          new = {row['physical_opening_id']: row for row in current['canonical_openings']}
+          assert len(new) == len(current['canonical_openings'])
+          assert old.keys() == new.keys()
+          for key in old:
+              for field in ('physical_opening_id', 'canonical_opening_id', 'source_observation_ids', 'source_lineage_root_ids'):
+                  assert old[key][field] == new[key][field]
+          traces = current['opening_measurement_traces']
+          assert traces
+          assert all('opening_dimension_existence_required' not in row['width_reason_codes'] for row in traces)
+          assert all('schedule_opening_instance_binding_geometry_unavailable' not in row['schedule_binding_reason_codes'] for row in traces)
+          assert 'quantities' not in current
+          print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'],
+                            'measurement_traces': traces}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-raster-measurement-source-handoff
+          path: lot16-measurement-source-*.json
+          retention-days: 14
