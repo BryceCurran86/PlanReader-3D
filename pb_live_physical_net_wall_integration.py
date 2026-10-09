@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 import fitz
 
@@ -246,6 +246,51 @@ def _merge_documented_room_area_evidence(
     return {
         record_id: merged[record_id]
         for record_id in sorted(merged)
+    }
+
+
+def _uniquely_owned_explicit_area_by_source_face(
+    *,
+    source_face_records: Sequence[object],
+    canonical_rooms: Sequence[LiveCanonicalRoomObject],
+    evidence_by_source_record: Mapping[str, object],
+) -> dict[str, object]:
+    """Resolve figured area only through unique record, room and face ownership.
+
+    SourceRoomFaceAuthority may expose several source records in one page scope.
+    A direct {face_id: evidence} comprehension would silently select the last
+    record if several documented source records mapped to the same physical
+    face. A duplicated source record with competing face IDs or canonical room
+    owners is equally ambiguous. Quarantine these claims rather than picking
+    a stable-but-unproven winner. Identical source-record replays are harmless.
+    """
+    face_ids_by_record: dict[str, set[str]] = {}
+    for record in source_face_records:
+        record_id = str(record.record_id or "").strip()
+        face_id = str(record.face_id or "").strip()
+        if record_id and face_id:
+            face_ids_by_record.setdefault(record_id, set()).add(face_id)
+
+    rooms_by_record: dict[str, list[str]] = {}
+    for room in canonical_rooms:
+        record_id = str(room.source_room_face_record_id or "").strip()
+        physical_id = str(room.physical_room_id or "").strip()
+        if record_id and physical_id and record_id in evidence_by_source_record:
+            rooms_by_record.setdefault(record_id, []).append(physical_id)
+
+    claims_by_face: dict[str, list[tuple[str, object]]] = {}
+    for record_id, owners in sorted(rooms_by_record.items()):
+        if len(owners) != 1 or len(face_ids_by_record.get(record_id, ())) != 1:
+            continue
+        face_id = next(iter(face_ids_by_record[record_id]))
+        evidence = evidence_by_source_record[record_id]
+        if evidence is not None:
+            claims_by_face.setdefault(face_id, []).append((record_id, evidence))
+
+    return {
+        face_id: claims[0][1]
+        for face_id, claims in sorted(claims_by_face.items())
+        if len(claims) == 1
     }
 
 
@@ -492,22 +537,11 @@ def collect_live_physical_net_wall_claim(
             ):
                 continue
 
-            face_id_by_record = {
-                str(record.record_id): str(record.face_id)
-                for record in room_scope.records
-            }
-            matching_evidence = {
-                str(room.source_room_face_record_id): evidence_by_record[
-                    str(room.source_room_face_record_id)
-                ]
-                for room in scope_rooms
-                if str(room.source_room_face_record_id) in evidence_by_record
-            }
-            explicit_by_face_id = {
-                face_id_by_record[record_id]: evidence
-                for record_id, evidence in matching_evidence.items()
-                if record_id in face_id_by_record
-            }
+            explicit_by_face_id = _uniquely_owned_explicit_area_by_source_face(
+                source_face_records=room_scope.records,
+                canonical_rooms=scope_rooms,
+                evidence_by_source_record=evidence_by_record,
+            )
 
             if (
                 room_binding.viewport_id is not None
