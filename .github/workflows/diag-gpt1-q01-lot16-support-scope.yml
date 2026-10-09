@@ -64,7 +64,8 @@ jobs:
                   for line in block.get("lines",()):
                       text_line="".join(span.get("text","") for span in line.get("spans",())).strip()
                       if area_pattern.search(text_line):
-                          area_texts.append({"page":index+1,"native_text":text_line[:150]})
+                          area_texts.append({"page":index+1,"native_text":text_line[:150],
+                              "source_bbox_pdf_pts":[round(float(x),4) for x in line.get("bbox",())]})
           pdf.close()
           result={"source_sha_verified":True,"source_sha":actual,
               "candidate_native_metric_area_lines":area_texts[:100],
@@ -78,6 +79,30 @@ jobs:
                   source,pages=(2,),topology_pages=(2,),room_area_support_pages=tuple(support),
               )
               result["cross_view_attempted"]=True
+              room_text_ownership=[]
+              for room in claim.canonical_rooms:
+                  if room.room_label not in ("WC","LINEN"):
+                      continue
+                  xs=[float(p[0]) for p in room.polygon_pdf_pts]
+                  ys=[float(p[1]) for p in room.polygon_pdf_pts]
+                  xmin,ymin,xmax,ymax=min(xs),min(ys),max(xs),max(ys)
+                  matching=[]
+                  for observation in area_texts:
+                      if observation["page"] != int(room.page_id):
+                          continue
+                      bbox=observation["source_bbox_pdf_pts"]
+                      if len(bbox)==4 and (
+                          xmin<=bbox[0] and ymin<=bbox[1] and
+                          bbox[2]<=xmax and bbox[3]<=ymax
+                      ):
+                          matching.append(observation)
+                  room_text_ownership.append({
+                      "label":room.room_label,"source_face":room.source_room_face_record_id,
+                      "physical_room_id":room.physical_room_id,
+                      "room_bbox_pdf_pts":[round(xmin,4),round(ymin,4),round(xmax,4),round(ymax,4)],
+                      "native_metric_area_lines_wholly_within_room_bbox":matching,
+                  })
+              result["room_native_area_spatial_candidates"]=room_text_ownership
               result["canonical_floor_count"]=len(claim.canonical_floors)
               result["metric_floor_count"]=sum(x.metric_area_m2 is not None for x in claim.canonical_floors)
               result["room_area_quantity_count"]=sum(not q.abstained and q.value is not None for q in claim.room_area_quantity_evidence)
