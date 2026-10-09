@@ -136,11 +136,16 @@ class SameViewRoomAreaProducer:
             or len(document_ids) != 1
             or len(source_hashes) != 1
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return SameViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (SAME_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "same_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
 
         revision_id = next(iter(revision_ids))
@@ -150,11 +155,16 @@ class SameViewRoomAreaProducer:
             or published.revision.document_id != next(iter(document_ids))
             or published.revision.source_sha256.lower() != next(iter(source_hashes))
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return SameViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (SAME_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "same_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
 
         eligible: list[LiveCanonicalRoomObject] = [
