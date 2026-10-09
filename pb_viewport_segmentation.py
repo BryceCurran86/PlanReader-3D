@@ -2782,21 +2782,23 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
             else []
         )
     if source_image_groups:
+        # Source placement connectivity can require pairwise geometry checks.
+        # Compute it once per page rather than once for each unresolved title.
+        components = _raster_placement_components(source_image_groups)
+        placement_count = sum(group["placements"] for group in source_image_groups)
+        sheetwide_count = sum(
+            _raster_component_is_sheetwide(c, calibration) for c in components
+        )
         for viewport in derived:
             if viewport.bounding_box is None and viewport.status in (
                 ViewportSegmentationStatus.UNSUPPORTED.value,
                 ViewportSegmentationStatus.AMBIGUOUS.value,
             ):
                 viewport.provenance["source_image_group_count"] = len(source_image_groups)
-                viewport.provenance["source_image_placement_count"] = sum(
-                    group["placements"] for group in source_image_groups
-                )
+                viewport.provenance["source_image_placement_count"] = placement_count
                 viewport.provenance["source_image_groups_not_authoritative"] = True
-                components = _raster_placement_components(source_image_groups)
                 viewport.provenance["source_image_coverage_component_count"] = len(components)
-                viewport.provenance["source_image_sheetwide_component_count"] = sum(
-                    _raster_component_is_sheetwide(c, calibration) for c in components
-                )
+                viewport.provenance["source_image_sheetwide_component_count"] = sheetwide_count
                 viewport.provenance["source_image_components_not_authoritative"] = True
     ordered = sorted(
         framed + derived,
