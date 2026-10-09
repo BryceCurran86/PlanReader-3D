@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from collections import Counter
 from pathlib import Path
 
@@ -73,6 +74,101 @@ def _wall_metric_diagnostic(claim) -> dict:
         "external_wall_quantity_published": claim.publication.quantity_evidence is not None,
         "external_wall_ids_count": len(claim.external_wall_ids),
         "per_wall": ledger,
+    }
+
+
+
+def _opening_quantity_first_failure(opening) -> str:
+    """Mirror the existing area publisher's ordered admissibility gates.
+
+    This is source-diagnostic only. Unknown opening labels, counts and geometry
+    remain unavailable rather than zero.
+    """
+    canonical_id = str(opening.canonical_opening_id or "").strip()
+    physical_id = str(opening.physical_opening_id or "").strip()
+    if not canonical_id or canonical_id != physical_id:
+        return "canonical_physical_opening_identity_unresolved"
+    if not str(opening.viewport_id or "").strip():
+        return "authenticated_opening_viewport_unavailable"
+    if not str(opening.host_wall_id or "").strip():
+        return "opening_host_wall_unresolved"
+    if not (
+        str(opening.host_binding_record_id or "").strip()
+        or str(opening.host_frame_record_id or "").strip()
+    ):
+        return "opening_host_source_receipt_unavailable"
+    if str(opening.opening_kind or "").strip().lower() not in {"door", "window"}:
+        return "authenticated_door_window_semantics_unavailable"
+    basis = str(opening.area_basis or "").strip()
+    bases = {
+        "figured_opening_label": "figured_area_record_id",
+        "resolved_opening_geometry": "opening_void_record_id",
+        "authenticated_elevation_frame": "figured_area_record_id",
+        "authenticated_frame_schedule": "schedule_binding_record_id",
+    }
+    if basis not in bases:
+        return "authenticated_opening_area_basis_unavailable"
+    try:
+        area = float(opening.area_m2)
+    except (TypeError, ValueError, OverflowError):
+        return "metric_opening_area_unavailable"
+    if not math.isfinite(area) or area <= 0.0:
+        return "metric_opening_area_unavailable"
+    evidence = {str(value).strip() for value in opening.evidence_ids if str(value).strip()}
+    if not evidence:
+        return "opening_source_evidence_unavailable"
+    authority_record_id = str(getattr(opening, bases[basis]) or "").strip()
+    if not authority_record_id or authority_record_id not in evidence:
+        return "opening_area_measurement_source_receipt_unavailable"
+    if (
+        basis == "authenticated_frame_schedule"
+        and str(opening.schedule_row_dimension_basis or "").strip().lower() != "frame"
+    ):
+        return "authenticated_frame_schedule_basis_unavailable"
+    return "opening_area_quantity_prerequisites_resolved"
+
+
+def _opening_quantity_diagnostic(claim) -> dict:
+    published_by_opening = {}
+    for quantity in claim.opening_quantity_evidence:
+        for identity in quantity.input_entity_ids:
+            published_by_opening.setdefault(str(identity), []).append(quantity)
+    ledger = []
+    for opening in claim.canonical_openings:
+        published = published_by_opening.get(str(opening.canonical_opening_id), ())
+        ledger.append({
+            "canonical_opening_id": opening.canonical_opening_id,
+            "physical_opening_id": opening.physical_opening_id,
+            "page_id": opening.page_id,
+            "opening_kind": opening.opening_kind,
+            "semantic_class": opening.semantic_class,
+            "viewport_id": opening.viewport_id,
+            "host_wall_id": opening.host_wall_id,
+            "host_receipt_available": bool(
+                opening.host_binding_record_id or opening.host_frame_record_id
+            ),
+            "area_basis": opening.area_basis,
+            "area_m2": opening.area_m2,
+            "source_evidence_count": len(opening.evidence_ids),
+            "schedule_explicit_count": bool(opening.schedule_count_explicit),
+            "first_missing_prerequisite": _opening_quantity_first_failure(opening),
+            "published_area_quantity_ids": [quantity.quantity_id for quantity in published],
+        })
+    return {
+        "canonical_opening_count": len(claim.canonical_openings),
+        "published_area_quantity_count": len(claim.opening_quantity_evidence),
+        "published_explicit_count_quantity_count": len(
+            claim.opening_count_quantity_evidence
+        ),
+        "first_failure_frequency": dict(Counter(
+            row["first_missing_prerequisite"] for row in ledger
+        )),
+        "producer_ready_but_no_area_quantity_count": sum(
+            row["first_missing_prerequisite"] == "opening_area_quantity_prerequisites_resolved"
+            and not row["published_area_quantity_ids"]
+            for row in ledger
+        ),
+        "per_opening": ledger,
     }
 
 
@@ -207,6 +303,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
             "wall_metric_diagnostic": _wall_metric_diagnostic(claim),
+            "opening_quantity_diagnostic": _opening_quantity_diagnostic(claim),
             "source_label_scope_diagnostic": label_scopes,
             "same_view_witness_intersection_audit": witness_audit,
             "label_ownership_diagnostic": {
