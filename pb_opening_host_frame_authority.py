@@ -413,7 +413,6 @@ class OpeningHostFrameProducer:
         raster_scope = (
             selected_opening is not None
             and selected_opening.structural_pattern in host_geometry.RASTER_WALL_BAND_HOST_PATTERNS
-            and len(selected_binding.member_wall_candidate_ids) == 2
         )
         if raster_scope:
             visibility = self._opening.source_visibility_authority()

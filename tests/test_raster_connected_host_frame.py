@@ -215,3 +215,50 @@ def test_branch_and_cycle_cannot_supply_a_whole_wall_path(edges):
     contexts = tuple(SimpleNamespace(left_node=((a,),), right_node=((b,),),
         binding=SimpleNamespace(record_id=str(i))) for i, (a, b) in enumerate(edges))
     assert OpeningHostFrameProducer._selected_component(contexts, contexts[0].binding) is None
+
+
+@pytest.mark.parametrize('member_count', [1, 2, 4])
+@pytest.mark.parametrize('warm', [False, True])
+def test_isolated_source_census_is_not_hidden_by_host_representation(monkeypatch, member_count, warm):
+    # This is a source-discovery regression, not authority for a fabricated
+    # host: invalid member placeholders below are never published as a frame.
+    source, _composition, producer, bound = _fixture()
+    scope = _scope(producer, bound)
+    selector, opening, _binding_selector, binding = bound[0]
+    import pb_opening_host_binding_authority as host
+    geometry = host._opening_geometry(producer._opening, opening)
+    if warm:
+        assert _publish(producer, bound)[0].status is Status.CORROBORATED
+    if member_count == 1:
+        binding = replace(binding, member_wall_candidate_ids=binding.member_wall_candidate_ids[:1])
+    if member_count == 4:
+        binding = replace(binding, member_wall_candidate_ids=(
+            *binding.member_wall_candidate_ids, 'unproven-face-a', 'unproven-face-b',
+        ))
+    hidden = bound[1][1].source_observation_ids[-1]
+    # The producer's snapshot inventory still owns the address. A missing
+    # receipt cannot silently remove it even for a whole-wall or four-face selected host.
+    del source._raster_opening_primitive_receipts[(selector.snapshot_id, hidden)]
+    reasons = []
+    contexts = producer._scope_bindings(wall_scope=scope, selected_binding=binding,
+        selected_geometry=geometry, selected_opening=opening, failure_reasons=reasons)
+    assert contexts is None
+    assert reasons == ['opening_host_frame_raster_scope_integrity_unproven']
+
+
+def test_native_selection_does_not_read_isolated_raster_namespace(monkeypatch):
+    from pb_physical_opening_authority import GAP_CORROBORATED_WINDOW_JAMB_PAIR
+    source, _composition, producer, bound = _fixture()
+    scope = _scope(producer, bound)
+    _, opening, _, binding = bound[0]
+    import pb_opening_host_binding_authority as host
+    geometry = host._opening_geometry(producer._opening, opening)
+    # Isolate the namespace predicate: native producer patterns must retain
+    # their ordinary reader, irrespective of unrelated raster addresses.
+    native = replace(opening, structural_pattern=GAP_CORROBORATED_WINDOW_JAMB_PAIR)
+    def forbidden(_snapshot):
+        raise AssertionError('native selection must not read the isolated raster census')
+    monkeypatch.setattr(producer._opening.source_visibility_authority(),
+        'raster_opening_primitive_observation_ids_for_snapshot', forbidden)
+    producer._scope_bindings(wall_scope=scope, selected_binding=binding,
+        selected_geometry=geometry, selected_opening=native, failure_reasons=[])
