@@ -58,7 +58,7 @@ jobs:
           # candidate inventory, never an area/scale or room ownership proof.
           import re
           area_texts=[]
-          area_pattern=re.compile(r"\\b\\d+(?:[.,]\\d+)?\\s*(?:m\\s*(?:2|²)|sq\\.?\\s*m|square\\s+met(?:re|er)s?)\\b",re.I)
+          area_pattern=re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:m\s*(?:2|²)|sq\.?\s*m|square\s+met(?:re|er)s?)\b",re.I)
           for index in range(pdf.page_count):
               for block in pdf[index].get_text("dict").get("blocks",()):
                   for line in block.get("lines",()):
