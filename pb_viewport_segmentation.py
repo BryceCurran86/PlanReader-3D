@@ -840,12 +840,37 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
             raise
         rect = page.rect
         width = float(rect.width); height = float(rect.height)
-    word_heights = [
-        float(w[3]) - float(w[1])
-        for w in _page_text(page, "words")
-        if float(w[3]) > float(w[1])
-    ]
-    median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
+    # Native vertical PDF words have a long Y bbox even at small font sizes.
+    # Read the producer-owned text-line direction and measure its perpendicular
+    # glyph thickness instead. Do not let vertical title lengths become minimum
+    # viewport-frame spans. Fall back to words only for lightweight test doubles.
+    text_thicknesses: list[float] = []
+    try:
+        for block in (_page_text(page, "dict") or {}).get("blocks", []):
+            if int(block.get("type", 0)) != 0:
+                continue
+            for line in block.get("lines", []) or []:
+                dx, dy = _normalised_direction(line.get("dir") or (1.0, 0.0))
+                for span in line.get("spans", []) or []:
+                    bbox = span.get("bbox") or ()
+                    if len(bbox) < 4 or not str(span.get("text") or "").strip():
+                        continue
+                    cross_span = (
+                        float(bbox[2]) - float(bbox[0])
+                        if abs(dy) > abs(dx)
+                        else float(bbox[3]) - float(bbox[1])
+                    )
+                    if math.isfinite(cross_span) and cross_span > 0:
+                        text_thicknesses.append(cross_span)
+    except Exception:
+        text_thicknesses = []
+    if not text_thicknesses:
+        text_thicknesses = [
+            float(w[3]) - float(w[1])
+            for w in _page_text(page, "words")
+            if float(w[3]) > float(w[1])
+        ]
+    median_h = statistics.median(text_thicknesses) if text_thicknesses else max(min(width, height) / 80.0, 1.0)
     return ViewportLayoutCalibration(
         median_word_height_pt=median_h,
         title_frame_gap_pt=max(median_h * 4.0, 2.0),
