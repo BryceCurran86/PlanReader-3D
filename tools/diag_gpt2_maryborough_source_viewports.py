@@ -130,6 +130,29 @@ if __name__ == "__main__":
             except (ValueError, RuntimeError) as exc:
                 images, placements = [], []
                 print("B01_IMAGE_PLACEMENTS_UNAVAILABLE", str(exc))
+            # Image placements on tiled raster sheets can be disconnected
+            # without identifying view ownership. Record actual placement
+            # geometry and title overlaps; never infer a drawing frame merely
+            # from an image-tile bounding union.
+            image_bounds = []
+            for placement in placements:
+                b = placement["bbox"]
+                image_bounds.append((float(b[0]),float(b[1]),float(b[2]),float(b[3])))
+            if image_bounds:
+                extent = [
+                    min(b[0] for b in image_bounds),
+                    min(b[1] for b in image_bounds),
+                    max(b[2] for b in image_bounds),
+                    max(b[3] for b in image_bounds),
+                ]
+            else:
+                extent = None
+            print("B01_IMAGE_TILE_SOURCE_SCOPE", json.dumps({
+                "page":page_no,"placements_sampled":len(image_bounds),
+                "sampled_extent":extent,
+                "candidate_viewport_authority":False,
+                "reason":"image tile union has no independent single-view ownership",
+            },sort_keys=True))
             print("B01_PRODUCER_CLIP_IMAGE_EVIDENCE", json.dumps({
                 "page": page_no, "extended_count": len(extended),
                 "clip_group_count": len(structural),
