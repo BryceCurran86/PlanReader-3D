@@ -1034,7 +1034,7 @@ def _rotated_two_rcps_with_central_schedule() -> fitz.Document:
     for y in (340.0, 380.0, 420.0, 460.0):
         page.draw_line((150.0, y), (450.0, y))
     page.insert_text(
-        (430.0, 480.0),
+        (475.0, 480.0),
         "CEILING FINISHES SCHEDULE",
         fontsize=9,
         rotate=90,
