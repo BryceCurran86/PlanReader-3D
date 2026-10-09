@@ -1,12 +1,12 @@
-name: Diagnostic Lot16 Room Face Scope
+name: Lot16 Source Room Face Diagnostic
 on:
+  workflow_dispatch:
   pull_request:
     paths:
-      - tools/diag_lot16_room_face_scope.py
-      - .github/workflows/diag-lot16-room-face-scope.yml
-  workflow_dispatch:
+      - "tools/diag_lot16_room_face_scope.py"
+      - ".github/workflows/diag-lot16-room-face-scope.yml"
 jobs:
-  lot16-room-face:
+  source-room-face:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -17,26 +17,31 @@ jobs:
           cache: pip
       - name: Install pinned dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Source-authenticated page-3 room face diagnostic
+      - name: Run original Lot16 source page-3 diagnostic
+        env:
+          PYTHONPATH: .
         run: |
           python - <<'PY'
-          from pathlib import Path
           import hashlib
           import subprocess
           import sys
-import os
+          from pathlib import Path
 
           expected = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           candidates = sorted(Path("documents/sources").glob("*.pdf"))
-          matched = [path for path in candidates if hashlib.sha256(path.read_bytes()).hexdigest() == expected]
+          matched = [
+              path for path in candidates
+              if hashlib.sha256(path.read_bytes()).hexdigest() == expected
+          ]
           if len(matched) != 1:
-              raise SystemExit(f"Lot16 original architectural source SHA mismatch/unavailable: matched={len(matched)}")
+              raise SystemExit(f"Lot16 SHA-verified architecture PDF unavailable: matches={len(matched)}")
           subprocess.run(
-              [sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
-               "--pdf", str(matched[0]), "--page-index", "2",
-               "--output", "lot16-room-face-scope.json"],
+              [
+                  sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
+                  "--pdf", str(matched[0]), "--page-index", "2",
+                  "--output", "lot16-room-face-scope.json",
+              ],
               check=True,
-              env={**os.environ, "PYTHONPATH": str(Path.cwd())},
           )
           PY
       - uses: actions/upload-artifact@v4
