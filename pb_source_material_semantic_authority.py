@@ -1297,7 +1297,24 @@ def _trusted_native_material_schedule_cluster_blocks(
         row_bbox = _native_block_bbox(block_words)
         overlap_x = min(title_bbox[2], row_bbox[2]) - max(title_bbox[0], row_bbox[0])
         overlap_y = min(title_bbox[3], row_bbox[3]) - max(title_bbox[1], row_bbox[1])
-        if overlap_x <= 0.0 and overlap_y <= 0.0:
+        title_width = title_bbox[2] - title_bbox[0]
+        title_height = title_bbox[3] - title_bbox[1]
+        row_width = row_bbox[2] - row_bbox[0]
+        # A vertical native CAD title may sit in the next text column
+        # rather than literally overlap the code/description column.
+        # Bound that lateral gap by the smaller native glyph-band width,
+        # not by the entire union of unrelated page rows.
+        vertical_title = title_height > 3.0 * title_width
+        lateral_gap = max(
+            title_bbox[0] - row_bbox[2],
+            row_bbox[0] - title_bbox[2],
+            0.0,
+        )
+        adjacent_vertical_column = (
+            vertical_title
+            and lateral_gap <= 2.0 * min(title_width, row_width)
+        )
+        if overlap_x <= 0.0 and overlap_y <= 0.0 and not adjacent_vertical_column:
             continue
         owned_candidates.append(candidate)
     if len(owned_candidates) < 2:
