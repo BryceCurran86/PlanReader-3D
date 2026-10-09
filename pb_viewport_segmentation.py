@@ -140,6 +140,8 @@ class _TitleAnchor:
     text: str
     bbox: tuple[float, float, float, float]
     view_type: str
+    # Producer-owned native text direction; never changes semantic classification.
+    direction: tuple[float, float] = (1.0, 0.0)
 
     @property
     def center(self) -> tuple[float, float]:
@@ -838,12 +840,37 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
             raise
         rect = page.rect
         width = float(rect.width); height = float(rect.height)
-    word_heights = [
-        float(w[3]) - float(w[1])
-        for w in _page_text(page, "words")
-        if float(w[3]) > float(w[1])
-    ]
-    median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
+    # Native vertical PDF words have a long Y bbox even at small font sizes.
+    # Read the producer-owned text-line direction and measure its perpendicular
+    # glyph thickness instead. Do not let vertical title lengths become minimum
+    # viewport-frame spans. Fall back to words only for lightweight test doubles.
+    text_thicknesses: list[float] = []
+    try:
+        for block in (_page_text(page, "dict") or {}).get("blocks", []):
+            if int(block.get("type", 0)) != 0:
+                continue
+            for line in block.get("lines", []) or []:
+                dx, dy = _normalised_direction(line.get("dir") or (1.0, 0.0))
+                for span in line.get("spans", []) or []:
+                    bbox = span.get("bbox") or ()
+                    if len(bbox) < 4 or not str(span.get("text") or "").strip():
+                        continue
+                    cross_span = (
+                        float(bbox[2]) - float(bbox[0])
+                        if abs(dy) > abs(dx)
+                        else float(bbox[3]) - float(bbox[1])
+                    )
+                    if math.isfinite(cross_span) and cross_span > 0:
+                        text_thicknesses.append(cross_span)
+    except Exception:
+        text_thicknesses = []
+    if not text_thicknesses:
+        text_thicknesses = [
+            float(w[3]) - float(w[1])
+            for w in _page_text(page, "words")
+            if float(w[3]) > float(w[1])
+        ]
+    median_h = statistics.median(text_thicknesses) if text_thicknesses else max(min(width, height) / 80.0, 1.0)
     return ViewportLayoutCalibration(
         median_word_height_pt=median_h,
         title_frame_gap_pt=max(median_h * 4.0, 2.0),
@@ -1132,6 +1159,146 @@ def _to_visual_bbox(page: Any, bbox: tuple[float, float, float, float]) -> tuple
         return bbox
 
 
+def _normalised_direction(value: object) -> tuple[float, float]:
+    try:
+        parts = tuple(float(item) for item in value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return (1.0, 0.0)
+    if len(parts) < 2:
+        return (1.0, 0.0)
+    dx, dy = parts[0], parts[1]
+    length = math.hypot(dx, dy)
+    if not math.isfinite(length) or length <= 1e-9:
+        return (1.0, 0.0)
+    return (dx / length, dy / length)
+
+
+def _bbox_in_text_basis(
+    bbox: Sequence[float],
+    direction: tuple[float, float],
+) -> tuple[float, float, float, float]:
+    """Project one native bbox into a title-local reading coordinate system.
+
+    Local +X follows text advance. Local +Y is the corresponding visual
+    "below" direction. For ordinary text direction (1, 0), this is identical
+    to native PDF coordinates. For vertical text this turns native left/right
+    into above/below without guessing from bbox aspect ratio.
+    """
+
+    dx, dy = _normalised_direction(direction)
+    vx, vy = -dy, dx
+    corners = (
+        (float(bbox[0]), float(bbox[1])),
+        (float(bbox[2]), float(bbox[1])),
+        (float(bbox[0]), float(bbox[3])),
+        (float(bbox[2]), float(bbox[3])),
+    )
+    local_x = tuple(x * dx + y * dy for x, y in corners)
+    local_y = tuple(x * vx + y * vy for x, y in corners)
+    return (
+        min(local_x),
+        min(local_y),
+        max(local_x),
+        max(local_y),
+    )
+
+
+def _fragment_native_direction(
+    page: Any,
+    *,
+    bbox: Sequence[float],
+    text: str,
+) -> tuple[float, float]:
+    """Recover a unique producer-owned text direction for one title fragment."""
+
+    target = _normalise_text(text)
+    if not target:
+        return (1.0, 0.0)
+    try:
+        data = _page_text(page, "dict") or {}
+    except Exception:
+        return (1.0, 0.0)
+
+    candidates: list[tuple[float, float]] = []
+    target_box = tuple(float(value) for value in bbox[:4])
+    target_area = max(_bbox_area(target_box), 1e-9)
+    for block in data.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
+            continue
+        for line in block.get("lines", []) or []:
+            line_bbox = line.get("bbox") or ()
+            if len(line_bbox) < 4:
+                continue
+            line_box = tuple(float(value) for value in line_bbox[:4])
+            line_text = _normalise_text(
+                " ".join(
+                    str(span.get("text", ""))
+                    for span in line.get("spans", []) or []
+                )
+            )
+            possible_boxes: list[tuple[float, float, float, float]] = []
+            if line_text == target:
+                possible_boxes.append(line_box)
+            for span in line.get("spans", []) or []:
+                if _normalise_text(str(span.get("text", ""))) != target:
+                    continue
+                span_bbox = span.get("bbox") or ()
+                if len(span_bbox) >= 4:
+                    possible_boxes.append(
+                        tuple(float(value) for value in span_bbox[:4])
+                    )
+            if not possible_boxes:
+                continue
+            if not any(
+                _bbox_overlap_area(target_box, candidate)
+                / min(target_area, max(_bbox_area(candidate), 1e-9))
+                >= 0.8
+                for candidate in possible_boxes
+            ):
+                continue
+            candidates.append(
+                _normalised_direction(line.get("dir") or (1.0, 0.0))
+            )
+
+    unique = {
+        (round(direction[0], 6), round(direction[1], 6))
+        for direction in candidates
+    }
+    if len(unique) != 1:
+        return (1.0, 0.0)
+    dx, dy = next(iter(unique))
+    return _normalised_direction((dx, dy))
+
+
+def _to_native_bbox(
+    page: Any,
+    bbox: tuple[float, float, float, float],
+) -> Optional[tuple[float, float, float, float]]:
+    """Map one visual/display bbox back into native page user space."""
+
+    if not int(getattr(page, "rotation", 0) or 0):
+        return _normalized_bbox(*bbox)
+    try:
+        import fitz
+
+        native = fitz.Rect(bbox) * page.derotation_matrix
+        result = _normalized_bbox(
+            float(native.x0),
+            float(native.y0),
+            float(native.x1),
+            float(native.y1),
+        )
+    except Exception:
+        return None
+    if (
+        result[2] <= result[0]
+        or result[3] <= result[1]
+        or not all(math.isfinite(value) for value in result)
+    ):
+        return None
+    return result
+
+
 def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
     owned: Optional[list[tuple[float, float, float, float]]] = None
@@ -1154,7 +1321,18 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
             tails = _wrapped_note_tail_lines(page)
         if tails and any(text in tail_text and _point_in_bbox(_bbox_center(bbox), tail_bbox) for tail_bbox, tail_text in tails):
             continue  # the wrapped tail of a note, not a drawing-view title
-        candidates.append(_TitleAnchor(text=text, bbox=bbox, view_type=view_type))
+        candidates.append(
+            _TitleAnchor(
+                text=text,
+                bbox=bbox,
+                view_type=view_type,
+                direction=_fragment_native_direction(
+                    page,
+                    bbox=bbox,
+                    text=text,
+                ),
+            )
+        )
 
     # Prefer the tighter span when a line-level fragment duplicates it.
     candidates.sort(key=lambda a: (_bbox_area(a.bbox), a.bbox[1], a.bbox[0], a.text))
@@ -1170,6 +1348,311 @@ def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
             anchors.append(candidate)
     anchors.sort(key=lambda a: (a.center[1], a.center[0], a.text))
     return anchors
+
+
+def _source_image_placement_groups(page: Any) -> tuple[dict[str, Any], ...]:
+    """Inspect producer image placements without synthesizing drawing frames.
+
+    Repeated XObjects are evidence of raster tiling, not of a drawing viewport.
+    Retain independent xref identity and physical placement coordinates.  This
+    function deliberately cannot create an authenticated SegmentedViewport.
+    """
+    get_images = getattr(page, "get_images", None)
+    get_rects = getattr(page, "get_image_rects", None)
+    if not callable(get_images) or not callable(get_rects):
+        return ()
+    try:
+        images = get_images(full=True)
+    except (RuntimeError, ValueError, TypeError):
+        return ()
+    groups = []
+    for image in images:
+        if not image:
+            continue
+        xref = image[0]
+        try:
+            placements = get_rects(xref)
+        except (RuntimeError, ValueError, TypeError):
+            continue
+        boxes = sorted({
+            tuple(float(v) for v in (r.x0, r.y0, r.x1, r.y1))
+            for r in placements
+            if float(r.x1) > float(r.x0) and float(r.y1) > float(r.y0)
+        })
+        if not boxes:
+            continue
+        groups.append({
+            "xref": int(xref),
+            "placements": len(boxes),
+            "native_bboxes": tuple(boxes),
+            "source_region_complete": False,
+        })
+    return tuple(sorted(groups, key=lambda row: row["xref"]))
+
+
+def _raster_placement_components(groups: Sequence[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    """Group touching source raster placements, without declaring plan ownership."""
+    tiles = sorted(
+        (tuple(float(v) for v in box), int(group["xref"]))
+        for group in groups for box in group["native_bboxes"]
+    )
+    parent = list(range(len(tiles)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, (a, _xref) in enumerate(tiles):
+        for j in range(i + 1, len(tiles)):
+            b = tiles[j][0]
+            if b[0] > a[2] + 0.25:
+                break
+            overlap_x = min(a[2], b[2]) - max(a[0], b[0])
+            overlap_y = min(a[3], b[3]) - max(a[1], b[1])
+            if overlap_x < -0.25 or overlap_y < -0.25:
+                continue
+            if overlap_x <= 0 and overlap_y <= 0:
+                continue  # corner contact is not connected coverage
+            ri, rj = root(i), root(j)
+            if ri != rj:
+                parent[rj] = ri
+
+    components: dict[int, list[int]] = {}
+    for i in range(len(tiles)):
+        components.setdefault(root(i), []).append(i)
+    result = []
+    for indices in components.values():
+        boxes = [tiles[i][0] for i in indices]
+        result.append({
+            "native_bbox": (
+                min(b[0] for b in boxes), min(b[1] for b in boxes),
+                max(b[2] for b in boxes), max(b[3] for b in boxes),
+            ),
+            "placement_count": len(indices),
+            "image_xrefs": tuple(sorted({tiles[i][1] for i in indices})),
+            "authenticated_viewport": False,
+        })
+    return tuple(sorted(result, key=lambda component: component["native_bbox"]))
+
+
+def _raster_component_is_sheetwide(
+    component: dict[str, Any],
+    calibration: ViewportLayoutCalibration,
+) -> bool:
+    """Reject raster coverage spanning most of the native page as a drawing.
+
+    Page coverage can represent multiple independent plans printed on one
+    continuous raster. It must never become an individual drawing viewport.
+    """
+    bbox = component["native_bbox"]
+    width = max(0.0, float(bbox[2]) - float(bbox[0]))
+    height = max(0.0, float(bbox[3]) - float(bbox[1]))
+    page_width = float(calibration.page_width_pt)
+    page_height = float(calibration.page_height_pt)
+    return (
+        page_width > 0 and page_height > 0
+        and width / page_width >= 0.90
+        and height / page_height >= 0.90
+    )
+
+
+def _raster_ink_gutter_evidence(
+    page: Any, *, max_render_dimension: int = 800,
+) -> dict[str, Any]:
+    """Find large empty corridors in a bounded rendering of source geometry.
+
+    Returned corridors are *candidate separation evidence*, never viewport
+    boundaries. Rendered ink includes text, title blocks and drawing symbols,
+    and a white corridor alone cannot prove which plan owns either side.
+    Coordinates use visual page orientation, not PDF native user space.
+    """
+    unavailable = {
+        "vertical_gutters_visual_pts": (),
+        "horizontal_gutters_visual_pts": (),
+        "raster_gutters_are_authoritative": False,
+    }
+    try:
+        width = float(page.rect.width)
+        height = float(page.rect.height)
+        if width <= 0 or height <= 0 or not math.isfinite(width + height):
+            return unavailable
+        scale = min(1.0, float(max_render_dimension) / max(width, height))
+        if scale <= 0 or max_render_dimension < 64:
+            return unavailable
+        pix = page.get_pixmap(
+            matrix=fitz.Matrix(scale, scale),
+            colorspace=fitz.csGRAY,
+            alpha=False,
+            annots=False,
+        )
+        if pix.n != 1 or pix.width < 10 or pix.height < 10:
+            return unavailable
+        buf = memoryview(pix.samples)
+        dark_cols = [0] * pix.width
+        dark_rows = [0] * pix.height
+        # 220 intentionally ignores antialiasing haze but counts actual ink.
+        for y in range(pix.height):
+            offset = y * pix.stride
+            dark_count = 0
+            for x in range(pix.width):
+                if buf[offset + x] < 220:
+                    dark_cols[x] += 1
+                    dark_count += 1
+            dark_rows[y] = dark_count
+        if not any(dark_cols) or not any(dark_rows):
+            return unavailable
+
+        def gutters(counts: Sequence[int], cross_span: int, page_span: float):
+            size = len(counts)
+            min_run = max(8, math.ceil(size * 0.025))
+            threshold = max(1, math.floor(cross_span * 0.002))
+            # Exclude page margins; require substantial ink on both sides.
+            cumulative = [0]
+            for count in counts:
+                cumulative.append(cumulative[-1] + count)
+            total = cumulative[-1]
+            if total <= 0:
+                return ()
+            result = []
+            start = None
+            for index in range(size + 1):
+                blank = (
+                    index < size and counts[index] <= threshold
+                    and math.ceil(size * 0.04) <= index < math.floor(size * 0.96)
+                )
+                if blank and start is None:
+                    start = index
+                if not blank and start is not None:
+                    end = index
+                    if (
+                        end - start >= min_run
+                        and cumulative[start] >= total * 0.15
+                        and total - cumulative[end] >= total * 0.15
+                    ):
+                        result.append((
+                            round(page_span * start / size, 3),
+                            round(page_span * end / size, 3),
+                        ))
+                    start = None
+            return tuple(result)
+
+        horizontal_gutters = gutters(dark_rows, pix.width, height)
+        # A short vertical separation between adjacent drawings can be
+        # interrupted by a title block elsewhere on the page. Scan individual
+        # ink bands separated by independently observed horizontal gutters,
+        # rather than insisting on a page-spanning empty vertical corridor.
+        spans = []
+        cursor = 0.0
+        for begin, end in horizontal_gutters:
+            if begin > cursor:
+                spans.append((cursor, begin))
+            cursor = end
+        if cursor < height:
+            spans.append((cursor, height))
+        local_gutters = []
+        for band_begin, band_end in spans:
+            y0 = max(0, min(pix.height, round(band_begin * pix.height / height)))
+            y1 = max(y0, min(pix.height, round(band_end * pix.height / height)))
+            if y1 - y0 < max(10, math.ceil(pix.height * 0.05)):
+                continue
+            local_cols = [0] * pix.width
+            for y in range(y0, y1):
+                row_offset = y * pix.stride
+                for x in range(pix.width):
+                    if buf[row_offset + x] < 220:
+                        local_cols[x] += 1
+            found = gutters(local_cols, y1 - y0, width)
+            if found:
+                local_gutters.append({
+                    "visual_band_y_pts": (
+                        round(band_begin, 3), round(band_end, 3),
+                    ),
+                    "vertical_gutters_visual_pts": found,
+                    "source_region_complete": False,
+                })
+        return {
+            "vertical_gutters_visual_pts": gutters(dark_cols, pix.height, width),
+            "horizontal_gutters_visual_pts": horizontal_gutters,
+            "local_vertical_gutters_by_band_visual_pts": tuple(local_gutters),
+            "render_dimensions": (pix.width, pix.height),
+            "raster_gutters_are_authoritative": False,
+        }
+    except (RuntimeError, ValueError, TypeError, OverflowError):
+        return unavailable
+
+
+def _raster_ink_title_cell_evidence(
+    page: Any,
+    anchors: Sequence[_TitleAnchor],
+    ink_evidence: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    """Associate rendered-ink separation candidates with native title boxes.
+
+    This is diagnostic coverage evidence only. A white gutter, even with a
+    single associated title, cannot independently authenticate a complete
+    architectural drawing viewport or its metric scale.
+    """
+    try:
+        width = float(page.rect.width)
+        height = float(page.rect.height)
+    except (AttributeError, ValueError, TypeError):
+        return ()
+    if width <= 0 or height <= 0:
+        return ()
+    horizontal = tuple(ink_evidence.get("horizontal_gutters_visual_pts") or ())
+    vertical = tuple(ink_evidence.get("vertical_gutters_visual_pts") or ())
+    local = tuple(ink_evidence.get("local_vertical_gutters_by_band_visual_pts") or ())
+
+    def spans(limit: float, gaps: Sequence[Sequence[float]]):
+        cursor = 0.0
+        out = []
+        for gap in gaps:
+            if len(gap) != 2:
+                return ()
+            start, end = float(gap[0]), float(gap[1])
+            if not (0 <= cursor <= start < end <= limit):
+                return ()
+            if start > cursor:
+                out.append((cursor, start))
+            cursor = end
+        if cursor < limit:
+            out.append((cursor, limit))
+        return tuple(out)
+
+    rows = []
+    title_boxes = tuple(
+        (anchor, _to_visual_bbox(page, anchor.bbox)) for anchor in anchors
+    )
+    for y0, y1 in spans(height, horizontal):
+        chosen = vertical
+        for band in local:
+            interval = tuple(band.get("visual_band_y_pts") or ())
+            if (
+                len(interval) == 2
+                and abs(float(interval[0]) - y0) <= 0.01
+                and abs(float(interval[1]) - y1) <= 0.01
+            ):
+                chosen = tuple(band.get("vertical_gutters_visual_pts") or ())
+                break
+        for x0, x1 in spans(width, chosen):
+            cell = (x0, y0, x1, y1)
+            owned = [
+                {"title": anchor.text, "type": anchor.view_type}
+                for anchor, bbox in title_boxes
+                if _bbox_contains(cell, bbox)
+            ]
+            if not owned:
+                continue
+            rows.append({
+                "visual_bbox": tuple(round(v, 3) for v in cell),
+                "contained_titles": tuple(owned),
+                "unique_title_candidate": len(owned) == 1,
+                "source_region_complete": False,
+                "authenticated_viewport": False,
+            })
+    return tuple(rows)
 
 
 def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
@@ -1230,7 +1713,16 @@ def _frame_candidates_for_title(
     """
 
     candidates: list[tuple[float, float, float, float]] = []
-    visual_anchor_bbox = _to_visual_bbox(page, anchor.bbox)
+    direction = _normalised_direction(anchor.direction)
+    title_is_native_vertical = (
+        str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES
+        and abs(direction[1]) > abs(direction[0])
+    )
+    visual_anchor_bbox = (
+        _bbox_in_text_basis(anchor.bbox, direction)
+        if title_is_native_vertical
+        else _to_visual_bbox(page, anchor.bbox)
+    )
     visual_title_center = _bbox_center(visual_anchor_bbox)
     for frame in frames:
         if _bbox_contains(
@@ -1241,7 +1733,11 @@ def _frame_candidates_for_title(
             candidates.append(frame)
             continue
 
-        visual_frame = _to_visual_bbox(page, frame)
+        visual_frame = (
+            _bbox_in_text_basis(frame, direction)
+            if title_is_native_vertical
+            else _to_visual_bbox(page, frame)
+        )
         overlap = min(visual_frame[2], visual_anchor_bbox[2]) - max(
             visual_frame[0], visual_anchor_bbox[0]
         )
@@ -1275,7 +1771,11 @@ def _frame_candidates_for_title(
         if any(
             other is not anchor
             and _point_in_bbox(
-                _bbox_center(_to_visual_bbox(page, other.bbox)),
+                _bbox_center(
+                    _bbox_in_text_basis(other.bbox, direction)
+                    if title_is_native_vertical
+                    else _to_visual_bbox(page, other.bbox)
+                ),
                 gap_box,
             )
             for other in anchors
@@ -1390,6 +1890,8 @@ def _frame_resolved_viewports(
 
 
 _AUTHORITATIVE_DERIVED_PARTITION_MODE = "columnar_title_grid"
+_ROTATED_SEMANTIC_FRAME_BAND_MODE = "rotated_semantic_frame_band"
+_PLAN_VIEW_TYPES = frozenset({DrawingViewType.FLOOR_PLAN.value, DrawingViewType.FLOOR_FINISH_PLAN.value, DrawingViewType.REFLECTED_CEILING_PLAN.value})
 _SINGLE_FLOOR_PLAN_PARTITION_MODE = "single_floor_plan_printable_area"
 _SINGLE_FLOOR_PLAN_SHEET_FRAME_MODE = "single_floor_plan_sheet_frame"
 _SINGLE_FLOOR_FINISH_PARTITION_MODE = "single_floor_finish_plan_printable_area"
@@ -1411,6 +1913,8 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
     mode = provenance.get("partition_mode")
     if mode == _AUTHORITATIVE_DERIVED_PARTITION_MODE:
         return provenance.get("grid_validated") is True
+    if mode == _ROTATED_SEMANTIC_FRAME_BAND_MODE:
+        return bool(provenance.get("visual_band_validated") is True and int(provenance.get("rotation", 0) or 0) in (90, 270) and str(provenance.get("separator_view_id") or "") and int(provenance.get("plan_title_count_in_band", 0) or 0) == 1 and int(provenance.get("drawing_vector_primitive_count", 0) or 0) >= 2)
     if mode in (
         _SINGLE_FLOOR_PLAN_PARTITION_MODE,
         _SINGLE_FLOOR_FINISH_PARTITION_MODE,
@@ -1997,6 +2501,265 @@ def _single_floor_plan_printable_partition(
     )
 
 
+def _rotated_semantic_frame_band_partitions(
+    page: Any,
+    anchors: Sequence[_TitleAnchor],
+    unresolved_indices: Sequence[int],
+    framed: Sequence[SegmentedViewport],
+    calibration: ViewportLayoutCalibration,
+    *,
+    page_number: int,
+) -> tuple[list[SegmentedViewport], set[int]]:
+    """Derive plan bands on rotated sheets from an authenticated table frame.
+
+    This is intentionally much narrower than generic title partitioning.
+    A resolved semantic-table frame may act as a physical separator only when
+    exactly one unresolved plan title owns one side band, no resolved viewport
+    overlaps that band, and the band contains real drawing primitives.  All
+    reasoning is performed in display orientation; the published viewport bbox
+    is converted back to native PDF user space.
+    """
+
+    try:
+        rotation = int(native_page_frame(page).rotation) % 360
+    except NativePageFrameUnresolved:
+        return [], set()
+    if rotation not in (90, 270):
+        return [], set()
+
+    separators = [
+        viewport
+        for viewport in framed
+        if (
+            viewport.bounding_box is not None
+            and viewport.status == ViewportSegmentationStatus.RESOLVED.value
+            and viewport.view_type in _SEMANTIC_TABLE_VIEW_TYPES
+        )
+    ]
+    plan_indices = [
+        index
+        for index in unresolved_indices
+        if anchors[index].view_type in _PLAN_VIEW_TYPES
+    ]
+    if not separators or not plan_indices:
+        return [], set()
+
+    try:
+        visual_width = float(page.rect.width)
+        visual_height = float(page.rect.height)
+    except Exception:
+        return [], set()
+    if visual_width <= 0.0 or visual_height <= 0.0:
+        return [], set()
+
+    visual_anchor_boxes = {
+        index: _to_visual_bbox(page, anchors[index].bbox)
+        for index in plan_indices
+    }
+    framed_visual = [
+        (
+            viewport,
+            _to_visual_bbox(page, viewport.bounding_box),
+        )
+        for viewport in framed
+        if viewport.bounding_box is not None
+    ]
+    gap = max(calibration.median_word_height_pt * 0.25, 0.5)
+    candidates_by_index: dict[
+        int,
+        list[
+            tuple[
+                tuple[float, float, float, float],
+                tuple[float, float, float, float],
+                str,
+                str,
+                int,
+            ]
+        ],
+    ] = {}
+
+    for separator in separators:
+        assert separator.bounding_box is not None
+        visual_separator = _to_visual_bbox(
+            page,
+            separator.bounding_box,
+        )
+        side_bands = (
+            (
+                "left",
+                (
+                    0.0,
+                    0.0,
+                    max(0.0, visual_separator[0] - gap),
+                    visual_height,
+                ),
+            ),
+            (
+                "right",
+                (
+                    min(visual_width, visual_separator[2] + gap),
+                    0.0,
+                    visual_width,
+                    visual_height,
+                ),
+            ),
+            (
+                "top",
+                (
+                    0.0,
+                    0.0,
+                    visual_width,
+                    max(0.0, visual_separator[1] - gap),
+                ),
+            ),
+            (
+                "bottom",
+                (
+                    0.0,
+                    min(visual_height, visual_separator[3] + gap),
+                    visual_width,
+                    visual_height,
+                ),
+            ),
+        )
+        # A long vertical source-owned schedule frame separates left/right
+        # drawing bands; a long horizontal one separates top/bottom. Testing
+        # perpendicular partitions as well can give the same title competing
+        # false owners. Square separators remain ambiguous and grant none.
+        separator_width = visual_separator[2] - visual_separator[0]
+        separator_height = visual_separator[3] - visual_separator[1]
+        if separator_height >= separator_width * 1.2:
+            permitted_sides = {"left", "right"}
+        elif separator_width >= separator_height * 1.2:
+            permitted_sides = {"top", "bottom"}
+        else:
+            continue
+        for side, visual_band in side_bands:
+            if side not in permitted_sides:
+                continue
+            if (
+                visual_band[2] - visual_band[0]
+                < calibration.minimum_frame_span_pt
+                or visual_band[3] - visual_band[1]
+                < calibration.minimum_frame_span_pt
+            ):
+                continue
+
+            owning_plan_indices = [
+                index
+                for index in plan_indices
+                if _bbox_contains(
+                    visual_band,
+                    visual_anchor_boxes[index],
+                    margin=calibration.median_word_height_pt * 0.1,
+                )
+            ]
+            if len(owning_plan_indices) != 1:
+                continue
+            index = owning_plan_indices[0]
+
+            if any(
+                _bbox_overlap_area(visual_band, other_visual) > 1e-6
+                for other, other_visual in framed_visual
+            ):
+                continue
+
+            native_band = _to_native_bbox(page, visual_band)
+            if native_band is None or not _bbox_contains(
+                native_band,
+                anchors[index].bbox,
+                margin=calibration.median_word_height_pt * 0.1,
+            ):
+                continue
+
+            primitive_count = _drawing_vector_primitive_count(
+                page,
+                native_band,
+                calibration,
+            )
+            if primitive_count < 2:
+                continue
+            candidates_by_index.setdefault(index, []).append(
+                (
+                    visual_band,
+                    native_band,
+                    separator.view_id,
+                    side,
+                    primitive_count,
+                )
+            )
+
+    out: list[SegmentedViewport] = []
+    consumed: set[int] = set()
+    for index in sorted(candidates_by_index):
+        unique: dict[
+            tuple[float, float, float, float],
+            tuple[
+                tuple[float, float, float, float],
+                tuple[float, float, float, float],
+                str,
+                str,
+                int,
+            ],
+        ] = {}
+        for candidate in candidates_by_index[index]:
+            key = tuple(round(value, 6) for value in candidate[1])
+            unique[key] = candidate
+        if len(unique) != 1:
+            continue
+        (
+            visual_band,
+            native_band,
+            separator_view_id,
+            side,
+            primitive_count,
+        ) = next(iter(unique.values()))
+        anchor = anchors[index]
+        raw, denominator, scale_conflict, scale_notes = _extract_scales_for_bbox(
+            page,
+            native_band,
+        )
+        out.append(
+            SegmentedViewport(
+                view_id=f"view_p{page_number}_{index + 1}",
+                page_number=page_number,
+                view_type=anchor.view_type,
+                label=anchor.text,
+                title_bbox=anchor.bbox,
+                bounding_box=native_band,
+                status=ViewportSegmentationStatus.DERIVED.value,
+                boundary_source=ViewportBoundarySource.TITLE_PARTITION.value,
+                confidence=0.9,
+                scale_raw=raw,
+                scale_denominator=denominator,
+                scale_conflict=scale_conflict,
+                notes=[
+                    (
+                        "rotated plan viewport owned by non-overlapping "
+                        "semantic-frame side band"
+                    ),
+                    *scale_notes,
+                ],
+                provenance={
+                    "partition_mode": _ROTATED_SEMANTIC_FRAME_BAND_MODE,
+                    "visual_band_validated": True,
+                    "rotation": rotation,
+                    "separator_view_id": separator_view_id,
+                    "separator_side": side,
+                    "visual_band_bbox": visual_band,
+                    "plan_title_count_in_band": 1,
+                    "drawing_vector_primitive_count": primitive_count,
+                    "title_bbox": anchor.bbox,
+                },
+            )
+        )
+        consumed.add(index)
+
+    if not validate_non_overlapping_viewports([*framed, *out]):
+        return [], set()
+    return out, consumed
+
+
 def _derived_partitions(
     page: Any,
     anchors: Sequence[_TitleAnchor],
@@ -2144,6 +2907,10 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     if not anchors:
         return []
     frames = extract_vector_frames(page, calibration)
+    # Keep genuine source raster placement evidence available for unresolved
+    # views. Image XObjects may repeat across the sheet; neither a placement
+    # nor the union of placements proves a unique drawing boundary.
+    source_image_groups = _source_image_placement_groups(page) if not frames else ()
     framed, consumed = _frame_resolved_viewports(
         page,
         anchors,
@@ -2157,26 +2924,47 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
     except NativePageFrameUnresolved:
         return []
     if unresolved and page_rotation != 0:
-        derived = [
-            SegmentedViewport(
-                view_id=f"view_p{page_number}_{index + 1}",
+        rotated_derived, rotated_consumed = (
+            _rotated_semantic_frame_band_partitions(
+                page,
+                anchors,
+                unresolved,
+                framed,
+                calibration,
                 page_number=page_number,
-                view_type=anchors[index].view_type,
-                label=anchors[index].text,
-                title_bbox=anchors[index].bbox,
-                bounding_box=None,
-                status=ViewportSegmentationStatus.UNSUPPORTED.value,
-                boundary_source=ViewportBoundarySource.NONE.value,
-                confidence=0.0,
-                notes=[
-                    "rotated page requires producer-owned vector-frame ownership"
-                ],
-                provenance={
-                    "rotation": page_rotation,
-                    "derived_partition_disabled": True,
-                },
             )
+        )
+        remaining_unresolved = [
+            index
             for index in unresolved
+            if index not in rotated_consumed
+        ]
+        derived = [
+            *rotated_derived,
+            *[
+                SegmentedViewport(
+                    view_id=f"view_p{page_number}_{index + 1}",
+                    page_number=page_number,
+                    view_type=anchors[index].view_type,
+                    label=anchors[index].text,
+                    title_bbox=anchors[index].bbox,
+                    bounding_box=None,
+                    status=ViewportSegmentationStatus.UNSUPPORTED.value,
+                    boundary_source=ViewportBoundarySource.NONE.value,
+                    confidence=0.0,
+                    notes=[
+                        (
+                            "rotated page lacks unique producer-owned "
+                            "frame/band ownership"
+                        )
+                    ],
+                    provenance={
+                        "rotation": page_rotation,
+                        "derived_partition_disabled": True,
+                    },
+                )
+                for index in remaining_unresolved
+            ],
         ]
     else:
         derived = (
@@ -2190,6 +2978,25 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
             if unresolved
             else []
         )
+    if source_image_groups:
+        # Source placement connectivity can require pairwise geometry checks.
+        # Compute it once per page rather than once for each unresolved title.
+        components = _raster_placement_components(source_image_groups)
+        placement_count = sum(group["placements"] for group in source_image_groups)
+        sheetwide_count = sum(
+            _raster_component_is_sheetwide(c, calibration) for c in components
+        )
+        for viewport in derived:
+            if viewport.bounding_box is None and viewport.status in (
+                ViewportSegmentationStatus.UNSUPPORTED.value,
+                ViewportSegmentationStatus.AMBIGUOUS.value,
+            ):
+                viewport.provenance["source_image_group_count"] = len(source_image_groups)
+                viewport.provenance["source_image_placement_count"] = placement_count
+                viewport.provenance["source_image_groups_not_authoritative"] = True
+                viewport.provenance["source_image_coverage_component_count"] = len(components)
+                viewport.provenance["source_image_sheetwide_component_count"] = sheetwide_count
+                viewport.provenance["source_image_components_not_authoritative"] = True
     ordered = sorted(
         framed + derived,
         key=lambda v: (v.title_bbox[1], v.title_bbox[0], v.view_id),

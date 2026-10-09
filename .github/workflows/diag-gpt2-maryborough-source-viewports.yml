@@ -1,0 +1,27 @@
+name: DIAG GPT2 Maryborough Source Viewports
+on:
+  pull_request:
+    paths:
+      - pb_viewport_segmentation.py
+      - tools/diag_gpt2_maryborough_source_viewports.py
+      - .github/workflows/diag-gpt2-maryborough-source-viewports.yml
+  workflow_dispatch:
+jobs:
+  viewports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inventory actual source viewports and block reasons
+        run: PYTHONPATH=. python -u tools/diag_gpt2_maryborough_source_viewports.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maryborough-gpt2-source-viewport-inventory
+          path: maryborough_gpt2_source_viewport_inventory.json
+          if-no-files-found: warn

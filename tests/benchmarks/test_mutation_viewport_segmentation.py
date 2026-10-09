@@ -758,3 +758,270 @@ def test_line_grid_frame_cannot_mint_floor_plan_authority() -> None:
         assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     finally:
         doc.close()
+
+
+
+def _vertical_title_line_grid_schedule() -> fitz.Document:
+    """Semantic schedule whose producer-owned title advances vertically."""
+
+    doc = fitz.open()
+    page = doc.new_page(width=720, height=420)
+
+    outer = fitz.Rect(80.0, 30.0, 300.0, 390.0)
+    page.draw_rect(outer)
+    xs = (100.0, 145.0, 190.0, 235.0, 280.0)
+    ys = (55.0, 110.0, 165.0, 220.0, 275.0, 330.0)
+    for x in xs:
+        page.draw_line((x, 55.0), (x, 330.0))
+    for y in ys:
+        page.draw_line((100.0, y), (280.0, y))
+
+    # Ordinary small source text keeps layout calibration representative while
+    # remaining semantically inert.
+    for index, label in enumerate(("A", "B", "C", "D", "E", "F")):
+        page.insert_text((110.0, 75.0 + index * 45.0), label, fontsize=8.0)
+
+    # rotate=90 yields a native vertical line. The table sits immediately to
+    # its left; in the title-local basis this is the ordinary
+    # "frame above, title below" ownership pattern.
+    page.insert_text(
+        (325.0, 310.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=10.0,
+        rotate=90,
+    )
+
+    # A normal drawing frame elsewhere must not steal this schedule title.
+    page.draw_rect(fitz.Rect(390.0, 30.0, 690.0, 360.0))
+    page.draw_line((420.0, 80.0), (650.0, 80.0))
+    page.draw_line((420.0, 80.0), (420.0, 300.0))
+    return _reopen(doc)
+
+
+def test_vertical_native_schedule_title_owns_exact_gridded_table_frame() -> None:
+    doc = _vertical_title_line_grid_schedule()
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        schedules = [
+            viewport
+            for viewport in viewports
+            if viewport.view_type == DrawingViewType.SCHEDULE.value
+        ]
+        assert len(schedules) == 1
+        schedule = schedules[0]
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx(
+            (80.0, 30.0, 300.0, 390.0)
+        )
+        assert schedule.label == "CEILING FINISHES SCHEDULE"
+    finally:
+        doc.close()
+
+
+def test_extreme_aspect_non_table_frame_still_rejected_for_vertical_title() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=1000)
+    page.draw_rect(fitz.Rect(120.0, 40.0, 220.0, 940.0))
+    for index in range(8):
+        page.insert_text(
+            (400.0, 100.0 + index * 40.0),
+            f"NOTE {index}",
+            fontsize=8.0,
+        )
+    page.insert_text(
+        (245.0, 700.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=10.0,
+        rotate=90,
+    )
+    doc = _reopen(doc)
+    try:
+        schedules = [
+            viewport
+            for viewport in segment_page_viewports(doc[0], page_number=1)
+            if viewport.view_type == DrawingViewType.SCHEDULE.value
+        ]
+        assert len(schedules) == 1
+        assert schedules[0].status == ViewportSegmentationStatus.UNSUPPORTED.value
+        assert schedules[0].bounding_box is None
+    finally:
+        doc.close()
+
+
+def test_rotated_band_coordinate_roundtrip_preserves_native_source_bbox() -> None:
+    from pb_viewport_segmentation import _to_native_bbox, _to_visual_bbox
+
+    doc = fitz.open()
+    page = doc.new_page(width=720, height=420)
+    native = (64.0, 52.0, 300.0, 280.0)
+    try:
+        for rotation in (0, 90, 270):
+            page.set_rotation(rotation)
+            visual = _to_visual_bbox(page, native)
+            restored = _to_native_bbox(page, visual)
+            assert restored == pytest.approx(native)
+        assert _to_native_bbox(page, (float("nan"), 0.0, 10.0, 20.0)) is None
+    finally:
+        doc.close()
+
+
+def _rotated_two_rcps_with_central_schedule() -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=600.0, height=800.0)
+    page.set_rotation(90)
+
+    # Native bbox -> visual center panel at x=300..500, y=150..450.
+    schedule = fitz.Rect(150.0, 300.0, 450.0, 500.0)
+    page.draw_rect(schedule)
+    for x in (210.0, 270.0, 330.0, 390.0):
+        page.draw_line((x, 300.0), (x, 500.0))
+    for y in (340.0, 380.0, 420.0, 460.0):
+        page.draw_line((150.0, y), (450.0, y))
+    page.insert_text(
+        (430.0, 480.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=9,
+        rotate=90,
+    )
+
+    # Two independent plan drawings on opposite visual sides of the table.
+    page.draw_line((80.0, 560.0), (520.0, 560.0))
+    page.draw_line((120.0, 690.0), (480.0, 690.0))
+    page.draw_line((80.0, 120.0), (520.0, 120.0))
+    page.draw_line((120.0, 230.0), (480.0, 230.0))
+    page.insert_text(
+        (520.0, 760.0),
+        "REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    page.insert_text(
+        (520.0, 280.0),
+        "PROP. REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    return _reopen(doc)
+
+
+def test_rotated_rcps_can_use_resolved_schedule_as_nonoverlapping_band_separator() -> None:
+    doc = _rotated_two_rcps_with_central_schedule()
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    assert validate_non_overlapping_viewports(viewports)
+
+    schedule = [
+        viewport
+        for viewport in viewports
+        if viewport.view_type == DrawingViewType.SCHEDULE.value
+    ]
+    rcps = [
+        viewport
+        for viewport in viewports
+        if viewport.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+    ]
+    assert len(schedule) == 1
+    from pb_viewport_segmentation import (
+        calibrate_viewport_layout, extract_vector_frames,
+        extract_view_title_anchors, _frame_candidates_for_title, _frame_looks_like_table,
+    )
+    calibration = calibrate_viewport_layout(doc[0])
+    frames = extract_vector_frames(doc[0], calibration)
+    schedule_anchor = next(a for a in extract_view_title_anchors(doc[0]) if a.view_type == DrawingViewType.SCHEDULE.value)
+    candidates = _frame_candidates_for_title(doc[0], schedule_anchor, frames, calibration)
+    assert schedule[0].status == ViewportSegmentationStatus.RESOLVED.value, (
+        "schedule authority prerequisite not met",
+        {"anchor": repr(schedule_anchor), "frames": frames, "candidates": candidates, "table_proofs": [(f, _frame_looks_like_table(f, doc[0], calibration)) for f in candidates]},
+        [(v.label, v.status, v.notes, v.provenance) for v in viewports],
+    )
+    assert len(rcps) == 2
+    assert all(
+        viewport.status == ViewportSegmentationStatus.DERIVED.value
+        for viewport in rcps
+    ), "\n".join(f"{v.label}: {v.status}; notes={v.notes}; provenance={v.provenance}" for v in viewports)
+    assert all(is_authoritative_derived_viewport(viewport) for viewport in rcps)
+    assert {
+        viewport.provenance.get("separator_side")
+        for viewport in rcps
+    } == {"left", "right"}
+    assert all(
+        viewport.provenance.get("visual_band_validated") is True
+        for viewport in rcps
+    )
+    # RCP plan bands must never authorize physical FLOOR_PLAN topology.
+    assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    doc.close()
+
+
+def test_rotated_semantic_band_fails_closed_when_two_plan_titles_compete() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=600.0, height=800.0)
+    page.set_rotation(90)
+    schedule = fitz.Rect(150.0, 300.0, 450.0, 500.0)
+    page.draw_rect(schedule)
+    for x in (210.0, 270.0, 330.0, 390.0):
+        page.draw_line((x, 300.0), (x, 500.0))
+    for y in (340.0, 380.0, 420.0, 460.0):
+        page.draw_line((150.0, y), (450.0, y))
+    page.insert_text(
+        (430.0, 480.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=9,
+        rotate=90,
+    )
+    page.draw_line((80.0, 560.0), (520.0, 560.0))
+    page.draw_line((120.0, 690.0), (480.0, 690.0))
+    page.draw_line((80.0, 120.0), (520.0, 120.0))
+    page.draw_line((120.0, 230.0), (480.0, 230.0))
+    page.insert_text(
+        (520.0, 760.0),
+        "REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    # A second plan title in the same visual left band destroys unique owner.
+    page.insert_text(
+        (480.0, 740.0),
+        "GROUND FLOOR PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    page.insert_text(
+        (520.0, 280.0),
+        "PROP. REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    doc = _reopen(doc)
+
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    left_competitors = [
+        viewport
+        for viewport in viewports
+        if viewport.label in ("REFLECTED CEILING PLAN", "GROUND FLOOR PLAN")
+    ]
+    assert len(left_competitors) == 2
+    assert all(
+        not is_authoritative_derived_viewport(viewport)
+        for viewport in left_competitors
+    )
+    doc.close()
+
+
+
+
+def test_vertical_native_title_length_does_not_inflate_frame_calibration() -> None:
+    from pb_viewport_segmentation import calibrate_viewport_layout
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=800)
+    page.set_rotation(90)
+    page.insert_text((430, 480), "CEILING FINISHES SCHEDULE", fontsize=9, rotate=90)
+    doc = _reopen(doc)
+    try:
+        calibration = calibrate_viewport_layout(doc[0])
+        assert calibration.median_word_height_pt < 20.0
+        assert calibration.minimum_frame_span_pt < 200.0
+    finally:
+        doc.close()
+
