@@ -406,7 +406,7 @@ def test_canonical_floor_enrichment_rejects_alien_room_snapshot_or_face(
         assert rejected_floor.metric_area_authority is None
 
 
-def test_duplicate_valid_room_area_authority_conflicts(tmp_path) -> None:
+def test_duplicate_identical_room_area_authority_is_idempotent(tmp_path) -> None:
     path = tmp_path / "metric-floor-duplicate.pdf"
     _write_plan(path)
     published, room_faces, selector = _authority(path)
@@ -431,9 +431,10 @@ def test_duplicate_valid_room_area_authority_conflicts(tmp_path) -> None:
 
     enriched = enrich_live_canonical_floor_metric_areas(floors, duplicated)
 
-    assert enriched.status is EvidenceResolutionStatus.CONFLICT
-    assert enriched.reason_codes == (LIVE_CANONICAL_FLOOR_METRIC_AREA_CONFLICT,)
-    assert any(floor.metric_area_m2 is None for floor in enriched.floors)
+    # A byte-for-byte replay is the same source authority, not two claims.
+    baseline = enrich_live_canonical_floor_metric_areas(floors, bridge)
+    assert enriched == baseline
+    assert enriched.status is EvidenceResolutionStatus.CORROBORATED
 
 
 def test_sequential_room_area_bridges_replay_or_conflict_without_overwrite(
