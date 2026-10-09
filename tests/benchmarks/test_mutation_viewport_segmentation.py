@@ -1019,3 +1019,43 @@ def _single_line_grid_frame_view(title: str) -> fitz.Document:
     page.insert_text((350, 325), title, fontsize=11)
     return _reopen(doc)
 
+
+
+def _rotated_two_rcps_with_central_schedule() -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=600.0, height=800.0)
+    page.set_rotation(90)
+
+    # Native bbox -> visual center panel at x=300..500, y=150..450.
+    schedule = fitz.Rect(150.0, 300.0, 450.0, 500.0)
+    page.draw_rect(schedule)
+    for x in (210.0, 270.0, 330.0, 390.0):
+        page.draw_line((x, 300.0), (x, 500.0))
+    for y in (340.0, 380.0, 420.0, 460.0):
+        page.draw_line((150.0, y), (450.0, y))
+    page.insert_text(
+        (430.0, 480.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=9,
+        rotate=90,
+    )
+
+    # Two independent plan drawings on opposite visual sides of the table.
+    page.draw_line((80.0, 560.0), (520.0, 560.0))
+    page.draw_line((120.0, 690.0), (480.0, 690.0))
+    page.draw_line((80.0, 120.0), (520.0, 120.0))
+    page.draw_line((120.0, 230.0), (480.0, 230.0))
+    page.insert_text(
+        (520.0, 760.0),
+        "REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    page.insert_text(
+        (520.0, 180.0),
+        "PROP. REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    return _reopen(doc)
+
