@@ -1437,6 +1437,27 @@ def _raster_placement_components(groups: Sequence[dict[str, Any]]) -> tuple[dict
     return tuple(sorted(result, key=lambda component: component["native_bbox"]))
 
 
+def _raster_component_is_sheetwide(
+    component: dict[str, Any],
+    calibration: ViewportLayoutCalibration,
+) -> bool:
+    """Reject raster coverage spanning most of the native page as a drawing.
+
+    Page coverage can represent multiple independent plans printed on one
+    continuous raster. It must never become an individual drawing viewport.
+    """
+    bbox = component["native_bbox"]
+    width = max(0.0, float(bbox[2]) - float(bbox[0]))
+    height = max(0.0, float(bbox[3]) - float(bbox[1]))
+    page_width = float(calibration.page_width_pt)
+    page_height = float(calibration.page_height_pt)
+    return (
+        page_width > 0 and page_height > 0
+        and width / page_width >= 0.90
+        and height / page_height >= 0.90
+    )
+
+
 def extract_vector_frames(page: Any, calibration: ViewportLayoutCalibration) -> list[tuple[float, float, float, float]]:
     frames: list[tuple[float, float, float, float]] = []
     tol = max(calibration.median_word_height_pt * 0.15, 0.75)
@@ -2771,8 +2792,10 @@ def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedView
                     group["placements"] for group in source_image_groups
                 )
                 viewport.provenance["source_image_groups_not_authoritative"] = True
-                viewport.provenance["source_image_coverage_component_count"] = len(
-                    _raster_placement_components(source_image_groups)
+                components = _raster_placement_components(source_image_groups)
+                viewport.provenance["source_image_coverage_component_count"] = len(components)
+                viewport.provenance["source_image_sheetwide_component_count"] = sum(
+                    _raster_component_is_sheetwide(c, calibration) for c in components
                 )
                 viewport.provenance["source_image_components_not_authoritative"] = True
     ordered = sorted(
