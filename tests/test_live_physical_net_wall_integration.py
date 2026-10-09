@@ -244,6 +244,8 @@ def test_surface_semantic_pages_use_isolated_source_without_expanding_topology(
 
     assert seen["decoded_pages"] == (1, 2, 3)
     assert seen["floor_decoded_pages"] == (1, 2, 3)
+    # Both semantic consumers retain source-plan and dimension support evidence.
+    # Topology remains scoped to page 1, as asserted below.
     assert (
         seen["floor_semantic_snapshot_id"]
         == seen["semantic_snapshot_id"]
