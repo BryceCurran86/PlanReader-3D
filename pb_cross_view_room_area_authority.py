@@ -177,6 +177,11 @@ class CrossViewRoomAreaResult:
     records: tuple[CrossViewRoomAreaRecord, ...]
     unresolved_physical_room_ids: tuple[str, ...]
     schema_version: str = CROSS_VIEW_ROOM_AREA_SCHEMA_VERSION
+    unresolved_first_failure_codes: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def unresolved_first_failure_by_physical_room_id(self) -> Mapping[str, str]:
+        return MappingProxyType(dict(self.unresolved_first_failure_codes))
 
     @property
     def evidence_by_physical_room_id(self) -> Mapping[str, EvidenceAtom]:
@@ -1419,11 +1424,16 @@ class CrossViewRoomAreaProducer:
             or len(source_hashes) != 1
             or len(source_snapshots) != 1
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return CrossViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "cross_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
         revision_id = next(iter(revision_ids))
         published = self._source.published_snapshot_for_revision(revision_id)
@@ -1433,11 +1443,16 @@ class CrossViewRoomAreaProducer:
             or published.revision.source_sha256.lower() != next(iter(source_hashes))
             or published.snapshot.snapshot_id != next(iter(source_snapshots))
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return CrossViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "cross_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
 
         # Quarantine duplicate source ownership before any native dimension
@@ -1496,6 +1511,8 @@ class CrossViewRoomAreaProducer:
             if len(grouped_rooms) == 1
         }
         page_results: dict[str, tuple[_TrustedBoundDimension, ...]] = {}
+        support_label_pages: dict[str, set[str]] = {}
+        support_dimension_pages: dict[str, set[str]] = {}
         page_lines: dict[str, tuple[_TrustedLine, ...]] = {}
         page_annotation_lines: dict[str, tuple[_TrustedLine, ...]] = {}
         for page_number in tuple(published.coverage.decoded_pages):
@@ -1517,6 +1534,8 @@ class CrossViewRoomAreaProducer:
             )
             if not relevant_lines:
                 continue
+            for line in relevant_lines:
+                support_label_pages.setdefault(_norm_label(line.text), set()).add(page_id)
             trusted_dimensions = _trusted_native_dimensions_for_page(
                 self._source,
                 revision_id=revision_id,
@@ -1527,6 +1546,8 @@ class CrossViewRoomAreaProducer:
                 continue
             page_results[page_id] = trusted_dimensions
             page_lines[page_id] = relevant_lines
+            for line in relevant_lines:
+                support_dimension_pages.setdefault(_norm_label(line.text), set()).add(page_id)
             annotation_lines = _trusted_lines_for_page(
                 self._source,
                 revision_id=revision_id,
@@ -1556,6 +1577,22 @@ class CrossViewRoomAreaProducer:
         }
         unresolved.update(str(value) for value in duplicate_room_ids)
         unresolved.update(conflicted_ids)
+        first_failures = {
+            room_id: "cross_view_room_prerequisites_unavailable"
+            for room_id in unresolved
+        }
+        first_failures.update({
+            str(room_id): "cross_view_room_label_duplicate"
+            for room_id in duplicate_room_ids
+        })
+        first_failures.update({
+            room_id: "cross_view_physical_room_identity_conflict"
+            for room_id in duplicate_physical_ids
+        })
+        first_failures.update({
+            room_id: "cross_view_source_room_face_identity_conflict"
+            for room_id in duplicate_face_room_ids
+        })
         conflict_seen = bool(duplicate_room_ids or conflicted_ids)
 
         for label, grouped_rooms in sorted(labels.items()):
@@ -1701,9 +1738,25 @@ class CrossViewRoomAreaProducer:
                 matches.extend(annotation_matches)
 
             if len(matches) != 1:
-                unresolved.add(str(room.physical_room_id))
+                physical_id = str(room.physical_room_id)
+                unresolved.add(physical_id)
                 if len(matches) > 1:
                     conflict_seen = True
+                    first_failures[physical_id] = (
+                        "cross_view_multiple_authenticated_dimension_pairs"
+                    )
+                elif not support_label_pages.get(label):
+                    first_failures[physical_id] = (
+                        "cross_view_trusted_support_label_unavailable"
+                    )
+                elif not support_dimension_pages.get(label):
+                    first_failures[physical_id] = (
+                        "cross_view_trusted_support_dimensions_unavailable"
+                    )
+                else:
+                    first_failures[physical_id] = (
+                        "cross_view_owned_dimension_pair_unavailable"
+                    )
                 continue
 
             support_lines, dimension_page_id, horizontal, vertical = matches[0]
@@ -1729,7 +1782,9 @@ class CrossViewRoomAreaProducer:
                 6,
             )
             if not math.isfinite(area_m2) or area_m2 <= 0.0:
-                unresolved.add(str(room.physical_room_id))
+                physical_id = str(room.physical_room_id)
+                unresolved.add(physical_id)
+                first_failures[physical_id] = "cross_view_metric_area_invalid"
                 continue
 
             horizontal_x = sorted(
@@ -1879,6 +1934,10 @@ class CrossViewRoomAreaProducer:
             reason_codes=reasons,
             records=tuple(records),
             unresolved_physical_room_ids=unresolved_ids,
+            unresolved_first_failure_codes=tuple(sorted(
+                (room_id, first_failures[room_id])
+                for room_id in unresolved_ids if room_id in first_failures
+            )),
         )
 
 

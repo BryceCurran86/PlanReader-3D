@@ -323,6 +323,7 @@ def test_cross_view_exact_label_and_witnessed_orthogonal_dimensions_mint_room_ow
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert result.reason_codes == (CROSS_VIEW_ROOM_AREA_RESOLVED,)
     assert result.unresolved_physical_room_ids == ()
+    assert result.unresolved_first_failure_by_physical_room_id == {}
     assert len(result.records) == 1
 
     record = result.records[0]
@@ -486,6 +487,44 @@ def test_cross_view_eligibility_does_not_compare_room_polygons(monkeypatch):
     assert result.records[0].area_evidence.normalized_value == 8.64
 
 
+def test_cross_view_first_gate_distinguishes_missing_support_from_dimensions(monkeypatch):
+    source, rooms = _source_and_room(page_ids=("1",))
+    no_support = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert no_support.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "cross_view_trusted_support_label_unavailable",
+    }
+
+    source, rooms = _source_and_room()
+    monkeypatch.setattr(
+        cross_view, "_trusted_native_dimensions_for_page",
+        lambda *args, **kwargs: (),
+    )
+    no_dimensions = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert no_dimensions.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "cross_view_trusted_support_dimensions_unavailable",
+    }
+
+
+def test_cross_view_first_gate_reports_mixed_room_source_lineage():
+    source, rooms = _source_and_room()
+    invalid = replace(
+        rooms,
+        rooms=(replace(rooms.rooms[0], source_sha256="b" * 64),),
+    )
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=invalid,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "cross_view_source_lineage_conflict",
+    }
+
+
 def test_duplicate_canonical_room_label_fails_closed_before_cross_view_binding():
     source, rooms = _source_and_room(duplicate_room_label=True)
     result = CrossViewRoomAreaProducer.from_source(
@@ -499,6 +538,10 @@ def test_duplicate_canonical_room_label_fails_closed_before_cross_view_binding()
     assert set(result.unresolved_physical_room_ids) == {
         "physical-room-1",
         "physical-room-2",
+    }
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "cross_view_room_label_duplicate",
+        "physical-room-2": "cross_view_room_label_duplicate",
     }
 
 

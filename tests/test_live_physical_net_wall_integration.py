@@ -394,6 +394,19 @@ def test_cross_view_room_area_reaches_same_canonical_floor_without_scale(
         if room.room_label == "OFFICE"
     )
     assert resolved_floor.room_entity_id == office_room.physical_room_id
+    # A resolved documented OFFICE quantity remains independent of STUDY's
+    # missing cross-view support label, with both results owned by source rooms.
+    study_room = next(
+        room for room in result.canonical_rooms if room.room_label == "STUDY"
+    )
+    cross_failures = dict(result.cross_view_room_area_first_failure_codes)
+    assert cross_failures == {
+        study_room.physical_room_id: "cross_view_trusted_support_label_unavailable"
+    }
+    assert office_room.physical_room_id not in cross_failures
+    assert result.cross_view_room_area_first_failure_codes == tuple(
+        sorted(result.cross_view_room_area_first_failure_codes)
+    )
     assert resolved_floor.metric_area_m2 == 8.64
     assert resolved_floor.metric_area_quantity_id
     assert resolved_floor.metric_area_authority
