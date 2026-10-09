@@ -74,7 +74,23 @@ jobs:
           assert baseline['source_sha256'] == current['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert current['primitive_safety_cap'] == 20_000
           assert current['source_decode_coverage'] == baseline['source_decode_coverage']
-          assert current['opening_bindings'] == baseline['opening_bindings']
+          before_bindings = {row['opening_identity_id']: row for row in baseline['opening_bindings']}
+          after_bindings = {row['opening_identity_id']: row for row in current['opening_bindings']}
+          assert before_bindings.keys() == after_bindings.keys()
+          assert len(after_bindings) == len(current['opening_bindings'])
+          canonical = {row['physical_opening_id']: row for row in current['canonical_openings']}
+          for key in before_bindings:
+              before, after = before_bindings[key], after_bindings[key]
+              if before['representative_observation_id'] != after['representative_observation_id']:
+                  # Removing a false overlapping candidate can change which
+                  # independently re-proven support represents the SAME object.
+                  # No hosted or measured object may use this exception.
+                  assert before['host_wall_id'] is None and after['host_wall_id'] is None
+                  assert before['record_id'] is None and after['record_id'] is None
+                  assert not canonical[key]['geometry_complete']
+                  assert before['representative_observation_id'] in canonical[key]['source_observation_ids']
+                  assert after['representative_observation_id'] in canonical[key]['source_observation_ids']
+              assert {k: v for k, v in before.items() if k != 'representative_observation_id'} == {k: v for k, v in after.items() if k != 'representative_observation_id'}
           assert current['resolved_host_frame_evidence'] == baseline['resolved_host_frame_evidence']
           old = {row['physical_opening_id']: row for row in baseline['canonical_openings']}
           new = {row['physical_opening_id']: row for row in current['canonical_openings']}
@@ -85,7 +101,15 @@ jobs:
                   assert old[key][field] == new[key][field]
           traces = current['opening_measurement_traces']
           assert traces
-          assert current['opening_measurement_traces'] == baseline['opening_measurement_traces']
+          def normalized_traces(report):
+              rows = {}
+              for trace in report['opening_measurement_traces']:
+                  row = {key: (sorted(value) if key.endswith('_reason_codes') else value)
+                         for key, value in trace.items() if key != 'representative_observation_id'}
+                  rows[row['opening_identity_id']] = row
+              assert len(rows) == len(report['opening_measurement_traces'])
+              return rows
+          assert normalized_traces(current) == normalized_traces(baseline)
           assert current['primitive_safety_cap'] == baseline['primitive_safety_cap']
           assert 'quantities' not in current
           print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'],
