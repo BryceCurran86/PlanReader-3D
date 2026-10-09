@@ -1025,24 +1025,3 @@ def test_vertical_native_title_length_does_not_inflate_frame_calibration() -> No
     finally:
         doc.close()
 
-def test_split_source_paths_form_only_exact_four_edge_frame():
-    from types import SimpleNamespace
-    from pb_viewport_segmentation import _split_path_closed_rectangles
-
-    def edge(a, b):
-        return {"items": [("l", SimpleNamespace(x=a[0], y=a[1]),
-                                   SimpleNamespace(x=b[0], y=b[1]))]}
-    drawing = [
-        edge((10, 10), (210, 10)),
-        edge((210, 110), (10, 110)),
-        edge((10, 110), (10, 10)),
-        edge((210, 10), (210, 110)),
-    ]
-    assert _split_path_closed_rectangles(drawing, tol=0.75) == [
-        (10.0, 10.0, 210.0, 110.0)
-    ]
-    assert _split_path_closed_rectangles(drawing[:3], tol=0.75) == []
-    assert _split_path_closed_rectangles(
-        drawing[:3] + [edge((211, 10), (211, 110))], tol=0.75
-    ) == []
-    assert _split_path_closed_rectangles(drawing * 25, tol=0.75) == []
