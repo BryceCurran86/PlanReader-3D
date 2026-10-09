@@ -1,0 +1,81 @@
+name: TEST GPT2 B01 Real Native Vertical Schedule Titles
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_viewport_segmentation.py"
+      - ".github/workflows/test-gpt2-b01-real-vertical-titles.yml"
+  workflow_dispatch:
+
+jobs:
+  maryborough-vertical-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove real PDF source title and viewport evidence
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b01-native-vertical
+          PYTHONPATH=. python - <<'PY' | tee artifacts/gpt2-b01-native-vertical/proof.json
+          import hashlib,json
+          from pathlib import Path
+          import fitz
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_viewport_segmentation import (
+              extract_view_title_anchors, segment_page_viewports,
+              validate_non_overlapping_viewports,
+          )
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          report={"source_sha256":sha,"pages":[],"proven_schedule_count":0}
+          for page_no in (9,11):
+              page=pdf.load_page(page_no-1)
+              anchors=extract_view_title_anchors(page)
+              viewports=segment_page_viewports(page,page_number=page_no)
+              schedule=[v for v in viewports if
+                  v.view_type==DrawingViewType.SCHEDULE.value
+                  and v.status=="resolved"
+                  and v.bounding_box is not None]
+              for row in viewports:
+                  if row.view_type in (
+                      DrawingViewType.REFLECTED_CEILING_PLAN.value,
+                      DrawingViewType.FLOOR_FINISH_PLAN.value,
+                  ):
+                      # No view may gain authority from an unbounded title.
+                      if row.bounding_box is None:
+                          assert row.status!="resolved"
+              assert validate_non_overlapping_viewports(viewports)
+              report["proven_schedule_count"]+=len(schedule)
+              report["pages"].append({
+                  "page":page_no,
+                  "native_title_rows":[
+                      {"text":v.text,"direction":v.direction,
+                       "type":v.view_type}
+                      for v in anchors],
+                  "views":[{"id":v.view_id,"type":v.view_type,
+                            "status":v.status,"bbox":v.bounding_box,
+                            "boundary_source":v.boundary_source}
+                           for v in viewports],
+              })
+          pdf.close()
+          assert report["proven_schedule_count"]>=2,report
+          print(json.dumps(report,sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b01-native-vertical-source
+          path: artifacts/gpt2-b01-native-vertical
+          retention-days: 5

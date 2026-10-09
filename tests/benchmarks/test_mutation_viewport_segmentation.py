@@ -758,3 +758,92 @@ def test_line_grid_frame_cannot_mint_floor_plan_authority() -> None:
         assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     finally:
         doc.close()
+
+
+
+def _vertical_title_line_grid_schedule() -> fitz.Document:
+    """Semantic schedule whose producer-owned title advances vertically."""
+
+    doc = fitz.open()
+    page = doc.new_page(width=720, height=420)
+
+    outer = fitz.Rect(80.0, 30.0, 300.0, 390.0)
+    page.draw_rect(outer)
+    xs = (100.0, 145.0, 190.0, 235.0, 280.0)
+    ys = (55.0, 110.0, 165.0, 220.0, 275.0, 330.0)
+    for x in xs:
+        page.draw_line((x, 55.0), (x, 330.0))
+    for y in ys:
+        page.draw_line((100.0, y), (280.0, y))
+
+    # Ordinary small source text keeps layout calibration representative while
+    # remaining semantically inert.
+    for index, label in enumerate(("A", "B", "C", "D", "E", "F")):
+        page.insert_text((110.0, 75.0 + index * 45.0), label, fontsize=8.0)
+
+    # rotate=90 yields a native vertical line. The table sits immediately to
+    # its left; in the title-local basis this is the ordinary
+    # "frame above, title below" ownership pattern.
+    page.insert_text(
+        (325.0, 310.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=10.0,
+        rotate=90,
+    )
+
+    # A normal drawing frame elsewhere must not steal this schedule title.
+    page.draw_rect(fitz.Rect(390.0, 30.0, 690.0, 360.0))
+    page.draw_line((420.0, 80.0), (650.0, 80.0))
+    page.draw_line((420.0, 80.0), (420.0, 300.0))
+    return _reopen(doc)
+
+
+def test_vertical_native_schedule_title_owns_exact_gridded_table_frame() -> None:
+    doc = _vertical_title_line_grid_schedule()
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        schedules = [
+            viewport
+            for viewport in viewports
+            if viewport.view_type == DrawingViewType.SCHEDULE.value
+        ]
+        assert len(schedules) == 1
+        schedule = schedules[0]
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx(
+            (80.0, 30.0, 300.0, 390.0)
+        )
+        assert schedule.label == "CEILING FINISHES SCHEDULE"
+    finally:
+        doc.close()
+
+
+def test_extreme_aspect_non_table_frame_still_rejected_for_vertical_title() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=1000)
+    page.draw_rect(fitz.Rect(120.0, 40.0, 220.0, 940.0))
+    for index in range(8):
+        page.insert_text(
+            (400.0, 100.0 + index * 40.0),
+            f"NOTE {index}",
+            fontsize=8.0,
+        )
+    page.insert_text(
+        (245.0, 700.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=10.0,
+        rotate=90,
+    )
+    doc = _reopen(doc)
+    try:
+        schedules = [
+            viewport
+            for viewport in segment_page_viewports(doc[0], page_number=1)
+            if viewport.view_type == DrawingViewType.SCHEDULE.value
+        ]
+        assert len(schedules) == 1
+        assert schedules[0].status == ViewportSegmentationStatus.UNSUPPORTED.value
+        assert schedules[0].bounding_box is None
+    finally:
+        doc.close()
