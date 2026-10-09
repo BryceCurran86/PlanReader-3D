@@ -532,17 +532,60 @@ def compose_live_canonical_rooms(
                     reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
             label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
             label_result = None
-            if page_label_authority is not None:
-                label_result = page_label_authority.resolve_scope(
-                    SourceRoomLabelSelector(
-                        document_id=selector.document_id,
-                        revision_id=selector.revision_id,
-                        source_sha256=selector.source_sha256,
-                        snapshot_id=selector.snapshot_id,
-                        page_id=selector.page_id,
-                        decision_scope_id=selector.decision_scope_id,
-                    )
+            scoped_label_authority = page_label_authority
+            if scoped_label_authority is None:
+                try:
+                    scoped_label_authority = SourceRoomLabelProducer.from_authorities(
+                        source_visibility_producer,
+                        authority,
+                        page_ids=(str(page_id),),
+                    ).authority()
+                except Exception:
+                    scoped_label_authority = None
+            label_selector = SourceRoomLabelSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+            )
+            if scoped_label_authority is not None:
+                label_result = scoped_label_authority.resolve_scope(label_selector)
+
+            # A batch label producer can be valid as an authority object yet
+            # fail closed for one page because another selected page makes the
+            # combined semantic universe unresolved. Retry only this already
+            # source-owned page when the batch scope produced no positive label
+            # proposition at all. Never replace positive batch records or
+            # split-face candidates.
+            if (
+                label_result is None
+                or (
+                    not label_result.records
+                    and not label_result.split_face_candidates
                 )
+            ):
+                try:
+                    page_scoped_label_authority = (
+                        SourceRoomLabelProducer.from_authorities(
+                            source_visibility_producer,
+                            authority,
+                            page_ids=(str(page_id),),
+                        ).authority()
+                    )
+                    page_scoped_result = (
+                        page_scoped_label_authority.resolve_scope(label_selector)
+                    )
+                    if (
+                        page_scoped_result.records
+                        or page_scoped_result.split_face_candidates
+                    ):
+                        label_result = page_scoped_result
+                except Exception:
+                    pass
+
+            if label_result is not None:
                 label_records_by_face = {
                     str(label.face_id): label for label in label_result.records
                 }
@@ -679,17 +722,62 @@ def compose_live_canonical_rooms(
 
                     label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
                     label_result = None
-                    if viewport_label_authority is not None:
-                        label_result = viewport_label_authority.resolve_scope(
-                            SourceRoomLabelSelector(
-                                document_id=wall_selector.document_id,
-                                revision_id=wall_selector.revision_id,
-                                source_sha256=wall_selector.source_sha256,
-                                snapshot_id=wall_selector.snapshot_id,
-                                page_id=wall_selector.page_id,
-                                decision_scope_id=wall_selector.decision_scope_id,
+                    scoped_viewport_label_authority = viewport_label_authority
+                    if scoped_viewport_label_authority is None:
+                        try:
+                            scoped_viewport_label_authority = (
+                                SourceRoomLabelProducer.from_authorities(
+                                    source_visibility_producer,
+                                    viewport_room_authority,
+                                    page_ids=(str(page_id),),
+                                ).authority()
+                            )
+                        except Exception:
+                            scoped_viewport_label_authority = None
+                    viewport_label_selector = SourceRoomLabelSelector(
+                        document_id=wall_selector.document_id,
+                        revision_id=wall_selector.revision_id,
+                        source_sha256=wall_selector.source_sha256,
+                        snapshot_id=wall_selector.snapshot_id,
+                        page_id=wall_selector.page_id,
+                        decision_scope_id=wall_selector.decision_scope_id,
+                    )
+                    if scoped_viewport_label_authority is not None:
+                        label_result = (
+                            scoped_viewport_label_authority.resolve_scope(
+                                viewport_label_selector
                             )
                         )
+
+                    if (
+                        label_result is None
+                        or (
+                            not label_result.records
+                            and not label_result.split_face_candidates
+                        )
+                    ):
+                        try:
+                            page_scoped_viewport_label_authority = (
+                                SourceRoomLabelProducer.from_authorities(
+                                    source_visibility_producer,
+                                    viewport_room_authority,
+                                    page_ids=(str(page_id),),
+                                ).authority()
+                            )
+                            page_scoped_result = (
+                                page_scoped_viewport_label_authority.resolve_scope(
+                                    viewport_label_selector
+                                )
+                            )
+                            if (
+                                page_scoped_result.records
+                                or page_scoped_result.split_face_candidates
+                            ):
+                                label_result = page_scoped_result
+                        except Exception:
+                            pass
+
+                    if label_result is not None:
                         label_records_by_face = {
                             str(label.face_id): label
                             for label in label_result.records
