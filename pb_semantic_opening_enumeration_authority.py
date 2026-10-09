@@ -36,6 +36,7 @@ from pb_physical_opening_authority import (
     PHYSICAL_OPENING_CANDIDATE_CLOSURE_UNRESOLVED,
     PHYSICAL_OPENING_DISPOSITION_OPENING_SUPPORT,
     PHYSICAL_OPENING_EXISTS,
+    OPENING_CANDIDATE_OUTSIDE_FLOOR_PLAN_SCOPE,
     PhysicalOpeningAuthority,
     PhysicalOpeningExistenceRecord,
 )
@@ -429,6 +430,7 @@ class SemanticOpeningEnumerationProducer:
         page_representative_raster_observation_ids: dict[str, str] = {}
         unknown_scope_resolution = False
         scoped_raster_ids: list[str] = []
+        non_plan_opening_candidate_seen = False
 
         for observation_id in tuple(sorted(set(published.visible_observation_ids))):
             obs_selector = ObservationSelector(
@@ -502,6 +504,13 @@ class SemanticOpeningEnumerationProducer:
                 disposition.status is EvidenceResolutionStatus.CORROBORATED
                 and disposition.disposition == PHYSICAL_OPENING_DISPOSITION_NO_CANDIDATE
             ):
+                if OPENING_CANDIDATE_OUTSIDE_FLOOR_PLAN_SCOPE in disposition.reason_codes:
+                    # A non-plan viewport gives a typed negative for OPENING
+                    # promotion, not exhaustive floor-plan opening coverage
+                    # of the entire mixed-view source page. Count publication
+                    # must remain closed until that external geometry is
+                    # explicitly separated from the candidate universe.
+                    non_plan_opening_candidate_seen = True
                 # Examined and disposed under the currently covered structural
                 # path. This is not a universal negative opening proposition.
                 continue
@@ -614,7 +623,7 @@ class SemanticOpeningEnumerationProducer:
         # gap/jamb candidates cannot disappear as isolated noncandidate lines.
         residual_ids = set(unresolved_visible_ids) - support_ids
 
-        candidate_closure_complete = True
+        candidate_closure_complete = not non_plan_opening_candidate_seen
         for page_id in scoped_page_ids:
             representative_id = page_representative_observation_ids.get(page_id)
             if representative_id is None:
