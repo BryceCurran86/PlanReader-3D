@@ -1245,6 +1245,35 @@ def _fragment_native_direction(
     return _normalised_direction((dx, dy))
 
 
+def _to_native_bbox(
+    page: Any,
+    bbox: tuple[float, float, float, float],
+) -> Optional[tuple[float, float, float, float]]:
+    """Map one visual/display bbox back into native page user space."""
+
+    if not int(getattr(page, "rotation", 0) or 0):
+        return _normalized_bbox(*bbox)
+    try:
+        import fitz
+
+        native = fitz.Rect(bbox) * page.derotation_matrix
+        result = _normalized_bbox(
+            float(native.x0),
+            float(native.y0),
+            float(native.x1),
+            float(native.y1),
+        )
+    except Exception:
+        return None
+    if (
+        result[2] <= result[0]
+        or result[3] <= result[1]
+        or not all(math.isfinite(value) for value in result)
+    ):
+        return None
+    return result
+
+
 def extract_view_title_anchors(page: Any) -> list[_TitleAnchor]:
     candidates: list[_TitleAnchor] = []
     owned: Optional[list[tuple[float, float, float, float]]] = None
