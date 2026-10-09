@@ -30,7 +30,8 @@ if __name__=="__main__":
                     heading_lines = [i for i, line in enumerate(lines) if SCHEDULE.search(line)]
                     description = CODES.sub("", val).strip(" :;-")
                     exact_code_line = len(codes) == 1 and val.upper() == codes[0]
-                    next_line = lines[line_idx + 1].strip() if line_idx + 1 < len(lines) else ""
+                    following_lines = [v.strip() for v in lines[line_idx + 1:line_idx + 5] if v.strip()]
+                    next_line = following_lines[0] if following_lines else ""
                     next_line_is_description = bool(
                         exact_code_line and next_line
                         and not CODES.search(next_line)
@@ -38,8 +39,10 @@ if __name__=="__main__":
                         and re.search(r"[A-Z]{3,}", next_line, re.I)
                     )
                     proof = {
+                        "following_native_lines": following_lines,
                         "next_native_line": next_line if next_line_is_description else None,
-                        "same_block_code_description_pair": next_line_is_description,
+                        "requires_row_ownership_verification": True,
+                        "code_followed_by_text_in_native_block": next_line_is_description,
                         "native_block_schedule_heading_lines": heading_lines,
                         "same_block_schedule_heading": bool(heading_lines),
                         "same_line_description_present": bool(description),
