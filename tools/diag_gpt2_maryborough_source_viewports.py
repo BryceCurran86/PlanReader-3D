@@ -63,6 +63,29 @@ if __name__ == "__main__":
                             "width": abs(rect.x1 - rect.x0),
                             "height": abs(rect.y1 - rect.y0),
                         })
+            # Four-edge native paths are qualitatively different from loose
+            # construction lines; inspect them as indivisible source paths.
+            four_edge_paths = []
+            for path_index, drawing in enumerate(drawings):
+                items = drawing.get("items", []) or []
+                if len(items) != 4:
+                    continue
+                edges = []
+                for item in items:
+                    if item and item[0] == "l":
+                        a, b = item[1], item[2]
+                        edges.append([[float(a.x), float(a.y)],
+                                      [float(b.x), float(b.y)]])
+                four_edge_paths.append({
+                    "path": path_index, "source_edge_count": len(edges),
+                    "bbox": tuple(drawing.get("rect") or ()),
+                    "edges": edges,
+                    "path_is_closed": bool(drawing.get("closePath")),
+                })
+            print("B01_SOURCE_FOUR_EDGE_PATHS", json.dumps({
+                "page": page_no, "count": len(four_edge_paths),
+                "first_30": four_edge_paths[:30],
+            }, default=str, sort_keys=True))
             # Compact largest rectangles on the title-bearing sheets: this
             # reveals whether real producer geometry supplies usable borders.
             raw_rectangles.sort(
