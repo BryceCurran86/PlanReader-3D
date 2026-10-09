@@ -109,6 +109,15 @@ def test_documented_dimension_canonical_ceiling_publishes_firm_without_scale() -
     assert quantity.metadata["quantity_handoff_only"] is True
 
 
+def test_ceiling_quantity_requires_nonempty_source_and_canonical_receipts() -> None:
+    # An empty set previously passed the lineage-subset check vacuously.
+    shadow = replace(_shadow_quantity(), evidence_ids=())
+    assert publish_live_ceiling_area_quantities(_result(shadow=shadow)) == ()
+
+    ceiling = replace(_ceiling(), evidence_ids=())
+    assert publish_live_ceiling_area_quantities(_result(ceiling=ceiling)) == ()
+
+
 def test_scaled_canonical_ceiling_requires_physical_scale_record() -> None:
     missing = _ceiling(
         authority=MeasurementAuthorityType.PDF_SCALED.value,
