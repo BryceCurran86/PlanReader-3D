@@ -1,0 +1,93 @@
+name: DIAG GPT1 Lot16 Source RCP Viewport Inventory
+
+on:
+  push:
+    branches: [diag/gpt1-q02-lot16-rcp-inventory-20261009]
+
+concurrency:
+  group: diag-gpt1-q02-lot16-rcp-inventory
+  cancel-in-progress: true
+
+jobs:
+  source-rcp-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install source-native dependencies
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen source and evaluator integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Scan source-owned Lot16 RCP viewport evidence
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt1-q02-rcp
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt1-q02-rcp/console.log
+          import hashlib, json, subprocess, collections
+          from pathlib import Path
+          import fitz
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_cross_view_ceiling_finish_authority import _viewport_is_authoritative
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              is_segment_page_viewports_product,
+              validate_non_overlapping_viewports,
+          )
+
+          project = "au_qld_lot16_power"
+          source = Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          manifest = json.loads(Path(f"benchmarks/frozen_holdout/full_plan_v2/projects/{project}/source_manifest.json").read_text())
+          actual = hashlib.sha256(source.read_bytes()).hexdigest()
+          expected = next(x["sha256"] for x in manifest["source_documents"] if x["name"] == source.name)
+          assert actual == expected, "Lot16 source hash does not match frozen manifest"
+          pdf = fitz.open(source)
+          classifications = collections.Counter()
+          pages = []
+          rcp = []
+          for index in range(pdf.page_count):
+              page_no = index + 1
+              try:
+                  viewports = tuple(segment_page_viewports(pdf.load_page(index), page_number=page_no))
+                  product_valid = bool(viewports) and all(is_segment_page_viewports_product(v) for v in viewports)
+                  siblings_ok = validate_non_overlapping_viewports(viewports) if product_valid else False
+                  candidates = []
+                  for v in viewports:
+                      classifications[str(v.view_type)] += 1
+                      authoritative = bool(
+                          product_valid and
+                          v.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value and
+                          _viewport_is_authoritative(v, sibling_non_overlapping=siblings_ok) and
+                          v.bounding_box is not None
+                      )
+                      if authoritative:
+                          rcp.append({"page_number": page_no, "viewport_id": str(v.view_id), "bbox_pt": list(v.bounding_box)})
+                      candidates.append({"id": str(v.view_id), "type": str(v.view_type), "authoritative_rcp": authoritative})
+                  pages.append({"page_number": page_no, "source_viewports": candidates, "product_valid": product_valid, "siblings_non_overlapping": siblings_ok})
+              except Exception as exc:
+                  pages.append({"page_number": page_no, "error_type": type(exc).__name__, "error": str(exc)[:300]})
+          data = {
+              "repo_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "source_sha_verified": True,
+              "source_sha256": actual,
+              "scope": "all_source_pages_rcp_inventory_not_frozen_v2_scoring",
+              "pdf_page_count": pdf.page_count,
+              "source_viewport_classifications": dict(sorted(classifications.items())),
+              "authenticated_rcp_viewport_count": len(rcp),
+              "authenticated_rcp_viewports": rcp,
+              "per_page_source_viewports": pages,
+          }
+          out = Path("artifacts/gpt1-q02-rcp/source-rcp-inventory.json")
+          out.write_text(json.dumps(data, indent=2, sort_keys=True))
+          print("GPT1_LOT16_RCP_SOURCE_GATES", json.dumps({k:v for k,v in data.items() if k!="per_page_source_viewports"},sort_keys=True))
+          PY
+      - name: Upload source-gate receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt1-q02-lot16-rcp-inventory
+          path: artifacts/gpt1-q02-rcp/
