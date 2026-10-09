@@ -167,3 +167,60 @@ def test_frame_cannot_promote_damaged_source_projection(monkeypatch, damage):
             source._producer._store.observations[key] = replace(observation,geometry=(0.,0.,1.,0.))
     monkeypatch.setattr(producer._walls, 'resolve_scope', lambda _s: scope)
     assert all(r.status is Status.ABSTAINED for r in _publish(producer, bound))
+
+
+def _merged_ancestor_fixture():
+    # Exercise the real W2 merger: one retained edge owns two adjacent
+    # original source segments, neither of which spans the merged edge alone.
+    from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+    from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+    from test_wall_room_topology_collinear_merge_index import _seg
+    segments = [_seg(0, -10., 5., 0., 5.), _seg(1, 0., 5., 15., 5.)]
+    graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=0.)
+    assert len(graph['edges']) == 1
+    edge = graph['edges'][0]
+    parents = tuple(edge[LINEAGE_KEY]['source_primitive_ids'])
+    assert set(parents) == {'s0', 's1'}
+    record, geometry, _lines = _fixture()
+    record.physical_identity.edge_ids = (edge['id'],)
+    record.physical_identity.source_primitive_ids = parents
+    record.source_edge_fragments = (PhysicalWallSourceEdgeFragment(edge['id'],
+        tuple(edge[key] for key in ('x1','y1','x2','y2')), parents),)
+    return record, geometry, {'s0': (-10.,5.,0.,5.), 's1': (0.,5.,15.,5.)}
+
+
+@pytest.mark.parametrize('overlap', [0., 2.])
+@pytest.mark.parametrize('theta,scale,dx,dy', [(0.,1.,0.,0.), (.7,.8,21.,-14.), (1.57,2.,-19.,33.)])
+def test_source_union_proves_real_merged_edge_without_remote_extension(overlap, theta, scale, dx, dy):
+    record, geometry, lines = _merged_ancestor_fixture()
+    lines['s0'] = (-40.,5.,overlap,5.)
+    lines['s1'] = (-overlap,5.,90.,5.)
+    c,s = math.cos(theta), math.sin(theta)
+    point = lambda p: (scale*(p[0]*c-p[1]*s)+dx, scale*(p[0]*s+p[1]*c)+dy)
+    line = lambda v: (*point(v[:2]), *point(v[2:]))
+    geometry.origin = point(geometry.origin)
+    geometry.axis, geometry.normal = (c,s), (-s,c)
+    geometry.thickness *= scale
+    record.wall_candidate.centerline_pts = tuple(point(p) for p in record.wall_candidate.centerline_pts)
+    record.source_edge_fragments = tuple(replace(f, geometry=line(f.geometry),
+        source_primitive_ids=tuple(reversed(f.source_primitive_ids))) for f in record.source_edge_fragments)
+    lines = {key:line(value) for key,value in reversed(tuple(lines.items()))}
+    before = repr((record,geometry,lines))
+    assert source_edge_axis_projection(record,geometry,lines) == pytest.approx((-30.*scale,-5.*scale,0.))
+    assert repr((record,geometry,lines)) == before
+
+
+@pytest.mark.parametrize('damage', ['gap','left_uncovered','right_uncovered','remote_only',
+    'endpoint_only','wrong_offset','bent','missing'])
+def test_source_union_cannot_hide_any_unproven_claimed_ancestor(damage):
+    record,geometry,lines = _merged_ancestor_fixture()
+    if damage == 'gap': lines['s1'] = (.01,5.,15.,5.)
+    elif damage == 'left_uncovered': lines['s0'] = (-9.99,5.,0.,5.)
+    elif damage == 'right_uncovered': lines['s1'] = (0.,5.,14.99,5.)
+    elif damage in {'remote_only','endpoint_only'}:
+        lines['s0'] = (-10.,5.,15.,5.)
+        lines['s1'] = (20.,5.,30.,5.) if damage == 'remote_only' else (15.,5.,30.,5.)
+    elif damage == 'wrong_offset': lines['s1'] = (0.,5.01,15.,5.01)
+    elif damage == 'bent': lines['s1'] = (0.,5.,15.,5.01)
+    elif damage == 'missing': del lines['s1']
+    assert source_edge_axis_projection(record,geometry,lines) is None

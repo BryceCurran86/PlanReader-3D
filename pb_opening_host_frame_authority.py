@@ -571,6 +571,12 @@ class OpeningHostFrameProducer:
             return None
         projected_u = tuple(_dot(point, axis) for point in points)
         projected_n = tuple(_dot(point, normal) for point in points)
+        differences = tuple(b - a for a, b in zip(projected_u, projected_u[1:]))
+        # One wall frame requires an ordered run. Extents alone can conceal
+        # retraced segments or repeated vertices; reversing a valid run is OK.
+        if not (all(delta > _COORD_TOL for delta in differences)
+                or all(delta < -_COORD_TOL for delta in differences)):
+            return None
         if max(projected_u) - min(projected_u) <= _COORD_TOL:
             return None
         return min(projected_u), max(projected_u), sum(projected_n) / len(projected_n)

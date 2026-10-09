@@ -169,3 +169,49 @@ def test_non_raster_opening_cannot_use_whole_wall_frame_shortcut() -> None:
         geometry=GEOMETRY,
     )
     assert result is None
+
+
+@pytest.mark.parametrize('points', [
+    ((20., 55.), (180., 55.), (100., 55.), (220., 55.)),
+    ((220., 55.), (100., 55.), (180., 55.), (20., 55.)),
+    ((20., 55.), (100., 55.), (100., 55.), (220., 55.)),
+])
+def test_backtracking_or_repeated_path_cannot_mint_whole_wall_frame(points):
+    record = _record('wall:host')
+    record.wall_candidate.centerline_pts = points
+    # The host-role resolver admits these extents; frame authority must
+    # independently reject a path that cannot define one ordered wall run.
+    if all(a != b for a, b in zip(points, points[1:])):
+        assert host._resolve_raster_whole_wall_host(
+            (record,), GEOMETRY, _equivalence((record,))
+        ).bands
+    assert frame.OpeningHostFrameProducer._record_projection(
+        record, GEOMETRY.axis, GEOMETRY.normal) is None
+    result = _producer(_scope((record,)))._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=GEOMETRY)
+    assert result is None
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('angle,scale,shift', [(0., 1., (0., 0.)),
+    (1.2, 2., (70., -32.)), (3.141592653589793 / 2, .5, (-40., 100.))])
+def test_ordered_split_whole_wall_projection_is_transform_invariant(reverse, angle, scale, shift):
+    import math
+    axis = (math.cos(angle), math.sin(angle))
+    normal = (-axis[1], axis[0])
+    def transform(p):
+        return (shift[0] + scale * (p[0] * axis[0] + p[1] * normal[0]),
+                shift[1] + scale * (p[0] * axis[1] + p[1] * normal[1]))
+    points = tuple(transform(p) for p in ((20., 55.), (100., 55.), (220., 55.)))
+    record = _record('wall:host')
+    record.wall_candidate.centerline_pts = points[::-1] if reverse else points
+    geometry = host._OpeningGeometry(origin=transform(GEOMETRY.origin), axis=axis,
+        normal=normal, length=40. * scale, thickness=10. * scale)
+    before = record.wall_candidate.centerline_pts
+    result = _producer(_scope((record,)))._raster_whole_wall_frame(
+        binding=_binding(), opening=_opening(), geometry=geometry)
+    assert result is not None
+    assert result.origin == pytest.approx(transform((20., 55.)))
+    assert (result.u0, result.u1, result.whole_wall_length) == pytest.approx(
+        (80. * scale, 120. * scale, 200. * scale))
+    assert record.wall_candidate.centerline_pts == before
