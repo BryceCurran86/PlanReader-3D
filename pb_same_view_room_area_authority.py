@@ -190,6 +190,17 @@ class SameViewRoomAreaProducer:
             if len(group) != 1
             for room in group
         }
+        # Two canonical rows asserting one physical room, even under different
+        # labels, cannot independently claim two figured areas. Validate the
+        # complete room universe, including candidates failing eligibility.
+        physical_counts: dict[str, int] = {}
+        for source_room in rooms:
+            physical_id = str(source_room.physical_room_id or "").strip()
+            if physical_id:
+                physical_counts[physical_id] = physical_counts.get(physical_id, 0) + 1
+        duplicate_physical_ids = {
+            room_id for room_id, count in physical_counts.items() if count > 1
+        }
         eligible_object_ids = {id(room) for room in eligible}
         unresolved: set[str] = {
             str(room.physical_room_id)
@@ -205,13 +216,20 @@ class SameViewRoomAreaProducer:
             room_id: "same_view_room_label_duplicate"
             for room_id in duplicate_room_ids
         })
-        conflict_seen = bool(duplicate_room_ids)
+        unresolved.update(duplicate_physical_ids)
+        first_failures.update({
+            room_id: "same_view_physical_room_identity_conflict"
+            for room_id in duplicate_physical_ids
+        })
+        conflict_seen = bool(duplicate_room_ids or duplicate_physical_ids)
         records: list[SameViewRoomAreaRecord] = []
 
         for (page_id, label), grouped_rooms in sorted(labels.items()):
             if len(grouped_rooms) != 1:
                 continue
             room = grouped_rooms[0]
+            if str(room.physical_room_id) in duplicate_physical_ids:
+                continue
 
             lines = tuple(
                 line
