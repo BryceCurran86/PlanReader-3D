@@ -11,7 +11,8 @@ from pb_viewport_segmentation import (
     validate_non_overlapping_viewports,
     calibrate_viewport_layout, extract_vector_frames,
     extract_view_title_anchors, _frame_candidates_for_title,
-    _frame_looks_like_table,
+    _frame_looks_like_table, _source_image_placement_groups,
+    _raster_placement_components,
 )
 
 SOURCE = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
@@ -199,6 +200,17 @@ if __name__ == "__main__":
             # For each actual RCP/floor-finish title, report independently
             # existing clip/image regions containing it, and competing plan
             # titles within the same region. Never treat proximity as proof.
+            source_groups = _source_image_placement_groups(page)
+            components = _raster_placement_components(source_groups)
+            print("B01_REAL_SOURCE_RASTER_COMPONENTS", json.dumps({
+                "page": page_no,
+                "source_image_groups": len(source_groups),
+                "component_count": len(components),
+                "components": list(components)[:30],
+                "all_nonauthoritative": all(
+                    not c["authenticated_viewport"] for c in components
+                ),
+            }, default=str, sort_keys=True))
             anchors = extract_view_title_anchors(page)
             plan_kinds = {
                 DrawingViewType.REFLECTED_CEILING_PLAN.value,
