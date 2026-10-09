@@ -1008,3 +1008,19 @@ def test_rotated_semantic_band_fails_closed_when_two_plan_titles_compete() -> No
     doc.close()
 
 
+
+
+def test_vertical_native_title_length_does_not_inflate_frame_calibration() -> None:
+    from pb_viewport_segmentation import calibrate_viewport_layout
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=800)
+    page.set_rotation(90)
+    page.insert_text((430, 480), "CEILING FINISHES SCHEDULE", fontsize=9, rotate=90)
+    doc = _reopen(doc)
+    try:
+        calibration = calibrate_viewport_layout(doc[0])
+        assert calibration.median_word_height_pt < 20.0
+        assert calibration.minimum_frame_span_pt < 200.0
+    finally:
+        doc.close()
