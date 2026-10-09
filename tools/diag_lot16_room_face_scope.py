@@ -1,6 +1,6 @@
 """Diagnostic-only Lot16 room-face source geometry trace (no authority changes).
 
-Run: PYTHONPATH=. python tools/diag_lot16_room_face_scope.py --pdf "documents/sources/3. Architectural - Lot 16 Power.pdf" --page-index 2 --output lot16-room-face-scope.json
+Run: PYTHONPATH=. python tools/diag_lot16_room_face_scope.py --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" --page-index 2 --output lot16-room-face-scope.json
 The PDF path must be an actual source file; no benchmark gold is loaded.
 """
 from __future__ import annotations
