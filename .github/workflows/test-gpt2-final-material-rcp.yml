@@ -233,6 +233,10 @@ jobs:
                           value.record.semantic_finish if value.record else None
                       ),
                       "record_id": value.record.record_id if value.record else None,
+                      "source_definition_ids": (
+                          list(value.record.source_definition_ids)
+                          if value.record else []
+                      ),
                   }
                   for key, value in sorted(producer._definition_results.items())
               ],
@@ -285,11 +289,16 @@ jobs:
               assert item["semantic_finish"] == "plasterboard", (code, item)
               assert item["record_id"], (code, item)
 
-          # This PDF identifies a vinyl-faced plaster *tile*, not a grid
-          # system, and its IPF1 cell contains conflicting contractor/material
-          # text. Neither may be introduced by raw-code substitution.
+          # The vinyl-faced plaster *tile* source row cannot define a ceiling
+          # grid system. A multi-cell IPF1 specification, however, may be
+          # admitted only if the real producer authenticated all contributing
+          # source observations and the schedule owner.
           assert "GRID" not in by_code, inventory
-          assert "IPF1" not in by_code, inventory
+          if "IPF1" in by_code:
+              item = by_code["IPF1"]
+              assert item["status"] == "EvidenceResolutionStatus.CORROBORATED", item
+              assert item["semantic_finish"] == "plasterboard", item
+              assert item["source_definition_ids"], item
           PY
       - uses: actions/upload-artifact@v4
         if: always()
