@@ -216,11 +216,20 @@ def publish_cross_view_ceiling_quantities(
     for bridge in room_area_bridges:
         if bridge.status is not EvidenceResolutionStatus.CORROBORATED:
             continue
-        entities = {
-            _clean(entity.candidate_entity_id): entity
-            for entity in bridge.entities
-            if _clean(entity.candidate_entity_id)
-        }
+        # The same source-room identity cannot resolve to competing entity
+        # receipts. Never allow a dict comprehension to select the last one.
+        entities: dict[str, EntityEvidence] = {}
+        contradictory_entity_ids: set[str] = set()
+        for entity in bridge.entities:
+            entity_id = _clean(entity.candidate_entity_id)
+            if not entity_id or entity_id in contradictory_entity_ids:
+                continue
+            prior = entities.get(entity_id)
+            if prior is not None and prior != entity:
+                entities.pop(entity_id, None)
+                contradictory_entity_ids.add(entity_id)
+                continue
+            entities[entity_id] = entity
         for quantity in bridge.quantities:
             if len(quantity.input_entity_ids) != 1:
                 continue
