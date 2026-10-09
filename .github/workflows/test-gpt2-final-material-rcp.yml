@@ -271,6 +271,25 @@ jobs:
           print("B02_PRODUCTION_PUBLICATION", json.dumps(
               inventory, sort_keys=True, default=str
           ))
+
+          # This assertion exercises the *real producer publication* stage,
+          # not just a trusted native row / parser candidate. A regression
+          # must fail even if source-row authentication still succeeds.
+          by_code = {row["code"]: row for row in inventory["definitions"]}
+          for code in ("FPB", "WFPB"):
+              item = by_code.get(code)
+              assert item is not None, (code, inventory)
+              assert item["status"] == "EvidenceResolutionStatus.CORROBORATED", (
+                  code, item
+              )
+              assert item["semantic_finish"] == "plasterboard", (code, item)
+              assert item["record_id"], (code, item)
+
+          # This PDF identifies a vinyl-faced plaster *tile*, not a grid
+          # system, and its IPF1 cell contains conflicting contractor/material
+          # text. Neither may be introduced by raw-code substitution.
+          assert "GRID" not in by_code, inventory
+          assert "IPF1" not in by_code, inventory
           PY
       - uses: actions/upload-artifact@v4
         if: always()
