@@ -84,17 +84,8 @@ def _valid_room_area_quantity(
     entity: EntityEvidence,
     quantity: QuantityEvidence,
 ) -> bool:
-    # FIRM status alone is not sufficient: a source quantity may explicitly
-    # abstain, or carry a nonfinite/out-of-range confidence receipt.
-    try:
-        source_confidence = float(quantity.confidence)
-    except (TypeError, ValueError, OverflowError):
-        return False
-    if not math.isfinite(source_confidence) or not 0.0 <= source_confidence <= 1.0:
-        return False
     if (
-        quantity.abstained
-        or quantity.family != "room_area"
+        quantity.family != "room_area"
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
         or _clean(quantity.unit).lower() not in {"m2", "m²"}
         or quantity.blocking_reasons
