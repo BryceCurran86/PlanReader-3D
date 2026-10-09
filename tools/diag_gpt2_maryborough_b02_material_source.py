@@ -76,6 +76,12 @@ if __name__=="__main__":
                             })
                     proof = {
                         "production_parser_candidates": parsed_rows,
+                        "first_parser_gate": (
+                            "BARE_ALPHA_CODE_NOT_RECOGNISED"
+                            if exact_code_line and following_lines and not parsed_rows
+                            else "PARSER_CANDIDATE_ONLY" if parsed_rows
+                            else "NO_COMPLETE_CODE_DESCRIPTION_ROW"
+                        ),
                         "parser_is_not_authority": True,
                         "candidate_description_lines": candidate_description_lines,
                         "multiline_row_requires_independent_binding": ambiguous_multiline,
