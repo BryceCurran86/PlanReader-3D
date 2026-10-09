@@ -78,10 +78,13 @@ def _publish_one(
     try:
         area = float(ceiling.area_m2)
         source_value = float(source.value)
+        source_confidence = float(source.confidence)
     except (TypeError, ValueError, OverflowError):
         return None
     if (
-        not math.isfinite(area)
+        not math.isfinite(source_confidence)
+        or not 0.0 <= source_confidence <= 1.0
+        or not math.isfinite(area)
         or area <= 0.0
         or not math.isfinite(source_value)
         or abs(area - source_value) > 1e-9
@@ -161,7 +164,7 @@ def _publish_one(
         evidence_ids=tuple(ceiling.evidence_ids),
         authority=measurement_authority,
         status=AuthorityStatus.FIRM.value,
-        confidence=float(source.confidence),
+        confidence=source_confidence,
         abstained=False,
         blocking_reasons=(),
         reason_codes=(LIVE_CEILING_AREA_QUANTITY_RESOLVED,),
