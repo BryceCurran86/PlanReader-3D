@@ -8,6 +8,49 @@ from pb_material_schedule_v1222 import parse_schedule_text, semantic_finish_from
 SOURCE=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
 CODES=re.compile(r"(?<![A-Z0-9])(?:FPB|WFPB|IPF1|GRID|FT2|FT3)(?![A-Z0-9])",re.I)
 SCHEDULE=re.compile(r"(?:FINISH|MATERIAL|CEILING|FLOOR|LINING).{0,40}(?:SCHEDULE|LEGEND)|(?:SCHEDULE|LEGEND).{0,40}(?:FINISH|MATERIAL|CEILING|FLOOR|LINING)",re.I)
+def _native_lateral_row_neighbours(blocks, code_bbox, code_block):
+    """Native sibling text cell candidates; proximity is never authentication.
+
+    Only enumerate distinct text blocks at the same vertical drawing baseline
+    and return their exact PDF block IDs/bounds for independent schedule-row
+    structure and source-word verification. Never parse adjacent text as a
+    definition or assign any material to a room.
+    """
+    x0,y0,x1,y1=(float(v) for v in code_bbox)
+    height=y1-y0
+    if height<=0:
+        return []
+    out=[]
+    for idx,block in enumerate(blocks):
+        if idx==code_block or block.get("type")!=0:
+            continue
+        bbox=block.get("bbox")
+        if bbox is None or len(bbox)<4:
+            continue
+        bx0,by0,bx1,by1=(float(v) for v in bbox[:4])
+        inter_y=max(0.0,min(y1,by1)-max(y0,by0))
+        if inter_y < .45*min(height,max(0.,by1-by0)):
+            continue
+        gap=max(bx0-x1,x0-bx1,0.0)
+        if gap > max(250.,height*12):
+            continue
+        words=[
+            str(span.get("text") or "").strip()
+            for line in block.get("lines",[])
+            for span in line.get("spans",[])
+            if str(span.get("text") or "").strip()
+        ]
+        if not words:
+            continue
+        out.append({
+            "native_block_no":idx,
+            "bbox":[bx0,by0,bx1,by1],
+            "horizontal_gap_pdf_pts":round(gap,3),
+            "text":" ".join(words)[:160],
+            "candidate_only":True,
+        })
+    return sorted(out,key=lambda x:(x["horizontal_gap_pdf_pts"],x["native_block_no"]))[:12]
+
 if __name__=="__main__":
     payload=SOURCE.read_bytes()
     doc=fitz.open(stream=payload,filetype="pdf")
@@ -28,6 +71,14 @@ if __name__=="__main__":
                 owners=[{"view":v.view_id,"type":v.view_type,"status":v.status} for v in views if v.bounding_box and v.bounding_box[0]<=cx<=v.bounding_box[2] and v.bounding_box[1]<=cy<=v.bounding_box[3]]
                 entry={"page":n,"block":block_idx,"line":line_idx,"text":val[:240],"bbox":bbox,"viewport_owners":owners,"surrounding_lines":lines[max(0,line_idx-2):line_idx+3]}
                 if codes:
+                    if any(c in ("FT2","FT3") for c in codes):
+                        entry["native_same_row_neighbours"] = (
+                            _native_lateral_row_neighbours(
+                                page.get_text("dict").get("blocks",[]),
+                                bbox, block_idx,
+                            )
+                        )
+                        entry["neighbour_row_is_authenticated"] = False
                     heading_lines = [i for i, line in enumerate(lines) if SCHEDULE.search(line)]
                     description = CODES.sub("", val).strip(" :;-")
                     exact_code_line = len(codes) == 1 and val.upper() == codes[0]
