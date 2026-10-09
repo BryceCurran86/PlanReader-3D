@@ -38,7 +38,20 @@ if __name__=="__main__":
                         and not SCHEDULE.search(next_line)
                         and re.search(r"[A-Z]{3,}", next_line, re.I)
                     )
+                    # A block may put a role (e.g. CONTRACTOR) before the
+                    # actual specification. Never equate the first trailing
+                    # line with an authenticated material meaning.
+                    candidate_description_lines = [
+                        t for t in following_lines
+                        if len(t.split()) >= 2
+                        and bool(re.search(r"[A-Za-z]{4,}", t))
+                        and not CODES.search(t)
+                        and not SCHEDULE.search(t)
+                    ]
+                    ambiguous_multiline = len(following_lines) > 1
                     proof = {
+                        "candidate_description_lines": candidate_description_lines,
+                        "multiline_row_requires_independent_binding": ambiguous_multiline,
                         "following_native_lines": following_lines,
                         "next_native_line": next_line if next_line_is_description else None,
                         "requires_row_ownership_verification": True,
@@ -46,7 +59,7 @@ if __name__=="__main__":
                         "native_block_schedule_heading_lines": heading_lines,
                         "same_block_schedule_heading": bool(heading_lines),
                         "same_line_description_present": bool(description),
-                        "source_definition_candidate_only": bool(heading_lines and description),
+                        "source_definition_candidate_only": bool(heading_lines and description and not ambiguous_multiline),
                         "authenticated_definition": False,
                         "reason": "Text proximity is not authenticated definition authority",
                     }
