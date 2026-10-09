@@ -1,0 +1,152 @@
+name: GPT MAX Raster Aperture Identity Conflict
+on:
+  pull_request:
+    paths:
+      - pb_opening_host_frame_authority.py
+      - pb_physical_wall_candidate_authority.py
+      - pb_source_visibility_authority.py
+      - pb_raster_source_wall_frame_projection.py
+      - tests/test_raster_aperture_identity_conflict.py
+      - tests/test_raster_connected_host_frame.py
+      - tests/test_raster_source_wall_frame_projection.py
+      - tests/test_raster_visibility_receipt_registration.py
+      - tools/diag_opening_wall_face_preservation.py
+      - pb_physical_opening_authority.py
+      - .github/workflows/test-gptmax-raster-aperture-identity.yml
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: gptmax-raster-aperture-identity-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  full-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Integrity and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+      - name: Full regression suite
+        run: PYTHONPATH=. python -m pytest -q tests/
+      - name: Smoke test
+        run: python tests/ci_smoke.py
+  source-proof:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reproduce original verified Lot16 prerequisite
+        run: |
+          git worktree add /tmp/gptmax-aperture-lot16-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          DIAG_SCRIPT="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
+          mkdir -p prerequisite-lot16
+          (cd /tmp/gptmax-aperture-lot16-prerequisite && PYTHONPATH=. python -u "$DIAG_SCRIPT" --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json")
+      - name: Real Lot16 source, wall and host handoff
+        run: >-
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
+          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          --page-id 3 --output lot16-connected-frame-source-handoff.json
+      - name: Verify exact source ownership and safety cap
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('lot16-connected-frame-source-handoff.json').read_text())
+          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert report['primitive_safety_cap'] == 20_000
+          assert report['opening_bindings']
+          assert any('raster_source_band_host_resolved' in row['reason_codes'] for row in report['opening_bindings'])
+          assert report['source_owned_wall_scope_results']
+          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
+          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
+          assert len(ids) == len(set(ids))
+          assert 'quantities' not in report
+          baseline = json.loads(Path('prerequisite-lot16/lot16-connected-frame-source-handoff.json').read_text())
+          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
+          assert baseline['source_sha256'] == report['source_sha256']
+          assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
+          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
+          old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
+          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-connected-frame-source-handoff
+          path: lot16-connected-frame-source-handoff.json
+          retention-days: 14
+  maryborough-source-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reproduce original verified Maryborough prerequisite
+        run: |
+          git worktree add /tmp/gptmax-aperture-mary-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          DIAG_SCRIPT="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
+          mkdir -p prerequisite-maryborough
+          (cd /tmp/gptmax-aperture-mary-prerequisite && PYTHONPATH=. python -u "$DIAG_SCRIPT" --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output "$GITHUB_WORKSPACE/prerequisite-maryborough/maryborough-connected-frame-source-handoff.json")
+      - name: Compare real Maryborough source and host identities with prerequisite
+        run: |
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
+          cp prerequisite-maryborough/maryborough-connected-frame-source-handoff.json maryborough-source-baseline.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          baseline = json.loads(Path('maryborough-source-baseline.json').read_text())
+          current = json.loads(Path('maryborough-connected-frame-source-handoff.json').read_text())
+          assert current['source_sha256'] == baseline['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
+          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
+          assert keyed(current['opening_bindings']) == keyed(baseline['opening_bindings'])
+          assert len(current['opening_bindings']) == len(keyed(current['opening_bindings']))
+          old_frames, new_frames = keyed(baseline['host_frames']), keyed(current['host_frames'])
+          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          assert 'quantities' not in current
+          print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'host_identity_parity': True, 'existing_frame_identity_parity': True}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maryborough-connected-frame-source-handoff
+          path: maryborough-*.json
+          retention-days: 14
