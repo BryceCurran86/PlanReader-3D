@@ -85,7 +85,8 @@ def _valid_room_area_quantity(
     quantity: QuantityEvidence,
 ) -> bool:
     if (
-        quantity.family != "room_area"
+        entity.status is not EvidenceResolutionStatus.CORROBORATED
+        or quantity.family != "room_area"
         or _clean(quantity.status) != AuthorityStatus.FIRM.value
         or _clean(quantity.unit).lower() not in {"m2", "m²"}
         or quantity.blocking_reasons
