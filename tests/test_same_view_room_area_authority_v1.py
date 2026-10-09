@@ -205,6 +205,56 @@ def test_same_source_page_dimension_bundle_extracted_once_for_distinct_labels(
     assert len(extractions) == 1
 
 
+def test_first_failure_receipts_preserve_valid_room_and_unresolved_identity() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+
+    assert len(result.records) == 1
+    assert result.records[0].physical_room_id == "physical-room-1"
+    assert "physical-room-1" not in result.unresolved_first_failure_by_physical_room_id
+    assert (
+        result.unresolved_first_failure_by_physical_room_id["physical-room-3"]
+        in {
+            "same_view_label_outside_dimension_box",
+            "same_view_figured_pair_scale_inconsistent",
+            "same_view_dimension_witness_intersection_unavailable",
+            "same_view_dimension_pair_unavailable",
+            "same_view_dimension_orientation_pair_unavailable",
+        }
+    )
+    assert result.unresolved_first_failure_codes == tuple(
+        sorted(result.unresolved_first_failure_codes)
+    )
+
+
+def test_duplicate_same_page_room_label_has_distinct_fail_closed_reason() -> None:
+    source, rooms = _source_and_rooms(duplicate_label=True)
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert result.records == ()
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_room_label_duplicate",
+        "physical-room-2": "same_view_room_label_duplicate",
+    }
+
+
+def test_same_view_eligibility_uses_object_identity_not_polygon_equality(monkeypatch) -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+
+    def forbidden_equality(self, other):
+        raise AssertionError("room eligibility must not compare source geometry")
+
+    monkeypatch.setattr(LiveCanonicalRoomObject, "__eq__", forbidden_equality)
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert len(result.records) == 1
+    assert "physical-room-3" in result.unresolved_first_failure_by_physical_room_id
+
+
 def test_dimension_bundle_cache_is_scoped_to_source_producer(monkeypatch) -> None:
     source_a, rooms_a = _source_and_rooms()
     source_b, rooms_b = _source_and_rooms()
