@@ -252,6 +252,22 @@ jobs:
                   for key, reasons in sorted(producer._definition_scope_blockers.items())
               ],
           }
+          inventory["first_gate_by_code"] = {
+              code: (
+                  next(
+                      (row for row in inventory["definitions"]
+                       if row["code"] == code),
+                      {
+                          "code": code,
+                          "status": "not_published",
+                          "reason_codes": [
+                              "source_definition_or_schedule_owner_unavailable"
+                          ],
+                      },
+                  )
+              )
+              for code in ("FPB", "WFPB", "GRID", "IPF1")
+          }
           print("B02_PRODUCTION_PUBLICATION", json.dumps(
               inventory, sort_keys=True, default=str
           ))
