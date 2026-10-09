@@ -8,10 +8,86 @@ import pytest
 
 import pb_live_physical_net_wall_integration as live_integration
 from pb_live_physical_net_wall_integration import (
+    _uniquely_owned_explicit_area_by_source_face,
     collect_live_physical_net_wall_claim,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 from tests.test_live_physical_opening_void_composition import _complete_void_pdf
+
+
+def _source_face(record_id: str, face_id: str):
+    return SimpleNamespace(record_id=record_id, face_id=face_id)
+
+
+def _canonical_room_owner(record_id: str, physical_id: str):
+    return SimpleNamespace(
+        source_room_face_record_id=record_id,
+        physical_room_id=physical_id,
+    )
+
+
+def test_unique_documented_area_claim_maps_to_one_source_owned_face() -> None:
+    evidence = object()
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(_source_face("rec-a", "face-1"),),
+        canonical_rooms=(_canonical_room_owner("rec-a", "physical-a"),),
+        evidence_by_source_record={"rec-a": evidence},
+    ) == {"face-1": evidence}
+
+
+def test_competing_documented_records_for_same_face_fail_closed() -> None:
+    retained = object()
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(
+            _source_face("rec-a", "face-1"),
+            _source_face("rec-b", "face-1"),
+            _source_face("rec-c", "face-2"),
+        ),
+        canonical_rooms=(
+            _canonical_room_owner("rec-a", "physical-a"),
+            _canonical_room_owner("rec-b", "physical-b"),
+            _canonical_room_owner("rec-c", "physical-c"),
+        ),
+        evidence_by_source_record={
+            "rec-a": object(),
+            "rec-b": object(),
+            "rec-c": retained,
+        },
+    ) == {"face-2": retained}
+
+
+def test_source_record_with_competing_faces_cannot_mint_area() -> None:
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(
+            _source_face("rec-a", "face-1"),
+            _source_face("rec-a", "face-2"),
+        ),
+        canonical_rooms=(_canonical_room_owner("rec-a", "physical-a"),),
+        evidence_by_source_record={"rec-a": object()},
+    ) == {}
+
+
+def test_one_source_record_cannot_have_two_canonical_room_owners() -> None:
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(_source_face("rec-a", "face-1"),),
+        canonical_rooms=(
+            _canonical_room_owner("rec-a", "physical-a"),
+            _canonical_room_owner("rec-a", "physical-b"),
+        ),
+        evidence_by_source_record={"rec-a": object()},
+    ) == {}
+
+
+def test_exact_source_face_record_replay_is_idempotent() -> None:
+    evidence = object()
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(
+            _source_face("rec-a", "face-1"),
+            _source_face("rec-a", "face-1"),
+        ),
+        canonical_rooms=(_canonical_room_owner("rec-a", "physical-a"),),
+        evidence_by_source_record={"rec-a": evidence},
+    ) == {"face-1": evidence}
 
 
 def test_live_physical_net_wall_runs_real_source_chain_and_fails_closed_without_height(
