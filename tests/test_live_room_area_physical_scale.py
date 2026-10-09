@@ -5,6 +5,7 @@ from pathlib import Path
 import fitz
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
+import pb_live_physical_net_wall_integration as integration
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
 
@@ -133,3 +134,33 @@ def test_title_block_ratio_without_graphic_scale_bar_never_mints_metric_room_are
         and floor.metric_area_m2 is None
         for floor in claim.canonical_floors
     )
+
+
+def test_authenticated_viewport_owner_is_resolved_once_per_room_scope(
+    tmp_path, monkeypatch
+) -> None:
+    original = integration._unique_authenticated_containing_floor_plan_viewport
+    calls: list[tuple[str, str]] = []
+
+    def counted(*, source, scope_rooms, page_id, snapshot_id):
+        calls.append((page_id, snapshot_id))
+        return original(
+            source=source,
+            scope_rooms=scope_rooms,
+            page_id=page_id,
+            snapshot_id=snapshot_id,
+        )
+
+    monkeypatch.setattr(
+        integration,
+        "_unique_authenticated_containing_floor_plan_viewport",
+        counted,
+    )
+    claim = collect_live_physical_net_wall_claim(
+        _write(tmp_path, include_scale_bar=True),
+        pages=(0,),
+    )
+    assert claim.canonical_rooms
+    # Repeated scale fallbacks may recheck the same ownership decision; the
+    # authenticated lookup must never be rebuilt twice for one room scope.
+    assert len(calls) == len(set(calls))
