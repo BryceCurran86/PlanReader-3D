@@ -188,6 +188,28 @@ def test_same_view_absent_producer_revision_reports_lineage_gate() -> None:
     }
 
 
+def test_same_physical_room_with_two_labels_cannot_publish_any_area() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    physical_id = rooms.rooms[0].physical_room_id
+    conflicting = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(rooms.rooms[1], physical_room_id=physical_id),
+        ),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=conflicting,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == (physical_id,)
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        physical_id: "same_view_physical_room_identity_conflict",
+    }
+
+
 def test_duplicate_same_page_room_label_fails_closed() -> None:
     source, rooms = _source_and_rooms(duplicate_label=True)
     result = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
