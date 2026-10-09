@@ -37,6 +37,25 @@ if __name__ == "__main__":
             page = doc[index]
             calibration = calibrate_viewport_layout(page)
             frames = extract_vector_frames(page, calibration)
+            # Distinguish no source vectors from unsupported source paths;
+            # this is diagnostic evidence only, never viewport authority.
+            drawings = page.get_drawings()
+            primitive_types = Counter(
+                str(item[0])
+                for drawing in drawings
+                for item in drawing.get("items", []) or []
+                if item
+            )
+            path_lengths = Counter(
+                str(len(drawing.get("items", []) or []))
+                for drawing in drawings
+            )
+            print("B01_SOURCE_GEOMETRY_DIAGNOSTIC", json.dumps({
+                "page": page_no, "drawings": len(drawings),
+                "primitive_types": dict(primitive_types),
+                "path_item_count_distribution": dict(path_lengths),
+                "extracted_frames": len(frames),
+            }, sort_keys=True))
             anchors = extract_view_title_anchors(page)
             for anchor in anchors:
                 if anchor.view_type not in target_types:
