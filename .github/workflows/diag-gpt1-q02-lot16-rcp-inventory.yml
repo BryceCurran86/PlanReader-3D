@@ -87,9 +87,12 @@ jobs:
           import re
           titles = []
           structural_rcp = []
+          missing_sources = []
           for document in manifest["source_documents"]:
               file_path = Path("documents/sources") / document["name"]
-              assert file_path.exists(), "Manifest-declared source missing"
+              if not file_path.exists():
+                  missing_sources.append(document["name"])
+                  continue
               assert hashlib.sha256(file_path.read_bytes()).hexdigest() == document["sha256"], "Source integrity mismatch"
               other = fitz.open(file_path)
               for index in range(other.page_count):
@@ -112,7 +115,7 @@ jobs:
                       ):
                           structural_rcp.append({"source":document["name"],"page_number":index+1,"viewport_id":str(v.view_id)})
               other.close()
-          extended = {"source_sha_verified":True,"source_documents_checked":len(manifest["source_documents"]),"native_ceiling_title_witnesses":titles,"additional_source_authenticated_rcp_viewports":structural_rcp}
+          extended = {"available_source_hashes_verified":True,"source_documents_checked":len(manifest["source_documents"])-len(missing_sources),"source_package_coverage_complete":not bool(missing_sources),"missing_source_documents":missing_sources,"native_ceiling_title_witnesses":titles,"additional_source_authenticated_rcp_viewports":structural_rcp}
           Path("artifacts/gpt1-q02-rcp/extended-support-inventory.json").write_text(json.dumps(extended,indent=2,sort_keys=True))
           print("GPT1_LOT16_RCP_SUPPORT_GATES",json.dumps(extended,sort_keys=True))
           PY
