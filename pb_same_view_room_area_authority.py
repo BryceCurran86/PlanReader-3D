@@ -204,6 +204,19 @@ class SameViewRoomAreaProducer:
         duplicate_physical_ids = {
             room_id for room_id, count in physical_counts.items() if count > 1
         }
+        source_face_ids: dict[str, list[str]] = {}
+        for source_room in rooms:
+            face_id = str(source_room.source_room_face_record_id or "").strip()
+            if face_id:
+                source_face_ids.setdefault(face_id, []).append(
+                    str(source_room.physical_room_id)
+                )
+        duplicate_face_room_ids = {
+            room_id
+            for physical_ids in source_face_ids.values()
+            if len(physical_ids) > 1
+            for room_id in physical_ids
+        }
         eligible_object_ids = {id(room) for room in eligible}
         unresolved: set[str] = {
             str(room.physical_room_id)
@@ -224,14 +237,24 @@ class SameViewRoomAreaProducer:
             room_id: "same_view_physical_room_identity_conflict"
             for room_id in duplicate_physical_ids
         })
-        conflict_seen = bool(duplicate_room_ids or duplicate_physical_ids)
+        unresolved.update(duplicate_face_room_ids)
+        first_failures.update({
+            room_id: "same_view_source_room_face_identity_conflict"
+            for room_id in duplicate_face_room_ids
+        })
+        conflict_seen = bool(
+            duplicate_room_ids or duplicate_physical_ids or duplicate_face_room_ids
+        )
         records: list[SameViewRoomAreaRecord] = []
 
         for (page_id, label), grouped_rooms in sorted(labels.items()):
             if len(grouped_rooms) != 1:
                 continue
             room = grouped_rooms[0]
-            if str(room.physical_room_id) in duplicate_physical_ids:
+            if (
+                str(room.physical_room_id) in duplicate_physical_ids
+                or str(room.physical_room_id) in duplicate_face_room_ids
+            ):
                 continue
 
             lines = tuple(
