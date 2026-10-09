@@ -399,6 +399,93 @@ def test_same_page_dimensions_cannot_mint_cross_view_room_area():
     }
 
 
+def test_cross_view_mixed_or_stale_source_snapshot_fails_closed():
+    source, rooms = _source_and_room(duplicate_room_label=True)
+    mixed = replace(
+        rooms, rooms=(
+            rooms.rooms[0],
+            replace(rooms.rooms[1], snapshot_id="foreign-snapshot"),
+        ),
+    )
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=mixed,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert set(result.unresolved_physical_room_ids) == {
+        "physical-room-1", "physical-room-2",
+    }
+
+    stale = replace(
+        rooms, rooms=(replace(rooms.rooms[0], snapshot_id="foreign-snapshot"),),
+    )
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=stale,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+
+
+def test_cross_view_duplicate_source_face_between_distinct_labels_fails_closed():
+    source, rooms = _source_and_room(duplicate_room_label=True)
+    distinct = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(
+                rooms.rooms[1],
+                room_label="OTHER",
+                source_room_face_record_id=rooms.rooms[0].source_room_face_record_id,
+            ),
+        ),
+    )
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=distinct,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert set(result.unresolved_physical_room_ids) == {
+        "physical-room-1", "physical-room-2",
+    }
+
+
+def test_cross_view_duplicate_physical_room_across_distinct_labels_fails_closed():
+    source, rooms = _source_and_room(duplicate_room_label=True)
+    distinct = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(
+                rooms.rooms[1],
+                room_label="OTHER",
+                physical_room_id=rooms.rooms[0].physical_room_id,
+            ),
+        ),
+    )
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=distinct,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == ("physical-room-1",)
+
+
+def test_cross_view_eligibility_does_not_compare_room_polygons(monkeypatch):
+    source, rooms = _source_and_room()
+    monkeypatch.setattr(
+        LiveCanonicalRoomObject, "__eq__",
+        lambda self, other: (_ for _ in ()).throw(
+            AssertionError("room geometry must not be compared for eligibility")
+        ),
+    )
+    result = CrossViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_evidence.normalized_value == 8.64
+
+
 def test_duplicate_canonical_room_label_fails_closed_before_cross_view_binding():
     source, rooms = _source_and_room(duplicate_room_label=True)
     result = CrossViewRoomAreaProducer.from_source(
