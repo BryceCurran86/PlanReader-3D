@@ -76,6 +76,11 @@ class SameViewRoomAreaResult:
     records: tuple[SameViewRoomAreaRecord, ...]
     unresolved_physical_room_ids: tuple[str, ...]
     schema_version: str = SAME_VIEW_ROOM_AREA_SCHEMA_VERSION
+    unresolved_first_failure_codes: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def unresolved_first_failure_by_physical_room_id(self) -> Mapping[str, str]:
+        return MappingProxyType(dict(self.unresolved_first_failure_codes))
 
     @property
     def evidence_by_source_room_face_record_id(self) -> Mapping[str, EvidenceAtom]:
@@ -175,12 +180,21 @@ class SameViewRoomAreaProducer:
             if len(group) != 1
             for room in group
         }
+        eligible_object_ids = {id(room) for room in eligible}
         unresolved: set[str] = {
             str(room.physical_room_id)
             for room in rooms
-            if room not in eligible
+            if id(room) not in eligible_object_ids
+        }
+        first_failures = {
+            room_id: "same_view_room_prerequisites_unavailable"
+            for room_id in unresolved
         }
         unresolved.update(duplicate_room_ids)
+        first_failures.update({
+            room_id: "same_view_room_label_duplicate"
+            for room_id in duplicate_room_ids
+        })
         conflict_seen = bool(duplicate_room_ids)
         records: list[SameViewRoomAreaRecord] = []
 
@@ -204,6 +218,10 @@ class SameViewRoomAreaProducer:
             # line on this physical room page.
             if len(lines) != 1:
                 unresolved.add(str(room.physical_room_id))
+                first_failures[str(room.physical_room_id)] = (
+                    "same_view_trusted_label_ambiguous"
+                    if len(lines) > 1 else "same_view_trusted_label_unavailable"
+                )
                 if len(lines) > 1:
                     conflict_seen = True
                 continue
@@ -228,18 +246,25 @@ class SameViewRoomAreaProducer:
 
             matches = []
             line = lines[0]
+            inside_pairs = 0
+            scale_consistent_pairs = 0
+            witness_pairs = 0
             for horizontal in horizontals:
                 for vertical in verticals:
-                    if (
-                        _line_inside_dimension_pair(line, horizontal, vertical)
-                        and _figured_pair_scale_consistent(
-                            page_id=page_id,
-                            horizontal=horizontal,
-                            vertical=vertical,
-                        )
-                        and _witness_systems_intersect(horizontal, vertical)
+                    if not _line_inside_dimension_pair(line, horizontal, vertical):
+                        continue
+                    inside_pairs += 1
+                    if not _figured_pair_scale_consistent(
+                        page_id=page_id,
+                        horizontal=horizontal,
+                        vertical=vertical,
                     ):
-                        matches.append((line, horizontal, vertical))
+                        continue
+                    scale_consistent_pairs += 1
+                    if not _witness_systems_intersect(horizontal, vertical):
+                        continue
+                    witness_pairs += 1
+                    matches.append((line, horizontal, vertical))
 
             if not matches:
                 owned_horizontals = tuple(
@@ -269,9 +294,21 @@ class SameViewRoomAreaProducer:
                 for owned_line, horizontal, vertical in matches
             }
             if len(deduped) != 1:
-                unresolved.add(str(room.physical_room_id))
+                room_id = str(room.physical_room_id)
+                unresolved.add(room_id)
                 if len(deduped) > 1:
                     conflict_seen = True
+                    first_failures[room_id] = "same_view_multiple_authenticated_dimension_pairs"
+                elif not horizontals or not verticals:
+                    first_failures[room_id] = "same_view_dimension_orientation_pair_unavailable"
+                elif not inside_pairs:
+                    first_failures[room_id] = "same_view_label_outside_dimension_box"
+                elif not scale_consistent_pairs:
+                    first_failures[room_id] = "same_view_figured_pair_scale_inconsistent"
+                elif not witness_pairs:
+                    first_failures[room_id] = "same_view_dimension_witness_intersection_unavailable"
+                else:
+                    first_failures[room_id] = "same_view_dimension_pair_unavailable"
                 continue
 
             owned_line, horizontal, vertical = next(iter(deduped.values()))
@@ -283,6 +320,7 @@ class SameViewRoomAreaProducer:
             )
             if not math.isfinite(area_m2) or area_m2 <= 0.0:
                 unresolved.add(str(room.physical_room_id))
+                first_failures[str(room.physical_room_id)] = "same_view_metric_area_invalid"
                 continue
 
             horizontal_x = sorted(
@@ -412,6 +450,10 @@ class SameViewRoomAreaProducer:
             reason_codes=reasons,
             records=tuple(records),
             unresolved_physical_room_ids=unresolved_ids,
+            unresolved_first_failure_codes=tuple(sorted(
+                (room_id, first_failures[room_id])
+                for room_id in unresolved_ids if room_id in first_failures
+            )),
         )
 
 
