@@ -24,6 +24,16 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
     original_extract = face_authority.extract_planar_faces
     original_label_resolve = label_authority.SourceRoomLabelAuthority.resolve_scope
     original_witness_intersect = same_view_authority._witness_systems_intersect
+    original_trusted_lines = same_view_authority._trusted_lines_for_page
+    active_label = {"value": "", "bbox": None}
+    def traced_trusted_lines(*args, **kwargs):
+        lines = original_trusted_lines(*args, **kwargs)
+        candidate_labels = tuple(kwargs.get("candidate_labels") or ())
+        active_label["value"] = str(candidate_labels[0]) if len(candidate_labels) == 1 else ""
+        active_label["bbox"] = [
+            list(line.bbox) for line in lines
+        ]
+        return lines
     label_scopes = []
     witness_audit = {
         "attempted_pairs": 0,
@@ -58,8 +68,10 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
         witness_audit[
             "intersecting_pairs" if proven else "nonintersecting_pairs"
         ] += 1
-        if not proven and len(witness_audit["failed_pair_samples"]) < 50:
+        if not proven and len(witness_audit["failed_pair_samples"]) < 300:
             witness_audit["failed_pair_samples"].append({
+                "room_label": active_label["value"],
+                "trusted_label_bboxes": active_label["bbox"],
                 "horizontal_dimension_id": str(horizontal.dimension_id),
                 "vertical_dimension_id": str(vertical.dimension_id),
                 "horizontal_value_mm": float(horizontal.value_mm),
@@ -68,6 +80,10 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
                 "vertical_endpoints_pt": vertical.endpoints_pt,
                 "horizontal_witness_count": len(horizontal.witness_geometries),
                 "vertical_witness_count": len(vertical.witness_geometries),
+                "horizontal_witness_segments": horizontal.witness_geometries,
+                "vertical_witness_segments": vertical.witness_geometries,
+                "horizontal_source_witness_ids": list(horizontal.witness_observation_ids),
+                "vertical_source_witness_ids": list(vertical.witness_observation_ids),
             })
         return proven
 
@@ -121,6 +137,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
         face_authority.extract_planar_faces = traced_extract
         label_authority.SourceRoomLabelAuthority.resolve_scope = traced_label_resolve
         same_view_authority._witness_systems_intersect = traced_witness_intersect
+        same_view_authority._trusted_lines_for_page = traced_trusted_lines
         claim = collect_live_physical_net_wall_claim(
             pdf, pages=(page_index,), topology_pages=(page_index,),
             room_area_support_pages=None,
@@ -183,6 +200,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
         face_authority.extract_planar_faces = original_extract
         label_authority.SourceRoomLabelAuthority.resolve_scope = original_label_resolve
         same_view_authority._witness_systems_intersect = original_witness_intersect
+        same_view_authority._trusted_lines_for_page = original_trusted_lines
 
 
 def main() -> None:
