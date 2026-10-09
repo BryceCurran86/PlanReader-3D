@@ -103,6 +103,20 @@ def test_unrelated_non_firm_replay_does_not_poison_a_firm_source_id() -> None:
     assert len(published) == 1
 
 
+def test_empty_source_receipts_cannot_mint_firm_floor_area() -> None:
+    source = _source_area()
+    # Previously the empty source evidence set passed the subset test
+    # vacuously, despite proving no relationship to the physical floor.
+    missing_source = replace(source, evidence_ids=())
+    assert publish_live_floor_area_quantities(
+        _claim_with(missing_source)
+    ) == ()
+
+    floor = replace(_floor(), evidence_ids=())
+    claim = replace(_claim_with(source), canonical_floors=(floor,))
+    assert publish_live_floor_area_quantities(claim) == ()
+
+
 def test_unsupported_area_units_and_blocked_claims_do_not_publish_m2() -> None:
     source = _source_area()
     invalid_claims = (
