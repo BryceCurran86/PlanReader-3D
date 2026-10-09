@@ -175,10 +175,13 @@ class SameViewRoomAreaProducer:
             if len(group) != 1
             for room in group
         }
+        # The eligible subset reuses these exact producer-owned room objects.
+        # Avoid quadratic dataclass equality comparisons of large room polygons.
+        eligible_object_ids = {id(room) for room in eligible}
         unresolved: set[str] = {
             str(room.physical_room_id)
             for room in rooms
-            if room not in eligible
+            if id(room) not in eligible_object_ids
         }
         unresolved.update(duplicate_room_ids)
         conflict_seen = bool(duplicate_room_ids)
