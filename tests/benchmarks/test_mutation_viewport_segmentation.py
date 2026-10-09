@@ -936,6 +936,8 @@ def test_rotated_rcps_can_use_resolved_schedule_as_nonoverlapping_band_separator
         viewport.provenance.get("visual_band_validated") is True
         for viewport in rcps
     )
+    # RCP plan bands must never authorize physical FLOOR_PLAN topology.
+    assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
     doc.close()
 
 
