@@ -292,6 +292,21 @@ def test_cross_view_room_area_reaches_same_canonical_floor_without_scale(
         sorted(result.same_view_room_area_first_failure_codes)
     )
 
+    scale_gates = dict(result.physical_scale_first_failure_codes)
+    assert set(scale_gates) == {
+        room.physical_room_id for room in result.canonical_rooms
+    }
+    assert all(reason_codes for reason_codes in scale_gates.values())
+    assert result.physical_scale_first_failure_codes == tuple(
+        sorted(result.physical_scale_first_failure_codes)
+    )
+    # The independent cross-view documented dimension for OFFICE still
+    # publishes FIRM, even though the physical-scale producer abstains.
+    assert any(
+        quantity.value == 8.64 and not quantity.abstained
+        for quantity in result.room_area_quantity_evidence
+    )
+
     resolved_floors = [
         floor for floor in result.canonical_floors
         if floor.metric_area_m2 is not None
