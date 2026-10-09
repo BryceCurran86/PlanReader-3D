@@ -22,6 +22,7 @@ from pb_opening_schedule_v171 import ScheduleEntry, detect_header, parse_schedul
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_physical_opening_authority import (
     PHYSICAL_OPENING_EXISTS,
+    RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
     RASTER_FRAMED_WALL_BAND_INTERRUPTION,
     PhysicalOpeningAuthority,
 )
@@ -396,15 +397,18 @@ def _opening_aperture_for_physical_opening(
     """Resolve tag-containment geometry from the physical opening itself.
 
     Native/vector G17 openings preserve the historical six-line reconstruction.
-    Raster-framed G17 openings carry a producer-sealed aperture bbox because
-    their support primitives are intentionally isolated from ordinary visible
+    Raster-framed and swing G17 openings carry a producer-sealed aperture bbox.
+    Their support primitives are intentionally isolated from ordinary visible
     observations.  Reusing that bbox proves only spatial ownership of a plan
     tag; it does not establish scale, width, height, semantic kind, schedule
     identity, or quantity.
     """
     if (
         getattr(opening, "structural_pattern", None)
-        == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+        in {
+            RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+            RASTER_DOOR_SWING_WALL_BAND_INTERRUPTION,
+        }
     ):
         bbox = getattr(opening, "aperture_bbox_pt", None)
         if bbox is None:
