@@ -74,8 +74,8 @@ _SCHEDULE_VIEW_TYPES = frozenset(
 
 
 _NONMATERIAL_GRID_DRAWING_TITLE = re.compile(
-    r"^\\s*GRID\\s+(?:(?:SET\\s*OUT|SETOUT|LAYOUT)\\s+PLAN|"
-    r"PLAN\\s+(?:SET\\s*OUT|SETOUT))\\s*$",
+    r"^\s*GRID\s+(?:(?:SET\s*OUT|SETOUT|LAYOUT)\s+PLAN|"
+    r"PLAN\s+(?:SET\s*OUT|SETOUT))\s*$",
     re.IGNORECASE,
 )
 
