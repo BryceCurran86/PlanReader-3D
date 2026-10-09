@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - pb_opening_host_frame_authority.py
+      - pb_physical_opening_authority.py
       - pb_physical_wall_candidate_authority.py
       - pb_source_visibility_authority.py
       - pb_raster_source_wall_frame_projection.py
