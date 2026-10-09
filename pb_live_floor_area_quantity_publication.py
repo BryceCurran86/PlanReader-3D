@@ -277,6 +277,15 @@ def publish_live_canonical_room_area_quantities(
             floor_quantity.metadata.get("revision_id")
         ):
             continue
+        # Room source identity is independent of a cross-view dimension
+        # snapshot. An explicitly declared physical room snapshot must not
+        # reissue its area onto another canonical room snapshot.
+        source_room_snapshot = _clean(metadata.get("room_snapshot_id"))
+        if source_room_snapshot and source_room_snapshot != room.snapshot_id:
+            continue
+        source_viewport = _clean(metadata.get("viewport_id"))
+        if room.viewport_id and source_viewport and _clean(room.viewport_id) != source_viewport:
+            continue
         if str(room.page_id) != _clean(
             floor_quantity.metadata.get("page_no")
         ):
