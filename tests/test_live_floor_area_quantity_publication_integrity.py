@@ -223,6 +223,46 @@ def test_canonical_room_reissue_preserves_approved_firm_source_evidence() -> Non
     assert output[0].input_entity_ids == ("physical-room-1",)
 
 
+def test_canonical_room_reissue_rejects_foreign_room_snapshot() -> None:
+    floor = _floor()
+    source = replace(
+        _source_area(),
+        metadata={
+            **_source_area().metadata,
+            "room_snapshot_id": floor.snapshot_id,
+            "source_room_face_record_id": floor.source_room_face_record_id,
+            "source_dimension_snapshot_id": "independent-dimension-support",
+        },
+    )
+    matching_claim = _claim_with_canonical_room(source)
+    assert len(publish_live_canonical_room_area_quantities(matching_claim)) == 1
+
+    foreign_room = replace(
+        matching_claim.canonical_rooms[0],
+        snapshot_id="other-physical-room-snapshot",
+    )
+    altered_claim = replace(
+        matching_claim,
+        canonical_rooms=(foreign_room,),
+    )
+    # The floor is valid, but an unrelated canonical room must not inherit it.
+    assert len(publish_live_floor_area_quantities(altered_claim)) == 1
+    assert publish_live_canonical_room_area_quantities(altered_claim) == ()
+
+
+def test_canonical_room_reissue_rejects_foreign_viewport() -> None:
+    source = _source_area()
+    claim = _claim_with_canonical_room(source)
+    assert len(publish_live_canonical_room_area_quantities(claim)) == 1
+    alien_room = replace(
+        claim.canonical_rooms[0],
+        viewport_id="foreign-room-viewport",
+    )
+    assert publish_live_canonical_room_area_quantities(
+        replace(claim, canonical_rooms=(alien_room,))
+    ) == ()
+
+
 def test_provisional_duplicate_replay_cannot_replace_approved_firm_room_source() -> None:
     source = _source_area()
     rejected = replace(
