@@ -520,3 +520,41 @@ def test_unconfirmed_room_entity_cannot_promote_firm_area_to_ceiling() -> None:
     assert result.records == ()
     assert result.quantities == ()
     assert result.unresolved_physical_room_ids == ("physical-room-1",)
+
+
+def test_shared_rcp_occurrence_cannot_publish_for_multiple_physical_rooms() -> None:
+    finish_result = _finish()
+    original = finish_result.records[0]
+    disputed = replace(
+        original,
+        record_id="second-binding-of-same-occurrence",
+        physical_room_id="physical-room-2",
+        canonical_room_id="canonical-room-2",
+        source_room_face_record_id="face-2",
+    )
+    shared_source = replace(finish_result, records=(original, disputed))
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(), room_area_bridges=(_bridge(),), finishes=shared_source,
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_physical_room_ids == (
+        "physical-room-1",
+        "physical-room-2",
+    )
+
+
+def test_missing_rcp_definition_or_occurrence_identity_abstains() -> None:
+    for missing in ("occurrence_record_id", "definition_record_id"):
+        finish_result = _finish()
+        invalid = replace(finish_result.records[0], **{missing: ""})
+        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+            rooms=_rooms(),
+            room_area_bridges=(_bridge(),),
+            finishes=replace(finish_result, records=(invalid,)),
+        )
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert result.records == ()
+        assert result.quantities == ()
+        assert result.unresolved_physical_room_ids == ("physical-room-1",)
