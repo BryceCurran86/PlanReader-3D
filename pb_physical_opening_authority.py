@@ -2347,7 +2347,18 @@ class PhysicalOpeningAuthority:
                 overlap = min(values[1], found.gap_end) - max(
                     values[0], found.gap_start
                 )
-                if overlap > _COORD_EQ_ABS_TOL:
+                # A boundary-anchored cap is not independent proof of
+                # physical wall continuation: native dimension ticks and jamb
+                # decoration may start at either gap endpoint. Preserve that
+                # structural hypothesis for the producer-owned annotation
+                # opposition/integrity checks (which can only ABSTAIN).
+                # A positive source-visible stub strictly INSIDE the proposed
+                # gap does prove these are not adjacent wall faces.
+                interior_stub = (
+                    values[0] > found.gap_start + _COORD_EQ_ABS_TOL
+                    and values[1] < found.gap_end - _COORD_EQ_ABS_TOL
+                )
+                if interior_stub and overlap > _COORD_EQ_ABS_TOL:
                     continuation = True
                     break
             if not continuation:
