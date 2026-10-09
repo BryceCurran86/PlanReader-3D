@@ -1,0 +1,111 @@
+name: DIAG GPT1 Lot16 Floor First Authority Gates
+
+on:
+  push:
+    branches: [diag/gpt1-q01-floor-first-gates-20261009]
+
+concurrency:
+  group: diag-gpt1-q01-floor-first-gates
+  cancel-in-progress: true
+
+jobs:
+  lot16-source-quantity-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install OCR
+        run: sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr
+      - name: Install requirements
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen V2 truth integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Real Lot16 page-3 source, canonical and quantity gate inventory
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt1-lot16-page3-gates
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt1-lot16-page3-gates/console.log
+          import hashlib,json,time,subprocess
+          from pathlib import Path
+          from collections import Counter
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          from pb_live_opening_area_quantity_publication import _opening_quantity
+
+          project="au_qld_lot16_power"
+          source=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          manifest=json.loads(Path(f"benchmarks/frozen_holdout/full_plan_v2/projects/{project}/source_manifest.json").read_text())
+          expected=next(x["sha256"] for x in manifest["source_documents"] if x["name"]==source.name)
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          assert actual==expected, "Lot16 architectural source SHA mismatch"
+          t0=time.perf_counter()
+          # Preserve the exact source page-3 diagnostic scope from issue #1992.
+          # This is NOT a full-project/Frozen V2 takeoff.
+          claim=collect_live_physical_net_wall_claim(
+              source,pages=(2,),topology_pages=(2,),room_area_support_pages=None
+          )
+          extract_seconds=time.perf_counter()-t0
+          floors=tuple(publish_live_floor_area_quantities(claim))
+          candidates=tuple(claim.canonical_openings)
+          qty=tuple(q for q in claim.room_area_quantity_evidence if not q.abstained and q.value is not None)
+          def status(v):return getattr(v,"value",str(v))
+          data={
+              "repo_sha":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
+              "source_sha_verified":True,"source_sha256":actual,
+              "scope":"test_only_page_index_2_not_frozen_v2",
+              "extract_seconds":round(extract_seconds,3),
+              "claim_status":status(claim.status),
+              "claim_reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_room_status":status(claim.canonical_room_status),
+              "canonical_room_reasons":list(claim.canonical_room_reason_codes),
+              "labelled_rooms":[{"label":x.room_label,"face_record_id":x.source_room_face_record_id,"geometry_complete":x.geometry_complete} for x in claim.canonical_rooms if x.room_label],
+              "canonical_floor_count":len(claim.canonical_floors),
+              "canonical_floor_status":status(claim.canonical_floor_status),
+              "canonical_floor_reasons":list(claim.canonical_floor_reason_codes),
+              "canonical_floor_metric_count":sum(x.metric_area_m2 is not None for x in claim.canonical_floors),
+              "canonical_floor_area_quantities":len(floors),
+              "floor_first_gates":[{
+                  "floor_id":x.physical_floor_surface_id,
+                  "room_entity_id":x.room_entity_id,
+                  "source_face_record_id":x.source_room_face_record_id,
+                  "page_id":x.page_id,
+                  "viewport_id":x.viewport_id,
+                  "geometry_complete":x.geometry_complete,
+                  "metric_area_authority":x.metric_area_authority,
+                  "metric_area_quantity_id":x.metric_area_quantity_id,
+                  "reason":(
+                      "physical_face_geometry_incomplete" if not x.geometry_complete
+                      else "no_authenticated_figured_dimensions_or_physical_scale"
+                      if x.metric_area_quantity_id is None
+                      else "metric_area_attached"
+                  )
+              } for x in claim.canonical_floors],
+              "room_label_binding":[{"face_record_id":x.source_room_face_record_id,"label":x.room_label,
+                  "label_binding_id":x.room_label_binding_record_id,
+                  "label_evidence_count":len(x.room_label_evidence_ids)
+              } for x in claim.canonical_rooms if x.room_label],
+              "room_area_quantities":len(qty),
+              "canonical_ceiling_count":len(claim.canonical_ceilings),
+              "source_opening_count":len(candidates),
+              "source_opening_area_quantity_count":sum(_opening_quantity(x) is not None for x in candidates),
+              "opening_area_quantity_count":len(claim.opening_quantity_evidence),
+              "opening_count_quantity_count":len(claim.opening_count_quantity_evidence),
+              "floor_finish_quantity_count":len(claim.floor_finish_quantity_evidence),
+              "ceiling_lining_quantity_count":len(claim.ceiling_lining_quantity_evidence),
+              "opening_area_values":[x.value for x in claim.opening_quantity_evidence if not x.abstained and x.value is not None],
+          }
+          Path("artifacts/gpt1-lot16-page3-gates/result.json").write_text(json.dumps(data,indent=2,sort_keys=True,default=str)+"\n")
+          print("GPT1_LOT16_SOURCE_GATES",json.dumps(data,sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-real-lot16-page3-quantity-gates
+          path: artifacts/gpt1-lot16-page3-gates
+          retention-days: 4
