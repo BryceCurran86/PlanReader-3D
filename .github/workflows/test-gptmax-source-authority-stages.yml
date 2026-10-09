@@ -1,0 +1,69 @@
+name: GPT MAX Source Authority Stage Handoff
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_source_authority_stages.py
+      - tests/test_gptmax_source_authority_stages.py
+      - .github/workflows/test-gptmax-source-authority-stages.yml
+concurrency:
+  group: gptmax-source-stages-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  diagnostic-regressions:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Verify read-only source handoff
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_source_authority_stages.py
+          ruff check --select F821,F823 tools/diag_gptmax_source_authority_stages.py tests/test_gptmax_source_authority_stages.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  real-source-stages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: lot16
+            pdf: "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
+            page: "3"
+            source_args: "--source-all-pages"
+          - project: 3laurel
+            pdf: "documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf"
+            page: "1"
+            source_args: ""
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Produce physical and canonical source authority stage artifact
+        env:
+          SOURCE_PDF: ${{ matrix.pdf }}
+          SOURCE_PAGE: ${{ matrix.page }}
+          SOURCE_ARGS: ${{ matrix.source_args }}
+          SOURCE_PROJECT: ${{ matrix.project }}
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$SOURCE_PDF" --page-id "$SOURCE_PAGE" $SOURCE_ARGS --output "$SOURCE_PROJECT-source-authority-stages.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.project }}-source-authority-stages
+          path: "*-source-authority-stages.json"
+          retention-days: 14
