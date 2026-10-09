@@ -11,39 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lot16-room-face-diagnostic:
-    if: github.event_name == 'pull_request' && github.head_ref == 'diag/q01-lot16-face-scope-failure-20261009'
-    runs-on: ubuntu-latest
-    timeout-minutes: 55
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Diagnose verified Lot16 page 3
-        env:
-          PYTHONPATH: .
-        run: |
-          python - <<'PY'
-          import hashlib
-          import subprocess
-          import sys
-          from pathlib import Path
-          expected = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
-          matched = [p for p in Path("documents/sources").glob("*.pdf") if hashlib.sha256(p.read_bytes()).hexdigest() == expected]
-          assert len(matched) == 1, "Exact Lot16 source PDF unavailable"
-          subprocess.run([sys.executable, "-u", "tools/diag_lot16_room_face_scope.py", "--pdf", str(matched[0]), "--page-index", "2", "--output", "lot16-room-face-scope.json"], check=True)
-          PY
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: lot16-room-face-source-diagnostic
-          path: lot16-room-face-scope.json
-          retention-days: 14
-
   test:
     runs-on: ubuntu-latest
     strategy:
