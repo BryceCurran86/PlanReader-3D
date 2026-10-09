@@ -112,6 +112,8 @@ def _publish_one(
         or _clean(meta.get("revision_id")) != _clean(ceiling.revision_id)
         or _clean(meta.get("viewport_id")) != _clean(ceiling.viewport_id)
         or _clean(meta.get("page_no")) != str(ceiling.source_page)
+        or not ceiling.evidence_ids
+        or not source.evidence_ids
         or not set(ceiling.evidence_ids).issubset(set(source.evidence_ids))
     ):
         return None
