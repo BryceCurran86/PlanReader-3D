@@ -211,6 +211,22 @@ def publish_live_canonical_room_area_quantities(
         raise TypeError("claim must be LivePhysicalNetWallClaim")
 
     rooms = _canonical_rooms_by_id(claim)
+    # Full canonical universe identity must be checked *before* filtering to
+    # the conveniently measured room. Competing physical/source-face owners
+    # cannot be resolved by first/last-writer-wins selection.
+    physical_owner_counts: dict[str, int] = {}
+    source_face_owner_counts: dict[str, int] = {}
+    for candidate in claim.canonical_rooms:
+        physical_id = _clean(candidate.physical_room_id)
+        source_face_id = _clean(candidate.source_room_face_record_id)
+        if physical_id:
+            physical_owner_counts[physical_id] = (
+                physical_owner_counts.get(physical_id, 0) + 1
+            )
+        if source_face_id:
+            source_face_owner_counts[source_face_id] = (
+                source_face_owner_counts.get(source_face_id, 0) + 1
+            )
     floor_quantities = publish_live_floor_area_quantities(claim)
     # The source ID is allowed to appear in ABSTAIN/provisional replays,
     # but an untrusted later replay must not override the exact FIRM source
@@ -276,6 +292,11 @@ def publish_live_canonical_room_area_quantities(
         if not same_area:
             continue
         if not room.physical_room_id or not room.canonical_room_id:
+            continue
+        if (
+            physical_owner_counts.get(_clean(room.physical_room_id), 0) != 1
+            or source_face_owner_counts.get(_clean(room.source_room_face_record_id), 0) != 1
+        ):
             continue
         if _clean(room.source_room_face_record_id) != _clean(
             metadata.get("source_room_face_record_id")
