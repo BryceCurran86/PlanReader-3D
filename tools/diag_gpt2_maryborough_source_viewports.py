@@ -147,6 +147,42 @@ if __name__ == "__main__":
                 ]
             else:
                 extent = None
+            # Preserve xref identity while probing raster tile ownership.
+            # One repeated background image must not be considered a plan.
+            tile_groups = {}
+            for placement in placements:
+                xref = str(placement["xref"])
+                tile_groups.setdefault(xref, []).append(placement["bbox"])
+            raster_titles = [
+                anchor for anchor in extract_view_title_anchors(page)
+                if anchor.view_type in (
+                    DrawingViewType.REFLECTED_CEILING_PLAN.value,
+                    DrawingViewType.FLOOR_FINISH_PLAN.value,
+                )
+            ]
+            groups = []
+            for xref, boxes in sorted(tile_groups.items()):
+                union = [
+                    min(b[0] for b in boxes), min(b[1] for b in boxes),
+                    max(b[2] for b in boxes), max(b[3] for b in boxes),
+                ]
+                linked_titles = []
+                for anchor in raster_titles:
+                    cx = (anchor.bbox[0]+anchor.bbox[2])/2
+                    cy = (anchor.bbox[1]+anchor.bbox[3])/2
+                    if union[0] <= cx <= union[2] and union[1] <= cy <= union[3]:
+                        linked_titles.append(anchor.text)
+                groups.append({
+                    "xref":xref, "tiles":len(boxes),
+                    "union_native_bbox":union,
+                    "plan_titles_inside_union":linked_titles,
+                    "authenticated_viewport":False,
+                })
+            print("B01_IMAGE_XREF_GROUP_OWNERSHIP",json.dumps({
+                "page":page_no,"groups":groups,
+                "source_proven_plan_group_count":0,
+                "reason":"xref sharing or containment is not a viewport ownership declaration",
+            },sort_keys=True))
             print("B01_IMAGE_TILE_SOURCE_SCOPE", json.dumps({
                 "page":page_no,"placements_sampled":len(image_bounds),
                 "sampled_extent":extent,
