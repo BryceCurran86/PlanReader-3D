@@ -90,7 +90,7 @@ jobs:
               horizontal=tuple(v for v in dims if v.orientation==DimensionOrientation.HORIZONTAL.value)
               vertical=tuple(v for v in dims if v.orientation==DimensionOrientation.VERTICAL.value)
               counts={"candidate_pairs":len(horizontal)*len(vertical),"label_inside":0,"scale_consistent":0,"witness_intersect":0,"inside_and_scale":0,"inside_scale_and_witness":0,"label_immediate_horizontal":0,"label_immediate_vertical":0,"immediate_and_scale":0}
-              candidates=[]
+              pair_candidates=[]
               if len(lines)==1:
                   line=lines[0]
                   owned_h=[v for v in horizontal if _dimension_is_immediate_label_annotation(line,v)]
@@ -109,8 +109,8 @@ jobs:
                           counts["inside_scale_and_witness"]+=int(inside and scale and witness)
                           if h in owned_h and v in owned_v and scale: counts["immediate_and_scale"]+=1
                           if inside and scale:
-                              candidates.append({"h_mm":h.value_mm,"v_mm":v.value_mm,"witness_intersect":witness,"h_id":h.dimension_id,"v_id":v.dimension_id})
-              pair_gates.append({"label":room.room_label,"physical_room_id":room.physical_room_id,"source_face":room.source_room_face_record_id,"gate_counts":counts,"inside_scaled_candidates":candidates[:16]})
+                              pair_candidates.append({"h_mm":h.value_mm,"v_mm":v.value_mm,"witness_intersect":witness,"h_id":h.dimension_id,"v_id":v.dimension_id})
+              pair_gates.append({"label":room.room_label,"physical_room_id":room.physical_room_id,"source_face":room.source_room_face_record_id,"gate_counts":counts,"inside_scaled_candidates":pair_candidates[:16]})
           scale_producer=PhysicalScaleProducer.from_source_visibility_producer(trace_source)
           scale_by_scope={}
           for room in claim.canonical_rooms:
