@@ -1538,9 +1538,44 @@ def _raster_ink_gutter_evidence(
                     start = None
             return tuple(result)
 
+        horizontal_gutters = gutters(dark_rows, pix.width, height)
+        # A short vertical separation between adjacent drawings can be
+        # interrupted by a title block elsewhere on the page. Scan individual
+        # ink bands separated by independently observed horizontal gutters,
+        # rather than insisting on a page-spanning empty vertical corridor.
+        spans = []
+        cursor = 0.0
+        for begin, end in horizontal_gutters:
+            if begin > cursor:
+                spans.append((cursor, begin))
+            cursor = end
+        if cursor < height:
+            spans.append((cursor, height))
+        local_gutters = []
+        for band_begin, band_end in spans:
+            y0 = max(0, min(pix.height, round(band_begin * pix.height / height)))
+            y1 = max(y0, min(pix.height, round(band_end * pix.height / height)))
+            if y1 - y0 < max(10, math.ceil(pix.height * 0.05)):
+                continue
+            local_cols = [0] * pix.width
+            for y in range(y0, y1):
+                row_offset = y * pix.stride
+                for x in range(pix.width):
+                    if buf[row_offset + x] < 220:
+                        local_cols[x] += 1
+            found = gutters(local_cols, y1 - y0, width)
+            if found:
+                local_gutters.append({
+                    "visual_band_y_pts": (
+                        round(band_begin, 3), round(band_end, 3),
+                    ),
+                    "vertical_gutters_visual_pts": found,
+                    "source_region_complete": False,
+                })
         return {
             "vertical_gutters_visual_pts": gutters(dark_cols, pix.height, width),
-            "horizontal_gutters_visual_pts": gutters(dark_rows, pix.width, height),
+            "horizontal_gutters_visual_pts": horizontal_gutters,
+            "local_vertical_gutters_by_band_visual_pts": tuple(local_gutters),
             "render_dimensions": (pix.width, pix.height),
             "raster_gutters_are_authoritative": False,
         }
