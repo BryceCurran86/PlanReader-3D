@@ -339,7 +339,11 @@ def enrich_live_canonical_floor_metric_areas(
         ]
         # Identical producer-owned FIRM receipts can be replayed harmlessly.
         # Distinct receipts remain competing authority and must fail closed.
-        candidates = list(dict.fromkeys(candidates))
+        unique_candidates = []
+        for candidate in candidates:
+            if not any(candidate == previous for previous in unique_candidates):
+                unique_candidates.append(candidate)
+        candidates = unique_candidates
         if len(candidates) > 1:
             conflict = True
             # No quantity may escape for a face with competing FIRM claims.
