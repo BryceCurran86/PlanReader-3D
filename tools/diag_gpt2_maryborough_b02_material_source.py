@@ -26,8 +26,29 @@ if __name__=="__main__":
                 cx=(bbox[0]+bbox[2])/2;cy=(bbox[1]+bbox[3])/2
                 owners=[{"view":v.view_id,"type":v.view_type,"status":v.status} for v in views if v.bounding_box and v.bounding_box[0]<=cx<=v.bounding_box[2] and v.bounding_box[1]<=cy<=v.bounding_box[3]]
                 entry={"page":n,"block":block_idx,"line":line_idx,"text":val[:240],"bbox":bbox,"viewport_owners":owners,"surrounding_lines":lines[max(0,line_idx-2):line_idx+3]}
-                if codes:report["matches"].append({**entry,"codes":codes})
+                if codes:
+                    heading_lines = [i for i, line in enumerate(lines) if SCHEDULE.search(line)]
+                    description = CODES.sub("", val).strip(" :;-")
+                    proof = {
+                        "native_block_schedule_heading_lines": heading_lines,
+                        "same_block_schedule_heading": bool(heading_lines),
+                        "same_line_description_present": bool(description),
+                        "source_definition_candidate_only": bool(heading_lines and description),
+                        "authenticated_definition": False,
+                        "reason": "Text proximity is not authenticated definition authority",
+                    }
+                    report["matches"].append({**entry, "codes": codes, "proof": proof})
                 if heading:report["schedule_headings"].append(entry)
+    report["code_proof_summary"] = {
+        code: {
+            "occurrences": sum(code in row["codes"] for row in report["matches"]),
+            "same_block_schedule_candidates": sum(
+                code in row["codes"] and row["proof"]["source_definition_candidate_only"]
+                for row in report["matches"]
+            ),
+            "authenticated_definition_count": 0,
+        } for code in ("FPB", "WFPB", "IPF1", "GRID")
+    }
     doc.close()
     Path("maryborough_b02_material_source_audit.json").write_text(json.dumps(report,indent=2,default=str))
     print("B02_SUMMARY",json.dumps({"sha256":report["source_sha256"],"pages":report["page_count"],"matches":len(report["matches"]),"schedule_headings":len(report["schedule_headings"]),"codes":dict(Counter(code for row in report["matches"] for code in row["codes"]))}))
