@@ -57,7 +57,8 @@ if __name__=="__main__":
     report={"source_sha256":hashlib.sha256(payload).hexdigest(),"page_count":len(doc),"matches":[],"schedule_headings":[]}
     for n,page in enumerate(doc,1):
         views=segment_page_viewports(page,page_number=n)
-        for block_idx,block in enumerate(page.get_text("dict").get("blocks",[])):
+        native_blocks=page.get_text("dict").get("blocks",[])
+        for block_idx,block in enumerate(native_blocks):
             if block.get("type")!=0: continue
             lines=[" ".join(str(span.get("text","")).strip() for span in line.get("spans",[]) if str(span.get("text","")).strip()) for line in block.get("lines",[])]
             for line_idx,raw in enumerate(lines):
@@ -74,8 +75,7 @@ if __name__=="__main__":
                     if any(c in ("FT2","FT3") for c in codes):
                         entry["native_same_row_neighbours"] = (
                             _native_lateral_row_neighbours(
-                                page.get_text("dict").get("blocks",[]),
-                                bbox, block_idx,
+                                native_blocks, bbox, block_idx,
                             )
                         )
                         entry["neighbour_row_is_authenticated"] = False
