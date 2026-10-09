@@ -172,6 +172,53 @@ def _opening_quantity_diagnostic(claim) -> dict:
     }
 
 
+
+def _opening_sealing_diagnostic(claim) -> dict:
+    """Exercise existing source-closed sealing and draft customer verification.
+
+    The synthetic workspace ID is diagnostic only; no persistence or scoring.
+    """
+    from pb_live_opening_source_closed_export import seal_live_opening_area_claim_run
+    from pb_live_opening_customer_projection import project_live_opening_customer_rows
+    from pb_customer_output_verification import verify_sealed_customer_output
+
+    upstream_ids = sorted(
+        quantity.quantity_id for quantity in claim.opening_quantity_evidence
+    )
+    report = {
+        "diagnostic_workspace_only": True,
+        "input_opening_area_quantity_count": len(upstream_ids),
+        "upstream_quantity_ids": upstream_ids,
+    }
+    try:
+        sealed = seal_live_opening_area_claim_run(
+            claim, workspace_id=1, project_id="source-diagnostic:lot16"
+        )
+        sealed_ids = sorted(quantity.quantity_id for quantity in sealed.quantities)
+        report["sealed_opening_area_quantity_count"] = len(sealed_ids)
+        report["sealed_quantity_ids"] = sealed_ids
+        report["unsealed_upstream_ids"] = sorted(set(upstream_ids) - set(sealed_ids))
+        rows = project_live_opening_customer_rows(
+            claim, workspace_id=1, project_id="source-diagnostic:lot16"
+        )
+        verified = verify_sealed_customer_output(sealed, rows)
+        report["customer_draft_row_count"] = len(rows)
+        report["verified_quantity_ids"] = sorted(verified.verified_quantity_ids)
+        report["verified_quantity_count"] = verified.valid_quantity_count
+        report["status"] = (
+            "source_sealed_and_customer_rows_verified"
+            if sealed_ids == upstream_ids
+            and len(rows) == len(sealed_ids)
+            and sorted(verified.verified_quantity_ids) == sealed_ids
+            else "source_to_customer_quantity_mismatch"
+        )
+    except Exception as error:
+        report["status"] = "source_to_customer_exception"
+        report["error_type"] = type(error).__name__
+        report["error"] = str(error)[:1000]
+    return report
+
+
 def inspect_source(pdf: Path, page_index: int) -> dict:
     payload = pdf.read_bytes()
     observations = []
@@ -304,6 +351,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "claim_type": type(claim).__name__,
             "wall_metric_diagnostic": _wall_metric_diagnostic(claim),
             "opening_quantity_diagnostic": _opening_quantity_diagnostic(claim),
+            "opening_sealing_diagnostic": _opening_sealing_diagnostic(claim),
             "source_label_scope_diagnostic": label_scopes,
             "same_view_witness_intersection_audit": witness_audit,
             "label_ownership_diagnostic": {
