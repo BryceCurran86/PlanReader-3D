@@ -329,3 +329,32 @@ def test_unmeasured_alternative_unit_cannot_overwrite_firm_room_source() -> None
     assert publish_live_canonical_room_area_quantities(
         _claim_with_canonical_room(source, invalid)
     ) == original
+
+
+def test_duplicate_physical_room_identity_quarantines_canonical_area_reissue() -> None:
+    source = _source_area()
+    claim = _claim_with_canonical_room(source)
+    authentic = claim.canonical_rooms[0]
+    competing = replace(
+        authentic,
+        canonical_room_id="competing-canonical-room",
+        source_room_face_record_id="another-source-room-face",
+    )
+    conflicted = replace(claim, canonical_rooms=(authentic, competing))
+    # The independently valid floor cannot promote either conflicting room.
+    assert len(publish_live_floor_area_quantities(conflicted)) == 1
+    assert publish_live_canonical_room_area_quantities(conflicted) == ()
+
+
+def test_duplicate_source_face_owner_quarantines_canonical_area_reissue() -> None:
+    source = _source_area()
+    claim = _claim_with_canonical_room(source)
+    authentic = claim.canonical_rooms[0]
+    competing = replace(
+        authentic,
+        canonical_room_id="competing-canonical-room",
+        physical_room_id="competing-physical-room",
+    )
+    conflicted = replace(claim, canonical_rooms=(authentic, competing))
+    assert len(publish_live_floor_area_quantities(conflicted)) == 1
+    assert publish_live_canonical_room_area_quantities(conflicted) == ()
