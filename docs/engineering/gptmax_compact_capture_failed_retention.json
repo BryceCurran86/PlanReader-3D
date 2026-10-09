@@ -1,0 +1,373 @@
+{
+  "baseline_commit": "0fe54c3dec256260e8aaa9aef7d50399f79ba3ae",
+  "baseline_local_source_wall_records": [
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_a4f3cf0e89f2a88ff275",
+        "comparison_mode": "centerline_path_with_lineage",
+        "edge_ids": [
+          "split_2453",
+          "split_2455"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            381.0,
+            297.0
+          ],
+          [
+            381.214286,
+            337.714286
+          ],
+          [
+            381.0,
+            349.0
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1567"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_d17bc307b8248e979c4a"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_2453",
+          "geometry": [
+            381.0,
+            297.0,
+            381.0,
+            336.75
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1567"
+          ]
+        },
+        {
+          "edge_id": "split_2455",
+          "geometry": [
+            381.0,
+            338.75,
+            381.0,
+            349.0
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1567"
+          ]
+        }
+      ],
+      "wall_candidate": {
+        "candidate_id": "wall_d17bc307b8248e979c4a",
+        "centerline_pts": [
+          [
+            381.0,
+            297.0
+          ],
+          [
+            381.2142857142857,
+            337.7142857142857
+          ],
+          [
+            381.0,
+            349.0
+          ]
+        ],
+        "confidence": 0.3,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_e61b5ad7f7535cebf009",
+          "junc_6d7e9d0ad73de8d9afc6"
+        ],
+        "face_a_segment_ids": [
+          "split_2453",
+          "split_2455"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "near_junction_review",
+          "l_corner"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_2_stage_a_edges",
+          "chain_extension_blocked_by:near_junction_review_at_start"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_d17bc307b8248e979c4a"
+    }
+  ],
+  "baseline_summary": {
+    "authenticated_hosts": 14,
+    "canonical_opening_area_records": 8,
+    "canonical_opening_records": 23,
+    "complete_opening_geometry_records": 0,
+    "height_reason_counts": {
+      "schedule_opening_instance_binding_no_contained_tag": 23
+    },
+    "label_dimension_reason_counts": {
+      "opening_label_dimension_ambiguous": 1,
+      "opening_label_dimension_resolved": 17,
+      "opening_label_dimension_text_unavailable": 5
+    },
+    "label_semantic_reason_counts": {
+      "opening_label_semantic_resolved": 8,
+      "opening_label_semantic_unavailable": 15
+    },
+    "physical_existence_claims": 23,
+    "resolved_source_frames": 9,
+    "room_scope_reason_counts": {
+      "source_room_face_scope_resolved": 1,
+      "source_room_face_universe_partial": 1
+    },
+    "schedule_reason_counts": {
+      "schedule_opening_instance_binding_no_contained_tag": 23
+    },
+    "width_reason_counts": {
+      "opening_dimension_witness_topology_required": 23
+    }
+  },
+  "experiment_local_source_wall_records": [
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_a4f3cf0e89f2a88ff275",
+        "comparison_mode": "centerline_path_with_lineage",
+        "edge_ids": [
+          "split_2470",
+          "split_2472",
+          "split_2473"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            381.0,
+            297.0
+          ],
+          [
+            381.214286,
+            337.714286
+          ],
+          [
+            380.64,
+            342.72
+          ],
+          [
+            381.0,
+            349.0
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1567"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_fae371e2ea140be03cb5"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_2470",
+          "geometry": [
+            381.0,
+            297.0,
+            381.0,
+            336.75
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1567"
+          ]
+        },
+        {
+          "edge_id": "split_2472",
+          "geometry": [
+            381.0,
+            338.75,
+            381.0,
+            342.72
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1567"
+          ]
+        },
+        {
+          "edge_id": "split_2473",
+          "geometry": [
+            381.0,
+            342.72,
+            381.0,
+            349.0
+          ],
+          "source_primitive_ids": [
+            "raster_segment:64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab:1.0.0:1567"
+          ]
+        }
+      ],
+      "wall_candidate": {
+        "candidate_id": "wall_fae371e2ea140be03cb5",
+        "centerline_pts": [
+          [
+            381.0,
+            297.0
+          ],
+          [
+            381.2142857142857,
+            337.7142857142857
+          ],
+          [
+            380.64,
+            342.72
+          ],
+          [
+            381.0,
+            349.0
+          ]
+        ],
+        "confidence": 0.3,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_da26aaa84e591f620c79",
+          "junc_bb4aa75740a5f82ac7f5"
+        ],
+        "face_a_segment_ids": [
+          "split_2470",
+          "split_2472",
+          "split_2473"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "near_junction_review",
+          "l_corner"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_3_stage_a_edges",
+          "chain_extension_blocked_by:near_junction_review_at_start"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_fae371e2ea140be03cb5"
+    }
+  ],
+  "experiment_summary": {
+    "authenticated_hosts": 17,
+    "canonical_opening_area_records": 8,
+    "canonical_opening_records": 23,
+    "complete_opening_geometry_records": 0,
+    "height_reason_counts": {
+      "schedule_opening_instance_binding_no_contained_tag": 23
+    },
+    "label_dimension_reason_counts": {
+      "opening_label_dimension_ambiguous": 1,
+      "opening_label_dimension_resolved": 17,
+      "opening_label_dimension_text_unavailable": 5
+    },
+    "label_semantic_reason_counts": {
+      "opening_label_semantic_resolved": 8,
+      "opening_label_semantic_unavailable": 15
+    },
+    "physical_existence_claims": 23,
+    "resolved_source_frames": 8,
+    "room_scope_reason_counts": {
+      "source_room_face_scope_resolved": 1,
+      "source_room_face_universe_partial": 1
+    },
+    "schedule_reason_counts": {
+      "schedule_opening_instance_binding_no_contained_tag": 23
+    },
+    "width_reason_counts": {
+      "opening_dimension_witness_topology_required": 23
+    }
+  },
+  "integration_allowed": false,
+  "lost_host_proofs": [
+    {
+      "after": {
+        "host_wall_id": null,
+        "member_wall_candidate_ids": [],
+        "opening_identity_id": "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+        "page_id": "3",
+        "reason_codes": [
+          "no_authenticated_host_wall_band",
+          "raster_source_band_left_source_primitive_unmapped"
+        ],
+        "record_id": null,
+        "representative_observation_id": "source_observation_015fd774480c905cc1f839ae9110c222",
+        "status": "abstained"
+      },
+      "before": {
+        "host_wall_id": "opening_host_binding_group_faaddaeb66f701a2fd935c61967af142",
+        "member_wall_candidate_ids": [
+          "wall_d17bc307b8248e979c4a"
+        ],
+        "opening_identity_id": "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+        "page_id": "3",
+        "reason_codes": [
+          "opening_host_binding_resolved",
+          "raster_whole_wall_host_resolved"
+        ],
+        "record_id": "opening_host_binding_v3_b489c5e6852cc92c4344f0949bc6a8d2",
+        "representative_observation_id": "source_observation_015fd774480c905cc1f839ae9110c222",
+        "status": "corroborated"
+      },
+      "physical_opening_id": "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609"
+    }
+  ],
+  "physical_identity_ids": [
+    "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+    "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+    "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176",
+    "physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8",
+    "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+    "physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d",
+    "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8",
+    "physical_opening_existence_661fc5e6f0c5975d5e9bdd5d759bd180",
+    "physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d",
+    "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+    "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+    "physical_opening_existence_91ae06327d4fcc8004a557b116a77820",
+    "physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f",
+    "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b",
+    "physical_opening_existence_b222d5310a7df1d632d5daab1a676645",
+    "physical_opening_existence_b248972669988c108ebc90c6ca3908fd",
+    "physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b",
+    "physical_opening_existence_bd108c2c1bfd88752311aab5901737bb",
+    "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096",
+    "physical_opening_existence_c4d87543028146e1cff0b5e2ca480c55",
+    "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+    "physical_opening_existence_f5adf8438fb6f48cc03b03d8ca2125f5",
+    "physical_opening_existence_f819752382d44a00d9f28feca4b00787"
+  ],
+  "primitive_safety_cap": 20000,
+  "purpose": "Failed real-source retention reproduction; never quantity or benchmark truth",
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+}

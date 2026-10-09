@@ -28,10 +28,24 @@ from typing import Any, Mapping, Optional, Sequence
 
 import fitz
 
+from pb_native_page_frame import NativePageFrameUnresolved
+
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_raster_visible_segment_detector import (
     RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
     detect_axis_aligned_raster_segments,
+)
+from pb_raster_compact_wall_band_segments import (
+    COMPACT_WALL_BAND_DETECTOR_VERSION,
+    COMPACT_WALL_BAND_IDENTITY_VERSION,
+    compact_band_has_same_visible_paint,
+    compact_band_already_covered_by_source_line,
+    detect_compact_raster_wall_band_segments,
+)
+from pb_raster_terminal_wall_band_segments import (
+    TERMINAL_WALL_BAND_DETECTOR_VERSION,
+    TERMINAL_WALL_BAND_IDENTITY_VERSION,
+    detect_terminal_raster_wall_band_segments,
 )
 from pb_raster_opening_source_primitives import (
     RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
@@ -217,6 +231,7 @@ class RasterSegmentVisibilityReceipt:
     pixel_geometry: tuple[float, float, float, float]
     geometry: tuple[float, float, float, float]
     detector_version: str = RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
+    visibility_render_sha256: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -539,12 +554,27 @@ def _raster_segment_receipt_matches_parent(
     fixed independently. A replaced receipt cannot change pixel geometry,
     render identity or DPI while borrowing an already verified source record.
     """
-    if receipt.dpi != RASTER_RENDER_DPI:
-        return False
     try:
-        prefix, render_sha, identity_version, index = str(parent.source_primitive_ref).split(":")
-        if (prefix != "raster_segment" or render_sha != receipt.image_sha256
-                or identity_version != RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION):
+        parts = str(parent.source_primitive_ref).split(":")
+        if len(parts) not in (4, 5) or parts[0] != "raster_segment":
+            return False
+        render_sha, identity_version, index = parts[1], parts[2], parts[-1]
+        if (render_sha != receipt.image_sha256 or int(index) < 0
+                or str(int(index)) != index):
+            return False
+        if identity_version == RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION:
+            if (len(parts) != 4 or receipt.dpi != RASTER_RENDER_DPI
+                    or receipt.visibility_render_sha256 is not None):
+                return False
+        elif identity_version in {COMPACT_WALL_BAND_IDENTITY_VERSION,
+                                  TERMINAL_WALL_BAND_IDENTITY_VERSION}:
+            full_hash = receipt.visibility_render_sha256
+            if (len(parts) != 5 or receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
+                    or not isinstance(full_hash, str) or len(full_hash) != 64
+                    or any(c not in '0123456789abcdef' for c in full_hash)
+                    or parts[3] != full_hash):
+                return False
+        else:
             return False
         expected_geometry = tuple(round(float(value) * 72.0 / receipt.dpi, 6)
                                   for value in receipt.pixel_geometry)
@@ -1636,6 +1666,7 @@ class SourceVisibilityProducer:
 
         source_authority = self._producer.authority()
         old_snapshot_id = published.snapshot.snapshot_id
+        completed_attempt_keys: set[tuple[str, str]] = set()
         pages_with_visible: set[str] = set()
         for observation_id in published.visible_observation_ids:
             result = source_authority.resolve(
@@ -1701,9 +1732,6 @@ class SourceVisibilityProducer:
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
             )
-            # Once render + detection complete successfully, repeating the same
-            # immutable revision/page cannot produce new source evidence.
-            self._raster_visibility_attempted_pages.add(raster_attempt_key)
 
             if page_id in pages_with_visible and image_regions:
                 segments = tuple(
@@ -1713,8 +1741,6 @@ class SourceVisibilityProducer:
                         segment.geometry_pt, image_regions
                     )
                 )
-            if not segments:
-                continue
 
             # Visibility publishes each proven source-owned primitive regardless
             # of whether enough neighbouring primitives exist to prove a wall or
@@ -1732,28 +1758,121 @@ class SourceVisibilityProducer:
                 )
             )
 
+            packets = [
+                (index, segment, image_sha256, RASTER_RENDER_DPI,
+                 RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION, RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION, None)
+                for index, segment in enumerate(segments)
+            ]
+            if image_regions:
+                try:
+                    compact_render = self._producer.render_native_page_png(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=snapshot.snapshot_id, page_id=page_id,
+                        dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                        include_native_frame=True, images_only=True,
+                    )
+                except NativePageFrameUnresolved:
+                    compact_render = None
+                if compact_render is not None:
+                    compact_png, compact_parent, compact_frame = compact_render
+                if compact_render is not None and compact_parent.observation_id != page_parent.observation_id:
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                # Match the existing G17 source-frame limitation. A page
+                # rotation requires its own independently proved transform.
+                if compact_render is not None and int(compact_frame.rotation) == 0:
+                    registration_scale = self.raster_opening_registration_scale(
+                        published.revision.revision_id, page_id,
+                    ) or (1.0, 1.0)
+                    compact_segments = detect_compact_raster_wall_band_segments(
+                        compact_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                        registration_scale=registration_scale,
+                    )
+                    compact_segments = tuple(sorted(compact_segments, key=lambda item: (
+                        item.orientation, item.geometry_pt, item.pixel_geometry,
+                    )))
+                    terminal_segments = detect_terminal_raster_wall_band_segments(
+                        compact_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                        registration_scale=registration_scale,
+                    )
+                    full_visibility_hash = None
+                    if compact_segments or terminal_segments:
+                        import cv2
+                        import numpy as np
+                        full_png, full_parent = self._producer.render_native_page_png(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=snapshot.snapshot_id, page_id=page_id,
+                            dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                        )
+                        if full_parent.observation_id != page_parent.observation_id:
+                            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                        isolated = cv2.imdecode(np.frombuffer(compact_png, np.uint8), cv2.IMREAD_GRAYSCALE)
+                        full = cv2.imdecode(np.frombuffer(full_png, np.uint8), cv2.IMREAD_GRAYSCALE)
+                        if isolated is None or full is None:
+                            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                        compact_segments = tuple(s for s in compact_segments
+                            if compact_band_has_same_visible_paint(s, isolated, full)
+                            and not compact_band_already_covered_by_source_line(
+                                s, segments, full, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                source_dpi=RASTER_RENDER_DPI))
+                        terminal_segments = tuple(s for s in terminal_segments
+                            if compact_band_has_same_visible_paint(s, isolated, full))
+                        full_visibility_hash = hashlib.sha256(full_png).hexdigest()
+                    compact_hash = hashlib.sha256(compact_png).hexdigest()
+                    packets.extend(
+                        (index, segment, compact_hash, RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                         COMPACT_WALL_BAND_IDENTITY_VERSION, COMPACT_WALL_BAND_DETECTOR_VERSION,
+                         full_visibility_hash)
+                        for index, segment in enumerate(compact_segments)
+                        if _axis_aligned_geometry_fully_covered_by_rect_union(
+                            segment.geometry_pt, image_regions,
+                        )
+                    )
+                    packets.extend(
+                        (index, segment, compact_hash, RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                         TERMINAL_WALL_BAND_IDENTITY_VERSION, TERMINAL_WALL_BAND_DETECTOR_VERSION,
+                         full_visibility_hash)
+                        for index, segment in enumerate(terminal_segments)
+                        if _axis_aligned_geometry_fully_covered_by_rect_union(
+                            segment.geometry_pt, image_regions,
+                        )
+                    )
+            # Both producer-owned detectors have completed. Preserve every
+            # historical ordinary index; supplemental lines have their own
+            # render/identity namespace and are appended as new observations.
+            completed_attempt_keys.add(raster_attempt_key)
+            if not packets:
+                continue
+
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
             page_receipts: list[
                 tuple[str, RasterSegmentVisibilityReceipt]
             ] = []
 
-            for index, segment in enumerate(segments):
+            for index, segment, render_hash, render_dpi, identity_version, detector_version, visibility_hash in packets:
                 segment_id = _raster_segment_observation_id(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
                     page_id=page_id,
                     partition_id=page_parent.source_partition_id,
-                    image_sha256=image_sha256,
-                    identity_version=RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                    image_sha256=render_hash,
+                    identity_version=identity_version,
                     pixel_geometry=segment.pixel_geometry,
                     geometry=segment.geometry_pt,
                     index=index,
                 )
                 segment_ref = (
-                    f"raster_segment:{image_sha256}:"
-                    f"{RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION}:{index}"
+                    f"raster_segment:{render_hash}:"
+                    f"{identity_version}:{index}"
                 )
+                if visibility_hash is not None:
+                    segment_ref = (
+                        f"raster_segment:{render_hash}:{identity_version}:{visibility_hash}:{index}"
+                    )
                 segment_specs.append(
                     {
                         "page_id": page_id,
@@ -1805,11 +1924,12 @@ class SourceVisibilityProducer:
                             source_sha256=published.revision.source_sha256,
                             page_id=page_id,
                             source_partition_id=page_parent.source_partition_id,
-                            image_sha256=image_sha256,
-                            dpi=RASTER_RENDER_DPI,
+                            image_sha256=render_hash,
+                            dpi=render_dpi,
                             pixel_geometry=tuple(segment.pixel_geometry),
                             geometry=tuple(segment.geometry_pt),
-                            detector_version=RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
+                            detector_version=detector_version,
+                            visibility_render_sha256=visibility_hash,
                         ),
                     )
                 )
@@ -1831,6 +1951,7 @@ class SourceVisibilityProducer:
                 new_receipts[visible_id] = receipt
 
         if snapshot.snapshot_id == old_snapshot_id:
+            self._raster_visibility_attempted_pages.update(completed_attempt_keys)
             return published
 
         final_snapshot_id = snapshot.snapshot_id
@@ -1885,6 +2006,7 @@ class SourceVisibilityProducer:
             ),
         )
         self._published_by_revision[updated.revision.revision_id] = updated
+        self._raster_visibility_attempted_pages.update(completed_attempt_keys)
         return updated
 
     def augment_with_raster_opening_primitives(

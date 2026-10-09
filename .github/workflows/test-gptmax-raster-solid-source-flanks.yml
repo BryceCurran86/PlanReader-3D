@@ -1,0 +1,158 @@
+name: GPT MAX Raster Solid Source Flanks
+on:
+  pull_request:
+    paths:
+      - pb_raster_compact_wall_band_segments.py
+      - pb_raster_terminal_wall_band_segments.py
+      - pb_raster_visible_segment_detector.py
+      - pb_source_visibility_authority.py
+      - tests/test_raster_compact_wall_band_segments.py
+      - tests/test_raster_terminal_wall_band_segments.py
+      - tests/test_raster_supplemental_source_registration.py
+      - tests/test_compact_local_source_duplicate.py
+      - tools/diag_opening_wall_face_preservation.py
+      - .github/workflows/test-gptmax-raster-solid-source-flanks.yml
+concurrency:
+  group: gptmax-solid-source-flanks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  full-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Integrity and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          python -m compileall -q .
+          ruff check --select F821,F823 .
+      - name: Full regression suite
+        run: PYTHONPATH=. python -m pytest -q tests/
+      - name: Smoke test
+        run: python tests/ci_smoke.py
+  source-proof:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Real Lot16 prerequisite and current source handoff
+        run: |
+          git worktree add /tmp/gptmax-lot16-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          DIAG_SCRIPT="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
+          (cd /tmp/gptmax-lot16-prerequisite && PYTHONPATH=. python -u "$DIAG_SCRIPT" --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --output /tmp/lot16-solid-source-baseline.json)
+          cp /tmp/lot16-solid-source-baseline.json lot16-solid-source-baseline.json
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --output lot16-solid-source-flanks-handoff.json
+      - name: Verify exact source ownership and safety cap
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('lot16-solid-source-flanks-handoff.json').read_text())
+          assert report['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert report['primitive_safety_cap'] == 20_000
+          baseline = json.loads(Path('lot16-solid-source-baseline.json').read_text())
+          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
+          old_bindings, new_bindings = keyed(baseline['opening_bindings']), keyed(report['opening_bindings'])
+          assert old_bindings.keys() <= new_bindings.keys()
+          lost_hosts = [{'opening_identity_id': key, 'baseline': row, 'current': new_bindings[key]}
+                        for key, row in old_bindings.items() if row['host_wall_id'] and not new_bindings[key]['host_wall_id']]
+          gained_hosts = [{'opening_identity_id': key, 'baseline': old_bindings.get(key), 'current': row}
+                          for key, row in new_bindings.items() if row['host_wall_id'] and not (old_bindings.get(key) or {}).get('host_wall_id')]
+          print(json.dumps({'lost_host_proofs': lost_hosts, 'new_host_proofs': gained_hosts}, sort_keys=True), flush=True)
+          assert all(new_bindings[key]['host_wall_id'] for key, row in old_bindings.items() if row['host_wall_id'])
+          old_geometry, new_geometry = keyed(baseline['resolved_host_frame_evidence']), keyed(report['resolved_host_frame_evidence'])
+          print(json.dumps({'lost_frame_proofs': [key for key in old_geometry if key not in new_geometry], 'frame_traces': report['host_frames']}, sort_keys=True), flush=True)
+          assert old_geometry.keys() <= new_geometry.keys()
+          fields = ('origin_pt', 'axis_unit', 'normal_unit', 'u0_pt', 'u1_pt', 'wall_thickness_pt', 'whole_wall_length_pt')
+          changes = {key: {field: [old_geometry[key][field], new_geometry[key][field]]
+                          for field in fields if old_geometry[key][field] != new_geometry[key][field]}
+                     for key in old_geometry}
+          print(json.dumps({'baseline': baseline['summary'], 'current': report['summary'], 'existing_frame_geometry_changes': {key: value for key, value in changes.items() if value}}))
+          assert report['opening_bindings']
+          assert any('raster_source_band_host_resolved' in row['reason_codes'] for row in report['opening_bindings'])
+          assert report['source_owned_wall_scope_results']
+          assert all(row['source_sha256'] == report['source_sha256'] for row in report['source_owned_wall_scope_results'])
+          ids = [row['opening_identity_id'] for row in report['opening_bindings']]
+          assert len(ids) == len(set(ids))
+          assert 'quantities' not in report
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lot16-solid-source-flanks-handoff
+          path: lot16-solid-source-*.json
+          retention-days: 14
+  maryborough-source-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Compare real Maryborough source and host identities with prerequisite
+        run: |
+          git worktree add /tmp/gptmax-maryborough-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          DIAG_SCRIPT="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
+          (cd /tmp/gptmax-maryborough-prerequisite && PYTHONPATH=. python -u "$DIAG_SCRIPT" --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output /tmp/maryborough-source-baseline.json)
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-solid-source-flanks-handoff.json
+          cp /tmp/maryborough-source-baseline.json maryborough-source-baseline.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          baseline = json.loads(Path('maryborough-source-baseline.json').read_text())
+          current = json.loads(Path('maryborough-solid-source-flanks-handoff.json').read_text())
+          assert current['source_sha256'] == baseline['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
+          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
+          old_bindings, new_bindings = keyed(baseline['opening_bindings']), keyed(current['opening_bindings'])
+          assert old_bindings.keys() <= new_bindings.keys()
+          assert len(current['opening_bindings']) == len(new_bindings)
+          assert all(new_bindings[key]['host_wall_id'] for key, row in old_bindings.items() if row['host_wall_id'])
+          old_geometry = keyed(baseline['resolved_host_frame_evidence'])
+          new_geometry = keyed(current['resolved_host_frame_evidence'])
+          assert old_geometry.keys() <= new_geometry.keys()
+          fields = ('origin_pt', 'axis_unit', 'normal_unit', 'u0_pt', 'u1_pt', 'wall_thickness_pt', 'whole_wall_length_pt')
+          changes = {key: {field: [old_geometry[key][field], new_geometry[key][field]]
+                          for field in fields if old_geometry[key][field] != new_geometry[key][field]}
+                     for key in old_geometry}
+          assert 'quantities' not in current
+          print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'existing_physical_identity_retained': True, 'existing_host_proof_retained': True, 'existing_frame_geometry_changes': {key: value for key, value in changes.items() if value}}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maryborough-solid-source-flanks-handoff
+          path: maryborough-*.json
+          retention-days: 14
