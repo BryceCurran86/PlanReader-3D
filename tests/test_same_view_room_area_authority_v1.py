@@ -221,6 +221,31 @@ def test_mixed_or_stale_room_snapshots_never_publish_same_view_area() -> None:
     }
 
 
+def test_duplicate_source_room_face_cannot_own_two_physical_room_areas() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    shared_face = rooms.rooms[0].source_room_face_record_id
+    conflicting = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(rooms.rooms[1], source_room_face_record_id=shared_face),
+        ),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=conflicting,
+    ).publish()
+
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == (
+        "physical-room-1", "physical-room-3",
+    )
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_room_face_identity_conflict",
+        "physical-room-3": "same_view_source_room_face_identity_conflict",
+    }
+
+
 def test_same_physical_room_with_two_labels_cannot_publish_any_area() -> None:
     source, rooms = _source_and_rooms(second_label=True)
     physical_id = rooms.rooms[0].physical_room_id
