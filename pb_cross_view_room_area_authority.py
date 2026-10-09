@@ -1424,11 +1424,16 @@ class CrossViewRoomAreaProducer:
             or len(source_hashes) != 1
             or len(source_snapshots) != 1
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return CrossViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "cross_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
         revision_id = next(iter(revision_ids))
         published = self._source.published_snapshot_for_revision(revision_id)
@@ -1438,11 +1443,16 @@ class CrossViewRoomAreaProducer:
             or published.revision.source_sha256.lower() != next(iter(source_hashes))
             or published.snapshot.snapshot_id != next(iter(source_snapshots))
         ):
+            unresolved_ids = tuple(sorted(str(room.physical_room_id) for room in rooms))
             return CrossViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
                 (CROSS_VIEW_ROOM_AREA_LINEAGE_CONFLICT,),
                 (),
-                tuple(sorted(str(room.physical_room_id) for room in rooms)),
+                unresolved_ids,
+                unresolved_first_failure_codes=tuple(
+                    (room_id, "cross_view_source_lineage_conflict")
+                    for room_id in unresolved_ids
+                ),
             )
 
         # Quarantine duplicate source ownership before any native dimension
