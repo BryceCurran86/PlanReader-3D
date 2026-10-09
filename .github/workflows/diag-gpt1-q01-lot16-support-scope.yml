@@ -1,0 +1,93 @@
+name: DIAG GPT1 Lot16 Source-First Cross-Page Room Area
+
+on:
+  push:
+    branches: [diag/gpt1-q01-lot16-support-scope-20261009]
+
+concurrency:
+  group: diag-gpt1-q01-lot16-support-scope
+  cancel-in-progress: true
+
+jobs:
+  q01-source-support-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install requirements
+        run: pip install -q -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify frozen source integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Inspect genuine architectural support-sheet labels and gated quantity
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt1-q01-cross-page
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee artifacts/gpt1-q01-cross-page/console.log
+          import hashlib, json, subprocess
+          from pathlib import Path
+          import fitz
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+
+          project="au_qld_lot16_power"
+          source=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          manifest=json.loads(Path(f"benchmarks/frozen_holdout/full_plan_v2/projects/{project}/source_manifest.json").read_text())
+          expected=next(x["sha256"] for x in manifest["source_documents"] if x["name"]==source.name)
+          actual=hashlib.sha256(source.read_bytes()).hexdigest()
+          assert actual==expected,"Architectural source hash mismatch"
+          pdf=fitz.open(source)
+          found=[]
+          support=[]
+          for ix in range(pdf.page_count):
+              page=pdf[ix]
+              lines=[]
+              for block in page.get_text("dict")["blocks"]:
+                  for line in block.get("lines",[]):
+                      text_line="".join(span.get("text","") for span in line.get("spans",[])).strip()
+                      if text_line.upper() in {"WC","LINEN"}:
+                          lines.append(text_line)
+              if lines:
+                  found.append({"page":ix+1,"exact_native_labels":lines})
+                  if ix!=2:
+                      support.append(ix)
+          pdf.close()
+          result={"source_sha_verified":True,"source_sha":actual,
+              "code_sha":subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip(),
+              "scope":"architectural_native_label_support_pages_not_frozen_benchmark",
+              "native_exact_room_labels":found,"candidate_support_page_indices":support,
+              "source_page3_only_baseline_metric_floors":0}
+          if support and len(support)<=4:
+              claim=collect_live_physical_net_wall_claim(
+                  source,pages=(2,),topology_pages=(2,),room_area_support_pages=tuple(support),
+              )
+              result["cross_view_attempted"]=True
+              result["canonical_floor_count"]=len(claim.canonical_floors)
+              result["metric_floor_count"]=sum(x.metric_area_m2 is not None for x in claim.canonical_floors)
+              result["room_area_quantity_count"]=sum(not q.abstained and q.value is not None for q in claim.room_area_quantity_evidence)
+              result["labelled_room_areas"]=[
+                  {"label":room.room_label,"physical_room_id":room.physical_room_id,
+                   "face_id":room.source_room_face_record_id,
+                   "metric_area_m2":next((floor.metric_area_m2 for floor in claim.canonical_floors if floor.room_entity_id==room.canonical_room_id),None)}
+                  for room in claim.canonical_rooms if room.room_label in ("WC","LINEN")
+              ]
+          else:
+              result["cross_view_attempted"]=False
+              result["blocked_reason"]=(
+                  "no_exact_native_label_on_other_architectural_pages"
+                  if not support else "support_scope_exceeds_safe_diagnostic_batch"
+              )
+          Path("artifacts/gpt1-q01-cross-page/source-first-support.json").write_text(
+              json.dumps(result,indent=2,sort_keys=True)
+          )
+          print("GPT1_Q01_CROSSPAGE_SOURCE_GATES",json.dumps(result,sort_keys=True))
+          PY
+      - name: Upload source authority receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt1-q01-crosspage-source-gates
+          path: artifacts/gpt1-q01-cross-page/
