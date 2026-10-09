@@ -1412,10 +1412,12 @@ class CrossViewRoomAreaProducer:
         revision_ids = {str(room.revision_id) for room in rooms}
         document_ids = {str(room.document_id) for room in rooms}
         source_hashes = {str(room.source_sha256).lower() for room in rooms}
+        source_snapshots = {str(room.snapshot_id) for room in rooms}
         if (
             len(revision_ids) != 1
             or len(document_ids) != 1
             or len(source_hashes) != 1
+            or len(source_snapshots) != 1
         ):
             return CrossViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
@@ -1429,6 +1431,7 @@ class CrossViewRoomAreaProducer:
             published is None
             or published.revision.document_id != next(iter(document_ids))
             or published.revision.source_sha256.lower() != next(iter(source_hashes))
+            or published.snapshot.snapshot_id != next(iter(source_snapshots))
         ):
             return CrossViewRoomAreaResult(
                 EvidenceResolutionStatus.CONFLICT,
@@ -1437,10 +1440,34 @@ class CrossViewRoomAreaProducer:
                 tuple(sorted(str(room.physical_room_id) for room in rooms)),
             )
 
+        # Quarantine duplicate source ownership before any native dimension
+        # work. Neither multiple labels for one physical room nor multiple
+        # physical rooms claiming one source face can independently mint areas.
+        physical_counts: dict[str, int] = {}
+        face_owners: dict[str, list[str]] = {}
+        for source_room in rooms:
+            physical_id = str(source_room.physical_room_id or "").strip()
+            face_id = str(source_room.source_room_face_record_id or "").strip()
+            if physical_id:
+                physical_counts[physical_id] = physical_counts.get(physical_id, 0) + 1
+            if face_id:
+                face_owners.setdefault(face_id, []).append(physical_id)
+        duplicate_physical_ids = {
+            room_id for room_id, count in physical_counts.items() if count > 1
+        }
+        duplicate_face_room_ids = {
+            room_id
+            for room_ids in face_owners.values()
+            if len(room_ids) > 1
+            for room_id in room_ids
+        }
+        conflicted_ids = duplicate_physical_ids | duplicate_face_room_ids
+
         eligible: list[LiveCanonicalRoomObject] = [
             room
             for room in rooms
-            if room.geometry_complete
+            if str(room.physical_room_id) not in conflicted_ids
+            and room.geometry_complete
             and str(room.physical_room_id or "").strip()
             and str(room.source_room_face_record_id or "").strip()
             and _norm_label(room.room_label)
@@ -1521,13 +1548,15 @@ class CrossViewRoomAreaProducer:
             )
 
         records: list[CrossViewRoomAreaRecord] = []
+        eligible_object_ids = {id(room) for room in eligible}
         unresolved: set[str] = {
             str(room.physical_room_id)
             for room in rooms
-            if room not in eligible
+            if id(room) not in eligible_object_ids
         }
         unresolved.update(str(value) for value in duplicate_room_ids)
-        conflict_seen = bool(duplicate_room_ids)
+        unresolved.update(conflicted_ids)
+        conflict_seen = bool(duplicate_room_ids or conflicted_ids)
 
         for label, grouped_rooms in sorted(labels.items()):
             if len(grouped_rooms) != 1:
