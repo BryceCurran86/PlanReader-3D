@@ -78,6 +78,67 @@ def test_one_source_record_cannot_have_two_canonical_room_owners() -> None:
     ) == {}
 
 
+def test_same_physical_room_claiming_two_source_records_cannot_mint_area() -> None:
+    # Both source records have different face identities, yet assert one
+    # physical room. Never publish two areas for that physical room.
+    retained = object()
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(
+            _source_face("rec-a", "face-a"),
+            _source_face("rec-b", "face-b"),
+            _source_face("rec-c", "face-c"),
+        ),
+        canonical_rooms=(
+            _canonical_room_owner("rec-a", "physical-shared"),
+            _canonical_room_owner("rec-b", "physical-shared"),
+            _canonical_room_owner("rec-c", "physical-independent"),
+        ),
+        evidence_by_source_record={
+            "rec-a": object(),
+            "rec-b": object(),
+            "rec-c": retained,
+        },
+    ) == {"face-c": retained}
+
+
+def test_unmeasured_competing_source_record_still_quarantines_room() -> None:
+    # A source record lacking explicit area remains an independent assertion
+    # about physical identity; it cannot make the other claimant authoritative.
+    retained = object()
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(
+            _source_face("rec-a", "face-a"),
+            _source_face("rec-b", "face-b"),
+            _source_face("rec-c", "face-c"),
+        ),
+        canonical_rooms=(
+            _canonical_room_owner("rec-a", "physical-shared"),
+            _canonical_room_owner("rec-b", "physical-shared"),
+            _canonical_room_owner("rec-c", "physical-independent"),
+        ),
+        evidence_by_source_record={"rec-a": object(), "rec-c": retained},
+    ) == {"face-c": retained}
+
+
+def test_competing_room_identity_is_independent_of_input_replay_order() -> None:
+    records=(
+        _source_face("rec-a", "face-a"),
+        _source_face("rec-b", "face-b"),
+    )
+    room_owners=(
+        _canonical_room_owner("rec-a", "physical-shared"),
+        _canonical_room_owner("rec-b", "physical-shared"),
+    )
+    evidence={"rec-a": object(), "rec-b": object()}
+    for record_order in (records, records[::-1]):
+        for room_order in (room_owners, room_owners[::-1]):
+            assert _uniquely_owned_explicit_area_by_source_face(
+                source_face_records=record_order,
+                canonical_rooms=room_order,
+                evidence_by_source_record=evidence,
+            ) == {}
+
+
 def test_exact_source_face_record_replay_is_idempotent() -> None:
     evidence = object()
     assert _uniquely_owned_explicit_area_by_source_face(
