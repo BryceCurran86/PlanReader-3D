@@ -267,11 +267,13 @@ def _uniquely_owned_explicit_area_by_source_face(
     a stable-but-unproven winner. Identical source-record replays are harmless.
     """
     face_ids_by_record: dict[str, set[str]] = {}
+    records_by_face: dict[str, set[str]] = {}
     for record in source_face_records:
         record_id = str(record.record_id or "").strip()
         face_id = str(record.face_id or "").strip()
         if record_id and face_id:
             face_ids_by_record.setdefault(record_id, set()).add(face_id)
+            records_by_face.setdefault(face_id, set()).add(record_id)
 
     rooms_by_record: dict[str, list[str]] = {}
     records_by_physical_room: dict[str, set[str]] = {}
@@ -302,6 +304,10 @@ def _uniquely_owned_explicit_area_by_source_face(
         ):
             continue
         face_id = next(iter(face_ids_by_record[record_id]))
+        # Another native source-room-face record contests this physical face
+        # even if it has no metric-area receipt or canonical room owner.
+        if len(records_by_face.get(face_id, ())) != 1:
+            continue
         evidence = evidence_by_source_record[record_id]
         if evidence is not None:
             claims_by_face.setdefault(face_id, []).append((record_id, evidence))
