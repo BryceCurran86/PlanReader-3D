@@ -78,6 +78,25 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "source_page_index_zero_based": page_index,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
+            "label_ownership_diagnostic": {
+                "labelled_room_count": sum(bool(room.room_label) for room in claim.canonical_rooms),
+                "unlabelled_room_count": sum(not bool(room.room_label) for room in claim.canonical_rooms),
+                "label_reason_frequency": dict(Counter(
+                    code for room in claim.canonical_rooms
+                    for code in (room.room_label_reason_codes or ())
+                )),
+                "labelled_rooms": [
+                    {
+                        "physical_room_id": room.physical_room_id,
+                        "room_label": room.room_label,
+                        "source_face_id": room.source_room_face_record_id,
+                        "label_binding_id": room.room_label_binding_record_id,
+                        "label_evidence_count": len(room.room_label_evidence_ids),
+                        "label_reason_codes": list(room.room_label_reason_codes),
+                    }
+                    for room in claim.canonical_rooms if room.room_label
+                ],
+            },
             "same_view_prerequisite_breakdown": {
                 "room_count": len(claim.canonical_rooms),
                 "geometry_incomplete": sum(not room.geometry_complete for room in claim.canonical_rooms),
