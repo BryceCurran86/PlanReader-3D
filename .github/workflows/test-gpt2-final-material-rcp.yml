@@ -218,6 +218,43 @@ jobs:
           assert code_rows["GRID"]["candidate"] is None, out
           assert "GRID" not in parsed, out
           assert "GRID" not in blocked, out
+
+          # End-to-end production publication is a separate, stronger gate
+          # than a trusted cluster-row candidate. Report every publisher
+          # decision without treating a parser candidate as a customer item.
+          authority = producer.publish(str(published.revision.revision_id))
+          inventory = {
+              "definitions": [
+                  {
+                      "code": key[-1],
+                      "status": str(value.status),
+                      "reason_codes": list(value.reason_codes),
+                      "semantic_finish": (
+                          value.record.semantic_finish if value.record else None
+                      ),
+                      "record_id": value.record.record_id if value.record else None,
+                  }
+                  for key, value in sorted(producer._definition_results.items())
+              ],
+              "occurrence_scopes": [
+                  {
+                      "selector": list(key),
+                      "status": str(value.status),
+                      "reason_codes": list(value.reason_codes),
+                      "scope_complete": value.scope_complete,
+                      "record_count": len(value.records),
+                      "record_codes": sorted({r.code for r in value.records}),
+                  }
+                  for key, value in sorted(producer._occurrence_results.items())
+              ],
+              "definition_scope_blockers": [
+                  {"scope": list(key), "reason_codes": list(reasons)}
+                  for key, reasons in sorted(producer._definition_scope_blockers.items())
+              ],
+          }
+          print("B02_PRODUCTION_PUBLICATION", json.dumps(
+              inventory, sort_keys=True, default=str
+          ))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
