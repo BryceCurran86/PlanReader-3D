@@ -50,6 +50,28 @@ if __name__ == "__main__":
                 str(len(drawing.get("items", []) or []))
                 for drawing in drawings
             )
+            # Inspect genuine rectangle and four-edge paths BEFORE size/crop
+            # filtering, never combine independent wall-line paths.
+            raw_rectangles = []
+            for path_index, drawing in enumerate(drawings):
+                for item in drawing.get("items", []) or []:
+                    if item and item[0] == "re":
+                        rect = item[1]
+                        raw_rectangles.append({
+                            "path": path_index, "kind": "source_rectangle",
+                            "bbox": [rect.x0, rect.y0, rect.x1, rect.y1],
+                            "width": abs(rect.x1 - rect.x0),
+                            "height": abs(rect.y1 - rect.y0),
+                        })
+            # Compact largest rectangles on the title-bearing sheets: this
+            # reveals whether real producer geometry supplies usable borders.
+            raw_rectangles.sort(
+                key=lambda r: r["width"] * r["height"], reverse=True
+            )
+            print("B01_NATIVE_RECTANGLE_CANDIDATES", json.dumps({
+                "page": page_no, "total": len(raw_rectangles),
+                "largest_20": raw_rectangles[:20],
+            }, sort_keys=True))
             print("B01_SOURCE_GEOMETRY_DIAGNOSTIC", json.dumps({
                 "page": page_no, "drawings": len(drawings),
                 "primitive_types": dict(primitive_types),
