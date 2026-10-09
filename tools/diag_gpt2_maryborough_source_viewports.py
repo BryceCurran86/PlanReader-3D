@@ -212,6 +212,25 @@ if __name__ == "__main__":
                 ),
             }, default=str, sort_keys=True))
             anchors = extract_view_title_anchors(page)
+            if components:
+                print("B01_RASTER_COMPONENT_TITLE_OWNERSHIP", json.dumps({
+                    "page": page_no,
+                    "components": [
+                        {
+                            "native_bbox": component["native_bbox"],
+                            "contained_titles": [
+                                {"type": anchor.view_type, "text": anchor.text}
+                                for anchor in anchors
+                                if (
+                                    component["native_bbox"][0] <= anchor.center[0] <= component["native_bbox"][2]
+                                    and component["native_bbox"][1] <= anchor.center[1] <= component["native_bbox"][3]
+                                )
+                            ],
+                            "unique_title_owner_proven": False,
+                        }
+                        for component in components
+                    ],
+                }, default=str, sort_keys=True))
             plan_kinds = {
                 DrawingViewType.REFLECTED_CEILING_PLAN.value,
                 DrawingViewType.FLOOR_FINISH_PLAN.value,
