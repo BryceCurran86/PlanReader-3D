@@ -24,6 +24,7 @@ jobs:
           import hashlib
           import subprocess
           import sys
+import os
 
           expected = "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           candidates = sorted(Path("documents/sources").glob("*.pdf"))
@@ -35,6 +36,7 @@ jobs:
                "--pdf", str(matched[0]), "--page-index", "2",
                "--output", "lot16-room-face-scope.json"],
               check=True,
+              env={**os.environ, "PYTHONPATH": str(Path.cwd())},
           )
           PY
       - uses: actions/upload-artifact@v4
