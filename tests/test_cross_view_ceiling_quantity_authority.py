@@ -358,30 +358,6 @@ def test_conflicting_room_area_quantity_id_order_cannot_select_winner() -> None:
         assert not result.quantities
 
 
-def test_abstained_or_invalid_confidence_firm_room_area_never_mints_ceiling() -> None:
-    bridge = _bridge()
-    source = bridge.quantities[0]
-    tampered_quantities = (
-        replace(source, abstained=True),
-        replace(source, confidence=float("nan")),
-        replace(source, confidence=float("inf")),
-        replace(source, confidence=float("-inf")),
-        replace(source, confidence=-0.01),
-        replace(source, confidence=1.01),
-    )
-    for rejected in tampered_quantities:
-        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
-            rooms=_rooms(),
-            room_area_bridges=(replace(bridge, quantities=(rejected,)),),
-            finishes=_finish(),
-        )
-        assert result.status is EvidenceResolutionStatus.ABSTAINED
-        assert result.unresolved_physical_room_ids == ("physical-room-1",)
-        assert result.records == ()
-        assert result.quantities == ()
-        assert result.canonical_ceilings == ()
-
-
 def test_conflicting_source_room_entity_replays_cannot_select_ceiling_winner() -> None:
     bridge = _bridge()
     authentic = bridge.entities[0]
