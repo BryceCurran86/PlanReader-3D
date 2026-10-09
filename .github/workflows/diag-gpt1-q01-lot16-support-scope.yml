@@ -103,6 +103,40 @@ jobs:
                       "native_metric_area_lines_wholly_within_room_bbox":matching,
                   })
               result["room_native_area_spatial_candidates"]=room_text_ownership
+              # Screen *all* source-owned page3 room polygons for explicit
+              # metric-area text boxes. Pure spatial candidates only; none is
+              # permitted to mint a quantity without text and room authority.
+              def contains_point(polygon, x, y):
+                  inside=False
+                  for a, c in zip(polygon, polygon[1:]+polygon[:1]):
+                      ax,ay=a; bx,by=c
+                      if (ay > y) != (by > y):
+                          intersect=ax+(y-ay)*(bx-ax)/(by-ay)
+                          if x < intersect:
+                              inside=not inside
+                  return inside
+              all_matches=[]
+              for room in claim.canonical_rooms:
+                  if str(room.page_id)!="3" or not room.geometry_complete:
+                      continue
+                  poly=[(float(x),float(y)) for x,y in room.polygon_pdf_pts]
+                  if len(poly)<3: continue
+                  for candidate in area_texts:
+                      if candidate["page"]!=3: continue
+                      bbox=candidate["source_bbox_pdf_pts"]
+                      if len(bbox)!=4: continue
+                      corners=((bbox[0],bbox[1]),(bbox[2],bbox[1]),
+                               (bbox[2],bbox[3]),(bbox[0],bbox[3]))
+                      if all(contains_point(poly,x,y) for x,y in corners):
+                          all_matches.append({
+                              "physical_room_id":room.physical_room_id,
+                              "room_label":room.room_label,
+                              "source_room_face_record_id":room.source_room_face_record_id,
+                              "native_area_text":candidate["native_text"],
+                              "native_area_bbox_pdf_pts":bbox,
+                          })
+              result["all_room_native_area_polygon_candidates"]=all_matches
+              result["all_room_native_area_polygon_candidate_count"]=len(all_matches)
               result["canonical_floor_count"]=len(claim.canonical_floors)
               result["metric_floor_count"]=sum(x.metric_area_m2 is not None for x in claim.canonical_floors)
               result["room_area_quantity_count"]=sum(not q.abstained and q.value is not None for q in claim.room_area_quantity_evidence)
