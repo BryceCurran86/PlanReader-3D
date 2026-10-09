@@ -227,6 +227,8 @@ def _valid_metric_area_quantity(
         MeasurementAuthorityType.PDF_SCALED.value,
     }:
         return False
+    if source_room_entity.status is not EvidenceResolutionStatus.CORROBORATED:
+        return False
     source_room_id = str(source_room_entity.candidate_entity_id or "").strip()
     if not source_room_id:
         return False
