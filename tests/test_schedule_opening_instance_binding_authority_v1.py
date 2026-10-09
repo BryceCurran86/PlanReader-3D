@@ -211,6 +211,69 @@ def test_real_binding_resolves_via_contained_tag_and_matching_row() -> None:
     assert resolved.status is EvidenceResolutionStatus.ABSTAINED
 
 
+@pytest.mark.parametrize("description, expected_status", [
+    ("IPF3 SOLID CORE", EvidenceResolutionStatus.CORROBORATED),
+    ("SOLID CORE FLUSH FACED TIMBER DOOR PAINT FINISH IPF3", EvidenceResolutionStatus.ABSTAINED),
+])
+def test_description_retention_does_not_override_table_ownership(description, expected_status) -> None:
+    """Downstream semantic grouping needs the exact producer-authenticated row text.
+
+    Retaining this field must not classify the row or mint a quantity; it only
+    carries through the description already parsed from the unique schedule row.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=760, height=650)
+    _draw_opening(
+        page,
+        x0=20.0,
+        gap0=100.0,
+        gap1=140.0,
+        x1=220.0,
+        y0=100.0,
+        y1=110.0,
+    )
+    page.insert_text(fitz.Point(112.0, TAG_Y), "D01", color=(0, 0, 0))
+
+    header = ("MARK", "WIDTH", "HEIGHT", "DESCRIPTION")
+    row = (
+        "D01",
+        "820",
+        "2040",
+        description,
+    )
+    xs = (50.0, 150.0, 250.0, 350.0)
+    for text, x in zip(header, xs):
+        page.insert_text(fitz.Point(x, SCHEDULE_HEADER_Y), text, color=(0, 0, 0))
+    for text, x in zip(row, xs):
+        page.insert_text(
+            fitz.Point(x, SCHEDULE_HEADER_Y + SCHEDULE_ROW_DY),
+            text,
+            color=(0, 0, 0),
+        )
+    payload = doc.tobytes()
+    doc.close()
+
+    src = SourceVisibilityProducer(
+        producer_method="sched-bind-description-test",
+        producer_version="1.0",
+    )
+    published = _ingest(src, payload, "sched-description")
+    opening_selector = _opening_selector(published, src.authority())
+
+    result = _bind(src, opening_selector)
+
+    assert result.status is expected_status, result.reason_codes
+    if expected_status is EvidenceResolutionStatus.ABSTAINED:
+        assert result.record is None
+        assert result.reason_codes == (BINDING_NO_MATCHING_ROW,)
+        return
+    assert result.record is not None
+    assert result.record.tag_mark == "D1"
+    assert result.record.schedule_row_type_mark == "D01"
+    assert result.record.schedule_row_description == description
+    assert result.record.schedule_row_observation_ids
+
+
 def test_opening_unresolved_selector_abstains() -> None:
     payload = _tag_pdf()
     src = SourceVisibilityProducer(producer_method="sched-bind-test", producer_version="1.0")
