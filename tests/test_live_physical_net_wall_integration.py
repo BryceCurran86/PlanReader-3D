@@ -120,6 +120,36 @@ def test_unmeasured_competing_source_record_still_quarantines_room() -> None:
     ) == {"face-c": retained}
 
 
+def test_unmeasured_source_record_contesting_same_face_quarantines_area() -> None:
+    # The face authority owns *both* source records, even if only one
+    # canonical room and one documented measurement were published.
+    independent = object()
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(
+            _source_face("rec-a", "face-shared"),
+            _source_face("rec-b", "face-shared"),
+            _source_face("rec-c", "face-independent"),
+        ),
+        canonical_rooms=(
+            _canonical_room_owner("rec-a", "physical-a"),
+            _canonical_room_owner("rec-c", "physical-c"),
+        ),
+        evidence_by_source_record={"rec-a": object(), "rec-c": independent},
+    ) == {"face-independent": independent}
+
+
+def test_source_record_replay_does_not_create_face_conflict() -> None:
+    evidence = object()
+    assert _uniquely_owned_explicit_area_by_source_face(
+        source_face_records=(
+            _source_face("rec-a", "face-a"),
+            _source_face("rec-a", "face-a"),
+        ),
+        canonical_rooms=(_canonical_room_owner("rec-a", "physical-a"),),
+        evidence_by_source_record={"rec-a": evidence},
+    ) == {"face-a": evidence}
+
+
 def test_competing_room_identity_is_independent_of_input_replay_order() -> None:
     records=(
         _source_face("rec-a", "face-a"),
