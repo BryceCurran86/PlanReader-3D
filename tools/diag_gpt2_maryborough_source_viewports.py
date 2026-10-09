@@ -171,11 +171,35 @@ if __name__ == "__main__":
                             "clip_index":region["index"],"bbox":b,
                             "other_plan_titles": competing,
                         })
+                # A printed plan title may be outside its source clip.
+                # Identify adjacent candidate regions only for diagnosis;
+                # repeated/nested clips must NOT become viewport authority.
+                adjacent = []
+                for region in clip_regions:
+                    b = region["bbox"]
+                    width, height = b[2]-b[0], b[3]-b[1]
+                    if width <= 0 or height <= 0:
+                        continue
+                    dx = max(b[0]-center[0], 0, center[0]-b[2])
+                    dy = max(b[1]-center[1], 0, center[1]-b[3])
+                    if dx > calibration.minimum_frame_span_pt or dy > calibration.minimum_frame_span_pt:
+                        continue
+                    competing = [
+                        a.text for a in plan_anchors if a is not anchor
+                        and max(b[0]-(a.bbox[0]+a.bbox[2])/2,0,(a.bbox[0]+a.bbox[2])/2-b[2]) <= calibration.minimum_frame_span_pt
+                        and max(b[1]-(a.bbox[1]+a.bbox[3])/2,0,(a.bbox[1]+a.bbox[3])/2-b[3]) <= calibration.minimum_frame_span_pt
+                    ]
+                    adjacent.append({"clip_index":region["index"],"bbox":b,
+                                     "distance_pt":round((dx*dx+dy*dy)**0.5,3),
+                                     "competing_titles":competing})
+                adjacent.sort(key=lambda v:(v["distance_pt"],v["clip_index"]))
                 region_rows.append({
                     "title":anchor.text,"title_bbox":anchor.bbox,
                     "title_center":center,
                     "clip_regions_containing_title":owned[:20],
                     "total_containing":len(owned),
+                    "adjacent_clip_count":len(adjacent),
+                    "nearest_adjacent_clips":adjacent[:12],
                 })
             print("B01_CLIP_TITLE_OWNERSHIP_PROBE", json.dumps({
                 "page":page_no,"plan_titles":region_rows,
