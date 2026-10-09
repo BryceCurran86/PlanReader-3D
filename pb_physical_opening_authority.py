@@ -2109,6 +2109,24 @@ class PhysicalOpeningAuthority:
                 candidate=candidate,
             ))
 
+        # Unequal overlapping apertures cannot establish distinct physical
+        # openings merely by hashing different detector extents. Keep both
+        # hypotheses; exact equal apertures retain the existing stable identity.
+        for other in candidates:
+            other_box = self._raster_candidate_gap_box_cache.get(other.candidate_id)
+            if other_box is None or other_box == gap_box:
+                continue
+            if (min(gap_box[2], other_box[2]) - max(gap_box[0], other_box[0]) > _COORD_EQ_ABS_TOL
+                    and min(gap_box[3], other_box[3]) - max(gap_box[1], other_box[1]) > _COORD_EQ_ABS_TOL):
+                return cache(PhysicalOpeningExistenceResult(
+                    status=EvidenceResolutionStatus.CONFLICT,
+                    proposition=None,
+                    physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
+                    reason_codes=(AMBIGUOUS_PHYSICAL_OPENING_CANDIDATES,),
+                    source_observation=source_result,
+                    candidate=candidate,
+                ))
+
         record_payload = {
             "document_id": candidate.document_id,
             "revision_id": candidate.revision_id,
