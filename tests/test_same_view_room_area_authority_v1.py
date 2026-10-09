@@ -154,6 +154,19 @@ def test_yearlike_dimension_is_promoted_only_by_floor_plan_witness_geometry() ->
     assert record.area_evidence.metadata["vertical_value_mm"] == 2000
 
 
+def test_same_view_room_eligibility_does_not_compare_room_polygons(monkeypatch) -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+
+    def forbidden_room_equality(self, other):
+        raise AssertionError("same-view membership must use object identity")
+
+    monkeypatch.setattr(LiveCanonicalRoomObject, "__eq__", forbidden_room_equality)
+    result = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
+    assert len(result.records) == 1
+    assert result.records[0].room_label == "TEST ROOM"
+    assert "physical-room-3" in result.unresolved_physical_room_ids
+
+
 def test_duplicate_same_page_room_label_fails_closed() -> None:
     source, rooms = _source_and_rooms(duplicate_label=True)
     result = SameViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
