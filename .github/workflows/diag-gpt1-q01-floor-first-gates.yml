@@ -36,10 +36,6 @@ jobs:
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
           from pb_live_opening_area_quantity_publication import _opening_quantity
-          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
-          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
-          from pb_source_visibility_authority import SourceVisibilityProducer
-          from pb_geometry_takeoff_model import DrawingViewType
 
           project="au_qld_lot16_power"
           source=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
