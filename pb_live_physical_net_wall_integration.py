@@ -756,7 +756,7 @@ def collect_live_physical_net_wall_claim(
                 document_id=document_id,
                 source_bytes=payload,
                 source_locator="memory://live-surface-semantic-source.pdf",
-                page_ids=surface_semantic_page_ids,
+                page_ids=tuple(sorted(set(decoded_page_ids) | set(surface_semantic_page_ids), key=int)),
             )
             if (
                 semantic_published.revision.document_id
