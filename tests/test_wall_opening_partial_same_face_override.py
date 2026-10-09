@@ -15,7 +15,6 @@ def _source():
     try:
         page = doc.new_page(width=500, height=500)
         y = 70.0
-        shape = page.new_shape()
         for first, second in (
             ((50, y), (180, y)),
             ((50, y + 18), (180, y + 18)),
@@ -24,9 +23,7 @@ def _source():
             ((220, y + 18), (360, y + 18)),
             ((220, y), (220, y + 18)),
         ):
-            shape.draw_line(first, second)
-        shape.finish(width=1)
-        shape.commit()
+            page.draw_line(first, second, width=1)
         payload = doc.tobytes(garbage=4, deflate=True)
     finally:
         doc.close()
@@ -86,38 +83,23 @@ def _same_raw_pairs(native):
     return same_pairs
 
 
-def _opening_authority(published, native):
-    revision = published.revision
-    snapshot = published.snapshot
-    existence = SimpleNamespace(
-        record_id="opening-six-primitive-proof",
-        document_id=revision.document_id,
-        revision_id=revision.revision_id,
-        source_sha256=revision.source_sha256,
-        snapshot_id=snapshot.snapshot_id,
-        page_id="1",
-        source_observation_ids=tuple(
-            observation_id for observation_id, _observation in native
-        ),
-    )
-    first_seed = native[0][0]
-
-    def prove(selector):
-        if selector.observation_id == first_seed:
-            return SimpleNamespace(
-                status=EvidenceResolutionStatus.CORROBORATED,
-                proposition=module.PHYSICAL_OPENING_EXISTS,
-                existence_record=existence,
-                reason_codes=(),
-            )
-        return SimpleNamespace(
-            status=EvidenceResolutionStatus.ABSTAINED,
-            proposition=None,
-            existence_record=None,
-            reason_codes=("not_seed",),
-        )
-
-    return SimpleNamespace(prove_existence=prove)
+def _opening_authority(source, published, native):
+    from pb_source_observation_authority import ObservationSelector
+    authority = source.physical_opening_authority()
+    records = []
+    for observation_id, _ in native:
+        result = authority.prove_existence(ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id,
+        ))
+        assert result.status is EvidenceResolutionStatus.CORROBORATED
+        assert result.existence_record is not None
+        records.append(result.existence_record)
+    assert len({record.record_id for record in records}) == 1
+    assert set(records[0].source_observation_ids) == {i for i, _ in native}
+    return authority
 
 
 def _record(wall_id: str, raw_id: str):
@@ -149,7 +131,7 @@ def test_same_face_pairs_survive_when_jambs_are_not_wall_candidates():
         page_id="1",
         records=records,
         resolved_visible_observations=rows,
-        physical_opening_authority=_opening_authority(published, native),
+        physical_opening_authority=_opening_authority(source, published, native),
     )
 
     expected = {
@@ -189,7 +171,7 @@ def test_competing_face_owner_blocks_only_that_partial_same_relation():
         page_id="1",
         records=tuple(records),
         resolved_visible_observations=rows,
-        physical_opening_authority=_opening_authority(published, native),
+        physical_opening_authority=_opening_authority(source, published, native),
     )
 
     blocked = tuple(
