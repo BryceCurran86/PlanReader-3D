@@ -188,6 +188,39 @@ def test_same_view_absent_producer_revision_reports_lineage_gate() -> None:
     }
 
 
+def test_mixed_or_stale_room_snapshots_never_publish_same_view_area() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    mixed = replace(
+        rooms,
+        rooms=(
+            rooms.rooms[0],
+            replace(rooms.rooms[1], snapshot_id="foreign-snapshot"),
+        ),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=mixed,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_lineage_conflict",
+        "physical-room-3": "same_view_source_lineage_conflict",
+    }
+
+    stale = replace(
+        rooms,
+        rooms=(replace(rooms.rooms[0], snapshot_id="foreign-snapshot"),),
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=stale,
+    ).publish()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_source_lineage_conflict",
+    }
+
+
 def test_same_physical_room_with_two_labels_cannot_publish_any_area() -> None:
     source, rooms = _source_and_rooms(second_label=True)
     physical_id = rooms.rooms[0].physical_room_id
