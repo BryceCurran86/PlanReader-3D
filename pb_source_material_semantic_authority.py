@@ -1084,6 +1084,20 @@ def _material_definition_candidate(
     if not combined:
         return None
 
+    # A longer block with a standalone code and multiple unrelated cells
+    # cannot establish which cell owns the definition (e.g. role versus
+    # material specification). Preserve abstention rather than concatenating
+    # the block into a plausible but unsupported definition.
+    if len(lines) > 2:
+        first_cell = str(lines[0][0]).strip()
+        if (
+            2 <= len(first_cell) <= 6
+            and first_cell.isascii()
+            and first_cell.isalnum()
+            and first_cell.isupper()
+        ):
+            return None
+
     parsed = parse_schedule_text(
         combined,
         page_id=int(words[0].page_id) if words else 0,
