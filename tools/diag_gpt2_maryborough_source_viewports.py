@@ -137,7 +137,50 @@ if __name__ == "__main__":
                 "image_count": len(images),
                 "placements_first_40": placements[:40],
             }, default=str, sort_keys=True))
+            # For each actual RCP/floor-finish title, report independently
+            # existing clip/image regions containing it, and competing plan
+            # titles within the same region. Never treat proximity as proof.
             anchors = extract_view_title_anchors(page)
+            plan_kinds = {
+                DrawingViewType.REFLECTED_CEILING_PLAN.value,
+                DrawingViewType.FLOOR_FINISH_PLAN.value,
+            }
+            plan_anchors = [a for a in anchors if a.view_type in plan_kinds]
+            region_rows = []
+            clip_regions = [
+                r for r in structural
+                if r["bbox"] is not None and len(r["bbox"]) == 4
+                and (r["bbox"][2] - r["bbox"][0]) >= calibration.minimum_frame_span_pt
+                and (r["bbox"][3] - r["bbox"][1]) >= calibration.minimum_frame_span_pt
+            ]
+            for anchor in plan_anchors:
+                center = (
+                    (anchor.bbox[0] + anchor.bbox[2]) / 2,
+                    (anchor.bbox[1] + anchor.bbox[3]) / 2,
+                )
+                owned = []
+                for region in clip_regions:
+                    b = region["bbox"]
+                    if b[0] <= center[0] <= b[2] and b[1] <= center[1] <= b[3]:
+                        competing = [
+                            a.text for a in plan_anchors if a is not anchor
+                            and b[0] <= (a.bbox[0]+a.bbox[2])/2 <= b[2]
+                            and b[1] <= (a.bbox[1]+a.bbox[3])/2 <= b[3]
+                        ]
+                        owned.append({
+                            "clip_index":region["index"],"bbox":b,
+                            "other_plan_titles": competing,
+                        })
+                region_rows.append({
+                    "title":anchor.text,"title_bbox":anchor.bbox,
+                    "title_center":center,
+                    "clip_regions_containing_title":owned[:20],
+                    "total_containing":len(owned),
+                })
+            print("B01_CLIP_TITLE_OWNERSHIP_PROBE", json.dumps({
+                "page":page_no,"plan_titles":region_rows,
+                "qualifying_clips":len(clip_regions),
+            },default=str,sort_keys=True))
             for anchor in anchors:
                 if anchor.view_type not in target_types:
                     continue
