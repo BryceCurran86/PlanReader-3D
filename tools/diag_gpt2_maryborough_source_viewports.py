@@ -101,6 +101,42 @@ if __name__ == "__main__":
                 "path_item_count_distribution": dict(path_lengths),
                 "extracted_frames": len(frames),
             }, sort_keys=True))
+            # PDF producer clipping/group objects may carry a boundary even
+            # when ordinary drawing paths do not. Read-only, source-native
+            # inspection; no clip is promoted to a viewport by this report.
+            try:
+                extended = page.get_drawings(extended=True)
+            except (TypeError, ValueError, RuntimeError) as exc:
+                extended = []
+                print("B01_EXTENDED_DRAWINGS_UNAVAILABLE", str(exc))
+            structural = []
+            for path_index, drawing in enumerate(extended):
+                kind = str(drawing.get("type") or "")
+                if kind not in ("clip", "group"):
+                    continue
+                bbox = drawing.get("scissor") or drawing.get("rect")
+                structural.append({
+                    "index": path_index, "kind": kind,
+                    "level": drawing.get("level"),
+                    "bbox": tuple(bbox) if bbox is not None else None,
+                    "items": len(drawing.get("items", []) or []),
+                })
+            try:
+                images = page.get_images(full=True)
+                placements = []
+                for image in images[:40]:
+                    for rect in page.get_image_rects(image[0])[:20]:
+                        placements.append({"xref": image[0], "bbox": tuple(rect)})
+            except (ValueError, RuntimeError) as exc:
+                images, placements = [], []
+                print("B01_IMAGE_PLACEMENTS_UNAVAILABLE", str(exc))
+            print("B01_PRODUCER_CLIP_IMAGE_EVIDENCE", json.dumps({
+                "page": page_no, "extended_count": len(extended),
+                "clip_group_count": len(structural),
+                "clip_groups_first_60": structural[:60],
+                "image_count": len(images),
+                "placements_first_40": placements[:40],
+            }, default=str, sort_keys=True))
             anchors = extract_view_title_anchors(page)
             for anchor in anchors:
                 if anchor.view_type not in target_types:
