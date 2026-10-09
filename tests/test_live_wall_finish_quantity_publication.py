@@ -150,3 +150,25 @@ def test_wall_finish_publisher_rejects_missing_source_receipts(changes):
     record, _surface = _resolved_record_and_surface()
     with pytest.raises(ValueError, match="source lineage receipts"):
         publish_bound_wall_finish_quantity(replace(record, **changes))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"record_id": ""},
+        {"document_id": ""},
+        {"revision_id": " "},
+        {"source_sha256": ""},
+        {"snapshot_id": ""},
+        {"trade_scope_id": ""},
+        {"finish_material": " "},
+        {"physical_face_ids": (" ",)},
+        {"physical_wall_ids": ()},
+        {"physical_wall_ids": (" ",)},
+        {"physical_surface_ids": (" ",)},
+    ],
+)
+def test_wall_finish_publisher_rejects_blank_physical_source_identity(changes):
+    record, _surface = _resolved_record_and_surface()
+    with pytest.raises(ValueError, match="physical/source identity"):
+        publish_bound_wall_finish_quantity(replace(record, **changes))
