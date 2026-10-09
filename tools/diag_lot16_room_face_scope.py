@@ -17,6 +17,65 @@ import pb_same_view_room_area_authority as same_view_authority
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
 
+
+def _wall_metric_first_failure(wall) -> str:
+    """Classify the first absent producer-owned wall quantity prerequisite.
+
+    This is a diagnostic ledger, not a new measurement or a claim that the
+    source supports a physical wall, a height or a finish.
+    """
+    if not wall.physical_identity_resolved or not wall.physical_wall_id:
+        return "physical_wall_identity_unresolved"
+    if not wall.evidence_ids or not wall.plan_members:
+        return "canonical_wall_source_receipts_unavailable"
+    if wall.length_m is None:
+        return "metric_wall_length_unavailable"
+    if wall.height_m is None:
+        return "authenticated_wall_height_unavailable"
+    if wall.gross_area_m2 is None or not wall.gross_polygon_wkb_hex:
+        return "gross_wall_area_unavailable"
+    if not wall.role or not wall.whole_wall_role_record_id:
+        return "authenticated_whole_wall_role_unavailable"
+    if wall.net_area_m2 is None or not wall.net_polygon_wkb_hex:
+        return "net_wall_area_or_deduction_unavailable"
+    return "canonical_net_wall_area_available"
+
+
+def _wall_metric_diagnostic(claim) -> dict:
+    ledger = []
+    for wall in claim.canonical_walls:
+        ledger.append({
+            "canonical_wall_id": wall.canonical_wall_id,
+            "physical_wall_id": wall.physical_wall_id,
+            "page_id": wall.page_id,
+            "physical_identity_resolved": bool(wall.physical_identity_resolved),
+            "identity_status": wall.identity_status,
+            "plan_member_count": len(wall.plan_members),
+            "evidence_receipt_count": len(wall.evidence_ids),
+            "role": wall.role,
+            "length_m": wall.length_m,
+            "height_m": wall.height_m,
+            "gross_area_m2": wall.gross_area_m2,
+            "net_area_m2": wall.net_area_m2,
+            "opening_void_count": len(wall.opening_voids),
+            "first_missing_prerequisite": _wall_metric_first_failure(wall),
+        })
+    return {
+        "canonical_wall_count": len(claim.canonical_walls),
+        "wall_authority_status": str(getattr(claim.canonical_wall_status, "value", claim.canonical_wall_status)),
+        "wall_authority_reasons": list(claim.canonical_wall_reason_codes),
+        "first_failure_frequency": dict(Counter(
+            entry["first_missing_prerequisite"] for entry in ledger
+        )),
+        "source_proven_net_wall_publication_status": str(
+            getattr(claim.publication.status, "value", claim.publication.status)
+        ),
+        "external_wall_quantity_published": claim.publication.quantity_evidence is not None,
+        "external_wall_ids_count": len(claim.external_wall_ids),
+        "per_wall": ledger,
+    }
+
+
 def inspect_source(pdf: Path, page_index: int) -> dict:
     payload = pdf.read_bytes()
     observations = []
@@ -147,6 +206,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "source_page_index_zero_based": page_index,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
+            "wall_metric_diagnostic": _wall_metric_diagnostic(claim),
             "source_label_scope_diagnostic": label_scopes,
             "same_view_witness_intersection_audit": witness_audit,
             "label_ownership_diagnostic": {
