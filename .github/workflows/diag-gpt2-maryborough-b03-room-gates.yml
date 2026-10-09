@@ -1,0 +1,73 @@
+name: DIAG GPT2 Maryborough B03 Room First Gates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt2_room_measurement_gates.py"
+      - "tests/test_gpt2_b03_room_measurement_gates.py"
+      - ".github/workflows/diag-gpt2-maryborough-b03-room-gates.yml"
+  workflow_dispatch:
+
+jobs:
+  real-source-room-first-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Test first-gate diagnostic
+        run: PYTHONPATH=. pytest -q tests/test_gpt2_b03_room_measurement_gates.py
+      - name: Source-first exact Maryborough room closure
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b03-room-gates
+          git rev-parse HEAD > artifacts/gpt2-b03-room-gates/head_sha.txt
+          PYTHONPATH=. python -u tools/diag_gpt2_room_measurement_gates.py \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --expected-sha256 b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007 \
+            --pages 6 --topology-pages 6 --support-pages 10 \
+            --output artifacts/gpt2-b03-room-gates/room_first_gates.json \
+            2>&1 | tee artifacts/gpt2-b03-room-gates/log.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path(
+              "artifacts/gpt2-b03-room-gates/room_first_gates.json"
+          ).read_text())
+          rooms=report["rooms"]
+          print("B03_FIRST_GATE_COUNTS", json.dumps({
+              gate:sum(r["first_unclosed_gate"]==gate for r in rooms)
+              for gate in sorted({r["first_unclosed_gate"] for r in rooms})
+          },sort_keys=True))
+          # Never assume a label denotes a unique physical room.
+          seen={}
+          for row in rooms:
+              seen.setdefault(row["room_label"],[]).append(row)
+          for label in ("FOOD PREP","OFFICE","COLD ROOM"):
+              if len(seen.get(label,[]))==1:
+                  row=seen[label][0]
+                  print("B03_MEASUREMENT_CONTROL",json.dumps({
+                      "label":label,"first_gate":row["first_unclosed_gate"],
+                      "metric_area_m2":row["metric_area_m2"],
+                      "source_face":row["source_room_face_record_id"],
+                      "canonical_floor":row["canonical_floor_id"],
+                  },sort_keys=True))
+          assert report["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b03-maryborough-first-gates
+          path: artifacts/gpt2-b03-room-gates
+          retention-days: 5
