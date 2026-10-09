@@ -2317,7 +2317,21 @@ def _rotated_semantic_frame_band_partitions(
                 ),
             ),
         )
+        # A long vertical source-owned schedule frame separates left/right
+        # drawing bands; a long horizontal one separates top/bottom. Testing
+        # perpendicular partitions as well can give the same title competing
+        # false owners. Square separators remain ambiguous and grant none.
+        separator_width = visual_separator[2] - visual_separator[0]
+        separator_height = visual_separator[3] - visual_separator[1]
+        if separator_height >= separator_width * 1.2:
+            permitted_sides = {"left", "right"}
+        elif separator_width >= separator_height * 1.2:
+            permitted_sides = {"top", "bottom"}
+        else:
+            continue
         for side, visual_band in side_bands:
+            if side not in permitted_sides:
+                continue
             if (
                 visual_band[2] - visual_band[0]
                 < calibration.minimum_frame_span_pt
