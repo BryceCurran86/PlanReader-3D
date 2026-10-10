@@ -231,9 +231,22 @@ def _claim_from_quantity(
         return None
 
     upstream_id = _clean(meta.get("upstream_area_quantity_id"))
-    area_by_id = {
-        item.quantity_id: item for item in source_result.room_area_quantities
-    }
+    # Quantity identity is cryptographic source lineage, never last-writer-wins.
+    # A modified record replay with the SAME upstream source quantity ID
+    # revokes the entire ID instead of choosing the last candidate. Exact
+    # byte-for-byte/equality replays are harmless and remain idempotent.
+    area_by_id = {}
+    conflicting_area_ids = set()
+    for item in source_result.room_area_quantities:
+        item_id = _clean(item.quantity_id)
+        if not item_id or item_id in conflicting_area_ids:
+            continue
+        previous = area_by_id.get(item_id)
+        if previous is not None and previous != item:
+            area_by_id.pop(item_id, None)
+            conflicting_area_ids.add(item_id)
+            continue
+        area_by_id[item_id] = item
     area = area_by_id.get(upstream_id)
     scope = quantity.input_entity_ids[0]
     if (
