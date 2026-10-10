@@ -138,6 +138,19 @@ def build_live_floor_finish_area_source_traces(
                 f"floor-finish revision mismatch: {quantity.quantity_id}"
             )
 
+        if _clean(metadata.get("source_room_face_record_id")) != _clean(
+            floor.source_room_face_record_id
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish source room face mismatch: "
+                f"{quantity.quantity_id}"
+            )
+        if _clean(metadata.get("page_no")) != _clean(floor.page_id):
+            raise SourceClosedRunConflictError(
+                "floor-finish source page mismatch: "
+                f"{quantity.quantity_id}"
+            )
+
         occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
         definition_id = _clean(metadata.get("finish_definition_record_id"))
         if not occurrence_id or not definition_id:
