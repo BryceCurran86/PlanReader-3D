@@ -83,6 +83,7 @@ def _quantity() -> QuantityEvidence:
             "support_viewport_id": "finish-vp",
             "finish_definition_record_id": "def-1",
             "finish_occurrence_record_id": "occ-1",
+            "finish_occurrence_evidence_id": "ev-occ",
             "source_dimension_page_id": "2",
         },
     )
@@ -243,3 +244,199 @@ def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
+
+
+def test_floor_finish_seal_rejects_one_occurrence_on_two_physical_floors() -> None:
+    original = _floor()
+    other = replace(
+        original,
+        canonical_floor_id="floor-2",
+        physical_floor_surface_id="floor-2",
+        room_entity_id="room-2",
+        source_room_face_record_id="face-2",
+    )
+    first = _quantity()
+    second = replace(
+        first,
+        quantity_id="floor-finish-q2",
+        semantic_key="floor_finish_area:floor-2:FT1:tile",
+        input_entity_ids=("floor-2",),
+        metadata={
+            **dict(first.metadata),
+            "canonical_floor_id": "floor-2",
+            "physical_floor_surface_id": "floor-2",
+            "source_room_face_record_id": "face-2",
+        },
+    )
+    claim = replace(
+        _claim(), canonical_floors=(original, other),
+        floor_finish_quantity_evidence=(first, second),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="source occurrence has competing physical floors",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+def test_floor_finish_seal_rejects_multiple_quantities_for_one_floor() -> None:
+    first = _quantity()
+    second = replace(
+        first,
+        quantity_id="floor-finish-q2",
+        semantic_key="floor_finish_area:floor-1:FT2:tile",
+        metadata={
+            **dict(first.metadata),
+            "finish_occurrence_record_id": "occ-2",
+        },
+    )
+    claim = replace(
+        _claim(),
+        floor_finish_quantity_evidence=(first, second),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="canonical floor has competing finish area quantities",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    ("finish_occurrence_record_id", "finish_definition_record_id"),
+)
+def test_floor_finish_seal_rejects_missing_source_semantic_receipt(receipt: str) -> None:
+    quantity = _quantity()
+    invalid = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), receipt: ""},
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(invalid,))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="source occurrence/definition receipt is missing",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    (
+        ({"unit": "ft2"}, "FIRM m2"),
+        ({"status": AuthorityStatus.BLOCKED.value}, "FIRM m2"),
+    ),
+)
+def test_floor_finish_seal_requires_firm_metric_area_quantity(
+    changes: dict, reason: str,
+) -> None:
+    invalid = replace(_quantity(), **changes)
+    claim = replace(_claim(), floor_finish_quantity_evidence=(invalid,))
+    with pytest.raises(SourceClosedRunConflictError, match=reason):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize(
+    ("receipt_key", "reason"),
+    (
+        ("source_room_face_record_id", "source room face mismatch"),
+        ("page_no", "source page mismatch"),
+    ),
+)
+def test_floor_finish_seal_rejects_stale_source_face_or_page(
+    receipt_key: str, reason: str,
+) -> None:
+    quantity = _quantity()
+    stale = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), receipt_key: "foreign-source"},
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(stale,))
+    with pytest.raises(SourceClosedRunConflictError, match=reason):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+def test_floor_finish_seal_rejects_alias_canonical_ids_for_same_physical_floor() -> None:
+    original = _floor()
+    alias = replace(
+        original,
+        canonical_floor_id="floor-alias",
+        # Replayed source owned by the same physical floor, not a second one.
+        physical_floor_surface_id=original.physical_floor_surface_id,
+    )
+    first = _quantity()
+    alias_quantity = replace(
+        first,
+        quantity_id="floor-finish-alias-q2",
+        semantic_key="floor_finish_area:floor-alias:FT2:tile",
+        input_entity_ids=(alias.canonical_floor_id,),
+        metadata={
+            **dict(first.metadata),
+            "canonical_floor_id": alias.canonical_floor_id,
+            "finish_occurrence_record_id": "occ-alias",
+        },
+    )
+    claim = replace(
+        _claim(),
+        canonical_floors=(original, alias),
+        floor_finish_quantity_evidence=(first, alias_quantity),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="physical floor has competing finish area quantities",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize(
+    ("receipt", "value"),
+    (
+        ("finish_occurrence_evidence_id", ""),
+        ("finish_occurrence_evidence_id", "foreign-evidence"),
+    ),
+)
+def test_floor_finish_seal_requires_exact_source_occurrence_witness(
+    receipt: str, value: str,
+) -> None:
+    original = _quantity()
+    altered = replace(
+        original,
+        metadata={**dict(original.metadata), receipt: value},
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(altered,))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="occurrence evidence receipt mismatch",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+def test_floor_finish_seal_cannot_use_missing_floor_occurrence_witness() -> None:
+    original = _floor()
+    replayed = replace(
+        original,
+        evidence_ids=tuple(
+            source for source in original.evidence_ids if source != "ev-occ"
+        ),
+    )
+    claim = replace(_claim(replayed))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="occurrence evidence receipt mismatch",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
