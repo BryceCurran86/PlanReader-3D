@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "tools/diag_lot16_room_face_scope.py"
+      - "pb_live_opening_area_quantity_publication.py"
+      - "pb_live_physical_opening_void_composition.py"
+      - "tests/test_live_opening_area_quantity_publication.py"
       - ".github/workflows/diag-lot16-room-face-scope.yml"
 jobs:
   source-room-face:
