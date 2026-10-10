@@ -38,12 +38,25 @@ def _finite_json_float(token: str) -> float:
     return value
 
 
+def _finite_json_int(token: str) -> int:
+    """Keep oversized JSON integers from overflowing numeric parity checks."""
+    value = int(token)
+    try:
+        finite_as_float = math.isfinite(value)
+    except OverflowError:
+        finite_as_float = False
+    if not finite_as_float:
+        raise ValueError("out-of-range JSON integer magnitude")
+    return value
+
+
 def _parse_evidence_json(payload: str) -> object:
     return json.loads(
         payload,
         object_pairs_hook=_unique_json_object,
         parse_constant=_reject_nonfinite_json_constant,
         parse_float=_finite_json_float,
+        parse_int=_finite_json_int,
     )
 
 
