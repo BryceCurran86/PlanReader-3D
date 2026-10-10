@@ -25,13 +25,32 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def _reject_nonfinite_json_constant(token: str) -> None:
+    """NaN and Infinity are not JSON numbers or admissible source evidence."""
+    raise ValueError(f"non-finite JSON number: {token}")
+
+
+def _finite_json_float(token: str) -> float:
+    """Reject finite-looking JSON numeric literals that overflow to infinity."""
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("non-finite JSON floating-point value")
+    return value
+
+
+def _parse_evidence_json(payload: str) -> object:
+    return json.loads(
+        payload,
+        object_pairs_hook=_unique_json_object,
+        parse_constant=_reject_nonfinite_json_constant,
+        parse_float=_finite_json_float,
+    )
+
+
 def _object(path: Path) -> dict:
     # A signed or frozen source envelope must never silently accept a second
     # conflicting JSON key; last-write-wins could replace source identity.
-    value = json.loads(
-        path.read_text(encoding="utf-8"),
-        object_pairs_hook=_unique_json_object,
-    )
+    value = _parse_evidence_json(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
@@ -192,10 +211,7 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         invalid_produced_shape = False
         if exists:
             try:
-                produced = json.loads(
-                    path.read_text(encoding="utf-8"),
-                    object_pairs_hook=_unique_json_object,
-                )
+                produced = _parse_evidence_json(path.read_text(encoding="utf-8"))
             except (ValueError, UnicodeError, OSError):
                 produced = []
                 invalid_produced_shape = True
