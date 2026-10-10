@@ -123,15 +123,29 @@ def _finite_pdf_source_edge(geometry):
         if any(type(v) not in (int,float) or not math.isfinite(v)
                for v in geometry):
             return False
-        return math.hypot(geometry[2]-geometry[0],
-                          geometry[3]-geometry[1])>0
+        length=math.hypot(geometry[2]-geometry[0],
+                          geometry[3]-geometry[1])
+        return math.isfinite(length) and length>0
     except (TypeError,ValueError,OverflowError):
         return False
 
 
 def _finite_pdf_path(points):
-    return (isinstance(points,(tuple,list)) and len(points)>=2
-            and all(_finite_pdf_point(point) for point in points))
+    if (not isinstance(points,(tuple,list)) or len(points)<2
+            or not all(_finite_pdf_point(point) for point in points)):
+        return False
+    # Huge but finite coordinates may still overflow a source edge's length.
+    # Zero-length chains cannot authenticate a physical wall path.
+    valid_length=False
+    for a,b in zip(points,points[1:]):
+        try:
+            length=math.hypot(b[0]-a[0],b[1]-a[1])
+        except (TypeError,ValueError,OverflowError):
+            return False
+        if not math.isfinite(length):
+            return False
+        valid_length=valid_length or length>0
+    return valid_length
 
 
 def _positive_candidate_signature(r):
