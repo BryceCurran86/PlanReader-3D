@@ -132,7 +132,7 @@ def test_two_room_source_publishes_stable_canonical_room_objects() -> None:
         ) == 1
 
 
-def test_valid_rooms_publish_but_partial_face_universe_stays_candidate() -> None:
+def test_partial_page_face_universe_cannot_mint_canonical_rooms() -> None:
     doc = fitz.open()
     try:
         page = doc.new_page(width=400, height=250)
@@ -144,7 +144,8 @@ def test_valid_rooms_publish_but_partial_face_universe_stays_candidate() -> None
             ((150.0, 50.0), (150.0, 150.0)),
             # A speck larger than the wall graph's 2.5pt gap-snap tolerance (a
             # smaller one is snapped away and never becomes a face) yet far under
-            # 1% of the largest face, so it is a genuine degenerate face.
+            # 1% of the largest face, so it makes the page face universe known
+            # incomplete.
             ((300.0, 50.0), (306.0, 50.0)),
             ((306.0, 50.0), (306.0, 56.0)),
             ((306.0, 56.0), (300.0, 56.0)),
@@ -180,11 +181,11 @@ def test_valid_rooms_publish_but_partial_face_universe_stays_candidate() -> None
         wall_opening_composition=wall_opening,
     )
 
-    assert result.status is EvidenceResolutionStatus.CANDIDATE
-    assert LIVE_CANONICAL_ROOM_PARTIAL in result.reason_codes
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert LIVE_CANONICAL_ROOM_UNAVAILABLE in result.reason_codes
     assert LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL in result.reason_codes
-    assert result.source_pages == (1,)
-    assert len(result.rooms) == 2
+    assert result.source_pages == ()
+    assert result.rooms == ()
 
 
 def test_single_box_fails_closed_without_minting_room_object() -> None:
@@ -359,8 +360,110 @@ def test_unresolved_page_room_scope_falls_back_to_authenticated_floor_plan_viewp
     )
 
 
-def test_incomplete_viewport_wall_scope_is_delegated_to_room_authority(monkeypatch) -> None:
-    """Let source-room authority decide whether an incomplete wall scope is locally safe."""
+def test_incomplete_page_face_universe_routes_to_authenticated_viewport(monkeypatch) -> None:
+    """A known-incomplete page result must not suppress a complete floor-plan scope."""
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    source, wall_opening = _source(page_partitions=(False,))
+    published = source.published_snapshot_for_revision(wall_opening.revision_id)
+    assert published is not None
+
+    viewport_selector = SimpleNamespace(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+        decision_scope_id="wall-source:viewport:1:complete-floor-plan",
+    )
+    viewport_wall_scope = SimpleNamespace(
+        status=EvidenceResolutionStatus.CORROBORATED,
+        scope_complete=True,
+        records=(object(),),
+        reason_codes=("physical_wall_candidate_scope_resolved",),
+        viewport_id="floor-plan-vp",
+        viewport_bbox=(5.0, 5.0, 95.0, 95.0),
+    )
+    viewport_wall_authority = SimpleNamespace(
+        selectors_for_authenticated_viewports=lambda **_kwargs: (viewport_selector,),
+        resolve_scope=lambda _selector: viewport_wall_scope,
+    )
+    viewport_wall_producer = SimpleNamespace(authority=lambda: viewport_wall_authority)
+
+    # Page-wide authority appears locally usable but explicitly says its face
+    # universe is incomplete. Its record must never be projected downstream.
+    page_room_record = object()
+    page_room_authority = SimpleNamespace(
+        resolve_scope=lambda _selector: SimpleNamespace(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            scope_complete=True,
+            records=(page_room_record,),
+            reason_codes=("source_room_face_universe_partial",),
+            face_universe_complete=False,
+        )
+    )
+
+    viewport_record = SimpleNamespace(
+        face_id="source-room-face-viewport-complete",
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id="1",
+        decision_scope_id=viewport_selector.decision_scope_id,
+        polygon_pdf_pts=(
+            (10.0, 10.0),
+            (80.0, 10.0),
+            (80.0, 80.0),
+            (10.0, 80.0),
+        ),
+        bounding_wall_ids=("vw1", "vw2", "vw3", "vw4"),
+        area_page_pts2=4900.0,
+        record_id="source-room-face-record-viewport-complete",
+    )
+    viewport_room_authority = SimpleNamespace(
+        resolve_scope=lambda _selector: SimpleNamespace(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            scope_complete=True,
+            records=(viewport_record,),
+            reason_codes=("source_room_face_scope_resolved",),
+            face_universe_complete=True,
+        )
+    )
+
+    monkeypatch.setattr(
+        module.PhysicalWallCandidateProducer,
+        "from_authenticated_viewports",
+        classmethod(lambda cls, *_args, **_kwargs: viewport_wall_producer),
+    )
+    monkeypatch.setattr(
+        module,
+        "build_source_room_face_authority",
+        lambda authority: (
+            viewport_room_authority
+            if authority is viewport_wall_authority
+            else page_room_authority
+        ),
+    )
+
+    result = module.compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED in result.reason_codes
+    assert result.source_pages == (1,)
+    assert len(result.rooms) == 1
+    room = result.rooms[0]
+    assert room.source_room_face_record_id == viewport_record.record_id
+    assert room.viewport_id == "floor-plan-vp"
+    assert room.decision_scope_id == viewport_selector.decision_scope_id
+
+
+def test_incomplete_viewport_room_universe_remains_fail_closed(monkeypatch) -> None:
+    """A locally resolved face cannot mint a room while its face universe is incomplete."""
     from types import SimpleNamespace
     import pb_live_canonical_room_composition as module
 
@@ -441,13 +544,10 @@ def test_incomplete_viewport_wall_scope_is_delegated_to_room_authority(monkeypat
         wall_opening_composition=wall_opening,
     )
 
-    assert result.status is EvidenceResolutionStatus.CANDIDATE
-    assert LIVE_CANONICAL_ROOM_VIEWPORT_FALLBACK_RESOLVED in result.reason_codes
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL in result.reason_codes
-    assert result.source_pages == (1,)
-    assert len(result.rooms) == 1
-    assert result.rooms[0].source_room_face_record_id == record.record_id
-    assert result.rooms[0].viewport_id == "floor-plan-vp"
+    assert result.source_pages == ()
+    assert result.rooms == ()
 
 
 def test_incomplete_viewport_wall_scope_cannot_publish_when_room_authority_abstains(monkeypatch) -> None:
@@ -728,3 +828,146 @@ def test_physical_room_identity_keeps_distinct_rooms_and_documents_distinct() ->
             other_view.physical_room_id,
         }
     ) == 4
+
+
+def test_batch_room_label_failure_falls_back_per_page_without_erasing_valid_labels(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    source, wall_opening = _source(page_partitions=(True, True))
+
+    class _FakeLabelAuthority:
+        def __init__(self, room_faces):
+            self._room_faces = room_faces
+
+        def resolve_scope(self, selector):
+            face_result = self._room_faces.resolve_scope(
+                SourceRoomFaceSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    page_id=selector.page_id,
+                    decision_scope_id=selector.decision_scope_id,
+                )
+            )
+            if not face_result.records:
+                return SimpleNamespace(records=(), split_face_candidates=())
+            face = face_result.records[0]
+            label = SimpleNamespace(
+                face_id=face.face_id,
+                record_id=f"label:{face.record_id}",
+                label="OFFICE",
+                observation_ids=(f"label-observation:{face.record_id}",),
+                word_evidence=(),
+                reason_codes=("source_room_label_scope_resolved",),
+            )
+            return SimpleNamespace(
+                records=(label,),
+                split_face_candidates=(),
+            )
+
+    def _fake_from_authorities(
+        cls,
+        source_arg,
+        room_faces,
+        *,
+        page_ids=None,
+    ):
+        selected = tuple(page_ids or ())
+        if len(selected) > 1:
+            raise RuntimeError("synthetic batch-only label failure")
+        return SimpleNamespace(
+            authority=lambda: _FakeLabelAuthority(room_faces)
+        )
+
+    monkeypatch.setattr(
+        module.SourceRoomLabelProducer,
+        "from_authorities",
+        classmethod(_fake_from_authorities),
+    )
+
+    result = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    labelled = [room for room in result.rooms if room.room_label == "OFFICE"]
+    assert len(labelled) == 2
+    assert {room.page_id for room in labelled} == {"1", "2"}
+    assert all(room.room_label_binding_record_id for room in labelled)
+    assert all(room.room_label_evidence_ids for room in labelled)
+
+
+def test_empty_batch_room_label_scope_retries_per_page_without_erasing_labels(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+    import pb_live_canonical_room_composition as module
+
+    source, wall_opening = _source(page_partitions=(True, True))
+
+    class _FakeLabelAuthority:
+        def __init__(self, room_faces, *, empty=False):
+            self._room_faces = room_faces
+            self._empty = empty
+
+        def resolve_scope(self, selector):
+            if self._empty:
+                return SimpleNamespace(records=(), split_face_candidates=())
+            face_result = self._room_faces.resolve_scope(
+                SourceRoomFaceSelector(
+                    document_id=selector.document_id,
+                    revision_id=selector.revision_id,
+                    source_sha256=selector.source_sha256,
+                    snapshot_id=selector.snapshot_id,
+                    page_id=selector.page_id,
+                    decision_scope_id=selector.decision_scope_id,
+                )
+            )
+            if not face_result.records:
+                return SimpleNamespace(records=(), split_face_candidates=())
+            face = face_result.records[0]
+            label = SimpleNamespace(
+                face_id=face.face_id,
+                record_id=f"label:{face.record_id}",
+                label="OFFICE",
+                observation_ids=(f"label-observation:{face.record_id}",),
+                word_evidence=(),
+                reason_codes=("source_room_label_scope_resolved",),
+            )
+            return SimpleNamespace(records=(label,), split_face_candidates=())
+
+    def _fake_from_authorities(
+        cls,
+        source_arg,
+        room_faces,
+        *,
+        page_ids=None,
+    ):
+        selected = tuple(page_ids or ())
+        return SimpleNamespace(
+            authority=lambda: _FakeLabelAuthority(
+                room_faces,
+                empty=len(selected) > 1,
+            )
+        )
+
+    monkeypatch.setattr(
+        module.SourceRoomLabelProducer,
+        "from_authorities",
+        classmethod(_fake_from_authorities),
+    )
+
+    result = compose_live_canonical_rooms(
+        source_visibility_producer=source,
+        wall_opening_composition=wall_opening,
+    )
+
+    labelled = [room for room in result.rooms if room.room_label == "OFFICE"]
+    assert len(labelled) == 2
+    assert {room.page_id for room in labelled} == {"1", "2"}
+    assert all(room.room_label_binding_record_id for room in labelled)
+    assert all(room.room_label_evidence_ids for room in labelled)

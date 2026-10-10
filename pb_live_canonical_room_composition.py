@@ -524,25 +524,63 @@ def compose_live_canonical_rooms(
             and result.scope_complete
             and result.records
         ):
+            # A page-wide room-face result with an incomplete face universe is
+            # not authoritative enough to mint persistent canonical rooms. A
+            # known missing/ambiguous face can change room identity, adjacency,
+            # label ownership and every downstream surface quantity. Route that
+            # page through the already-sealed authenticated FLOOR_PLAN viewport
+            # path instead. If no viewport can prove a complete room scope, the
+            # page remains fail-closed rather than publishing partial page-wide
+            # physical identities.
+            if not result.face_universe_complete:
+                reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                reasons.extend(result.reason_codes)
+                unresolved_pages.append(str(page_id))
+                continue
+
             if str(page_id).isdigit():
                 room_pages.add(int(page_id))
-                if result.face_universe_complete:
-                    resolved_pages.add(int(page_id))
-                else:
-                    reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                resolved_pages.add(int(page_id))
             label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
             label_result = None
+            label_selector = SourceRoomLabelSelector(
+                document_id=selector.document_id,
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+                page_id=selector.page_id,
+                decision_scope_id=selector.decision_scope_id,
+            )
             if page_label_authority is not None:
-                label_result = page_label_authority.resolve_scope(
-                    SourceRoomLabelSelector(
-                        document_id=selector.document_id,
-                        revision_id=selector.revision_id,
-                        source_sha256=selector.source_sha256,
-                        snapshot_id=selector.snapshot_id,
-                        page_id=selector.page_id,
-                        decision_scope_id=selector.decision_scope_id,
-                    )
+                label_result = page_label_authority.resolve_scope(label_selector)
+
+            if (
+                label_result is None
+                or (
+                    not label_result.records
+                    and not label_result.split_face_candidates
                 )
+            ):
+                try:
+                    page_scoped_label_authority = (
+                        SourceRoomLabelProducer.from_authorities(
+                            source_visibility_producer,
+                            authority,
+                            page_ids=(str(page_id),),
+                        ).authority()
+                    )
+                    page_scoped_result = page_scoped_label_authority.resolve_scope(
+                        label_selector
+                    )
+                    if (
+                        page_scoped_result.records
+                        or page_scoped_result.split_face_candidates
+                    ):
+                        label_result = page_scoped_result
+                except Exception:
+                    pass
+
+            if label_result is not None:
                 label_records_by_face = {
                     str(label.face_id): label for label in label_result.records
                 }
@@ -676,20 +714,56 @@ def compose_live_canonical_rooms(
                     ):
                         reasons.extend(room_result.reason_codes)
                         continue
+                    if not room_result.face_universe_complete:
+                        reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                        reasons.extend(room_result.reason_codes)
+                        page_face_universe_complete = False
+                        continue
 
                     label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
                     label_result = None
+                    viewport_label_selector = SourceRoomLabelSelector(
+                        document_id=wall_selector.document_id,
+                        revision_id=wall_selector.revision_id,
+                        source_sha256=wall_selector.source_sha256,
+                        snapshot_id=wall_selector.snapshot_id,
+                        page_id=wall_selector.page_id,
+                        decision_scope_id=wall_selector.decision_scope_id,
+                    )
                     if viewport_label_authority is not None:
                         label_result = viewport_label_authority.resolve_scope(
-                            SourceRoomLabelSelector(
-                                document_id=wall_selector.document_id,
-                                revision_id=wall_selector.revision_id,
-                                source_sha256=wall_selector.source_sha256,
-                                snapshot_id=wall_selector.snapshot_id,
-                                page_id=wall_selector.page_id,
-                                decision_scope_id=wall_selector.decision_scope_id,
-                            )
+                            viewport_label_selector
                         )
+
+                    if (
+                        label_result is None
+                        or (
+                            not label_result.records
+                            and not label_result.split_face_candidates
+                        )
+                    ):
+                        try:
+                            page_scoped_viewport_label_authority = (
+                                SourceRoomLabelProducer.from_authorities(
+                                    source_visibility_producer,
+                                    viewport_room_authority,
+                                    page_ids=(str(page_id),),
+                                ).authority()
+                            )
+                            page_scoped_result = (
+                                page_scoped_viewport_label_authority.resolve_scope(
+                                    viewport_label_selector
+                                )
+                            )
+                            if (
+                                page_scoped_result.records
+                                or page_scoped_result.split_face_candidates
+                            ):
+                                label_result = page_scoped_result
+                        except Exception:
+                            pass
+
+                    if label_result is not None:
                         label_records_by_face = {
                             str(label.face_id): label
                             for label in label_result.records
@@ -754,9 +828,6 @@ def compose_live_canonical_rooms(
                         for record in composite_records
                     )
                     page_resolved = True
-                    if not room_result.face_universe_complete:
-                        page_face_universe_complete = False
-                        reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
                     viewport_fallback_used = True
 
                 if page_resolved and str(page_id).isdigit():
