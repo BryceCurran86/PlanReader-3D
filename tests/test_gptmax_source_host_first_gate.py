@@ -132,3 +132,36 @@ def test_original_producer_host_status_is_never_inferred_from_missing_records():
     census = source_first_gate_census(sample)
     assert census["unhosted_first_gate_counts"] == {}
     assert census["host_publication_allowed"] is False
+
+
+def test_two_authentic_missing_flank_gates_never_choose_first_by_side():
+    sample = report()
+    sample["opening_bindings"][0]["reason_codes"] = [
+        "no_authenticated_host_wall_band",
+        "raster_source_band_right_source_primitive_unmapped",
+        "raster_source_band_left_source_primitive_unmapped",
+    ]
+    census = source_first_gate_census(sample)
+    assert census["unhosted_first_gate_counts"] == {
+        "multiple_source_host_gates_unresolved": 1
+    }
+    row = census["unhosted_original_openings"][0]
+    assert row["all_specific_observed_gates"] == [
+        "left_original_raster_source_primitive_unmapped",
+        "right_original_raster_source_primitive_unmapped",
+    ]
+    assert row["first_observed_host_gate"] == "multiple_source_host_gates_unresolved"
+    assert census["host_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("broken", ["host_not_dict", "scope_not_dict", "frame_not_dict"])
+def test_invalid_receipt_types_fail_closed_as_value_error(broken):
+    sample = report()
+    if broken == "host_not_dict":
+        sample["opening_bindings"][0] = None
+    elif broken == "scope_not_dict":
+        sample["source_owned_wall_scope_results"][0] = None
+    else:
+        sample["host_frames"] = [None]
+    with pytest.raises(ValueError, match="receipts unavailable"):
+        source_first_gate_census(sample)
