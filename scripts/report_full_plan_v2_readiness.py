@@ -15,6 +15,16 @@ from pathlib import Path
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 
 
+def _unique_produced_json_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject duplicated object keys before one may shadow source identity."""
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate produced JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _object(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -177,8 +187,11 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         invalid_produced_shape = False
         if exists:
             try:
-                produced = json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, UnicodeError, OSError):
+                produced = json.loads(
+                    path.read_text(encoding="utf-8"),
+                    object_pairs_hook=_unique_produced_json_object,
+                )
+            except (ValueError, UnicodeError, OSError):
                 produced = []
                 invalid_produced_shape = True
             if not isinstance(produced, list) or any(not isinstance(x, dict) for x in produced):
