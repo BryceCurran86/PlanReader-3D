@@ -181,6 +181,15 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish source occurrence has competing physical floors: "
                 f"{occurrence_id}"
             )
+        # Resolve the most specific failed authority first: a repeated
+        # canonical floor is a direct conflict before considering competing
+        # canonical aliases of the same physical surface.
+        prior_quantity = quantity_owner_by_floor.get(floor_id)
+        if prior_quantity is not None and prior_quantity != quantity.quantity_id:
+            raise SourceClosedRunConflictError(
+                "canonical floor has competing finish area quantities: "
+                f"{floor_id}"
+            )
         physical_floor_id = _clean(floor.physical_floor_surface_id)
         prior_physical_owner = quantity_owner_by_physical_floor.get(
             physical_floor_id
@@ -192,12 +201,6 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 "physical floor has competing finish area quantities: "
                 f"{physical_floor_id}"
-            )
-        prior_quantity = quantity_owner_by_floor.get(floor_id)
-        if prior_quantity is not None and prior_quantity != quantity.quantity_id:
-            raise SourceClosedRunConflictError(
-                "canonical floor has competing finish area quantities: "
-                f"{floor_id}"
             )
         floor_owner_by_occurrence[occurrence_id] = floor_id
         quantity_owner_by_floor[floor_id] = quantity.quantity_id
