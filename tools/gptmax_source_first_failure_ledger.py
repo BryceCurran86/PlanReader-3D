@@ -141,6 +141,11 @@ def build_first_failure_ledger(report):
     stages = Counter()
     for physical_id in sorted(physical):
         binding, receipt = physical[physical_id], frame[physical_id]
+        selected_page_ids = set(map(str, pages))
+        if (str(binding.get("page_id") or "") not in selected_page_ids
+                or (receipt.get("page_id") is not None
+                    and str(receipt["page_id"]) != str(binding["page_id"]))):
+            raise ValueError(f"physical opening or host-frame page scope mismatch: {physical_id}")
         reasons = _reason_codes(binding)
         frame_reasons = _reason_codes(receipt)
         host = binding.get("host_wall_id")
