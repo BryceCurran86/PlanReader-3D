@@ -693,3 +693,24 @@ def test_touching_grid_source_edges_without_positive_span_do_not_connect():
         room_scope=disconnected,
         label_scope=_label_scope(),
     ).records == ()
+
+
+def test_source_grid_union_rejects_overlapping_face_interiors():
+    from dataclasses import replace
+    original = _room_scope()
+    left, right = original.records
+    # Even with the same W4 receipt, an internally overlapping source-face
+    # footprint is not a true room-cell partition and must not be composed.
+    inflated = replace(right,
+        polygon_pdf_pts=((8.0, 0.0), (20.0, 0.0),
+                         (20.0, 10.0), (8.0, 10.0)),
+        area_page_pts2=120.0,
+    )
+    overlapped = replace(original, records=(left, inflated))
+    result = compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=overlapped,
+        label_scope=_label_scope(),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
