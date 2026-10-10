@@ -1374,6 +1374,36 @@ def _line_inside_dimension_pair(
     )
 
 
+def _quarantine_reused_cross_view_dimensions(
+    records: Sequence[CrossViewRoomAreaRecord],
+) -> tuple[list[CrossViewRoomAreaRecord], set[str]]:
+    """Reconcile original dimension observation ownership, not numeric size.
+
+    A dimension ID is only source-comparable within its authenticated support
+    page. Two genuinely different rooms cannot each reuse the same original
+    horizontal or vertical producer record as an independent FIRM area witness.
+    """
+    owners: dict[tuple[str, str], set[str]] = {}
+    for record in records:
+        room_id = str(record.physical_room_id)
+        for dimension_id in (
+            record.horizontal_dimension_id,
+            record.vertical_dimension_id,
+        ):
+            owners.setdefault(
+                (str(record.source_dimension_page_id), str(dimension_id)), set()
+            ).add(room_id)
+    conflicted = set().union(
+        *(room_ids for room_ids in owners.values() if len(room_ids) > 1),
+        set(),
+    )
+    return (
+        [record for record in records
+         if str(record.physical_room_id) not in conflicted],
+        conflicted,
+    )
+
+
 class CrossViewRoomAreaProducer:
     def __init__(
         self,
@@ -1911,6 +1941,22 @@ class CrossViewRoomAreaProducer:
                     _seal=_RECORD_SEAL,
                 )
             )
+
+        # Across distinct physical rooms, an original producer-owned native
+        # figured dimension observation may support at most one whole-room
+        # area. A shared horizontal OR vertical source dimension on the same
+        # support page is not independent proof of two metric room areas.
+        # Quarantine both claimants, regardless of producer iteration order.
+        records, reused_source_owners = _quarantine_reused_cross_view_dimensions(
+            records
+        )
+        if reused_source_owners:
+            unresolved.update(reused_source_owners)
+            first_failures.update({
+                room_id: "cross_view_dimension_source_owner_conflict"
+                for room_id in reused_source_owners
+            })
+            conflict_seen = True
 
         records.sort(key=lambda item: item.physical_room_id)
         unresolved_ids = tuple(sorted(unresolved))
