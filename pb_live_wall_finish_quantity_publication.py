@@ -44,6 +44,9 @@ def publish_bound_wall_finish_quantity(
                 record.revision_id,
                 record.source_sha256,
                 record.snapshot_id,
+                record.page_id,
+                record.viewport_id,
+                record.decision_scope_id,
                 record.trade_scope_id,
                 record.finish_material,
             )
