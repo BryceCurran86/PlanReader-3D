@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from collections import Counter
 from pathlib import Path
@@ -124,6 +125,21 @@ def _positive_candidate_signature(r):
             or any(not isinstance(v,str) or not v for v in primitive_ids)
             or not isinstance(path,list) or len(path)<2):
         return None
+    # A source-evidence comparison must not call two equally malformed
+    # fragments "unchanged source". Require actual original PDF-point
+    # geometry and each edge's positive primitive ancestry.
+    for fragment in fragments:
+        if not isinstance(fragment,dict):
+            return None
+        geometry=fragment.get("geometry")
+        parents=fragment.get("source_primitive_ids")
+        if (not isinstance(geometry,list) or len(geometry)!=4
+                or any(type(v) not in (int,float) or not math.isfinite(v)
+                       for v in geometry)
+                or not isinstance(parents,list) or not parents
+                or any(not isinstance(v,str) or v not in primitive_ids
+                       for v in parents)):
+            return None
     try:
         # JSON-safe immutable equality. This includes actual original page
         # coordinates and complete positive source ancestry, but no split-N
