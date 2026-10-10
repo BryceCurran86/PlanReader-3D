@@ -50,6 +50,17 @@ def _opening_quantity(
     if (
         not canonical_id
         or canonical_id != physical_id
+        or not all(
+            str(value or "").strip()
+            for value in (
+                opening.document_id,
+                opening.revision_id,
+                opening.source_sha256,
+                opening.snapshot_id,
+                opening.page_id,
+                opening.representative_observation_id,
+            )
+        )
         or not viewport_id
         or not host_wall_id
         or not (host_binding_record_id or host_frame_record_id)
@@ -156,6 +167,7 @@ def _opening_quantity(
             "document_id": opening.document_id,
             "revision_id": opening.revision_id,
             "source_sha256": opening.source_sha256,
+            "snapshot_id": opening.snapshot_id,
             "page_no": opening.page_id,
             "viewport_id": viewport_id,
             "canonical_opening_id": canonical_id,
@@ -201,6 +213,13 @@ def publish_live_opening_area_quantities(
     for opening in composition.canonical_openings:
         if type(opening) is not LiveCanonicalOpeningObject:
             raise TypeError("canonical_openings must contain LiveCanonicalOpeningObject")
+        # A stale foreign-revision member cannot be filtered out as
+        # unsupported while the favourable member becomes a commercial
+        # quantity. The canonical composition is revision-scoped.
+        if str(opening.revision_id or "").strip() != str(composition.revision_id or "").strip():
+            raise ValueError(
+                "canonical opening revision conflicts with quantity composition"
+            )
         canonical_id = str(opening.canonical_opening_id or "").strip()
         physical_id = str(opening.physical_opening_id or "").strip()
         if canonical_id and canonical_id in canonical_ids:
