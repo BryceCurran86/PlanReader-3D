@@ -141,7 +141,8 @@ def test_source_proven_ordinary_wall_touched_by_compact_t_endpoint(flip):
     line=(381*72/72,297.,381*72/72,349.)
     source=SimpleNamespace(geometry_pt=line,orientation="vertical")
     if flip:
-        compact.pixel_geometry=tuple(reversed(compact.pixel_geometry))
+        a,b,c,d=compact.pixel_geometry
+        compact.pixel_geometry=(c,d,a,b)
     assert endpoint_on_original(compact,(source,),dpi=300,source_dpi=144)
 
 
