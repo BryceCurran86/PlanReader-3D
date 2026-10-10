@@ -151,3 +151,43 @@ def test_invalid_produced_quantity_id_types_do_not_become_fake_id_strings(tmp_pa
     assert "None" not in project["duplicate_quantity_ids"]
     assert project["reconciliation_complete"] is False
     assert project["coverage_accuracy"] is None
+
+
+def test_invalid_produced_json_cannot_abort_other_projects_or_publish_score(tmp_path: Path) -> None:
+    project_dir = tmp_path / "au_qld_lot16_power"
+    project_dir.mkdir()
+    (project_dir / "produced_items.json").write_text("{not-json", encoding="utf-8")
+
+    report = diagnostic_report(ROOT, tmp_path)
+    assert len(report["projects"]) == 4
+    lot16 = next(p for p in report["projects"] if p["project_id"] == "au_qld_lot16_power")
+    maryborough = next(
+        p for p in report["projects"]
+        if p["project_id"] == "au_qld_maryborough_service_station"
+    )
+    assert lot16["produced_file_present"] is True
+    assert lot16["produced_count"] is None
+    assert lot16["sealed_quantity_count"] is None
+    assert lot16["produced_sealed_parity_verified"] is False
+    assert "produced_items_invalid_json_or_shape" in lot16["blockers"]
+    assert "empty_produced_items_unverified" not in lot16["blockers"]
+    assert maryborough["produced_file_present"] is False
+    assert "production_items_missing" in maryborough["blockers"]
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
+
+
+def test_wrong_produced_document_shape_blocks_project_without_fabricating_count(tmp_path: Path) -> None:
+    project_dir = tmp_path / "au_qld_3laurel"
+    project_dir.mkdir()
+    for invalid in ('{"quantity_id":"fake-list"}', '[{"quantity_id":"q"}, null]', 'null'):
+        (project_dir / "produced_items.json").write_text(invalid, encoding="utf-8")
+        report = diagnostic_report(ROOT, tmp_path)
+        result = next(p for p in report["projects"] if p["project_id"] == "au_qld_3laurel")
+        assert "produced_items_invalid_json_or_shape" in result["blockers"]
+        assert result["produced_count"] is None
+        assert result["lineage_conflict_count"] is None
+        assert result["abstention_count"] is None
+        assert result["reconciliation_complete"] is False
+        assert result["coverage_accuracy"] is None
+        assert result["precision_adjusted_accuracy"] is None
