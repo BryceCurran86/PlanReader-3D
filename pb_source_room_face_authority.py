@@ -269,6 +269,24 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
     return tuple(result)
 
 
+def _finite_source_edge(value: Edge) -> bool:
+    """Reject invalid endpoints and overflowed lengths on either source edge."""
+    try:
+        if len(value) != 2 or any(len(point) != 2 for point in value):
+            return False
+        first, second = (
+            tuple(float(coordinate) for coordinate in point)
+            for point in value
+        )
+        if not all(math.isfinite(c) for point in (first, second) for c in point):
+            return False
+        return math.isfinite(
+            math.hypot(second[0] - first[0], second[1] - first[1])
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
     """Return True only when a child edge is a quantized subsegment of parent.
 
@@ -278,11 +296,13 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
     the maximum error implied by that quantization. No geometric extension,
     nearest-edge selection, or angle-only matching is permitted.
     """
+    if not (_finite_source_edge(parent) and _finite_source_edge(child)):
+        return False
     (ax, ay), (bx, by) = parent
     tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
     dx, dy = bx - ax, by - ay
     length = math.hypot(dx, dy)
-    if length <= tolerance:
+    if not math.isfinite(length) or length <= tolerance:
         return False
 
     xmin, xmax = min(ax, bx) - tolerance, max(ax, bx) + tolerance
@@ -292,7 +312,7 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
         if not (xmin <= px <= xmax and ymin <= py <= ymax):
             return False
         perpendicular_distance = abs((px - ax) * dy - (py - ay) * dx) / length
-        if perpendicular_distance > tolerance:
+        if not math.isfinite(perpendicular_distance) or perpendicular_distance > tolerance:
             return False
     return child[0] != child[1]
 
@@ -303,17 +323,19 @@ def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
     The overlap is SOURCE geometry used only to stabilize fail-closed local
     abstention. It never selects an owner or extends either source edge.
     """
+    if not (_finite_source_edge(left) and _finite_source_edge(right)):
+        return None
     (ax, ay), (bx, by) = left
     (cx, cy), (dx, dy) = right
     tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
     vx, vy = bx - ax, by - ay
     length = math.hypot(vx, vy)
-    if length <= tolerance:
+    if not math.isfinite(length) or length <= tolerance:
         return None
 
     for px, py in ((cx, cy), (dx, dy)):
         perpendicular_distance = abs((px - ax) * vy - (py - ay) * vx) / length
-        if perpendicular_distance > tolerance:
+        if not math.isfinite(perpendicular_distance) or perpendicular_distance > tolerance:
             return None
 
     ux, uy = vx / length, vy / length
@@ -321,6 +343,8 @@ def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
         (cx - ax) * ux + (cy - ay) * uy,
         (dx - ax) * ux + (dy - ay) * uy,
     )
+    if not all(math.isfinite(value) for value in right_positions):
+        return None
     start = max(0.0, min(right_positions))
     end = min(length, max(right_positions))
     if end - start <= tolerance:

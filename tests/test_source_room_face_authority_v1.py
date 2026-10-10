@@ -427,3 +427,53 @@ def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> No
     assert result.records == ()
     assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes
 
+
+
+def test_nonfinite_source_edges_cannot_supply_wall_ownership_or_collinear_overlap():
+    """NaN previously survived collinearity comparisons as a fake positive span."""
+    from pb_source_room_face_authority import (
+        _collinear_overlap_edge,
+        _edges_share_positive_collinear_span,
+        _finite_source_edge,
+    )
+
+    clean = ((0.0, 0.0), (10.0, 0.0))
+    partial = ((5.0, 0.0), (15.0, 0.0))
+    assert _finite_source_edge(clean)
+    assert _collinear_overlap_edge(clean, partial) == (
+        (5.0, 0.0), (10.0, 0.0)
+    )
+    assert _edges_share_positive_collinear_span(clean, partial)
+    assert _edge_contains_edge(clean, ((1.0, 0.0), (9.0, 0.0)))
+
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        malformed = ((bad, 0.0), (7.0, 0.0))
+        assert not _finite_source_edge(malformed)
+        assert _collinear_overlap_edge(clean, malformed) is None
+        assert _collinear_overlap_edge(malformed, clean) is None
+        assert not _edges_share_positive_collinear_span(clean, malformed)
+        assert not _edge_contains_edge(clean, malformed)
+        assert not _edge_contains_edge(malformed, clean)
+    assert not _finite_source_edge(((0.0, 0.0), ()))
+    assert _collinear_overlap_edge(clean, ((0.0, 0.0), ())) is None
+    assert not _edge_contains_edge(clean, ((0.0, 0.0), ()))
+
+
+def test_finite_source_coordinates_with_overflowed_intermediates_abstain():
+    """Finite inputs still cannot authenticate infinite arithmetic results."""
+    from pb_source_room_face_authority import (
+        _collinear_overlap_edge, _finite_source_edge,
+    )
+
+    infinite_length = ((-1e308, 0.0), (1e308, 0.0))
+    assert not _finite_source_edge(infinite_length)
+    assert not _finite_source_edge(tuple(reversed(infinite_length)))
+    finite_child = ((0.0, 0.0), (10.0, 0.0))
+    assert not _edge_contains_edge(infinite_length, finite_child)
+    assert _collinear_overlap_edge(infinite_length, finite_child) is None
+    assert _collinear_overlap_edge(finite_child, infinite_length) is None
+
+    huge_diagonal = ((0.0, 0.0), (1e200, 1e200))
+    off_diagonal = ((5e199, 6e199), (9e199, 9e199))
+    assert not _edge_contains_edge(huge_diagonal, off_diagonal)
+    assert _collinear_overlap_edge(huge_diagonal, off_diagonal) is None
