@@ -221,3 +221,35 @@ def test_non_abstained_sealed_quantity_with_incomplete_lineage_fails_closed() ->
 
     with pytest.raises(CustomerOutputVerificationError, match="incomplete lineage"):
         verify_sealed_customer_output(sealed, [row])
+
+
+def test_orphaned_automated_customer_row_cannot_hide_as_manual_row() -> None:
+    sealed, rows = sealed_and_rows()
+    orphan = dict(rows[0])
+    orphan.pop("quantity_id")
+    orphan.pop("commercial_projection_provenance", None)
+    orphan["notes"] = ""
+    # Source-owned automated provenance still declares this row as a
+    # QuantityEvidence projection even after its direct ID was stripped.
+    assert orphan["source_reference"].startswith("QuantityEvidence qty-1")
+    with pytest.raises(CustomerOutputVerificationError, match="missing quantity identity"):
+        verify_sealed_customer_output(sealed, [*rows, orphan])
+
+
+def test_malformed_automated_provenance_cannot_lose_its_quantity_identity() -> None:
+    sealed, rows = sealed_and_rows()
+    orphan = dict(rows[0])
+    orphan.pop("quantity_id")
+    orphan["commercial_projection_provenance"] = {}
+    orphan["source_reference"] = "manual note"
+    orphan["notes"] = ""
+    with pytest.raises(CustomerOutputVerificationError, match="missing quantity identity"):
+        verify_sealed_customer_output(sealed, [*rows, orphan])
+
+
+def test_manual_row_without_projection_identity_remains_outside_automated_bijection() -> None:
+    sealed, rows = sealed_and_rows()
+    manual = {"description": "Estimator note", "quantity": 1, "source_reference": "manual"}
+    report = verify_sealed_customer_output(sealed, [*rows, manual])
+    assert report.verified_quantity_ids == ("qty-1", "qty-2")
+    assert report.customer_row_count == 2
