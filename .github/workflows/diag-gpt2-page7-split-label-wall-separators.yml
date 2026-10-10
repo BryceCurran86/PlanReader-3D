@@ -32,6 +32,7 @@ jobs:
         run: |
           PYTHONPATH=. pytest -q tests/test_gpt2_remaining_label_source_face_candidates.py
           PYTHONPATH=. pytest -q tests/test_gpt2_split_label_wall_separators.py
+          PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
         run: |
@@ -330,6 +331,81 @@ jobs:
           },sort_keys=True,default=str))
           assert all(not row["merge_source_faces_authorized"]
                      for row in split_rows)
+
+          # Use the EXISTING production composite authority, not a new
+          # geometry-union pathway. A positive composite needs independently
+          # source-grid-opposed W4 wall separators and a fully valid face
+          # component; an arbitrary shared source wall is insufficient.
+          from pb_source_composite_room_face_authority import (
+              compose_grid_separated_room_faces,
+              _fully_grid_opposed_wall_evidence,
+              _grid_local_adjacency,
+          )
+          composite_scopes=[]
+          for selector in selectors:
+              wall_scope=wall_authority.resolve_scope(selector)
+              room_scope=face_authority.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              label_scope=label_authority.resolve_scope(SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              fully_grid,evidence_by_wall=_fully_grid_opposed_wall_evidence(wall_scope)
+              adjacency=_grid_local_adjacency(room_scope,fully_grid)
+              composite=compose_grid_separated_room_faces(
+                  wall_scope=wall_scope,
+                  room_scope=room_scope,
+                  label_scope=label_scope,
+              )
+              composite_scopes.append({
+                  "source_decision_scope_id":selector.decision_scope_id,
+                  "wall_scope_status":str(wall_scope.status),
+                  "wall_scope_complete":wall_scope.scope_complete,
+                  "wall_scope_reason_codes":list(wall_scope.reason_codes),
+                  "room_scope_status":str(room_scope.status),
+                  "room_scope_complete":room_scope.scope_complete,
+                  "room_face_universe_complete":room_scope.face_universe_complete,
+                  "room_scope_reason_codes":list(room_scope.reason_codes),
+                  "source_sealed_split_label_count":len(label_scope.split_face_candidates),
+                  "fully_grid_opposed_wall_count":len(fully_grid),
+                  "grid_wall_evidence_ids":dict(
+                      sorted((wall_id,list(evidence_by_wall[wall_id]))
+                      for wall_id in fully_grid)
+                  ),
+                  "grid_connected_face_count":len(adjacency),
+                  "actual_composite_status":str(composite.status),
+                  "actual_composite_reason_codes":list(composite.reason_codes),
+                  "real_composite_records":[{
+                      "label":record.label,
+                      "record_id":record.record_id,
+                      "constituent_source_room_face_record_ids":list(
+                          record.constituent_source_room_face_record_ids
+                      ),
+                      "grid_separator_wall_ids":list(record.separator_wall_ids),
+                      "source_grid_evidence_ids":list(record.grid_evidence_ids),
+                      "area_pdf_points_squared_not_metric":record.area_page_pts2,
+                  } for record in composite.records],
+                  "unresolved_source_split_candidate_record_ids":list(
+                      composite.unresolved_label_candidate_ids
+                  ),
+                  "new_metric_areas_published":0,
+              })
+          print("GPT2_PAGE7_PRODUCTION_GRID_COMPOSITE_FIRST_GATES",json.dumps({
+              "source_sha256":sha,
+              "scope_results":composite_scopes,
+              "source_composite_producer_only":True,
+              "no_deduced_metric_areas_or_unsupported_merges":True,
+          },sort_keys=True,default=str))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
