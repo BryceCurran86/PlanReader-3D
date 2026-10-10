@@ -1,0 +1,30 @@
+name: TEST GPT2 Canonical Room Label Lineage
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_live_canonical_room_composition.py"
+      - "tests/test_gpt2_canonical_room_label_lineage.py"
+      - ".github/workflows/test-gpt2-canonical-room-label-lineage.yml"
+  workflow_dispatch:
+
+jobs:
+  source-face-label-lineage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Test canonical room physical ownership and source label integrity
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_gpt2_canonical_room_label_lineage.py \
+            tests/test_live_canonical_room_composition.py \
+            tests/test_source_room_label_authority_v1.py

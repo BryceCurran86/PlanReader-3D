@@ -312,6 +312,60 @@ def _physical_room_id(record, *, viewport_id: Optional[str]) -> str:
     )
 
 
+def _unique_source_room_labels_by_face(
+    labels: Collection[SourceRoomLabelRecord],
+) -> dict[str, SourceRoomLabelRecord]:
+    """Retain only uniquely source-owned face labels; never last-write-wins.
+
+    Exact repeated publication of one immutable label receipt is idempotent.
+    Competing records for one physical face revoke the semantic label only,
+    never the producer-authenticated physical room geometry.
+    """
+    owned: dict[str, SourceRoomLabelRecord] = {}
+    conflicted: set[str] = set()
+    for label in labels:
+        if type(label) is not SourceRoomLabelRecord:
+            continue
+        face_id = str(label.face_id or "").strip()
+        if not face_id or face_id in conflicted:
+            continue
+        previous = owned.get(face_id)
+        if previous is not None and previous != label:
+            owned.pop(face_id, None)
+            conflicted.add(face_id)
+        elif previous is None:
+            owned[face_id] = label
+    return owned
+
+
+def _verified_source_room_label_for_face(
+    record: object,
+    label: Optional[SourceRoomLabelRecord],
+) -> Optional[SourceRoomLabelRecord]:
+    """At canonical publication, prove the semantic label owns this exact face.
+
+    Face id alone is insufficient: a stale or unrelated scope must not
+    relabel valid source geometry. Physical rooms remain publishable unlabeled.
+    """
+    if type(label) is not SourceRoomLabelRecord:
+        return None
+    if label.status is not EvidenceResolutionStatus.CORROBORATED:
+        return None
+    if any(
+        str(getattr(record, attr, "") or "") != str(getattr(label, attr, "") or "")
+        for attr in (
+            "document_id", "revision_id", "source_sha256", "snapshot_id",
+            "page_id", "decision_scope_id", "face_id",
+        )
+    ):
+        return None
+    if str(getattr(record, "record_id", "") or "") != str(label.source_room_face_record_id or ""):
+        return None
+    if not str(label.record_id or "").strip() or not label.observation_ids or not label.word_evidence:
+        return None
+    return label
+
+
 def _room_object_from_record(
     record,
     *,
@@ -339,6 +393,7 @@ def _room_object_from_record(
             )
 
     physical_room_id = _physical_room_id(record, viewport_id=viewport_id)
+    room_label_record = _verified_source_room_label_for_face(record, room_label_record)
     label_evidence_ids: tuple[str, ...] = ()
     label_reason_codes: tuple[str, ...] = ()
     if room_label_record is not None:
@@ -543,9 +598,9 @@ def compose_live_canonical_rooms(
                         decision_scope_id=selector.decision_scope_id,
                     )
                 )
-                label_records_by_face = {
-                    str(label.face_id): label for label in label_result.records
-                }
+                label_records_by_face = _unique_source_room_labels_by_face(
+                    label_result.records
+                )
 
             composite_records = ()
             if label_result is not None and label_result.split_face_candidates:
@@ -690,10 +745,9 @@ def compose_live_canonical_rooms(
                                 decision_scope_id=wall_selector.decision_scope_id,
                             )
                         )
-                        label_records_by_face = {
-                            str(label.face_id): label
-                            for label in label_result.records
-                        }
+                        label_records_by_face = _unique_source_room_labels_by_face(
+                            label_result.records
+                        )
 
                     composite_records = ()
                     if label_result is not None and label_result.split_face_candidates:

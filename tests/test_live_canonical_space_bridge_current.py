@@ -16,6 +16,11 @@ from pb_live_canonical_space_bridge import (
     compose_live_canonical_spaces,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_room_label_authority import (
+    SourceRoomLabelRecord,
+    SourceRoomLabelWordEvidence,
+    _RECORD_SEAL,
+)
 
 
 def _source_record():
@@ -40,13 +45,33 @@ def _source_record():
 
 
 def _label_record():
-    word = SimpleNamespace(authority_record_id="raster-proof-1")
-    return SimpleNamespace(
-        label="OFFICE",
+    face = _source_record()
+    word = SourceRoomLabelWordEvidence(
+        observation_id="word-observation-1",
+        receipt_id="raster-proof-1",
+        trusted_text="OFFICE",
+        authority_kind="raster_text_corroboration",
+        authority_record_id="raster-proof-1",
+        geometry=(11.0, 12.0, 18.0, 16.0),
+        word_no=0,
+    )
+    return SourceRoomLabelRecord(
         record_id="source-room-label-record",
+        document_id=face.document_id,
+        revision_id=face.revision_id,
+        source_sha256=face.source_sha256,
+        snapshot_id=face.snapshot_id,
+        page_id=face.page_id,
+        decision_scope_id=face.decision_scope_id,
+        face_id=face.face_id,
+        source_room_face_record_id=face.record_id,
+        label="OFFICE",
         observation_ids=("word-observation-1",),
         word_evidence=(word,),
+        source_bbox=word.geometry,
+        status=EvidenceResolutionStatus.CORROBORATED,
         reason_codes=("source_room_label_scope_resolved",),
+        _seal=_RECORD_SEAL,
     )
 
 
