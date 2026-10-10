@@ -294,3 +294,101 @@ def test_opening_count_sealing_rejects_missing_member_evidence(tmp_path) -> None
             workspace_id=7,
             project_id="source-project",
         )
+
+@pytest.mark.parametrize("extra_member", ("", "duplicate"))
+def test_count_bridge_refuses_malformed_representative_universe(extra_member):
+    """A 'complete' count may not omit blank or duplicated source members."""
+    from pb_live_opening_count_quantity_publication import (
+        publish_live_authenticated_opening_count_quantities,
+    )
+    from pb_live_wall_opening_authority_composition import (
+        compose_live_wall_opening_authority,
+    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    source = SourceVisibilityProducer(
+        producer_method="count-representative-universe-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="count-representative-universe-test",
+        source_bytes=_floor_plan_with_schedule_quantity(quantity=1),
+        source_locator="memory://count-representative-universe-test.pdf",
+    )
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    original = composition.semantic_enumeration_result
+    assert original.record is not None
+    reps = original.record.representative_observation_ids
+    assert reps
+    extra = reps[0] if extra_member == "duplicate" else ""
+    malformed = replace(
+        original,
+        record=replace(
+            original.record,
+            representative_observation_ids=(*reps, extra),
+        ),
+    )
+    changed = replace(composition, semantic_enumeration_result=malformed)
+    quantities = publish_live_authenticated_opening_count_quantities(
+        source_visibility_producer=source,
+        wall_opening_composition=changed,
+    )
+    assert quantities == ()
+
+def test_count_bridge_rejects_two_representatives_for_same_opening():
+    """Source identity collision must not overwrite a schedule binding."""
+    from pb_live_opening_count_quantity_publication import (
+        publish_live_authenticated_opening_count_quantities,
+    )
+    from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+    from pb_source_visibility_authority import SourceVisibilityProducer
+    from pb_source_observation_authority import ObservationSelector
+
+    source = SourceVisibilityProducer(
+        producer_method="count-binding-collision-test", producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="count-binding-collision-test",
+        source_bytes=_floor_plan_with_schedule_quantity(quantity=1),
+        source_locator="memory://count-binding-collision-test.pdf",
+    )
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    result = composition.semantic_enumeration_result
+    assert result.record is not None
+    original_id = result.record.representative_observation_ids[0]
+    original_selector = ObservationSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        observation_id=original_id,
+    )
+    same_opening = composition.physical_opening_authority.prove_existence(original_selector)
+    assert same_opening.existence_record is not None
+    duplicated = replace(
+        composition,
+        semantic_enumeration_result=replace(
+            result,
+            record=replace(
+                result.record,
+                representative_observation_ids=(original_id, "second-observation"),
+            ),
+        ),
+    )
+    with patch.object(
+        composition.physical_opening_authority,
+        "prove_existence",
+        return_value=same_opening,
+    ):
+        assert publish_live_authenticated_opening_count_quantities(
+            source_visibility_producer=source,
+            wall_opening_composition=duplicated,
+        ) == ()
