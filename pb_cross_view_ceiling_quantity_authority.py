@@ -78,6 +78,22 @@ def _quantity_value(quantity: QuantityEvidence) -> Optional[float]:
     return value
 
 
+def _source_figured_dimension_ids(metadata: Mapping) -> Optional[tuple[str, ...]]:
+    """Require actual source-ID tokens; strings are NOT collections of IDs.
+
+    The upstream documented room area must own two distinct native figured
+    receipts. A bare string such as "HV" must never count as two observations.
+    Non-string items are not source observation identities.
+    """
+    raw = metadata.get("figured_dimension_ids")
+    if not isinstance(raw, (tuple, list)):
+        return None
+    if not all(isinstance(item, str) for item in raw):
+        return None
+    ids = tuple(sorted({_clean(item) for item in raw if _clean(item)}))
+    return ids if len(ids) == 2 else None
+
+
 def _valid_room_area_quantity(
     room: LiveCanonicalRoomObject,
     *,
@@ -104,14 +120,7 @@ def _valid_room_area_quantity(
     quantity_meta = (
         quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     )
-    figured_ids = tuple(
-        {
-            _clean(item)
-            for item in (quantity_meta.get("figured_dimension_ids") or ())
-            if _clean(item)
-        }
-    )
-    if len(figured_ids) != 2:
+    if _source_figured_dimension_ids(quantity_meta) is None:
         return False
 
     # Some documented dimension bridges carry explicit physical-room ownership
@@ -326,15 +335,7 @@ def publish_cross_view_ceiling_quantities(
             else {}
         )
         entity_meta = entity.metadata if isinstance(entity.metadata, Mapping) else {}
-        figured_dimension_ids = tuple(
-            sorted(
-                {
-                    _clean(item)
-                    for item in (area_meta.get("figured_dimension_ids") or ())
-                    if _clean(item)
-                }
-            )
-        )
+        figured_dimension_ids = _source_figured_dimension_ids(area_meta)
         source_room_index_id = _clean(entity_meta.get("source_room_index_id"))
         area_viewport_id = _clean(area_meta.get("viewport_id"))
         try:
@@ -346,7 +347,7 @@ def publish_cross_view_ceiling_quantities(
         if (
             not room.geometry_complete
             or len(room.polygon_pdf_pts) < 3
-            or len(figured_dimension_ids) != 2
+            or figured_dimension_ids is None
             or not source_room_index_id
             or not area_viewport_id
             or not _clean(room.canonical_room_id)
