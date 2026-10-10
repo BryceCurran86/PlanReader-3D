@@ -1,0 +1,27 @@
+name: TEST GPT2 Native Split Material Candidates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_material_semantic_authority.py"
+      - "tests/test_gpt2_native_split_material_candidate.py"
+      - ".github/workflows/test-gpt2-native-split-material-candidate.yml"
+  workflow_dispatch:
+
+jobs:
+  material-candidate-semantics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source/frozen integrity and focused parser tests
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_native_split_material_candidate.py tests/test_source_material_semantic_authority_v1.py
