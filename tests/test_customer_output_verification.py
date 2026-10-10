@@ -253,3 +253,15 @@ def test_manual_row_without_projection_identity_remains_outside_automated_biject
     report = verify_sealed_customer_output(sealed, [*rows, manual])
     assert report.verified_quantity_ids == ("qty-1", "qty-2")
     assert report.customer_row_count == 2
+
+
+def test_orphaned_auto_notes_cannot_hide_even_if_source_reference_is_erased() -> None:
+    sealed, rows = sealed_and_rows()
+    orphan = dict(rows[0])
+    orphan.pop("quantity_id")
+    orphan.pop("commercial_projection_provenance", None)
+    orphan["source_reference"] = "manual note"
+    # Persisted adapter-owned notes remain a machine-readable source marker.
+    assert isinstance(orphan["notes"], str)
+    with pytest.raises(CustomerOutputVerificationError, match="missing quantity identity"):
+        verify_sealed_customer_output(sealed, [*rows, orphan])
