@@ -416,3 +416,32 @@ def test_realistic_large_json_integer_still_parses_exactly() -> None:
     assert _parse_evidence_json('{"source_numeric_id":12345678901234567890}') == {
         "source_numeric_id": 12345678901234567890
     }
+
+
+@pytest.mark.parametrize("bad_value", (10 ** 400, -(10 ** 400)))
+def test_direct_produced_sealed_parity_huge_integer_abstains_without_crash(
+    bad_value: int,
+) -> None:
+    from types import SimpleNamespace
+    from scripts.report_full_plan_v2_readiness import produced_sealed_parity_blockers
+
+    row = SimpleNamespace(
+        quantity_id="source-authenticated-q",
+        abstained=False,
+        lineage_ok=True,
+        unit="m2",
+        value=12.0,
+        object_identity_refs=("physical-source-1",),
+    )
+    produced = [{
+        "quantity_id": "source-authenticated-q",
+        "abstained": False,
+        "lineage_ok": True,
+        "unit": "m2",
+        "value": bad_value,
+        "object_refs": ["physical-source-1"],
+        "trade_category": "opening",
+    }]
+    assert produced_sealed_parity_blockers(produced, (row,)) == [
+        "projection_value_mismatch:source-authenticated-q"
+    ]
