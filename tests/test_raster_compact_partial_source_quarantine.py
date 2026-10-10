@@ -181,3 +181,26 @@ def test_t_endpoint_cannot_alias_parallel_line_or_invent_geometry():
     original=repr((compact,source))
     assert not endpoint_on_original(compact,(source,),dpi=300,source_dpi=144)
     assert repr((compact,source))==original
+
+
+
+def test_source_end_t_guard_is_symmetric_under_rotation_and_source_reversal():
+    # Same physical T after turning both independent source axes 90 degrees:
+    # original source is a horizontal through-line; compact vertical
+    # terminates on its interior. Endpoint ordering cannot change abstention.
+    compact=SimpleNamespace(
+        pixel_geometry=(60.,50.,60.,90.),orientation="vertical"
+    )
+    line=SimpleNamespace(
+        geometry_pt=(20*72/300,50*72/300,100*72/300,50*72/300),
+        orientation="horizontal",
+    )
+    assert endpoint_on_original(compact,(line,),dpi=300,source_dpi=144)
+    reverse=SimpleNamespace(geometry_pt=(
+        line.geometry_pt[2],line.geometry_pt[3],
+        line.geometry_pt[0],line.geometry_pt[1]),
+        orientation="horizontal",
+    )
+    assert endpoint_on_original(compact,(reverse,),dpi=300,source_dpi=144)
+    compact.pixel_geometry=(60.,90.,60.,50.)
+    assert endpoint_on_original(compact,(reverse,),dpi=300,source_dpi=144)
