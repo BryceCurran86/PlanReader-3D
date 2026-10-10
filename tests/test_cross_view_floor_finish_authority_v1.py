@@ -829,7 +829,7 @@ def test_shared_floor_finish_occurrence_quarantines_all_competing_floor_owners(
     assert unresolved == tuple(sorted((
         authentic.canonical_floor_id, competing.canonical_floor_id,
     )))
-    assert authentic.quantity not in tuple(row.quantity for row in retained)
+    assert retained[0].occurrence_record_id == "separate-producer-owned-occurrence"
 
 
 def test_identical_floor_finish_source_ownership_is_not_a_conflict(
