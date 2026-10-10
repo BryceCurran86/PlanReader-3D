@@ -53,6 +53,25 @@ def _unique_records(records, label):
         if not isinstance(record, dict):
             raise ValueError(f"{label}: invalid wall record")
         key = _parents(record)
+        fragments = record.get("source_edge_fragments") or ()
+        if not isinstance(fragments, (list, tuple)):
+            raise ValueError(f"{label}: invalid source-edge inventory")
+        seen_edges, lineage = set(), set()
+        for fragment in fragments:
+            if not isinstance(fragment, dict):
+                raise ValueError(f"{label}: malformed source-edge fragment")
+            edge_id = fragment.get("edge_id")
+            parents = fragment.get("source_primitive_ids")
+            if (not isinstance(edge_id, str) or not edge_id or edge_id in seen_edges
+                    or not isinstance(parents, (list, tuple)) or not parents
+                    or any(not isinstance(p, str) or not p for p in parents)
+                    or len(set(parents)) != len(parents)
+                    or not set(parents) <= set(key)):
+                raise ValueError(f"{label}: duplicate edge or foreign/unknown source lineage")
+            seen_edges.add(edge_id)
+            lineage.update(parents)
+        if fragments and lineage != set(key):
+            raise ValueError(f"{label}: incomplete source-edge ancestry")
         indexed.setdefault(key, []).append(record)
     return indexed
 
