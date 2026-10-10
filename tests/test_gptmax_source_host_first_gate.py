@@ -47,6 +47,22 @@ def report():
             "snapshot_id": "source_snapshot_from_revision",
             "records": [first, second],
         }],
+        "semantic_inventory": {
+            "status": "conflict",
+            "reason_codes": ["semantic_opening_universe_exhaustiveness_unproven"],
+            "record": {
+                "document_id": "producer-source-document",
+                "revision_id": "source_revision_from_pdf",
+                "snapshot_id": "source_snapshot_from_revision",
+                "source_sha256": SHA,
+                "page_ids": ["3"],
+                "physical_opening_universe_complete": False,
+                "structural_enumeration_complete": False,
+                "representative_observation_ids": ["observation-one", "observation-two"],
+                "residual_visible_observation_ids": ["unresolved-raster-source"],
+                "conflict_observation_ids": ["conflicting-raster-source"],
+            },
+        },
         "opening_bindings": [
             {
                 "page_id": "3", "opening_identity_id": "real-opening-1",
@@ -137,6 +153,7 @@ def test_original_producer_host_status_is_never_inferred_from_missing_records():
     sample = report()
     sample["opening_bindings"].clear()
     sample["host_frames"].clear()
+    sample["semantic_inventory"]["record"]["representative_observation_ids"] = []
     sample["summary"] = {
         "physical_existence_claims": 0, "host_bindings": 0, "host_frames": 0
     }
@@ -235,3 +252,33 @@ def test_source_first_gate_refuses_unproven_page_decode_receipt(mutate):
     mutate(source)
     with pytest.raises(ValueError, match="not all decoded"):
         source_first_gate_census(source, expected_source_sha=SHA)
+
+
+def test_incomplete_semantic_opening_universe_never_becomes_source_count():
+    sample = report()
+    census = source_first_gate_census(sample)
+    semantic = census["semantic_opening_universe_source_census"]
+    assert semantic["status"] == "conflict"
+    assert semantic["physical_opening_universe_complete"] is False
+    assert semantic["structural_enumeration_complete"] is False
+    assert semantic["representative_source_opening_count"] == 2
+    assert semantic["residual_source_observation_count"] == 1
+    assert semantic["conflict_source_observation_count"] == 1
+    assert not census["opening_count_publication_allowed"]
+    assert census["benchmark_accuracy"] is None
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda x: x["semantic_inventory"]["record"].update(snapshot_id="foreign"),
+    lambda x: x["semantic_inventory"]["record"].update(source_sha256="b"*64),
+    lambda x: x["semantic_inventory"]["record"].update(page_ids=["99"]),
+    lambda x: x["semantic_inventory"]["record"].update(
+        representative_observation_ids=["only-one"]),
+    lambda x: x["semantic_inventory"]["record"].update(
+        representative_observation_ids=["duplicate", "duplicate"]),
+])
+def test_semantic_universe_source_mismatch_cannot_authorise_count(mutate):
+    sample = report()
+    mutate(sample)
+    with pytest.raises(ValueError, match="semantic"):
+        source_first_gate_census(sample)
