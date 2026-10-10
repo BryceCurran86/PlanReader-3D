@@ -398,12 +398,24 @@ def generate_project_handoff(
             )
             if _clean(ceiling.source_room_index_id)
         }
-        if new_room_index_ids:
+        # Two different room-index IDs can describe the same authenticated
+        # room-area source after cross-view remapping. A single upstream area
+        # receipt must never mint duplicate legacy + RCP ceiling quantities.
+        new_room_area_quantity_ids = {
+            _clean(ceiling.room_area_quantity_id)
+            for ceiling in tuple(
+                getattr(claim, "canonical_ceilings", ()) or ()
+            )
+            if _clean(getattr(ceiling, "room_area_quantity_id", ""))
+        }
+        if new_room_index_ids or new_room_area_quantity_ids:
             retained_legacy_ceilings = tuple(
                 ceiling
                 for ceiling in ceiling_result.canonical_ceilings
                 if _clean(ceiling.source_room_index_id)
                 not in new_room_index_ids
+                and _clean(getattr(ceiling, "room_area_quantity_id", ""))
+                not in new_room_area_quantity_ids
             )
             retained_shadow_ids = {
                 _clean(ceiling.ceiling_quantity_id)
