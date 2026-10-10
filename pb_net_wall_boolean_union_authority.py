@@ -670,8 +670,6 @@ class NetWallBooleanUnionProducer:
                     or deduction.decision_scope_id != selector.decision_scope_id
                     or deduction.opening_identity_id != opening_id
                     or deduction.target_scope_id != selector.trade_scope_id
-                    or deduction.physical_void_record_id != void_record.record_id
-                    or deduction.opening_universe_record_id != universe_record.record_id
                 ):
                     return self._store(
                         selector,
