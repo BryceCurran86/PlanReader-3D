@@ -1,0 +1,42 @@
+name: DIAG GPT2 Maryborough Source Figured Dimensions
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt2_maryborough_dimension_first_witness.py"
+      - ".github/workflows/diag-gpt2-maryborough-dimension-first-witness.yml"
+      - "tests/test_gpt2_maryborough_dimension_first_witness.py"
+  workflow_dispatch:
+
+jobs:
+  real-maryborough-dimension-witnesses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Unit tests
+        run: PYTHONPATH=. pytest -q tests/test_gpt2_maryborough_dimension_first_witness.py
+      - name: Source-native room dimension first witness audit
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-maryborough-dimension-first-witness
+          PYTHONPATH=. python -u tools/diag_gpt2_maryborough_dimension_first_witness.py \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --output artifacts/gpt2-maryborough-dimension-first-witness/source_ledger.json \
+            2>&1 | tee artifacts/gpt2-maryborough-dimension-first-witness/run.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-dimension-first-witness
+          path: artifacts/gpt2-maryborough-dimension-first-witness
+          retention-days: 7
