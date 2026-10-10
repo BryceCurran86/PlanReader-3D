@@ -193,6 +193,23 @@ jobs:
                   "first_reasons":list(output.reason_codes),
                   "source_owned_label_count":len(rows),
                   "records":rows,
+                  # A producer-authenticated whole line may span multiple
+                  # different physical faces. Its receipt is a SPLIT candidate,
+                  # never authority to collapse or relabel those source faces.
+                  "source_split_face_candidates":[{
+                      "native_label":candidate.label,
+                      "split_candidate_id":candidate.record_id,
+                      "word_face_ids":list(candidate.word_face_ids),
+                      "source_room_face_record_ids":list(
+                          candidate.source_room_face_record_ids
+                      ),
+                      "source_word_observation_ids":list(
+                          candidate.observation_ids
+                      ),
+                      "source_bbox_pdf_pts":candidate.source_bbox,
+                      "first_gate":"source_label_words_have_distinct_face_owners",
+                      "canonical_room_published":False,
+                  } for candidate in output.split_face_candidates],
               })
           report={
               "source_sha256":sha,
@@ -258,6 +275,11 @@ jobs:
               "already_authenticated_room_labels":sorted(set(
                   r["room_label"] for scope in scoped_labels for r in scope["records"]
               )),
+              "producer_sealed_split_face_candidates":[
+                  candidate for scope in scoped_labels
+                  for candidate in scope["source_split_face_candidates"]
+                  if candidate["native_label"] in targets
+              ],
               "remaining_native_label_face_candidates":report_rows,
               "room_area_quantity_publications":0,
               "status":"NATIVE_SPATIAL_CANDIDATES_ONLY_NO_SOURCE_ROOM_LABEL_PUBLICATION",
