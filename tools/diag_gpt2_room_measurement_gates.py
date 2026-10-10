@@ -77,6 +77,8 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         linked_receipts = published_area_by_id.get(floor_quantity_id, [])
         linked_metadata = dict(getattr(linked_receipts[0], "metadata", {}) or {}) if len(linked_receipts) == 1 else {}
         declared_face = _clean(linked_metadata.get("source_room_face_record_id"))
+        declared_page = _clean(linked_metadata.get("page_no"))
+        declared_snapshot = _clean(linked_metadata.get("room_snapshot_id"))
         firm_documented_receipt = (
             numeric_metric
             and bool(floor_quantity_id)
@@ -87,6 +89,8 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
             }
             and len(tuple(getattr(linked_receipts[0], "input_entity_ids", ()) or ())) == 1
             and (not declared_face or declared_face == _clean(getattr(floor, "source_room_face_record_id", "")))
+            and (not declared_page or declared_page == _clean(getattr(floor, "page_id", "")))
+            and (not declared_snapshot or declared_snapshot == _clean(getattr(floor, "snapshot_id", "")))
             and not tuple(getattr(linked_receipts[0], "blocking_reasons", ()) or ())
             and not bool(getattr(linked_receipts[0], "abstained", True))
             and _clean(getattr(linked_receipts[0], "status", "")).casefold() == "firm"
