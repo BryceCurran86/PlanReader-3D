@@ -152,3 +152,40 @@ def test_bad_original_source_page_rejected_before_processing(page):
             data, page_id=page,
             expected_source_sha=hashlib.sha256(data).hexdigest(),
         )
+
+
+def test_w2_source_edge_parent_not_in_w4_identity_is_quarantined_as_contradiction():
+    w4 = record(
+        "w4-physical-id", ["legitimate-parent"],
+        source_edges=(("split-positive", ["legitimate-parent"]),
+                      ("split-foreign", ["foreign-parent"])),
+    )
+    report = nonpublishing_raster_source_w4_membership(
+        [w4], {
+            "legitimate-parent": (-1.,0.,1.,0.),
+            "foreign-parent": (-1.,0.,1.,0.),
+        }, opening(), page_id="3"
+    )
+    by_parent = {
+        row["source_primitive_id"]: row
+        for row in report["diagnostic_local_raster_lines"]
+    }
+    assert by_parent["legitimate-parent"][
+        "actual_w2_source_edges_by_w4_candidate"
+    ] == [{"wall_candidate_id":"w4-physical-id",
+           "source_edge_id":"split-positive"}]
+    assert by_parent["foreign-parent"][
+        "exact_positive_ancestry_w4_candidate_ids"
+    ] == []
+    assert by_parent["foreign-parent"][
+        "actual_w2_source_edges_by_w4_candidate"
+    ] == []
+    assert report["source_edge_parent_identity_contradiction_count"] == 1
+    assert report["source_edge_parent_identity_contradictions"] == [{
+        "wall_candidate_id": "w4-physical-id",
+        "source_edge_id": "split-foreign",
+        "unowned_source_parent_id": "foreign-parent",
+    }]
+    assert not report["local_host_contact_proven"]
+    assert not report["host_publication_allowed"]
+    assert not report["metric_quantity_publication_allowed"]
