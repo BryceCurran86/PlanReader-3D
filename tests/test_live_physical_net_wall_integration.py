@@ -528,3 +528,65 @@ def test_room_area_support_pages_do_not_expand_topology_scope(
     assert result.canonical_room_source_pages == (1,)
     assert all(room.page_id == "1" for room in result.canonical_rooms)
     assert all(floor.page_id == "1" for floor in result.canonical_floors)
+
+
+def test_scale_viewport_fallback_reuses_checked_ownership_scope(
+    tmp_path, monkeypatch,
+) -> None:
+    """A missing authenticated viewport is checked once per room scope.
+
+    Returning viewport-required from the physical scale gate exercises the
+    fallback without manufacturing a calibration or a floor-plan viewport.
+    """
+    from dataclasses import replace
+    from pb_physical_scale_authority import (
+        PhysicalScaleProducer,
+        PHYSICAL_SCALE_VIEWPORT_REQUIRED,
+    )
+
+    pdf = tmp_path / "cross-view-room-area-viewport-reuse.pdf"
+    pdf.write_bytes(_two_room_cross_view_area_pdf())
+
+    lookup_calls = []
+    scale_fallbacks = []
+    real_publish = PhysicalScaleProducer.publish_scope
+
+    def missing_unique_viewport(*, source, scope_rooms, page_id, snapshot_id):
+        lookup_calls.append((page_id, snapshot_id, tuple(
+            room.physical_room_id for room in scope_rooms
+        )))
+        return None
+
+    def require_viewport_scale(self, selector):
+        result = real_publish(self, selector)
+        if selector.viewport_id is None:
+            scale_fallbacks.append(selector.page_id)
+            return replace(
+                result,
+                status=EvidenceResolutionStatus.ABSTAINED,
+                reason_codes=(PHYSICAL_SCALE_VIEWPORT_REQUIRED,),
+                evidence=None,
+            )
+        return result
+
+    monkeypatch.setattr(
+        live_integration,
+        "_unique_authenticated_containing_floor_plan_viewport",
+        missing_unique_viewport,
+    )
+    monkeypatch.setattr(
+        PhysicalScaleProducer, "publish_scope", require_viewport_scale,
+    )
+    result = collect_live_physical_net_wall_claim(
+        pdf, pages=(0,), room_area_support_pages=(1,),
+    )
+
+    assert scale_fallbacks, "fixture must exercise viewport-required fallback"
+    assert len(lookup_calls) == 1
+    assert len({call[:2] for call in lookup_calls}) == len(lookup_calls)
+    assert len(result.canonical_rooms) == 2
+    # This performance change must not erase source-owned figured area.
+    assert any(
+        quantity.value == 8.64 and not quantity.abstained
+        for quantity in result.room_area_quantity_evidence
+    )
