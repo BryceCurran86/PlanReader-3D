@@ -10,6 +10,7 @@ import math
 from collections.abc import Mapping
 from types import MappingProxyType
 
+from pb_geometry_takeoff_model import AuthorityStatus
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
@@ -51,6 +52,11 @@ def build_live_floor_finish_area_source_traces(
         floors_by_id[floor_id] = floor
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    # Defensive replay boundary: producer-owned source occurrence and physical
+    # floor identity are one-to-one. Different QuantityEvidence IDs cannot
+    # mint independent customer rows from the same upstream physical fact.
+    quantity_owner_by_floor: dict[str, str] = {}
+    floor_owner_by_occurrence: dict[str, str] = {}
     for quantity in claim.floor_finish_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -62,6 +68,11 @@ def build_live_floor_finish_area_source_traces(
             )
         if quantity.abstained or quantity.value is None:
             continue
+        if quantity.unit != "m2" or quantity.status != AuthorityStatus.FIRM.value:
+            raise SourceClosedRunConflictError(
+                "floor-finish quantity must be FIRM m2: "
+                f"{quantity.quantity_id}"
+            )
         if len(quantity.input_entity_ids) != 1:
             raise SourceClosedRunConflictError(
                 "floor-finish quantity must own exactly one canonical floor: "
@@ -126,6 +137,41 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish revision mismatch: {quantity.quantity_id}"
             )
+
+        if _clean(metadata.get("source_room_face_record_id")) != _clean(
+            floor.source_room_face_record_id
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish source room face mismatch: "
+                f"{quantity.quantity_id}"
+            )
+        if _clean(metadata.get("page_no")) != _clean(floor.page_id):
+            raise SourceClosedRunConflictError(
+                "floor-finish source page mismatch: "
+                f"{quantity.quantity_id}"
+            )
+
+        occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
+        definition_id = _clean(metadata.get("finish_definition_record_id"))
+        if not occurrence_id or not definition_id:
+            raise SourceClosedRunConflictError(
+                "floor-finish source occurrence/definition receipt is missing: "
+                f"{quantity.quantity_id}"
+            )
+        prior_floor = floor_owner_by_occurrence.get(occurrence_id)
+        if prior_floor is not None and prior_floor != floor_id:
+            raise SourceClosedRunConflictError(
+                "floor-finish source occurrence has competing physical floors: "
+                f"{occurrence_id}"
+            )
+        prior_quantity = quantity_owner_by_floor.get(floor_id)
+        if prior_quantity is not None and prior_quantity != quantity.quantity_id:
+            raise SourceClosedRunConflictError(
+                "canonical floor has competing finish area quantities: "
+                f"{floor_id}"
+            )
+        floor_owner_by_occurrence[occurrence_id] = floor_id
+        quantity_owner_by_floor[floor_id] = quantity.quantity_id
 
         semantic_finish = _clean(metadata.get("semantic_finish")).lower()
         if (
