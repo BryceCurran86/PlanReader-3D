@@ -651,3 +651,16 @@ def test_modestly_nested_source_json_still_parses_without_value_changes() -> Non
         assert len(actual) == 1
         actual = actual[0]
     assert actual == {"source_qty": 13.270425}
+
+
+def test_quoted_and_escaped_brackets_do_not_count_as_json_structure() -> None:
+    import json
+    from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+
+    # The guard must ignore source notes containing drawings, escaped quote
+    # text and literal braces instead of mistaking them for nested JSON.
+    human_note = ("[{" * 1000) + ' witness: "quoted" \\ geometry' + ("}]" * 1000)
+    encoded = json.dumps({"source_note": human_note, "value": 13.270425})
+    assert _parse_evidence_json(encoded) == {
+        "source_note": human_note, "value": 13.270425
+    }
