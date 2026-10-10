@@ -16,8 +16,25 @@ from pathlib import Path
 import fitz
 
 
+def _unique_manifest_keys(pairs: list[tuple[str, object]]) -> dict:
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate source manifest key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json(token: str) -> None:
+    raise ValueError(f"nonfinite source manifest value: {token}")
+
+
 def check_source_pdf_package(manifest_path: Path, source_root: Path) -> dict:
-    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    manifest = json.loads(
+        Path(manifest_path).read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_manifest_keys,
+        parse_constant=_reject_nonfinite_json,
+    )
     if not isinstance(manifest, dict):
         raise ValueError("source manifest must be an object")
     documents = manifest.get("source_documents")
