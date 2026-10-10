@@ -20,6 +20,8 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Install OCR engine for real-source text evidence
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
       - name: Prove source-owned floor plan wall and room faces
