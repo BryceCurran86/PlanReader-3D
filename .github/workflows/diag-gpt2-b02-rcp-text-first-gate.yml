@@ -1,0 +1,123 @@
+name: DIAG GPT2 B02 RCP Text First Integrity Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt2-b02-rcp-text-first-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  source-rcp-text-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact source-owned material occurrence first failing text receipt
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-rcp-text-first-gate
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-rcp-text-first-gate/ledger.json
+          import hashlib
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          import fitz
+
+          import pb_source_material_semantic_authority as material
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              is_authoritative_derived_viewport,
+              validate_non_overlapping_viewports,
+          )
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          assert pdf.page_count==31
+          page=pdf.load_page(8)
+          viewports=segment_page_viewports(page,page_number=9)
+          assert validate_non_overlapping_viewports(viewports)
+          owned=[
+              v for v in viewports
+              if v.view_type=="reflected_ceiling_plan" and
+              v.bounding_box is not None and
+              (v.status=="resolved" or is_authoritative_derived_viewport(v))
+          ]
+          assert len(owned)==1, "requires unique authenticated RCP viewport"
+          viewport=owned[0]
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-rcp-source-text-first-gate",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt2-rcp-source-first-gate",
+              source_bytes=payload,
+              source_locator="memory://maryborough-rcp-integrity.pdf",
+              page_ids=("9",),
+          )
+          words=material._trusted_words_by_page(source,published).get("9",())
+          assert words, "real page9 source text unavailable"
+          inside=[]
+          crossing=[]
+          for word in words:
+              if not material._bbox_intersects(word.bbox,viewport.bounding_box):
+                  continue
+              row={
+                  "source_observation_id":word.observation_id,
+                  "native_text":word.text,
+                  "page_id":word.page_id,
+                  "source_partition_id":word.source_partition_id,
+                  "block_no":word.block_no,
+                  "line_no":word.line_no,
+                  "word_no":word.word_no,
+                  "native_bbox_pdf_pts":word.bbox,
+                  "trusted":word.trusted,
+                  "first_integrity_reasons":list(word.reason_codes),
+              }
+              if material._bbox_fully_inside(word.bbox,viewport.bounding_box):
+                  inside.append(row)
+              else:
+                  crossing.append(row)
+
+          blockers=Counter(
+              reason for word in inside if not word["trusted"]
+              for reason in word["first_integrity_reasons"]
+          )
+          all_untrusted=[x for x in inside if not x["trusted"]]
+          report={
+              "source_sha256":sha,
+              "page":9,
+              "physical_rcp_viewport_id":viewport.view_id,
+              "source_rcp_native_bbox":viewport.bounding_box,
+              "source_page_word_count":len(words),
+              "rcp_words_fully_inside":len(inside),
+              "rcp_words_untrusted":len(all_untrusted),
+              "rcp_words_crossing_boundary":len(crossing),
+              "reason_frequency":dict(sorted(blockers.items())),
+              "first_40_untrusted_word_receipts":all_untrusted[:40],
+              "all_boundary_crossing_word_receipts":crossing,
+              "stage":"TEXT_INTEGRITY_CANDIDATE_DIAGNOSTIC_ONLY",
+              "no_material_occurrence_published":True,
+          }
+          pdf.close()
+          assert report["rcp_words_untrusted"] or report["rcp_words_crossing_boundary"], (
+              "Expected existing fail-closed source first gate; do not silently waive it"
+          )
+          print("GPT2_B02_RCP_TEXT_FIRST_GATE",json.dumps(report,sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b02-rcp-source-text-first-gate
+          path: artifacts/gpt2-rcp-text-first-gate
+          retention-days: 7
