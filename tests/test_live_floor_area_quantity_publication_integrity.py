@@ -451,6 +451,7 @@ def test_unrelated_unmeasured_floor_does_not_poison_firm_source_area() -> None:
         canonical_floor_id="other-canonical-floor",
         physical_floor_surface_id="other-physical-floor",
         room_entity_id="other-room",
+        source_room_face_record_id="other-source-face",
         metric_area_quantity_id=None,
         metric_area_m2=None,
         metric_area_authority=None,
@@ -551,3 +552,27 @@ def test_genuinely_separate_rooms_and_faces_preserve_two_firm_floor_areas() -> N
     assert results == publish_live_floor_area_quantities(
         replace(claim, canonical_floors=(second, _floor()))
     )
+
+
+def test_unmeasured_other_room_using_same_source_face_quarantines_firm() -> None:
+    source = _source_area()
+    authentic = _floor()
+    unresolved = replace(
+        authentic,
+        canonical_floor_id="unmeasured-second-floor",
+        physical_floor_surface_id="unmeasured-second-physical",
+        room_entity_id="other-canonical-room",
+        # Source-face ID intentionally remains authentic.source_room_face_record_id.
+        metric_area_quantity_id=None,
+        metric_area_m2=None,
+        metric_area_authority=None,
+        physical_floor_surface_identity_resolved=False,
+    )
+    claim = replace(
+        _claim_with(source),
+        canonical_floors=(authentic, unresolved),
+    )
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_floor_area_quantities(
+        replace(claim, canonical_floors=(unresolved, authentic))
+    ) == ()
