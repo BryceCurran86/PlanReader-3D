@@ -338,6 +338,7 @@ def test_external_wall_rejects_foreign_opening_universe_provenance():
         assert result.status is EvidenceResolutionStatus.CONFLICT
         assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH in result.reason_codes
         assert result.quantity_evidence is None
+        assert result.canonical_walls == ()
 
 def test_external_wall_requires_full_universe_result_completeness():
     """A complete-looking record cannot override unresolved producer verdicts."""
