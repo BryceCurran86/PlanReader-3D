@@ -445,3 +445,53 @@ def test_direct_produced_sealed_parity_huge_integer_abstains_without_crash(
     assert produced_sealed_parity_blockers(produced, (row,)) == [
         "projection_value_mismatch:source-authenticated-q"
     ]
+
+
+@pytest.mark.parametrize("failure", (
+    FileNotFoundError("sealed file concurrently removed"),
+    UnicodeError("sealed file concurrently corrupted"),
+    ValueError("sealed payload replaced with malformed JSON"),
+))
+def test_concurrent_seal_replacement_is_local_parity_blocker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    from scripts import report_full_plan_v2_readiness as module
+
+    sealed_root = tmp_path / "sealed"
+    path = sealed_root / "au_qld_lot16_power"
+    path.mkdir(parents=True)
+    # This internal parity pass follows a successful independent seal proof.
+    # It must handle a second-read race, not fabricate complete source parity.
+    (path / "sealed_run.json").write_text("{}", encoding="utf-8")
+
+    def changed_seal(_path: Path) -> dict:
+        raise failure
+
+    monkeypatch.setattr(module, "_object", changed_seal)
+    assert module._sealed_projection_proof(
+        sealed_root, "au_qld_lot16_power", [], True
+    ) == (False, ["sealed_run_changed_during_parity"])
+
+
+def test_replaced_seal_cannot_switch_project_during_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    root = tmp_path / "sealed"
+    target = root / "au_qld_lot16_power"
+    target.mkdir(parents=True)
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict",
+        lambda _payload: SimpleNamespace(
+            project_id="au_qld_maryborough_service_station", quantities=()
+        ),
+    )
+    assert module._sealed_projection_proof(
+        root, "au_qld_lot16_power", [], True
+    ) == (False, ["sealed_run_changed_during_parity"])
