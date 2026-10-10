@@ -124,3 +124,46 @@ def test_page_proof_cache_cannot_cross_producer_owned_wall_scopes(monkeypatch):
     assert second == first
     assert second is not first
     assert sorted(calls) == sorted(row[0] for row in rows)
+
+
+def test_cached_page_proofs_preserve_first_authenticated_witness_order(monkeypatch):
+    """W4 must not reorder hosts by hashed physical record ID on cache miss."""
+    from pb_migration_contracts import EvidenceResolutionStatus
+    from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
+
+    source, published, _ = _source(page_count=1)
+    physical = source.physical_opening_authority()
+    rows = source.authority().authenticated_visible_observations(published)
+    page_rows = [(key, row) for key, row in rows if row.page_id == "1"]
+    assert len(page_rows) >= 2
+    first_observation, second_observation = (page_rows[0][0], page_rows[1][0])
+    called = []
+
+    def controlled_proof(selector):
+        called.append(selector.observation_id)
+        record_id = {
+            first_observation: "zz-first-visible-proof",
+            second_observation: "aa-second-visible-proof",
+        }.get(selector.observation_id)
+        if record_id is None:
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                proposition=None,
+                existence_record=None,
+            )
+        return SimpleNamespace(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            proposition=PHYSICAL_OPENING_EXISTS,
+            existence_record=SimpleNamespace(record_id=record_id, page_id="1"),
+        )
+
+    monkeypatch.setattr(physical, "prove_existence", controlled_proof)
+    first = _proof(source, published, physical, rows=page_rows)
+    assert [record.record_id for record in first] == [
+        "zz-first-visible-proof",
+        "aa-second-visible-proof",
+    ]
+    assert called == [key for key, _ in page_rows]
+    called.clear()
+    assert _proof(source, published, physical, rows=tuple(reversed(page_rows))) is first
+    assert called == []
