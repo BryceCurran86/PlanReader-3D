@@ -478,6 +478,145 @@ def _collapse_equivalent_nested_frames(
     return kept
 
 
+def _collapse_source_repeated_plan_border_pair(
+    page: Any,
+    frames: Sequence[tuple[float, float, float, float]],
+    calibration: ViewportLayoutCalibration,
+    fragments: Sequence[tuple[tuple[float, float, float, float], str]],
+) -> list[tuple[float, float, float, float]]:
+    """Conservatively identify one native double border of a floor plan.
+
+    This extension beyond the ordinary one-text-height duplicate-border rule
+    requires positive native-source evidence, not a guessed page margin:
+    exactly two nested source frames; three aligned sides; a narrow fourth-side
+    strip containing no text and only source line geometries each drawn twice
+    with identical paint style. All foreign rectangles/curves and any stroke
+    materially crossing the inner frame revoke the collapse. Choose the INNER
+    authenticated source frame; this cannot enlarge the owned drawing region.
+    """
+
+    if len(frames) != 2:
+        return list(frames)
+    ordered = sorted(frames, key=_bbox_area)
+    inner, outer = ordered
+    edge_tol = max(calibration.median_word_height_pt * 0.1, 0.75)
+    if not _bbox_contains(outer, inner, margin=edge_tol):
+        return list(frames)
+    delta = [abs(float(outer[i]) - float(inner[i])) for i in range(4)]
+    aligned = [i for i, value in enumerate(delta) if value <= edge_tol]
+    if len(aligned) != 3:
+        return list(frames)
+    side = next(i for i in range(4) if i not in aligned)
+    gap = delta[side]
+    inner_span = min(float(inner[2]) - float(inner[0]),
+                     float(inner[3]) - float(inner[1]))
+    # Ordinary 1x-height duplicate frames are already handled upstream. Only
+    # modest source-border margins qualify; large nested regions stay distinct.
+    if (
+        gap <= max(calibration.median_word_height_pt, edge_tol)
+        or gap > max(2.0 * calibration.median_word_height_pt, edge_tol)
+        or gap > 0.02 * inner_span
+    ):
+        return list(frames)
+
+    if side == 0:
+        strip = (outer[0], outer[1], inner[0], outer[3])
+    elif side == 1:
+        strip = (outer[0], outer[1], outer[2], inner[1])
+    elif side == 2:
+        strip = (inner[2], outer[1], outer[2], outer[3])
+    else:
+        strip = (outer[0], inner[3], outer[2], outer[3])
+    strip = _normalized_bbox(*strip)
+    if _bbox_area(strip) <= 0:
+        return list(frames)
+    if any(_bbox_overlap_area(box, strip) > 1e-6 for box, _ in fragments):
+        return list(frames)
+
+    repetitions: dict[tuple[object, ...], set[int]] = {}
+    protrusion_tol = max(0.25, calibration.median_word_height_pt * 0.05)
+    for path_index, drawing in enumerate(_page_drawings(page)):
+        seqno = drawing.get("seqno", path_index)
+        try:
+            seqno = int(seqno)
+        except (TypeError, ValueError):
+            return list(frames)
+        style = (
+            str(drawing.get("type") or ""),
+            str(drawing.get("color") or ""),
+            round(float(drawing.get("width") or 0.0), 3),
+            round(float(drawing.get("stroke_opacity") or 1.0), 3),
+        )
+        for item in drawing.get("items", ()) or ():
+            if not item:
+                continue
+            if item[0] == "re" and len(item) >= 2:
+                rect = item[1]
+                bbox = _normalized_bbox(
+                    float(rect.x0), float(rect.y0),
+                    float(rect.x1), float(rect.y1),
+                )
+                if _bbox_overlap_area(bbox, strip) > 1e-6 and not any(
+                    all(abs(bbox[i]-frame[i]) <= edge_tol for i in range(4))
+                    for frame in (inner, outer)
+                ):
+                    return list(frames)
+                continue
+            if item[0] != "l" or len(item) < 3:
+                # An independently drawn curve/quad over the differential
+                # band may be a physical symbol, not a duplicate border.
+                # Unknown path item geometry is not permission to collapse.
+                if item[0] in ("c", "qu"):
+                    points = [
+                        p for p in item[1:]
+                        if hasattr(p, "x") and hasattr(p, "y")
+                    ]
+                    if points and _bbox_overlap_area(_normalized_bbox(
+                        min(float(p.x) for p in points),
+                        min(float(p.y) for p in points),
+                        max(float(p.x) for p in points),
+                        max(float(p.y) for p in points),
+                    ), strip) > 1e-6:
+                        return list(frames)
+                continue
+            a, b = item[1], item[2]
+            x0,y0,x1,y1 = float(a.x),float(a.y),float(b.x),float(b.y)
+            if (
+                max(x0,x1) < strip[0] or min(x0,x1) > strip[2]
+                or max(y0,y1) < strip[1] or min(y0,y1) > strip[3]
+            ):
+                continue
+            # Retain only exact source border strokes, not arbitrary nearby
+            # source geometry, as harmless frame edges.
+            if side in (0,2) and abs(x0-x1) <= .25 and (
+                abs(x0-outer[side]) <= .25 or abs(x0-inner[side]) <= .25
+            ):
+                continue
+            if side in (1,3) and abs(y0-y1) <= .25 and (
+                abs(y0-outer[side]) <= .25 or abs(y0-inner[side]) <= .25
+            ):
+                continue
+            interior = float(inner[side])
+            if side in (0,2):
+                crosses = min(x0,x1) < interior < max(x0,x1)
+                penetration = max(x0,x1)-interior if side == 0 else interior-min(x0,x1)
+            else:
+                crosses = min(y0,y1) < interior < max(y0,y1)
+                penetration = max(y0,y1)-interior if side == 1 else interior-min(y0,y1)
+            if crosses and penetration > protrusion_tol:
+                return list(frames)
+            first = (round(x0,3),round(y0,3))
+            second = (round(x1,3),round(y1,3))
+            geometry = tuple(sorted((first,second)))
+            repetitions.setdefault((geometry,style),set()).add(seqno)
+
+    # There must be independent *positive* repeated source artwork and no
+    # unmatched/solo source strokes. This is not a global margin tolerance.
+    if len(repetitions) < 2 or any(len(paths) != 2 for paths in repetitions.values()):
+        return list(frames)
+    return [inner]
+
+
 def _frame_has_title_block_labels(
     frame: Sequence[float],
     fragments: Sequence[tuple[tuple[float, float, float, float], str]],
@@ -1555,6 +1694,10 @@ def _frame_resolved_viewports(
         ]
         usable = _collapse_nested_band_frames(usable)
         usable = _collapse_equivalent_nested_frames(usable, calibration)
+        if len(usable) > 1 and anchor.view_type == DrawingViewType.FLOOR_PLAN.value:
+            usable = _collapse_source_repeated_plan_border_pair(
+                page, usable, calibration, fragments
+            )
         if len(usable) > 1:
             out.append(SegmentedViewport(
                 view_id=f"view_p{page_number}_{index + 1}", page_number=page_number,
