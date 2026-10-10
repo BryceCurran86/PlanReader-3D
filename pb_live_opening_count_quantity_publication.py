@@ -132,6 +132,10 @@ def publish_live_authenticated_opening_count_quantities(
             decision_scope_id=scope_id,
             opening_record_id=opening.record_id,
         )
+        if opening.record_id in binding_selectors:
+            # Two representatives resolving to one physical opening cannot
+            # silently overwrite a binding and certify complete count coverage.
+            return ()
         binding_selectors[opening.record_id] = selector
         binding_results[opening.record_id] = binding_producer.publish_scope(
             opening_selector=opening_selector,
