@@ -791,6 +791,7 @@ def test_canonical_composite_abstains_when_original_face_identity_is_duplicated(
         SimpleNamespace(face_id="a", record_id="a1"),
         SimpleNamespace(face_id="a", record_id="a2"),
         SimpleNamespace(face_id="b", record_id="b1"),
+        SimpleNamespace(face_id="c", record_id="c1"),
     )
     composite = SimpleNamespace(
         record_id="candidate",
@@ -800,11 +801,20 @@ def test_canonical_composite_abstains_when_original_face_identity_is_duplicated(
     assert remaining == originals
     assert accepted == ()
 
-    # A separate unique face can still be composed independently.
+    # A separate genuine two-face composite can still publish independently.
     independent = SimpleNamespace(record_id="independent",
-                                  constituent_face_ids=("b",))
+                                  constituent_face_ids=("b", "c"))
     remaining, accepted = _canonical_composite_supersedence(
         originals, (independent,)
     )
     assert accepted == (independent,)
     assert tuple(v.record_id for v in remaining) == ("a1", "a2")
+
+    # One-face replacements are not room compositions and cannot retire cells.
+    singleton = SimpleNamespace(record_id="singleton",
+                                constituent_face_ids=("b",))
+    remaining, accepted = _canonical_composite_supersedence(
+        originals, (singleton,)
+    )
+    assert remaining == originals
+    assert accepted == ()
