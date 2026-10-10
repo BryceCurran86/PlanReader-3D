@@ -395,3 +395,48 @@ def test_boolean_customer_quantity_cannot_impersonate_one_sealed_unit() -> None:
     numeric_string = dict(rows[0], quantity="1.0")
     assert verify_sealed_customer_output(sealed, (numeric_int,)).valid_quantity_count == 1
     assert verify_sealed_customer_output(sealed, (numeric_string,)).valid_quantity_count == 1
+
+
+@pytest.mark.parametrize(
+    "invalid_notes",
+    ('{"adapter":"commercial_takeoff",', '"manual text"', "corrupt notes"),
+)
+def test_direct_customer_provenance_cannot_hide_invalid_persisted_notes(
+    invalid_notes: str,
+) -> None:
+    sealed, rows = sealed_and_rows()
+    corrupted = dict(rows[0], notes=invalid_notes)
+    with pytest.raises(CustomerOutputVerificationError, match="projection provenance"):
+        verify_sealed_customer_output(sealed, (corrupted, rows[1]))
+
+
+def test_nested_duplicate_notes_identity_cannot_hide_behind_direct_copy() -> None:
+    import json
+
+    sealed, rows = sealed_and_rows()
+    corrupted = dict(rows[0])
+    original_notes = json.loads(corrupted["notes"])
+    assert original_notes["source_trace"]["source_sha256"] == SHA
+    encoded = json.dumps(original_notes, sort_keys=True)
+    assert '"source_trace": {' in encoded
+    corrupted["notes"] = encoded.replace(
+        '"source_trace": {',
+        '"source_trace": {"source_sha256": "' + ("b" * 64) + '", ',
+        1,
+    )
+    # Last-write-wins would have accepted the later genuine SHA field while
+    # silently discarding a first, conflicting source identity.
+    with pytest.raises(CustomerOutputVerificationError, match="duplicate provenance key"):
+        verify_sealed_customer_output(sealed, (corrupted, rows[1]))
+
+
+def test_notes_provenance_must_remain_a_structured_commercial_receipt() -> None:
+    import json
+
+    sealed, rows = sealed_and_rows()
+    structured = dict(rows[0], notes=json.dumps({"other": "manual"}))
+    with pytest.raises(
+        CustomerOutputVerificationError,
+        match="conflicting direct and persisted projection provenance",
+    ):
+        verify_sealed_customer_output(sealed, (structured, rows[1]))
