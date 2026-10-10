@@ -845,6 +845,38 @@ def test_scenario_18_opening_partially_outside_wall_fails_closed() -> None:
     assert NET_WALL_VOID_UNRESOLVED in res.reason_codes
 
 
+@pytest.mark.parametrize(
+    "bounds",
+    (
+        {"u0": -5e-7, "u1": 1.0, "z0": 0.0, "z1": 2.0},
+        {"u0": 9.0, "u1": 10.0 + 5e-7, "z0": 0.0, "z1": 2.0},
+        {"u0": 1.0, "u1": 2.0, "z0": -5e-7, "z1": 2.0},
+        {"u0": 1.0, "u1": 2.0, "z0": 1.0, "z1": 3.0 + 5e-7},
+    ),
+)
+def test_sub_tolerance_opening_overhang_abstains_before_boolean_subtraction(bounds) -> None:
+    """Tolerance is not permission to deduct a void outside physical wall."""
+    void = _void_record("op-1", **bounds)
+    deduction = OpeningDeductionResult(
+        EvidenceResolutionStatus.CORROBORATED,
+        (OPENING_DEDUCTION_AUTHORIZED,),
+        _deduction_record("op-1"),
+    )
+    producer, selector = _setup_pipeline(
+        gross=_gross_record(length=10.0, height=3.0),
+        voids=(void,),
+        deductions=(("op-1", deduction),),
+    )
+    result = producer.publish(selector)
+    assert result.status == EvidenceResolutionStatus.CONFLICT
+    assert NET_WALL_VOID_UNRESOLVED in result.reason_codes
+    # The producer retains a blocked provenance receipt, not a publishable
+    # net-wall quantity. An overhanging opening must never be deducted.
+    assert result.record is not None
+    assert result.record.net_area_m2 is None
+    assert result.record.opening_deduction_record_ids == ()
+
+
 def test_scenario_19_opening_completely_outside_wall_fails_closed() -> None:
     # Gross wall length is 10m; opening is at u in [15, 17]
     v1 = _void_record("op-1", u0=15.0, u1=17.0, z0=0.0, z1=2.0)
@@ -1179,3 +1211,31 @@ def test_subtract_void_union_boundary_touching_contained_geometry_preserved() ->
     assert not net.is_empty
     assert net.area == pytest.approx(10.0 * 3.0 - 1.0 * 2.0)
 
+
+@pytest.mark.parametrize(
+    "bounds",
+    (
+        {"u0": 0.0, "u1": 1.0, "z0": 0.0, "z1": 2.0},
+        {"u0": 9.0, "u1": 10.0, "z0": 0.0, "z1": 2.0},
+        {"u0": 1.0, "u1": 2.0, "z0": 0.0, "z1": 3.0},
+    ),
+)
+def test_exact_wall_boundary_opening_still_deducts(bounds) -> None:
+    """Strict containment rejects overhangs, not valid boundary contacts."""
+    void = _void_record("op-1", **bounds)
+    deduction = OpeningDeductionResult(
+        EvidenceResolutionStatus.CORROBORATED,
+        (OPENING_DEDUCTION_AUTHORIZED,),
+        _deduction_record("op-1"),
+    )
+    producer, selector = _setup_pipeline(
+        gross=_gross_record(length=10.0, height=3.0),
+        voids=(void,),
+        deductions=(("op-1", deduction),),
+    )
+    result = producer.publish(selector)
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.record is not None
+    expected_void_area = (bounds["u1"] - bounds["u0"]) * (bounds["z1"] - bounds["z0"])
+    assert result.record.void_union_area_m2 == pytest.approx(expected_void_area)
+    assert result.record.net_area_m2 == pytest.approx(30.0 - expected_void_area)
