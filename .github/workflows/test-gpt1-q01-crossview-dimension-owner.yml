@@ -1,0 +1,62 @@
+name: GPT1 Q01 CrossView Dimension Owner Source
+on:
+  pull_request:
+    paths:
+      - pb_cross_view_room_area_authority.py
+      - tests/test_cross_view_room_area_authority_v1.py
+      - .github/workflows/test-gpt1-q01-crossview-dimension-owner.yml
+jobs:
+  maryborough-original-source-quantity-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install original-source OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen evaluator and source-provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+      - name: Authenticate real Maryborough three FIRM measurements and retain ABSTAIN
+        run: |
+          mkdir -p artifacts/gpt1-q01-crossview-owner
+          PYTHONPATH=. python -u tools/diag_gpt2_room_measurement_gates.py \
+            --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+            --expected-sha256 b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007 \
+            --pages 6 --topology-pages 6 --support-pages 10 \
+            --output artifacts/gpt1-q01-crossview-owner/original-source.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("artifacts/gpt1-q01-crossview-owner/original-source.json").read_text())
+          assert report["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          rooms=report["rooms"]
+          verified={"FOOD PREP":13.270425,"OFFICE":9.05352,"COLD ROOM":25.37875}
+          for name,area in verified.items():
+              matches=[r for r in rooms if r["room_label"]==name]
+              assert len(matches)==1,(name,len(matches))
+              row=matches[0]
+              assert row["firm_documented_area_receipt"]
+              assert row["metric_area_m2"]==area,(name,row["metric_area_m2"])
+              assert row["floor_area_reissued_quantity_id"]
+              assert row["canonical_room_area_reissued_quantity_id"]
+          for name in ("FREEZER","SALES","AIRLOCK","PWD","LAUNDRY"):
+              matches=[r for r in rooms if r["room_label"]==name]
+              if len(matches)==1:
+                  assert matches[0]["metric_area_m2"] is None,(name,matches[0])
+          assert report["reissued_floor_area_quantity_count"]==3
+          assert report["reissued_canonical_room_area_quantity_count"]==3
+          print("GPT1_Q01_ORIGINAL_SOURCE_THREE_AREAS_PRESERVED", verified)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-q01-original-source-owner-parity
+          path: artifacts/gpt1-q01-crossview-owner
+          retention-days: 14
