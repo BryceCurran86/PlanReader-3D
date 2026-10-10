@@ -247,6 +247,7 @@ def test_conflicting_source_frame_receipts_fail_closed_before_rekey_classificati
 @pytest.mark.parametrize("corruption",[
     "empty_edge_parents","unrelated_edge_parent","nonfinite_source_coord",
     "fabricated_source_coord","incomplete_source_coord",
+    "overflow_source_coord","degenerate_source_edge",
 ])
 def test_identically_corrupted_source_edges_are_never_unchanged_source(corruption):
     old,new=rekey()
@@ -261,6 +262,10 @@ def test_identically_corrupted_source_edges_are_never_unchanged_source(corruptio
             edge["geometry"][0]=float("nan")
         elif corruption=="fabricated_source_coord":
             edge["geometry"][0]="not_pdf_point"
+        elif corruption=="overflow_source_coord":
+            edge["geometry"][0]=10**1000
+        elif corruption=="degenerate_source_edge":
+            edge["geometry"]=[10.,10.,10.,10.]
         else:
             edge["geometry"]=[10.,10.,70.]
     result=compare_source_host_rekeys(old,new)
