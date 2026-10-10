@@ -552,3 +552,30 @@ def test_producer_wire_types_still_round_trip_with_verified_fingerprints() -> No
     reloaded = export.sealed_source_closed_run_from_dict(encoded)
     assert reloaded.run_id == original.run_id
     assert reloaded.fingerprint == original.fingerprint
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("value", float("nan")),
+        ("value", float("inf")),
+        ("value", -float("inf")),
+        ("value", 10 ** 400),
+        ("confidence", float("nan")),
+        ("confidence", float("inf")),
+        ("confidence", 10 ** 400),
+    ],
+)
+def test_sealed_loader_rejects_nonfinite_numeric_receipts_before_hashing(
+    field: str, replacement: object
+) -> None:
+    sealed = export.seal_source_closed_run(
+        (quantity(),), project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    tampered = sealed.to_dict()
+    tampered["quantities"][0][field] = replacement
+    with pytest.raises(
+        export.SourceClosedRunConflictError, match="non-finite"
+    ):
+        export.sealed_source_closed_run_from_dict(tampered)
