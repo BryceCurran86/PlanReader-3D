@@ -141,3 +141,54 @@ def test_native_quad_over_border_strip_is_independent_graphic_content():
     assert _collapse_source_repeated_plan_border_pair(
         Page(changed),(INNER,OUTER),cal(),()
     ) == [INNER,OUTER]
+
+
+def _white_background_mask(*, seqno=3, fill=(1.,1.,1.), opacity=1.,
+                           paint_type="f", stroke=None):
+    return {
+        "seqno": seqno,
+        "type": paint_type,
+        "fill": fill,
+        "fill_opacity": opacity,
+        "color": stroke,
+        "items": [("re", SimpleNamespace(
+            x0=40., y0=700., x1=75., y1=800.
+        ))],
+    }
+
+
+def test_opaque_white_background_mask_before_source_double_strokes_is_nonowner():
+    # A source paint background underneath the duplicated visible border
+    # cannot compete with the producer-owned native line geometry.
+    actual=[_white_background_mask()]+paths()
+    assert _collapse_source_repeated_plan_border_pair(
+        Page(actual), (INNER,OUTER), cal(), ()
+    ) == [INNER]
+
+
+def test_late_white_mask_still_blocks_source_border_recovery():
+    actual=paths()+[_white_background_mask(seqno=9999)]
+    assert _collapse_source_repeated_plan_border_pair(
+        Page(actual), (INNER,OUTER), cal(), ()
+    ) == [INNER,OUTER]
+
+
+def test_colored_translucent_or_stroked_rectangle_never_grants_plan_boundary():
+    for kwargs in (
+        {"fill":(.9,.9,.9)},
+        {"fill":(1.,0.,0.)},
+        {"opacity":.5},
+        {"stroke":(0.,0.,0.)},
+        {"paint_type":"fs"},
+    ):
+        actual=[_white_background_mask(**kwargs)]+paths()
+        assert _collapse_source_repeated_plan_border_pair(
+            Page(actual),(INNER,OUTER),cal(),()
+        ) == [INNER,OUTER],kwargs
+
+
+def test_multiple_early_opaque_white_mask_rectangles_can_coexist():
+    masks=[_white_background_mask(seqno=i) for i in (1,2,3)]
+    assert _collapse_source_repeated_plan_border_pair(
+        Page(masks+paths()),(INNER,OUTER),cal(),()
+    ) == [INNER]
