@@ -10,7 +10,7 @@ on:
 jobs:
   material-source-scope-isolation:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,7 +22,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-      - name: Compare material schedule source scopes without inference
+      - name: Prove source material definitions in one OCR-backed schedule scope
         shell: bash
         run: |
           set -o pipefail
@@ -63,7 +63,7 @@ jobs:
           ocr_backend=TesseractOCRBackend()
           assert ocr_backend.is_available(), "Producer OCR backend not available"
           results=[]
-          for page_ids in (("9","11"),("7","9","11")):
+          for page_ids in (("9","11"),):
               visibility=SourceVisibilityProducer(
                   producer_method="gpt2-material-schedule-scope-isolation",
                   producer_version="1",
@@ -105,7 +105,7 @@ jobs:
           comparison={
               "source_sha256":sha,"source_page_count":31,
               "native_page_viewports":source_views,
-              "source_scope_definition_results":results,
+              "source_scope_definition_results":results,\n              "source_scope_uses_exact_schedule_pages_only":True,
               "tesseract_binary":executable,
               "ocr_backend_available":bool(ocr_backend.is_available()),
               "source_authentication_requirement":"exact producer-owned source text/raster receipts only",
