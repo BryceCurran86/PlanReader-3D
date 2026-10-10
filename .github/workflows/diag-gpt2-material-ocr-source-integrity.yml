@@ -57,7 +57,7 @@ jobs:
           pdf.close()
 
           import shutil
-          from pb_raster_text_corroboration_authority import TesseractOCRBackend
+          from pb_portable_raster_ocr_authority import TesseractOCRBackend
           executable=shutil.which("tesseract")
           assert executable, "Tesseract binary needed for CAD text raster corroboration"
           ocr_backend=TesseractOCRBackend()
