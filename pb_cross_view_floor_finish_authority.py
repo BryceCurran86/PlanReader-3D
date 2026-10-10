@@ -411,6 +411,43 @@ class CrossViewFloorFinishResult:
         )
 
 
+def _quarantine_reused_floor_finish_occurrences(
+    records: Sequence[CrossViewFloorFinishRecord],
+) -> tuple[tuple[CrossViewFloorFinishRecord, ...], tuple[str, ...]]:
+    """Fail closed when one authenticated occurrence claims multiple floors.
+
+    The source material occurrence is a single producer-owned physical receipt.
+    It cannot independently authorize the finish area of different room floors.
+    Preserve unrelated occurrences; quarantine every contested floor rather
+    than selecting a first/last binding based on input order.
+    """
+    owners: dict[str, set[tuple[str, str]]] = {}
+    for record in records:
+        occurrence_id = _clean(record.occurrence_record_id)
+        if occurrence_id:
+            owners.setdefault(occurrence_id, set()).add(
+                (record.canonical_floor_id, record.physical_floor_surface_id)
+            )
+    disputed = {
+        occurrence_id
+        for occurrence_id, identities in owners.items()
+        if len(identities) > 1
+    }
+    if not disputed:
+        return tuple(records), ()
+    surviving = tuple(
+        record
+        for record in records
+        if _clean(record.occurrence_record_id) not in disputed
+    )
+    unresolved = tuple(sorted({
+        record.canonical_floor_id
+        for record in records
+        if _clean(record.occurrence_record_id) in disputed
+    }))
+    return surviving, unresolved
+
+
 class CrossViewFloorFinishProducer:
     def __init__(
         self,
@@ -900,6 +937,16 @@ class CrossViewFloorFinishProducer:
                 )
             )
 
+        # The per-floor candidate gate also needs its inverse: one exact
+        # material occurrence is not a valid owner for multiple physical
+        # floor identities. Never publish either contested commercial row.
+        unique_records, disputed_floor_ids = (
+            _quarantine_reused_floor_finish_occurrences(records)
+        )
+        if disputed_floor_ids:
+            unresolved.update(disputed_floor_ids)
+            conflict = True
+        records = list(unique_records)
         records.sort(key=lambda record: record.canonical_floor_id)
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
