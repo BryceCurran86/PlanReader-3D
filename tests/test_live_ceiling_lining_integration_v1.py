@@ -424,3 +424,47 @@ def test_ceiling_topology_pages_must_be_subset_of_evidence_pages(tmp_path) -> No
             pages=(0,),
             topology_pages=(1,),
         )
+
+
+
+def test_canonical_ceiling_denies_single_or_replayed_figured_dimension_axis() -> None:
+    # Even when the upstream room area claims FIRM, an incomplete lineage
+    # cannot establish two independent directions for a whole ceiling plane.
+    for ids in (("dim-h",), ("dim-v",), ("dim-h", "dim-h"), ("", "dim-h", "")):
+        live, ceiling, source_result = _documented_area_claim_fixture()
+        original_area = source_result.room_area_quantities[0]
+        malformed_area = replace(
+            original_area,
+            metadata={
+                **dict(original_area.metadata),
+                "figured_dimension_ids": ids,
+            },
+        )
+        source_result.room_area_quantities = (malformed_area,)
+        assert live._claim_from_quantity(
+            quantity=ceiling,
+            source_result=source_result,
+            page_no=1,
+            viewport_id="vp-1",
+        ) is None
+
+
+def test_canonical_ceiling_preserves_two_independent_documented_dimension_ids() -> None:
+    live, ceiling, source_result = _documented_area_claim_fixture()
+    area = source_result.room_area_quantities[0]
+    modified = replace(
+        area,
+        metadata={
+            **dict(area.metadata),
+            "figured_dimension_ids": ["dim-v", "dim-h", "dim-v"],
+        },
+    )
+    source_result.room_area_quantities = (modified,)
+    receipt = live._claim_from_quantity(
+        quantity=ceiling,
+        source_result=source_result,
+        page_no=1,
+        viewport_id="vp-1",
+    )
+    assert receipt is not None
+    assert receipt[8] == ("dim-h", "dim-v")
