@@ -18,11 +18,15 @@ def opening():
     )
 
 
-def record(id, source_ids, *, usable=True):
+def record(id, source_ids, *, usable=True, source_edges=()):
     return SimpleNamespace(
         wall_candidate_id=id,
         physical_identity=SimpleNamespace(
             source_primitive_ids=tuple(source_ids), usable=usable,
+        ),
+        source_edge_fragments=tuple(
+            SimpleNamespace(edge_id=edge_id, source_primitive_ids=tuple(parents))
+            for edge_id, parents in source_edges
         ),
     )
 
@@ -79,6 +83,47 @@ def test_bad_original_source_geometry_does_not_create_candidate_ancestry(line):
     assert result["original_source_stage_counts"] == {"invalid_source_geometry":1}
     assert result["diagnostic_local_raster_lines"] == []
     assert not result["host_publication_allowed"]
+
+
+def test_original_w2_source_edge_witnesses_preserve_shared_parent_ambiguity():
+    records=[
+        record("w4-a", ["common", "only-a"],
+               source_edges=(("split-2296", ["common", "only-a"]),)),
+        record("w4-b", ["common"],
+               source_edges=(("split-9744", ["common"]),)),
+        record("w4-c", ["common"],
+               source_edges=(("split-9744", ["common"]),)),
+    ]
+    original=deepcopy(records)
+    result=nonpublishing_raster_source_w4_membership(
+        records, {"common": (-2.,0.,13.,0.)}, opening(), page_id="3"
+    )
+    row=result["diagnostic_local_raster_lines"][0]
+    assert row["exact_positive_ancestry_w4_candidate_ids"]==[
+        "w4-a", "w4-b", "w4-c"
+    ]
+    assert row["actual_w2_source_edges_by_w4_candidate"]==[
+        {"wall_candidate_id":"w4-a","source_edge_id":"split-2296"},
+        {"wall_candidate_id":"w4-b","source_edge_id":"split-9744"},
+        {"wall_candidate_id":"w4-c","source_edge_id":"split-9744"},
+    ]
+    assert records==original
+    assert not row["locally_authenticated_host"]
+    assert not result["host_publication_allowed"]
+    assert not result["opening_count_publication_allowed"]
+
+
+def test_source_parent_without_w2_edge_witness_is_not_silently_fabricated():
+    result=nonpublishing_raster_source_w4_membership(
+        [record("w4-with-ancestry", ["positive-parent"])],
+        {"positive-parent":(-1.,0.,11.,0.)}, opening(), page_id="3"
+    )
+    row=result["diagnostic_local_raster_lines"][0]
+    assert row["exact_positive_ancestry_w4_candidate_ids"]==[
+        "w4-with-ancestry"
+    ]
+    assert row["actual_w2_source_edges_by_w4_candidate"]==[]
+    assert not row["locally_authenticated_host"]
 
 
 def test_duplicate_ancestry_parent_not_counted_as_two_openings_or_host():
