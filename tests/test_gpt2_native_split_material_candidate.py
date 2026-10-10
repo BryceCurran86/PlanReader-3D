@@ -31,8 +31,10 @@ def test_bare_code_is_not_material_definition():
     assert _material_definition_candidate(_words("FPB")) is None
 
 
-def test_two_line_row_without_complete_description_abstains():
-    assert _material_definition_candidate(_words("FPB", "PLASTERBOARD")) is None
+def test_two_line_row_without_semantic_material_description_abstains():
+    # One material-bearing word can be a parser candidate; absence of a
+    # meaningful material description must not be promoted even to candidate.
+    assert _material_definition_candidate(_words("FPB", "REFERENCE")) is None
 
 
 def test_invalid_code_grammar_and_generic_nonmaterial_stay_blocked():
