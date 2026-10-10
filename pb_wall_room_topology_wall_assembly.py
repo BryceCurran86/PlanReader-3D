@@ -272,6 +272,10 @@ def _canonical_wall_candidate_id(
     )
 
 
+class W4SourceCandidateAddressCollision(ValueError):
+    """Producer-proven W4 address ambiguity; never select a last-writer wall."""
+
+
 def _source_owned_collision_candidate_addresses(
     walls: Sequence[WallCandidate],
     edges_by_id: Dict[str, Dict[str, Any]],
@@ -299,34 +303,34 @@ def _source_owned_collision_candidate_addresses(
         for wall in group:
             edges = tuple(wall.face_a_segment_ids) + tuple(wall.face_b_segment_ids or ())
             if not edges or len(set(edges)) != len(edges):
-                raise ValueError("W4 collision has absent or duplicated source edges")
+                raise W4SourceCandidateAddressCollision("W4 collision has absent or duplicated source edges")
             if group_edges.intersection(edges):
-                raise ValueError("W4 collision has competing owners of one source edge")
+                raise W4SourceCandidateAddressCollision("W4 collision has competing owners of one source edge")
             group_edges.update(edges)
             source_parts = []
             for eid in edges:
                 edge = edges_by_id.get(str(eid))
                 if not isinstance(edge, dict):
-                    raise ValueError("W4 collision has missing original source edge")
+                    raise W4SourceCandidateAddressCollision("W4 collision has missing original source edge")
                 lineage = edge.get(LINEAGE_KEY) or {}
                 raw = lineage.get("source_primitive_ids") if isinstance(lineage, dict) else None
                 if (not isinstance(raw, (list, tuple)) or not raw
                         or any(not isinstance(v, str) or not v for v in raw)):
-                    raise ValueError("W4 collision lacks positive source ancestry")
+                    raise W4SourceCandidateAddressCollision("W4 collision lacks positive source ancestry")
                 try:
                     a = (float(edge["x1"]), float(edge["y1"]))
                     b = (float(edge["x2"]), float(edge["y2"]))
                 except (KeyError, ValueError, TypeError, OverflowError):
-                    raise ValueError("W4 collision lacks original source geometry") from None
+                    raise W4SourceCandidateAddressCollision("W4 collision lacks original source geometry") from None
                 if (not all(math.isfinite(x) for x in (*a, *b)) or a == b):
-                    raise ValueError("W4 collision has invalid source geometry")
+                    raise W4SourceCandidateAddressCollision("W4 collision has invalid source geometry")
                 source_parts.append({
                     "positive_source_primitive_ids": sorted(set(raw)),
                     "source_line": tuple(sorted((a, b))),
                 })
             terminals = tuple(wall.end_node_ids)
             if len(terminals) != 2 or any(not isinstance(x, str) or not x for x in terminals):
-                raise ValueError("W4 collision lacks junction ownership")
+                raise W4SourceCandidateAddressCollision("W4 collision lacks junction ownership")
             new_id = stable_contract_id("wall", {
                 "geometric_candidate_id": old_id,
                 "viewport_id": wall.viewport_id,
@@ -334,7 +338,7 @@ def _source_owned_collision_candidate_addresses(
                 "terminal_source_junction_ids": sorted(terminals),
             })
             if new_id in unchanged_ids or new_id in group_keys or new_id in new_ids:
-                raise ValueError("W4 collision not uniquely source-disambiguated")
+                raise W4SourceCandidateAddressCollision("W4 collision not uniquely source-disambiguated")
             group_keys.add(new_id)
             new_ids.add(new_id)
             marked = replace(
@@ -353,14 +357,14 @@ def _source_owned_collision_candidate_addresses(
         edges = tuple(wall.face_a_segment_ids) + tuple(wall.face_b_segment_ids or ())
         converted = replacements.get(id(wall))
         if converted is None:
-            raise ValueError("W4 collided wall lost source edge ownership")
+            raise W4SourceCandidateAddressCollision("W4 collided wall lost source edge ownership")
         revised.append(converted)
         for eid in edges:
             if edge_to_wall.get(eid) != wall.candidate_id:
-                raise ValueError("W4 source edge owner unexpectedly changed")
+                raise W4SourceCandidateAddressCollision("W4 source edge owner unexpectedly changed")
             remapped[eid] = converted.candidate_id
     if len({wall.candidate_id for wall in revised}) != len(revised):
-        raise ValueError("W4 source candidate addresses remain duplicated")
+        raise W4SourceCandidateAddressCollision("W4 source candidate addresses remain duplicated")
     return revised, remapped
 
 
