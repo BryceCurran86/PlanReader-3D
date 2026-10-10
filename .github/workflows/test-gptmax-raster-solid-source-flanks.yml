@@ -100,6 +100,30 @@ jobs:
           assert len(ids) == len(set(ids))
           assert 'quantities' not in report
           PY
+      - name: Compare exact baseline physical host/frame receipts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          old = json.loads(Path('lot16-solid-source-baseline.json').read_text())
+          new = json.loads(Path('lot16-solid-source-flanks-handoff.json').read_text())
+          def keyed(rows):
+              ids = [row['opening_identity_id'] for row in rows]
+              assert len(ids) == len(set(ids)), "duplicate physical identity"
+              return {row['opening_identity_id']: row for row in rows}
+          for name in ('opening_bindings', 'host_frames'):
+              a, b = keyed(old[name]), keyed(new[name])
+              assert a.keys() <= b.keys(), f"{name}: physical identity removed"
+              for physical, prior in a.items():
+                  current = b[physical]
+                  if prior.get('host_wall_id'):
+                      assert current.get('host_wall_id') == prior['host_wall_id'], (
+                          physical, name, 'host owner lost or silently rekeyed')
+                  if prior.get('record_id'):
+                      assert current.get('record_id') == prior['record_id'], (
+                          physical, name, 'source-owned host/frame receipt changed')
+          print('Exact source physical identity, host and frame receipts retained')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -149,6 +173,30 @@ jobs:
                      for key in old_geometry}
           assert 'quantities' not in current
           print(json.dumps({'baseline': baseline['summary'], 'current': current['summary'], 'existing_physical_identity_retained': True, 'existing_host_proof_retained': True, 'existing_frame_geometry_changes': {key: value for key, value in changes.items() if value}}))
+          PY
+      - name: Compare exact baseline physical host/frame receipts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          old = json.loads(Path('maryborough-source-baseline.json').read_text())
+          new = json.loads(Path('maryborough-solid-source-flanks-handoff.json').read_text())
+          def keyed(rows):
+              ids = [row['opening_identity_id'] for row in rows]
+              assert len(ids) == len(set(ids)), "duplicate physical identity"
+              return {row['opening_identity_id']: row for row in rows}
+          for name in ('opening_bindings', 'host_frames'):
+              a, b = keyed(old[name]), keyed(new[name])
+              assert a.keys() <= b.keys(), f"{name}: physical identity removed"
+              for physical, prior in a.items():
+                  current = b[physical]
+                  if prior.get('host_wall_id'):
+                      assert current.get('host_wall_id') == prior['host_wall_id'], (
+                          physical, name, 'host owner lost or silently rekeyed')
+                  if prior.get('record_id'):
+                      assert current.get('record_id') == prior['record_id'], (
+                          physical, name, 'source-owned host/frame receipt changed')
+          print('Exact source physical identity, host and frame receipts retained')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
