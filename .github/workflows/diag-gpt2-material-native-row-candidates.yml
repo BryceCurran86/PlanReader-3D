@@ -1,0 +1,34 @@
+name: DIAG GPT2 Source Native Material Row Candidates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gpt2_maryborough_b02_material_source.py
+      - tests/test_gpt2_b02_native_row_neighbours.py
+      - .github/workflows/diag-gpt2-material-native-row-candidates.yml
+  workflow_dispatch:
+
+jobs:
+  native-material-row-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Protect frozen truth and source row negative controls
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_b02_native_row_neighbours.py
+      - name: Exact source native material schedule code/row first-gate inventory
+        run: PYTHONPATH=. python -u tools/diag_gpt2_maryborough_b02_material_source.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-source-native-material-row-candidates
+          path: maryborough_b02_material_source_audit.json
+          retention-days: 7
