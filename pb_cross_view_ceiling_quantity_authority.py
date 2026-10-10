@@ -514,23 +514,39 @@ def publish_cross_view_ceiling_quantities(
     # republished for two physical ceiling surfaces. Quarantine *both*
     # physical owners, not whichever record happens to be visited second.
     source_area_owners: dict[str, set[str]] = {}
+    canonical_room_owners: dict[str, set[str]] = {}
     for record in records:
         source_area_owners.setdefault(
             record.upstream_room_area_quantity_id, set()
+        ).add(record.physical_room_id)
+        # Different source receipt IDs do not justify publishing the same
+        # canonical room's full ceiling through two physical room identities.
+        canonical_room_owners.setdefault(
+            record.canonical_room_id, set()
         ).add(record.physical_room_id)
     contested_source_ids = {
         source_id for source_id, owners in source_area_owners.items()
         if len(owners) > 1
     }
-    if contested_source_ids:
+    contested_canonical_room_ids = {
+        canonical_id for canonical_id, owners in canonical_room_owners.items()
+        if len(owners) > 1
+    }
+    if contested_source_ids or contested_canonical_room_ids:
         rejected = [
             record for record in records
-            if record.upstream_room_area_quantity_id in contested_source_ids
+            if (
+                record.upstream_room_area_quantity_id in contested_source_ids
+                or record.canonical_room_id in contested_canonical_room_ids
+            )
         ]
         unresolved.update(record.physical_room_id for record in rejected)
         records = [
             record for record in records
-            if record.upstream_room_area_quantity_id not in contested_source_ids
+            if (
+                record.upstream_room_area_quantity_id not in contested_source_ids
+                and record.canonical_room_id not in contested_canonical_room_ids
+            )
         ]
         conflict = True
 
