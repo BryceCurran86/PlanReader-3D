@@ -48,3 +48,24 @@ source origin, line-angle, scale or 20,000 source-primitive cap.
 
 No frozen V2 manifests/evaluator/object universe/reference takeoffs/denominators
 or predicted benchmark labels are read, edited or used as algorithm inputs.
+
+
+## Narrowed positive supplemental raster source gate
+
+The first clean-main version (#2158) failed actual original Lot16 source retention
+despite 23/14/9 aggregate parity: it churned ten host receipts and five source
+frame receipts. The reason was overly broad junction reanchoring even when
+there was NO compact/terminal supplemental source competing at the node.
+
+This combined stacked branch now requires an independent producer-owned
+supplemental compact/terminal raster observation for any correction:
+first-party compact_solid_wall_band_v1 or terminal_solid_wall_band_v1 source
+identity, sole original parent source record with positive page-coordinate
+authority, endpoint exactly at the already source-authenticated through point,
+and orthogonal outgoing T stem. Ordinary raster, native linework, missing
+or ambiguous ancestors, near-endpoint, remotely extending parents and diagonal
+branches cannot trigger reanchoring. The old source gap remains unresolved.
+
+A passing clean-main negative-control run alone is not acceptance. Only the
+stacked real compact plus narrowed W2 original-source Lot16 and Maryborough
+source CI can demonstrate retained proof and any legitimate host recovery.
