@@ -41,6 +41,7 @@ def nonpublishing_raster_source_w4_membership(
     """
     owners_by_source = defaultdict(set)
     source_edges_by_parent = defaultdict(set)
+    contradictory_source_edge_parent_receipts = set()
     skipped_nonusable = set()
     for r in records:
         identity = r.physical_identity
@@ -56,10 +57,19 @@ def nonpublishing_raster_source_w4_membership(
         for fragment in getattr(r, "source_edge_fragments", ()):
             edge_id = str(fragment.edge_id)
             for parent_id in tuple(fragment.source_primitive_ids):
-                if isinstance(parent_id, str) and parent_id:
-                    source_edges_by_parent[parent_id].add(
-                        (str(r.wall_candidate_id), edge_id)
+                if not isinstance(parent_id, str) or not parent_id:
+                    continue
+                if parent_id not in ids:
+                    # A W2 source-edge receipt which contradicts its own W4
+                    # source parent inventory is a lineage defect, not an
+                    # additional source-authorised candidate for this flank.
+                    contradictory_source_edge_parent_receipts.add(
+                        (str(r.wall_candidate_id), edge_id, parent_id)
                     )
+                    continue
+                source_edges_by_parent[parent_id].add(
+                    (str(r.wall_candidate_id), edge_id)
+                )
 
     evidence_rows = []
     reasons = Counter()
@@ -114,6 +124,19 @@ def nonpublishing_raster_source_w4_membership(
         "diagnostic_local_raster_lines": evidence_rows,
         "original_source_stage_counts": dict(sorted(reasons.items())),
         "unusable_identity_source_parent_count": len(skipped_nonusable),
+        "source_edge_parent_identity_contradictions": [
+            {
+                "wall_candidate_id": wall_id,
+                "source_edge_id": edge_id,
+                "unowned_source_parent_id": parent_id,
+            }
+            for wall_id, edge_id, parent_id in sorted(
+                contradictory_source_edge_parent_receipts
+            )
+        ],
+        "source_edge_parent_identity_contradiction_count": len(
+            contradictory_source_edge_parent_receipts
+        ),
         "w4_identity_count": len(records),
         "candidate_ancestry_only": True,
         "local_host_contact_proven": False,
