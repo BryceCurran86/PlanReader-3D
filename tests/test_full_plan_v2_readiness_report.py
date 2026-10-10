@@ -251,7 +251,7 @@ def test_duplicate_json_keys_in_sealed_run_fail_before_fingerprint_validation(tm
         '"project_id":"another-project","quantities":[]}',
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="duplicate produced JSON key: project_id"):
+    with pytest.raises(ValueError, match="duplicate JSON key: project_id"):
         _object(path)
 
     report = diagnostic_report(ROOT, tmp_path / "produced", sealed_root=sealed_root)
@@ -276,5 +276,5 @@ def test_nested_duplicate_identity_in_sealed_payload_is_rejected(tmp_path: Path)
         '"quantities":[{"quantity_id":"q1","quantity_id":"q2"}]}',
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="duplicate produced JSON key: quantity_id"):
+    with pytest.raises(ValueError, match="duplicate JSON key: quantity_id"):
         _object(target)
