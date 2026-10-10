@@ -69,6 +69,39 @@ def _source_views(report):
     for oid in evidence:
         if oid not in physical or not frames[oid].get("record_id"):
             raise ValueError("source whole-wall geometry without authenticated frame receipt")
+    # The three independently serialized authority views must agree for each
+    # positively framed opening. Unframed openings may legitimately have a
+    # corroborated host and an ABSTAIN frame with no host_wall_id.
+    for oid, frame in frames.items():
+        if not frame.get("record_id"):
+            continue
+        host=physical[oid]
+        receipt=evidence.get(oid)
+        if not host.get("host_wall_id") or not host.get("record_id") or receipt is None:
+            raise ValueError("authenticated frame lacks source-owned host or geometry")
+        if (frame.get("host_wall_id") != host["host_wall_id"]
+                or receipt.get("host_wall_id") != host["host_wall_id"]
+                or receipt.get("host_binding_record_id") != host["record_id"]
+                or receipt.get("record_id") != frame["record_id"]):
+            raise ValueError("inconsistent physical opening host/frame receipt lineage")
+        members=frame.get("whole_wall_candidate_ids")
+        if members is not None and (
+                not isinstance(members,list)
+                or members != receipt.get("whole_wall_candidate_ids")
+                or members != host.get("member_wall_candidate_ids")):
+            raise ValueError("inconsistent framed whole-wall candidate membership")
+        selector=receipt.get("selector")
+        if not isinstance(selector,dict):
+            raise ValueError("framed receipt missing producer source selector")
+        expected={
+            "opening_identity_id":oid,
+            "page_id":str(host.get("page_id")),
+            "source_sha256":sha,
+            "snapshot_id":report.get("snapshot_id"),
+        }
+        for key,value in expected.items():
+            if key in selector and value is not None and str(selector[key]) != str(value):
+                raise ValueError("framed source selector disagrees with opening source owner")
     return sha,tuple(map(str,pages)),physical,frames,walls,evidence
 
 
