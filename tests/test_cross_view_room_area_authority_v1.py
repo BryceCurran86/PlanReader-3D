@@ -999,3 +999,41 @@ def test_compound_label_alone_cannot_mint_room_area(
     result = CrossViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
 
     assert result.records == ()
+
+
+def test_genuine_finite_source_witness_junction_survives_guard() -> None:
+    intersect = cross_view._source_segments_intersect
+    assert intersect((100.0, 70.0, 100.0, 90.0),
+                     (90.0, 80.0, 110.0, 80.0))
+    assert intersect((100.0, 80.0, 90.0, 80.0),
+                     (90.0, 80.0, 90.0, 90.0))
+    assert not intersect((100.0, 70.0, 100.0, 90.0),
+                         (101.0, 80.0, 110.0, 80.0))
+
+
+def test_source_witness_point_segment_cannot_fake_physical_junction() -> None:
+    intersect = cross_view._source_segments_intersect
+    genuine = (90.0, 80.0, 110.0, 80.0)
+    for zero_length in (
+        (100.0, 80.0, 100.0, 80.0),
+        (90.0, 80.0, 90.0, 80.0),
+    ):
+        assert not intersect(zero_length, genuine)
+        assert not intersect(genuine, zero_length)
+
+
+def test_nonfinite_or_malformed_source_witness_is_not_a_junction() -> None:
+    intersect = cross_view._source_segments_intersect
+    genuine = (90.0, 80.0, 110.0, 80.0)
+    malformed = (
+        (100.0, float("nan"), 100.0, 90.0),
+        (100.0, float("inf"), 100.0, 90.0),
+        (100.0, 70.0, 100.0, float("-inf")),
+        (-1e308, 80.0, 1e308, 80.0),
+        (100.0, 80.0, True, 90.0),
+        (100.0, 80.0, "100", 90.0),
+        (100.0, 80.0, 100.0),
+    )
+    for invalid in malformed:
+        assert not intersect(invalid, genuine)
+        assert not intersect(genuine, invalid)
