@@ -524,3 +524,68 @@ def test_two_distinct_figured_dimension_receipts_retain_firm_ceiling_area() -> N
     assert len(published) == 1
     assert published[0].authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
     assert published[0].value == 13.270425
+
+
+def test_two_distinct_area_receipt_ids_cannot_mint_two_full_ceilings_for_one_room() -> None:
+    original = _ceiling()
+    alternative = replace(
+        original,
+        canonical_ceiling_id="canonical-ceiling-alternative-full-area",
+        ceiling_quantity_id="qty-shadow-ceiling-alternative",
+        room_area_quantity_id="qty-room-area-alternative",
+    )
+    source_alternative = replace(
+        _shadow_quantity(),
+        quantity_id="qty-shadow-ceiling-alternative",
+        metadata={
+            **dict(_shadow_quantity().metadata),
+            "upstream_area_quantity_id": "qty-room-area-alternative",
+        },
+    )
+    # Both pass all existing individual-source and area checks, and neither
+    # shares an upstream quantity ID. The collision is the *physical room*.
+    first = publish_live_ceiling_area_quantities(_result())
+    alternate = publish_live_ceiling_area_quantities(
+        _result(ceiling=alternative, shadow=source_alternative)
+    )
+    assert len(first) == len(alternate) == 1
+    result = replace(
+        _result(),
+        canonical_ceilings=(original, alternative),
+        quantity_evidence=(_shadow_quantity(), source_alternative),
+    )
+    assert publish_live_ceiling_area_quantities(result) == ()
+    assert publish_live_ceiling_area_quantities(
+        replace(result, canonical_ceilings=(alternative, original))
+    ) == ()
+
+
+def test_different_rooms_with_distinct_area_sources_do_not_quarantine_each_other() -> None:
+    first = _ceiling()
+    second = replace(
+        first,
+        canonical_ceiling_id="canonical-ceiling-room-2",
+        room_entity_id="room-2",
+        room_area_quantity_id="qty-room-area-2",
+        ceiling_quantity_id="qty-shadow-ceiling-room-2",
+    )
+    secondary_source = replace(
+        _shadow_quantity(),
+        quantity_id="qty-shadow-ceiling-room-2",
+        input_entity_ids=("room-2",),
+        semantic_key="ceiling_lining:room-2",
+        metadata={
+            **dict(_shadow_quantity().metadata),
+            "upstream_area_quantity_id": "qty-room-area-2",
+        },
+    )
+    result = replace(
+        _result(),
+        canonical_ceilings=(first, second),
+        quantity_evidence=(_shadow_quantity(), secondary_source),
+    )
+    quantities = publish_live_ceiling_area_quantities(result)
+    assert len(quantities) == 2
+    assert {q.input_entity_ids for q in quantities} == {
+        ("canonical-ceiling-1",), ("canonical-ceiling-room-2",)
+    }
