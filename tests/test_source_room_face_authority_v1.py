@@ -427,3 +427,33 @@ def test_disjoint_faces_on_same_long_wall_do_not_fake_two_sided_boundary() -> No
     assert result.records == ()
     assert SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS in result.reason_codes
 
+
+
+def test_nonfinite_source_edges_cannot_supply_wall_ownership_or_collinear_overlap():
+    """NaN previously survived collinearity comparisons as a fake positive span."""
+    from pb_source_room_face_authority import (
+        _collinear_overlap_edge,
+        _edges_share_positive_collinear_span,
+        _finite_source_edge,
+    )
+
+    clean = ((0.0, 0.0), (10.0, 0.0))
+    partial = ((5.0, 0.0), (15.0, 0.0))
+    assert _finite_source_edge(clean)
+    assert _collinear_overlap_edge(clean, partial) == (
+        (5.0, 0.0), (10.0, 0.0)
+    )
+    assert _edges_share_positive_collinear_span(clean, partial)
+    assert _edge_contains_edge(clean, ((1.0, 0.0), (9.0, 0.0)))
+
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        malformed = ((bad, 0.0), (7.0, 0.0))
+        assert not _finite_source_edge(malformed)
+        assert _collinear_overlap_edge(clean, malformed) is None
+        assert _collinear_overlap_edge(malformed, clean) is None
+        assert not _edges_share_positive_collinear_span(clean, malformed)
+        assert not _edge_contains_edge(clean, malformed)
+        assert not _edge_contains_edge(malformed, clean)
+    assert not _finite_source_edge(((0.0, 0.0), ()))
+    assert _collinear_overlap_edge(clean, ((0.0, 0.0), ())) is None
+    assert not _edge_contains_edge(clean, ((0.0, 0.0), ()))
