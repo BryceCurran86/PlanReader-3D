@@ -1,0 +1,108 @@
+name: GPT MAX W2 Exact Source Through Junction Experiment
+on:
+  pull_request:
+    paths:
+      - "pb_wall_room_topology_source_snap_anchor.py"
+      - "pb_wall_room_topology_stage_a.py"
+      - "tests/test_wall_room_topology_source_snap_anchor.py"
+      - ".github/workflows/test-gptmax-source-owned-t-junction-experiment.yml"
+concurrency:
+  group: gptmax-source-owned-t-junction-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  focused-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Positive source split and fail-closed W2 topology tests
+        run: |
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_wall_room_topology_source_snap_anchor.py \
+            tests/test_wall_room_topology_stage_a.py \
+            tests/test_wall_room_topology_wall_assembly.py \
+            tests/test_raster_source_wall_frame_projection.py
+      - name: Frozen integrity and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  actual-original-source-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      matrix:
+        include:
+          - name: lot16
+            pdf: "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
+            page_ids: "--page-id 3"
+            sha: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          - name: maryborough
+            pdf: "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
+            page_ids: "--page-id 7 --page-id 30 --page-id 31"
+            sha: "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original verified prerequisite and changed live source proof
+        env:
+          SOURCE_PDF: "${{ matrix.pdf }}"
+          PAGE_IDS: "${{ matrix.page_ids }}"
+          GPTMAX_W2_SOURCE_TRACE: "1"
+        run: |
+          git worktree add /tmp/gptmax-snap-source-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          (cd /tmp/gptmax-snap-source-prerequisite && PYTHONPATH=. python -u "$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py" \
+            --pdf "$SOURCE_PDF" $PAGE_IDS \
+            --output "$GITHUB_WORKSPACE/original-source-before.json")
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf "$SOURCE_PDF" $PAGE_IDS --output original-source-after.json
+      - name: Reject any lost, changed or rekeyed physical host/frame proof
+        env:
+          EXPECTED_SOURCE_SHA: "${{ matrix.sha }}"
+        run: |
+          python - <<'PY'
+          import json, os
+          from tools.gptmax_compare_opening_authority import compare_reports
+          old=json.load(open("original-source-before.json"))
+          new=json.load(open("original-source-after.json"))
+          assert old["source_sha256"]==new["source_sha256"]==os.environ["EXPECTED_SOURCE_SHA"]
+          assert old["primitive_safety_cap"]==new["primitive_safety_cap"]==20_000
+          def shape(r):
+              return {
+                  "source_sha256":r["source_sha256"],
+                  "selected_geometry_page_ids":r["selected_geometry_page_ids"],
+                  "all_source_pages_requested":False,
+                  "primitive_safety_cap":r["primitive_safety_cap"],
+                  "opening_bindings":r["opening_bindings"],
+                  "host_frame_traces":r["host_frames"],
+              }
+          audit=compare_reports(shape(old),shape(new))
+          with open("exact-identity-retention.json","w") as f:
+              json.dump(audit,f,indent=2,sort_keys=True)
+          print(json.dumps({"retention_pass":audit["retention_pass"],
+                            "counts":audit["count_summary"],
+                            "lost":audit["lost_proof_records"],
+                            "changed":audit["changed_proof_records_needing_review"],
+                            "missing":audit["missing_physical_openings"]},sort_keys=True),flush=True)
+          assert audit["retention_pass"], "previously authentic source host/frame lost or rekeyed"
+          assert not audit["missing_physical_openings"]
+          assert audit["benchmark_accuracy"] is None
+          assert "quantities" not in old and "quantities" not in new
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gptmax-w2-source-identity-${{ matrix.name }}
+          path: |
+            original-source-before.json
+            original-source-after.json
+            exact-identity-retention.json
+          if-no-files-found: ignore
