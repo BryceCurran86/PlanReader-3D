@@ -8,6 +8,8 @@ on:
       - "pb_*wall*.py"
       - "pb_live_physical_net_wall_integration.py"
       - "tests/test_source_*room*.py"
+      - "tests/test_gpt2_named_room_metric_first_gates.py"
+      - "tools/diag_gpt2_named_room_metric_first_gates.py"
       - ".github/workflows/test_gpt2_maryborough_grid_component_completion.yml"
 
 concurrency:
@@ -66,6 +68,10 @@ jobs:
               for room in claim.canonical_rooms if norm(room.room_label)
           ]
           labels=sorted({row["label"] for row in labelled})
+          from tools.diag_gpt2_named_room_metric_first_gates import (
+              summarize_named_room_metric_first_gates,
+          )
+          named_metric_ledger=summarize_named_room_metric_first_gates(claim)
           firm={
               norm(dict(q.metadata or {}).get("room_label")):float(q.value)
               for q in claim.room_area_quantity_evidence
@@ -95,6 +101,7 @@ jobs:
               "labels":labels,
               "observed_geometry_targets":observed,
               "firm_room_areas":firm,
+              **named_metric_ledger,
               "status":getattr(claim.status,"value",str(claim.status)),
               "reason_codes":list(claim.reason_codes),
           },indent=2,sort_keys=True))
