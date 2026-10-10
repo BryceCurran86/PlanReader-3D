@@ -279,7 +279,11 @@ def _claim_from_quantity(
                 }
             )
         )
-        if not figured_dimension_ids:
+        # The ceiling must carry both independently source-owned axes of
+        # the documented room-area proof. One dimension ID, or repetitions of
+        # the same ID, cannot establish a metric plane and must not enter the
+        # canonical ceiling pipeline as a source-authenticated area.
+        if len(figured_dimension_ids) < 2:
             return None
 
     return (
