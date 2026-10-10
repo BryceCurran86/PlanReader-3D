@@ -1405,12 +1405,21 @@ def _try_physical_net_wall_rows(
             for ceiling in tuple(getattr(claim, "canonical_ceilings", ()) or ())
             if str(getattr(ceiling, "source_room_index_id", "") or "").strip()
         }
-        if new_room_index_ids:
+        # An independently remapped room-index ID must not reissue the same
+        # authenticated room-area receipt as a second legacy ceiling.
+        new_room_area_quantity_ids = {
+            str(getattr(ceiling, "room_area_quantity_id", "") or "").strip()
+            for ceiling in tuple(getattr(claim, "canonical_ceilings", ()) or ())
+            if str(getattr(ceiling, "room_area_quantity_id", "") or "").strip()
+        }
+        if new_room_index_ids or new_room_area_quantity_ids:
             retained_legacy_ceilings = tuple(
                 ceiling
                 for ceiling in legacy_result.canonical_ceilings
                 if str(ceiling.source_room_index_id or "").strip()
                 not in new_room_index_ids
+                and str(getattr(ceiling, "room_area_quantity_id", "") or "").strip()
+                not in new_room_area_quantity_ids
             )
             retained_shadow_ids = {
                 str(ceiling.ceiling_quantity_id or "").strip()
