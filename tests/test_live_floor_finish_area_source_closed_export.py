@@ -243,3 +243,82 @@ def test_floor_finish_seal_projects_exactly_one_customer_row() -> None:
     assert persisted_report.verified_quantity_ids == (
         run.quantities[0].quantity_id,
     )
+
+
+def test_floor_finish_seal_rejects_one_occurrence_on_two_physical_floors() -> None:
+    original = _floor()
+    other = replace(
+        original,
+        canonical_floor_id="floor-2",
+        physical_floor_surface_id="floor-2",
+        room_entity_id="room-2",
+        source_room_face_record_id="face-2",
+    )
+    first = _quantity()
+    second = replace(
+        first,
+        quantity_id="floor-finish-q2",
+        semantic_key="floor_finish_area:floor-2:FT1:tile",
+        input_entity_ids=("floor-2",),
+        metadata={
+            **dict(first.metadata),
+            "canonical_floor_id": "floor-2",
+            "physical_floor_surface_id": "floor-2",
+            "source_room_face_record_id": "face-2",
+        },
+    )
+    claim = replace(
+        _claim(), canonical_floors=(original, other),
+        floor_finish_quantity_evidence=(first, second),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="source occurrence has competing physical floors",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+def test_floor_finish_seal_rejects_multiple_quantities_for_one_floor() -> None:
+    first = _quantity()
+    second = replace(
+        first,
+        quantity_id="floor-finish-q2",
+        semantic_key="floor_finish_area:floor-1:FT2:tile",
+        metadata={
+            **dict(first.metadata),
+            "finish_occurrence_record_id": "occ-2",
+        },
+    )
+    claim = replace(
+        _claim(),
+        floor_finish_quantity_evidence=(first, second),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="canonical floor has competing finish area quantities",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    ("finish_occurrence_record_id", "finish_definition_record_id"),
+)
+def test_floor_finish_seal_rejects_missing_source_semantic_receipt(receipt: str) -> None:
+    quantity = _quantity()
+    invalid = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), receipt: ""},
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(invalid,))
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="source occurrence/definition receipt is missing",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
