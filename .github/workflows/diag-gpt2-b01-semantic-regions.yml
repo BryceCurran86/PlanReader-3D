@@ -1,0 +1,95 @@
+name: DIAG GPT2 B01 Maryborough Semantic Regions
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_viewport_segmentation.py"
+      - "tests/benchmarks/test_mutation_viewport_segmentation.py"
+      - ".github/workflows/diag-gpt2-b01-semantic-regions.yml"
+  workflow_dispatch:
+
+jobs:
+  maryborough-semantic-regions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Capture verified semantic region inventory
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b01-semantic-regions
+          PYTHONPATH=. python - <<'PY' | tee artifacts/gpt2-b01-semantic-regions/inventory.json
+          import hashlib
+          import json
+          from pathlib import Path
+          import fitz
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+              is_authoritative_derived_viewport,
+              is_segment_page_viewports_product,
+          )
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload = path.read_bytes()
+          sha = hashlib.sha256(payload).hexdigest()
+          assert sha == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          doc = fitz.open(stream=payload,filetype="pdf")
+          assert doc.page_count == 31
+          record = {
+              "source_sha256": sha,
+              "source_page_count": doc.page_count,
+              "scope_pages_1_based": [9,11,25,26,27],
+              "pages": [],
+          }
+          for page_no in record["scope_pages_1_based"]:
+              page = doc.load_page(page_no - 1)
+              views = segment_page_viewports(page,page_number=page_no)
+              assert validate_non_overlapping_viewports(views)
+              assert all(is_segment_page_viewports_product(v) for v in views)
+              rows = []
+              for v in views:
+                  if v.view_type not in (
+                      DrawingViewType.REFLECTED_CEILING_PLAN.value,
+                      DrawingViewType.FLOOR_FINISH_PLAN.value,
+                      DrawingViewType.SCHEDULE.value,
+                      DrawingViewType.LEGEND.value,
+                      DrawingViewType.FLOOR_PLAN.value,
+                  ):
+                      continue
+                  authorized = bool(
+                      v.bounding_box is not None and
+                      (v.status == "resolved" or is_authoritative_derived_viewport(v))
+                  )
+                  if v.bounding_box is None:
+                      assert not authorized
+                  rows.append({
+                      "id": v.view_id,
+                      "title": v.label,
+                      "type": v.view_type,
+                      "status": v.status,
+                      "boundary_source": v.boundary_source,
+                      "native_bbox_pdf_pts": v.bounding_box,
+                      "authoritative": authorized,
+                      "reason": v.notes,
+                      "partition_mode": (v.provenance or {}).get("partition_mode"),
+                      "separator": (v.provenance or {}).get("separator_view_id"),
+                  })
+              record["pages"].append({"page": page_no,"views": rows})
+          doc.close()
+          print(json.dumps(record,sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b01-semantic-regions
+          path: artifacts/gpt2-b01-semantic-regions
+          retention-days: 7
