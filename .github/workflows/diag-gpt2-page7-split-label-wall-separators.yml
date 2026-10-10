@@ -9,6 +9,8 @@ on:
       - "tests/test_gpt2_remaining_label_source_face_candidates.py"
       - "tools/diag_gpt2_split_label_wall_separators.py"
       - "tests/test_gpt2_split_label_wall_separators.py"
+      - "tools/diag_gpt2_split_face_collinear_first_gates.py"
+      - "tests/test_gpt2_split_face_collinear_first_gates.py"
       - ".github/workflows/diag-gpt2-page7-split-label-wall-separators.yml"
   workflow_dispatch:
 
@@ -32,6 +34,7 @@ jobs:
         run: |
           PYTHONPATH=. pytest -q tests/test_gpt2_remaining_label_source_face_candidates.py
           PYTHONPATH=. pytest -q tests/test_gpt2_split_label_wall_separators.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_split_face_collinear_first_gates.py
           PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
@@ -331,6 +334,40 @@ jobs:
           },sort_keys=True,default=str))
           assert all(not row["merge_source_faces_authorized"]
                      for row in split_rows)
+
+          from tools.diag_gpt2_split_face_collinear_first_gates import (
+              audit_collinear_candidates,
+          )
+          collinear_rows=[]
+          for selector in selectors:
+              label_scope=label_authority.resolve_scope(SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              for candidate in label_scope.split_face_candidates:
+                  collinear_rows.append(audit_collinear_candidates(
+                      candidate,source_face_by_record_id,
+                  ))
+          print("GPT2_PAGE7_COLLINEAR_SOURCE_SUBEDGE_FIRST_GATES",json.dumps({
+              "source_sha256":sha,
+              "source_page":7,
+              "source_split_candidate_count":len(collinear_rows),
+              "collinear_candidate_counts":dict(Counter(
+                  item["first_gate"] for item in collinear_rows
+              )),
+              "candidates":collinear_rows,
+              "source_room_label_publications":0,
+              "metric_quantity_publications":0,
+          },sort_keys=True,default=str))
+          assert all(not row["merge_source_faces_authorized"]
+                     and not row["source_room_label_published"]
+                     and not row["metric_quantity_published"]
+                     for row in collinear_rows)
+
 
           # Use the EXISTING production composite authority, not a new
           # geometry-union pathway. A positive composite needs independently
