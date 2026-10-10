@@ -156,7 +156,7 @@ def _edge_key(value) -> tuple[tuple[float, float], tuple[float, float]] | None:
     try:
         first = (float(value[0][0]), float(value[0][1]))
         second = (float(value[1][0]), float(value[1][1]))
-    except (IndexError, TypeError, ValueError):
+    except (IndexError, TypeError, ValueError, OverflowError):
         return None
     if not all(math.isfinite(v) for point in (first, second) for v in point):
         return None
