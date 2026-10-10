@@ -47,6 +47,8 @@ jobs:
             sha: "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
