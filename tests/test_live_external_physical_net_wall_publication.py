@@ -279,6 +279,7 @@ def test_expected_opening_with_missing_void_never_publishes_gross_as_net() -> No
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED in result.reason_codes
     assert result.quantity_evidence is None
+    assert result.canonical_walls == ()
 
 
 def test_physical_publication_has_no_trade_policy_or_quantity_truth_inputs() -> None:
