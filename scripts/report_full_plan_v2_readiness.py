@@ -204,9 +204,19 @@ def _sealed_projection_proof(
         return False, ["produced_sealed_parity_not_proven"]
     from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 
-    sealed = sealed_source_closed_run_from_dict(
-        _object(sealed_root / project_id / "sealed_run.json")
-    )
+    # A parallel production seal writer can replace/remove this file after
+    # _sealed_run_proof succeeded. The second independent read must fail closed
+    # for this project, not abort the four-project readiness diagnostic.
+    from pb_source_closed_run_export import SourceClosedRunExportError
+    try:
+        sealed = sealed_source_closed_run_from_dict(
+            _object(sealed_root / project_id / "sealed_run.json")
+        )
+    except (SourceClosedRunExportError, TypeError, ValueError, KeyError,
+            UnicodeError, OSError):
+        return False, ["sealed_run_changed_during_parity"]
+    if sealed.project_id != project_id:
+        return False, ["sealed_run_changed_during_parity"]
     blockers = produced_sealed_parity_blockers(produced, sealed.quantities)
     return not blockers, blockers
 
