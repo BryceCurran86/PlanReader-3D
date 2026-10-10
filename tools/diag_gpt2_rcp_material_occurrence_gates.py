@@ -42,6 +42,13 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
         and bool(str(getattr(record,"record_id","") or "").strip())
         for record in records
     )
+    # Where the viewport producer exposes its exact source page, material
+    # observations from another sheet cannot become this RCP's occurrences.
+    page_number = getattr(viewport, "page_number", None)
+    record_pages_match = page_number is None or all(
+        str(getattr(record, "page_id", "") or "") == str(page_number)
+        for record in records
+    )
     if kind!="reflected_ceiling_plan":
         gate="not_an_rcp_viewport"
     elif not supported:
@@ -56,6 +63,8 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
         gate="producer_no_authenticated_occurrences"
     elif not owned_records:
         gate="producer_occurrence_viewport_lineage_mismatch"
+    elif not record_pages_match:
+        gate="producer_occurrence_source_page_mismatch"
     else:
         gate="producer_authenticated_occurrences_require_room_owner_before_quantity"
     return {
@@ -71,7 +80,7 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
         "producer_authenticated_record_ids":[
             str(getattr(r,"record_id",""))
             for r in records
-        ] if supported and complete and scope_token=="corroborated" and owned_records else [],
+        ] if supported and complete and scope_token=="corroborated" and owned_records and record_pages_match else [],
         "first_unclosed_gate":gate,
         "new_room_material_ownership_claim":False,
         "new_metric_quantity_claim":False,
