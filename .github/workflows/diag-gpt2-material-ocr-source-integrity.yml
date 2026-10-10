@@ -105,7 +105,8 @@ jobs:
           comparison={
               "source_sha256":sha,"source_page_count":31,
               "native_page_viewports":source_views,
-              "source_scope_definition_results":results,\n              "source_scope_uses_exact_schedule_pages_only":True,
+              "source_scope_definition_results":results,
+              "source_scope_uses_exact_schedule_pages_only":True,
               "tesseract_binary":executable,
               "ocr_backend_available":bool(ocr_backend.is_available()),
               "source_authentication_requirement":"exact producer-owned source text/raster receipts only",
