@@ -128,6 +128,16 @@ def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: 
     return not reasons, len(sealed.quantities), reasons
 
 
+def _safe_finite_quantity_number(value: object) -> bool:
+    """Avoid int-to-float overflow in parity for already-decoded quantities."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tuple) -> list[str]:
     """Prove quantity projection from authenticated production IDs, never V2 truth.
 
@@ -166,7 +176,7 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
                 blockers.append(f"abstained_projection_has_value:{quantity_id}")
         elif (
             type(value) not in (int, float)
-            or not math.isfinite(value)
+            or not _safe_finite_quantity_number(value)
             or row.value is None
             or value != row.value
         ):
