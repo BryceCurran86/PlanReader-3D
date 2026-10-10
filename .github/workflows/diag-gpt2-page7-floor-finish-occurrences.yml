@@ -1,0 +1,142 @@
+name: DIAG GPT2 Page7 Source Floor Finish Occurrences
+
+on:
+  pull_request:
+    branches:
+      - main
+      - gpt2/page7-source-double-border-plan-owner-20261010
+    paths:
+      - ".github/workflows/diag-gpt2-page7-floor-finish-occurrences.yml"
+  workflow_dispatch:
+
+jobs:
+  source-floor-finish-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 unchanged
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Real source-owned floor finish occurrence first gate
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-page7-floor-finish
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-page7-floor-finish/report.json
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import (
+              SourceMaterialDefinitionSelector,
+              SourceMaterialOccurrenceSelector,
+              SourceMaterialSemanticProducer,
+          )
+          from pb_viewport_segmentation import (
+              segment_page_viewports, validate_non_overlapping_viewports,
+          )
+          from pb_drawing_evidence_binding import DrawingViewType
+
+          raw=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(raw).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          doc=fitz.open(stream=raw,filetype="pdf")
+          assert doc.page_count==31
+          viewports=segment_page_viewports(doc.load_page(6),page_number=7)
+          assert validate_non_overlapping_viewports(viewports)
+          floors=[v for v in viewports if v.view_type==DrawingViewType.FLOOR_PLAN.value]
+          assert len(floors)==1 and floors[0].status=="resolved" and floors[0].bounding_box
+          doc.close()
+
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-page7-floor-finish-source-audit",
+              producer_version="1",
+          )
+          snapshot=source.ingest_native_pdf_bytes(
+              document_id="gpt2-page7-floor-finish-document",
+              source_bytes=raw,
+              source_locator="memory://maryborough-page7-floor-finish.pdf",
+              page_ids=("7","9","11"),
+          )
+          assert snapshot.revision.source_sha256==sha
+          material=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          authority=material.publish(snapshot.revision.revision_id)
+          lineage=dict(
+              document_id=snapshot.revision.document_id,
+              revision_id=snapshot.revision.revision_id,
+              source_sha256=sha,
+              snapshot_id=snapshot.snapshot.snapshot_id,
+          )
+          code_results={}
+          for code in ("FPB","WFPB","IPF1","GRID","FT2","FT3"):
+              resolved=authority.resolve_definition(
+                  SourceMaterialDefinitionSelector(**lineage,code=code)
+              )
+              rec=resolved.record
+              code_results[code]=dict(
+                  status=str(resolved.status),
+                  first_gate=list(resolved.reason_codes),
+                  semantic_finish=getattr(rec,"semantic_finish",None),
+                  source_definition_record_id=getattr(rec,"record_id",None),
+                  source_definition_evidence_ids=list(
+                      getattr(rec,"source_definition_ids",()) or ()
+                  ),
+              )
+
+          floor_scopes=[]
+          for v in floors:
+              result=authority.resolve_occurrences(
+                  SourceMaterialOccurrenceSelector(
+                      **lineage,page_id="7",viewport_id=v.view_id
+                  )
+              )
+              occurrences=[]
+              for rec in result.records:
+                  assert rec.source_sha256==sha
+                  assert rec.page_id=="7" and rec.viewport_id==v.view_id
+                  assert rec.source_text_observation_ids
+                  assert rec.source_evidence_id and rec.definition_record_id
+                  occurrences.append(dict(
+                      code=rec.code,
+                      semantic_finish=rec.semantic_finish,
+                      source_observation_ids=list(rec.source_text_observation_ids),
+                      definition_record_id=rec.definition_record_id,
+                      source_evidence_id=rec.source_evidence_id,
+                      native_bbox_pdf_pts=rec.bbox_pdf_pts,
+                  ))
+              floor_scopes.append(dict(
+                  viewport_id=v.view_id,
+                  status=str(result.status),
+                  first_gate=list(result.reason_codes),
+                  scope_complete=bool(result.scope_complete),
+                  authenticated_material_occurrence_count=len(occurrences),
+                  occurrences=occurrences,
+              ))
+
+          result=dict(
+              source_sha256=sha,source_page_count=31,
+              decoded_pages=[7,9,11],
+              floor_source_owned_viewport_id=floors[0].view_id,
+              floor_source_viewport_bbox=floors[0].bounding_box,
+              material_definitions=code_results,
+              floor_finish_occurrence_scopes=floor_scopes,
+              unresolved=["physical_room_material_owner","metric_finish_area",
+                          "customer_quantity","frozen_accuracy"],
+              material_inference_forbidden=True,
+          )
+          print("GPT2_PAGE7_SOURCE_FLOOR_FINISH",json.dumps(result,sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-page7-source-floor-finish-first-gate
+          path: artifacts/gpt2-page7-floor-finish
+          retention-days: 7
