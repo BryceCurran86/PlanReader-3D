@@ -15,6 +15,16 @@ from pathlib import Path
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 
 
+def _unique_produced_json_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject duplicated object keys before one may shadow source identity."""
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate produced JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _object(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -174,10 +184,22 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             raise ValueError(f"frozen project identity mismatch: {project_id}")
         path = produced_root / project_id / "produced_items.json"
         exists = path.is_file()
+        invalid_produced_shape = False
         if exists:
-            produced = json.loads(path.read_text(encoding="utf-8"))
+            try:
+                produced = json.loads(
+                    path.read_text(encoding="utf-8"),
+                    object_pairs_hook=_unique_produced_json_object,
+                )
+            except (ValueError, UnicodeError, OSError):
+                produced = []
+                invalid_produced_shape = True
             if not isinstance(produced, list) or any(not isinstance(x, dict) for x in produced):
-                raise ValueError(f"{path} must contain a JSON list of objects")
+                produced = []
+                invalid_produced_shape = True
+            # Keep examining the other projects; an unreadable produced file
+            # must be an explicit source-readiness blocker, never a score or
+            # a fatal exception that conceals unrelated project failures.
             # A malformed production row is a readiness blocker, not a
             # reason to crash before the remaining four-project diagnostic.
             # Reject absent, blank and non-string IDs without manufacturing
@@ -200,7 +222,11 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         expected_shas = {doc["sha256"] for doc in manifest.get("source_documents", ())}
         seal_verified, sealed_count, seal_reasons = _sealed_run_proof(sealed_root, project_id, expected_shas)
         blockers.extend(seal_reasons)
-        parity_verified, parity_reasons = _sealed_projection_proof(sealed_root, project_id, produced, seal_verified) if exists else (False, ["produced_sealed_parity_not_proven"])
+        parity_verified, parity_reasons = (
+            _sealed_projection_proof(sealed_root, project_id, produced, seal_verified)
+            if exists and not invalid_produced_shape
+            else (False, ["produced_sealed_parity_not_proven"])
+        )
         blockers.extend(parity_reasons)
         if exists:
             blockers.append("commercial_trade_authority_not_independently_verified")
@@ -214,16 +240,18 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             blockers.append("duplicate_produced_quantity_ids")
         if any(item.get("lineage_ok") is not True for item in produced):
             blockers.append("production_lineage_conflict_or_unverified")
-        if not produced and exists:
+        if invalid_produced_shape:
+            blockers.append("produced_items_invalid_json_or_shape")
+        elif not produced and exists:
             blockers.append("empty_produced_items_unverified")
         projects.append({
             "project_id": project_id,
             "manifest_status": manifest.get("status"),
             "denominator": denominator,
             "produced_file_present": exists,
-            "produced_count": len(produced) if exists else None,
-            "lineage_conflict_count": sum(item.get("lineage_ok") is not True for item in produced) if exists else None,
-            "abstention_count": sum(item.get("abstained") is True for item in produced) if exists else None,
+            "produced_count": len(produced) if exists and not invalid_produced_shape else None,
+            "lineage_conflict_count": sum(item.get("lineage_ok") is not True for item in produced) if exists and not invalid_produced_shape else None,
+            "abstention_count": sum(item.get("abstained") is True for item in produced) if exists and not invalid_produced_shape else None,
             "duplicate_quantity_ids": duplicate_ids,
             "source_sha_verified": source_verified,
             "sealed_run_verified": seal_verified,
