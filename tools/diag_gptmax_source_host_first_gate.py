@@ -35,7 +35,11 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
     bindings = report.get("opening_bindings")
     frames = report.get("host_frames")
     summary = report.get("summary")
-    if not isinstance(scopes, list) or not isinstance(bindings, list) or not isinstance(frames, list):
+    if (not isinstance(scopes, list) or not isinstance(bindings, list)
+            or not isinstance(frames, list)
+            or any(not isinstance(b, dict) for b in bindings)
+            or any(not isinstance(f, dict) for f in frames)
+            or any(not isinstance(s, dict) for s in scopes)):
         raise ValueError("original source wall/opening/frame receipts unavailable")
     if not isinstance(summary, dict):
         raise ValueError("source report has no producer summary")
@@ -124,23 +128,32 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
         reasons = tuple(trace.get("reason_codes") or ())
         if any(not isinstance(code, str) or not code for code in reasons):
             raise ValueError("invalid original source host blockers")
-        if "raster_source_band_left_source_primitive_unmapped" in reasons:
-            stage = "left_original_raster_source_primitive_unmapped"
-        elif "raster_source_band_right_source_primitive_unmapped" in reasons:
-            stage = "right_original_raster_source_primitive_unmapped"
-        elif "raster_source_band_left_local_wall_owner_unmapped" in reasons:
-            stage = "left_source_local_w4_owner_unmapped"
-        elif "raster_source_band_right_local_wall_owner_unmapped" in reasons:
-            stage = "right_source_local_w4_owner_unmapped"
-        elif "no_authenticated_host_wall_band" in reasons:
-            stage = "source_host_wall_band_unproven"
-        else:
-            stage = "other_source_host_blocker"
+        specific = {
+            "raster_source_band_left_source_primitive_unmapped":
+                "left_original_raster_source_primitive_unmapped",
+            "raster_source_band_right_source_primitive_unmapped":
+                "right_original_raster_source_primitive_unmapped",
+            "raster_source_band_left_local_wall_owner_unmapped":
+                "left_source_local_w4_owner_unmapped",
+            "raster_source_band_right_local_wall_owner_unmapped":
+                "right_source_local_w4_owner_unmapped",
+        }
+        observed = tuple(sorted(specific[code] for code in reasons if code in specific))
+        # Two independent flank failures do not have an authenticated order.
+        # Never arbitrarily call 'left' the first evidence gate.
+        stage = (
+            observed[0] if len(observed) == 1
+            else "multiple_source_host_gates_unresolved" if observed
+            else "source_host_wall_band_unproven"
+            if "no_authenticated_host_wall_band" in reasons
+            else "other_source_host_blocker"
+        )
         first_gates[stage] += 1
         unhosted.append({
             "page_id": page,
             "opening_identity_id": opening_id,
             "first_observed_host_gate": stage,
+            "all_specific_observed_gates": list(observed),
             "original_source_reason_codes": list(reasons),
         })
     return {
