@@ -2946,19 +2946,15 @@ def _assemble_scope_result(
     authenticated_frame_edge_primitive_count: int = 0,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = selector.decision_scope_id
-    protected_faces = (
-        _producer_proven_opening_wall_face_source_ids(
-            source_producer=source_producer, published=published, page_id=page_id,
-            physical_opening_authority=physical_opening_authority,
-            resolved_visible_observations=resolved_visible_observations,
-        )
-        if physical_opening_authority is not None else frozenset()
-    )
+    # Source-proven face protection is DIAGNOSTIC ONLY until the original
+    # Lot16/W4 candidate, host and frame identity preservation is proved.
+    # The pre-motif helper remains available for standalone producer-owned
+    # source analysis and positive fixture tests; calling it here would run a
+    # second whole-page source proof and rekey live physical wall topology.
     topology_segments = _filter_repeated_non_physical_drafting_primitives(
         segments,
         page_width=page_width,
         page_height=page_height,
-        preserved_source_primitive_ids=protected_faces,
     )
     if len(topology_segments) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
         return _blocked(
