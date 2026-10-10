@@ -37,6 +37,85 @@ def _has_firm_metric_floor_receipt(floor) -> bool:
     )
 
 
+
+def _floor_quantity_first_failure(floor, room, area_quantity_ids: set[str]) -> str:
+    """Identify the earliest unresolved floor-to-measurement stage.
+
+    A PDF polygon area is never a physical m² measurement. A correctly
+    corroborated source room label does not by itself authenticate scale.
+    """
+    if not floor.physical_floor_surface_identity_resolved or not floor.physical_floor_surface_id:
+        return "physical_floor_identity_unresolved"
+    if not floor.source_room_face_record_id or not floor.evidence_ids:
+        return "source_room_face_evidence_unavailable"
+    if room is None:
+        return "canonical_room_owner_unavailable"
+    # A separately source-authenticated physical scale can close metric area
+    # without an identifiable room-text label. Check an actual measurement
+    # receipt first; the label branch diagnoses only the unmeasured path.
+    if _has_firm_metric_floor_receipt(floor):
+        if floor.metric_area_quantity_id not in area_quantity_ids:
+            return "metric_floor_area_quantity_evidence_unavailable"
+        return "floor_area_quantity_prerequisites_resolved"
+    if (
+        not room.room_label
+        or not room.room_label_binding_record_id
+        or not room.room_label_evidence_ids
+    ):
+        return "authenticated_room_label_ownership_unavailable"
+    return "documented_dimension_or_physical_scale_measurement_unavailable"
+
+
+def _floor_quantity_diagnostic(claim) -> dict:
+    rooms_by_id = {
+        str(room.canonical_room_id): room
+        for room in claim.canonical_rooms
+    }
+    areas = {
+        str(quantity.quantity_id)
+        for quantity in claim.room_area_quantity_evidence
+        if str(quantity.quantity_id)
+        and not quantity.abstained
+        and quantity.value is not None
+        and quantity.unit == "m2"
+        and quantity.status == "firm"
+    }
+    finishes: dict[str, list[str]] = {}
+    for quantity in claim.floor_finish_quantity_evidence:
+        for entity_id in quantity.input_entity_ids:
+            finishes.setdefault(str(entity_id), []).append(quantity.quantity_id)
+    rows = []
+    for floor in claim.canonical_floors:
+        reason = _floor_quantity_first_failure(
+            floor, rooms_by_id.get(str(floor.room_entity_id)), areas
+        )
+        rows.append({
+            "canonical_floor_id": floor.canonical_floor_id,
+            "physical_floor_surface_id": floor.physical_floor_surface_id,
+            "room_entity_id": floor.room_entity_id,
+            "source_room_face_record_id": floor.source_room_face_record_id,
+            "source_receipt_count": len(floor.evidence_ids),
+            "geometry_area_page_pts2": floor.area_page_pts2,
+            "metric_area_m2": floor.metric_area_m2,
+            "metric_area_authority": floor.metric_area_authority,
+            "metric_area_quantity_id": floor.metric_area_quantity_id,
+            "finish_descriptor": floor.finish_descriptor,
+            "published_finish_quantity_ids": sorted(
+                finishes.get(str(floor.canonical_floor_id), [])
+            ),
+            "first_missing_prerequisite": reason,
+        })
+    return {
+        "canonical_floor_count": len(rows),
+        "first_failure_frequency": dict(Counter(
+            row["first_missing_prerequisite"] for row in rows
+        )),
+        "area_quantity_count": len(claim.room_area_quantity_evidence),
+        "finish_quantity_count": len(claim.floor_finish_quantity_evidence),
+        "per_floor": rows,
+    }
+
+
 def _wall_metric_first_failure(wall) -> str:
     """Classify the first absent producer-owned wall quantity prerequisite.
 
@@ -367,6 +446,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             "source_page_index_zero_based": page_index,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
+            "floor_quantity_diagnostic": _floor_quantity_diagnostic(claim),
             "wall_metric_diagnostic": _wall_metric_diagnostic(claim),
             "opening_quantity_diagnostic": _opening_quantity_diagnostic(claim),
             "opening_sealing_diagnostic": _opening_sealing_diagnostic(claim),
