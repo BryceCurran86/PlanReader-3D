@@ -1,0 +1,77 @@
+name: GPT MAX Raster Source W4 Ancestry Audit
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_raster_host_source_membership.py
+      - tests/test_gptmax_raster_host_source_membership.py
+      - docs/engineering/gptmax_raster_host_source_membership.md
+      - .github/workflows/test-gptmax-raster-host-source-membership.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Raster source-W4 membership cannot publish a host or count
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_raster_host_source_membership.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original SHA-pinned raster source-W4 first membership without host binding
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_raster_host_source_membership.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output lot16-raster-source-w4-membership.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path("lot16-raster-source-w4-membership.json").read_text())
+          assert x["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert (x["source_original_opening_count"],x["source_original_host_count"],
+                  x["source_original_frame_count"])==(23,14,9)
+          assert len(x["opening_rows"]) == 7, "Original raster first-gate universe unexpectedly changed"
+          assert not x["source_audit_abstained"]
+          assert not x["host_publication_allowed"]
+          assert not x["opening_count_publication_allowed"]
+          assert not x["metric_quantity_publication_allowed"]
+          assert x["benchmark_accuracy"] is None
+          for row in x["opening_rows"]:
+              assert any("raster_source_band_" in reason
+                         for reason in row["original_binding_reason_codes"])
+              evidence=row["source_w4_ancestry_audit"]
+              assert evidence["candidate_ancestry_only"]
+              assert not evidence["local_host_contact_proven"]
+              assert not evidence["host_publication_allowed"]
+          print({"original_lot16_host_frame_unchanged":True,
+                 "raster_source_first_failures":len(x["opening_rows"])})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-raster-w4-source-first-membership-lot16
+          path: lot16-raster-source-w4-membership.json
+          retention-days: 30
