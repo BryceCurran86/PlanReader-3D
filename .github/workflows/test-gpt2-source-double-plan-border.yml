@@ -1,0 +1,63 @@
+name: TEST GPT2 Page7 Source Double Plan Border
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_viewport_segmentation.py"
+      - "tests/test_gpt2_source_double_border_floor_plan.py"
+      - ".github/workflows/test-gpt2-source-double-plan-border.yml"
+  workflow_dispatch:
+
+jobs:
+  source-double-plan-border:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 and adversarial source double-border regression
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_source_double_border_floor_plan.py tests/benchmarks/test_mutation_viewport_segmentation.py
+      - name: Recheck unique real Maryborough floor plan viewport
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-double-plan-border
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-double-plan-border/source_first_gate.json
+          import hashlib,json
+          from pathlib import Path
+          import fitz
+          from pb_viewport_segmentation import segment_page_viewports, validate_non_overlapping_viewports
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          assert len(pdf)==31
+          viewports=segment_page_viewports(pdf.load_page(6),page_number=7)
+          assert validate_non_overlapping_viewports(viewports)
+          floor=[v for v in viewports if v.view_type=="floor_plan" and v.label=="PROP. FLOOR PLAN"]
+          report={
+              "source_sha256":sha,
+              "floor_plan_title_count":len(floor),
+              "floor_plan_statuses":[v.status for v in floor],
+              "floor_plan_native_bboxes":[v.bounding_box for v in floor],
+              "floor_plan_boundary_source":[v.boundary_source for v in floor],
+              "all_source_viewport_statuses":[[v.label,v.status] for v in viewports],
+              "scope":"SOURCE_VIEWPORT_PROOF_ONLY_NO_METRIC_QUANTITY",
+          }
+          print("GPT2_SOURCE_DOUBLE_PLAN_BORDER",json.dumps(report,sort_keys=True,default=str))
+          pdf.close()
+          assert len(floor)==1 and floor[0].status=="resolved" and floor[0].bounding_box
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-page7-source-double-border-authenticity
+          path: artifacts/gpt2-double-plan-border
+          retention-days: 7
