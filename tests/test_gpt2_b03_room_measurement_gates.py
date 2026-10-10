@@ -150,3 +150,12 @@ def test_conflicting_source_face_metadata_cannot_validate_documented_area() -> N
     row = inspect_room_measurement_gates(claim)["rooms"][0]
     assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT"
     assert row["firm_documented_area_receipt"] is False
+
+
+def test_mismatched_source_page_rejects_documented_receipt() -> None:
+    claim = _documented_area_claim()
+    claim.canonical_floors[0].page_id = "7"
+    claim.room_area_quantity_evidence[0].metadata["page_no"] = "8"
+    row = inspect_room_measurement_gates(claim)["rooms"][0]
+    assert row["firm_documented_area_receipt"] is False
+    assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT"
