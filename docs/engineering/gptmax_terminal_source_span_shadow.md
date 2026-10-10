@@ -165,3 +165,31 @@ verified CI ZIP is artifact `11678188765` in run `38073763011`, SHA-256
 Both original Lot16 and three-page Maryborough default/trace comparisons
 pass locally on the published tree, including the unchanged strict receipt
 retention checker. The publication branch has no source or quantity repair.
+
+
+## Original Maryborough W4 identity collision (source-first negative)
+
+The earlier real-source Maryborough audit failed before preview output at
+`duplicate or foreign source assembly identity`. Downloading and parsing the
+independently passed original-source evidence archive #11678793809 proves
+one conflicting duplicate `wall_candidate_id` on page 7:
+`wall_6d948b1b47258597fa66`. Its two original producer candidates refer
+to `split_2296` and `split_9744`, have distinct end-junction lists and
+opposite centerline order, while the keyed physical identity sidecar resolves
+to `split_9744`. Both appear in the original scope report, which includes
+3,737 wall records but only 3,736 unique candidate IDs on page 7; pages 30
+and 31 have no such duplicates. The original source SHA is
+`b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`.
+
+This is **conflicting source topology**, not interchangeable or safe-to-rekey
+duplicate data. Read-only source association must preserve the full producer
+row multiset, rather than dict-overwriting an ID or silently picking a
+candidate. Because removing a conflicting candidate would hide its competing
+source endpoint ownership, the entire affected W4 decision scope is quarantined
+from terminal-source preview publication. Unaffected source scopes can still
+yield shadow-only observations. The original source report and all physical
+host, frame, count and quantity states remain unmodified.
+
+A dedicated production W4 identity collision remediation must be designed and
+source-validated separately. No automatic source-edge merge, wall geometry
+extension, host promotion or score claim is authorised here.
