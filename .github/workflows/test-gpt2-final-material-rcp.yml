@@ -14,8 +14,9 @@ on:
       - "tests/test_cross_view_ceiling_finish_authority.py"
       - "tests/test_cross_view_ceiling_quantity_authority.py"
       - ".github/workflows/test-gpt2-final-material-rcp.yml"
+      - "tools/diag_gpt2_maryborough_b02_material_source.py"
 concurrency:
-  group: test-gpt2-final-material-rcp-subset
+  group: test-gpt2-final-material-rcp-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
