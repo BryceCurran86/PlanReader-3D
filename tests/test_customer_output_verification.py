@@ -261,7 +261,13 @@ def test_orphaned_auto_notes_cannot_hide_even_if_source_reference_is_erased() ->
     orphan.pop("quantity_id")
     orphan.pop("commercial_projection_provenance", None)
     orphan["source_reference"] = "manual note"
-    # Persisted adapter-owned notes remain a machine-readable source marker.
+    # Keep the serialized commercial adapter marker, but strip the actual
+    # nested quantity ID so the row is genuinely orphaned.
     assert isinstance(orphan["notes"], str)
+    import json
+    notes = json.loads(orphan["notes"])
+    assert notes["adapter"] == "commercial_takeoff"
+    notes["quantity"].pop("quantity_id", None)
+    orphan["notes"] = json.dumps(notes)
     with pytest.raises(CustomerOutputVerificationError, match="missing quantity identity"):
         verify_sealed_customer_output(sealed, [*rows, orphan])
