@@ -169,3 +169,23 @@ def test_source_page_ownership_prevents_rcp_occurrence_cross_sheet_attribution()
     assert gate(viewport,scope(complete=True,records=(missing_page,)))[
         "producer_authenticated_record_ids"
     ] == []
+
+
+def test_duplicate_material_occurrence_record_ids_cannot_double_count_source():
+    first=R(record_id="source-duplicate",code="FPB",viewport_id="v9")
+    repeated=R(record_id="source-duplicate",code="FPB",viewport_id="v9")
+    got=gate(vp(),scope(complete=True,records=(first,repeated)))
+    assert got["first_unclosed_gate"]=="producer_occurrence_identity_ambiguous"
+    assert got["producer_occurrence_record_ids"]==[
+        "source-duplicate", "source-duplicate",
+    ]
+    assert got["producer_authenticated_record_ids"]==[]
+    assert got["new_room_material_ownership_claim"] is False
+    assert got["new_metric_quantity_claim"] is False
+
+    unique=R(record_id="different",code="FPB",viewport_id="v9")
+    right=gate(vp(),scope(complete=True,records=(first,unique)))
+    assert right["first_unclosed_gate"]=="producer_authenticated_occurrences_require_room_owner_before_quantity"
+    assert right["producer_authenticated_record_ids"]==[
+        "source-duplicate", "different",
+    ]
