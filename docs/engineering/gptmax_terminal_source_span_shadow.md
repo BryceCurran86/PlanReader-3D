@@ -74,3 +74,63 @@ This broader census also prevents shipping a selective two-ID patch: changing
 the identity authority generically would affect other source candidates and
 must be validated against the complete original retention gate in a separate
 shadow experiment.
+
+## Proposed runtime association check before implementation
+
+Observed: the physical-wall producer's `_assemble_scope_result` passes its
+actual W2 graph and assembled walls into `collect_physical_wall_identities`,
+then writes those original identities and edge geometries into the scope's
+records. The scope's `decision_scope_id` equals the wall identity viewport;
+its source SHA, revision and snapshot identify the original published source.
+
+Inference: a read-only wrapper at that existing call can link the endpoint
+trace and wall records without pairing unrelated serialized files. Proposed
+shadow diagnostic: observe the real graph object and its identity-collection
+call; derive previews from copies; return every original graph and identity
+object; verify the resulting scope's source/page/revision/snapshot and exact
+candidate records before exposing the preview. Missing, duplicate or foreign
+associations fail closed. The wrapper cannot grant physical equivalence or
+host/frame/quantity authority. Benchmark IDs and expected counts never choose
+an association. Default prediction and complete source-report parity remain
+required in the real PDF run.
+
+## Runtime association validation
+
+20 additional runtime tests pass (66 tests with the pure preview suite).
+Missing graph calls, reused graph objects, duplicate identity calls, changed
+source geometry, foreign candidate records, documents, pages, revisions and
+snapshots fail closed. Original graph/identity objects and environment state
+are retained on both successful and failing diagnostic calls.
+
+The actual Lot16 run observes one producer assembly call with all 2,094
+original candidate identities. The complete source report equals the default
+published-tree report; the unchanged strict retention checker passes, with
+23 openings, 14 hosts and nine frames. All source document, hash, page,
+revision and snapshot fields agree. Its ordinary W2 graph fingerprint equals
+the endpoint-only trace: `b813c6aa609139c783db09477f4a068e1c2198c14e3821eda48a91817a31d334`.
+It produces 126 independent terminal hypotheses on the unchanged baseline,
+without replacing any candidate or granting authority.
+
+The archived blocked experiment was independently replayed through the same
+runtime observer, with actual indexed-snap graph equality asserted before
+attaching the observational sidecar. Its one producer assembly call contains
+2,101 original identities and 134 terminal hypotheses. Both motivating
+fragments reproduce their original IDs inside that actual source scope.
+All source-report fields reproduce the archived experimental result
+(23 openings, 18 hosts, nine frames), while strict original retention still
+fails. Original graph, assembly and identity objects were never repaired.
+The interior `:1567` interval still emits no terminal preview.
+
+Archived ordinary graph SHA-256:
+`44e1596327c0ca01d2fef98e026d4db2f03f369e7fb32ffcf0fdbef58d331c55`.
+Runtime diagnostic report SHA-256:
+`19348c33f885e12436d5c75c5a498e59c537633a628c4459fd764ab9f59c90d9`.
+The source association is observed and checked; physical equivalence, receipt
+migration, graph extension and commercial publication remain unauthorized.
+
+Current main's newly merged read-only source-host rekey ledger (#2178) was
+also run against the original archived pair. It classifies ten old hosts as
+unchanged W4/frame source with unapproved receipt rekeys, and four as source
+proof requiring review: three changed W4 membership groups and one changed
+ABSTAIN frame reason. Neither this ledger nor the source-path preview accepts
+those receipts. This preserves the interior-gap negative for separate review.
