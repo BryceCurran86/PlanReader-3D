@@ -48,8 +48,12 @@ def audit(source: bytes) -> dict:
             )
         rcps=[row for row in rows if row["view_type"]==DrawingViewType.REFLECTED_CEILING_PLAN.value]
         authoritative=[row for row in rcps if
-            row["bounding_box_pdf_pts"] is not None
-            and (row["status"].lower().split(".")[-1] == "resolved" or row["authoritative_derived"])
+            nonoverlap
+            and row["bounding_box_pdf_pts"] is not None
+            and row["first_authority_gate"] in (
+                "source_viewport_resolved",
+                "source_derived_viewport_authenticated",
+            )
         ]
         return {
             "source_sha256":sha, "source_page_number":9,
