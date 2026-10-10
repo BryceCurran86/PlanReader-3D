@@ -38,11 +38,13 @@ from __future__ import annotations
 
 import heapq
 import math
+import os
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
 from pb_vector_geometry_v130 import snap_geometry
+from pb_wall_room_topology_short_fragment_audit import audit_short_source_fragments
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     attach_lineage_to_split_fragments,
@@ -208,6 +210,8 @@ def _point_pairs_to_segment_dicts(
 def _snap_geometry_indexed(
     segments: Sequence[Dict[str, Any]],
     tolerance_pt: float = DEFAULT_GAP_SNAP_TOLERANCE_PT,
+    *,
+    include_endpoint_assignments: bool = False,
 ) -> Dict[str, Any]:
     """Exact Stage-A equivalent of snap_geometry with a local endpoint index.
 
@@ -221,7 +225,7 @@ def _snap_geometry_indexed(
         return snap_geometry(segments, tolerance_pt=tolerance_pt)
 
     nodes: List[Dict[str, Any]] = []
-    node_for: Dict[Tuple[str, int], int] = {}
+    endpoint_assignments: Dict[str, Tuple[int, int]] = {}
     cell_size = float(tolerance_pt)
     grid: Dict[Tuple[int, int], set[int]] = {}
 
@@ -281,6 +285,12 @@ def _snap_geometry_indexed(
     for seg in segments:
         a = locate((float(seg["x1"]), float(seg["y1"])))
         b = locate((float(seg["x2"]), float(seg["y2"])))
+        if include_endpoint_assignments:
+            segment_id = seg.get("id")
+            if (not isinstance(segment_id, str) or not segment_id
+                    or segment_id in endpoint_assignments):
+                raise ValueError("missing or duplicate split id in W2 endpoint trace")
+            endpoint_assignments[segment_id] = (a, b)
         if a == b:
             continue
         edge = dict(seg)
@@ -296,8 +306,6 @@ def _snap_geometry_indexed(
             )
         ) % 180.0
         edges.append(edge)
-        node_for[(str(seg.get("id")), 0)] = a
-        node_for[(str(seg.get("id")), 1)] = b
 
     adjacency: Dict[int, List[int]] = {idx: [] for idx in range(len(nodes))}
     for edge_index, edge in enumerate(edges):
@@ -305,7 +313,10 @@ def _snap_geometry_indexed(
         adjacency[edge["b"]].append(edge_index)
     for node in nodes:
         node["degree"] = len(adjacency[node["id"]])
-    return {"nodes": nodes, "edges": edges, "adjacency": adjacency}
+    result = {"nodes": nodes, "edges": edges, "adjacency": adjacency}
+    if include_endpoint_assignments:
+        result["endpoint_snap_assignments"] = endpoint_assignments
+    return result
 
 
 def merge_collinear_degree_two_nodes(
@@ -608,9 +619,11 @@ def build_wall_graph_for_viewport(
     split_segment_dicts = _point_pairs_to_segment_dicts(
         split_pairs, source_segments=structural_segments
     )
+    audit_short_source = os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1"
     snapped_graph = _snap_geometry_indexed(
         split_segment_dicts,
         tolerance_pt=gap_snap_tolerance_pt,
+        include_endpoint_assignments=audit_short_source,
     )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
@@ -621,4 +634,14 @@ def build_wall_graph_for_viewport(
     )
     merged_graph["excluded_segments"] = excluded_segments
     merged_graph["snap_collapsed_fragments"] = snap_collapsed_fragments
+    # Explicit opt-in diagnostic only. This is an observational source
+    # provenance ledger; it never changes the wall graph or creates hosts.
+    if audit_short_source:
+        merged_graph["short_source_fragment_retention_audit"] = (
+            audit_short_source_fragments(
+                split_segment_dicts, snapped_graph, merged_graph,
+                max_length_pt=gap_snap_tolerance_pt,
+                producer_reported_collapsed_fragments=snap_collapsed_fragments,
+            )
+        )
     return merged_graph
