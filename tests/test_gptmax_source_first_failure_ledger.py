@@ -89,7 +89,7 @@ def test_order_is_not_identity_and_source_is_not_mutated():
     "source_sha", "primitive_cap", "physical_duplicate", "frame_duplicate",
     "frame_missing", "summary_hosts", "summary_frames", "summary_openings",
     "frame_without_host", "host_without_receipt", "host_without_wall",
-    "bad_host_reasons", "bad_frame_reasons",
+    "bad_host_reasons", "bad_frame_reasons", "physical_wrong_page", "frame_wrong_page",
 ])
 def test_malformed_source_evidence_fails_closed(damage):
     x=report()
@@ -106,6 +106,8 @@ def test_malformed_source_evidence_fails_closed(damage):
     elif damage=="host_without_wall": x["opening_bindings"][0]["host_wall_id"] = None
     elif damage=="bad_host_reasons": x["opening_bindings"][0]["reason_codes"] = [False]
     elif damage=="bad_frame_reasons": x["host_frame_traces"][0]["reason_codes"] = None
+    elif damage=="physical_wrong_page": x["opening_bindings"][0]["page_id"] = "8"
+    elif damage=="frame_wrong_page": x["host_frame_traces"][0]["page_id"] = "8"
     with pytest.raises(ValueError):
         build_first_failure_ledger(x)
 
