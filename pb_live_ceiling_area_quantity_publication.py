@@ -120,8 +120,18 @@ def _publish_one(
 
     measurement_authority = _clean(ceiling.measurement_authority)
     if measurement_authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
+        # Do not count characters from one malformed string as multiple
+        # independent original figured-dimension observations. This final
+        # QuantityEvidence boundary must fail closed even when canonical
+        # objects come from other producers or test/imported records.
+        raw_figured_ids = ceiling.figured_dimension_ids
+        if (
+            not isinstance(raw_figured_ids, (tuple, list))
+            or not all(isinstance(value, str) for value in raw_figured_ids)
+        ):
+            return None
         figured_ids = tuple(
-            sorted({_clean(value) for value in ceiling.figured_dimension_ids if _clean(value)})
+            sorted({_clean(value) for value in raw_figured_ids if _clean(value)})
         )
         # One observed dimension cannot define a documented two-axis area.
         # This canonical adapter does not infer the missing orthogonal axis
