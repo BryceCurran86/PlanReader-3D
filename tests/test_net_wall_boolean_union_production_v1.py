@@ -591,6 +591,38 @@ def test_scenario_02_one_applicable_opening() -> None:
     assert res.record.net_area_m2 == pytest.approx(28.0)
 
 
+@pytest.mark.parametrize(
+    "change",
+    (
+        {"opening_identity_id": "unrelated-opening"},
+        {"target_scope_id": "unrelated-trade"},
+        {"source_sha256": "foreign-source"},
+        {"decision_scope_id": "foreign-decision"},
+        {"page_id": "foreign-page"},
+    ),
+)
+def test_replayed_deduction_cannot_cross_opening_or_source_scope(change) -> None:
+    """A selector's result may never authorize an unrelated deduction receipt."""
+    from dataclasses import replace
+
+    opening = _void_record("op-1")
+    forged = replace(_deduction_record("op-1"), **change)
+    deduction = OpeningDeductionResult(
+        EvidenceResolutionStatus.CORROBORATED,
+        (OPENING_DEDUCTION_AUTHORIZED,),
+        forged,
+    )
+    producer, selector = _setup_pipeline(
+        gross=_gross_record(length=10.0, height=3.0),
+        voids=(opening,),
+        deductions=(("op-1", deduction),),
+    )
+    result = producer.publish(selector)
+    assert result.status == EvidenceResolutionStatus.CONFLICT
+    assert NET_WALL_LINEAGE_MISMATCH in result.reason_codes
+    assert result.record is None
+
+
 def test_scenario_03_two_distinct_openings() -> None:
     v1 = _void_record("op-1", u0=1.0, u1=2.0, z0=0.0, z1=2.0)  # 2 m2
     v2 = _void_record("op-2", u0=5.0, u1=7.0, z0=0.0, z1=2.0)  # 4 m2
