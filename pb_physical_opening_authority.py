@@ -1155,7 +1155,7 @@ class PhysicalOpeningAuthority:
         # retain those exact authority results so per-observation proofs do not
         # re-run the same source/receipt validation thousands of times.
         self._wall_source_opening_page_proof_cache: dict[
-            tuple[str, str, str, str, str],
+            tuple[str, str, str, str, str, str],
             tuple[PhysicalOpeningExistenceRecord, ...],
         ] = {}
         self._visible_source_result_cache: dict[
