@@ -56,6 +56,7 @@ jobs:
         env:
           SOURCE_PDF: "${{ matrix.pdf }}"
           PAGE_IDS: "${{ matrix.page_ids }}"
+          GPTMAX_W2_SOURCE_TRACE: "1"
         run: |
           git worktree add /tmp/gptmax-snap-source-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
           (cd /tmp/gptmax-snap-source-prerequisite && PYTHONPATH=. python -u "$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py" \
