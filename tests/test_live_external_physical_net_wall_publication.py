@@ -348,3 +348,44 @@ def test_external_net_wall_rejects_sub_tolerance_right_or_top_void_overhang():
         assert result.status is EvidenceResolutionStatus.CONFLICT
         assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID in result.reason_codes
         assert result.quantity_evidence is None
+
+def test_external_net_wall_rejects_sub_tolerance_left_or_bottom_void_overhang():
+    """A void fractionally outside u=0 or z=0 must not be deducted."""
+    from dataclasses import replace
+    from pb_physical_opening_void_authority import (
+        PhysicalOpeningVoidAuthority,
+        PhysicalOpeningVoidResult,
+        _AUTHORITY_SEAL as VOID_AUTHORITY_SEAL,
+    )
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+    )
+
+    wall_opening, physical_void, gross, roles, original, _wall = _chain()
+    selector = physical_void.void_selectors[original.opening_identity_id]
+    for coordinate in ("u0", "z0"):
+        forged = replace(original, **{coordinate: -5e-10})
+        source_authority = PhysicalOpeningVoidAuthority(
+            {selector.key: PhysicalOpeningVoidResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("source_void_resolved",),
+                record=forged,
+            )},
+            _seal=VOID_AUTHORITY_SEAL,
+        )
+        altered = replace(
+            physical_void,
+            physical_opening_void_authorities=MappingProxyType({
+                **physical_void.physical_opening_void_authorities,
+                selector.page_id: source_authority,
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=wall_opening,
+            physical_void_composition=altered,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID in result.reason_codes
+        assert result.quantity_evidence is None
