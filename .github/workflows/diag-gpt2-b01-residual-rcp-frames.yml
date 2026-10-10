@@ -36,7 +36,7 @@ jobs:
           doc = fitz.open(stream=payload, filetype="pdf")
           assert doc.page_count == 31
           pages = []
-          for page_id in (9, 25, 26, 27):
+          for page_id in (7, 9, 25, 26, 27):
               page = doc.load_page(page_id - 1)
               calibration = vp.calibrate_viewport_layout(page)
               anchors = vp.extract_view_title_anchors(page)
@@ -47,7 +47,7 @@ jobs:
               anchor_rows = []
               for index, anchor in enumerate(anchors):
                   if anchor.view_type not in {
-                      "reflected_ceiling_plan", "schedule", "legend"
+                      "floor_plan", "reflected_ceiling_plan", "schedule", "legend"
                   }:
                       continue
                   candidate_frames = vp._frame_candidates_for_title(
@@ -78,7 +78,7 @@ jobs:
                       "first_failure": v.notes,
                   }
                   for v in viewports if v.view_type in
-                  {"reflected_ceiling_plan", "schedule", "legend"}
+                  {"floor_plan", "reflected_ceiling_plan", "schedule", "legend"}
               ]
               pages.append({
                   "page": page_id,
@@ -94,6 +94,8 @@ jobs:
               "status": "diagnostic_only_no_new_viewport_authority",
           }, sort_keys=True, default=str))
           PY
+      - name: Audit competing plan-frame differential source strips
+        run: PYTHONPATH=. python -u tools/diag_gpt2_page7_frame_border_strip.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
