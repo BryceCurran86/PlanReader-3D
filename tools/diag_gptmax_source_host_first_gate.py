@@ -68,6 +68,40 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
     }
     if any(summary.get(key) != count for key, count in expected.items()):
         raise ValueError("source report summary contradicts individual receipts")
+    semantic = report.get("semantic_inventory")
+    semantic_record = semantic.get("record") if isinstance(semantic, dict) else None
+    if not isinstance(semantic_record, dict):
+        raise ValueError("source semantic opening universe receipt unavailable")
+    if (semantic_record.get("document_id") != document_id
+            or semantic_record.get("revision_id") != revision_id
+            or semantic_record.get("snapshot_id") != snapshot_id
+            or semantic_record.get("source_sha256") != sha
+            or set(semantic_record.get("page_ids") or ()) != set(pages)):
+        raise ValueError("foreign source semantic opening inventory lineage")
+    semantic_opening_ids = semantic_record.get("representative_observation_ids")
+    if not isinstance(semantic_opening_ids, (tuple, list)):
+        raise ValueError("semantic opening inventory missing representative IDs")
+    if len(set(semantic_opening_ids)) != len(semantic_opening_ids):
+        raise ValueError("semantic inventory contains duplicate representative source IDs")
+    if len(semantic_opening_ids) != len(bindings):
+        raise ValueError("semantic inventory and original opening receipts disagree")
+    semantic_census = {
+        "status": semantic.get("status"),
+        "producer_reason_codes": list(semantic.get("reason_codes") or ()),
+        "physical_opening_universe_complete": (
+            semantic_record.get("physical_opening_universe_complete") is True
+        ),
+        "structural_enumeration_complete": (
+            semantic_record.get("structural_enumeration_complete") is True
+        ),
+        "representative_source_opening_count": len(semantic_opening_ids),
+        "residual_source_observation_count": len(
+            semantic_record.get("residual_visible_observation_ids") or ()
+        ),
+        "conflict_source_observation_count": len(
+            semantic_record.get("conflict_observation_ids") or ()
+        ),
+    }
     observed_pages = {str(s.get("page_id")) for s in scopes}
     if observed_pages != set(pages):
         raise ValueError("wall scopes do not match requested original source pages")
@@ -189,6 +223,7 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
         "original_source_report_sha256": sha,
         "selected_geometry_page_ids": list(pages),
         "source_summary_verified": expected,
+        "semantic_opening_universe_source_census": semantic_census,
         "source_wall_scope_census": scope_census,
         "w4_candidate_address_collisions": collisions,
         "physical_identity_sidecar_edge_mismatches": sidecar_mismatches,
