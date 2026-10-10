@@ -580,3 +580,20 @@ def test_long_grid_wall_with_more_than_two_global_owners_uses_local_adjacency():
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.records) == 1
     assert result.records[0].constituent_face_ids == ("top_left", "top_right")
+
+
+def test_planarized_source_wall_edges_reject_nonfinite_coordinates():
+    # A malformed source edge cannot be a globally shared grid separator.
+    from pb_source_composite_room_face_authority import _edge_key
+
+    assert _edge_key(((0.0, 0.0), (10.0, 0.0))) == (
+        (0.0, 0.0), (10.0, 0.0)
+    )
+    assert _edge_key(((10.0, 0.0), (0.0, 0.0))) == (
+        (0.0, 0.0), (10.0, 0.0)
+    )
+    for value in (float("nan"), float("inf"), float("-inf")):
+        assert _edge_key(((0.0, 0.0), (value, 0.0))) is None
+        assert _edge_key(((value, 1.0), (2.0, 1.0))) is None
+    assert _edge_key(((0.0, 0.0), (0.0, 0.0))) is None
+    assert _edge_key(((0.0, 0.0), ())) is None
