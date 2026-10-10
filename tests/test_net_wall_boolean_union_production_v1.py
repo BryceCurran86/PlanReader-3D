@@ -1198,4 +1198,7 @@ def test_malformed_complete_opening_universe_members_fail_closed(members) -> Non
     result = producer.publish(selector)
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert NET_WALL_OPENING_UNIVERSE_INCOMPLETE in result.reason_codes
-    assert result.record is None
+    # Retained blocked gross-wall lineage is not a publishable net area.
+    assert result.record is not None
+    assert result.record.net_area_m2 is None
+    assert not result.record.opening_deduction_record_ids
