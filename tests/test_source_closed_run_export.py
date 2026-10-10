@@ -501,3 +501,54 @@ def test_export_has_no_benchmark_or_truth_dependency() -> None:
     )
     for value in forbidden:
         assert value not in source
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("abstained", 0),
+        ("abstained", "false"),
+        ("lineage_ok", 1),
+        ("lineage_ok", "false"),
+        ("value", "13.270425"),
+        ("value", True),
+        ("confidence", "1.0"),
+        ("confidence", True),
+    ],
+)
+def test_sealed_loader_rejects_coercible_but_noncanonical_wire_types(
+    field: str, replacement: object
+) -> None:
+    sealed = export.seal_source_closed_run(
+        (quantity(),), project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    encoded = sealed.to_dict()
+    source_row = encoded["quantities"][0]
+    fingerprint = source_row["fingerprint"]
+    assert source_row[field] != replacement or type(source_row[field]) is not type(replacement)
+    source_row[field] = replacement
+    # Both production fingerprints remain unchanged. The old loader could
+    # normalize 0->False, 'false'->True, or '13.270425'->float and silently
+    # accept a different serialized receipt as the original sealed source.
+    assert source_row["fingerprint"] == fingerprint
+    with pytest.raises(
+        export.SourceClosedRunConflictError,
+        match="non-Boolean|nonnumeric",
+    ):
+        export.sealed_source_closed_run_from_dict(encoded)
+
+
+def test_producer_wire_types_still_round_trip_with_verified_fingerprints() -> None:
+    original = export.seal_source_closed_run(
+        (quantity(),), project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    encoded = original.to_dict()
+    assert type(encoded["quantities"][0]["abstained"]) is bool
+    assert type(encoded["quantities"][0]["lineage_ok"]) is bool
+    assert type(encoded["quantities"][0]["value"]) is float
+    assert type(encoded["quantities"][0]["confidence"]) is float
+    reloaded = export.sealed_source_closed_run_from_dict(encoded)
+    assert reloaded.run_id == original.run_id
+    assert reloaded.fingerprint == original.fingerprint
