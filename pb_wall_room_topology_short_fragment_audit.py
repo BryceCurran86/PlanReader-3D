@@ -177,6 +177,8 @@ def audit_short_source_fragments(
         positions = [nodes[pair[0]], nodes[pair[1]]] if pair is not None else None
         displacement = (max(math.dist(a, positions[0]), math.dist(b, positions[1]))
                         if positions is not None else None)
+        if displacement is not None and not math.isfinite(displacement):
+            raise ValueError("nonfinite W2 endpoint displacement")
         counts[status]+=1
         out.append({
             "source_split_fragment_id":fid,

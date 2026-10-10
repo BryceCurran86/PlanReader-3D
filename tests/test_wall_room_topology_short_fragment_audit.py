@@ -89,6 +89,17 @@ def test_displaced_source_endpoints_are_observed_not_snapped_again():
     assert s==original
 
 
+@pytest.mark.parametrize("raw", [True, False])
+def test_finite_nodes_cannot_emit_overflowed_displacement(raw):
+    f = fragment()
+    s, m = graph(a=(1.7e308, 1.7e308), b=(1.6e308, 1.6e308), raw=raw)
+    assert all(math.isfinite(n[k]) for n in s["nodes"] for k in ("x", "y"))
+    original = deepcopy((f, s, m))
+    with pytest.raises(ValueError, match="nonfinite W2 endpoint displacement"):
+        audit([f], s, m)
+    assert (f, s, m) == original
+
+
 @pytest.mark.parametrize("change", [
     "unknown_parent", "multi_parent","different_parent","false_source_page",
     "uncorroborated_short_gap","source_off_axis","wrong_parent_end",

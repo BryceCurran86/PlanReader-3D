@@ -119,7 +119,8 @@ During those source jobs, #2176 merged into main, followed by the standalone
 source-rekey and W4 coverage diagnostics. The resulting add/add merge conflict
 is resolved against main `69ca3062ea120be81479186a5ead638f1415af3c`, preserving
 all merged producer-disappearance validations and independent diagnostics.
-The integration changes no source-runtime file relative to the green head:
+The first integration head `f5dc2d624109b2e5a2ca2f1483ed81ec38d977c4`
+changes no source-runtime file relative to the green head:
 all 421 root Python files, both actual source diagnostic entry points and both
 dependency manifests (425 files) have identical Git blob IDs. Source-runtime
 blob-set SHA-256: `943d1ef704bced4d450d60b317e63555b75df26e95cf0f8a6d4937805608e268`.
@@ -127,7 +128,21 @@ The original source PDFs and frozen V2 files remain unchanged. The verified
 source artifacts therefore describe the exact source implementation retained
 by this integration, rather than a substituted source or normalized receipt.
 
-304 focused integration tests pass, including current main's source-rekey and
-W4 coverage checks. CI on the new integration commit must also pass before
-merge. The separate terminal-source experiment grants no graph, identity,
+304 focused tests passed on that first integration, including current main's
+source-rekey and W4 coverage checks. Its full Python 3.13/3.14 CI passed
+9,262 tests per version; its original-source Lot16 artifact also exactly
+matches the local complete source report and endpoint audit.
+
+Final review then reproduced a malformed-trace edge case: finite snapped
+coordinates near the floating-point maximum can produce infinite endpoint
+displacement for both retained and collapsed fragments. The prior finite
+displacement guard is restored before any observation is emitted. Two
+negative tests require rejection without input mutation. This does not
+alter valid producer geometry. After this correction, 235 focused tests,
+provider isolation, frozen V2 integrity and undefined-name checks pass.
+The final commit must independently
+pass fresh CI and both original-source checks before merge; the earlier
+425-file identity statement describes the first integration only.
+
+The separate terminal-source experiment grants no graph, identity,
 host/frame migration or commercial authority, and is excluded from this PR.
