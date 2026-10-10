@@ -358,3 +358,50 @@ def test_duplicate_source_face_owner_quarantines_canonical_area_reissue() -> Non
     conflicted = replace(claim, canonical_rooms=(authentic, competing))
     assert len(publish_live_floor_area_quantities(conflicted)) == 1
     assert publish_live_canonical_room_area_quantities(conflicted) == ()
+
+
+def test_unscaled_page_polygon_never_becomes_metric_floor_area() -> None:
+    # A fully closed source polygon may have an enormous PDF-points² area;
+    # geometric completeness is not a physical scale or m² source receipt.
+    floor = replace(
+        _floor(),
+        area_page_pts2=250000.0,
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        metric_area_m2=None,
+        metric_area_quantity_id=None,
+        metric_area_authority=None,
+    )
+    claim = replace(_claim_with(), canonical_floors=(floor,))
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_canonical_room_area_quantities(claim) == ()
+
+
+def test_source_firm_area_does_not_override_unmeasured_pdf_polygon() -> None:
+    source = _source_area()
+    floor = replace(
+        _floor(),
+        area_page_pts2=999999.0,
+        geometry_complete=True,
+        metric_geometry_complete=False,
+        metric_area_m2=None,
+    )
+    claim = replace(_claim_with(source), canonical_floors=(floor,))
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_canonical_room_area_quantities(claim) == ()
+
+
+def test_firm_documented_area_is_valid_without_geometric_scale() -> None:
+    # Figured m² authority is independent of whether PDF geometry is scaled.
+    floor = replace(
+        _floor(),
+        area_page_pts2=100000.0,
+        geometry_complete=True,
+        metric_geometry_complete=False,
+    )
+    claim = replace(_claim_with(_source_area()), canonical_floors=(floor,))
+    published = publish_live_floor_area_quantities(claim)
+    assert len(published) == 1
+    assert published[0].value == 8.64
+    assert published[0].unit == "m2"
+    assert published[0].metadata["upstream_room_area_quantity_id"] == "room-area-1"
