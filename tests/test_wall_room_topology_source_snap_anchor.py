@@ -33,7 +33,7 @@ def _graph():
     edges=[
         _edge("ordinary-upper",0,1,(381.,338.75),p,"ordinary-1567",((381.,297.),(381.,349.))),
         _edge("ordinary-lower",1,2,p,(381.,349.),"ordinary-1567",((381.,297.),(381.,349.))),
-        _edge("true-compact-T",1,3,p,(410.25,342.72),"compact-T",(p,(410.25,342.72))),
+        _edge("true-compact-T",1,3,p,(410.25,342.72),"raster_segment:sourceimage:terminal_solid_wall_band_v1:registeredpaint:0",(p,(410.25,342.72))),
     ]
     nodes=[
         {"id":0,"x":381.,"y":338.75,"degree":1},
@@ -119,3 +119,60 @@ def test_zero_or_invalid_existing_snap_tolerance_cannot_expand_geometry():
     for bad in (nan,):
         with pytest.raises(ValueError):
             reanchor(g,tolerance_pt=bad)
+
+
+
+@pytest.mark.parametrize("damage", [
+    "ordinary_t","native_t","unknown_raster_producer","supplement_parent_missing",
+    "supplement_two_parents","supplement_record_unproved","supplement_parent_remote",
+    "supplement_near_end","supplement_wrong_end","supplement_not_perpendicular",
+])
+def test_only_exact_positive_producer_owned_supplemental_t_can_reanchor(damage):
+    g=_graph()
+    branch=g["edges"][2]
+    payload=branch["primitive_lineage"]
+    if damage=="ordinary_t":
+        payload["source_primitive_ids"]=["raster_segment:sourceimage:1.0.0:12"]
+        payload["source_records"][0]["id"]=payload["source_primitive_ids"][0]
+    elif damage=="native_t":
+        payload["source_primitive_ids"]=["segment:source:12"]
+        payload["source_records"][0]["id"]=payload["source_primitive_ids"][0]
+    elif damage=="unknown_raster_producer":
+        payload["source_primitive_ids"]=["raster_segment:sourceimage:not_a_supplemental_line:12"]
+        payload["source_records"][0]["id"]=payload["source_primitive_ids"][0]
+    elif damage=="supplement_parent_missing":
+        payload["source_records"]=[]
+    elif damage=="supplement_two_parents":
+        payload["source_primitive_ids"].append("other")
+    elif damage=="supplement_record_unproved":
+        payload["source_records"][0]["page_coords_present"]=False
+    elif damage=="supplement_parent_remote":
+        payload["source_records"][0]["x1"]+=10.
+        payload["source_records"][0]["x2"]+=10.
+    elif damage=="supplement_near_end":
+        payload["source_records"][0]["x1"]+=.01
+    elif damage=="supplement_wrong_end":
+        payload["source_records"][0]["x1"]=376.
+        payload["source_records"][0]["x2"]=412.
+    else:
+        # A positive but diagonal source branch does not establish a
+        # perpendicular through/junction correction.
+        branch["y2"]+=.75
+        payload["source_records"][0]["y2"]+=.75
+    before=deepcopy(g)
+    after=reanchor(g,tolerance_pt=2.5)
+    assert not after["exact_source_through_junction_anchors"]
+    assert after["nodes"]==before["nodes"]
+    assert after["edges"]==before["edges"]
+
+
+def test_first_party_compact_namespace_can_prove_exact_positive_t_without_guessing():
+    g=_graph()
+    p=g["edges"][2]["primitive_lineage"]
+    p["source_primitive_ids"]=[
+        "raster_segment:sourceimage:compact_solid_wall_band_v1:registeredpaint:0"
+    ]
+    p["source_records"][0]["id"]=p["source_primitive_ids"][0]
+    after=reanchor(g,tolerance_pt=2.5)
+    assert after["nodes"][1]["x"]==381.
+    assert len(after["exact_source_through_junction_anchors"])==1
