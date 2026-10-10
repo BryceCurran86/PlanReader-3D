@@ -1,0 +1,100 @@
+name: DIAG GPT2 Remaining Room Native Viewport Authority
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt2_native_room_viewport_candidates.py"
+      - "tests/test_gpt2_native_room_viewport_candidates.py"
+      - ".github/workflows/diag-gpt2-remaining-room-viewport-owners.yml"
+  workflow_dispatch:
+jobs:
+  source-native-view-owner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 and fail-closed candidate tests
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_native_room_viewport_candidates.py
+      - name: SHA-verified source native label and independent view-frame audit
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-room-viewport-owners
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-room-viewport-owners/native_source_viewport_candidates.json
+          import hashlib,json
+          from pathlib import Path
+          import fitz
+          from tools.diag_gpt2_maryborough_room_source_map import inventory
+          from tools.diag_gpt2_native_room_viewport_candidates import classify_native_label_viewport
+          from pb_viewport_segmentation import segment_page_viewports
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload=path.read_bytes()
+          expected="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert hashlib.sha256(payload).hexdigest()==expected
+          candidate_map=inventory(payload,expected_sha256=expected)
+          pdf=fitz.open(stream=payload,filetype="pdf")
+          assert pdf.page_count==31
+          # Restrict expensive source viewport segmentation to observed
+          # topology/support page receipts. Do not search blindly.
+          pages=(7,9,11,14,28)
+          page_views={p:segment_page_viewports(pdf.load_page(p-1),page_number=p)
+                      for p in pages}
+          outcomes={}
+          for label,info in candidate_map["targets"].items():
+              items=[]
+              for source in info["native_candidates"]:
+                  page=source["page_1_based"]
+                  if page not in page_views:
+                      items.append({
+                          "page_1_based":page,
+                          "native_bbox_pdf_pts":source["native_bbox_pdf_pts"],
+                          "first_gate":"view_source_scope_not_checked",
+                          "physical_room_proven":False,
+                      })
+                      continue
+                  result=classify_native_label_viewport(
+                      source["native_bbox_pdf_pts"],page_views[page]
+                  )
+                  items.append({
+                      "page_1_based":page,
+                      "native_bbox_pdf_pts":source["native_bbox_pdf_pts"],
+                      "native_text":source["native_text"],
+                      **result,
+                  })
+              outcomes[label]=items
+          report={
+              "source_sha256":expected,
+              "source_page_count":31,
+              "checked_support_pages":pages,
+              "source_viewports":{str(k):[{
+                  "id":v.view_id,
+                  "type":v.view_type,
+                  "status":v.status,
+                  "source_bbox_pdf_pts":v.bounding_box
+              } for v in values] for k,values in page_views.items()},
+              "native_room_candidates":outcomes,
+              "semantic_room_face_publications":0,
+              "room_area_quantity_publications":0,
+              "candidate_scope_only":True,
+          }
+          print("GPT2_REMAINING_ROOM_NATIVE_VIEWPORT_GATES",json.dumps(
+              report,sort_keys=True,default=str))
+          assert report["candidate_scope_only"]
+          assert not any(row.get("physical_room_proven",False)
+                         for rows in outcomes.values() for row in rows)
+          pdf.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-remaining-room-source-viewport-gates
+          path: artifacts/gpt2-room-viewport-owners
+          retention-days: 7
