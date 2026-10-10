@@ -322,3 +322,21 @@ def test_floor_finish_seal_rejects_missing_source_semantic_receipt(receipt: str)
         seal_live_floor_finish_area_run(
             claim, workspace_id=1, project_id="project-1",
         )
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    (
+        ({"unit": "ft2"}, "FIRM m2"),
+        ({"status": AuthorityStatus.BLOCKED.value}, "FIRM m2"),
+    ),
+)
+def test_floor_finish_seal_requires_firm_metric_area_quantity(
+    changes: dict, reason: str,
+) -> None:
+    invalid = replace(_quantity(), **changes)
+    claim = replace(_claim(), floor_finish_quantity_evidence=(invalid,))
+    with pytest.raises(SourceClosedRunConflictError, match=reason):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
