@@ -146,3 +146,24 @@ pass fresh CI and both original-source checks before merge; the earlier
 
 The separate terminal-source experiment grants no graph, identity,
 host/frame migration or commercial authority, and is excluded from this PR.
+
+
+## 2026-10-11 clean-main preservation pass
+
+This successor selectively replays the complete #2182 observational endpoint trace
+and finite-displacement guard onto current main, rather than overwriting it
+with either the original #2182 head or the outdated #2185 head.
+
+Observed main-only `pb_wall_room_topology_stage_a._snap_geometry_indexed`
+retains a `node_for` endpoint bookkeeping dictionary populated for surviving
+edges. The clean replay **retains both assignments** and adds its optional
+`endpoint_snap_assignments` diagnostic sidecar independently. With the audit
+environment flag unset, the published W2 graph shape and assembly remain
+unchanged. The original source-mutation, exact-base receipt comparison,
+Lot16 and Maryborough SHA checks are carried into the successor CI. The
+20,000 cap, W4 graph/identities, opening host/frame and customer quantities
+are not modified.
+
+This is diagnostic reconciliation, **not** promotion of a physical wall,
+opening host, opening count or metric quantity. All original source and full
+Python checks must pass on the exact clean-main head before merging.
