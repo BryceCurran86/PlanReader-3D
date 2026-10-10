@@ -1,6 +1,8 @@
 """Live source-owned ceiling-lining extractor integration tests."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import fitz
 
 import pb_live_ceiling_lining_integration as live_module
