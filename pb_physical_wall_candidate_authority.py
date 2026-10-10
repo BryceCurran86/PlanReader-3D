@@ -83,7 +83,10 @@ from pb_wall_room_topology_stage_a import (
     build_wall_graph_for_viewport,
     is_structural_candidate_segment,
 )
-from pb_wall_room_topology_wall_assembly import assemble_wall_topology
+from pb_wall_room_topology_wall_assembly import (
+    W4SourceCandidateAddressCollision,
+    assemble_wall_topology,
+)
 from pb_wall_room_topology_typed_negative_evidence import (
     collect_source_lineage_grid_evidence,
 )
@@ -2941,18 +2944,14 @@ def _assemble_source_owned_w4_identities_or_unavailable(
             graph, junctions, relationships, viewport_id=scope_id
         )
         identities = collect_physical_wall_identities(walls, graph)
+    except W4SourceCandidateAddressCollision:
+        # No producer evidence can decide which source W4 row owns the address.
+        # The caller emits a complete-scope ABSTAIN, not a guessed identity.
+        return None
     except ValueError as exc:
-        # Handle every deliberately fail-closed W4 source-address failure,
-        # including the final topology/owner consistency checks. Unknown
-        # graph/runtime ValueErrors still propagate for engineering diagnosis.
-        known_collision_prefixes = (
-            "W4 collision",
-            "W4 collided wall lost source edge ownership",
-            "W4 source edge owner unexpectedly changed",
-            "W4 source candidate addresses remain duplicated",
-            "duplicate W4 candidate id",
-        )
-        if str(exc).startswith(known_collision_prefixes):
+        # This one error comes from the downstream physical identity
+        # collection keyed by W4 address, not from the W4 source assembler.
+        if str(exc).startswith("duplicate W4 candidate id"):
             return None
         raise
     return walls, rekeyed_junctions, identities
