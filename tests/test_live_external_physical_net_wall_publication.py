@@ -281,6 +281,7 @@ def test_expected_opening_with_missing_void_never_publishes_gross_as_net() -> No
     assert result.quantity_evidence is None
     assert result.canonical_walls == ()
     assert result.physical_void_record_ids == ()
+    assert result.opening_universe_record_ids == ()
 
 
 def test_physical_publication_has_no_trade_policy_or_quantity_truth_inputs() -> None:
