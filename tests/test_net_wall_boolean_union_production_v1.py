@@ -1180,7 +1180,7 @@ def test_subtract_void_union_boundary_touching_contained_geometry_preserved() ->
     assert net.area == pytest.approx(10.0 * 3.0 - 1.0 * 2.0)
 
 
-@pytest.mark.parametrize("members", (("op-1", "op-1"), ("op-1", "")))
+@pytest.mark.parametrize("members", (("op-1", "op-1"), ("op-1", ""), ("op-1", "  ")))
 def test_malformed_complete_opening_universe_members_fail_closed(members) -> None:
     """Completeness cannot discard repeated or missing physical members."""
     v = _void_record("op-1")
