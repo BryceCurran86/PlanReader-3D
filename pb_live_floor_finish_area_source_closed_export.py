@@ -56,6 +56,7 @@ def build_live_floor_finish_area_source_traces(
     # floor identity are one-to-one. Different QuantityEvidence IDs cannot
     # mint independent customer rows from the same upstream physical fact.
     quantity_owner_by_floor: dict[str, str] = {}
+    quantity_owner_by_physical_floor: dict[str, tuple[str, str]] = {}
     floor_owner_by_occurrence: dict[str, str] = {}
     for quantity in claim.floor_finish_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
@@ -164,6 +165,18 @@ def build_live_floor_finish_area_source_traces(
                 "floor-finish source occurrence has competing physical floors: "
                 f"{occurrence_id}"
             )
+        physical_floor_id = _clean(floor.physical_floor_surface_id)
+        prior_physical_owner = quantity_owner_by_physical_floor.get(
+            physical_floor_id
+        )
+        if (
+            prior_physical_owner is not None
+            and prior_physical_owner != (floor_id, quantity.quantity_id)
+        ):
+            raise SourceClosedRunConflictError(
+                "physical floor has competing finish area quantities: "
+                f"{physical_floor_id}"
+            )
         prior_quantity = quantity_owner_by_floor.get(floor_id)
         if prior_quantity is not None and prior_quantity != quantity.quantity_id:
             raise SourceClosedRunConflictError(
@@ -172,6 +185,9 @@ def build_live_floor_finish_area_source_traces(
             )
         floor_owner_by_occurrence[occurrence_id] = floor_id
         quantity_owner_by_floor[floor_id] = quantity.quantity_id
+        quantity_owner_by_physical_floor[physical_floor_id] = (
+            floor_id, quantity.quantity_id
+        )
 
         semantic_finish = _clean(metadata.get("semantic_finish")).lower()
         if (
