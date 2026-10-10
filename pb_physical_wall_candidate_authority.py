@@ -37,7 +37,11 @@ from pb_pdf_text_integrity_authority import (
 )
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_drawing_evidence_binding import DrawingViewType
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
+from pb_physical_opening_authority import (
+    PHYSICAL_OPENING_EXISTS,
+    RASTER_FRAMED_WALL_BAND_INTERRUPTION,
+    PhysicalOpeningAuthority,
+)
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_RESOLVED,
     PhysicalScaleProducer,
@@ -59,10 +63,13 @@ from pb_physical_wall_source_metadata_shadow import (
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
     NATIVE_PDF_VISIBLE_SEGMENT,
+    RASTER_OPENING_PRIMITIVE_RENDER_DPI,
     RASTER_PDF_VISIBLE_SEGMENT,
+    RASTER_RENDER_DPI,
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
+from pb_raster_opening_source_primitives import RASTER_WALL_BAND_FACE
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
@@ -154,6 +161,14 @@ BOUNDARY_PRIMITIVE_INSIDE_MULTIPLE_VIEWPORTS = "inside_multiple_viewports"
 PHYSICAL_WALL_SCOPE_BOUNDARY_EVALUATION_SCHEMA_VERSION = "1.0.0"
 BOUNDARY_EVALUATION_EVALUATED = "evaluated"
 BOUNDARY_EVALUATION_UNAVAILABLE = "unavailable"
+
+# Cross-render ownership is not a generic wall snap tolerance. It covers at
+# most one pixel from each of the two producer-owned raster renderings whose
+# geometry is being reconciled (ordinary wall visibility vs opening evidence).
+_RASTER_OPENING_TO_W4_FACE_TOLERANCE_PT = (
+    72.0 / float(RASTER_RENDER_DPI)
+    + 72.0 / float(RASTER_OPENING_PRIMITIVE_RENDER_DPI)
+)
 
 TRUSTED_EQUIVALENCE_OVERRIDE_UNKNOWN_MEMBER = (
     "trusted_equivalence_override_unknown_member"
@@ -2358,6 +2373,322 @@ def _interval_sets_overlap_or_snap(
     return False
 
 
+def _raster_line_interval(
+    line: Line,
+    direction: Point,
+) -> tuple[float, float]:
+    values = (
+        _projection((line[0], line[1]), direction),
+        _projection((line[2], line[3]), direction),
+    )
+    return (min(values), max(values))
+
+
+def _raster_opening_face_role(
+    line: Line,
+    *,
+    opening_start: float,
+    opening_end: float,
+    direction: Point,
+) -> Optional[tuple[str, float]]:
+    """Classify one G17 wall-face support relative to its sealed aperture."""
+
+    if not _parallel(line, (direction[0], direction[1], 2.0 * direction[0], 2.0 * direction[1])):
+        return None
+    lower, upper = _raster_line_interval(line, direction)
+    origin = (line[0], line[1])
+    offset = _cross(direction, origin)
+    if (
+        lower < opening_start - _COORD_TOL
+        and abs(upper - opening_start) <= DEFAULT_GAP_SNAP_TOLERANCE_PT
+    ):
+        return ("left", offset)
+    if (
+        upper > opening_end + _COORD_TOL
+        and abs(lower - opening_end) <= DEFAULT_GAP_SNAP_TOLERANCE_PT
+    ):
+        return ("right", offset)
+    return None
+
+
+def _raster_face_source_owner(
+    *,
+    face_observation,
+    face_line: Line,
+    role: str,
+    opening_start: float,
+    opening_end: float,
+    direction: Point,
+    raster_visible_rows: Sequence[tuple[str, object, Line]],
+    records_by_raw_id: Mapping[str, Sequence[PhysicalWallCandidateRecord]],
+) -> Optional[str]:
+    """Map one isolated G17 face to exactly one W4 owner via raster ancestry.
+
+    Candidate membership starts from ordinary producer-owned raster segments in
+    the same source partition. Geometry may differ only by the sum of one pixel
+    from each producer-owned render. A segment must also occupy the opening-edge
+    role already proved by G17. No nearest/first fallback exists.
+    """
+
+    face_lower, face_upper = _raster_line_interval(face_line, direction)
+    owners: set[str] = set()
+    for raw_id, observation, source_line in raster_visible_rows:
+        if (
+            str(getattr(observation, "source_partition_id", ""))
+            != str(getattr(face_observation, "source_partition_id", ""))
+            or not _parallel(face_line, source_line)
+        ):
+            continue
+
+        normal_delta = abs(
+            _cross(
+                direction,
+                (
+                    source_line[0] - face_line[0],
+                    source_line[1] - face_line[1],
+                ),
+            )
+        )
+        if normal_delta > _RASTER_OPENING_TO_W4_FACE_TOLERANCE_PT + _COORD_TOL:
+            continue
+
+        lower, upper = _raster_line_interval(source_line, direction)
+        overlap = min(face_upper, upper) - max(face_lower, lower)
+        if overlap <= _COORD_TOL:
+            continue
+
+        if role == "left":
+            if (
+                lower >= opening_start - _COORD_TOL
+                or abs(upper - opening_start) > DEFAULT_GAP_SNAP_TOLERANCE_PT
+            ):
+                continue
+        elif role == "right":
+            if (
+                upper <= opening_end + _COORD_TOL
+                or abs(lower - opening_end) > DEFAULT_GAP_SNAP_TOLERANCE_PT
+            ):
+                continue
+        else:
+            return None
+
+        for record in records_by_raw_id.get(raw_id, ()):
+            owners.add(str(record.wall_candidate_id))
+            if len(owners) > 1:
+                return None
+
+    if len(owners) != 1:
+        return None
+    return next(iter(owners))
+
+
+def _producer_raster_opening_relation_overrides(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    page_id: str,
+    records: Sequence[PhysicalWallCandidateRecord],
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    """Recover only G17-proven SAME wall-face relations for raster openings.
+
+    The opening evidence render is intentionally isolated from the ordinary W4
+    raster universe. This bridge reconciles the two producer-owned raster
+    representations through exact source scope/partition plus cross-render
+    geometry. It never creates a wall, host, DISTINCT relation, or opening.
+    """
+
+    if not records:
+        return {}
+
+    records_by_raw_id: dict[str, list[PhysicalWallCandidateRecord]] = {}
+    for record in records:
+        identity = record.physical_identity
+        if not identity.usable:
+            continue
+        for raw_id in identity.source_primitive_ids:
+            records_by_raw_id.setdefault(str(raw_id), []).append(record)
+
+    visibility = source_producer.authority()
+    if resolved_visible_observations is None:
+        page_rows = list(
+            _visible_observations_by_page(
+                source_producer=source_producer,
+                published=published,
+            ).get(str(page_id), ())
+        )
+    else:
+        page_rows = [
+            row
+            for row in resolved_visible_observations
+            if str(getattr(row[1], "page_id", "")) == str(page_id)
+        ]
+
+    raster_visible_rows: list[tuple[str, object, Line]] = []
+    prefix = "visible:raster_segment:"
+    for _observation_id, observation in page_rows:
+        if (
+            getattr(observation, "observation_kind", None)
+            != RASTER_PDF_VISIBLE_SEGMENT
+            or not str(getattr(observation, "source_primitive_ref", "")).startswith(prefix)
+        ):
+            continue
+        line = _line(tuple(getattr(observation, "geometry", ())))
+        if line is None:
+            continue
+        raw_id = str(observation.source_primitive_ref)[len("visible:") :]
+        if raw_id:
+            raster_visible_rows.append((raw_id, observation, line))
+    if not raster_visible_rows:
+        return {}
+
+    opening_authority = (
+        physical_opening_authority
+        if physical_opening_authority is not None
+        else source_producer.physical_opening_authority()
+    )
+    proven: dict[str, object] = {}
+    primitive_ids = tuple(
+        getattr(published, "raster_opening_primitive_observation_ids", ()) or ()
+    )
+    for observation_id in primitive_ids:
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=observation_id,
+        )
+        primitive = visibility.resolve_raster_opening_primitive(selector)
+        observation = primitive.observation
+        if (
+            primitive.status is not EvidenceResolutionStatus.CORROBORATED
+            or observation is None
+            or str(observation.page_id) != str(page_id)
+        ):
+            continue
+        result = opening_authority.prove_existence(selector)
+        existence = result.existence_record
+        if (
+            result.status is EvidenceResolutionStatus.CORROBORATED
+            and result.proposition == PHYSICAL_OPENING_EXISTS
+            and existence is not None
+            and str(existence.page_id) == str(page_id)
+            and existence.structural_pattern == RASTER_FRAMED_WALL_BAND_INTERRUPTION
+            and existence.aperture_bbox_pt is not None
+        ):
+            proven[str(existence.record_id)] = existence
+
+    relation_sets: dict[
+        tuple[str, str], set[PhysicalEquivalenceClass]
+    ] = {}
+    for existence in proven.values():
+        try:
+            x0, y0, x1, y1 = (
+                float(value) for value in tuple(existence.aperture_bbox_pt)
+            )
+        except (TypeError, ValueError):
+            continue
+        width, height = x1 - x0, y1 - y0
+        if (
+            not all(math.isfinite(value) for value in (x0, y0, x1, y1))
+            or width <= _COORD_TOL
+            or height <= _COORD_TOL
+            or abs(width - height) <= _COORD_TOL
+        ):
+            continue
+        if width > height:
+            direction = (1.0, 0.0)
+            opening_start, opening_end = x0, x1
+        else:
+            direction = (0.0, 1.0)
+            opening_start, opening_end = y0, y1
+
+        faces: list[tuple[str, float, Optional[str], Line]] = []
+        valid = True
+        for support_id in tuple(existence.source_observation_ids):
+            support = visibility.resolve_raster_opening_primitive(
+                ObservationSelector(
+                    document_id=existence.document_id,
+                    revision_id=existence.revision_id,
+                    source_sha256=existence.source_sha256,
+                    snapshot_id=existence.snapshot_id,
+                    observation_id=support_id,
+                )
+            )
+            observation = support.observation
+            if (
+                support.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+                or str(observation.page_id) != str(page_id)
+            ):
+                valid = False
+                break
+            if observation.observation_kind != RASTER_WALL_BAND_FACE:
+                continue
+            line = _line(tuple(observation.geometry))
+            if line is None:
+                valid = False
+                break
+            role = _raster_opening_face_role(
+                line,
+                opening_start=opening_start,
+                opening_end=opening_end,
+                direction=direction,
+            )
+            if role is None:
+                valid = False
+                break
+            owner = _raster_face_source_owner(
+                face_observation=observation,
+                face_line=line,
+                role=role[0],
+                opening_start=opening_start,
+                opening_end=opening_end,
+                direction=direction,
+                raster_visible_rows=raster_visible_rows,
+                records_by_raw_id=records_by_raw_id,
+            )
+            # Ownership failure is local to this face. Preserve the independent
+            # opposite-face SAME proof when its two owners remain unique, just
+            # like the native G17 partial-SAME bridge.
+            faces.append((role[0], role[1], owner, line))
+        if not valid or len(faces) != 4:
+            continue
+
+        left = sorted(
+            (item for item in faces if item[0] == "left"),
+            key=lambda item: (item[1], item[2] or ""),
+        )
+        right = sorted(
+            (item for item in faces if item[0] == "right"),
+            key=lambda item: (item[1], item[2] or ""),
+        )
+        if len(left) != 2 or len(right) != 2:
+            continue
+
+        # G17 already proved these two band pieces are the clean continuation
+        # across one physical opening. Sorted face order therefore pairs lower
+        # with lower and upper with upper without inferring a cross-face relation.
+        for left_face, right_face in zip(left, right):
+            if left_face[2] is None or right_face[2] is None:
+                continue
+            left_owner, right_owner = str(left_face[2]), str(right_face[2])
+            if left_owner == right_owner:
+                continue
+            pair = tuple(sorted((left_owner, right_owner)))
+            relation_sets.setdefault(pair, set()).add(
+                PhysicalEquivalenceClass.SAME_PHYSICAL_WALL
+            )
+
+    return {
+        pair: next(iter(classifications))
+        for pair, classifications in relation_sets.items()
+        if classifications == {PhysicalEquivalenceClass.SAME_PHYSICAL_WALL}
+    }
+
+
 def _producer_shared_source_face_relation_overrides(
     *,
     segments: Sequence[Mapping[str, object]],
@@ -2942,6 +3273,19 @@ def _assemble_scope_result(
         tuple(ordered_identities),
         equivalence,
         trusted_overrides,
+    )
+    raster_opening_overrides = _producer_raster_opening_relation_overrides(
+        source_producer=source_producer,
+        published=published,
+        page_id=page_id,
+        records=tuple(records),
+        resolved_visible_observations=resolved_visible_observations,
+        physical_opening_authority=physical_opening_authority,
+    )
+    equivalence = _apply_trusted_relation_overrides(
+        tuple(ordered_identities),
+        equivalence,
+        raster_opening_overrides,
     )
 
     boundary_reasons: list[str] = list(pre_boundary_reasons)
