@@ -563,14 +563,24 @@ def _collapse_source_repeated_plan_border_pair(
                     return list(frames)
                 continue
             if item[0] != "l" or len(item) < 3:
-                # An independently drawn curve/quad over the differential
-                # band may be a physical symbol, not a duplicate border.
-                # Unknown path item geometry is not permission to collapse.
-                if item[0] in ("c", "qu"):
+                # Non-line primitives may be physical symbols. Refuse
+                # overlapping curves/quads, and refuse UNKNOWN geometry,
+                # rather than treating missing coordinates as empty space.
+                if item[0] == "qu":
+                    if len(item) < 2:
+                        return list(frames)
+                    quad_bbox = _axis_aligned_quad_bbox(item[1], tol=edge_tol)
+                    if quad_bbox is None or _bbox_overlap_area(
+                        quad_bbox, strip
+                    ) > 1e-6:
+                        return list(frames)
+                elif item[0] == "c":
                     points = [
                         p for p in item[1:]
                         if hasattr(p, "x") and hasattr(p, "y")
                     ]
+                    if len(points) != len(item) - 1:
+                        return list(frames)
                     if points and _bbox_overlap_area(_normalized_bbox(
                         min(float(p.x) for p in points),
                         min(float(p.y) for p in points),
