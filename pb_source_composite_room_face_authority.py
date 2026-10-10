@@ -214,24 +214,32 @@ def _atomic_source_wall_edge_counts(
                 counts[(wall_id, edge)][face_id] += 1
 
     for (wall_id, axis, fixed), spans in grid_intervals.items():
-        source_cuts = sorted({
-            value for start, end, _face in spans for value in (start, end)
-        })
-        for start, end in zip(source_cuts, source_cuts[1:]):
-            if end <= start:
-                continue
-            owning_faces = [
-                face_id for left, right, face_id in spans
-                if left <= start and end <= right
-            ]
-            if not owning_faces:
+        # Sweep exact source endpoints instead of scanning every source
+        # interval for every atomic edge. This preserves per-face multiplicity:
+        # overlapping duplicate receipts count twice and never authenticate
+        # an apparent two-sided W4 separator.
+        events: dict[float, Counter[str]] = defaultdict(Counter)
+        for start, end, face_id in spans:
+            events[start][face_id] += 1
+            events[end][face_id] -= 1
+        cuts = sorted(events)
+        active: Counter[str] = Counter()
+        for index, start in enumerate(cuts[:-1]):
+            for face_id, delta in events[start].items():
+                new_count = active[face_id] + delta
+                if new_count > 0:
+                    active[face_id] = new_count
+                else:
+                    active.pop(face_id, None)
+            end = cuts[index + 1]
+            if end <= start or not active:
                 continue
             atomic_edge = (
                 ((fixed, start), (fixed, end))
                 if axis == "vertical"
                 else ((start, fixed), (end, fixed))
             )
-            counts[(wall_id, atomic_edge)].update(owning_faces)
+            counts[(wall_id, atomic_edge)].update(active)
     return counts
 
 
