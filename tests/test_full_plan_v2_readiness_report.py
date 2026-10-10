@@ -191,3 +191,21 @@ def test_wrong_produced_document_shape_blocks_project_without_fabricating_count(
         assert result["reconciliation_complete"] is False
         assert result["coverage_accuracy"] is None
         assert result["precision_adjusted_accuracy"] is None
+
+
+def test_duplicate_json_object_keys_cannot_overwrite_production_quantity_identity(tmp_path: Path) -> None:
+    target = tmp_path / "au_qld_3laurel"
+    target.mkdir()
+    (target / "produced_items.json").write_text(
+        '[{"quantity_id":"authenticated-id", "quantity_id":"rekeyed-id", '
+        '"value":1.0,"unit":"m2","trade_category":"surface"}]',
+        encoding="utf-8",
+    )
+    report = diagnostic_report(ROOT, tmp_path)
+    project = next(x for x in report["projects"] if x["project_id"] == "au_qld_3laurel")
+    assert project["produced_file_present"] is True
+    assert project["produced_count"] is None
+    assert "produced_items_invalid_json_or_shape" in project["blockers"]
+    assert project["produced_sealed_parity_verified"] is False
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
