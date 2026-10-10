@@ -167,3 +167,35 @@ def test_cached_page_proofs_preserve_first_authenticated_witness_order(monkeypat
     called.clear()
     assert _proof(source, published, physical, rows=tuple(reversed(page_rows))) is first
     assert called == []
+
+
+def test_cached_opening_proofs_use_published_snapshot_order_not_index_order(monkeypatch):
+    """A reordered authenticated index cannot silently reorder W4/G17 proofs."""
+    from pb_migration_contracts import EvidenceResolutionStatus
+
+    source, published, _ = _source(page_count=1)
+    physical = source.physical_opening_authority()
+    authoritative = source.authority()
+    original_index = tuple(authoritative.authenticated_visible_observations(published))
+    source_ids = tuple(
+        observation_id for observation_id in published.visible_observation_ids
+        if observation_id in {key for key, _ in original_index}
+    )
+    assert len(source_ids) > 1
+    monkeypatch.setattr(
+        type(authoritative), "authenticated_visible_observations",
+        lambda self, snapshot: tuple(reversed(original_index)),
+    )
+    witnessed = []
+
+    def prove(selector):
+        witnessed.append(selector.observation_id)
+        return SimpleNamespace(
+            status=EvidenceResolutionStatus.ABSTAINED,
+            proposition=None,
+            existence_record=None,
+        )
+
+    monkeypatch.setattr(physical, "prove_existence", prove)
+    assert _proof(source, published, physical, rows=original_index) == ()
+    assert witnessed == list(source_ids)
