@@ -9,6 +9,104 @@ import pb_viewport_segmentation as vp
 SHA = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 
 
+
+def _source_line_path_provenance(page, strip, side, outer, inner):
+    """Read native path ownership of border-strip strokes without granting it.
+
+    A native line occurrence has a stable drawing-sequence receipt (within
+    this exact source page). Duplicate geometry and paint style are retained:
+    repeated drawn curves are not automatically duplicate physical borders.
+    """
+    strokes = []
+    for path_index, drawing in enumerate(page.get_drawings()):
+        seqno = drawing.get("seqno", path_index)
+        for item_no, item in enumerate(drawing.get("items", ())):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            a, b = item[1], item[2]
+            x0, y0, x1, y1 = (
+                float(a.x), float(a.y), float(b.x), float(b.y)
+            )
+            if (
+                max(x0, x1) < strip[0] or min(x0, x1) > strip[2]
+                or max(y0, y1) < strip[1] or min(y0, y1) > strip[3]
+            ):
+                continue
+            # Ignore only collinear SOURCE frame-edge strokes, not all
+            # nearby curved or crossing artwork in the differential band.
+            if side in (0, 2) and abs(x0-x1) <= .25 and (
+                abs(x0-outer[side]) <= .25
+                or abs(x0-inner[side]) <= .25
+            ):
+                continue
+            if side in (1, 3) and abs(y0-y1) <= .25 and (
+                abs(y0-outer[side]) <= .25
+                or abs(y0-inner[side]) <= .25
+            ):
+                continue
+            start=(round(x0,3),round(y0,3))
+            end=(round(x1,3),round(y1,3))
+            geometry_key=tuple(sorted((start,end)))
+            # The inner frame boundary is a real source edge; a line
+            # crossing it is not established as ornamental by proximity.
+            limit=float(inner[side])
+            crosses_inner = (
+                (min(x0,x1) < limit < max(x0,x1))
+                if side in (0,2)
+                else (min(y0,y1) < limit < max(y0,y1))
+            )
+            strokes.append({
+                "path_index":path_index,
+                "source_drawing_seqno":seqno,
+                "item_index":item_no,
+                "line_native_pdf_pts":[x0,y0,x1,y1],
+                "geometry_signature":geometry_key,
+                "crosses_inner_frame_edge":crosses_inner,
+                "stroke_width":drawing.get("width"),
+                "stroke_color":drawing.get("color"),
+                "stroke_type":drawing.get("type"),
+                "stroke_layer":drawing.get("layer"),
+                "stroke_opacity":drawing.get("stroke_opacity"),
+                "fill_opacity":drawing.get("fill_opacity"),
+                "source_path_rect":tuple(drawing["rect"]) if drawing.get("rect") is not None else None,
+            })
+    grouped={}
+    for stroke in strokes:
+        key=str(stroke["source_drawing_seqno"])
+        grouped.setdefault(key,[]).append(stroke)
+    signatures={repr(x["geometry_signature"]) for x in strokes}
+    return {
+        "line_intersection_count":len(strokes),
+        "unique_line_geometry_count":len(signatures),
+        "native_source_path_count":len(grouped),
+        "inner_frame_crossing_line_count":sum(
+            bool(row["crosses_inner_frame_edge"]) for row in strokes
+        ),
+        "source_path_receipts":[{
+            "drawing_seqno":key,
+            "line_count":len(rows),
+            "source_line_geometry_examples":[
+                row["line_native_pdf_pts"] for row in rows[:6]
+            ],
+            "stroke_style":{
+                "stroke_width":rows[0]["stroke_width"],
+                "stroke_color":rows[0]["stroke_color"],
+                "stroke_type":rows[0]["stroke_type"],
+                "stroke_layer":rows[0]["stroke_layer"],
+                "stroke_opacity":rows[0]["stroke_opacity"],
+                "fill_opacity":rows[0]["fill_opacity"],
+            },
+            "source_path_rect":rows[0]["source_path_rect"],
+            "crosses_inner_frame_edge":any(
+                x["crosses_inner_frame_edge"] for x in rows
+            ),
+        } for key,rows in sorted(grouped.items())],
+        "first_40_source_stroke_receipts":strokes[:40],
+        "classification":"SOURCE_PATH_CANDIDATE_ONLY_NOT_BOUNDARY_PROOF",
+    }
+
+
+
 def inspect(pdf_data: bytes) -> dict:
     sha = hashlib.sha256(pdf_data).hexdigest()
     if sha != SHA:
@@ -104,6 +202,9 @@ def inspect(pdf_data: bytes) -> dict:
                         "source_text_examples":words[:20],
                         "nonframe_native_line_intersections":len(line_crossings),
                         "source_line_examples":line_crossings[:20],
+                        "path_provenance":_source_line_path_provenance(
+                            page,strip,side,outer,inner
+                        ),
                     })
         return {
             "source_sha256":sha,
