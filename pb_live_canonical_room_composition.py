@@ -6,6 +6,7 @@ geometry, names, levels, finishes, quantities, or commercial authority.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Collection, Mapping, Optional
 
@@ -442,6 +443,69 @@ def _room_object_from_record(
     )
 
 
+def _canonical_composite_supersedence(
+    source_room_face_records,
+    composite_records,
+):
+    """Project non-overlapping authenticated room composites, never their cells.
+
+    Original producer-owned SourceRoomFace records remain available for audit.
+    The canonical projection must not expose the same physical area as both
+    its component cells and a larger authenticated composite room: doing so
+    would duplicate canonical floors and downstream takeoff candidates.
+    Any unexpected missing or duplicate constituent reference fails closed
+    for the affected composite, preserving its original source-room cells.
+    """
+    originals = tuple(source_room_face_records)
+    composites = tuple(composite_records)
+    # The original physical face universe must itself be unique. Otherwise
+    # retiring an identity could erase multiple source faces with one claim.
+    source_id_counts = Counter(str(record.face_id) for record in originals)
+    known = set(source_id_counts)
+    originals_by_face = {str(record.face_id): record for record in originals}
+    claimed = Counter(
+        str(face_id)
+        for composite in composites
+        for face_id in composite.constituent_face_ids
+    )
+    accepted = []
+    suppressed = set()
+    for composite in composites:
+        ids = tuple(str(value) for value in composite.constituent_face_ids)
+        if (
+            len(ids) < 2
+            or len(ids) != len(set(ids))
+            or any(
+                face_id not in known
+                or source_id_counts[face_id] != 1
+                or claimed[face_id] != 1
+                for face_id in ids
+            )
+        ):
+            continue
+        # A physical face identity is insufficient by itself: the composite
+        # must cite each *exact* authenticated producer-owned source receipt.
+        # Otherwise an older/stale witness could retire an unrelated face.
+        actual_receipts = tuple(
+            str(value)
+            for value in (
+                getattr(composite, "constituent_source_room_face_record_ids", ()) or ()
+            )
+        )
+        expected_receipts = tuple(
+            str(originals_by_face[face_id].record_id)
+            for face_id in ids
+        )
+        if actual_receipts != expected_receipts:
+            continue
+        accepted.append(composite)
+        suppressed.update(ids)
+    return (
+        tuple(record for record in originals if str(record.face_id) not in suppressed),
+        tuple(accepted),
+    )
+
+
 def _room_object_from_composite_record(
     record,
     *,
@@ -629,6 +693,9 @@ def compose_live_canonical_rooms(
             if binding is not None:
                 authority_bindings.append(binding)
 
+            canonical_source_records, composite_records = (
+                _canonical_composite_supersedence(result.records, composite_records)
+            )
             rooms.extend(
                 _room_object_from_record(
                     record,
@@ -637,7 +704,7 @@ def compose_live_canonical_rooms(
                     unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
                     room_label_record=label_records_by_face.get(str(record.face_id)),
                 )
-                for record in result.records
+                for record in canonical_source_records
             )
             rooms.extend(
                 _room_object_from_composite_record(
@@ -789,14 +856,20 @@ def compose_live_canonical_rooms(
                     if binding is not None:
                         authority_bindings.append(binding)
 
+                    canonical_source_records, composite_records = (
+                        _canonical_composite_supersedence(
+                            room_result.records, composite_records
+                        )
+                    )
                     rooms.extend(
-                        _room_object_from_record(                            record,
+                        _room_object_from_record(
+                            record,
                             viewport_id=wall_scope.viewport_id,
                             canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
                             unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
                             room_label_record=label_records_by_face.get(str(record.face_id)),
                         )
-                        for record in room_result.records
+                        for record in canonical_source_records
                     )
                     rooms.extend(
                         _room_object_from_composite_record(

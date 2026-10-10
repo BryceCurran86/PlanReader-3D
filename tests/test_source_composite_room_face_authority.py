@@ -634,3 +634,229 @@ def test_null_wall_identity_cannot_own_any_composite_room_subedge():
     ))
     assert _local_edge_owners(source_scope) == {}
     assert _grid_local_adjacency(source_scope, {"None", ""}) == {}
+
+
+def test_source_grid_subedges_node_at_exact_split_endpoints():
+    """Two authentic W4 wall receipts may use different exact subedge cuts."""
+    from dataclasses import replace
+
+    scope = _room_scope()
+    left, right = scope.records
+    new_right_edges = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            new_right_edges.extend((
+                (wall, ((10.0, 0.0), (10.0, 4.0))),
+                (wall, ((10.0, 4.0), (10.0, 10.0))),
+            ))
+        else:
+            new_right_edges.append((wall, edge))
+    split_scope = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(new_right_edges)),
+    ))
+
+    result = compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=split_scope,
+        label_scope=_label_scope(),
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_page_pts2 == 200.0
+    assert result.records[0].separator_wall_ids == ("w_sep",)
+
+
+def test_source_grid_edge_noding_requires_exact_axis_and_same_w4_wall():
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import _grid_local_adjacency
+    scope = _room_scope()
+    left, right = scope.records
+    incompatible = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            incompatible.extend((
+                (wall, ((10.00001, 0.0), (10.00001, 4.0))),
+                (wall, ((10.00001, 4.0), (10.00001, 10.0))),
+            ))
+        else:
+            incompatible.append((wall, edge))
+    offset_scope = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(incompatible)),
+    ))
+    assert _grid_local_adjacency(offset_scope, {"w_sep"}) == {}
+    assert compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=offset_scope,
+        label_scope=_label_scope(),
+    ).records == ()
+
+    # Matching geometry associated with a different W4 wall is never an owner.
+    foreign = tuple(
+        ("w_wrong", edge) if wall == "w_sep" else (wall, edge)
+        for wall, edge in right.boundary_wall_edges
+    )
+    foreign_scope = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=foreign),
+    ))
+    assert _grid_local_adjacency(foreign_scope, {"w_sep"}) == {}
+
+
+def test_grid_noding_rejects_duplicate_and_three_sided_source_owners():
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import _grid_local_adjacency
+    scope = _room_scope()
+    left, right = scope.records
+    dup_scope = replace(scope, records=(
+        replace(left, boundary_wall_edges=left.boundary_wall_edges +
+                (("w_sep", ((10.0, 0.0), (10.0, 10.0))),)),
+        right,
+    ))
+    assert _grid_local_adjacency(dup_scope, {"w_sep"}) == {}
+    assert compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=dup_scope,
+        label_scope=_label_scope(),
+    ).records == ()
+
+    third = replace(left, face_id="unrelated_third_face",
+                    record_id="unrelated_third_record")
+    triple_scope = replace(scope, records=(left, right, third))
+    assert _grid_local_adjacency(triple_scope, {"w_sep"}) == {}
+
+
+def test_touching_grid_source_edges_without_positive_span_do_not_connect():
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import _grid_local_adjacency
+    scope = _room_scope()
+    left, right = scope.records
+    left_edges = tuple(
+        (wall, ((10.0, 0.0), (10.0, 5.0))) if wall == "w_sep"
+        else (wall, edge) for wall, edge in left.boundary_wall_edges
+    )
+    right_edges = tuple(
+        (wall, ((10.0, 5.0), (10.0, 10.0))) if wall == "w_sep"
+        else (wall, edge) for wall, edge in right.boundary_wall_edges
+    )
+    disconnected = replace(scope, records=(
+        replace(left, boundary_wall_edges=left_edges),
+        replace(right, boundary_wall_edges=right_edges),
+    ))
+    assert _grid_local_adjacency(disconnected, {"w_sep"}) == {}
+    assert compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=disconnected,
+        label_scope=_label_scope(),
+    ).records == ()
+
+
+def test_source_grid_union_rejects_overlapping_face_interiors():
+    from dataclasses import replace
+    original = _room_scope()
+    left, right = original.records
+    # Even with the same W4 receipt, an internally overlapping source-face
+    # footprint is not a true room-cell partition and must not be composed.
+    inflated = replace(right,
+        polygon_pdf_pts=((8.0, 0.0), (20.0, 0.0),
+                         (20.0, 10.0), (8.0, 10.0)),
+        area_page_pts2=120.0,
+    )
+    overlapped = replace(original, records=(left, inflated))
+    result = compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=overlapped,
+        label_scope=_label_scope(),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+
+
+def test_source_endpoint_sweep_preserves_overlapping_same_face_multiplicity():
+    """A sweep must not collapse duplicate overlaps into a fake two-sided owner."""
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts,
+    )
+
+    scope = _room_scope()
+    left, right = scope.records
+    right_edges = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            right_edges.extend((
+                (wall, ((10.0, 0.0), (10.0, 6.0))),
+                (wall, ((10.0, 4.0), (10.0, 10.0))),
+            ))
+        else:
+            right_edges.append((wall, edge))
+    modified = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(right_edges)),
+    ))
+    noded = _atomic_source_wall_edge_counts(modified, {"w_sep"})
+    shared = noded[("w_sep", ((10.0, 4.0), (10.0, 6.0)))]
+    assert shared["face_left"] == 1
+    assert shared["face_right"] == 2
+    result = compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=modified,
+        label_scope=_label_scope(),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+
+
+def test_source_endpoint_sweep_preserves_adjacent_same_face_segments():
+    """An end and start at the same authentic cut keep one face owner."""
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts,
+    )
+
+    scope = _room_scope()
+    left, right = scope.records
+    right_edges = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            right_edges.extend((
+                (wall, ((10.0, 0.0), (10.0, 4.0))),
+                (wall, ((10.0, 4.0), (10.0, 10.0))),
+            ))
+        else:
+            right_edges.append((wall, edge))
+    modified = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(right_edges)),
+    ))
+    noded = _atomic_source_wall_edge_counts(modified, {"w_sep"})
+    for start, end in ((0.0, 4.0), (4.0, 10.0)):
+        assert noded[("w_sep", ((10.0, start), (10.0, end)))] == {
+            "face_left": 1, "face_right": 1,
+        }
+
+
+def test_source_w4_node_counts_are_scoped_once_across_competing_labels(monkeypatch):
+    """Candidate abstention semantics stay unchanged without per-label noding."""
+    import pb_source_composite_room_face_authority as module
+
+    original = module._atomic_source_wall_edge_counts
+    calls = []
+
+    def measured(room_scope, grid_walls):
+        calls.append((room_scope, frozenset(grid_walls)))
+        return original(room_scope, grid_walls)
+
+    monkeypatch.setattr(module, "_atomic_source_wall_edge_counts", measured)
+    room_scope = _three_cell_room_scope()
+    result = compose_grid_separated_room_faces(
+        wall_scope=_three_cell_wall_scope(
+            (_grid_atom("e_lm", "ev_lm"), _grid_atom("e_mr", "ev_mr"))
+        ),
+        room_scope=room_scope,
+        label_scope=_three_cell_label_scope(competing_split=True),
+    )
+    assert len(calls) == 1
+    assert calls[0][0] is room_scope
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert set(result.unresolved_label_candidate_ids) == {
+        "split_label_primary",
+        "split_label_competing",
+    }
