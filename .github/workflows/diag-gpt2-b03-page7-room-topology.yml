@@ -1,0 +1,134 @@
+name: DIAG GPT2 B03 Page7 Physical Room First Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt2-b03-page7-room-topology.yml"
+  workflow_dispatch:
+
+jobs:
+  source-room-topology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-only room wall and face authority first gate
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b03-source-room-topology
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-b03-source-room-topology/report.json
+          import hashlib, json
+          from pathlib import Path
+          import fitz
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_physical_wall_candidate_authority import (
+              PhysicalWallCandidateProducer,PhysicalWallCandidateSelector,
+          )
+          from pb_source_room_face_authority import (
+              build_source_room_face_authority,SourceRoomFaceSelector,
+          )
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_migration_contracts import EvidenceResolutionStatus
+
+          source_bytes=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          source_sha=hashlib.sha256(source_bytes).hexdigest()
+          assert source_sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf=fitz.open(stream=source_bytes,filetype="pdf")
+          assert pdf.page_count==31
+          pdf.close()
+
+          source=SourceVisibilityProducer(
+              producer_method="gpt2-b03-page7-physical-room-first-gate",
+              producer_version="1",
+          )
+          published=source.ingest_native_pdf_bytes(
+              document_id="gpt2-b03-source-room-scope-verified",
+              source_bytes=source_bytes,
+              source_locator="memory://gpt2-page7-room-first-gate.pdf",
+              page_ids=("7",),
+          )
+          source.augment_with_raster_opening_primitives(
+              published.revision.revision_id,page_ids=("7",)
+          )
+          wall_producer=PhysicalWallCandidateProducer.from_source_visibility_producer(
+              source,page_ids=("7",)
+          )
+          latest=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert latest and latest.revision.source_sha256==source_sha
+
+          def inspect(walls,selector):
+              wall_scope=walls.resolve_scope(selector)
+              rooms=build_source_room_face_authority(walls)
+              room_scope=rooms.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,decision_scope_id=selector.decision_scope_id,
+              ))
+              return {
+                  "scope_id":selector.decision_scope_id,
+                  "wall_scope_status":str(wall_scope.status),
+                  "wall_scope_complete":bool(wall_scope.scope_complete),
+                  "wall_reason_codes":list(wall_scope.reason_codes),
+                  "physical_wall_candidate_count":len(wall_scope.records),
+                  "excluded_boundary_primitive_count":len(tuple(
+                      getattr(getattr(wall_scope,"boundary_evaluation",None),
+                              "excluded_boundary_primitives",()) or ())),
+                  "room_scope_status":str(room_scope.status),
+                  "room_scope_complete":bool(room_scope.scope_complete),
+                  "room_face_universe_complete":bool(room_scope.face_universe_complete),
+                  "room_reason_codes":list(room_scope.reason_codes),
+                  "source_room_face_count":len(room_scope.records),
+                  "room_source_evidence": [{
+                      "face_id":r.face_id,
+                      "source_room_face_record_id":r.record_id,
+                      "page":r.page_id,
+                      "decision_scope":r.decision_scope_id,
+                      "boundary_wall_ids":list(r.bounding_wall_ids),
+                      "area_page_pts2_not_metric":r.area_page_pts2,
+                  } for r in room_scope.records],
+              }
+
+          walls=wall_producer.authority()
+          scope=PhysicalWallCandidateSelector(
+              document_id=latest.revision.document_id,
+              revision_id=latest.revision.revision_id,
+              source_sha256=latest.revision.source_sha256,
+              snapshot_id=latest.snapshot.snapshot_id,
+              page_id="7",decision_scope_id="wall-source:page-7",
+          )
+          page_scope=inspect(walls,scope)
+          detail={"source_sha256":source_sha,"page_1_based":7,
+                  "page_wide_scope":page_scope,"viewport_scopes":[]}
+          if not page_scope["room_scope_complete"] or not page_scope["source_room_face_count"]:
+              vp_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+                  source,page_ids=("7",)
+              )
+              vp_auth=vp_producer.authority()
+              latest=source.published_snapshot_for_revision(published.revision.revision_id)
+              selectors=vp_auth.selectors_for_authenticated_viewports(
+                  document_id=latest.revision.document_id,
+                  revision_id=latest.revision.revision_id,
+                  source_sha256=latest.revision.source_sha256,
+                  snapshot_id=latest.snapshot.snapshot_id,
+                  page_id="7",
+                  view_type=DrawingViewType.FLOOR_PLAN.value,
+              )
+              for owned_selector in selectors:
+                  detail["viewport_scopes"].append(inspect(vp_auth,owned_selector))
+          detail["report_mode"]="READ_ONLY_SOURCE_WALL_AND_FACE_FIRST_FAILURE_NO_QUANTITY"
+          print("GPT2_B03_PAGE7_ROOM_TOPOLOGY_FIRST_GATE",json.dumps(detail,sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b03-page7-physical-room-topology
+          path: artifacts/gpt2-b03-source-room-topology
+          retention-days: 7
