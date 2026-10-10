@@ -121,7 +121,11 @@ def test_changed_or_missing_positive_original_source_never_called_snapshot_only(
     frames=b["host_frames"][0]
     record=b["source_owned_wall_scope_results"][0]["records"][0]
     if damage=="member_change":
+        # A genuine W4 reassembly must update the hosted frame's wall list too;
+        # an inconsistent list is separately rejected by the provenance tests.
         opening["member_wall_candidate_ids"]=["wall_b"]
+        frames["whole_wall_candidate_ids"]=["wall_b"]
+        b["resolved_host_frame_evidence"][0]["whole_wall_candidate_ids"]=["wall_b"]
     elif damage=="source_v2_change":
         record["physical_identity"]["candidate_identity_id"]="wall2_different"
     elif damage=="source_original_primitive_change":
