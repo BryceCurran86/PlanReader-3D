@@ -1,0 +1,109 @@
+"""Original raster source parent membership is NOT a physical host proof."""
+from copy import deepcopy
+from types import SimpleNamespace
+
+import pytest
+
+from pb_opening_host_binding_authority import _OpeningGeometry
+from tools.diag_gptmax_raster_host_source_membership import (
+    nonpublishing_raster_source_w4_membership,
+    original_raster_host_ancestry_census,
+)
+
+
+def opening():
+    return _OpeningGeometry(
+        origin=(0.,0.), axis=(1.,0.), normal=(0.,1.),
+        length=10., thickness=4.,
+    )
+
+
+def record(id, source_ids, *, usable=True):
+    return SimpleNamespace(
+        wall_candidate_id=id,
+        physical_identity=SimpleNamespace(
+            source_primitive_ids=tuple(source_ids), usable=usable,
+        ),
+    )
+
+
+def test_positive_exact_source_ancestry_is_never_local_wall_host_authority():
+    rows = [
+        record("w4-src-a", ["source-a", "source-common"]),
+        record("w4-src-b", ["source-b", "source-common"]),
+        record("w4-unusable", ["source-unusable"], usable=False),
+    ]
+    raw = {
+        "source-a": (-5.,-1.,0.,-1.),
+        "source-b": (10.,1.,14.,1.),
+        "source-common": (-3.,0.,14.,0.),
+        "source-unusable": (0.,0.,1.,0.),
+        "orphan-source": (0.,1.,1.,1.),
+        "off-axis-source": (0.,0.,0.,4.),
+        "far-source": (50.,0.,60.,0.),
+    }
+    original = deepcopy(raw)
+    report = nonpublishing_raster_source_w4_membership(
+        rows, raw, opening(), page_id="3"
+    )
+    assert raw == original
+    evidence={r["source_primitive_id"]:r for r in report["diagnostic_local_raster_lines"]}
+    assert evidence["source-common"]["exact_positive_ancestry_w4_candidate_ids"] == [
+        "w4-src-a", "w4-src-b"
+    ]
+    assert evidence["source-a"]["exact_positive_ancestry_w4_candidate_ids"] == ["w4-src-a"]
+    assert evidence["source-unusable"]["exact_positive_ancestry_w4_candidate_ids"] == []
+    assert evidence["orphan-source"]["exact_positive_ancestry_w4_candidate_ids"] == []
+    assert "off-axis-source" not in evidence
+    assert "far-source" not in evidence
+    assert report["original_source_stage_counts"]["line_not_parallel_to_opening"] == 1
+    assert report["original_source_stage_counts"]["line_outside_aperture_local_band"] == 1
+    assert report["unusable_identity_source_parent_count"] == 1
+    assert not report["local_host_contact_proven"]
+    assert not report["physical_equivalence_proven"]
+    assert not report["host_publication_allowed"]
+    assert not report["opening_count_publication_allowed"]
+    assert not report["metric_quantity_publication_allowed"]
+    assert report["benchmark_accuracy"] is None
+
+
+@pytest.mark.parametrize("line", [
+    (float("nan"), 0., 1., 0.), (0., float("inf"),1.,0.),
+    (0.,0.,1.), ("invalid",0.,1.,0.),
+])
+def test_bad_original_source_geometry_does_not_create_candidate_ancestry(line):
+    result=nonpublishing_raster_source_w4_membership(
+        [record("source-owned", ["source"])], {"source":line},
+        opening(), page_id="3",
+    )
+    assert result["original_source_stage_counts"] == {"invalid_source_geometry":1}
+    assert result["diagnostic_local_raster_lines"] == []
+    assert not result["host_publication_allowed"]
+
+
+def test_duplicate_ancestry_parent_not_counted_as_two_openings_or_host():
+    rows=[record("same-physical-id", ["parent", "parent"])]
+    data={"parent": (-1.,0.,1.,0.)}
+    result=nonpublishing_raster_source_w4_membership(rows,data,opening(),page_id="3")
+    assert result["diagnostic_local_raster_lines"][0][
+        "exact_positive_ancestry_w4_candidate_ids"
+    ] == ["same-physical-id"]
+    assert not result["opening_count_publication_allowed"]
+
+
+def test_diagnostic_cannot_accept_a_wrong_original_pdf_sha():
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        original_raster_host_ancestry_census(
+            b"not-the-original-pdf", page_id="3", expected_source_sha="0"*64,
+        )
+
+
+@pytest.mark.parametrize("page", ["", "-1", "3a", "0"])
+def test_bad_original_source_page_rejected_before_processing(page):
+    import hashlib
+    data=b"fake-input-is-not-a-PDF"
+    with pytest.raises(ValueError, match="invalid page"):
+        original_raster_host_ancestry_census(
+            data, page_id=page,
+            expected_source_sha=hashlib.sha256(data).hexdigest(),
+        )
