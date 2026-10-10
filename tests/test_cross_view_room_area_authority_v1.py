@@ -999,3 +999,83 @@ def test_compound_label_alone_cannot_mint_room_area(
     result = CrossViewRoomAreaProducer.from_source(source=source, rooms=rooms).publish()
 
     assert result.records == ()
+
+
+def _source_area_owner_record(room_id: str, page: str, horizontal: str, vertical: str):
+    from pb_migration_contracts import EvidenceAtom
+
+    return CrossViewRoomAreaRecord(
+        physical_room_id=room_id,
+        source_room_face_record_id="face-"+room_id,
+        room_label=room_id,
+        source_dimension_page_id=page,
+        source_label_observation_ids=("source-label-"+room_id,),
+        source_label_receipt_ids=("source-receipt-"+room_id,),
+        horizontal_dimension_id=horizontal,
+        vertical_dimension_id=vertical,
+        area_evidence=EvidenceAtom(
+            evidence_id="area-"+room_id,
+            document_id="source-test-doc",
+            page_id="1",
+            kind="explicit_room_area",
+            method="authenticated_cross_view_figured_dimensions",
+            normalized_value=8.64,
+            unit="m2",
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+        _seal=cross_view._RECORD_SEAL,
+    )
+
+
+def test_cross_view_horizontal_dimension_source_is_not_two_room_areas() -> None:
+    from pb_cross_view_room_area_authority import (
+        _quarantine_reused_cross_view_dimensions,
+    )
+
+    one=_source_area_owner_record("room-1","9","shared-h","v1")
+    two=_source_area_owner_record("room-2","9","shared-h","v2")
+    unrelated=_source_area_owner_record("room-3","9","own-h","v3")
+    records, conflict=_quarantine_reused_cross_view_dimensions(
+        (one,two,unrelated))
+    assert records==[unrelated]
+    assert conflict=={"room-1","room-2"}
+    reversed_records, reversed_conflict=_quarantine_reused_cross_view_dimensions(
+        (unrelated,two,one))
+    assert reversed_records==[unrelated]
+    assert reversed_conflict==conflict
+
+
+def test_cross_view_vertical_dimension_source_is_not_two_room_areas() -> None:
+    from pb_cross_view_room_area_authority import (
+        _quarantine_reused_cross_view_dimensions,
+    )
+
+    one=_source_area_owner_record("room-1","9","h1","shared-v")
+    two=_source_area_owner_record("room-2","9","h2","shared-v")
+    records, conflict=_quarantine_reused_cross_view_dimensions((one,two))
+    assert records==[]
+    assert conflict=={"room-1","room-2"}
+
+
+def test_cross_view_dimension_identity_scoped_to_actual_support_page() -> None:
+    from pb_cross_view_room_area_authority import (
+        _quarantine_reused_cross_view_dimensions,
+    )
+
+    one=_source_area_owner_record("room-1","9","common-h","common-v")
+    two=_source_area_owner_record("room-2","11","common-h","common-v")
+    records, conflict=_quarantine_reused_cross_view_dimensions((one,two))
+    assert records==[one,two]
+    assert conflict==set()
+
+
+def test_cross_view_separate_source_dimensions_keep_both_metric_rooms() -> None:
+    from pb_cross_view_room_area_authority import (
+        _quarantine_reused_cross_view_dimensions,
+    )
+
+    one=_source_area_owner_record("room-1","9","h1","v1")
+    two=_source_area_owner_record("room-2","9","h2","v2")
+    records, conflict=_quarantine_reused_cross_view_dimensions((one,two))
+    assert records==[one,two]
+    assert conflict==set()
