@@ -2097,7 +2097,19 @@ def _producer_proven_page_opening_records(
     # A damaged competitor can invalidate a cached uniqueness proof even when
     # the opening's own six source observations are unchanged.
     authenticated = visibility.authenticated_visible_observations(published)
-    rows = tuple(row for row in authenticated if str(row[1].page_id) == str(page_id))
+    authenticated_by_id = {
+        observation_id: observation for observation_id, observation in authenticated
+    }
+    # Source-visible IDs are the authority's original observation traversal.
+    # The old W4/G17 loop proved this order directly from the published
+    # snapshot; an authenticated page index may return an equivalent set in
+    # a different order and silently change representative host ownership.
+    rows = tuple(
+        (observation_id, authenticated_by_id[observation_id])
+        for observation_id in published.visible_observation_ids
+        if observation_id in authenticated_by_id
+        and str(authenticated_by_id[observation_id].page_id) == str(page_id)
+    )
     if (resolved_visible_observations is not None
             and (len(resolved_visible_observations) != len(rows)
                  or dict(resolved_visible_observations) != dict(rows))):
