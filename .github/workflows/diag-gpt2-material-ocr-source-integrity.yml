@@ -1,0 +1,125 @@
+name: DIAG GPT2 Material OCR Source Integrity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt2-material-ocr-source-integrity.yml"
+  workflow_dispatch:
+
+jobs:
+  material-source-scope-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Install authenticated OCR backend
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Compare material schedule source scopes without inference
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-material-schedule-scope
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-material-schedule-scope/source_comparison.json
+          import hashlib
+          import json
+          from pathlib import Path
+          import fitz
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import (
+              SourceMaterialSemanticProducer, SourceMaterialDefinitionSelector,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          raw=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(raw).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf=fitz.open(stream=raw,filetype="pdf")
+          assert pdf.page_count==31
+          source_views={}
+          for number in (7,9,11):
+              source_views[str(number)]=[{
+                  "view_id":v.view_id,
+                  "title":v.label,
+                  "type":v.view_type,
+                  "status":v.status,
+                  "boundary_source":v.boundary_source,
+                  "bbox_pdf_pts":v.bounding_box,
+              } for v in segment_page_viewports(pdf.load_page(number-1),page_number=number)]
+          pdf.close()
+
+          import shutil
+          from pb_raster_text_corroboration_authority import TesseractOCRBackend
+          executable=shutil.which("tesseract")
+          assert executable, "Tesseract binary needed for CAD text raster corroboration"
+          ocr_backend=TesseractOCRBackend()
+          assert ocr_backend.is_available(), "Producer OCR backend not available"
+          results=[]
+          for page_ids in (("9","11"),("7","9","11")):
+              visibility=SourceVisibilityProducer(
+                  producer_method="gpt2-material-schedule-scope-isolation",
+                  producer_version="1",
+              )
+              published=visibility.ingest_native_pdf_bytes(
+                  document_id="gpt2-material-scope-"+("-".join(page_ids)),
+                  source_bytes=raw,
+                  source_locator="memory://maryborough-material-"+("-".join(page_ids))+".pdf",
+                  page_ids=page_ids,
+              )
+              assert published.revision.source_sha256==sha
+              authority=SourceMaterialSemanticProducer.from_source_visibility_producer(
+                  visibility
+              ).publish(published.revision.revision_id)
+              identity=dict(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=sha,
+                  snapshot_id=published.snapshot.snapshot_id,
+              )
+              definitions={}
+              for code in ("FPB","WFPB","IPF1","GRID","FT2","FT3"):
+                  resolved=authority.resolve_definition(
+                      SourceMaterialDefinitionSelector(**identity,code=code)
+                  )
+                  rec=resolved.record
+                  definitions[code]={
+                      "status":str(resolved.status),
+                      "reason_codes":list(resolved.reason_codes),
+                      "finish":getattr(rec,"semantic_finish",None),
+                      "record_id":getattr(rec,"record_id",None),
+                      "source_evidence_ids":list(getattr(rec,"source_definition_ids",()) or ()),
+                  }
+              results.append({
+                  "decoded_source_pages":list(page_ids),
+                  "definitions":definitions,
+              })
+
+          comparison={
+              "source_sha256":sha,"source_page_count":31,
+              "native_page_viewports":source_views,
+              "source_scope_definition_results":results,
+              "tesseract_binary":executable,
+              "ocr_backend_available":bool(ocr_backend.is_available()),
+              "source_authentication_requirement":"exact producer-owned source text/raster receipts only",
+              "not_proven":["schedule_material_occurrence","floor_finish_room_ownership",
+                            "physical_room_metric","benchmark_match"],
+          }
+          print("GPT2_MATERIAL_SCHEDULE_SCOPE_COMPARISON",
+                json.dumps(comparison,sort_keys=True,default=str))
+          # A prerequisite is never semantic authority by itself. The code
+          # must still publish through the source-owned definition selectors.
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-material-schedule-scope-isolation
+          path: artifacts/gpt2-material-schedule-scope
+          retention-days: 7
