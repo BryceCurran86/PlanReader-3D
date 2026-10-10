@@ -728,3 +728,54 @@ def test_physical_room_identity_keeps_distinct_rooms_and_documents_distinct() ->
             other_view.physical_room_id,
         }
     ) == 4
+
+
+def test_canonical_grid_composite_supersedes_only_its_original_face_cells():
+    """Do not publish both component cells and their canonical room union."""
+    from types import SimpleNamespace
+    from pb_live_canonical_room_composition import _canonical_composite_supersedence
+
+    originals = tuple(
+        SimpleNamespace(face_id=face_id, record_id="source_" + face_id)
+        for face_id in ("left", "right", "unrelated")
+    )
+    composite = SimpleNamespace(
+        record_id="composite_real",
+        constituent_face_ids=("left", "right"),
+    )
+    remaining, published = _canonical_composite_supersedence(
+        originals, (composite,)
+    )
+    assert tuple(face.face_id for face in remaining) == ("unrelated",)
+    assert published == (composite,)
+    # The producer-owned SourceRoomFace receipt universe is not mutated.
+    assert len(originals) == 3
+
+
+def test_canonical_composite_unknown_or_competing_cell_abstains():
+    from types import SimpleNamespace
+    from pb_live_canonical_room_composition import _canonical_composite_supersedence
+
+    originals = tuple(SimpleNamespace(face_id=x) for x in ("a", "b", "c"))
+    valid = SimpleNamespace(record_id="valid", constituent_face_ids=("a", "b"))
+    unknown = SimpleNamespace(record_id="unknown", constituent_face_ids=("a", "missing"))
+    duplicate = SimpleNamespace(record_id="duplicate", constituent_face_ids=("b", "b"))
+    overlapping = SimpleNamespace(record_id="other", constituent_face_ids=("b", "c"))
+
+    for composite in (unknown, duplicate):
+        remaining, published = _canonical_composite_supersedence(
+            originals, (composite,)
+        )
+        assert remaining == originals
+        assert published == ()
+
+    remaining, published = _canonical_composite_supersedence(
+        originals, (valid, overlapping)
+    )
+    # An overlapping candidate cannot quietly retire any component cell.
+    assert remaining == originals
+    assert published == ()
+
+    remaining, published = _canonical_composite_supersedence(originals, ())
+    assert remaining == originals
+    assert published == ()
