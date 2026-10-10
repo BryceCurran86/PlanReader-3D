@@ -141,13 +141,17 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
         observed = tuple(sorted(specific[code] for code in reasons if code in specific))
         # Two independent flank failures do not have an authenticated order.
         # Never arbitrarily call 'left' the first evidence gate.
-        stage = (
-            observed[0] if len(observed) == 1
-            else "multiple_source_host_gates_unresolved" if observed
-            else "source_host_wall_band_unproven"
-            if "no_authenticated_host_wall_band" in reasons
-            else "other_source_host_blocker"
-        )
+        if observed:
+            stage = (observed[0] if len(observed) == 1
+                     else "multiple_source_host_gates_unresolved")
+        elif "complete_authenticated_host_wall_universe_required" in reasons:
+            stage = "source_wall_scope_boundary_or_completeness_unproven"
+        elif "ambiguous_physical_wall_equivalence_for_host" in reasons:
+            stage = "physical_wall_equivalence_ambiguous_for_host"
+        elif "no_authenticated_host_wall_band" in reasons:
+            stage = "source_host_wall_band_unproven"
+        else:
+            stage = "other_source_host_blocker"
         first_gates[stage] += 1
         unhosted.append({
             "page_id": page,
