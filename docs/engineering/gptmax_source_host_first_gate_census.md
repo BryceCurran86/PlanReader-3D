@@ -53,7 +53,7 @@ benchmark run.
 
 Exact archived original Maryborough PDF SHA:
 `b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`.
-Original report has 180 opening existences, 3 hosts, 0 frames. Page 7 W4
+Original report has 180 opening existences, 3 hosts, 0 frames. The **177** unhosted original physical openings have first-gate classes: **94** missing authenticated host wall bands, **62** blocked by ambiguous physical-wall equivalence (42 direct and 20 with concurrent two-face lineage ambiguity), and **21** with incomplete wall-source scope / boundary evidence (14 viewport-cropped and seven scope-bounds unresolved). These source classifications are not a promise that the producer could seal the quantities after a single fix. Page 7 W4
 has 3,737 source candidate records but only 3,736 unique addresses. The
 source-edge and junction records `split_2296` and `split_9744`
 share the address `wall_6d948b1b47258597fa66`, and the
