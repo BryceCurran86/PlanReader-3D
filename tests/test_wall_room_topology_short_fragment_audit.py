@@ -160,3 +160,25 @@ def test_real_short_vertical_end_remains_observation_not_missing_gap_closure():
     assert w["max_endpoint_snap_displacement_pt"]==pytest.approx(1.7)
     assert w["source_gap_closure"]=="NOT_PROVEN_BY_THIS_AUDIT"
     assert not r["metric_quantity_publication_allowed"]
+
+
+
+def test_w2_opt_in_trace_never_changes_existing_graph_authority(monkeypatch):
+    from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+
+    source=[{
+        "id":"native_source_line_real_positive",
+        "kind":"line","x1":0.,"y1":0.,"x2":8.,"y2":0.,
+        "width":1.,"stroke":(0,0,0),
+    }]
+    monkeypatch.delenv("GPTMAX_W2_SHORT_SOURCE_AUDIT",raising=False)
+    base=build_wall_graph_for_viewport(source)
+    assert "short_source_fragment_retention_audit" not in base
+
+    monkeypatch.setenv("GPTMAX_W2_SHORT_SOURCE_AUDIT","1")
+    traced=build_wall_graph_for_viewport(source)
+    witness=traced.pop("short_source_fragment_retention_audit")
+    assert traced==base
+    assert witness["physical_host_publication_allowed"] is False
+    assert witness["opening_count_publication_allowed"] is False
+    assert witness["metric_quantity_publication_allowed"] is False
