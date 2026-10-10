@@ -1,0 +1,415 @@
+name: DIAG GPT2 Page7 Split Labels Exact Wall Separators
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_viewport_segmentation.py"
+      - "tools/diag_gpt2_remaining_label_source_face_candidates.py"
+      - "tests/test_gpt2_remaining_label_source_face_candidates.py"
+      - "tools/diag_gpt2_split_label_wall_separators.py"
+      - "tests/test_gpt2_split_label_wall_separators.py"
+      - ".github/workflows/diag-gpt2-page7-split-label-wall-separators.yml"
+  workflow_dispatch:
+
+jobs:
+  source-face-physical-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Install OCR engine for real-source text evidence
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Source-label and exact wall adjacency adversarial regressions
+        run: |
+          PYTHONPATH=. pytest -q tests/test_gpt2_remaining_label_source_face_candidates.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_split_label_wall_separators.py
+          PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
+      - name: Source-owned native room text vs authentic physical face first gate
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-page7-physical-faces
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-page7-physical-faces/source_ledger.json
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer, SourceRoomLabelSelector,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+          )
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          document=fitz.open(stream=payload,filetype="pdf")
+          assert document.page_count==31
+          page=document.load_page(6)
+          viewports=segment_page_viewports(page,page_number=7)
+          assert validate_non_overlapping_viewports(viewports)
+          floor=[v for v in viewports if v.view_type==DrawingViewType.FLOOR_PLAN.value]
+          assert len(floor)==1 and floor[0].status=="resolved" and floor[0].bounding_box
+          document.close()
+
+          producer=SourceVisibilityProducer(
+              producer_method="gpt2-page7-source-face-after-frame",
+              producer_version="1",
+          )
+          published=producer.ingest_native_pdf_bytes(
+              document_id="gpt2-page7-face-after-frame-source",
+              source_bytes=payload,
+              source_locator="memory://gpt2-page7-face-after-frame.pdf",
+              page_ids=("7",),
+          )
+          assert published.revision.source_sha256==sha
+          producer.augment_with_raster_opening_primitives(
+              published.revision.revision_id,page_ids=("7",)
+          )
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              producer,page_ids=("7",)
+          )
+          wall_authority=wall_producer.authority()
+          live=producer.published_snapshot_for_revision(published.revision.revision_id)
+          assert live is not None and live.revision.source_sha256==sha
+          selectors=wall_authority.selectors_for_authenticated_viewports(
+              document_id=live.revision.document_id,
+              revision_id=live.revision.revision_id,
+              source_sha256=live.revision.source_sha256,
+              snapshot_id=live.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          scopes=[]
+          for selector in selectors:
+              walls=wall_authority.resolve_scope(selector)
+              rooms=build_source_room_face_authority(wall_authority)
+              face_scope=rooms.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              scopes.append({
+                  "decision_scope_id":selector.decision_scope_id,
+                  "wall_scope_status":str(walls.status),
+                  "wall_scope_complete":bool(walls.scope_complete),
+                  "wall_candidate_count":len(walls.records),
+                  "wall_reason_codes":list(walls.reason_codes),
+                  "boundary_evaluation_status":str(getattr(
+                      getattr(walls,"boundary_evaluation",None),"status",None)),
+                  "boundary_tainted_wall_ids":list(getattr(
+                      getattr(walls,"boundary_evaluation",None),
+                      "boundary_tainted_wall_candidate_ids",()) or ())[:30],
+                  "room_status":str(face_scope.status),
+                  "room_scope_complete":bool(face_scope.scope_complete),
+                  "room_universe_complete":bool(face_scope.face_universe_complete),
+                  "room_reason_codes":list(face_scope.reason_codes),
+                  "physical_source_face_count":len(face_scope.records),
+                  "physical_source_face_examples":[{
+                      "source_face_record_id":r.record_id,
+                      "face_id":r.face_id,
+                      "native_page":r.page_id,
+                      "decision_scope":r.decision_scope_id,
+                      "source_wall_ids":list(r.bounding_wall_ids),
+                      "area_pdf_points_squared_NOT_metric":r.area_page_pts2,
+                  } for r in face_scope.records[:30]],
+              })
+          result={
+              "source_sha256":sha,
+              "source_page":7,
+              "authenticated_floor_viewport":floor[0].view_id,
+              "native_floor_viewport_bbox":floor[0].bounding_box,
+              "viewport_scope_selector_count":len(selectors),
+              "scopes":scopes,
+              "metric_room_area_claims":0,
+              "finish_occurrence_claims":0,
+              "benchmark_score_claims":0,
+          }
+          print("GPT2_PAGE7_ROOM_LABEL_SOURCE_FACES",json.dumps(result,sort_keys=True,default=str))
+          assert selectors, "floor viewport did not reach producer owned wall scopes"
+          assert any(x["physical_source_face_count"]>0 for x in scopes), (
+              "Source-owned room faces not recovered despite resolved floor-plan viewport"
+          )
+          # The label producer is independent of PDF word proximity.
+          # It authenticates exact text receipts and physical face ownership.
+          face_authority=build_source_room_face_authority(wall_authority)
+          label_producer=SourceRoomLabelProducer.from_authorities(
+              producer,face_authority,page_ids=("7",)
+          )
+          label_authority=label_producer.authority()
+          scoped_labels=[]
+          for selector in selectors:
+              selected=SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              )
+              output=label_authority.resolve_scope(selected)
+              rows=[]
+              for record in output.records:
+                  assert record.source_sha256==sha
+                  assert record.page_id=="7"
+                  assert record.decision_scope_id==selector.decision_scope_id
+                  assert record.source_room_face_record_id
+                  assert record.face_id
+                  assert record.observation_ids and record.word_evidence
+                  rows.append({
+                      "room_label":record.label,
+                      "source_face_id":record.face_id,
+                      "source_room_face_record_id":record.source_room_face_record_id,
+                      "source_label_record_id":record.record_id,
+                      "source_label_observation_ids":list(record.observation_ids),
+                      "word_authorities":[
+                          {"text":word.trusted_text,
+                           "authority_kind":word.authority_kind,
+                           "authority_record_id":word.authority_record_id}
+                          for word in record.word_evidence
+                      ],
+                  })
+              scoped_labels.append({
+                  "scope_id":selector.decision_scope_id,
+                  "status":str(output.status),
+                  "first_reasons":list(output.reason_codes),
+                  "source_owned_label_count":len(rows),
+                  "records":rows,
+                  # A producer-authenticated whole line may span multiple
+                  # different physical faces. Its receipt is a SPLIT candidate,
+                  # never authority to collapse or relabel those source faces.
+                  "source_split_face_candidates":[{
+                      "native_label":candidate.label,
+                      "split_candidate_id":candidate.record_id,
+                      "word_face_ids":list(candidate.word_face_ids),
+                      "source_room_face_record_ids":list(
+                          candidate.source_room_face_record_ids
+                      ),
+                      "source_word_observation_ids":list(
+                          candidate.observation_ids
+                      ),
+                      "source_bbox_pdf_pts":candidate.source_bbox,
+                      "first_gate":"source_label_words_have_distinct_face_owners",
+                      "canonical_room_published":False,
+                  } for candidate in output.split_face_candidates],
+              })
+          report={
+              "source_sha256":sha,
+              "source_page":7,
+              "floor_plan_viewport":floor[0].view_id,
+              "source_physical_face_counts":[s["physical_source_face_count"] for s in scopes],
+              "source_room_labels":scoped_labels,
+              "metric_quantity_claims":0,
+              "material_finish_claims":0,
+          }
+          print("GPT2_PAGE7_ROOM_LABEL_OWNERSHIP",json.dumps(report,sort_keys=True,default=str))
+
+          # Independent native text may be physically nearby even when no
+          # source authority has bound it to a physical face. Produce source
+          # *spatial candidates* for GPT2 #39, never canonical room claims.
+          from tools.diag_gpt2_maryborough_room_source_map import inventory
+          from tools.diag_gpt2_remaining_label_source_face_candidates import (
+              source_label_face_candidates,
+          )
+          targets=("POS COUNTER","FOOD SERVICE","WASH UP",
+                   "TRUCK DRIVER LOUNGE","M-AMB","F-AMB","DRY STORE")
+          discovered=inventory(payload,expected_sha256=sha)
+          native_rows={target:[
+              row for row in discovered["targets"][target]["native_candidates"]
+              if row["page_1_based"]==7
+          ] for target in targets}
+          face_records=[]
+          for selector in selectors:
+              face_scope=face_authority.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              face_records.extend(face_scope.records)
+          report_rows={}
+          for target, candidates in native_rows.items():
+              report_rows[target]=[]
+              for candidate in candidates:
+                  census=source_label_face_candidates(
+                      candidate["native_bbox_pdf_pts"],face_records,
+                  )
+                  report_rows[target].append({
+                      "native_page":7,
+                      "native_text":candidate["native_text"],
+                      "native_bbox_pdf_pts":candidate["native_bbox_pdf_pts"],
+                      "first_source_face_gate":census["first_source_face_gate"],
+                      "centre_face_candidate_count":len(census["centre_face_record_ids"]),
+                      "fully_sampled_face_candidate_count":len(census["sampled_box_face_record_ids"]),
+                      "first_10_centre_face_ids":census["centre_face_record_ids"][:10],
+                      "first_10_whole_bbox_face_ids":census["sampled_box_face_record_ids"][:10],
+                      "source_room_label_authenticated":False,
+                      "room_metric_area_authenticated":False,
+                  })
+          print("GPT2_PAGE7_REMAINING_ROOM_LABEL_FACE_FIRST_GATES",json.dumps({
+              "source_sha256":sha,
+              "page":7,
+              "floor_plan_source_view_id":floor[0].view_id,
+              "source_scope_is_partial":True,
+              "physical_source_face_count":len(face_records),
+              "already_authenticated_room_labels":sorted(set(
+                  r["room_label"] for scope in scoped_labels for r in scope["records"]
+              )),
+              "producer_sealed_split_face_candidates":[
+                  candidate for scope in scoped_labels
+                  for candidate in scope["source_split_face_candidates"]
+                  if candidate["native_label"] in targets
+              ],
+              "remaining_native_label_face_candidates":report_rows,
+              "room_area_quantity_publications":0,
+              "status":"NATIVE_SPATIAL_CANDIDATES_ONLY_NO_SOURCE_ROOM_LABEL_PUBLICATION",
+          },sort_keys=True,default=str))
+          assert all(not row["source_room_label_authenticated"]
+                     for rows in report_rows.values() for row in rows)
+
+          from collections import Counter
+          from tools.diag_gpt2_split_label_wall_separators import (
+              split_face_source_wall_separator_gate
+          )
+          source_face_by_record_id={
+              record.record_id:record for record in face_records
+          }
+          split_rows=[]
+          for selector in selectors:
+              output=label_authority.resolve_scope(SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              for candidate in output.split_face_candidates:
+                  split_rows.append(split_face_source_wall_separator_gate(
+                      candidate,source_face_by_record_id,
+                  ))
+          print("GPT2_PAGE7_SPLIT_LABEL_SOURCE_WALL_SEPARATORS",json.dumps({
+              "source_sha256":sha,
+              "source_page":7,
+              "physical_source_face_count":len(face_records),
+              "authenticated_split_label_candidate_count":len(split_rows),
+              "candidates":[{
+                  **row,
+                  "pairwise_first_gate_counts":dict(Counter(
+                      item["first_gate"] for item in row["pairwise_source_wall_gates"]
+                  )),
+              } for row in split_rows],
+              "source_room_face_union_count":0,
+              "new_source_room_label_record_count":0,
+              "metric_room_area_publication_count":0,
+              "scope":"EXACT_SOURCE_WALL_SEPARATORS_ONLY",
+          },sort_keys=True,default=str))
+          assert all(not row["merge_source_faces_authorized"]
+                     for row in split_rows)
+
+          # Use the EXISTING production composite authority, not a new
+          # geometry-union pathway. A positive composite needs independently
+          # source-grid-opposed W4 wall separators and a fully valid face
+          # component; an arbitrary shared source wall is insufficient.
+          from pb_source_composite_room_face_authority import (
+              compose_grid_separated_room_faces,
+              _fully_grid_opposed_wall_evidence,
+              _grid_local_adjacency,
+          )
+          composite_scopes=[]
+          for selector in selectors:
+              wall_scope=wall_authority.resolve_scope(selector)
+              room_scope=face_authority.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              label_scope=label_authority.resolve_scope(SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              fully_grid,evidence_by_wall=_fully_grid_opposed_wall_evidence(wall_scope)
+              adjacency=_grid_local_adjacency(room_scope,fully_grid)
+              composite=compose_grid_separated_room_faces(
+                  wall_scope=wall_scope,
+                  room_scope=room_scope,
+                  label_scope=label_scope,
+              )
+              composite_scopes.append({
+                  "source_decision_scope_id":selector.decision_scope_id,
+                  "wall_scope_status":str(wall_scope.status),
+                  "wall_scope_complete":wall_scope.scope_complete,
+                  "wall_scope_reason_codes":list(wall_scope.reason_codes),
+                  "room_scope_status":str(room_scope.status),
+                  "room_scope_complete":room_scope.scope_complete,
+                  "room_face_universe_complete":room_scope.face_universe_complete,
+                  "room_scope_reason_codes":list(room_scope.reason_codes),
+                  "source_sealed_split_label_count":len(label_scope.split_face_candidates),
+                  "fully_grid_opposed_wall_count":len(fully_grid),
+                  "grid_wall_evidence_ids":dict(
+                      sorted((wall_id,list(evidence_by_wall[wall_id]))
+                      for wall_id in fully_grid)
+                  ),
+                  "grid_connected_face_count":len(adjacency),
+                  "actual_composite_status":str(composite.status),
+                  "actual_composite_reason_codes":list(composite.reason_codes),
+                  "real_composite_records":[{
+                      "label":record.label,
+                      "record_id":record.record_id,
+                      "constituent_source_room_face_record_ids":list(
+                          record.constituent_source_room_face_record_ids
+                      ),
+                      "grid_separator_wall_ids":list(record.separator_wall_ids),
+                      "source_grid_evidence_ids":list(record.grid_evidence_ids),
+                      "area_pdf_points_squared_not_metric":record.area_page_pts2,
+                  } for record in composite.records],
+                  "unresolved_source_split_candidate_record_ids":list(
+                      composite.unresolved_label_candidate_ids
+                  ),
+                  "new_metric_areas_published":0,
+              })
+          print("GPT2_PAGE7_PRODUCTION_GRID_COMPOSITE_FIRST_GATES",json.dumps({
+              "source_sha256":sha,
+              "scope_results":composite_scopes,
+              "source_composite_producer_only":True,
+              "no_deduced_metric_areas_or_unsupported_merges":True,
+          },sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-page7-split-label-source-wall-separators
+          path: artifacts/gpt2-page7-physical-faces
+          retention-days: 7
