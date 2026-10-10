@@ -568,6 +568,7 @@ def collect_live_physical_net_wall_claim(
                 evidence_by_source_record=evidence_by_record,
             )
 
+            containing_viewport = None
             if (
                 room_binding.viewport_id is not None
                 and room_binding.viewport_bbox is not None
@@ -683,14 +684,10 @@ def collect_live_physical_net_wall_claim(
                     PHYSICAL_SCALE_VIEWPORT_REQUIRED,
                 )
             ):
-                containing_viewport = (
-                    _unique_authenticated_containing_floor_plan_viewport(
-                        source=source,
-                        scope_rooms=scope_rooms,
-                        page_id=page_id,
-                        snapshot_id=snapshot_id,
-                    )
-                )
+                # The exact source, room polygon set, page and snapshot were
+                # already checked for this room scope above. Reuse that
+                # producer-owned result (including an explicit None) rather
+                # than rebuilding the whole viewport/wall authority twice.
                 if containing_viewport is not None:
                     resolved_viewport_id, resolved_viewport_bbox = (
                         containing_viewport
