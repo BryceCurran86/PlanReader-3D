@@ -579,12 +579,23 @@ def compose_live_canonical_rooms(
             and result.scope_complete
             and result.records
         ):
+            # A page-wide room-face result with an incomplete face universe is
+            # not authoritative enough to mint persistent canonical rooms. A
+            # known missing/ambiguous face can change room identity, adjacency,
+            # label ownership and every downstream surface quantity. Route that
+            # page through the already-sealed authenticated FLOOR_PLAN viewport
+            # path instead. If no viewport can prove a complete room scope, the
+            # page remains fail-closed rather than publishing partial page-wide
+            # physical identities.
+            if not result.face_universe_complete:
+                reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                reasons.extend(result.reason_codes)
+                unresolved_pages.append(str(page_id))
+                continue
+
             if str(page_id).isdigit():
                 room_pages.add(int(page_id))
-                if result.face_universe_complete:
-                    resolved_pages.add(int(page_id))
-                else:
-                    reasons.append(LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL)
+                resolved_pages.add(int(page_id))
             label_records_by_face: dict[str, SourceRoomLabelRecord] = {}
             label_result = None
             if page_label_authority is not None:
