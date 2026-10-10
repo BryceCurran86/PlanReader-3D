@@ -136,6 +136,7 @@ def test_changed_or_missing_positive_original_source_never_called_snapshot_only(
         opening.update(host_wall_id=None,record_id=None)
     elif damage=="frame_unavailable":
         frames["record_id"]=None
+        b["resolved_host_frame_evidence"]=[]
     elif damage=="frame_geom_change":
         b["resolved_host_frame_evidence"][0]["whole_wall_length_pt"]=59.
     elif damage=="host_reason_change":
