@@ -13,16 +13,26 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
     status=str(getattr(viewport,"status","") or "")
     bbox=getattr(viewport,"bounding_box",None)
     scope_status=str(getattr(result,"status",""))
+    # EvidenceResolutionStatus is an Enum: str() alone produces
+    # "EvidenceResolutionStatus.CORROBORATED", not its value.
+    scope_token=str(getattr(getattr(result,"status",None),"value",getattr(result,"status","")) or "")
     reasons=list(getattr(result,"reason_codes",()) or ())
     complete=bool(getattr(result,"scope_complete",False))
     records=tuple(getattr(result,"records",()) or ())
-    supported=kind=="reflected_ceiling_plan" and status in ("resolved","derived") and bbox is not None
+    # Diagnostic-only source viewport shape classification; production
+    # source ownership is never granted by this diagnostic helper.
+    view_token=str(getattr(getattr(viewport,"status",None),"value",getattr(viewport,"status","")) or "")
+    supported=kind=="reflected_ceiling_plan" and view_token in ("resolved","derived") and bbox is not None
     if kind!="reflected_ceiling_plan":
         gate="not_an_rcp_viewport"
     elif not supported:
         gate="source_rcp_viewport_unresolved"
     elif not complete:
         gate="producer_source_occurrence_universe_incomplete"
+    elif scope_token!="corroborated":
+        # A CANDIDATE, CONFLICT, or ABSTAINED producer may not be described
+        # as having authenticated occurrences, regardless of stale rows.
+        gate="producer_source_occurrence_scope_not_corroborated"
     elif not records:
         gate="producer_no_authenticated_occurrences"
     else:
@@ -37,6 +47,10 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
         "producer_reason_codes":reasons,
         "producer_occurrence_record_ids":[str(getattr(r,"record_id","")) for r in records],
         "producer_occurrence_codes":[str(getattr(r,"code","")) for r in records],
+        "producer_authenticated_record_ids":[
+            str(getattr(r,"record_id",""))
+            for r in records
+        ] if supported and complete and scope_token=="corroborated" else [],
         "first_unclosed_gate":gate,
         "new_room_material_ownership_claim":False,
         "new_metric_quantity_claim":False,
