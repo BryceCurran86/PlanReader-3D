@@ -9,6 +9,8 @@ on:
       - "tests/test_gpt2_remaining_label_source_face_candidates.py"
       - "tools/diag_gpt2_split_label_wall_separators.py"
       - "tests/test_gpt2_split_label_wall_separators.py"
+      - "tools/diag_gpt2_split_face_collinear_first_gates.py"
+      - "tests/test_gpt2_split_face_collinear_first_gates.py"
       - ".github/workflows/diag-gpt2-page7-split-label-wall-separators.yml"
   workflow_dispatch:
 
@@ -32,6 +34,7 @@ jobs:
         run: |
           PYTHONPATH=. pytest -q tests/test_gpt2_remaining_label_source_face_candidates.py
           PYTHONPATH=. pytest -q tests/test_gpt2_split_label_wall_separators.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_split_face_collinear_first_gates.py
           PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
