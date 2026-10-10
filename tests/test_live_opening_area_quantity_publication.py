@@ -467,3 +467,42 @@ def test_live_opening_source_closed_run_is_deterministic() -> None:
     assert first.run_id == second.run_id
     assert first.fingerprint == second.fingerprint
     assert first.to_json() == second.to_json()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    (
+        "document_id",
+        "revision_id",
+        "source_sha256",
+        "snapshot_id",
+        "page_id",
+        "representative_observation_id",
+    ),
+)
+def test_opening_area_rejects_missing_source_lineage(missing: str) -> None:
+    opening = _opening()
+    assert _opening_quantity(opening) is not None
+    assert _opening_quantity(replace(opening, **{missing: ""})) is None
+
+
+def test_opening_area_quantity_retains_source_snapshot_metadata() -> None:
+    quantity = _opening_quantity(_opening())
+    assert quantity is not None
+    assert quantity.metadata["snapshot_id"] == "snap-1"
+
+
+def test_foreign_revision_opening_cannot_publish_area() -> None:
+    stale = replace(_opening(), revision_id="foreign-revision")
+    with pytest.raises(ValueError, match="revision conflicts"):
+        publish_live_opening_area_quantities(_composition(stale))
+
+
+def test_foreign_revision_unsupported_opening_cannot_hide_conflict() -> None:
+    proven = _opening(canonical_id="opening-proven")
+    stale = replace(
+        _opening(canonical_id="opening-stale", area_m2=None),
+        revision_id="foreign-revision",
+    )
+    with pytest.raises(ValueError, match="revision conflicts"):
+        publish_live_opening_area_quantities(_composition(proven, stale))
