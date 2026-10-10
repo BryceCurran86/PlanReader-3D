@@ -34,3 +34,34 @@ source roots; fresh CI/source artifacts and no new false positives. The
 previous 23/17/8 run is a **failed** experiment, not a new baseline.
 Do not modify frozen V2 truth, scoring, tolerances, denominators or
 production quantity/sealing code.
+
+
+## Second forensic finding (archived real-source artifact)
+
+The original-source artifact from run 38020311696 is preserved and was
+compared to its prerequisite without changing its source SHA:
+23 original physical openings, 14 hosts and 9 frames become
+23 / 17 / 8 under compact capture. There are exactly **seven**
+additional W4 wall-source primitives and none of the original source
+roots disappear. The implicated compact primitive is a horizontal
+source-painted line from (381.0,342.72) to (410.25,342.72) PDF points,
+while the already-visible ordinary raster source primitive :1567 lies
+vertically on x=381.0 from y=297.0 to y=349.0. The two line axes meet
+at the compact line's **endpoint**, forming a graph T junction, not
+a parallel overlapping centerline.
+
+The first partial-collinear duplicate guard was therefore insufficient.
+Even a full perpendicular crossing guard misses this endpoint geometry.
+The next stacked experiment withholds a compact supplemental nominee
+whose endpoint touches the *interior of an independently published ordinary
+raster source* at the exact registered render-pixel footprint, preserving
+the original line rather than snapping/replacing it. This is a negative
+admission decision, not an assertion that no real T wall exists.
+It may suppress a genuine source T and lower recall; adoption requires
+both real Lot16 and Maryborough source retention, no newly lost physical
+identities, and independent proof of any claimed additional hosts.
+No metrics or benchmark quantities are produced.
+
+The 2.5-point W2 snap tolerance and 20,000 primitive safety cap are
+unchanged. The preserved 336.75–338.75 PDF-point gap may not be promoted
+into proven connected source geometry by any of these experiments.
