@@ -290,6 +290,13 @@ def _verify_row_lineage(
         raise CustomerOutputVerificationError(
             f"non-abstained sealed quantity {quantity_id!r} has no value"
         )
+    # bool is a subclass of int in Python; float(True) == 1.0 and
+    # float(False) == 0.0. A Boolean customer field is not a measured
+    # quantity, even if it numerically equals the sealed value.
+    if type(row.get("quantity")) is bool:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} has Boolean instead of measured quantity"
+        )
     try:
         row_value = float(row.get("quantity"))
     except (TypeError, ValueError, OverflowError) as exc:
