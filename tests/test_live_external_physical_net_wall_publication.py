@@ -318,6 +318,7 @@ def test_external_wall_refuses_missing_opening_host_or_universe_receipts():
         ("opening_universe_record_id", ""),
         ("host_binding_record_id", "   "),
         ("opening_universe_record_id", "   "),
+        ("record_id", "   "),
     ):
         forged = replace(original, **{field: value})
         authority = PhysicalOpeningVoidAuthority(
