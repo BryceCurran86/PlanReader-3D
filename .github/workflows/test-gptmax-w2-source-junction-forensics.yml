@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install unit-test dependency
+        run: python -m pip install pytest
       - name: Unit regression
         run: PYTHONPATH=. python -m pytest -q tests/test_gptmax_w2_source_junction_forensics.py
       - name: Fetch exact archived failed Lot16 source records
