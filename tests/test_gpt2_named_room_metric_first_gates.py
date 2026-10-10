@@ -35,6 +35,7 @@ def test_named_room_gates_preserve_exact_source_owned_failure_codes():
     assert got["named_room_metric_first_failure_codes"]["physical_scale"] == [{
         "physical_room_id": "source-1", "label": "FREEZER",
         "first_gates": ["no_scale", "no_documented_dimensions"],
+        "source_reason_receipt_valid": True,
     }]
     assert got["all_source_first_failure_receipt_counts"] == {
         "same_view": 2, "cross_view": 1, "physical_scale": 1,
@@ -57,3 +58,16 @@ def test_named_room_gates_abstain_on_duplicate_or_missing_physical_owner():
         "first_gate": "source_ok",
     }]
     assert got["all_source_first_failure_receipt_counts"]["same_view"] == 2
+
+
+def test_malformed_scale_reason_receipt_never_becomes_fake_individual_gates():
+    for raw in ("scale_unavailable", None, 0, (), ("",)):
+        report = summarize(claim(
+            (room("room-1", "FREEZER"),),
+            scale=(("room-1", raw),),
+        ))
+        entries = report["named_room_metric_first_failure_codes"]["physical_scale"]
+        assert len(entries) == 1
+        assert entries[0]["source_reason_receipt_valid"] is False
+        assert entries[0]["first_gates"] in ([], [""])
+        assert report["metric_quantity_published"] is False
