@@ -8,6 +8,7 @@ and evidence.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Mapping
 
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
@@ -82,9 +83,21 @@ def publish_live_floor_area_quantities(
         source_quantities[qid] = quantity
 
     floors_by_quantity: dict[str, list[LiveCanonicalFloorSurfaceObject]] = {}
+    # Identity uniqueness belongs to the entire producer-owned floor universe,
+    # not just the subset already carrying FIRM area source quantity IDs. An
+    # unresolved/ABSTAIN replay of the same floor can otherwise be hidden by
+    # filtering and allow one conflicting floor owner to publish commercially.
+    canonical_ids: Counter[str] = Counter()
+    physical_ids: Counter[str] = Counter()
     for floor in claim.canonical_floors:
         if type(floor) is not LiveCanonicalFloorSurfaceObject:
             raise TypeError("canonical_floors must contain LiveCanonicalFloorSurfaceObject")
+        canonical_id = _clean(floor.canonical_floor_id)
+        physical_id = _clean(floor.physical_floor_surface_id)
+        if canonical_id:
+            canonical_ids[canonical_id] += 1
+        if physical_id:
+            physical_ids[physical_id] += 1
         qid = _clean(floor.metric_area_quantity_id)
         if qid:
             floors_by_quantity.setdefault(qid, []).append(floor)
@@ -108,6 +121,9 @@ def publish_live_floor_area_quantities(
         if not floor.physical_floor_surface_identity_resolved:
             continue
         if not floor.physical_floor_surface_id or not floor.canonical_floor_id:
+            continue
+        if (canonical_ids[_clean(floor.canonical_floor_id)] != 1
+                or physical_ids[_clean(floor.physical_floor_surface_id)] != 1):
             continue
         if len(physical_floor_claim_ids.get(_clean(floor.physical_floor_surface_id), ())) != 1:
             continue
