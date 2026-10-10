@@ -558,3 +558,90 @@ def test_missing_rcp_definition_or_occurrence_identity_abstains() -> None:
         assert result.records == ()
         assert result.quantities == ()
         assert result.unresolved_physical_room_ids == ("physical-room-1",)
+
+
+def _second_ceiling_source_scope(*, face_id: str) -> tuple:
+    second_room = replace(
+        _room(),
+        physical_room_id="physical-room-2",
+        canonical_room_id="canonical-room-2",
+        source_room_face_record_id=face_id,
+        room_label="STORAGE",
+    )
+    second_finish = replace(
+        _finish().records[0],
+        record_id="ceiling-finish-record-2",
+        physical_room_id="physical-room-2",
+        canonical_room_id="canonical-room-2",
+        source_room_face_record_id=face_id,
+        room_label="STORAGE",
+        occurrence_record_id="occ-grid-2",
+        occurrence_evidence_id="occ-evidence-2",
+    )
+    return second_room, second_finish
+
+
+def test_same_firm_room_area_receipt_cannot_publish_for_two_physical_ceilings() -> None:
+    # Both physical rooms independently pass existing per-room checks, but
+    # share ONE source-room face and ONE upstream room-area QuantityEvidence.
+    # Even distinct RCP finish occurrence IDs do not authenticate two full
+    # ceiling areas from the same original room-area receipt.
+    other_room, other_finish = _second_ceiling_source_scope(face_id="face-1")
+    both_rooms = replace(_rooms(), rooms=(_room(), other_room))
+    both_finishes = replace(
+        _finish(), records=(_finish().records[0], other_finish)
+    )
+
+    each = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=replace(_rooms(), rooms=(other_room,)),
+        room_area_bridges=(_bridge(),),
+        finishes=replace(_finish(), records=(other_finish,)),
+    )
+    assert len(each.quantities) == 1
+
+    together = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=both_rooms,
+        room_area_bridges=(_bridge(),),
+        finishes=both_finishes,
+    )
+    assert together.status is EvidenceResolutionStatus.CONFLICT
+    assert together.records == ()
+    assert together.quantities == ()
+    assert together.canonical_ceilings == ()
+    assert together.unresolved_physical_room_ids == (
+        "physical-room-1", "physical-room-2",
+    )
+
+    reversed_scope = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=replace(both_rooms, rooms=(other_room, _room())),
+        room_area_bridges=(_bridge(),),
+        finishes=replace(both_finishes, records=(other_finish, _finish().records[0])),
+    )
+    assert reversed_scope.quantities == ()
+    assert reversed_scope.unresolved_physical_room_ids == (
+        "physical-room-1", "physical-room-2",
+    )
+
+
+def test_distinct_source_room_area_receipts_allow_two_different_rcp_rooms() -> None:
+    other_room, other_finish = _second_ceiling_source_scope(face_id="face-2")
+    rooms = replace(_rooms(), rooms=(_room(), other_room))
+    finishes = replace(
+        _finish(), records=(_finish().records[0], other_finish)
+    )
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=rooms,
+        room_area_bridges=(
+            _bridge(),
+            _bridge(face_id="face-2", quantity_id="room-area-qty-2"),
+        ),
+        finishes=finishes,
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.quantities) == 2
+    assert {q.metadata["upstream_room_area_quantity_id"] for q in result.quantities} == {
+        "room-area-qty-1", "room-area-qty-2"
+    }
+    assert {r.physical_room_id for r in result.records} == {
+        "physical-room-1", "physical-room-2"
+    }
