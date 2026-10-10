@@ -348,3 +348,100 @@ def test_nonfinite_manifest_json_is_rejected_before_source_identity_checks(tmp_p
                           encoding="utf-8")
         with pytest.raises(ValueError, match="non-finite JSON"):
             _object(target)
+
+
+@pytest.mark.parametrize("sign", ("", "-"))
+def test_oversized_json_integer_is_project_blocker_not_suite_crash(
+    tmp_path: Path, sign: str
+) -> None:
+    numeric_token = sign + "1" + "0" * 400
+    target = tmp_path / "au_qld_lot16_power"
+    target.mkdir()
+    (target / "produced_items.json").write_text(
+        '[{"quantity_id":"real-source-quantity","lineage_ok":true,'
+        '"object_refs":["opening-source-object"],"abstained":false,'
+        '"value":' + numeric_token + ',"unit":"m2",'
+        '"trade_category":"opening"}]',
+        encoding="utf-8",
+    )
+    report = diagnostic_report(ROOT, tmp_path)
+    assert len(report["projects"]) == 4
+    lot16 = next(
+        x for x in report["projects"]
+        if x["project_id"] == "au_qld_lot16_power"
+    )
+    other = next(
+        x for x in report["projects"]
+        if x["project_id"] == "au_qld_maryborough_service_station"
+    )
+    assert lot16["produced_file_present"] is True
+    assert lot16["produced_count"] is None
+    assert "produced_items_invalid_json_or_shape" in lot16["blockers"]
+    assert "production_items_missing" in other["blockers"]
+    assert lot16["coverage_accuracy"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
+
+
+@pytest.mark.parametrize("sign", ("", "-"))
+def test_oversized_json_integer_in_sealed_run_is_local_integrity_failure(
+    tmp_path: Path, sign: str
+) -> None:
+    from scripts.report_full_plan_v2_readiness import _object
+
+    sealed_root = tmp_path / "sealed"
+    target = sealed_root / "au_qld_lot16_power"
+    target.mkdir(parents=True)
+    (target / "sealed_run.json").write_text(
+        '{"project_id":"au_qld_lot16_power",'
+        '"quantities":[{"quantity_id":"q",'
+        '"value":' + sign + "1" + "0" * 400 + '}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="out-of-range JSON integer"):
+        _object(target / "sealed_run.json")
+    report = diagnostic_report(ROOT, tmp_path / "produced", sealed_root=sealed_root)
+    lot16 = next(
+        x for x in report["projects"]
+        if x["project_id"] == "au_qld_lot16_power"
+    )
+    assert lot16["sealed_run_verified"] is False
+    assert lot16["sealed_quantity_count"] is None
+    assert "sealed_run_integrity_invalid" in lot16["blockers"]
+    assert report["score_claim"] is False
+
+
+def test_realistic_large_json_integer_still_parses_exactly() -> None:
+    from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+    assert _parse_evidence_json('{"source_numeric_id":12345678901234567890}') == {
+        "source_numeric_id": 12345678901234567890
+    }
+
+
+@pytest.mark.parametrize("bad_value", (10 ** 400, -(10 ** 400)))
+def test_direct_produced_sealed_parity_huge_integer_abstains_without_crash(
+    bad_value: int,
+) -> None:
+    from types import SimpleNamespace
+    from scripts.report_full_plan_v2_readiness import produced_sealed_parity_blockers
+
+    row = SimpleNamespace(
+        quantity_id="source-authenticated-q",
+        abstained=False,
+        lineage_ok=True,
+        unit="m2",
+        value=12.0,
+        object_identity_refs=("physical-source-1",),
+    )
+    produced = [{
+        "quantity_id": "source-authenticated-q",
+        "abstained": False,
+        "lineage_ok": True,
+        "unit": "m2",
+        "value": bad_value,
+        "object_refs": ["physical-source-1"],
+        "trade_category": "opening",
+    }]
+    assert produced_sealed_parity_blockers(produced, (row,)) == [
+        "projection_value_mismatch:source-authenticated-q"
+    ]
