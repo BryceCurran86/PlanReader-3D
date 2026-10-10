@@ -34,3 +34,15 @@ def test_different_wall_identity_stays_candidate_only():
     row = audit_collinear_candidates(candidate, {"a": a, "b": b})
     assert row["candidate_shared_spans"][0]["wall_id_agrees"] is False
     assert row["merge_source_faces_authorized"] is False
+
+
+def test_malformed_source_edge_fails_closed():
+    fields = dict(document_id="doc", revision_id="rev", source_sha256="a"*64,
+                  snapshot_id="snap", page_id="7", decision_scope_id="view")
+    candidate = O(label="ROOM", source_room_face_record_ids=("a", "b"), **fields)
+    a = O(record_id="a", boundary_wall_edges=(("W1", ((0, 0), (10, 0))),), **fields)
+    b = O(record_id="b", boundary_wall_edges=(("W1", ((float("nan"), 0), (5, 0))),), **fields)
+    result = audit_collinear_candidates(candidate, {"a": a, "b": b})
+    assert result["first_gate"] == "malformed_source_wall_edge"
+    assert result["candidate_shared_spans"] == []
+    assert not result["merge_source_faces_authorized"]
