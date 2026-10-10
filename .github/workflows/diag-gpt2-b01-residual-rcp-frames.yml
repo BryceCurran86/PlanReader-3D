@@ -36,7 +36,7 @@ jobs:
           doc = fitz.open(stream=payload, filetype="pdf")
           assert doc.page_count == 31
           pages = []
-          for page_id in (9,):
+          for page_id in (9, 25, 26, 27):
               page = doc.load_page(page_id - 1)
               calibration = vp.calibrate_viewport_layout(page)
               anchors = vp.extract_view_title_anchors(page)
