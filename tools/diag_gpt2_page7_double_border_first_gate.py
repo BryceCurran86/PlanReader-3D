@@ -81,15 +81,45 @@ def inspect(page):
                         continue
                     foreign_rects.append({
                         "native_drawing_seqno":drawing.get("seqno",k),
-                        "bbox":bbox
+                        "path_index":k,
+                        "bbox":bbox,
+                        "source_item_index":index,
+                        "rectangle_instructions":str(item[0]),
+                        "native_paint_type":drawing.get("type"),
+                        "source_stroke_color":drawing.get("color"),
+                        "source_fill_color":drawing.get("fill"),
+                        "source_stroke_width":drawing.get("width"),
+                        "source_stroke_opacity":drawing.get("stroke_opacity"),
+                        "source_fill_opacity":drawing.get("fill_opacity"),
+                        "source_layer":drawing.get("layer"),
+                        "source_path_item_count":len(drawing.get("items",()) or ()),
+                        "source_path_rect":str(drawing.get("rect")),
                     })
                     continue
                 if item[0]!="l" or len(item)<3:
                     if item[0] in ("c","qu"):
-                        source_nonlines.append({
-                            "native_drawing_seqno":drawing.get("seqno",k),
-                            "item_kind":item[0],
-                        })
+                        points=[p for p in item[1:]
+                                if hasattr(p,"x") and hasattr(p,"y")]
+                        bounds=None
+                        if item[0]=="qu" and len(item)>=2:
+                            quad=vp._axis_aligned_quad_bbox(item[1],tol=edge_tol)
+                            bounds=quad
+                        elif len(points)==len(item)-1 and points:
+                            bounds=vp._normalized_bbox(
+                                min(float(p.x) for p in points),
+                                min(float(p.y) for p in points),
+                                max(float(p.x) for p in points),
+                                max(float(p.y) for p in points),
+                            )
+                        if bounds is None or vp._bbox_overlap_area(bounds,strip)>1e-6:
+                            source_nonlines.append({
+                                "native_drawing_seqno":drawing.get("seqno",k),
+                                "item_kind":item[0],
+                                "native_bounds":bounds,
+                                "source_path_item_count":len(drawing.get("items",()) or ()),
+                                "paint_type":drawing.get("type"),
+                                "source_layer":drawing.get("layer"),
+                            })
                     continue
                 a,b=item[1],item[2]
                 x0,y0,x1,y1=float(a.x),float(a.y),float(b.x),float(b.y)
@@ -129,7 +159,7 @@ def inspect(page):
             "first_text_overlaps":colliding_text[:10],
             "foreign_source_rectangle_count":len(foreign_rects),
             "first_foreign_rectangles":foreign_rects[:20],
-            "raw_native_curve_quad_count_page":len(source_nonlines),
+            "curve_quad_overlap_or_unknown_count":len(source_nonlines),
             "first_curve_quads":source_nonlines[:10],
             "native_line_occurrences":all_strokes,
             "distinct_geometry_plus_paint_style":len(signatures),
