@@ -228,3 +228,70 @@ def test_noncolliding_unchanged_id_is_never_reused_by_disambiguator(monkeypatch)
             {"source-edge-a": a.candidate_id,
              "source-edge-b": b.candidate_id,
              "unrelated": unrelated.candidate_id})
+
+
+@pytest.mark.parametrize("error_source,error_text", [
+    ("w4", "W4 collision lacks positive source ancestry"),
+    ("w4", "W4 collision has missing original source edge"),
+    ("collector", "duplicate W4 candidate id before physical identity collection"),
+])
+def test_production_w4_source_collision_returns_unavailable_not_unhandled(
+    monkeypatch, error_source, error_text
+):
+    import pb_physical_wall_candidate_authority as authority
+
+    def assemble(*args, **kwargs):
+        if error_source == "w4":
+            raise ValueError(error_text)
+        return ["positive-source-wall"], ["source-junction"]
+
+    def collect(*args, **kwargs):
+        if error_source == "collector":
+            raise ValueError(error_text)
+        return {"positive-source-wall": "verified-identity"}
+
+    monkeypatch.setattr(authority, "assemble_wall_topology", assemble)
+    monkeypatch.setattr(authority, "collect_physical_wall_identities", collect)
+    outcome = authority._assemble_source_owned_w4_identities_or_unavailable(
+        graph={"edges": []}, junctions=(), relationships=(),
+        scope_id="original-source-only",
+    )
+    assert outcome is None
+
+
+def test_production_w4_source_collision_guard_preserves_valid_walls(monkeypatch):
+    import pb_physical_wall_candidate_authority as authority
+
+    expected_walls = ["original-source-wall"]
+    expected_junctions = ["original-junction"]
+    expected_identities = {"original-source-wall": "original-source-identity"}
+    def assemble(graph, junctions, relationships, *, viewport_id):
+        assert viewport_id == "wall-source:page-3"
+        return expected_walls, expected_junctions
+
+    def collect(walls, graph):
+        assert walls is expected_walls
+        return expected_identities
+
+    monkeypatch.setattr(authority, "assemble_wall_topology", assemble)
+    monkeypatch.setattr(authority, "collect_physical_wall_identities", collect)
+    result = authority._assemble_source_owned_w4_identities_or_unavailable(
+        graph={"edges": []}, junctions=(), relationships=(),
+        scope_id="wall-source:page-3",
+    )
+    assert result == (expected_walls, expected_junctions, expected_identities)
+    assert result[0] is expected_walls and result[2] is expected_identities
+
+
+def test_production_w4_scope_does_not_hide_unrelated_assembly_error(monkeypatch):
+    import pb_physical_wall_candidate_authority as authority
+
+    def fail_unexpected(*args, **kwargs):
+        raise ValueError("unexpected source graph corruption")
+
+    monkeypatch.setattr(authority, "assemble_wall_topology", fail_unexpected)
+    with pytest.raises(ValueError, match="unexpected source graph corruption"):
+        authority._assemble_source_owned_w4_identities_or_unavailable(
+            graph={}, junctions=(), relationships=(),
+            scope_id="wall-source:page-3",
+        )
