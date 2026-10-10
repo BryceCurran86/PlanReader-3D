@@ -1,0 +1,135 @@
+name: TEST ONLY GPT2 Maryborough Elevation Frame Area
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  maryborough-window-area:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove source-closed host-independent elevation-frame areas
+        run: |
+          set -o pipefail
+          OUT=artifacts/gpt2-maryborough-elevation-frame-area
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
+          PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
+          import json
+          from pathlib import Path
+          import fitz
+
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_live_opening_source_closed_export import seal_live_opening_area_claim_run
+
+          source_path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          doc=fitz.open(source_path)
+          try:
+              a610=[]
+              for index in range(doc.page_count):
+                  text=" ".join((doc[index].get_text("text") or "").upper().split())
+                  if (
+                      "WINDOW ELEVATIONS" in text
+                      and all(tag in text for tag in ("W01","W02","W05","W06"))
+                  ):
+                      a610.append(index)
+              assert len(a610)==1, a610
+              a610_index=a610[0]
+          finally:
+              doc.close()
+
+          claim=collect_live_physical_net_wall_claim(
+              source_path,
+              pages=(6,a610_index),
+              topology_pages=(6,),
+          )
+
+          wanted={"W01":6.84,"W02":7.79,"W05":14.4115,"W06":1.47}
+          openings={
+              str(o.type_mark or "").strip().upper():o
+              for o in claim.canonical_openings
+              if str(o.type_mark or "").strip().upper() in wanted
+          }
+          quantities={}
+          for q in claim.opening_quantity_evidence:
+              assert len(q.input_entity_ids)==1
+              opening=next(
+                  (
+                      o for o in openings.values()
+                      if o.canonical_opening_id==q.input_entity_ids[0]
+                  ),
+                  None,
+              )
+              if opening is not None:
+                  quantities[opening.type_mark.upper()]=q
+
+          report={}
+          for mark,expected in wanted.items():
+              opening=openings.get(mark)
+              quantity=quantities.get(mark)
+              report[mark]={
+                  "opening_present":opening is not None,
+                  "canonical_opening_id":None if opening is None else opening.canonical_opening_id,
+                  "host_wall_id":None if opening is None else opening.host_wall_id,
+                  "host_binding_record_id":None if opening is None else opening.host_binding_record_id,
+                  "type_mark":None if opening is None else opening.type_mark,
+                  "tag_observation_id":None if opening is None else opening.tag_observation_id,
+                  "area_basis":None if opening is None else opening.area_basis,
+                  "area_m2":None if opening is None else opening.area_m2,
+                  "figured_area_record_id":None if opening is None else opening.figured_area_record_id,
+                  "quantity_id":None if quantity is None else quantity.quantity_id,
+                  "quantity_value":None if quantity is None else quantity.value,
+                  "quantity_authority":None if quantity is None else quantity.authority,
+              }
+              assert opening is not None, mark
+              assert opening.opening_kind=="window", (mark,opening.opening_kind)
+              assert opening.type_mark==mark, (mark,opening.type_mark)
+              assert opening.tag_observation_id, mark
+              assert opening.area_basis=="authenticated_elevation_frame", (mark,opening.area_basis)
+              assert abs(float(opening.area_m2)-expected)<1e-9, (mark,opening.area_m2)
+              assert opening.figured_area_record_id in opening.evidence_ids, mark
+              assert quantity is not None, mark
+              assert abs(float(quantity.value)-expected)<1e-9, (mark,quantity.value)
+
+          sealed=seal_live_opening_area_claim_run(
+              claim,
+              workspace_id=1,
+              project_id="au_qld_maryborough_service_station",
+          )
+          by_identity={row.object_identity_refs[0]:row for row in sealed.quantities}
+          for mark,opening in openings.items():
+              if mark not in wanted:
+                  continue
+              row=by_identity.get(opening.canonical_opening_id)
+              assert row is not None, mark
+              assert row.lineage_ok is True, (mark,row.lineage_reason_codes)
+              assert abs(float(row.value)-wanted[mark])<1e-9
+
+          print(json.dumps({
+              "a610_page_index_zero_based":a610_index,
+              "canonical_opening_count":len(claim.canonical_openings),
+              "opening_area_quantity_count":len(claim.opening_quantity_evidence),
+              "wanted":report,
+              "sealed_quantity_count":len(sealed.quantities),
+              "sealed_rows":[row.to_dict() for row in sealed.quantities],
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+          },indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-maryborough-elevation-frame-area
+          path: artifacts/gpt2-maryborough-elevation-frame-area
+          retention-days: 2

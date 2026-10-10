@@ -245,6 +245,73 @@ def test_authenticated_elevation_frame_area_is_identity_bound_commercial_evidenc
     ) is None
 
 
+def _hostless_tagged_elevation_opening() -> LiveCanonicalOpeningObject:
+    opening = _opening(
+        area_m2=6.84,
+        area_basis="authenticated_elevation_frame",
+        figured_area_record_id="elevation-frame-w1",
+    )
+    return replace(
+        opening,
+        host_wall_id=None,
+        host_binding_record_id=None,
+        host_frame_record_id=None,
+        type_mark="W1",
+        tag_observation_id="plan-tag-w1",
+        evidence_ids=tuple((*opening.evidence_ids, "plan-tag-w1")),
+    )
+
+
+def test_tagged_elevation_frame_area_does_not_require_host_wall() -> None:
+    opening = _hostless_tagged_elevation_opening()
+    quantity = _opening_quantity(opening)
+
+    assert quantity is not None
+    assert quantity.value == pytest.approx(6.84)
+    assert quantity.authority == LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY
+    assert quantity.metadata["host_wall_id"] is None
+    assert quantity.metadata["host_binding_record_id"] is None
+    assert quantity.metadata["measurement_record_id"] == "elevation-frame-w1"
+
+
+def test_hostless_elevation_frame_still_requires_owned_plan_tag_provenance() -> None:
+    opening = _hostless_tagged_elevation_opening()
+
+    assert _opening_quantity(replace(opening, type_mark=None)) is None
+    assert _opening_quantity(replace(opening, tag_observation_id=None)) is None
+    assert _opening_quantity(
+        replace(
+            opening,
+            evidence_ids=tuple(
+                value
+                for value in opening.evidence_ids
+                if value != "plan-tag-w1"
+            ),
+        )
+    ) is None
+
+
+def test_hostless_non_elevation_area_bases_remain_fail_closed() -> None:
+    elevation = _hostless_tagged_elevation_opening()
+
+    assert _opening_quantity(
+        replace(
+            elevation,
+            area_basis="figured_opening_label",
+            figured_area_record_id="elevation-frame-w1",
+        )
+    ) is None
+    assert _opening_quantity(
+        replace(
+            elevation,
+            area_basis="resolved_opening_geometry",
+            figured_area_record_id=None,
+            opening_void_record_id="void-1",
+            evidence_ids=tuple((*elevation.evidence_ids, "void-1")),
+        )
+    ) is None
+
+
 def test_authenticated_frame_schedule_area_is_commercial_only_with_frame_basis() -> None:
     opening = replace(
         _opening(
@@ -457,6 +524,22 @@ def test_source_closed_export_excludes_unhosted_openings() -> None:
     )
     assert len(sealed.quantities) == 1
     assert sealed.quantities[0].object_identity_refs == ("hosted",)
+
+
+def test_source_closed_export_seals_hostless_tagged_elevation_area() -> None:
+    opening = _hostless_tagged_elevation_opening()
+    sealed = seal_live_opening_area_run(
+        _composition(opening),
+        workspace_id=3,
+        project_id="source-project",
+    )
+
+    assert len(sealed.quantities) == 1
+    row = sealed.quantities[0]
+    assert row.lineage_ok is True
+    assert row.object_identity_refs == ("opening-1",)
+    assert row.value == pytest.approx(6.84)
+    assert row.authority == LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY
 
 
 def test_source_closed_trace_rejects_canonical_evidence_dropout() -> None:
