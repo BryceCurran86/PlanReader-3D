@@ -127,3 +127,58 @@ def test_collection_refuses_colliding_w4_id_before_last_writer_overwrite():
     a, b = wall("source-edge-a", "junction-a"), wall("source-edge-b", "junction-b")
     with pytest.raises(ValueError, match="duplicate W4 candidate id"):
         collect_physical_wall_identities((a, b), {"edges": list(edges().values())})
+
+
+def test_shared_native_parents_with_distinct_split_edges_do_not_alias_w4_address():
+    """Two adjacent W2 fragments can inherit exactly the same three U1 parents.
+
+    Original-source shared ancestry is NOT sufficient to erase the different
+    W2 split coordinates and W3 junction owners, nor to prove different
+    physical walls.
+    """
+    a = wall("source-edge-a", "junction-a")
+    b = wall("source-edge-b", "junction-b", reverse=True)
+    graph_edges = edges()
+    common = ["source-a", "source-b", "source-c"]
+    for eid in ("source-edge-a", "source-edge-b"):
+        graph_edges[eid][LINEAGE_KEY]["source_primitive_ids"] = common
+    graph_edges["source-edge-a"].update({"x1": 1., "y1": 4., "x2": 1., "y2": 9.})
+    graph_edges["source-edge-b"].update({"x1": 1., "y1": 9., "x2": 1., "y2": 12.})
+    old = deepcopy((a, b, graph_edges))
+    candidates, mapping = _source_owned_collision_candidate_addresses(
+        (b, a), graph_edges,
+        {"source-edge-a": a.candidate_id, "source-edge-b": b.candidate_id},
+    )
+    assert len(candidates) == len({c.candidate_id for c in candidates}) == 2
+    assert candidates[0].candidate_id != candidates[1].candidate_id
+    assert mapping["source-edge-a"] != mapping["source-edge-b"]
+    assert all(c.metadata["precollision_w4_candidate_id"] == a.candidate_id
+               for c in candidates)
+    assert (a, b, graph_edges) == old
+
+
+def test_source_collision_rekey_is_independent_of_global_page_translation():
+    """Candidate-address order cannot choose a winner after moving a viewport."""
+    a, b = wall("source-edge-a", "junction-a"), wall("source-edge-b", "junction-b")
+    inventory = edges()
+    original_ids, _ = _source_owned_collision_candidate_addresses(
+        (a, b), inventory,
+        {"source-edge-a": a.candidate_id, "source-edge-b": b.candidate_id},
+    )
+    shifted = deepcopy(inventory)
+    for edge in shifted.values():
+        edge["x1"] += 500
+        edge["x2"] += 500
+        edge["y1"] -= 200
+        edge["y2"] -= 200
+    shifted_a, shifted_b = (
+        replace(a, centerline_pts=tuple((x + 500, y - 200) for x, y in a.centerline_pts)),
+        replace(b, centerline_pts=tuple((x + 500, y - 200) for x, y in b.centerline_pts)),
+    )
+    translated, _ = _source_owned_collision_candidate_addresses(
+        (shifted_b, shifted_a), shifted,
+        {"source-edge-a": a.candidate_id, "source-edge-b": b.candidate_id},
+    )
+    assert len({c.candidate_id for c in translated}) == 2
+    assert {c.face_a_segment_ids[0] for c in translated} == {
+        c.face_a_segment_ids[0] for c in original_ids}
