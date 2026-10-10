@@ -18,10 +18,12 @@ from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRA
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_opening_host_binding_authority import (
+    _RASTER_WHOLE_WALL_CENTER_TOL_PT,
     _authenticated_raster_source_lines,
     _opening_geometry,
     _source_line_axis_data,
 )
+from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -66,8 +68,17 @@ def nonpublishing_raster_source_w4_membership(
         lo, hi, offset = axis
         # Only geometry-local *diagnostic* candidates. Source identity + axis
         # overlap does not prove physical host, gap closure or equivalence.
-        if (hi < -2.5 or lo > opening_geometry.length + 2.5
-                or abs(offset) > opening_geometry.thickness / 2.0 + 5.0):
+        # Follow W2's existing endpoint snap and the source raster render
+        # tolerance; do not invent another physical closure tolerance.
+        local_along = DEFAULT_GAP_SNAP_TOLERANCE_PT
+        local_cross = (
+            opening_geometry.thickness / 2.0
+            + DEFAULT_GAP_SNAP_TOLERANCE_PT
+            + _RASTER_WHOLE_WALL_CENTER_TOL_PT
+        )
+        if (hi < -local_along
+                or lo > opening_geometry.length + local_along
+                or abs(offset) > local_cross):
             reasons["line_outside_aperture_local_band"] += 1
             continue
         owners = sorted(owners_by_source.get(sid, ()))
