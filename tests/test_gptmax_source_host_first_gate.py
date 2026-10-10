@@ -28,12 +28,21 @@ def report():
     second["wall_candidate"]["end_node_ids"] = ["junction-middle", "junction-two"]
     return {
         "source_sha256": SHA,
+        "revision_id": "source_revision_from_pdf",
+        "snapshot_id": "source_snapshot_from_revision",
+        "source_decode_coverage": {
+            "document_id": "producer-source-document",
+            "revision_id": "source_revision_from_pdf",
+        },
         "selected_geometry_page_ids": ["3"],
         "primitive_safety_cap": 20_000,
         "source_owned_wall_scope_results": [{
             "page_id": "3",
             "decision_scope_id": "wall-source:page-3",
             "source_sha256": SHA,
+            "document_id": "producer-source-document",
+            "revision_id": "source_revision_from_pdf",
+            "snapshot_id": "source_snapshot_from_revision",
             "records": [first, second],
         }],
         "opening_bindings": [
@@ -191,3 +200,22 @@ def test_source_host_gate_classification_does_not_hide_upstream_authority_failur
     assert census["unhosted_first_gate_counts"] == {expected: 1}
     assert not census["physical_wall_equivalence_proven"]
     assert not census["host_publication_allowed"]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda x: x.update(snapshot_id="foreign-snapshot"),
+    lambda x: x.update(revision_id="foreign-revision"),
+    lambda x: x["source_decode_coverage"].update(
+        revision_id="foreign-source-revision"),
+    lambda x: x["source_owned_wall_scope_results"][0].update(
+        snapshot_id="foreign-source-snapshot"),
+    lambda x: x["source_owned_wall_scope_results"][0].update(
+        document_id="different-document"),
+    lambda x: x["source_owned_wall_scope_results"][0].update(
+        revision_id="different-revision"),
+])
+def test_source_report_never_mixes_a_foreign_snapshot_or_revision(mutate):
+    original = report()
+    mutate(original)
+    with pytest.raises(ValueError, match="revision|snapshot|document"):
+        source_first_gate_census(original, expected_source_sha=SHA)
