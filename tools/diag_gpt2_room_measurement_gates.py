@@ -46,6 +46,32 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         if quantity_id:
             published_area_by_id.setdefault(quantity_id, []).append(quantity)
 
+    # Only real producer claims can be passed to the commercial reissuers.
+    # A canonical floor's commercial_quantity_authority flag is deliberately
+    # False until independent review, including for source-FIRM room areas.
+    # It must not substitute for running the actual fail-closed publishers.
+    published_floor_by_source: dict[str, list[Any]] = {}
+    published_room_by_source: dict[str, list[Any]] = {}
+    from collections.abc import Mapping
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+    if type(claim) is LivePhysicalNetWallClaim:
+        from pb_live_floor_area_quantity_publication import (
+            publish_live_floor_area_quantities,
+            publish_live_canonical_room_area_quantities,
+        )
+        for published in publish_live_floor_area_quantities(claim):
+            metadata = published.metadata
+            if isinstance(metadata, Mapping):
+                upstream = _clean(metadata.get("upstream_room_area_quantity_id"))
+                if upstream:
+                    published_floor_by_source.setdefault(upstream, []).append(published)
+        for published in publish_live_canonical_room_area_quantities(claim):
+            metadata = published.metadata
+            if isinstance(metadata, Mapping):
+                upstream = _clean(metadata.get("upstream_room_area_quantity_id"))
+                if upstream:
+                    published_room_by_source.setdefault(upstream, []).append(published)
+
     traces = {
         "same_view": _reason_map(
             claim.same_view_room_area_first_failure_codes
@@ -123,6 +149,16 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
             _clean(room.room_label_binding_record_id)
             and tuple(room.room_label_evidence_ids or ())
         )
+        floor_reissues = [
+            item for item in published_floor_by_source.get(floor_quantity_id, ())
+            if _clean(item.metadata.get("canonical_floor_id")) == _clean(
+                getattr(floor, "canonical_floor_id", "") if floor else ""
+            )
+        ]
+        room_reissues = [
+            item for item in published_room_by_source.get(floor_quantity_id, ())
+            if _clean(item.metadata.get("canonical_room_id")) == _clean(room.canonical_room_id)
+        ]
         if not room.geometry_complete or not room.source_room_face_record_id:
             gate = "SOURCE_ROOM_FACE"
         elif not label_trusted:
@@ -131,13 +167,14 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
             gate = "CANONICAL_FLOOR_OWNERSHIP"
         elif not metric_valid:
             gate = "METRIC_MEASUREMENT"
-        elif not (
-            getattr(floor, "metric_area_quantity_id", None)
-            and getattr(floor, "commercial_quantity_authority", False)
-        ):
+        elif not floor_quantity_id or len(floor_reissues) != 1:
             gate = "FLOOR_QUANTITY_PUBLICATION"
+        elif len(room_reissues) != 1:
+            gate = "CANONICAL_ROOM_AREA_REISSUE"
         else:
-            gate = "ROOM_FLOOR_QUANTITY_READY"
+            # Source-owned FIRM canonical reissue is NOT yet a verified sealed
+            # customer export, completeness claim, or frozen V2 score.
+            gate = "SEALED_CUSTOMER_PROJECTION_UNVERIFIED"
         rows.append({
             "room_label": _clean(room.room_label),
             "physical_room_id": physical_id,
@@ -160,6 +197,15 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
                 getattr(floor, "metric_geometry_complete", False)
             ) if floor else False,
             "firm_documented_area_receipt": bool(firm_documented_receipt),
+            "floor_area_reissued_quantity_id": (
+                floor_reissues[0].quantity_id if len(floor_reissues) == 1 else None
+            ),
+            "canonical_room_area_reissued_quantity_id": (
+                room_reissues[0].quantity_id if len(room_reissues) == 1 else None
+            ),
+            "commercial_quantity_authority_flag": bool(
+                getattr(floor, "commercial_quantity_authority", False)
+            ) if floor else False,
             "metric_authority": (
                 getattr(floor, "metric_area_authority", None) if floor else None
             ),
@@ -189,6 +235,12 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         "rooms": sorted(rows, key=lambda r: (r["room_label"], r["physical_room_id"])),
         "room_area_quantity_evidence_count": len(
             claim.room_area_quantity_evidence
+        ),
+        "reissued_floor_area_quantity_count": sum(
+            len(value) for value in published_floor_by_source.values()
+        ),
+        "reissued_canonical_room_area_quantity_count": sum(
+            len(value) for value in published_room_by_source.values()
         ),
         "floor_finish_quantity_evidence_count": len(
             claim.floor_finish_quantity_evidence
