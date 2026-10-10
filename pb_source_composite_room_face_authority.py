@@ -277,6 +277,8 @@ def _local_edge_owners(
 def _grid_local_adjacency(
     room_scope: SourceRoomFaceScopeResult,
     fully_grid_wall_ids: set[str],
+    *,
+    local_counts=None,
 ) -> Mapping[
     str,
     tuple[
@@ -306,7 +308,8 @@ def _grid_local_adjacency(
             ]
         ],
     ] = defaultdict(set)
-    local_counts = _atomic_source_wall_edge_counts(room_scope, fully_grid_wall_ids)
+    if local_counts is None:
+        local_counts = _atomic_source_wall_edge_counts(room_scope, fully_grid_wall_ids)
     for (wall_id, edge), face_counts in local_counts.items():
         if (
             wall_id not in fully_grid_wall_ids
@@ -328,6 +331,7 @@ def _grid_connected_component(
     *,
     room_scope: SourceRoomFaceScopeResult,
     fully_grid_wall_ids: set[str],
+    adjacency=None,
 ) -> tuple[str, ...] | None:
     """Complete one room through exact two-sided grid-owned subedges."""
 
@@ -336,7 +340,8 @@ def _grid_connected_component(
     if len(seeds) < 2 or any(face_id not in room_by_face for face_id in seeds):
         return None
 
-    adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
+    if adjacency is None:
+        adjacency = _grid_local_adjacency(room_scope, fully_grid_wall_ids)
     visited: set[str] = {seeds[0]}
     pending = [seeds[0]]
     while pending:
@@ -382,6 +387,8 @@ def _candidate_record(
     label_scope: SourceRoomLabelScopeResult,
     fully_grid_wall_ids: set[str],
     grid_evidence_by_wall: Mapping[str, tuple[str, ...]],
+    local_counts=None,
+    grid_adjacency=None,
 ) -> CompositeSourceRoomFaceRecord | None:
     room_by_face = {str(record.face_id): record for record in room_scope.records}
     seed_face_ids = tuple(str(value) for value in candidate.word_face_ids)
@@ -389,6 +396,7 @@ def _candidate_record(
         seed_face_ids,
         room_scope=room_scope,
         fully_grid_wall_ids=fully_grid_wall_ids,
+        adjacency=grid_adjacency,
     )
     if constituent_face_ids is None:
         return None
@@ -438,7 +446,8 @@ def _candidate_record(
             if not wall_id or edge is None:
                 return None
 
-    local_counts = _atomic_source_wall_edge_counts(room_scope, fully_grid_wall_ids)
+    if local_counts is None:
+        local_counts = _atomic_source_wall_edge_counts(room_scope, fully_grid_wall_ids)
     edge_owners = {
         key: tuple(sorted(face_counts))
         for key, face_counts in local_counts.items()
@@ -619,6 +628,12 @@ def compose_grid_separated_room_faces(
         )
 
     fully_grid, evidence_by_wall = _fully_grid_opposed_wall_evidence(wall_scope)
+    # Source-wall node ownership and grid connectivity are scope-global.
+    # Build once, then preserve exactly the same candidate-local checks.
+    local_counts = _atomic_source_wall_edge_counts(room_scope, fully_grid)
+    grid_adjacency = _grid_local_adjacency(
+        room_scope, fully_grid, local_counts=local_counts
+    )
     records: list[CompositeSourceRoomFaceRecord] = []
     unresolved: list[str] = []
     for candidate in label_scope.split_face_candidates:
@@ -629,6 +644,8 @@ def compose_grid_separated_room_faces(
             label_scope=label_scope,
             fully_grid_wall_ids=fully_grid,
             grid_evidence_by_wall=evidence_by_wall,
+            local_counts=local_counts,
+            grid_adjacency=grid_adjacency,
         )
         if record is None:
             unresolved.append(candidate.record_id)
