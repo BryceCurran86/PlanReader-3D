@@ -290,15 +290,19 @@ def _source_owned_collision_candidate_addresses(
     if not collisions:
         return list(walls), dict(edge_to_wall)
 
-    replacement_by_edges: dict[tuple[str, ...], WallCandidate] = {}
+    replacements: dict[int, WallCandidate] = {}
     new_ids: set[str] = set()
     unchanged_ids = set(by_id) - set(collisions)
     for old_id, group in sorted(collisions.items()):
         group_keys: set[str] = set()
+        group_edges: set[str] = set()
         for wall in group:
             edges = tuple(wall.face_a_segment_ids) + tuple(wall.face_b_segment_ids or ())
             if not edges or len(set(edges)) != len(edges):
                 raise ValueError("W4 collision has absent or duplicated source edges")
+            if group_edges.intersection(edges):
+                raise ValueError("W4 collision has competing owners of one source edge")
+            group_edges.update(edges)
             source_parts = []
             for eid in edges:
                 edge = edges_by_id.get(str(eid))
@@ -338,7 +342,7 @@ def _source_owned_collision_candidate_addresses(
                 metadata={**dict(wall.metadata), "precollision_w4_candidate_id": old_id},
                 reason_codes=tuple((*wall.reason_codes, "source_owned_w4_candidate_address_collision")),
             )
-            replacement_by_edges[tuple(sorted(edges))] = marked
+            replacements[id(wall)] = marked
 
     revised = []
     remapped = dict(edge_to_wall)
@@ -347,7 +351,7 @@ def _source_owned_collision_candidate_addresses(
             revised.append(wall)
             continue
         edges = tuple(wall.face_a_segment_ids) + tuple(wall.face_b_segment_ids or ())
-        converted = replacement_by_edges.get(tuple(sorted(edges)))
+        converted = replacements.get(id(wall))
         if converted is None:
             raise ValueError("W4 collided wall lost source edge ownership")
         revised.append(converted)
