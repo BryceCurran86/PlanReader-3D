@@ -695,3 +695,70 @@ def test_title_block_plus_one_figured_span_stays_provisional_outside_bridge() ->
         revision_id="rev-1",
     )
     assert measurement_authority_for_page_scale(calibration) == AuthorityStatus.PROVISIONAL.value
+
+
+def test_adjacent_dimensions_sharing_one_source_witness_are_one_scale_system() -> None:
+    # Native dimension chain: 10m then 5m along the same straight axis,
+    # sharing the actual end/start native witness source ID and geometry.
+    first = _pair("a", 10000.0, origin=(100.0, 150.0))
+    second = _pair("b", 5000.0, origin=(383.5, 150.0))
+    second_binding = deepcopy(second[1])
+    second_binding.witness_line_ids = (
+        first[1].witness_line_ids[1],
+        second[1].witness_line_ids[1],
+    )
+    second_geometry = [
+        line for line in second[2]
+        if line.segment_id != second[1].witness_line_ids[0]
+    ]
+    result = _run(
+        _bundle([(first[0], first[1], first[2]),
+                 (second[0], second_binding, second_geometry)])
+    )
+    assert len(result.candidates) == 2
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert result.reason_codes == (FIGURED_SPAN_SCALE_SINGLE_CANDIDATE,)
+    assert len(result.independence_group_ids) == 1
+    assert result.quantity_m2 is None
+
+
+def test_native_witness_chain_merges_scale_independence_transitively() -> None:
+    first = _pair("a", 10000.0, origin=(100.0, 150.0))
+    second = _pair("b", 5000.0, origin=(383.5, 150.0))
+    third = _pair("c", 2500.0, origin=(525.25, 150.0))
+    second_binding = deepcopy(second[1])
+    second_binding.witness_line_ids = (
+        first[1].witness_line_ids[1], second[1].witness_line_ids[1]
+    )
+    third_binding = deepcopy(third[1])
+    third_binding.witness_line_ids = (
+        second[1].witness_line_ids[1], third[1].witness_line_ids[1]
+    )
+    second_lines = [
+        line for line in second[2]
+        if line.segment_id != second[1].witness_line_ids[0]
+    ]
+    third_lines = [
+        line for line in third[2]
+        if line.segment_id != third[1].witness_line_ids[0]
+    ]
+    result = _run(
+        _bundle([
+            first,
+            (second[0], second_binding, second_lines),
+            (third[0], third_binding, third_lines),
+        ])
+    )
+    assert len(result.candidates) == 3
+    assert result.status is EvidenceResolutionStatus.CANDIDATE
+    assert len(result.independence_group_ids) == 1
+    assert result.quantity_m2 is None
+
+
+def test_separate_native_witness_spans_remain_independent_scale_evidence() -> None:
+    first = _pair("a", 10000.0, origin=(100.0, 150.0))
+    second = _pair("b", 5000.0, origin=(100.0, 350.0))
+    result = _run(_bundle([first, second]))
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.independence_group_ids) == 2
+    assert result.quantity_m2 is None

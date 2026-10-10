@@ -574,7 +574,12 @@ def _same_source_system(
         return True
     if left.dimension_line_id and left.dimension_line_id == right.dimension_line_id:
         return True
-    if left.witness_line_ids and left.witness_line_ids == right.witness_line_ids:
+    # Two adjoining source dimension spans may share exactly ONE native
+    # witness/tick. They belong to the same figured chain, not two independent
+    # observations capable of corroborating a viewport physical scale.
+    # Exact source IDs matter: never infer shared ownership from proximity.
+    if (left.witness_line_ids and right.witness_line_ids
+            and set(left.witness_line_ids).intersection(right.witness_line_ids)):
         return True
     if _span_identity(left) == _span_identity(right):
         return True
