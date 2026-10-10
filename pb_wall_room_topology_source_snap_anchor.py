@@ -11,6 +11,8 @@ wall sameness, instantiate hosts, or supply QuantityEvidence.
 from __future__ import annotations
 
 import math
+import os
+import json
 from collections import defaultdict
 from typing import Any, Mapping
 
@@ -169,6 +171,30 @@ def reanchor_exact_source_through_junctions(graph, *, tolerance_pt):
                 by_source[ids[0]].append((edge,p,far))
         if not valid:
             continue
+        # Experiment-only diagnostic gated by the workflow environment.
+        # Source-owned W2 facts remain unchanged; never used in production
+        # decision making, and no test/benchmark identities are consulted.
+        if os.environ.get("GPTMAX_W2_SOURCE_TRACE") == "1":
+            supplemental = [
+                (edge,p,far) for edge,p,far in raw_incident
+                if any("terminal_solid_wall_band_v1" in str(k) or
+                       "compact_solid_wall_band_v1" in str(k)
+                       for k in ((edge.get(LINEAGE_KEY) or {}).get("source_primitive_ids") or ()))
+            ]
+            if supplemental:
+                print("GPTMAX_W2_SOURCE_TRACE", json.dumps({
+                    "node":npoint, "degree":len(incident),
+                    "entries":[{
+                        "p":p,"far":far,
+                        "ids":(edge.get(LINEAGE_KEY) or {}).get("source_primitive_ids"),
+                        "parents":[{
+                            "id":r.get("id"),
+                            "positive":r.get("page_coords_present"),
+                            "geometry":[r.get(k) for k in ("x1","y1","x2","y2")],
+                        } for r in ((edge.get(LINEAGE_KEY) or {}).get("source_records") or ()) if isinstance(r,Mapping)],
+                        "supplemental_positive":_positive_supplemental_t_branch(edge,p,far,p),
+                    } for edge,p,far in raw_incident],
+                },sort_keys=True),flush=True)
         candidate_points=set()
         for primitive_id, members in by_source.items():
             for i,left in enumerate(members):
