@@ -458,7 +458,10 @@ def _canonical_composite_supersedence(
     """
     originals = tuple(source_room_face_records)
     composites = tuple(composite_records)
-    known = {str(record.face_id) for record in originals}
+    # The original physical face universe must itself be unique. Otherwise
+    # retiring an identity could erase multiple source faces with one claim.
+    source_id_counts = Counter(str(record.face_id) for record in originals)
+    known = set(source_id_counts)
     claimed = Counter(
         str(face_id)
         for composite in composites
@@ -471,7 +474,12 @@ def _canonical_composite_supersedence(
         if (
             not ids
             or len(ids) != len(set(ids))
-            or any(face_id not in known or claimed[face_id] != 1 for face_id in ids)
+            or any(
+                face_id not in known
+                or source_id_counts[face_id] != 1
+                or claimed[face_id] != 1
+                for face_id in ids
+            )
         ):
             continue
         accepted.append(composite)
