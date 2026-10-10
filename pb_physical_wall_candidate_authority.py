@@ -37,7 +37,9 @@ from pb_pdf_text_integrity_authority import (
 )
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 from pb_drawing_evidence_binding import DrawingViewType
-from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority
+from pb_physical_opening_authority import (
+    PHYSICAL_OPENING_EXISTS, PhysicalOpeningAuthority, PhysicalOpeningExistenceRecord,
+)
 from pb_physical_scale_authority import (
     PHYSICAL_SCALE_RESOLVED,
     PhysicalScaleProducer,
@@ -2071,6 +2073,76 @@ def _opening_raw_relation_sets(
     return relation_sets
 
 
+def _producer_proven_page_opening_records(
+    *, source_producer: SourceVisibilityProducer, published, page_id: str,
+    physical_opening_authority: PhysicalOpeningAuthority,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    proof_scope_fingerprint: str = "direct-full-page",
+) -> tuple[PhysicalOpeningExistenceRecord, ...]:
+    """Share the full-page positive proof inventory, with fresh integrity.
+
+    This is individual existence evidence only. It never supplies a count or
+    semantic universe completeness. Prove every authenticated page observation
+    once; no caller candidate list or preflight geometry narrows that universe.
+    """
+    if type(physical_opening_authority) is not PhysicalOpeningAuthority:
+        raise TypeError("physical_opening_authority must be producer-owned")
+    reader = physical_opening_authority._source_visibility_authority
+    if (reader is None
+            or reader._source_authority._store is not source_producer._producer._store
+            or (physical_opening_authority._source_visibility_producer is not None
+                and physical_opening_authority._source_visibility_producer is not source_producer)):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    visibility = source_producer.authority()
+    # A damaged competitor can invalidate a cached uniqueness proof even when
+    # the opening's own six source observations are unchanged.
+    authenticated = visibility.authenticated_visible_observations(published)
+    authenticated_by_id = {
+        observation_id: observation for observation_id, observation in authenticated
+    }
+    # Source-visible IDs are the authority's original observation traversal.
+    # The old W4/G17 loop proved this order directly from the published
+    # snapshot; an authenticated page index may return an equivalent set in
+    # a different order and silently change representative host ownership.
+    rows = tuple(
+        (observation_id, authenticated_by_id[observation_id])
+        for observation_id in published.visible_observation_ids
+        if observation_id in authenticated_by_id
+        and str(authenticated_by_id[observation_id].page_id) == str(page_id)
+    )
+    if (resolved_visible_observations is not None
+            and (len(resolved_visible_observations) != len(rows)
+                 or dict(resolved_visible_observations) != dict(rows))):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    key = (published.revision.document_id, published.revision.revision_id,
+           published.revision.source_sha256, published.snapshot.snapshot_id,
+           str(page_id), str(proof_scope_fingerprint))
+    cached = physical_opening_authority._wall_source_opening_page_proof_cache.get(key)
+    if cached is not None:
+        return cached
+    proven: dict[str, PhysicalOpeningExistenceRecord] = {}
+    for observation_id, observation in rows:
+        if str(observation.page_id) != str(page_id):
+            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+        result = physical_opening_authority.prove_existence(ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
+        opening = result.existence_record
+        if (result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.proposition == PHYSICAL_OPENING_EXISTS
+                and opening is not None and str(opening.page_id) == str(page_id)):
+            proven[opening.record_id] = opening
+    # Preserve first authenticated source-observation witness order. The
+    # previous W4 path consumed dict insertion order, which controls the
+    # representative provenance of competing/adjacent physical openings.
+    # Sorting hashed record IDs can silently alter host binding precedence.
+    records = tuple(proven.values())
+    physical_opening_authority._wall_source_opening_page_proof_cache[key] = records
+    return records
+
+
 def _producer_opening_relation_overrides(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2098,7 +2170,6 @@ def _producer_opening_relation_overrides(
         if physical_opening_authority is not None
         else PhysicalOpeningAuthority.from_source_visibility_producer(source_producer)
     )
-    proven_records: dict[str, object] = {}
 
     if resolved_visible_observations is None:
         page_visible_rows: list[tuple[str, object]] = []
@@ -2128,35 +2199,26 @@ def _producer_opening_relation_overrides(
 
     prefix = "visible:segment:"
 
-    # Preserve the #969 authority contract exactly: every authenticated visible
-    # observation on this page is proved once. The page index removes repeated
-    # document-wide ownership scans, but does not narrow the opening authority's
-    # evidence universe or preflight candidate membership.
-    for observation_id, observation in page_visible_rows:
-        if str(observation.page_id) != str(page_id):
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        selector = ObservationSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            observation_id=observation_id,
-        )
-        result = opening_authority.prove_existence(selector)
-        existence = result.existence_record
-        if (
-            result.status is EvidenceResolutionStatus.CORROBORATED
-            and result.proposition == PHYSICAL_OPENING_EXISTS
-            and existence is not None
-            and existence.page_id == page_id
-        ):
-            proven_records[existence.record_id] = existence
+    # Share complete, freshly authenticated page proofs between W4 scopes.
+    proven_records = _producer_proven_page_opening_records(
+        source_producer=source_producer, published=published, page_id=page_id,
+        physical_opening_authority=opening_authority,
+        resolved_visible_observations=page_visible_rows,
+        # Complete G17 page proofs are never narrowed by the W4 scope.
+        # Partition *reuse* by exact producer-owned wall candidate identity,
+        # because separate W4 scopes must not inherit a warmed proof cache
+        # created under another physical wall scope.
+        proof_scope_fingerprint=hashlib.sha256(repr(tuple(sorted(
+            (str(record.wall_candidate_id), tuple(sorted(
+                str(raw_id) for raw_id in record.physical_identity.source_primitive_ids
+            ))) for record in records
+        ))).encode("utf-8")).hexdigest())
 
     candidate_relation_sets: dict[
         tuple[str, str], set[PhysicalEquivalenceClass]
     ] = {}
 
-    for existence in proven_records.values():
+    for existence in proven_records:
         raw_lines: dict[str, Line] = {}
         valid = True
         for observation_id in existence.source_observation_ids:  # type: ignore[attr-defined]
