@@ -89,6 +89,12 @@ def publish_live_floor_area_quantities(
     # filtering and allow one conflicting floor owner to publish commercially.
     canonical_ids: Counter[str] = Counter()
     physical_ids: Counter[str] = Counter()
+    # Whole-room floor-area quantities cannot be published twice merely by
+    # minting two canonical floor IDs or two upstream quantity IDs for one
+    # canonical room/source face. Count *every* original floor object, even
+    # unmeasured/ABSTAIN rows, before selecting a FIRM published quantity.
+    canonical_room_ids: Counter[str] = Counter()
+    source_face_ids: Counter[str] = Counter()
     for floor in claim.canonical_floors:
         if type(floor) is not LiveCanonicalFloorSurfaceObject:
             raise TypeError("canonical_floors must contain LiveCanonicalFloorSurfaceObject")
@@ -98,6 +104,12 @@ def publish_live_floor_area_quantities(
             canonical_ids[canonical_id] += 1
         if physical_id:
             physical_ids[physical_id] += 1
+        room_id = _clean(floor.room_entity_id)
+        face_id = _clean(floor.source_room_face_record_id)
+        if room_id:
+            canonical_room_ids[room_id] += 1
+        if face_id:
+            source_face_ids[face_id] += 1
         qid = _clean(floor.metric_area_quantity_id)
         if qid:
             floors_by_quantity.setdefault(qid, []).append(floor)
@@ -122,8 +134,14 @@ def publish_live_floor_area_quantities(
             continue
         if not floor.physical_floor_surface_id or not floor.canonical_floor_id:
             continue
-        if (canonical_ids[_clean(floor.canonical_floor_id)] != 1
-                or physical_ids[_clean(floor.physical_floor_surface_id)] != 1):
+        if (
+            canonical_ids[_clean(floor.canonical_floor_id)] != 1
+            or physical_ids[_clean(floor.physical_floor_surface_id)] != 1
+            or not _clean(floor.room_entity_id)
+            or not _clean(floor.source_room_face_record_id)
+            or canonical_room_ids[_clean(floor.room_entity_id)] != 1
+            or source_face_ids[_clean(floor.source_room_face_record_id)] != 1
+        ):
             continue
         if len(physical_floor_claim_ids.get(_clean(floor.physical_floor_surface_id), ())) != 1:
             continue
