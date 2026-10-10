@@ -217,6 +217,23 @@ def publish_live_ceiling_area_quantities(
         if ceiling_id:
             canonical_ids.add(ceiling_id)
 
+    # A whole-ceiling quantity reuses one already-FIRM room-area quantity.
+    # Two canonical ceilings cannot each mint the FULL area from that SAME
+    # source receipt, even if they carry different shadow ceiling quantity
+    # IDs and distinct canonical IDs. Check the full canonical universe
+    # before filtering provisional candidates, so an unmeasured duplicate
+    # cannot disappear and accidentally authorize its competitor.
+    area_owners: dict[str, set[str]] = {}
+    for ceiling in result.canonical_ceilings:
+        parent = _clean(ceiling.room_area_quantity_id)
+        ceiling_id = _clean(ceiling.canonical_ceiling_id)
+        if parent and ceiling_id:
+            area_owners.setdefault(parent, set()).add(ceiling_id)
+    conflicted_areas = {
+        parent for parent, owners in area_owners.items()
+        if len(owners) > 1
+    }
+
     source_by_id = _source_quantities(result)
     out: list[QuantityEvidence] = []
     seen_entity_ids: set[str] = set()
@@ -226,6 +243,8 @@ def publish_live_ceiling_area_quantities(
         result.canonical_ceilings,
         key=lambda item: item.canonical_ceiling_id,
     ):
+        if _clean(ceiling.room_area_quantity_id) in conflicted_areas:
+            continue
         source = source_by_id.get(_clean(ceiling.ceiling_quantity_id))
         if source is None:
             continue
