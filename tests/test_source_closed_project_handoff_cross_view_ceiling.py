@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import fitz
+import pytest
 
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
@@ -62,18 +63,50 @@ def _shadow_quantity(quantity_id: str, room_id: str) -> QuantityEvidence:
     )
 
 
+@pytest.mark.parametrize(
+    ("new_index_id", "overlap_index_id", "new_area_id", "overlap_area_id", "new_published"),
+    (
+        ("room-index-overlap", "room-index-overlap", "area-new", "area-other", True),
+        # Distinct room-index identities can point to the same producer-owned
+        # FIRM room-area receipt; this is still one physical ceiling area.
+        ("room-index-new", "room-index-legacy-alias", "area-shared", "area-shared", True),
+        # A candidate new ceiling without an actually published quantity
+        # must not suppress valid legacy ceilings at all.
+        ("room-index-overlap", "room-index-overlap", "area-new", "area-new", False),
+    ),
+)
 def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
     tmp_path,
     monkeypatch,
+    new_index_id,
+    overlap_index_id,
+    new_area_id,
+    overlap_area_id,
+    new_published,
 ) -> None:
     pdf = tmp_path / "source.pdf"
     source_sha = _pdf(pdf)
 
     new_quantity = _firm_quantity("qty-new", "ceiling-new")
     legacy_quantity = _firm_quantity("qty-legacy", "ceiling-legacy")
+    legacy_overlap_quantity = _firm_quantity("qty-legacy-overlap", "ceiling-overlap")
+    expected_legacy_indices = (
+        ("room-index-other",) if new_published
+        else (overlap_index_id, "room-index-other")
+    )
+    expected_legacy_source_ids = (
+        ("shadow-other",) if new_published
+        else ("shadow-overlap", "shadow-other")
+    )
+    legacy_quantities = (
+        (legacy_quantity,) if new_published
+        else (legacy_overlap_quantity, legacy_quantity)
+    )
     new_canonical = SimpleNamespace(
         canonical_ceiling_id="ceiling-new",
-        source_room_index_id="room-index-overlap",
+        ceiling_quantity_id="qty-new",
+        source_room_index_id=new_index_id,
+        room_area_quantity_id=new_area_id,
     )
     claim = SimpleNamespace(
         status=SimpleNamespace(value="corroborated"),
@@ -86,17 +119,19 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
         canonical_spaces=(),
         floor_finish_quantity_evidence=(),
         room_area_quantity_evidence=(),
-        ceiling_lining_quantity_evidence=(new_quantity,),
+        ceiling_lining_quantity_evidence=(new_quantity,) if new_published else (),
     )
 
     overlap_ceiling = SimpleNamespace(
         canonical_ceiling_id="legacy-overlap",
-        source_room_index_id="room-index-overlap",
+        source_room_index_id=overlap_index_id,
+        room_area_quantity_id=overlap_area_id,
         ceiling_quantity_id="shadow-overlap",
     )
     unrelated_ceiling = SimpleNamespace(
         canonical_ceiling_id="legacy-unrelated",
         source_room_index_id="room-index-other",
+        room_area_quantity_id="area-unrelated",
         ceiling_quantity_id="shadow-other",
     )
     legacy_result = LiveCeilingLiningResult(
@@ -134,12 +169,12 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
         assert tuple(
             ceiling.source_room_index_id
             for ceiling in result.canonical_ceilings
-        ) == ("room-index-other",)
+        ) == expected_legacy_indices
         assert tuple(
             quantity.quantity_id
             for quantity in result.quantity_evidence
-        ) == ("shadow-other",)
-        return (legacy_quantity,)
+        ) == expected_legacy_source_ids
+        return legacy_quantities
 
     monkeypatch.setattr(
         handoff,
@@ -147,11 +182,14 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
         _publish_legacy,
     )
 
-    def _run(run_id, quantity):
+    def _run(run_id, quantities):
         return SimpleNamespace(
             run_id=run_id,
             source_sha256s=(source_sha,),
-            quantities=(SimpleNamespace(quantity_id=quantity.quantity_id),),
+            quantities=tuple(
+                SimpleNamespace(quantity_id=quantity.quantity_id)
+                for quantity in quantities
+            ),
             to_json=lambda: "{}",
         )
 
@@ -160,17 +198,17 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
         assert workspace_id == 1
         assert project_id == "project-1"
         seen["new_seals"] += 1
-        return _run("run-new", new_quantity)
+        return _run("run-new", (new_quantity,))
 
     def _seal_legacy(result, *, workspace_id, project_id):
         assert tuple(
             ceiling.source_room_index_id
             for ceiling in result.canonical_ceilings
-        ) == ("room-index-other",)
+        ) == expected_legacy_indices
         assert workspace_id == 1
         assert project_id == "project-1"
         seen["legacy_seals"] += 1
-        return _run("run-legacy", legacy_quantity)
+        return _run("run-legacy", legacy_quantities)
 
     monkeypatch.setattr(handoff, "seal_live_ceiling_lining_run", _seal_new)
     monkeypatch.setattr(handoff, "seal_live_ceiling_area_run", _seal_legacy)
@@ -197,14 +235,17 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
 
     assert seen == {
         "publisher_calls": 1,
-        "new_seals": 1,
+        "new_seals": 1 if new_published else 0,
         "legacy_seals": 1,
     }
     assert summary["canonical_counts"]["ceilings"] == 1
     assert summary["family_counts"]["ceiling_area"] == 2
     assert (
         summary["ceiling_authority_path"]
-        == "cross_view_rcp_plus_legacy_nonoverlap"
+        == (
+            "cross_view_rcp_plus_legacy_nonoverlap"
+            if new_published else "legacy_same_scope_ceiling_lining"
+        )
     )
     assert summary["combined_quantity_count"] == 2
     assert summary["status"] == "sealed"

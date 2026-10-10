@@ -7,6 +7,7 @@ import fitz
 import pb_cross_view_floor_finish_authority as floor_finish_authority
 import pb_source_material_semantic_authority as material_semantic
 from pb_cross_view_floor_finish_authority import (
+    _quarantine_reused_floor_finish_occurrences,
     CROSS_VIEW_FLOOR_FINISH_CONFLICT,
     CROSS_VIEW_FLOOR_FINISH_RESOLVED,
     CrossViewFloorFinishProducer,
@@ -793,4 +794,91 @@ def test_unresolved_documented_area_evidence_cannot_publish_floor_finish(
     assert result.quantities == ()
     assert result.unresolved_canonical_floor_ids == (
         floors.floors[0].canonical_floor_id,
+    )
+
+
+def test_shared_floor_finish_occurrence_quarantines_all_competing_floor_owners(
+    monkeypatch,
+) -> None:
+    """One producer-owned source occurrence cannot quantify two room floors."""
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish()
+    assert len(result.records) == 1
+    authentic = result.records[0]
+    competing = replace(
+        authentic,
+        physical_room_id="physical-room-competing",
+        canonical_floor_id="canonical-floor-competing",
+        physical_floor_surface_id="physical-floor-competing",
+    )
+    # Unrelated independently authenticated occurrence survives quarantine.
+    unrelated = replace(
+        authentic,
+        physical_room_id="physical-room-other",
+        canonical_floor_id="canonical-floor-other",
+        physical_floor_surface_id="physical-floor-other",
+        occurrence_record_id="separate-producer-owned-occurrence",
+    )
+    retained, unresolved = _quarantine_reused_floor_finish_occurrences(
+        (authentic, competing, unrelated)
+    )
+    assert retained == (unrelated,)
+    assert unresolved == tuple(sorted((
+        authentic.canonical_floor_id, competing.canonical_floor_id,
+    )))
+    assert retained[0].occurrence_record_id == "separate-producer-owned-occurrence"
+
+
+def test_identical_floor_finish_source_ownership_is_not_a_conflict(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    result = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish()
+    authentic = result.records[0]
+    retained, unresolved = _quarantine_reused_floor_finish_occurrences(
+        (authentic,)
+    )
+    assert retained == (authentic,)
+    assert unresolved == ()
+
+
+def test_shared_floor_finish_conflict_result_is_input_order_independent(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    verified = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish().records[0]
+    competing = replace(
+        verified,
+        canonical_floor_id="floor-b",
+        physical_floor_surface_id="floor-b",
+        physical_room_id="room-b",
+    )
+    unrelated = replace(
+        verified,
+        canonical_floor_id="floor-c",
+        physical_floor_surface_id="floor-c",
+        physical_room_id="room-c",
+        occurrence_record_id="different-authenticated-occurrence",
+    )
+    original, ids = _quarantine_reused_floor_finish_occurrences(
+        (verified, competing, unrelated)
+    )
+    reversed_rows, reversed_ids = _quarantine_reused_floor_finish_occurrences(
+        (unrelated, competing, verified)
+    )
+    assert ids == reversed_ids
+    assert tuple(row.occurrence_record_id for row in original) == (
+        "different-authenticated-occurrence",
+    )
+    assert tuple(row.occurrence_record_id for row in reversed_rows) == (
+        "different-authenticated-occurrence",
     )

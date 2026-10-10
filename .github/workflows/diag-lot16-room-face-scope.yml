@@ -5,6 +5,8 @@ on:
     paths:
       - "tools/diag_lot16_room_face_scope.py"
       - "pb_live_opening_area_quantity_publication.py"
+      - "pb_cross_view_floor_finish_authority.py"
+      - "tests/test_cross_view_floor_finish_authority_v1.py"
       - "pb_live_physical_opening_void_composition.py"
       - "tests/test_live_opening_area_quantity_publication.py"
       - ".github/workflows/diag-lot16-room-face-scope.yml"
