@@ -312,8 +312,14 @@ def test_external_wall_refuses_missing_opening_host_or_universe_receipts():
 
     wall_opening, physical_void, gross, roles, original, _gross = _chain()
     selector = physical_void.void_selectors[original.opening_identity_id]
-    for field in ("record_id", "host_binding_record_id", "opening_universe_record_id"):
-        forged = replace(original, **{field: ""})
+    for field, value in (
+        ("record_id", ""),
+        ("host_binding_record_id", ""),
+        ("opening_universe_record_id", ""),
+        ("host_binding_record_id", "   "),
+        ("opening_universe_record_id", "   "),
+    ):
+        forged = replace(original, **{field: value})
         authority = PhysicalOpeningVoidAuthority(
             {selector.key: PhysicalOpeningVoidResult(
                 status=EvidenceResolutionStatus.CORROBORATED,
