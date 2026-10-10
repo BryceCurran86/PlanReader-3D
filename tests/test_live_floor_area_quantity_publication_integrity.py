@@ -405,3 +405,61 @@ def test_firm_documented_area_is_valid_without_geometric_scale() -> None:
     assert published[0].value == 8.64
     assert published[0].unit == "m2"
     assert published[0].metadata["upstream_room_area_quantity_id"] == "room-area-1"
+
+
+def test_unmeasured_duplicate_physical_floor_cannot_be_filtered_away() -> None:
+    source = _source_area()
+    authentic = _floor()
+    unresolved = replace(
+        authentic,
+        canonical_floor_id="unresolved-canonical-floor",
+        metric_area_quantity_id=None,
+        metric_area_m2=None,
+        metric_area_authority=None,
+        physical_floor_surface_identity_resolved=False,
+    )
+    conflicted = replace(
+        _claim_with(source),
+        canonical_floors=(authentic, unresolved),
+    )
+    assert publish_live_floor_area_quantities(conflicted) == ()
+    assert publish_live_canonical_room_area_quantities(conflicted) == ()
+
+
+def test_unmeasured_duplicate_canonical_floor_cannot_be_filtered_away() -> None:
+    source = _source_area()
+    authentic = _floor()
+    unresolved = replace(
+        authentic,
+        physical_floor_surface_id="unresolved-physical-floor",
+        room_entity_id="unresolved-room",
+        metric_area_quantity_id=None,
+        metric_area_m2=None,
+        metric_area_authority=None,
+        physical_floor_surface_identity_resolved=False,
+    )
+    assert publish_live_floor_area_quantities(
+        replace(_claim_with(source), canonical_floors=(authentic, unresolved))
+    ) == ()
+
+
+def test_unrelated_unmeasured_floor_does_not_poison_firm_source_area() -> None:
+    source = _source_area()
+    authentic = _floor()
+    unresolved = replace(
+        authentic,
+        canonical_floor_id="other-canonical-floor",
+        physical_floor_surface_id="other-physical-floor",
+        room_entity_id="other-room",
+        metric_area_quantity_id=None,
+        metric_area_m2=None,
+        metric_area_authority=None,
+        physical_floor_surface_identity_resolved=False,
+    )
+    claim = replace(_claim_with(source), canonical_floors=(authentic, unresolved))
+    quantities = publish_live_floor_area_quantities(claim)
+    assert len(quantities) == 1
+    assert quantities[0].input_entity_ids == (authentic.physical_floor_surface_id,)
+    assert quantities == publish_live_floor_area_quantities(
+        replace(claim, canonical_floors=(unresolved, authentic))
+    )
