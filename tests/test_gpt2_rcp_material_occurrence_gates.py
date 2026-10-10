@@ -7,8 +7,13 @@ from tools.diag_gpt2_rcp_material_occurrence_gates import (
 def vp(kind="reflected_ceiling_plan",status="derived",box=(1,2,9,20)):
     return R(view_id="v9",view_type=kind,status=status,bounding_box=box)
 
-def scope(*,complete=False,records=(),reasons=("source_material_viewport_unauthenticated",)):
-    return R(status="EvidenceResolutionStatus.ABSTAINED",scope_complete=complete,
+def scope(*,complete=False,records=(),reasons=("source_material_viewport_unauthenticated",),status=None):
+    from pb_migration_contracts import EvidenceResolutionStatus
+    producer_status = status or (
+        EvidenceResolutionStatus.CORROBORATED
+        if complete else EvidenceResolutionStatus.ABSTAINED
+    )
+    return R(status=producer_status,scope_complete=complete,
              records=records,reason_codes=reasons)
 
 def test_no_rcp_owner_even_if_material_scope_has_records():
@@ -37,3 +42,39 @@ def test_producer_records_still_require_real_room_owner():
     assert r["producer_occurrence_record_ids"]==["source-1"]
     assert r["new_room_material_ownership_claim"] is False
     assert r["new_metric_quantity_claim"] is False
+
+
+def test_conflicted_or_candidate_source_scope_never_authenticates_stale_occurrences():
+    from pb_migration_contracts import EvidenceResolutionStatus
+    for status in (
+        EvidenceResolutionStatus.CONFLICT,
+        EvidenceResolutionStatus.CANDIDATE,
+        EvidenceResolutionStatus.ABSTAINED,
+    ):
+        r=gate(
+            vp(),scope(complete=True, records=(R(record_id="stale", code="GRID"),),
+                       status=status)
+        )
+        assert r["first_unclosed_gate"]=="producer_source_occurrence_scope_not_corroborated"
+        assert r["producer_occurrence_record_ids"]==["stale"]
+        assert r["producer_authenticated_record_ids"]==[]
+        assert r["new_room_material_ownership_claim"] is False
+        assert r["new_metric_quantity_claim"] is False
+
+
+def test_producer_enum_corroboration_only_counts_authentic_records():
+    from pb_migration_contracts import EvidenceResolutionStatus
+    r=gate(
+        vp(),
+        scope(
+            complete=True,
+            records=(R(record_id="source-record",code="FPB"),),
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+    )
+    assert r["first_unclosed_gate"]=="producer_authenticated_occurrences_require_room_owner_before_quantity"
+    assert r["producer_authenticated_record_ids"]==["source-record"]
+    assert r["new_metric_quantity_claim"] is False
+    for not_rcp in (vp(kind="schedule"),vp(status="unsupported",box=None)):
+        row=gate(not_rcp,scope(complete=True,records=(R(record_id="x",code="FPB"),)))
+        assert row["producer_authenticated_record_ids"]==[]
