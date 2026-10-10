@@ -123,7 +123,10 @@ def _publish_one(
         figured_ids = tuple(
             sorted({_clean(value) for value in ceiling.figured_dimension_ids if _clean(value)})
         )
-        if not figured_ids:
+        # One observed dimension cannot define a documented two-axis area.
+        # This canonical adapter does not infer the missing orthogonal axis
+        # from PDF points, a nominal sheet scale, or benchmark quantities.
+        if len(figured_ids) < 2:
             return None
         resolved_scale_id = None
     elif measurement_authority == MeasurementAuthorityType.PDF_SCALED.value:
