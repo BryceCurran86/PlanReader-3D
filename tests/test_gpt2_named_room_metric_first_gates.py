@@ -83,3 +83,18 @@ def test_missing_producer_metric_first_gate_is_not_a_firm_measurement():
     }]
     assert got["named_room_metric_first_failure_codes"]["cross_view"] == []
     assert got["metric_quantity_published"] is False
+
+
+def test_competing_or_duplicate_source_metric_first_failure_receipts_abstain():
+    row = summarize(claim(
+        (room("a", "FREEZER"), room("b", "SALES")),
+        same=(("a", "need_figure"), ("a", "scale_ambiguous"),
+              ("b", "no_dim"), ("b", "no_dim")),
+    ))
+    assert row["ambiguous_metric_first_failure_owner_ids"]["same_view"] == ["a"]
+    assert row["named_room_metric_first_failure_codes"]["same_view"] == [{
+        "physical_room_id": "b", "label": "SALES", "first_gate": "no_dim",
+    }]
+    assert row["named_rooms_without_first_failure_receipts"] == []
+    assert row["all_source_first_failure_receipt_counts"]["same_view"] == 4
+    assert row["metric_quantity_published"] is False
