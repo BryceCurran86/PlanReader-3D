@@ -60,8 +60,26 @@ def audit_collinear_candidates(candidate: Any, faces_by_record_id: dict[str, Any
         faces.append(face)
     for i, left in enumerate(faces):
         for right in faces[i+1:]:
-            for lid, ledge in getattr(left, "boundary_wall_edges", ()) or ():
-                for rid, redge in getattr(right, "boundary_wall_edges", ()) or ():
+            for left_row in getattr(left, "boundary_wall_edges", ()) or ():
+                if not isinstance(left_row, (tuple, list)) or len(left_row) != 2:
+                    result["first_gate"] = "malformed_source_wall_edge"
+                    result["candidate_shared_spans"] = []
+                    return result
+                lid, ledge = left_row
+                if not str(lid).strip() or _finite_native_edge(ledge) is None:
+                    result["first_gate"] = "malformed_source_wall_edge"
+                    result["candidate_shared_spans"] = []
+                    return result
+                for right_row in getattr(right, "boundary_wall_edges", ()) or ():
+                    if not isinstance(right_row, (tuple, list)) or len(right_row) != 2:
+                        result["first_gate"] = "malformed_source_wall_edge"
+                        result["candidate_shared_spans"] = []
+                        return result
+                    rid, redge = right_row
+                    if not str(rid).strip() or _finite_native_edge(redge) is None:
+                        result["first_gate"] = "malformed_source_wall_edge"
+                        result["candidate_shared_spans"] = []
+                        return result
                     span = _overlap(ledge, redge)
                     if span <= EPS:
                         continue
