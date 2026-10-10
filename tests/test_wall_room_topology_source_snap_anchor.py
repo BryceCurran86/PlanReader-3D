@@ -176,3 +176,51 @@ def test_first_party_compact_namespace_can_prove_exact_positive_t_without_guessi
     after=reanchor(g,tolerance_pt=2.5)
     assert after["nodes"][1]["x"]==381.
     assert len(after["exact_source_through_junction_anchors"])==1
+
+
+def test_real_registered_terminal_source_short_overhang_retains_original_through_node():
+    g=_graph()
+    branch=g["edges"][2]["primitive_lineage"]["source_records"][0]
+    # Exact original raster record in the failed real Lot16 source run:
+    # split piece starts at (381,342.72), but the independently registered
+    # painted parent line extends back to (379.2,342.72).
+    branch["x1"]=379.2
+    branch["x2"]=411.6
+    before=deepcopy(g)
+    out=reanchor(g,tolerance_pt=2.5)
+    assert out["nodes"][1]["x"]==381.
+    assert out["nodes"][1]["y"]==342.72
+    assert len(out["exact_source_through_junction_anchors"])==1
+    assert g==before
+    assert out["edges"]==before["edges"]
+
+
+def test_registered_parent_overhang_cannot_exceed_existing_snap_footprint():
+    g=_graph()
+    branch=g["edges"][2]["primitive_lineage"]["source_records"][0]
+    branch["x1"]=377.2
+    branch["x2"]=411.6
+    out=reanchor(g,tolerance_pt=2.5)
+    assert out["nodes"][1]["x"]==380.64
+    assert not out["exact_source_through_junction_anchors"]
+
+
+def test_real_full_crossing_stays_unmodified_even_if_paint_overhang_is_short():
+    g=_graph()
+    # Both independently observed opposite fragments share the same
+    # supplemental parent: genuine source crossing is not a terminal T.
+    source_id=g["edges"][2]["primitive_lineage"]["source_primitive_ids"][0]
+    extra=_edge(
+        "terminal-overhang-opposite",1,4,(381.,342.72),(379.2,342.72),
+        source_id,((379.2,342.72),(411.6,342.72)),
+    )
+    g["edges"][2]["primitive_lineage"]["source_records"][0]["x1"]=379.2
+    g["edges"][2]["primitive_lineage"]["source_records"][0]["x2"]=411.6
+    g["edges"].append(extra)
+    g["adjacency"][1].append(3)
+    g["adjacency"][4]=[3]
+    g["nodes"].append({"id":4,"x":379.2,"y":342.72,"degree":1})
+    g["nodes"][1]["degree"]=4
+    out=reanchor(g,tolerance_pt=2.5)
+    assert not out["exact_source_through_junction_anchors"]
+    assert out["nodes"][1]["x"]==380.64
