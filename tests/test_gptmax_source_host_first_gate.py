@@ -59,6 +59,7 @@ def report():
                 "physical_opening_universe_complete": False,
                 "structural_enumeration_complete": False,
                 "representative_observation_ids": ["observation-one", "observation-two"],
+                "physical_opening_record_ids": ["real-opening-1", "real-opening-2"],
                 "residual_visible_observation_ids": ["unresolved-raster-source"],
                 "conflict_observation_ids": ["conflicting-raster-source"],
             },
@@ -66,6 +67,7 @@ def report():
         "opening_bindings": [
             {
                 "page_id": "3", "opening_identity_id": "real-opening-1",
+                "representative_observation_id": "observation-one",
                 "host_wall_id": None,
                 "reason_codes": [
                     "no_authenticated_host_wall_band",
@@ -74,6 +76,7 @@ def report():
             },
             {
                 "page_id": "3", "opening_identity_id": "real-opening-2",
+                "representative_observation_id": "observation-two",
                 "host_wall_id": "real-proven-original-host",
                 "reason_codes": ["opening_host_binding_resolved"],
             },
@@ -154,6 +157,7 @@ def test_original_producer_host_status_is_never_inferred_from_missing_records():
     sample["opening_bindings"].clear()
     sample["host_frames"].clear()
     sample["semantic_inventory"]["record"]["representative_observation_ids"] = []
+    sample["semantic_inventory"]["record"]["physical_opening_record_ids"] = []
     sample["summary"] = {
         "physical_existence_claims": 0, "host_bindings": 0, "host_frames": 0
     }
@@ -282,3 +286,24 @@ def test_semantic_universe_source_mismatch_cannot_authorise_count(mutate):
     mutate(sample)
     with pytest.raises(ValueError, match="semantic"):
         source_first_gate_census(sample)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda x: x["semantic_inventory"]["record"].update(
+        representative_observation_ids=["unrelated-source-observation", "observation-two"]
+    ),
+    lambda x: x["semantic_inventory"]["record"].update(
+        physical_opening_record_ids=["real-opening-1", "invented-record"]
+    ),
+    lambda x: x["opening_bindings"][0].update(
+        representative_observation_id="unrelated-source-observation"
+    ),
+    lambda x: x["opening_bindings"][0].update(
+        opening_identity_id="invented-record"
+    ),
+])
+def test_matching_semantic_member_counts_cannot_hide_foreign_source_ids(mutate):
+    source = report()
+    mutate(source)
+    with pytest.raises(ValueError, match="semantic|foreign|duplicate"):
+        source_first_gate_census(source, expected_source_sha=SHA)
