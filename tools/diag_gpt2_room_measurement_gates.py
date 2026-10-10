@@ -163,7 +163,15 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         })
     return {
         "canonical_room_count": len(claim.canonical_rooms),
+        "canonical_room_status": str(claim.canonical_room_status),
+        "canonical_room_reason_codes": list(claim.canonical_room_reason_codes),
+        "canonical_room_source_pages": list(claim.canonical_room_source_pages),
+        "canonical_wall_status": str(claim.canonical_wall_status),
+        "canonical_wall_reason_codes": list(claim.canonical_wall_reason_codes),
+        "canonical_wall_source_pages": list(claim.canonical_wall_source_pages),
         "canonical_floor_count": len(claim.canonical_floors),
+        "canonical_floor_status": str(claim.canonical_floor_status),
+        "canonical_floor_reason_codes": list(claim.canonical_floor_reason_codes),
         "labelled_room_count": len(rows),
         "rooms": sorted(rows, key=lambda r: (r["room_label"], r["physical_room_id"])),
         "room_area_quantity_evidence_count": len(
