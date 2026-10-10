@@ -5,6 +5,7 @@ material occurrence. This helper cannot turn a material definition or
 untrusted native code into an occurrence, room-owned finish or quantity.
 """
 from __future__ import annotations
+import math
 from typing import Any
 
 def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,Any]:
@@ -22,7 +23,17 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
     # Diagnostic-only source viewport shape classification; production
     # source ownership is never granted by this diagnostic helper.
     view_token=str(getattr(getattr(viewport,"status",None),"value",getattr(viewport,"status","")) or "")
-    supported=kind=="reflected_ceiling_plan" and view_token in ("resolved","derived") and bbox is not None
+    try:
+        native_bbox=tuple(float(value) for value in bbox)
+        bbox_valid=(
+            len(native_bbox)==4
+            and all(math.isfinite(value) for value in native_bbox)
+            and native_bbox[0]<native_bbox[2]
+            and native_bbox[1]<native_bbox[3]
+        )
+    except (TypeError, ValueError, OverflowError):
+        bbox_valid=False
+    supported=kind=="reflected_ceiling_plan" and view_token in ("resolved","derived") and bbox_valid
     if kind!="reflected_ceiling_plan":
         gate="not_an_rcp_viewport"
     elif not supported:
