@@ -153,6 +153,11 @@ def audit_short_source_fragments(
         if not all(math.isfinite(x) for x in (*a,*b)):
             raise ValueError("nonfinite original split source geometry")
         length=math.dist(a,b)
+        # Individually finite original PDF coordinates can overflow
+        # Pythagorean distance. Silently skipping that fragment would make
+        # the source fragment census look complete when it cannot be measured.
+        if not math.isfinite(length):
+            raise ValueError("nonfinite original split source length")
         if not (1e-7<length<=max_length_pt):
             continue
         primitive_id = _positive_single_parent(fragment)
@@ -177,6 +182,11 @@ def audit_short_source_fragments(
         positions = [nodes[pair[0]], nodes[pair[1]]] if pair is not None else None
         displacement = (max(math.dist(a, positions[0]), math.dist(b, positions[1]))
                         if positions is not None else None)
+        # Finite individual W2 node coordinates can still overflow math.dist
+        # when they are very far apart. Observation is not licence to serialize
+        # inf as a real endpoint displacement or a recoverable source span.
+        if displacement is not None and not math.isfinite(displacement):
+            raise ValueError("nonfinite W2 endpoint displacement")
         counts[status]+=1
         out.append({
             "source_split_fragment_id":fid,
