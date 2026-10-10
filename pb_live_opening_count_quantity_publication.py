@@ -84,6 +84,19 @@ def publish_live_authenticated_opening_count_quantities(
     if not scope_id:
         return ()
 
+    # The producer's representative universe must not silently lose blank
+    # members or duplicate source observations when later keyed by identity.
+    representatives = tuple(
+        str(value or "").strip()
+        for value in semantic_record.representative_observation_ids
+    )
+    if (
+        not representatives
+        or any(not value for value in representatives)
+        or len(set(representatives)) != len(representatives)
+    ):
+        return ()
+
     binding_producer = (
         ScheduleOpeningInstanceBindingProducer.from_source_visibility_producer(
             source_visibility_producer
