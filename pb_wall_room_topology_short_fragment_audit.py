@@ -47,12 +47,12 @@ def audit_short_source_fragments(
     merged_graph: Mapping[str, Any],
     *,
     max_length_pt: float,
+    producer_reported_collapsed_fragments: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Account for each *positive-source* short split fragment exactly once.
 
-    "SNAP_COLLAPSED" means W2's two endpoints snapped onto one topological
-    node; it is not evidence of a missing physical wall or permission to
-    extend geometry. "COLLINEAR_MERGED" means the original split-edge id is
+    "PRODUCER_REPORTED_EDGE_ABSENT" means the W2 producer reported an
+    absent edge, not that endpoint collapse has been independently proven. "COLLINEAR_MERGED" means the original split-edge id is
     retained in the later edge's leaf ancestry, not that its raw length was
     metrically preserved. A displacement is observational only.
     """
@@ -62,6 +62,13 @@ def audit_short_source_fragments(
         raise ValueError("invalid observational source fragment length")
     if not isinstance(split_fragments,(tuple,list)):
         raise ValueError("source split inventory must be a sequence")
+    if not isinstance(producer_reported_collapsed_fragments, (tuple, list)):
+        raise ValueError("invalid producer disappearance ledger")
+    reported = set()
+    for row in producer_reported_collapsed_fragments:
+        if not isinstance(row, Mapping) or not isinstance(row.get("id"), str) or not row["id"] or row["id"] in reported:
+            raise ValueError("invalid or duplicated producer disappearance receipt")
+        reported.add(row["id"])
     nodes = {n["id"]:n for n in snapped_graph["nodes"]}
     snapped_edges = {e["id"]:e for e in snapped_graph["edges"]}
     merged_edges = merged_graph["edges"]
@@ -106,10 +113,11 @@ def audit_short_source_fragments(
             continue
         edge=snapped_edges.get(fid)
         if edge is None:
-            status="SNAP_COLLAPSED"
+            status=("PRODUCER_REPORTED_EDGE_ABSENT" if fid in reported
+                    else "EDGE_ABSENT_UNRESOLVED")
             displacement=None
             if fid in final_leaf_ids:
-                raise ValueError("collapsed W2 fragment appears in final merge ancestry")
+                raise ValueError("absent W2 fragment appears in final merge ancestry")
         else:
             if fid in direct_ids:
                 status="RETAINED_RAW_EDGE"
