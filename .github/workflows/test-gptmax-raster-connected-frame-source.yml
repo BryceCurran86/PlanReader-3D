@@ -69,8 +69,8 @@ jobs:
         run: |
           # Compare against the exact current PR base; archive past source regressions separately.
           git worktree add /tmp/gptmax-original-lot16-prerequisite ${{ github.event.pull_request.base.sha }}
-          REPORTER="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
-          (cd /tmp/gptmax-original-lot16-prerequisite && PYTHONPATH=. python -u "$REPORTER" \
+          # Execute the diagnostic from the checked-out base, not from the PR head.
+          (cd /tmp/gptmax-original-lot16-prerequisite && PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
             --page-id 3 --output "$GITHUB_WORKSPACE/lot16-connected-frame-prerequisite.json")
       - name: Verify exact source ownership and safety cap
