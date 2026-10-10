@@ -779,3 +779,32 @@ def test_canonical_composite_unknown_or_competing_cell_abstains():
     remaining, published = _canonical_composite_supersedence(originals, ())
     assert remaining == originals
     assert published == ()
+
+
+def test_canonical_composite_abstains_when_original_face_identity_is_duplicated():
+    from types import SimpleNamespace
+    from pb_live_canonical_room_composition import _canonical_composite_supersedence
+
+    # A duplicate physical SourceRoomFace identity cannot be retired twice by
+    # one composite witness, even when the composite lists each ID once.
+    originals = (
+        SimpleNamespace(face_id="a", record_id="a1"),
+        SimpleNamespace(face_id="a", record_id="a2"),
+        SimpleNamespace(face_id="b", record_id="b1"),
+    )
+    composite = SimpleNamespace(
+        record_id="candidate",
+        constituent_face_ids=("a", "b"),
+    )
+    remaining, accepted = _canonical_composite_supersedence(originals, (composite,))
+    assert remaining == originals
+    assert accepted == ()
+
+    # A separate unique face can still be composed independently.
+    independent = SimpleNamespace(record_id="independent",
+                                  constituent_face_ids=("b",))
+    remaining, accepted = _canonical_composite_supersedence(
+        originals, (independent,)
+    )
+    assert accepted == (independent,)
+    assert tuple(v.record_id for v in remaining) == ("a1", "a2")
