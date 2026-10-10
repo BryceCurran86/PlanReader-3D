@@ -94,6 +94,8 @@ jobs:
               "status": "diagnostic_only_no_new_viewport_authority",
           }, sort_keys=True, default=str))
           PY
+      - name: Audit competing plan-frame differential source strips
+        run: PYTHONPATH=. python -u tools/diag_gpt2_page7_frame_border_strip.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
