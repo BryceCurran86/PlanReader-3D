@@ -151,3 +151,36 @@ def test_missing_duplicate_or_foreign_runtime_association_fails_closed_and_resto
     assert diagnostic.wall_authority.build_wall_graph_for_viewport is build
     assert diagnostic.wall_authority.collect_physical_wall_identities is collect
     assert os.environ["GPTMAX_W2_SHORT_SOURCE_AUDIT"] == "prior-value"
+
+
+def test_identical_repeated_producer_candidate_is_one_observational_identity():
+    """Exact repeated rows cannot create a second preview or production identity."""
+    walls = [Wall(), Wall()]
+    identities = {"wall_alpha": Identity()}
+    graph = {"edges": [{
+        "id": "edge_surviving", "x1": 0., "y1": 0., "x2": 10., "y2": 0.,
+        diagnostic.wall_authority.LINEAGE_KEY: {
+            "source_primitive_ids": ["source_positive"],
+        },
+    }]}
+    before = deepcopy((walls, identities, graph))
+    unique = diagnostic._records_from_original_call(walls[:1], identities, graph)
+    observed = diagnostic._records_from_original_call(walls, identities, graph)
+    assert observed == unique
+    assert len(observed) == 1
+    assert (walls, identities, graph) == before
+
+
+def test_conflicting_duplicate_producer_candidate_fails_closed():
+    walls = [Wall(), Wall(candidate_id="wall_alpha", viewport_id="foreign-scope")]
+    before = deepcopy(walls)
+    with pytest.raises(RuntimeError, match="conflicting duplicate"):
+        diagnostic._records_from_original_call(
+            walls, {"wall_alpha": Identity()}, {"edges": []})
+    assert walls == before
+
+
+def test_foreign_or_missing_identity_not_silently_reconciled():
+    with pytest.raises(RuntimeError, match="foreign or missing"):
+        diagnostic._records_from_original_call(
+            [Wall()], {"wall_beta": Identity()}, {"edges": []})
