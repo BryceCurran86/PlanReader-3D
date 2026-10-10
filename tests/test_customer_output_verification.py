@@ -344,3 +344,27 @@ def test_source_reference_extra_nonidentity_estimator_note_is_allowed() -> None:
     annotated["source_reference"] += "; estimator note: checked"
     report = verify_sealed_customer_output(sealed, [annotated, rows[1]])
     assert report.verified_quantity_ids == ("qty-1", "qty-2")
+
+
+def test_live_pb_auto_geometry_caption_preserves_exact_machine_source_identity() -> None:
+    sealed, rows = sealed_and_rows()
+    customer_rows = [dict(row) for row in rows]
+    customer_rows[0]["source_reference"] = (
+        "PB Auto Geometry v1.2.19 · " + customer_rows[0]["source_reference"]
+    )
+    assert verify_sealed_customer_output(sealed, customer_rows).verified_quantity_ids == (
+        "qty-1", "qty-2",
+    )
+
+
+def test_live_caption_cannot_hide_suffix_forged_quantity_id() -> None:
+    sealed, rows = sealed_and_rows()
+    customer_rows = [dict(row) for row in rows]
+    original = customer_rows[0]["source_reference"]
+    assert original.startswith("QuantityEvidence qty-1;")
+    customer_rows[0]["source_reference"] = (
+        "PB Auto Geometry v1.2.19 · "
+        + original.replace("QuantityEvidence qty-1;", "QuantityEvidence qty-1-foreign;", 1)
+    )
+    with pytest.raises(CustomerOutputVerificationError, match="source_reference lineage is incomplete"):
+        verify_sealed_customer_output(sealed, customer_rows)
