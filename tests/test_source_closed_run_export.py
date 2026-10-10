@@ -579,3 +579,63 @@ def test_sealed_loader_rejects_nonfinite_numeric_receipts_before_hashing(
         export.SourceClosedRunConflictError, match="non-finite"
     ):
         export.sealed_source_closed_run_from_dict(tampered)
+
+
+@pytest.mark.parametrize("lineage_field", (
+    "object_identity_refs", "trace_canonical_entity_ids",
+    "evidence_ids", "trace_evidence_ids", "blocking_reasons",
+    "reason_codes", "lineage_reason_codes",
+))
+def test_sealed_loader_rejects_mapping_in_place_of_signed_lineage_array(
+    lineage_field: str,
+) -> None:
+    sealed = export.seal_source_closed_run(
+        (quantity(),), project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    changed = sealed.to_dict()
+    signed_row = changed["quantities"][0]
+    originally_signed = signed_row["fingerprint"]
+    original_ids = signed_row[lineage_field]
+    assert isinstance(original_ids, list)
+    # Iterating a mapping's keys yields precisely the original signed IDs,
+    # even for an empty array. The old loader accepted the forged wire shape.
+    signed_row[lineage_field] = {value: None for value in original_ids}
+    assert signed_row["fingerprint"] == originally_signed
+    with pytest.raises(
+        export.SourceClosedRunConflictError, match="non-array lineage"
+    ):
+        export.sealed_source_closed_run_from_dict(changed)
+
+
+@pytest.mark.parametrize("envelope_field", ("source_sha256s", "revision_ids"))
+def test_sealed_loader_rejects_mapping_in_signed_source_envelope(
+    envelope_field: str,
+) -> None:
+    sealed = export.seal_source_closed_run(
+        (quantity(),), project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    changed = sealed.to_dict()
+    original_values = changed[envelope_field]
+    assert isinstance(original_values, list)
+    changed[envelope_field] = {value: "untrusted" for value in original_values}
+    with pytest.raises(
+        export.SourceClosedRunConflictError, match="array of strings"
+    ):
+        export.sealed_source_closed_run_from_dict(changed)
+
+
+def test_original_producer_lineage_arrays_still_verify_byte_identity() -> None:
+    sealed = export.seal_source_closed_run(
+        (quantity(),), project_id="project-a",
+        traces_by_quantity_id={"qty-1": trace()},
+    )
+    encoded = sealed.to_dict()
+    for field in (
+        "object_identity_refs", "trace_canonical_entity_ids",
+        "evidence_ids", "trace_evidence_ids", "blocking_reasons",
+        "reason_codes", "lineage_reason_codes",
+    ):
+        assert type(encoded["quantities"][0][field]) is list
+    assert export.sealed_source_closed_run_from_dict(encoded).fingerprint == sealed.fingerprint
