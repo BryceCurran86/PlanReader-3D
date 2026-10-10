@@ -1,0 +1,298 @@
+name: DIAG GPT2 Page7 Physical Room Figured Witness Candidates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_viewport_segmentation.py"
+      - ".github/workflows/diag-gpt2-page7-room-figured-witnesses.yml"
+  workflow_dispatch:
+
+jobs:
+  source-face-physical-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Install OCR engine for real-source text evidence
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Prove source-owned floor plan wall and room faces
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-page7-physical-faces
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-page7-physical-faces/source_ledger.json
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_room_label_authority import (
+              SourceRoomLabelProducer, SourceRoomLabelSelector,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+          )
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          document=fitz.open(stream=payload,filetype="pdf")
+          assert document.page_count==31
+          page=document.load_page(6)
+          viewports=segment_page_viewports(page,page_number=7)
+          assert validate_non_overlapping_viewports(viewports)
+          floor=[v for v in viewports if v.view_type==DrawingViewType.FLOOR_PLAN.value]
+          assert len(floor)==1 and floor[0].status=="resolved" and floor[0].bounding_box
+          document.close()
+
+          producer=SourceVisibilityProducer(
+              producer_method="gpt2-page7-source-face-after-frame",
+              producer_version="1",
+          )
+          published=producer.ingest_native_pdf_bytes(
+              document_id="gpt2-page7-face-after-frame-source",
+              source_bytes=payload,
+              source_locator="memory://gpt2-page7-face-after-frame.pdf",
+              page_ids=("7",),
+          )
+          assert published.revision.source_sha256==sha
+          producer.augment_with_raster_opening_primitives(
+              published.revision.revision_id,page_ids=("7",)
+          )
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              producer,page_ids=("7",)
+          )
+          wall_authority=wall_producer.authority()
+          live=producer.published_snapshot_for_revision(published.revision.revision_id)
+          assert live is not None and live.revision.source_sha256==sha
+          selectors=wall_authority.selectors_for_authenticated_viewports(
+              document_id=live.revision.document_id,
+              revision_id=live.revision.revision_id,
+              source_sha256=live.revision.source_sha256,
+              snapshot_id=live.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          scopes=[]
+          for selector in selectors:
+              walls=wall_authority.resolve_scope(selector)
+              rooms=build_source_room_face_authority(wall_authority)
+              face_scope=rooms.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              scopes.append({
+                  "decision_scope_id":selector.decision_scope_id,
+                  "wall_scope_status":str(walls.status),
+                  "wall_scope_complete":bool(walls.scope_complete),
+                  "wall_candidate_count":len(walls.records),
+                  "wall_reason_codes":list(walls.reason_codes),
+                  "boundary_evaluation_status":str(getattr(
+                      getattr(walls,"boundary_evaluation",None),"status",None)),
+                  "boundary_tainted_wall_ids":list(getattr(
+                      getattr(walls,"boundary_evaluation",None),
+                      "boundary_tainted_wall_candidate_ids",()) or ())[:30],
+                  "room_status":str(face_scope.status),
+                  "room_scope_complete":bool(face_scope.scope_complete),
+                  "room_universe_complete":bool(face_scope.face_universe_complete),
+                  "room_reason_codes":list(face_scope.reason_codes),
+                  "physical_source_face_count":len(face_scope.records),
+                  "physical_source_face_examples":[{
+                      "source_face_record_id":r.record_id,
+                      "face_id":r.face_id,
+                      "native_page":r.page_id,
+                      "decision_scope":r.decision_scope_id,
+                      "source_wall_ids":list(r.bounding_wall_ids),
+                      "area_pdf_points_squared_NOT_metric":r.area_page_pts2,
+                  } for r in face_scope.records[:30]],
+              })
+          result={
+              "source_sha256":sha,
+              "source_page":7,
+              "authenticated_floor_viewport":floor[0].view_id,
+              "native_floor_viewport_bbox":floor[0].bounding_box,
+              "viewport_scope_selector_count":len(selectors),
+              "scopes":scopes,
+              "metric_room_area_claims":0,
+              "finish_occurrence_claims":0,
+              "benchmark_score_claims":0,
+          }
+          print("GPT2_PAGE7_ROOM_LABEL_SOURCE_FACES",json.dumps(result,sort_keys=True,default=str))
+          assert selectors, "floor viewport did not reach producer owned wall scopes"
+          assert any(x["physical_source_face_count"]>0 for x in scopes), (
+              "Source-owned room faces not recovered despite resolved floor-plan viewport"
+          )
+          # The label producer is independent of PDF word proximity.
+          # It authenticates exact text receipts and physical face ownership.
+          face_authority=build_source_room_face_authority(wall_authority)
+          label_producer=SourceRoomLabelProducer.from_authorities(
+              producer,face_authority,page_ids=("7",)
+          )
+          label_authority=label_producer.authority()
+          scoped_labels=[]
+          for selector in selectors:
+              selected=SourceRoomLabelSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              )
+              output=label_authority.resolve_scope(selected)
+              rows=[]
+              for record in output.records:
+                  assert record.source_sha256==sha
+                  assert record.page_id=="7"
+                  assert record.decision_scope_id==selector.decision_scope_id
+                  assert record.source_room_face_record_id
+                  assert record.face_id
+                  assert record.observation_ids and record.word_evidence
+                  rows.append({
+                      "room_label":record.label,
+                      "source_face_id":record.face_id,
+                      "source_room_face_record_id":record.source_room_face_record_id,
+                      "source_label_record_id":record.record_id,
+                      "source_label_observation_ids":list(record.observation_ids),
+                      "word_authorities":[
+                          {"text":word.trusted_text,
+                           "authority_kind":word.authority_kind,
+                           "authority_record_id":word.authority_record_id}
+                          for word in record.word_evidence
+                      ],
+                  })
+              scoped_labels.append({
+                  "scope_id":selector.decision_scope_id,
+                  "status":str(output.status),
+                  "first_reasons":list(output.reason_codes),
+                  "source_owned_label_count":len(rows),
+                  "records":rows,
+              })
+          report={
+              "source_sha256":sha,
+              "source_page":7,
+              "floor_plan_viewport":floor[0].view_id,
+              "source_physical_face_counts":[s["physical_source_face_count"] for s in scopes],
+              "source_room_labels":scoped_labels,
+              "metric_quantity_claims":0,
+              "material_finish_claims":0,
+          }
+          print("GPT2_PAGE7_ROOM_LABEL_OWNERSHIP",json.dumps(report,sort_keys=True,default=str))
+
+          # Source-native figured-dimension geometry must be *independently*
+          # authenticated. Spatially enclosed text candidates alone do not
+          # bind a dimension's witness endpoints to room walls.
+          from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+          source_pdf=fitz.open(stream=payload,filetype="pdf")
+          try:
+              dimension_bundle=extract_dimension_evidence_bundle(
+                  source_pdf.load_page(6),page_num=7,
+                  view_id=floor[0].view_id,
+                  view_type=DrawingViewType.FLOOR_PLAN.value,
+              )
+          finally:
+              source_pdf.close()
+          obs_by_id={o.dimension_id:o for o in dimension_bundle.observations}
+          bindings_by_obs={}
+          for binding in dimension_bundle.bindings:
+              bindings_by_obs.setdefault(binding.observation_id,[]).append(binding)
+
+          def source_point_inside_polygon(x,y,vertices):
+              # The test is for candidate spatial overlap only; it never
+              # creates or resolves a figured room measurement.
+              inside=False
+              for i in range(len(vertices)):
+                  ax,ay=map(float,vertices[i-1])
+                  bx,by=map(float,vertices[i])
+                  if ((ay>y)!=(by>y)) and x < (bx-ax)*(y-ay)/(by-ay)+ax:
+                      inside=not inside
+              return inside
+
+          candidate_rooms=[]
+          for selector,scope in zip(selectors,scopes):
+              face_scope=face_authority.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              by_face_record={r.record_id:r for r in face_scope.records}
+              label_scope=next(
+                  (s for s in scoped_labels if s["scope_id"]==selector.decision_scope_id),
+                  None
+              )
+              for label in (label_scope or {}).get("records",()):
+                  face=by_face_record.get(label["source_room_face_record_id"])
+                  assert face is not None, "published room label lacks source face"
+                  assert face.face_id==label["source_face_id"]
+                  polygon=tuple(face.polygon_pdf_pts)
+                  candidates=[]
+                  for observation in dimension_bundle.observations:
+                      bx0,by0,bx1,by1=map(float,observation.bbox)
+                      x,y=(bx0+bx1)*0.5,(by0+by1)*0.5
+                      if not source_point_inside_polygon(x,y,polygon):
+                          continue
+                      witnesses=bindings_by_obs.get(observation.dimension_id,())
+                      candidates.append({
+                          "dimension_observation_id":observation.dimension_id,
+                          "native_text":observation.raw_text,
+                          "typed_value":observation.value,
+                          "source_unit":observation.unit,
+                          "native_bbox_pdf_points":observation.bbox,
+                          "witness_binding_states":[str(b.status) for b in witnesses],
+                          "source_witness_ids":[list(b.witness_line_ids) for b in witnesses],
+                          "first_missing_authority":"room_wall_dimension_endpoint_owner_unproven",
+                      })
+                  candidate_rooms.append({
+                      "label":label["room_label"],
+                      "source_face_record_id":face.record_id,
+                      "source_face_id":face.face_id,
+                      "source_label_record_id":label["source_label_record_id"],
+                      "face_area_pdf_points_squared_not_metric":face.area_page_pts2,
+                      "spatial_dimension_candidates":candidates,
+                      "room_owned_orthogonal_figured_pairs":0,
+                      "metric_area_proven":False,
+                      "first_authority":"source_wall_to_figured_witness_pair_binding_unproven",
+                  })
+          print("GPT2_PAGE7_ROOM_FIGURED_WITNESS_CANDIDATES",json.dumps({
+              "source_sha256":sha,
+              "source_page":7,
+              "source_plan_viewport":floor[0].view_id,
+              "native_typed_dimension_candidates":len(dimension_bundle.observations),
+              "native_witness_bindings":len(dimension_bundle.bindings),
+              "rooms":candidate_rooms,
+              "published_metric_area_count":0,
+              "full_room_candidate_universe_complete":False,
+              "status":"CANDIDATE_ONLY_NO_DIMENSION_OWNERSHIP",
+          },sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-page7-figured-witness-spatial-first-gates
+          path: artifacts/gpt2-page7-physical-faces
+          retention-days: 7
