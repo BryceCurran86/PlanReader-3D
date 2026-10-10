@@ -338,6 +338,16 @@ def _verify_row_lineage(
     reference_parts = tuple(
         part.strip() for part in source_reference.split(";") if part.strip()
     )
+    # Existing live PB Auto Geometry customer rows prepend a human-readable
+    # producer caption to the *first* machine token using the middle-dot
+    # delimiter. Preserve that one known envelope while still requiring the
+    # actual QuantityEvidence ID as one complete terminal token, not a prefix.
+    # Never strip or normalize the document/SHA/viewport/revision tokens.
+    if reference_parts and " · " in reference_parts[0]:
+        reference_parts = (
+            reference_parts[0].rsplit(" · ", 1)[-1].strip(),
+            *reference_parts[1:],
+        )
     missing_reference_parts = [
         part for part in required_reference_parts if part not in reference_parts
     ]
