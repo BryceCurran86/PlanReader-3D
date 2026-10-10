@@ -116,6 +116,19 @@ def _finite_pdf_point(point):
         return False
 
 
+def _finite_pdf_source_edge(geometry):
+    if not isinstance(geometry,list) or len(geometry)!=4:
+        return False
+    try:
+        if any(type(v) not in (int,float) or not math.isfinite(v)
+               for v in geometry):
+            return False
+        return math.hypot(geometry[2]-geometry[0],
+                          geometry[3]-geometry[1])>0
+    except (TypeError,ValueError,OverflowError):
+        return False
+
+
 def _finite_pdf_path(points):
     return (isinstance(points,(tuple,list)) and len(points)>=2
             and all(_finite_pdf_point(point) for point in points))
@@ -149,9 +162,7 @@ def _positive_candidate_signature(r):
             return None
         geometry=fragment.get("geometry")
         parents=fragment.get("source_primitive_ids")
-        if (not isinstance(geometry,list) or len(geometry)!=4
-                or any(type(v) not in (int,float) or not math.isfinite(v)
-                       for v in geometry)
+        if (not _finite_pdf_source_edge(geometry)
                 or not isinstance(parents,list) or not parents
                 or any(not isinstance(v,str) or v not in primitive_ids
                        for v in parents)):
