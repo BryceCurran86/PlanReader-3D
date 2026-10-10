@@ -319,6 +319,9 @@ def test_external_wall_rejects_void_from_different_source_document_or_snapshot()
         ("document_id", "other-document"),
         ("source_sha256", "f" * 64),
         ("snapshot_id", "other-snapshot"),
+        ("revision_id", "foreign-revision"),
+        ("page_id", "foreign-page"),
+        ("decision_scope_id", "foreign-scope"),
     ):
         forged = replace(original, **{field: value})
         authority = PhysicalOpeningVoidAuthority(
