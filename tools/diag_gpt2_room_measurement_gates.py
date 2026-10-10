@@ -72,6 +72,19 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
                 if upstream:
                     published_room_by_source.setdefault(upstream, []).append(published)
 
+    customer_handoff = {
+        "published_floor_area_quantity_ids": [],
+        "sealed_floor_area_quantity_ids": [],
+        "customer_verified_floor_area_quantity_ids": [],
+        "customer_review_row_count": 0,
+        "customer_projection_failure_type": None,
+    }
+    if type(claim) is LivePhysicalNetWallClaim:
+        from tools.diag_gpt3_maryborough_floor_customer_gate import (
+            inspect_floor_customer_handoff,
+        )
+        customer_handoff = inspect_floor_customer_handoff(claim)
+
     traces = {
         "same_view": _reason_map(
             claim.same_view_room_area_first_failure_codes
@@ -174,7 +187,18 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         else:
             # Source-owned FIRM canonical reissue is NOT yet a verified sealed
             # customer export, completeness claim, or frozen V2 score.
-            gate = "SEALED_CUSTOMER_PROJECTION_UNVERIFIED"
+            floor_id = floor_reissues[0].quantity_id
+            if (
+                floor_id in customer_handoff["sealed_floor_area_quantity_ids"]
+                and floor_id in customer_handoff[
+                    "customer_verified_floor_area_quantity_ids"
+                ]
+            ):
+                # An authenticated source-sealed draft is still unreviewed,
+                # and this never claims an official frozen V2 score.
+                gate = "CUSTOMER_REVIEW_ROW_VERIFIED_UNSCORED"
+            else:
+                gate = "SEALED_CUSTOMER_PROJECTION_UNVERIFIED"
         rows.append({
             "room_label": _clean(room.room_label),
             "physical_room_id": physical_id,
@@ -202,6 +226,14 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
             ),
             "canonical_room_area_reissued_quantity_id": (
                 room_reissues[0].quantity_id if len(room_reissues) == 1 else None
+            ),
+            "floor_area_source_sealed": (
+                len(floor_reissues) == 1 and floor_reissues[0].quantity_id
+                in customer_handoff["sealed_floor_area_quantity_ids"]
+            ),
+            "floor_area_customer_row_verified": (
+                len(floor_reissues) == 1 and floor_reissues[0].quantity_id
+                in customer_handoff["customer_verified_floor_area_quantity_ids"]
             ),
             "commercial_quantity_authority_flag": bool(
                 getattr(floor, "commercial_quantity_authority", False)
@@ -242,6 +274,17 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         "reissued_canonical_room_area_quantity_count": sum(
             len(value) for value in published_room_by_source.values()
         ),
+        "source_closed_floor_seal_quantity_count": len(
+            customer_handoff["sealed_floor_area_quantity_ids"]
+        ),
+        "verified_floor_customer_row_count": customer_handoff[
+            "customer_review_row_count"
+        ],
+        "floor_customer_projection_failure_type": customer_handoff[
+            "customer_projection_failure_type"
+        ],
+        "commercial_estimator_approved": False,
+        "benchmark_accuracy": None,
         "floor_finish_quantity_evidence_count": len(
             claim.floor_finish_quantity_evidence
         ),
