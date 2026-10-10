@@ -140,3 +140,32 @@ def test_rcp_missing_or_mixed_viewport_provenance_does_not_count_as_authentic():
         assert row["first_unclosed_gate"]=="producer_occurrence_viewport_lineage_mismatch"
         assert row["producer_authenticated_record_ids"]==[]
         assert row["new_metric_quantity_claim"] is False
+
+
+def test_source_page_ownership_prevents_rcp_occurrence_cross_sheet_attribution():
+    from pb_migration_contracts import EvidenceResolutionStatus
+    viewport=R(
+        view_id="view_p9_5", view_type="reflected_ceiling_plan",
+        status="derived", bounding_box=(1,2,9,20), page_number=9,
+    )
+    wrong_sheet=R(record_id="record-p10",code="FPB",
+                  viewport_id="view_p9_5",page_id="10")
+    wrong=gate(viewport,scope(
+        complete=True, records=(wrong_sheet,),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    ))
+    assert wrong["first_unclosed_gate"]=="producer_occurrence_source_page_mismatch"
+    assert wrong["producer_authenticated_record_ids"]==[]
+    same_sheet=R(record_id="record-p9",code="FPB",
+                 viewport_id="view_p9_5",page_id="9")
+    right=gate(viewport,scope(
+        complete=True,records=(same_sheet,),
+        status=EvidenceResolutionStatus.CORROBORATED,
+    ))
+    assert right["first_unclosed_gate"]=="producer_authenticated_occurrences_require_room_owner_before_quantity"
+    assert right["producer_authenticated_record_ids"]==["record-p9"]
+    assert right["new_metric_quantity_claim"] is False
+    missing_page=R(record_id="record-no-page",code="FPB",viewport_id="view_p9_5")
+    assert gate(viewport,scope(complete=True,records=(missing_page,)))[
+        "producer_authenticated_record_ids"
+    ] == []
