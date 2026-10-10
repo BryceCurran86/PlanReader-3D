@@ -12,7 +12,11 @@ on:
 jobs:
   real-source-room-first-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Original SHA-verified B03 production needed ~41 minutes before the
+    # customer/sealing stage was added. A 45-minute cap cancelled the prior
+    # genuine source run without recording a source result; allow bounded
+    # headroom for full original-source + customer parity checks.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
