@@ -271,3 +271,66 @@ def test_identically_corrupted_source_edges_are_never_unchanged_source(corruptio
         "W4_POSITIVE_SOURCE_PROOF_UNAVAILABLE"
     ]
     assert not result["official_host_receipt_identity_acceptance"]
+
+
+@pytest.mark.parametrize("damage", [
+    "nonfinite_path","overflow_path","boolean_path","malformed_path",
+    "nonfinite_wall_centerline","foreign_wall_centerline",
+])
+def test_identically_invalid_positive_w4_paths_cannot_certify_snapshot_only_rekey(damage):
+    a,b=rekey()
+    for source in (a,b):
+        record=source["source_owned_wall_scope_results"][0]["records"][0]
+        if damage=="nonfinite_path":
+            record["physical_identity"]["path_fingerprint"][0][0]=float("nan")
+        elif damage=="overflow_path":
+            record["physical_identity"]["path_fingerprint"][0][0]=10**1000
+        elif damage=="boolean_path":
+            record["physical_identity"]["path_fingerprint"][0][0]=True
+        elif damage=="malformed_path":
+            record["physical_identity"]["path_fingerprint"]=[[10.],[70.,10.]]
+        elif damage=="nonfinite_wall_centerline":
+            record["wall_candidate"]["centerline_pts"][0][0]=float("inf")
+        else:
+            record["wall_candidate"]["centerline_pts"]=[[10.,10.],["wrong",10.]]
+    output=compare_source_host_rekeys(a,b)
+    assert output["rekey_classification_counts"]=={
+        "ORIGINAL_SOURCE_PROOF_CHANGED_OR_LOST":1
+    }
+    assert "W4_POSITIVE_SOURCE_PROOF_UNAVAILABLE" in output["source_comparison_rows"][0]["reason_codes"]
+    assert output["official_host_receipt_identity_acceptance"] is False
+
+
+@pytest.mark.parametrize("damage", [
+    "nonfinite_origin","nonfinite_axis","nonfinite_normal","nonfinite_length",
+    "zero_length","overflow_length","missing_wall_candidates",
+    "nonnumeric_thickness","nonfinite_u_span",
+])
+def test_identically_invalid_source_frames_cannot_certify_snapshot_only_rekey(damage):
+    a,b=rekey()
+    for source in (a,b):
+        frame=source["resolved_host_frame_evidence"][0]
+        if damage=="nonfinite_origin":
+            frame["origin_pt"][0]=float("nan")
+        elif damage=="nonfinite_axis":
+            frame["axis_unit"][0]=float("inf")
+        elif damage=="nonfinite_normal":
+            frame["normal_unit"][0]=float("nan")
+        elif damage=="nonfinite_length":
+            frame["whole_wall_length_pt"]=float("inf")
+        elif damage=="zero_length":
+            frame["whole_wall_length_pt"]=0
+        elif damage=="overflow_length":
+            frame["whole_wall_length_pt"]=10**1000
+        elif damage=="missing_wall_candidates":
+            frame["whole_wall_candidate_ids"]=[]
+        elif damage=="nonnumeric_thickness":
+            frame["wall_thickness_pt"]="four"
+        else:
+            frame["u0_pt"]=float("nan")
+    output=compare_source_host_rekeys(a,b)
+    assert output["rekey_classification_counts"]=={
+        "ORIGINAL_SOURCE_PROOF_CHANGED_OR_LOST":1
+    }
+    assert "FRAME_SOURCE_GEOMETRY_UNAVAILABLE" in output["source_comparison_rows"][0]["reason_codes"]
+    assert output["official_host_receipt_identity_acceptance"] is False
