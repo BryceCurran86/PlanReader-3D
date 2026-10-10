@@ -326,3 +326,4 @@ def test_blank_source_opening_binding_never_disappears_from_coverage(missing_ide
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE in result.reason_codes
     assert result.quantity_evidence is None
+    assert result.canonical_walls == ()
