@@ -301,3 +301,77 @@ def test_physical_publication_has_no_trade_policy_or_quantity_truth_inputs() -> 
         "quantity",
     }
     assert not (parameters & forbidden)
+
+def test_external_wall_rejects_foreign_opening_universe_provenance():
+    """Complete means complete for this exact source and wall decision scope."""
+    from dataclasses import replace
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
+    )
+
+    wall_opening, physical_void, gross, roles, _void, _gross = _chain()
+    page_id = gross.traces[0].page_id
+    original = wall_opening.opening_universe_results[page_id]
+    assert original.record is not None
+
+    for changes in (
+        {"document_id": "foreign-document"},
+        {"source_sha256": "f" * 64},
+        {"snapshot_id": "foreign-snapshot"},
+        {"revision_id": "foreign-revision"},
+        {"decision_scope_id": "foreign-decision"},
+        {"page_ids": ("unrelated-page",)},
+    ):
+        forged = replace(original, record=replace(original.record, **changes))
+        altered = replace(
+            wall_opening,
+            opening_universe_results=MappingProxyType({
+                **wall_opening.opening_universe_results, page_id: forged
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=altered,
+            physical_void_composition=physical_void,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH in result.reason_codes
+        assert result.quantity_evidence is None
+        assert result.canonical_walls == ()
+
+def test_external_wall_requires_full_universe_result_completeness():
+    """A complete-looking record cannot override unresolved producer verdicts."""
+    from dataclasses import replace
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+    )
+
+    wall_opening, physical_void, gross, roles, _void, _gross = _chain()
+    page_id = gross.traces[0].page_id
+    original = wall_opening.opening_universe_results[page_id]
+    assert original.record is not None
+    for field in (
+        "decision_scope_complete",
+        "source_decode_complete",
+        "semantic_enumeration_complete",
+    ):
+        altered_result = replace(original, **{field: False})
+        altered_composition = replace(
+            wall_opening,
+            opening_universe_results=MappingProxyType({
+                **wall_opening.opening_universe_results,
+                page_id: altered_result,
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=altered_composition,
+            physical_void_composition=physical_void,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE in result.reason_codes
+        assert result.quantity_evidence is None
+        assert result.opening_universe_record_ids == ()
+        assert result.physical_void_record_ids == ()

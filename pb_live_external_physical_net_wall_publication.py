@@ -511,12 +511,34 @@ def compose_live_external_physical_net_wall_publication(
             or universe is None
             or universe.status is not EvidenceResolutionStatus.CORROBORATED
             or universe.record is None
+            or universe.decision_scope_complete is not True
+            or universe.source_decode_complete is not True
+            or universe.semantic_enumeration_complete is not True
             or not universe.record.decision_scope_complete
         ):
             return _blocked(
                 revision_id=revision_id,
                 status=EvidenceResolutionStatus.ABSTAINED,
                 reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+            )
+
+        # A complete universe from another PDF, snapshot or decision scope
+        # cannot certify the openings on this wall.
+        universe_record = universe.record
+        if (
+            _clean(universe_record.document_id) != _clean(gross_selector.document_id)
+            or _clean(universe_record.revision_id) != _clean(gross_selector.revision_id)
+            or _clean(universe_record.source_sha256) != _clean(gross_selector.source_sha256)
+            or _clean(universe_record.snapshot_id) != _clean(gross_selector.snapshot_id)
+            or _clean(universe_record.decision_scope_id) != _clean(gross_selector.decision_scope_id)
+            or _clean(trace.page_id) not in {
+                _clean(page) for page in universe_record.page_ids
+            }
+        ):
+            return _blocked(
+                revision_id=revision_id,
+                status=EvidenceResolutionStatus.CONFLICT,
+                reason=LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
             )
 
         gross_result = gross_authority.resolve(gross_selector)
