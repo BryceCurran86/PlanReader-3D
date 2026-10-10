@@ -714,3 +714,65 @@ def test_source_grid_union_rejects_overlapping_face_interiors():
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.records == ()
+
+
+def test_source_endpoint_sweep_preserves_overlapping_same_face_multiplicity():
+    """A sweep must not collapse duplicate overlaps into a fake two-sided owner."""
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts,
+    )
+
+    scope = _room_scope()
+    left, right = scope.records
+    right_edges = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            right_edges.extend((
+                (wall, ((10.0, 0.0), (10.0, 6.0))),
+                (wall, ((10.0, 4.0), (10.0, 10.0))),
+            ))
+        else:
+            right_edges.append((wall, edge))
+    modified = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(right_edges)),
+    ))
+    noded = _atomic_source_wall_edge_counts(modified, {"w_sep"})
+    shared = noded[("w_sep", ((10.0, 4.0), (10.0, 6.0)))]
+    assert shared["face_left"] == 1
+    assert shared["face_right"] == 2
+    result = compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=modified,
+        label_scope=_label_scope(),
+    )
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+
+
+def test_source_endpoint_sweep_preserves_adjacent_same_face_segments():
+    """An end and start at the same authentic cut keep one face owner."""
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts,
+    )
+
+    scope = _room_scope()
+    left, right = scope.records
+    right_edges = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            right_edges.extend((
+                (wall, ((10.0, 0.0), (10.0, 4.0))),
+                (wall, ((10.0, 4.0), (10.0, 10.0))),
+            ))
+        else:
+            right_edges.append((wall, edge))
+    modified = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(right_edges)),
+    ))
+    noded = _atomic_source_wall_edge_counts(modified, {"w_sep"})
+    for start, end in ((0.0, 4.0), (4.0, 10.0)):
+        assert noded[("w_sep", ((10.0, start), (10.0, end)))] == {
+            "face_left": 1, "face_right": 1,
+        }
