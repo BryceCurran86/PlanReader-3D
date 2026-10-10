@@ -836,16 +836,31 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
     try:
         frame = native_page_frame(page)
         width = float(frame.native_width); height = float(frame.native_height)
+        rotation = int(frame.rotation) % 360
     except NativePageFrameUnresolved:
         if isinstance(page, fitz.Page):
             raise
         rect = page.rect
         width = float(rect.width); height = float(rect.height)
-    word_heights = [
-        float(w[3]) - float(w[1])
-        for w in _page_text(page, "words")
-        if float(w[3]) > float(w[1])
-    ]
+        rotation = 0
+    word_heights = []
+    for word in _page_text(page, "words"):
+        native_width = float(word[2]) - float(word[0])
+        native_height = float(word[3]) - float(word[1])
+        if native_height <= 0.0:
+            continue
+        # On /Rotate 90/270 CAD sheets, native vertically advancing text
+        # has a tall *word-length* bbox.  That dimension is not glyph height.
+        # Use the transverse glyph extent only for positively tall words;
+        # horizontal words and every non-rotated sheet retain their baseline.
+        if (
+            rotation in (90, 270)
+            and native_width > 0.0
+            and native_height > native_width * 1.25
+        ):
+            word_heights.append(native_width)
+        else:
+            word_heights.append(native_height)
     median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
     return ViewportLayoutCalibration(
         median_word_height_pt=median_h,
