@@ -153,6 +153,11 @@ def audit_short_source_fragments(
         if not all(math.isfinite(x) for x in (*a,*b)):
             raise ValueError("nonfinite original split source geometry")
         length=math.dist(a,b)
+        # Individually finite original PDF coordinates can overflow
+        # Pythagorean distance. Silently skipping that fragment would make
+        # the source fragment census look complete when it cannot be measured.
+        if not math.isfinite(length):
+            raise ValueError("nonfinite original split source length")
         if not (1e-7<length<=max_length_pt):
             continue
         primitive_id = _positive_single_parent(fragment)
