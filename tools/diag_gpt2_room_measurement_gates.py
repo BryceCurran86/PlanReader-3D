@@ -67,7 +67,7 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         metric_area = getattr(floor, "metric_area_m2", None)
         numeric_metric = (
             metric_area is not None
-            and isinstance(metric_area, (int, float))
+            and type(metric_area) in (int, float)
             and math.isfinite(float(metric_area))
             and float(metric_area) > 0
         )
@@ -75,7 +75,16 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
             getattr(floor, "metric_area_quantity_id", "") if floor else ""
         )
         linked_receipts = published_area_by_id.get(floor_quantity_id, [])
-        linked_metadata = dict(getattr(linked_receipts[0], "metadata", {}) or {}) if len(linked_receipts) == 1 else {}
+        metadata = getattr(linked_receipts[0], "metadata", None) if len(linked_receipts) == 1 else None
+        linked_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        receipt_value = getattr(linked_receipts[0], "value", None) if len(linked_receipts) == 1 else None
+        receipt_numeric = (
+            type(receipt_value) in (int, float)
+            and math.isfinite(receipt_value)
+            and receipt_value > 0
+        )
+        owner_sha = _clean(getattr(floor, "source_sha256", "")) if floor else ""
+        owner_revision = _clean(getattr(floor, "revision_id", "")) if floor else ""
         declared_face = _clean(linked_metadata.get("source_room_face_record_id"))
         declared_page = _clean(linked_metadata.get("page_no"))
         declared_snapshot = _clean(linked_metadata.get("room_snapshot_id"))
@@ -95,16 +104,13 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
             and not bool(getattr(linked_receipts[0], "abstained", True))
             and _clean(getattr(linked_receipts[0], "status", "")).casefold() == "firm"
             and _clean(getattr(linked_receipts[0], "unit", "")).casefold() in {"m2", "m²"}
-            and getattr(linked_receipts[0], "value", None) is not None
-            and math.isfinite(float(linked_receipts[0].value))
-            and abs(float(linked_receipts[0].value) - float(metric_area)) <= 1e-9
+            and receipt_numeric
+            and abs(receipt_value - float(metric_area)) <= 1e-9
             and bool(tuple(getattr(linked_receipts[0], "evidence_ids", ()) or ()))
-            and _clean(
-                dict(getattr(linked_receipts[0], "metadata", {}) or {}).get("source_sha256")
-            ).lower() == _clean(getattr(floor, "source_sha256", "")).lower()
-            and _clean(
-                dict(getattr(linked_receipts[0], "metadata", {}) or {}).get("revision_id")
-            ) == _clean(getattr(floor, "revision_id", ""))
+            and bool(owner_sha)
+            and bool(owner_revision)
+            and _clean(linked_metadata.get("source_sha256")).lower() == owner_sha.lower()
+            and _clean(linked_metadata.get("revision_id")) == owner_revision
         )
         metric_valid = bool(
             numeric_metric
