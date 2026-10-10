@@ -302,7 +302,8 @@ def test_physical_publication_has_no_trade_policy_or_quantity_truth_inputs() -> 
     }
     assert not (parameters & forbidden)
 
-def test_blank_source_opening_binding_never_disappears_from_coverage():
+@pytest.mark.parametrize("missing_identity", ("", "   "))
+def test_blank_source_opening_binding_never_disappears_from_coverage(missing_identity):
     from dataclasses import replace
     from pb_live_external_physical_net_wall_publication import (
         LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
@@ -310,7 +311,7 @@ def test_blank_source_opening_binding_never_disappears_from_coverage():
 
     wall_opening, physical_void, gross, roles, _void, _gross = _chain()
     assert wall_opening.opening_bindings
-    blank = replace(wall_opening.opening_bindings[0], opening_identity_id="")
+    blank = replace(wall_opening.opening_bindings[0], opening_identity_id=missing_identity)
     altered = replace(
         wall_opening,
         opening_bindings=(*wall_opening.opening_bindings, blank),
