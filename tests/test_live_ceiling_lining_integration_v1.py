@@ -468,3 +468,57 @@ def test_canonical_ceiling_preserves_two_independent_documented_dimension_ids() 
     )
     assert receipt is not None
     assert receipt[8] == ("dim-h", "dim-v")
+
+
+def test_canonical_ceiling_rejects_string_or_non_source_figured_metadata() -> None:
+    # A single string is iterable: without type checking, its different
+    # characters falsely count as independent dimension witness receipts.
+    malformed_ids = (
+        "dim-h",
+        "dim-h,dim-v",
+        {"horizontal": "dim-h", "vertical": "dim-v"},
+        ("dim-h", 123),
+        ("dim-h", None),
+        ["dim-h", ["dim-v"]],
+    )
+    for raw_ids in malformed_ids:
+        live, ceiling, source_result = _documented_area_claim_fixture()
+        area = source_result.room_area_quantities[0]
+        source_result.room_area_quantities = (
+            replace(
+                area,
+                metadata={
+                    **dict(area.metadata),
+                    "figured_dimension_ids": raw_ids,
+                },
+            ),
+        )
+        assert live._claim_from_quantity(
+            quantity=ceiling,
+            source_result=source_result,
+            page_no=1,
+            viewport_id="vp-1",
+        ) is None
+
+
+def test_canonical_ceiling_source_axis_metadata_accepts_exact_two_string_tokens() -> None:
+    for raw_ids in (["dim-v", "dim-h"], ("dim-h", "dim-v", "dim-h")):
+        live, ceiling, source_result = _documented_area_claim_fixture()
+        area = source_result.room_area_quantities[0]
+        source_result.room_area_quantities = (
+            replace(
+                area,
+                metadata={
+                    **dict(area.metadata),
+                    "figured_dimension_ids": raw_ids,
+                },
+            ),
+        )
+        resolved = live._claim_from_quantity(
+            quantity=ceiling,
+            source_result=source_result,
+            page_no=1,
+            viewport_id="vp-1",
+        )
+        assert resolved is not None
+        assert resolved[8] == ("dim-h", "dim-v")
