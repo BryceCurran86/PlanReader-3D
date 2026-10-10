@@ -86,9 +86,12 @@ def _strict_customer_notes(notes: str) -> Mapping[str, Any]:
 
 def _canonical_source_id_array(name: str, values: Any) -> tuple[str, ...]:
     """Require source-authenticated array receipts, not coerced keys/chars."""
-    if type(values) not in (list, tuple) or any(type(item) is not str for item in values):
+    if type(values) not in (list, tuple) or any(
+        type(item) is not str or not item or item != item.strip()
+        for item in values
+    ):
         raise CustomerOutputVerificationError(
-            f"customer source provenance {name} must be an array of strings"
+            f"customer source provenance {name} must be an array of canonical strings"
         )
     return _string_tuple(values)
 
