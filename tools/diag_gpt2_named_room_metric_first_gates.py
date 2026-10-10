@@ -65,7 +65,20 @@ def summarize_named_room_metric_first_gates(claim: Any) -> dict[str, Any]:
             row["label"], row["physical_room_id"],
             repr(row.get("first_gate", row.get("first_gates"))),
         ))
+    witnessed_room_ids = {
+        row["physical_room_id"]
+        for entries in ledger.values()
+        for row in entries
+    }
+    # Absence of a failed measurement receipt does not prove a measurement
+    # passed. It may mean that producer was never run for that physical room.
+    no_gate_receipt = [
+        {"physical_room_id": room_id, "label": label}
+        for room_id, label in sorted(owners.items(), key=lambda row: (row[1], row[0]))
+        if room_id not in witnessed_room_ids
+    ]
     return {
+        "named_rooms_without_first_failure_receipts": no_gate_receipt,
         "source_named_room_count": len(named),
         "uniquely_attributable_named_room_count": len(owners),
         "ambiguous_named_physical_room_ids": conflicts,
