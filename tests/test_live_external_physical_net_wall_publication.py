@@ -301,3 +301,26 @@ def test_physical_publication_has_no_trade_policy_or_quantity_truth_inputs() -> 
         "quantity",
     }
     assert not (parameters & forbidden)
+
+def test_blank_source_opening_binding_never_disappears_from_coverage():
+    from dataclasses import replace
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+    )
+
+    wall_opening, physical_void, gross, roles, _void, _gross = _chain()
+    assert wall_opening.opening_bindings
+    blank = replace(wall_opening.opening_bindings[0], opening_identity_id="")
+    altered = replace(
+        wall_opening,
+        opening_bindings=(*wall_opening.opening_bindings, blank),
+    )
+    result = compose_live_external_physical_net_wall_publication(
+        wall_opening_composition=altered,
+        physical_void_composition=physical_void,
+        gross_wall_composition=gross,
+        whole_wall_role_composition=roles,
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE in result.reason_codes
+    assert result.quantity_evidence is None
