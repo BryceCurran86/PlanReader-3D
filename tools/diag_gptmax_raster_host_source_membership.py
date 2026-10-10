@@ -40,6 +40,7 @@ def nonpublishing_raster_source_w4_membership(
     rows and never return a chosen host.
     """
     owners_by_source = defaultdict(set)
+    source_edges_by_parent = defaultdict(set)
     skipped_nonusable = set()
     for r in records:
         identity = r.physical_identity
@@ -49,6 +50,16 @@ def nonpublishing_raster_source_w4_membership(
             continue
         for source_id in ids:
             owners_by_source[source_id].add(str(r.wall_candidate_id))
+        # W4's sealed source-edge fragments are the actual W2 sidecars, not
+        # arbitrary candidate-line geometry or an inferred physical host.
+        # Record exact parent+edge links, retaining every shared owner.
+        for fragment in getattr(r, "source_edge_fragments", ()):
+            edge_id = str(fragment.edge_id)
+            for parent_id in tuple(fragment.source_primitive_ids):
+                if isinstance(parent_id, str) and parent_id:
+                    source_edges_by_parent[parent_id].add(
+                        (str(r.wall_candidate_id), edge_id)
+                    )
 
     evidence_rows = []
     reasons = Counter()
@@ -90,6 +101,11 @@ def nonpublishing_raster_source_w4_membership(
             "opening_axis_span_pt": [lo, hi],
             "opening_normal_offset_pt": offset,
             "exact_positive_ancestry_w4_candidate_ids": owners,
+            "actual_w2_source_edges_by_w4_candidate": [
+                {"wall_candidate_id": owner_id, "source_edge_id": edge_id}
+                for owner_id, edge_id in sorted(source_edges_by_parent.get(sid, ()))
+                if owner_id in owners
+            ],
             "locally_authenticated_host": False,
         })
 
