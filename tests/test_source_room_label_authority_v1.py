@@ -476,3 +476,35 @@ def test_authenticated_whole_line_still_requires_all_words_in_same_room_face(
     )
 
     assert _records(producer) == []
+
+
+def test_room_label_producer_builds_one_sealed_text_authority_per_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Page, word and fallback gates share immutable source text receipts."""
+    path = tmp_path / "source-label-text-authority-reuse.pdf"
+    _write_two_room_pdf(path)
+    source, room_faces = _setup(path)
+    original = SourceVisibilityProducer.text_integrity_authority
+    created = []
+
+    def counted(self):
+        authority = original(self)
+        created.append(authority)
+        return authority
+
+    monkeypatch.setattr(SourceVisibilityProducer, "text_integrity_authority", counted)
+    monkeypatch.setattr(SourceRoomLabelProducer, "_authorize_word", _fake_authorized)
+    producer = SourceRoomLabelProducer.from_authorities_for_tests(
+        source, room_faces, MockOCRBackend(), page_ids=("1",),
+    )
+    assert len(created) == 1
+    assert producer._text_integrity_authority is created[0]
+    assert {record.label for record in _records(producer)} == {
+        "FOOD PREP", "COLD ROOM",
+    }
+    # Repeated native selector checks cannot rebuild or alter the sealed
+    # authority's source universe.
+    assert producer._authorize_word is not None
+    assert len(created) == 1
