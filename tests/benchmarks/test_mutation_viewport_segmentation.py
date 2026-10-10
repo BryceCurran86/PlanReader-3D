@@ -1101,3 +1101,57 @@ def test_rotated_native_vertical_words_do_not_inflate_frame_calibration() -> Non
         assert calibration.minimum_frame_span_pt < 200.0
     finally:
         doc.close()
+
+
+def test_native_vertical_line_direction_calibrates_unrotated_page_glyphs() -> None:
+    """A page without /Rotate can still contain native vertical CAD text."""
+    from pb_viewport_segmentation import calibrate_viewport_layout
+
+    doc = fitz.open()
+    page = doc.new_page(width=520, height=520)
+    for x in (100.0, 230.0, 360.0):
+        page.insert_text(
+            (x, 430.0), "REFLECTED CEILING PLAN",
+            fontsize=11, rotate=90,
+        )
+    doc = _reopen(doc)
+    try:
+        page = doc[0]
+        assert page.rotation == 0
+        lines = [
+            line
+            for block in page.get_text("dict").get("blocks", [])
+            if int(block.get("type", 0)) == 0
+            for line in block.get("lines", [])
+        ]
+        assert len(lines) == 3
+        assert all(abs(float(line["dir"][1])) > 0.9 for line in lines)
+        assert all(
+            float(line["bbox"][3]) - float(line["bbox"][1]) > 40.0
+            for line in lines
+        )
+        calibration = calibrate_viewport_layout(page)
+        assert 0.0 < calibration.median_word_height_pt < 20.0
+        assert calibration.minimum_frame_span_pt < 160.0
+    finally:
+        doc.close()
+
+
+def test_native_horizontal_lines_keep_expected_glyph_height() -> None:
+    """Horizontal source lines must not use their word length as thickness."""
+    from pb_viewport_segmentation import calibrate_viewport_layout
+
+    doc = fitz.open()
+    page = doc.new_page(width=520, height=520)
+    for y in (100.0, 210.0, 320.0):
+        page.insert_text(
+            (60.0, y), "REFLECTED CEILING PLAN",
+            fontsize=11, rotate=0,
+        )
+    doc = _reopen(doc)
+    try:
+        calibration = calibrate_viewport_layout(doc[0])
+        assert 0.0 < calibration.median_word_height_pt < 20.0
+        assert calibration.minimum_frame_span_pt < 160.0
+    finally:
+        doc.close()
