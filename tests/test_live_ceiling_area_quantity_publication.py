@@ -433,3 +433,94 @@ def test_provisional_ceiling_source_unit_must_be_square_metres() -> None:
     non_metric = replace(_shadow_quantity(), unit="ft2")
     result = _result(shadow=non_metric)
     assert publish_live_ceiling_area_quantities(result) == ()
+
+
+def test_two_canonical_ceilings_cannot_repeat_one_full_room_area_source() -> None:
+    original = _ceiling()
+    other = replace(
+        original,
+        canonical_ceiling_id="canonical-ceiling-2",
+        ceiling_quantity_id="qty-shadow-ceiling-2",
+    )
+    shadow_other = replace(
+        _shadow_quantity(), quantity_id="qty-shadow-ceiling-2",
+    )
+    result = replace(
+        _result(), canonical_ceilings=(original, other),
+        quantity_evidence=(_shadow_quantity(), shadow_other),
+    )
+    assert publish_live_ceiling_area_quantities(result) == ()
+    assert publish_live_ceiling_area_quantities(
+        replace(result, canonical_ceilings=(other, original)),
+    ) == ()
+
+
+def test_unmeasured_ceiling_without_positive_source_does_not_poison_firm() -> None:
+    original = _ceiling()
+    unresolved = replace(
+        original,
+        canonical_ceiling_id="canonical-ceiling-unmeasured",
+        ceiling_quantity_id="",
+        metric_area_complete=False,
+        area_m2=None,
+    )
+    result = replace(
+        _result(), canonical_ceilings=(original, unresolved),
+    )
+    expected = publish_live_ceiling_area_quantities(_result())
+    assert len(expected) == 1
+    assert publish_live_ceiling_area_quantities(result) == expected
+    assert publish_live_ceiling_area_quantities(
+        replace(result, canonical_ceilings=(unresolved, original))
+    ) == expected
+
+
+def test_different_room_area_sources_keep_independent_ceilings() -> None:
+    first = _ceiling()
+    second = replace(
+        first,
+        canonical_ceiling_id="canonical-ceiling-2",
+        room_entity_id="room-2",
+        room_area_quantity_id="qty-room-area-2",
+        ceiling_quantity_id="qty-shadow-ceiling-2",
+        source_room_index_id="room-index-2",
+    )
+    shadow_other = replace(
+        _shadow_quantity(),
+        quantity_id="qty-shadow-ceiling-2",
+        semantic_key="ceiling_lining:room-2",
+        input_entity_ids=("room-2",),
+        metadata={
+            **dict(_shadow_quantity().metadata),
+            "upstream_area_quantity_id": "qty-room-area-2",
+        },
+    )
+    result = replace(
+        _result(), canonical_ceilings=(first, second),
+        quantity_evidence=(_shadow_quantity(), shadow_other),
+    )
+    published = publish_live_ceiling_area_quantities(result)
+    assert len(published) == 2
+    assert {q.input_entity_ids for q in published} == {
+        ("canonical-ceiling-1",), ("canonical-ceiling-2",),
+    }
+
+
+def test_single_figured_dimension_cannot_claim_full_metric_ceiling_area() -> None:
+    for dimension_ids in (
+        ("dim-h",),
+        ("dim-h", "dim-h"),
+        ("", "dim-h", ""),
+    ):
+        candidate = _ceiling(figured_dimension_ids=dimension_ids)
+        assert publish_live_ceiling_area_quantities(
+            _result(ceiling=candidate)
+        ) == ()
+
+
+def test_two_distinct_figured_dimension_receipts_retain_firm_ceiling_area() -> None:
+    candidate = _ceiling(figured_dimension_ids=("dim-h", "dim-v"))
+    published = publish_live_ceiling_area_quantities(_result(ceiling=candidate))
+    assert len(published) == 1
+    assert published[0].authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert published[0].value == 13.270425
