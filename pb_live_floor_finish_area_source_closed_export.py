@@ -51,6 +51,11 @@ def build_live_floor_finish_area_source_traces(
         floors_by_id[floor_id] = floor
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    # Defensive replay boundary: producer-owned source occurrence and physical
+    # floor identity are one-to-one. Different QuantityEvidence IDs cannot
+    # mint independent customer rows from the same upstream physical fact.
+    quantity_owner_by_floor: dict[str, str] = {}
+    floor_owner_by_occurrence: dict[str, str] = {}
     for quantity in claim.floor_finish_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -126,6 +131,28 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish revision mismatch: {quantity.quantity_id}"
             )
+
+        occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
+        definition_id = _clean(metadata.get("finish_definition_record_id"))
+        if not occurrence_id or not definition_id:
+            raise SourceClosedRunConflictError(
+                "floor-finish source occurrence/definition receipt is missing: "
+                f"{quantity.quantity_id}"
+            )
+        prior_floor = floor_owner_by_occurrence.get(occurrence_id)
+        if prior_floor is not None and prior_floor != floor_id:
+            raise SourceClosedRunConflictError(
+                "floor-finish source occurrence has competing physical floors: "
+                f"{occurrence_id}"
+            )
+        prior_quantity = quantity_owner_by_floor.get(floor_id)
+        if prior_quantity is not None and prior_quantity != quantity.quantity_id:
+            raise SourceClosedRunConflictError(
+                "canonical floor has competing finish area quantities: "
+                f"{floor_id}"
+            )
+        floor_owner_by_occurrence[occurrence_id] = floor_id
+        quantity_owner_by_floor[floor_id] = quantity.quantity_id
 
         semantic_finish = _clean(metadata.get("semantic_finish")).lower()
         if (
