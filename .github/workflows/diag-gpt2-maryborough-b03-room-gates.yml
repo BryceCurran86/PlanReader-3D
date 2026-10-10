@@ -12,7 +12,11 @@ on:
 jobs:
   real-source-room-first-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Original SHA-verified B03 production needed ~41 minutes before the
+    # customer/sealing stage was added. A 45-minute cap cancelled the prior
+    # genuine source run without recording a source result; allow bounded
+    # headroom for full original-source + customer parity checks.
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -77,6 +81,43 @@ jobs:
                       "canonical_floor":row["canonical_floor_id"],
                   },sort_keys=True))
           assert report["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          # These are independent production source receipts from the already
+          # SHA-verified B03 run, NOT benchmark reference quantities. Confirm
+          # the newer canonical floor duplicate-identity guard did not erase
+          # source-authenticated quantities or silently skip customer output.
+          controls={
+              "FOOD PREP":(13.270425,
+                  "floor_area_quantity_d62c2f382a0c773ec36f",
+                  "canonical_room_area_quantity_a691af59bcb8a78c474d"),
+              "OFFICE":(9.05352,
+                  "floor_area_quantity_8bcdc01455538a6a105a",
+                  "canonical_room_area_quantity_3b2be6bc2f91a42ee569"),
+              "COLD ROOM":(25.37875,
+                  "floor_area_quantity_6b28b3abaedf519631ed",
+                  "canonical_room_area_quantity_409cc3811baafced5beb"),
+          }
+          assert report["source_closed_floor_seal_quantity_count"]>=len(controls), report
+          assert report["verified_floor_customer_row_count"]>=len(controls), report
+          assert report["floor_customer_projection_failure_type"] is None, report
+          assert report["commercial_estimator_approved"] is False
+          assert report["benchmark_accuracy"] is None
+          for label,(area,floor_quantity_id,room_quantity_id) in controls.items():
+              matched=seen.get(label,())
+              assert len(matched)==1, (label,matched)
+              row=matched[0]
+              assert abs(float(row["metric_area_m2"])-area)<1e-9, (label,row)
+              assert row["floor_area_reissued_quantity_id"]==floor_quantity_id, row
+              assert row["canonical_room_area_reissued_quantity_id"]==room_quantity_id, row
+              assert row["floor_area_source_sealed"] is True, row
+              assert row["floor_area_customer_row_verified"] is True, row
+              assert row["first_unclosed_gate"]=="CUSTOMER_REVIEW_ROW_VERIFIED_UNSCORED", row
+          print("GPT3_MARYBOROUGH_CUSTOMER_SOURCE_PROOF",json.dumps({
+              "source_sha256":report["source_sha256"],
+              "verified_rows":report["verified_floor_customer_row_count"],
+              "control_labels":sorted(controls),
+              "commercial_estimator_approved":False,
+              "benchmark_accuracy":None,
+          },sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         if: always()

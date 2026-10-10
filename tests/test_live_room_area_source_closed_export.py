@@ -588,3 +588,59 @@ def test_live_room_area_customer_projection_has_no_truth_or_scoring_dependency()
     )
     for value in forbidden:
         assert value not in source
+
+
+def test_source_sealed_floor_customer_diagnostic_is_exact_and_unapproved(
+    live_claim,
+) -> None:
+    from tools.diag_gpt3_maryborough_floor_customer_gate import (
+        inspect_floor_customer_handoff,
+    )
+    proof = inspect_floor_customer_handoff(
+        live_claim, workspace_id=7, project_id="source-project"
+    )
+    published = publish_live_floor_area_quantities(live_claim)
+    ids = [row.quantity_id for row in published]
+    assert len(ids) == 1
+    assert proof["published_floor_area_quantity_ids"] == ids
+    assert proof["sealed_floor_area_quantity_ids"] == ids
+    assert proof["customer_verified_floor_area_quantity_ids"] == ids
+    assert proof["customer_review_row_count"] == 1
+    assert proof["customer_projection_failure_type"] is None
+    assert proof["diagnostic_workspace_not_customer_approved"] is True
+    assert proof["commercial_estimator_approved"] is False
+    assert proof["benchmark_accuracy"] is None
+
+
+def test_unavailable_floor_customer_diagnostic_stays_unpublished(
+    live_claim,
+) -> None:
+    from tools.diag_gpt3_maryborough_floor_customer_gate import (
+        inspect_floor_customer_handoff,
+    )
+    unmeasured = replace(live_claim, room_area_quantity_evidence=())
+    proof = inspect_floor_customer_handoff(unmeasured)
+    assert proof["published_floor_area_quantity_ids"] == []
+    assert proof["sealed_floor_area_quantity_ids"] == []
+    assert proof["customer_verified_floor_area_quantity_ids"] == []
+    assert proof["customer_review_row_count"] == 0
+    assert proof["commercial_estimator_approved"] is False
+
+
+def test_missing_customer_authority_never_converts_seal_to_verified_row(
+    live_claim, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tools.diag_gpt3_maryborough_floor_customer_gate as module
+    from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
+
+    def reject_customer_rows(*_args, **_kwargs):
+        raise MissingCommercialAuthorityError("missing figured dimension witness")
+
+    monkeypatch.setattr(module, "project_live_floor_area_customer_rows", reject_customer_rows)
+    proof = module.inspect_floor_customer_handoff(live_claim)
+    assert len(proof["published_floor_area_quantity_ids"]) == 1
+    assert len(proof["sealed_floor_area_quantity_ids"]) == 1
+    assert proof["customer_verified_floor_area_quantity_ids"] == []
+    assert proof["customer_review_row_count"] == 0
+    assert proof["customer_projection_failure_type"] == "MissingCommercialAuthorityError"
+    assert proof["benchmark_accuracy"] is None
