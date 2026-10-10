@@ -10,6 +10,7 @@ import math
 from collections.abc import Mapping
 from types import MappingProxyType
 
+from pb_geometry_takeoff_model import AuthorityStatus
 from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
@@ -67,6 +68,11 @@ def build_live_floor_finish_area_source_traces(
             )
         if quantity.abstained or quantity.value is None:
             continue
+        if quantity.unit != "m2" or quantity.status != AuthorityStatus.FIRM.value:
+            raise SourceClosedRunConflictError(
+                "floor-finish quantity must be FIRM m2: "
+                f"{quantity.quantity_id}"
+            )
         if len(quantity.input_entity_ids) != 1:
             raise SourceClosedRunConflictError(
                 "floor-finish quantity must own exactly one canonical floor: "
