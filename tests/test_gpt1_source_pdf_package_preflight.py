@@ -160,3 +160,30 @@ def test_entire_source_root_symlink_rejected(tmp_path):
     alias.symlink_to(real_root, target_is_directory=True)
     with pytest.raises(ValueError, match="symlinked"):
         check_source_pdf_package(manifest, alias)
+
+
+def test_duplicate_json_manifest_keys_cannot_replace_original_source_inventory(tmp_path):
+    a = _pdf(tmp_path / "architecture.pdf")
+    manifest = _manifest(tmp_path, [a])
+    original = manifest.read_text()
+    # Deliberately introduce a second conflicting source_documents member.
+    damaged = original.replace(
+        '"source_documents":',
+        '"source_documents": [], "source_documents":',
+        1,
+    )
+    manifest.write_text(damaged)
+    with pytest.raises(ValueError, match="duplicate source manifest key"):
+        check_source_pdf_package(manifest, tmp_path)
+
+
+@pytest.mark.parametrize("untrusted", ["NaN", "Infinity", "-Infinity"])
+def test_nonfinite_manifest_json_claim_fails_before_any_source_promotion(
+    tmp_path, untrusted
+):
+    a = _pdf(tmp_path / "architecture.pdf")
+    manifest = _manifest(tmp_path, [a])
+    original = manifest.read_text()
+    manifest.write_text(original[:-1] + f', "supplementary_value": {untrusted}' + "}")
+    with pytest.raises(ValueError, match="nonfinite source manifest"):
+        check_source_pdf_package(manifest, tmp_path)
