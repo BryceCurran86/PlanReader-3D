@@ -2077,6 +2077,7 @@ def _producer_proven_page_opening_records(
     *, source_producer: SourceVisibilityProducer, published, page_id: str,
     physical_opening_authority: PhysicalOpeningAuthority,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    proof_scope_fingerprint: str = "direct-full-page",
 ) -> tuple[PhysicalOpeningExistenceRecord, ...]:
     """Share the full-page positive proof inventory, with fresh integrity.
 
@@ -2102,7 +2103,8 @@ def _producer_proven_page_opening_records(
                  or dict(resolved_visible_observations) != dict(rows))):
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
     key = (published.revision.document_id, published.revision.revision_id,
-           published.revision.source_sha256, published.snapshot.snapshot_id, str(page_id))
+           published.revision.source_sha256, published.snapshot.snapshot_id,
+           str(page_id), str(proof_scope_fingerprint))
     cached = physical_opening_authority._wall_source_opening_page_proof_cache.get(key)
     if cached is not None:
         return cached
@@ -2185,7 +2187,16 @@ def _producer_opening_relation_overrides(
     proven_records = _producer_proven_page_opening_records(
         source_producer=source_producer, published=published, page_id=page_id,
         physical_opening_authority=opening_authority,
-        resolved_visible_observations=page_visible_rows)
+        resolved_visible_observations=page_visible_rows,
+        # Complete G17 page proofs are never narrowed by the W4 scope.
+        # Partition *reuse* by exact producer-owned wall candidate identity,
+        # because separate W4 scopes must not inherit a warmed proof cache
+        # created under another physical wall scope.
+        proof_scope_fingerprint=hashlib.sha256(repr(tuple(sorted(
+            (str(record.wall_candidate_id), tuple(sorted(
+                str(raw_id) for raw_id in record.physical_identity.source_primitive_ids
+            ))) for record in records
+        ))).encode("utf-8")).hexdigest())
 
     candidate_relation_sets: dict[
         tuple[str, str], set[PhysicalEquivalenceClass]
