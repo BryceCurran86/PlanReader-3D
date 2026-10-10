@@ -42,6 +42,13 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
             or any(not isinstance(p, str) or not p.isdigit() for p in pages)
             or len(set(pages)) != len(pages)):
         raise ValueError("invalid original source page scope")
+    decoded = coverage.get("decoded_pages")
+    failed = coverage.get("failed_pages")
+    if (not isinstance(decoded, (list, tuple))
+            or not isinstance(failed, (list, tuple))
+            or any(type(p) is not int or p < 1 for p in (*decoded, *failed))
+            or any(int(p) not in decoded or int(p) in failed for p in pages)):
+        raise ValueError("selected original source pages were not all decoded")
     scopes = report.get("source_owned_wall_scope_results")
     bindings = report.get("opening_bindings")
     frames = report.get("host_frames")
