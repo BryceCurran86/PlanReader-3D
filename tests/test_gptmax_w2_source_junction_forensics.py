@@ -74,3 +74,14 @@ def test_absent_candidate_source_is_unmatched_without_guess():
     data = compare_wall_records([old], [])
     assert data["unmatched_or_ambiguous"][0]["candidate_candidate_count"] == 0
     assert data["may_publish_quantities"] is False
+
+
+@pytest.mark.parametrize("damage", ["foreign", "empty", "duplicate_edge", "incomplete"])
+def test_unowned_or_partial_lineage_never_looks_like_source_parity(damage):
+    item = _wall([(10., 0., 20., 0.), (20., 0., 30., 0.)])
+    if damage == "foreign": item["source_edge_fragments"][0]["source_primitive_ids"] = ["foreign"]
+    elif damage == "empty": item["source_edge_fragments"][0]["source_primitive_ids"] = []
+    elif damage == "duplicate_edge": item["source_edge_fragments"][1]["edge_id"] = "e0"
+    else: item["physical_identity"]["source_primitive_ids"].append("absent-parent")
+    with pytest.raises(ValueError):
+        compare_wall_records([item], [deepcopy(item)])
