@@ -71,6 +71,9 @@ def audit_short_source_fragments(
         reported.add(row["id"])
     nodes = {n["id"]:n for n in snapped_graph["nodes"]}
     snapped_edges = {e["id"]:e for e in snapped_graph["edges"]}
+    original_ids = {fragment.get("id") for fragment in split_fragments}
+    if not reported.issubset(original_ids) or reported.intersection(snapped_edges):
+        raise ValueError("producer disappearance ledger conflicts with source or surviving graph")
     merged_edges = merged_graph["edges"]
     final_leaf_ids=set()
     direct_ids=set()
