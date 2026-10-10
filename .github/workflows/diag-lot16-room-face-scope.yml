@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "tools/diag_lot16_room_face_scope.py"
+      - "pb_cross_view_floor_finish_authority.py"
+      - "tests/test_cross_view_floor_finish_authority_v1.py"
       - ".github/workflows/diag-lot16-room-face-scope.yml"
 jobs:
   source-room-face:
