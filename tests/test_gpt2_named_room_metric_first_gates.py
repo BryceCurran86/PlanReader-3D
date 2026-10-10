@@ -71,3 +71,15 @@ def test_malformed_scale_reason_receipt_never_becomes_fake_individual_gates():
         assert entries[0]["source_reason_receipt_valid"] is False
         assert entries[0]["first_gates"] in ([], [""])
         assert report["metric_quantity_published"] is False
+
+
+def test_missing_producer_metric_first_gate_is_not_a_firm_measurement():
+    got = summarize(claim(
+        (room("source-freezer", "FREEZER"), room("source-pwd", "PWD")),
+        same=(("source-freezer", "needs_orthogonal_figured_pair"),),
+    ))
+    assert got["named_rooms_without_first_failure_receipts"] == [{
+        "physical_room_id": "source-pwd", "label": "PWD",
+    }]
+    assert got["named_room_metric_first_failure_codes"]["cross_view"] == []
+    assert got["metric_quantity_published"] is False
