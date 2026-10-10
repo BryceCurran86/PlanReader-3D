@@ -209,3 +209,27 @@ def test_duplicate_json_object_keys_cannot_overwrite_production_quantity_identit
     assert project["produced_sealed_parity_verified"] is False
     assert report["publication_status"] == "UNPUBLISHED"
     assert report["score_claim"] is False
+
+
+
+def test_unreadable_sealed_run_bytes_are_one_project_blocker_not_suite_crash(tmp_path: Path) -> None:
+    sealed_root = tmp_path / "sealed"
+    target = sealed_root / "au_qld_lot16_power"
+    target.mkdir(parents=True)
+    (target / "sealed_run.json").write_bytes(bytes((0xFF, 0xFE, 0xFA)))
+
+    report = diagnostic_report(ROOT, tmp_path / "produced", sealed_root=sealed_root)
+    assert len(report["projects"]) == 4
+    lot16 = next(p for p in report["projects"] if p["project_id"] == "au_qld_lot16_power")
+    maryborough = next(
+        p for p in report["projects"]
+        if p["project_id"] == "au_qld_maryborough_service_station"
+    )
+    assert lot16["sealed_run_verified"] is False
+    assert lot16["sealed_quantity_count"] is None
+    assert "sealed_run_integrity_invalid" in lot16["blockers"]
+    assert "sealed_run_missing" in maryborough["blockers"]
+    assert lot16["reconciliation_complete"] is False
+    assert lot16["coverage_accuracy"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
