@@ -117,3 +117,63 @@ def compact_band_crosses_original_source(segment, source_lines, *, dpi: int, sou
         if along[0]-pixel_half <= face_lo and along[1]+pixel_half >= face_hi:
             return True
     return False
+
+
+
+def compact_band_endpoint_on_original_source_interior(
+    segment, source_lines, *, dpi: int, source_dpi: int,
+) -> bool:
+    """Withhold a supplemental compact T when its endpoint touches an original.
+
+    A source-published ordinary raster line must remain unbroken for at least
+    one original source pixel in *both* directions beyond the compact wall
+    centre. The compact nominee may end on that line within only the two
+    discrete render-pixel sample half-widths. An independent true T might be
+    withheld; its suppressed compact source is NEVER substituted with another
+    wall or asserted to be structurally absent. This is a conservative
+    candidate-admission experiment, not a physical equivalence decision.
+    """
+    if (not isinstance(dpi, int) or not isinstance(source_dpi, int)
+            or dpi <= 0 or source_dpi <= 0):
+        return False
+    try:
+        c = tuple(float(v) for v in segment.pixel_geometry)
+        orientation = segment.orientation
+    except (AttributeError,TypeError,ValueError,OverflowError):
+        return False
+    if len(c)!=4 or not all(math.isfinite(v) for v in c):
+        return False
+    if orientation=="horizontal" and c[1]==c[3] and c[0]!=c[2]:
+        endpoints=(c[0],c[2])
+        across=c[1]
+        other="vertical"
+    elif orientation=="vertical" and c[0]==c[2] and c[1]!=c[3]:
+        endpoints=(c[1],c[3])
+        across=c[0]
+        other="horizontal"
+    else:
+        return False
+    pixel_half = dpi/(2.*source_dpi)
+    coincidence = pixel_half+.5   # fixed original/current render pixel cells
+    for source in source_lines:
+        if getattr(source,"orientation",None)!=other:
+            continue
+        try:
+            q=tuple(float(v)*dpi/72. for v in source.geometry_pt)
+        except (AttributeError,TypeError,ValueError,OverflowError):
+            continue
+        if len(q)!=4 or not all(math.isfinite(v) for v in q):
+            continue
+        if other=="vertical" and q[0]==q[2]:
+            offset=q[0]
+            span=sorted((q[1],q[3]))
+        elif other=="horizontal" and q[1]==q[3]:
+            offset=q[1]
+            span=sorted((q[0],q[2]))
+        else:
+            continue
+        if not any(abs(e-offset)<=coincidence for e in endpoints):
+            continue
+        if span[0]+pixel_half+.5 < across < span[1]-pixel_half-.5:
+            return True
+    return False
