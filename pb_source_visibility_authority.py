@@ -45,6 +45,7 @@ from pb_raster_compact_wall_band_segments import (
 from pb_raster_compact_partial_source_quarantine import (
     compact_band_has_partial_original_source_coverage,
     compact_band_crosses_original_source,
+    compact_band_endpoint_on_original_source_interior,
 )
 from pb_raster_terminal_wall_band_segments import (
     TERMINAL_WALL_BAND_DETECTOR_VERSION,
@@ -1829,6 +1830,9 @@ class SourceVisibilityProducer:
                                 s, segments, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
                                 source_dpi=RASTER_RENDER_DPI)
                             and not compact_band_crosses_original_source(
+                                s, segments, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                source_dpi=RASTER_RENDER_DPI)
+                            and not compact_band_endpoint_on_original_source_interior(
                                 s, segments, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
                                 source_dpi=RASTER_RENDER_DPI))
                         terminal_segments = tuple(s for s in terminal_segments
