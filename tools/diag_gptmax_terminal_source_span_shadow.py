@@ -24,14 +24,27 @@ def _graph_fingerprint(graph):
 
 
 def _records_from_original_call(walls, identities, graph):
-    wall_ids = [wall.candidate_id for wall in walls]
-    if len(wall_ids) != len(set(wall_ids)) or set(wall_ids) != set(identities):
-        raise RuntimeError("duplicate or foreign source assembly identity")
+    # The production collector is keyed by candidate_id. An identical repeated
+    # producer row is observable without changing that identity; conflicting
+    # rows under the same key are not, and must remain a hard failure.
+    by_candidate_id = {}
+    for wall in walls:
+        cid = wall.candidate_id
+        if not isinstance(cid, str) or not cid:
+            raise RuntimeError("invalid source assembly candidate identity")
+        prior = by_candidate_id.get(cid)
+        if prior is not None:
+            if asdict(prior) != asdict(wall):
+                raise RuntimeError("conflicting duplicate source assembly identity")
+            continue
+        by_candidate_id[cid] = wall
+    if set(by_candidate_id) != set(identities):
+        raise RuntimeError("foreign or missing source assembly identity")
     edges = {str(edge["id"]): edge for edge in graph["edges"]}
     if len(edges) != len(graph["edges"]):
         raise RuntimeError("duplicate source assembly graph edge")
     records = []
-    for wall in sorted(walls, key=lambda row: row.candidate_id):
+    for wall in sorted(by_candidate_id.values(), key=lambda row: row.candidate_id):
         identity = identities[wall.candidate_id]
         fragments = []
         for edge_id in sorted(identity.edge_ids):
