@@ -79,6 +79,12 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
             numeric_metric
             and bool(floor_quantity_id)
             and len(linked_receipts) == 1
+            and _clean(getattr(linked_receipts[0], "family", "")) == "room_area"
+            and _clean(getattr(linked_receipts[0], "authority", "")) in {
+                "documented_dimension", "pdf_scaled"
+            }
+            and len(tuple(getattr(linked_receipts[0], "input_entity_ids", ()) or ())) == 1
+            and not tuple(getattr(linked_receipts[0], "blocking_reasons", ()) or ())
             and not bool(getattr(linked_receipts[0], "abstained", True))
             and _clean(getattr(linked_receipts[0], "status", "")).casefold() == "firm"
             and _clean(getattr(linked_receipts[0], "unit", "")).casefold() in {"m2", "m²"}
