@@ -161,6 +161,18 @@ def sealed_source_closed_run_from_dict(
     if _clean(payload.get("schema_version")) != SOURCE_CLOSED_RUN_EXPORT_SCHEMA_VERSION:
         raise SourceClosedRunConflictError("unsupported sealed run schema_version")
 
+    # The canonical producer writes actual arrays of source envelope IDs.
+    # JSON strings and mappings must not be iterated/coerced to reconstruct
+    # the same signed ID tuples from different wire receipts.
+    for envelope_field in ("source_sha256s", "revision_ids"):
+        envelope = payload.get(envelope_field)
+        if type(envelope) not in (list, tuple) or any(
+            type(item) is not str for item in envelope
+        ):
+            raise SourceClosedRunConflictError(
+                f"sealed run {envelope_field} must be an array of strings"
+            )
+
     raw_rows = payload.get("quantities")
     if not isinstance(raw_rows, (list, tuple)):
         raise SourceClosedRunConflictError("sealed run quantities must be a sequence")
@@ -171,6 +183,21 @@ def sealed_source_closed_run_from_dict(
             raise SourceClosedRunConflictError(
                 f"sealed quantity {index} must be a mapping"
             )
+        # Signed lineage arrays are canonical JSON sequences, not strings,
+        # mappings or numerics with keys/characters that happen to rehydrate
+        # into the same source identities and preserve a normalized fingerprint.
+        for lineage_field in (
+            "object_identity_refs", "trace_canonical_entity_ids",
+            "evidence_ids", "trace_evidence_ids", "blocking_reasons",
+            "reason_codes", "lineage_reason_codes",
+        ):
+            raw_values = raw.get(lineage_field)
+            if type(raw_values) not in (list, tuple) or any(
+                type(item) is not str for item in raw_values
+            ):
+                raise SourceClosedRunConflictError(
+                    f"sealed quantity {index} has non-array lineage {lineage_field}"
+                )
         # A valid original seal emits genuine JSON booleans and numeric
         # quantities. Last-minute string/int coercion during import can let
         # an altered receipt retain the same normalized fingerprint (e.g.
