@@ -1,0 +1,30 @@
+name: GPT MAX W2 Short Source Fragment Retention
+on:
+  pull_request:
+    paths:
+      - pb_wall_room_topology_short_fragment_audit.py
+      - pb_wall_room_topology_stage_a.py
+      - tests/test_wall_room_topology_short_fragment_audit.py
+      - .github/workflows/test-gptmax-w2-short-source-fragment.yml
+jobs:
+  positive-short-source-lineage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original short-fragment ancestry and snap-displacement ledger
+        run: |
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_wall_room_topology_short_fragment_audit.py \
+            tests/test_wall_room_topology_stage_a.py
+      - name: Preserve frozen truth and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
