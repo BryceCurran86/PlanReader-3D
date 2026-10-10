@@ -1,0 +1,71 @@
+name: GPT MAX W2 Source Junction Forensics
+
+on:
+  pull_request:
+    paths:
+      - "tools/gptmax_w2_source_junction_forensics.py"
+      - "tests/test_gptmax_w2_source_junction_forensics.py"
+      - ".github/workflows/test-gptmax-w2-source-junction-forensics.yml"
+  workflow_dispatch:
+
+jobs:
+  archived-source-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Unit regression
+        run: PYTHONPATH=. python -m pytest -q tests/test_gptmax_w2_source_junction_forensics.py
+      - name: Fetch exact archived failed Lot16 source records
+        run: |
+          git fetch origin '+refs/heads/experiment/gptmax-compact-pixel-footprint-blocked-20261010:refs/remotes/origin/experiment/gptmax-compact-pixel-footprint-blocked-20261010'
+          git show origin/experiment/gptmax-compact-pixel-footprint-blocked-20261010:docs/engineering/gptmax_compact_capture_failed_retention.json > /tmp/w2-blocked-source.json
+      - name: Run read-only W2 source/junction report
+        run: |
+          PYTHONPATH=. python tools/gptmax_w2_source_junction_forensics.py --input /tmp/w2-blocked-source.json --output /tmp/w2-forensics.json
+      - name: Require real-source gap and do not promote lost host
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          archived = json.load(open("/tmp/w2-blocked-source.json"))
+          report = json.load(open("/tmp/w2-forensics.json"))
+          assert archived["source_sha256"] == "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert archived["baseline_summary"]["authenticated_hosts"] == 14
+          assert archived["experiment_summary"]["authenticated_hosts"] == 17
+          assert archived["baseline_summary"]["resolved_source_frames"] == 9
+          assert archived["experiment_summary"]["resolved_source_frames"] == 8
+          assert len(archived["lost_host_proofs"]) == 1
+          assert "38c03575cd66ed19cae7f9e4489f1609" in archived["lost_host_proofs"][0]["physical_opening_id"]
+          rows = report["matched_source_ancestries"]
+          assert len(rows) == 1 and report["unmatched_or_ambiguous"] == []
+          row = rows[0]
+          assert row["source_primitive_ids"][0].endswith(":1567")
+          for tag in ("baseline", "candidate"):
+              assert len(row[tag]["unproven_source_gaps_page_pt"]) == 1
+              lo, hi = row[tag]["unproven_source_gaps_page_pt"][0]
+              assert math.isclose(hi - lo, 2.0, abs_tol=1e-9)
+          assert row["baseline"]["source_edge_count"] == 2
+          assert row["candidate"]["source_edge_count"] == 3
+          offsets = row["candidate"]["snapped_path_offsets_page_pt"]
+          assert any(abs(x["point"][0] - 380.64) < 1e-6 and
+                     abs(x["point"][1] - 342.72) < 1e-6 and
+                     abs(x["signed_normal_offset_pt"]) > .35 for x in offsets)
+          assert not report["may_publish_hosts"]
+          assert not report["may_publish_quantities"]
+          assert not report["may_change_opening_counts"]
+          assert report["benchmark_accuracy"] is None
+          print("Exact archive retained: 2-point source gap, added snapped W2 node, no host promotion")
+          PY
+      - name: Upload read-only forensic output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gptmax-w2-source-junction-forensics
+          path: /tmp/w2-forensics.json
+          if-no-files-found: ignore
