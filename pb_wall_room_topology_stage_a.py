@@ -630,6 +630,7 @@ def build_wall_graph_for_viewport(
             audit_short_source_fragments(
                 split_segment_dicts, snapped_graph, merged_graph,
                 max_length_pt=gap_snap_tolerance_pt,
+                producer_reported_collapsed_fragments=snap_collapsed_fragments,
             )
         )
     return merged_graph
