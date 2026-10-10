@@ -80,7 +80,7 @@ def test_ambiguous_or_unproven_through_geometry_preserves_original_graph(damage)
     elif damage=="bent_upper":
         g["edges"][0]["x1"]=380.8
     elif damage=="not_through":
-        g["edges"][1]["y2"]=342.74
+        g["edges"][1]["x2"]=381.5
     elif damage=="other_endpoint_far":
         g["edges"][2]["x1"]=375.
     elif damage=="nan_node":
