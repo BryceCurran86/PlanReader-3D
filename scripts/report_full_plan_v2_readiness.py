@@ -89,13 +89,20 @@ def _source_sha_proof(manifest: dict, source_root: Path | None, project_id: str)
         if not source.is_file():
             reasons.append(f"source_file_missing:{name}")
             continue
-        if source.stat().st_size != expected_size:
-            reasons.append(f"source_file_size_mismatch:{name}")
+        # A concurrently replaced or unreadable source PDF must fail this
+        # project's SHA authority, not terminate the four-project diagnostic.
+        # Keep streaming original bytes; never infer a source SHA from names.
+        try:
+            if source.stat().st_size != expected_size:
+                reasons.append(f"source_file_size_mismatch:{name}")
+                continue
+            digest = hashlib.sha256()
+            with source.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError:
+            reasons.append(f"source_file_unreadable:{name}")
             continue
-        digest = hashlib.sha256()
-        with source.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
         if digest.hexdigest() != expected_sha.lower():
             reasons.append(f"source_file_sha_mismatch:{name}")
     return not reasons, reasons
