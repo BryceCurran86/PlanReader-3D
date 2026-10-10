@@ -495,3 +495,87 @@ def test_replaced_seal_cannot_switch_project_during_parity(
     assert module._sealed_projection_proof(
         root, "au_qld_lot16_power", [], True
     ) == (False, ["sealed_run_changed_during_parity"])
+
+
+def test_first_seal_proof_captures_exact_verified_fingerprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    project_id = "au_qld_lot16_power"
+    target = tmp_path / project_id
+    target.mkdir()
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+    source_sha = "a" * 64
+    seal = SimpleNamespace(
+        project_id=project_id,
+        source_sha256s=(source_sha,),
+        quantities=(SimpleNamespace(
+            lineage_ok=True,
+            abstained=False,
+            object_identity_refs=("physical-source-object",),
+        ),),
+        fingerprint="verified-cryptographic-run-fingerprint",
+    )
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict", lambda _payload: seal
+    )
+    fingerprints: list[str] = []
+    assert module._sealed_run_proof(
+        tmp_path, project_id, {source_sha},
+        seal_fingerprint_sink=fingerprints,
+    ) == (True, 1, [])
+    assert fingerprints == ["verified-cryptographic-run-fingerprint"]
+
+
+def test_valid_but_swapped_second_seal_is_not_authorized_by_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    project_id = "au_qld_lot16_power"
+    target = tmp_path / project_id
+    target.mkdir()
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict",
+        lambda _payload: SimpleNamespace(
+            project_id=project_id, quantities=(),
+            fingerprint="other-valid-production-run",
+        ),
+    )
+    assert module._sealed_projection_proof(
+        tmp_path, project_id, [], True,
+        expected_seal_fingerprint="first-verified-production-run",
+    ) == (False, ["sealed_run_changed_during_parity"])
+
+
+def test_unchanged_signed_seal_fingerprint_can_reach_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    project_id = "au_qld_lot16_power"
+    target = tmp_path / project_id
+    target.mkdir()
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict",
+        lambda _payload: SimpleNamespace(
+            project_id=project_id, quantities=(),
+            fingerprint="unchanged-production-run",
+        ),
+    )
+    assert module._sealed_projection_proof(
+        tmp_path, project_id, [], True,
+        expected_seal_fingerprint="unchanged-production-run",
+    ) == (True, [])
