@@ -1,0 +1,167 @@
+name: DIAG GPT2 Maryborough B02 Live RCP Occurrences
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt2-b02-live-rcp-occurrences.yml"
+  workflow_dispatch:
+
+jobs:
+  source-rcp-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install source-text corroboration
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Source-verified production material and RCP occurrence ledger
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b02-live-rcp
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-b02-live-rcp/inventory.json
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import (
+              SourceMaterialDefinitionSelector,
+              SourceMaterialOccurrenceSelector,
+              SourceMaterialSemanticProducer,
+          )
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              is_authoritative_derived_viewport,
+              validate_non_overlapping_viewports,
+          )
+
+          path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          payload = path.read_bytes()
+          source_sha = hashlib.sha256(payload).hexdigest()
+          assert source_sha == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf = fitz.open(stream=payload, filetype="pdf")
+          assert pdf.page_count == 31
+          rcps = []
+          page = pdf.load_page(8)
+          viewports = segment_page_viewports(page, page_number=9)
+          assert validate_non_overlapping_viewports(viewports)
+          for v in viewports:
+              if v.view_type != DrawingViewType.REFLECTED_CEILING_PLAN.value:
+                  continue
+              authoritative = (
+                  v.bounding_box is not None and
+                  (v.status == "resolved" or is_authoritative_derived_viewport(v))
+              )
+              rcps.append({
+                  "id": v.view_id,
+                  "title": v.label,
+                  "status": v.status,
+                  "authenticated": bool(authoritative),
+                  "native_bbox_pdf_pts": v.bounding_box,
+                  "boundary_source": v.boundary_source,
+              })
+          pdf.close()
+          assert any(v["authenticated"] for v in rcps), "B01 real source viewport recovery missing"
+
+          source = SourceVisibilityProducer(
+              producer_method="gpt2-b02-real-rcp-occurrence-proof",
+              producer_version="1",
+          )
+          published = source.ingest_native_pdf_bytes(
+              document_id="gpt2-b02-maryborough-source-ownership",
+              source_bytes=payload,
+              source_locator="memory://maryborough-rcp-proof.pdf",
+              page_ids=("7", "9", "11"),
+          )
+          assert published.revision.source_sha256 == source_sha
+          assert {"9", "11"}.issubset({
+              str(i) for i in published.coverage.decoded_pages
+          })
+
+          producer = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          authority = producer.publish(str(published.revision.revision_id))
+          lineage = {
+              "document_id": published.revision.document_id,
+              "revision_id": published.revision.revision_id,
+              "source_sha256": source_sha,
+              "snapshot_id": published.snapshot.snapshot_id,
+          }
+          definitions = {}
+          for code in ("FPB", "WFPB", "IPF1", "GRID", "FT2", "FT3"):
+              result = authority.resolve_definition(
+                  SourceMaterialDefinitionSelector(**lineage, code=code)
+              )
+              rec = result.record
+              definitions[code] = {
+                  "status": str(result.status),
+                  "first_gate": list(result.reason_codes),
+                  "semantic_finish": rec.semantic_finish if rec else None,
+                  "record_id": rec.record_id if rec else None,
+                  "pages": list(rec.source_page_ids) if rec else [],
+                  "source_definition_ids": list(rec.source_definition_ids) if rec else [],
+              }
+              if rec:
+                  assert rec.source_sha256 == source_sha
+                  assert rec.source_definition_ids
+
+          occurrences = []
+          for v in rcps:
+              if not v["authenticated"]:
+                  continue
+              result = authority.resolve_occurrences(
+                  SourceMaterialOccurrenceSelector(
+                      **lineage, page_id="9", viewport_id=v["id"]
+                  )
+              )
+              rows = []
+              for rec in result.records:
+                  assert rec.source_sha256 == source_sha
+                  assert rec.page_id == "9" and rec.viewport_id == v["id"]
+                  assert rec.source_evidence_id and rec.definition_record_id
+                  assert rec.source_text_observation_ids
+                  rows.append({
+                      "code": rec.code,
+                      "semantic_finish": rec.semantic_finish,
+                      "record_id": rec.record_id,
+                      "definition_record_id": rec.definition_record_id,
+                      "source_evidence_id": rec.source_evidence_id,
+                      "source_text_observation_ids": list(rec.source_text_observation_ids),
+                      "bbox_pdf_pts": rec.bbox_pdf_pts,
+                  })
+              occurrences.append({
+                  "viewport_id": v["id"],
+                  "status": str(result.status),
+                  "first_gate": list(result.reason_codes),
+                  "scope_complete": result.scope_complete,
+                  "count": len(rows),
+                  "source_owned_records": rows,
+              })
+          print("GPT2_B02_PRODUCTION_RCP_LEDGER", json.dumps({
+              "source_sha256": source_sha,
+              "pages_decoded": sorted(str(i) for i in published.coverage.decoded_pages),
+              "rcp_viewports": rcps,
+              "definitions": definitions,
+              "rcp_occurrence_scopes": occurrences,
+              "source_scope": "real_PDF_p7_p9_p11",
+              "not_proven": ["physical_room_finish_link","metric_quantity","sealed_customer_row","frozen_score"],
+          }, sort_keys=True, default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b02-live-rcp-occurrences
+          path: artifacts/gpt2-b02-live-rcp
+          retention-days: 7
