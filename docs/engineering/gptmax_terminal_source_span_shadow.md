@@ -134,3 +134,34 @@ unchanged W4/frame source with unapproved receipt rekeys, and four as source
 proof requiring review: three changed W4 membership groups and one changed
 ABSTAIN frame reason. Neither this ledger nor the source-path preview accepts
 those receipts. This preserves the interior-gap negative for separate review.
+
+## Original PDF visual limits
+
+Read-only Poppler crops of original page 3 at 576dpi were inspected at the
+registered coordinates, without annotating or changing the PDF. At that
+render resolution, both endpoints of the `:1585` terminal interval lie on
+dark paint. The `:324` interval starts on dark paint but its registered
+endpoint at (584.5, 531.25) pt is light. The `:1567` interior interval is light
+at y336.75 and y337.75 and dark at y338.75, consistent with the visible frame
+detail. The crops use these source-page rectangles in points:
+
+| Source primitive | Crop (x0, y0, width, height) |
+| --- | --- |
+| `:1585` | (400, 330, 32, 40) |
+| `:324` | (570, 520, 25, 23) |
+| `:1567` | (372, 325, 22, 32) |
+
+These are rendering observations, not a new pixel threshold, source truth,
+wall-role classifier or measurement. Detector-registered positive-parent
+geometry does not itself prove exact painted wall extent or interior
+continuity. Reproducing an old candidate identity remains a compiler-path
+hypothesis; it cannot promote its span to a physical wall or frame. No
+algorithm or tolerance was changed to fit these observations.
+
+Published diagnostic #2182 additionally has exact complete Lot16 report and
+endpoint-audit parity between Python 3.13 CI and local Python 3.12.14. The
+verified CI ZIP is artifact `11678188765` in run `38073763011`, SHA-256
+`521ce6af82f8d29251f1466c9a9f7b4c0d6f9c75f967ae381421bffb7c32e0ba`.
+Both original Lot16 and three-page Maryborough default/trace comparisons
+pass locally on the published tree, including the unchanged strict receipt
+retention checker. The publication branch has no source or quantity repair.
