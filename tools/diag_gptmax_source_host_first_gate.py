@@ -26,6 +26,17 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
         raise ValueError("original source SHA-256 mismatch")
     if report.get("primitive_safety_cap") != 20_000:
         raise ValueError("source safety cap is missing or altered")
+    revision_id = report.get("revision_id")
+    snapshot_id = report.get("snapshot_id")
+    coverage = report.get("source_decode_coverage")
+    if (not isinstance(revision_id, str) or not revision_id
+            or not isinstance(snapshot_id, str) or not snapshot_id
+            or not isinstance(coverage, dict)
+            or not isinstance(coverage.get("document_id"), str)
+            or not coverage["document_id"]
+            or coverage.get("revision_id") != revision_id):
+        raise ValueError("inconsistent original source revision and snapshot lineage")
+    document_id = coverage["document_id"]
     pages = report.get("selected_geometry_page_ids")
     if (not isinstance(pages, (list, tuple)) or not pages
             or any(not isinstance(p, str) or not p.isdigit() for p in pages)
@@ -55,6 +66,13 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
         raise ValueError("wall scopes do not match requested original source pages")
     if any(s.get("source_sha256") != sha for s in scopes):
         raise ValueError("foreign source wall scope")
+    if any(
+        scope.get("revision_id") != revision_id
+        or scope.get("snapshot_id") != snapshot_id
+        or scope.get("document_id") != document_id
+        for scope in scopes
+    ):
+        raise ValueError("foreign original revision, snapshot, or document wall scope")
     scope_ids = [s.get("decision_scope_id") for s in scopes]
     if any(not isinstance(s, str) or not s for s in scope_ids) or len(set(scope_ids)) != len(scope_ids):
         raise ValueError("repeated or missing producer-owned wall decision scope")
