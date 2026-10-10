@@ -2122,7 +2122,11 @@ def _producer_proven_page_opening_records(
                 and result.proposition == PHYSICAL_OPENING_EXISTS
                 and opening is not None and str(opening.page_id) == str(page_id)):
             proven[opening.record_id] = opening
-    records = tuple(proven[record_id] for record_id in sorted(proven))
+    # Preserve first authenticated source-observation witness order. The
+    # previous W4 path consumed dict insertion order, which controls the
+    # representative provenance of competing/adjacent physical openings.
+    # Sorting hashed record IDs can silently alter host binding precedence.
+    records = tuple(proven.values())
     physical_opening_authority._wall_source_opening_page_proof_cache[key] = records
     return records
 
