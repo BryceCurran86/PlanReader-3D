@@ -2942,10 +2942,17 @@ def _assemble_source_owned_w4_identities_or_unavailable(
         )
         identities = collect_physical_wall_identities(walls, graph)
     except ValueError as exc:
-        if (
-            str(exc).startswith("W4 collision")
-            or str(exc).startswith("duplicate W4 candidate id")
-        ):
+        # Handle every deliberately fail-closed W4 source-address failure,
+        # including the final topology/owner consistency checks. Unknown
+        # graph/runtime ValueErrors still propagate for engineering diagnosis.
+        known_collision_prefixes = (
+            "W4 collision",
+            "W4 collided wall lost source edge ownership",
+            "W4 source edge owner unexpectedly changed",
+            "W4 source candidate addresses remain duplicated",
+            "duplicate W4 candidate id",
+        )
+        if str(exc).startswith(known_collision_prefixes):
             return None
         raise
     return walls, rekeyed_junctions, identities
