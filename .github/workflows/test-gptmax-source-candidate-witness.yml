@@ -1,0 +1,28 @@
+name: GPT MAX Source Candidate Witness
+on:
+  pull_request:
+    paths:
+      - pb_opening_host_binding_authority.py
+      - pb_opening_host_source_candidate_witness.py
+      - tests/test_opening_host_source_candidate_witness.py
+      - .github/workflows/test-gptmax-source-candidate-witness.yml
+jobs:
+  evidence-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source candidate identity abstention and membership regression
+        run: PYTHONPATH=. python -m pytest -q tests/test_opening_host_source_candidate_witness.py
+      - name: Provider and frozen benchmark isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py

@@ -27,6 +27,7 @@ from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_opening_host_source_candidate_witness import source_candidate_membership_witness_id
 from pb_physical_opening_authority import (
     GAP_CORROBORATED_DOOR_JAMB_LEAF,
     GAP_CORROBORATED_WINDOW_JAMB_PAIR,
@@ -173,6 +174,21 @@ class OpeningHostBindingRecord:
     member_equivalence_groups: tuple[tuple[str, ...], ...]
     source_observation_ids: tuple[str, ...]
     schema_version: str = OPENING_HOST_BINDING_SCHEMA_VERSION
+
+    @property
+    def source_candidate_membership_witness_id(self) -> Optional[str]:
+        """Snapshot-independent W4 membership fingerprint, NOT host authority.
+
+        This witness cannot replace host_wall_id, record_id, source receipt,
+        member equivalence groups, boundary checks or a sealed quantity.
+        """
+        return source_candidate_membership_witness_id(
+            document_id=self.document_id,
+            source_sha256=self.source_sha256,
+            page_id=self.page_id,
+            opening_identity_id=self.opening_identity_id,
+            member_candidate_identity_ids=self.member_candidate_identity_ids,
+        )
 
 
 @dataclass(frozen=True)
