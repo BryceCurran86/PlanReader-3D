@@ -485,6 +485,36 @@ class SameViewRoomAreaProducer:
                 )
             )
 
+        # Figured-dimension witness IDs are source-owned measurements, not
+        # reusable inferred sizes. Two independent physical rooms claiming the
+        # same native horizontal OR vertical dimension have no unique area
+        # ownership, even when their label lines are individually authenticated.
+        # Quarantine BOTH claims, not whichever happened to run second.
+        dimension_owners: dict[tuple[str, str], set[str]] = {}
+        for record in records:
+            for dimension_id in (
+                record.horizontal_dimension_id,
+                record.vertical_dimension_id,
+            ):
+                dimension_owners.setdefault(
+                    (record.source_dimension_page_id, dimension_id), set()
+                ).add(record.physical_room_id)
+        contested_rooms = set().union(*(
+            owners for owners in dimension_owners.values()
+            if len(owners) > 1
+        ), set())
+        if contested_rooms:
+            records = [
+                record for record in records
+                if record.physical_room_id not in contested_rooms
+            ]
+            unresolved.update(contested_rooms)
+            first_failures.update({
+                room_id: "same_view_dimension_source_owner_conflict"
+                for room_id in contested_rooms
+            })
+            conflict_seen = True
+
         records.sort(key=lambda item: item.physical_room_id)
         unresolved_ids = tuple(sorted(unresolved))
         if records and not unresolved_ids:
