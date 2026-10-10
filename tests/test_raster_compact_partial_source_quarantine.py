@@ -121,3 +121,62 @@ def test_crossing_quarantine_never_modifies_either_source_observation():
     before=repr((compact,original))
     assert crosses(compact,(original,),dpi=300,source_dpi=144)
     assert repr((compact,original))==before
+
+
+
+from pb_raster_compact_partial_source_quarantine import (
+    compact_band_endpoint_on_original_source_interior as endpoint_on_original,
+)
+
+
+@pytest.mark.parametrize("flip",[False,True])
+def test_source_proven_ordinary_wall_touched_by_compact_t_endpoint(flip):
+    # Source-derived geometry from the archived Lot16 wall/compact audit:
+    # ordinary x=381, y=297..349; compact y=342.72 x=381..410.25.
+    sc=300/72.
+    compact=SimpleNamespace(
+        pixel_geometry=(381*sc,342.72*sc,410.25*sc,342.72*sc),
+        orientation="horizontal",
+    )
+    line=(381*72/72,297.,381*72/72,349.)
+    source=SimpleNamespace(geometry_pt=line,orientation="vertical")
+    if flip:
+        compact.pixel_geometry=tuple(reversed(compact.pixel_geometry))
+    assert endpoint_on_original(compact,(source,),dpi=300,source_dpi=144)
+
+
+@pytest.mark.parametrize("damage",[
+    "source_near_end","source_corner","outside","other_axis",
+    "nonorthogonal","nonfinite","remote","invalid_dpi",
+])
+def test_t_endpoint_requires_ordinary_original_interior(damage):
+    compact=SimpleNamespace(pixel_geometry=(40.,50.,90.,50.),orientation="horizontal")
+    source=SimpleNamespace(geometry_pt=(40*72/300,20*72/300,
+                                        40*72/300,70*72/300),orientation="vertical")
+    dpi=300
+    if damage=="source_near_end":
+        source.geometry_pt=(40*72/300,49.8*72/300,40*72/300,70*72/300)
+    elif damage=="source_corner":
+        source.geometry_pt=(40*72/300,50*72/300,40*72/300,70*72/300)
+    elif damage=="outside":
+        source.geometry_pt=(25*72/300,20*72/300,25*72/300,70*72/300)
+    elif damage=="other_axis":
+        source.orientation="horizontal"
+    elif damage=="nonorthogonal":
+        source.geometry_pt=(40*72/300,20*72/300,42*72/300,70*72/300)
+    elif damage=="nonfinite":
+        source.geometry_pt=(float("nan"),20*72/300,40*72/300,70*72/300)
+    elif damage=="remote":
+        source.geometry_pt=(40*72/300,100*72/300,40*72/300,170*72/300)
+    else:
+        dpi=0
+    assert not endpoint_on_original(compact,(source,),dpi=dpi,source_dpi=144)
+
+
+def test_t_endpoint_cannot_alias_parallel_line_or_invent_geometry():
+    compact=SimpleNamespace(pixel_geometry=(40.,50.,90.,50.),orientation="horizontal")
+    source=SimpleNamespace(geometry_pt=(40*72/300,50*72/300,90*72/300,50*72/300),
+                           orientation="horizontal")
+    original=repr((compact,source))
+    assert not endpoint_on_original(compact,(source,),dpi=300,source_dpi=144)
+    assert repr((compact,source))==original
