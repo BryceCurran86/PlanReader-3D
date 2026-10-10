@@ -181,7 +181,7 @@ def _local_edge_owners(
         face_id = str(record.face_id)
         for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
             try:
-                wall_id = str(item[0])
+                wall_id = str(item[0] or "").strip()
                 edge = _edge_key(item[1])
             except (IndexError, TypeError):
                 continue
@@ -342,7 +342,7 @@ def _candidate_record(
     for record in constituent:
         for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
             try:
-                wall_id = str(item[0])
+                wall_id = str(item[0] or "").strip()
                 edge = _edge_key(item[1])
             except (IndexError, TypeError):
                 return None
