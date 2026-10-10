@@ -83,7 +83,10 @@ from pb_wall_room_topology_stage_a import (
     build_wall_graph_for_viewport,
     is_structural_candidate_segment,
 )
-from pb_wall_room_topology_wall_assembly import assemble_wall_topology
+from pb_wall_room_topology_wall_assembly import (
+    W4SourceCandidateAddressCollision,
+    assemble_wall_topology,
+)
 from pb_wall_room_topology_typed_negative_evidence import (
     collect_source_lineage_grid_evidence,
 )
@@ -2923,6 +2926,37 @@ def _source_snap_collapsed_fragment_inventory(graph, identities):
             for candidate_id, rows in inventory.items()}
 
 
+def _assemble_source_owned_w4_identities_or_unavailable(
+    *,
+    graph,
+    junctions,
+    relationships,
+    scope_id: str,
+):
+    """Fail closed on provenance-ambiguous W4 candidate addresses.
+
+    Only known W4 identity-collision errors become unavailable scope. Every
+    other unexpected assembly error still propagates for engineering diagnosis.
+    This function never invents a wall candidate or equivalence relation.
+    """
+    try:
+        walls, rekeyed_junctions = assemble_wall_topology(
+            graph, junctions, relationships, viewport_id=scope_id
+        )
+        identities = collect_physical_wall_identities(walls, graph)
+    except W4SourceCandidateAddressCollision:
+        # No producer evidence can decide which source W4 row owns the address.
+        # The caller emits a complete-scope ABSTAIN, not a guessed identity.
+        return None
+    except ValueError as exc:
+        # This one error comes from the downstream physical identity
+        # collection keyed by W4 address, not from the W4 source assembler.
+        if str(exc).startswith("duplicate W4 candidate id"):
+            return None
+        raise
+    return walls, rekeyed_junctions, identities
+
+
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2984,13 +3018,15 @@ def _assemble_scope_result(
         page_id=page_id,
         viewport_id=scope_id,
     )
-    walls, _rekeyed_junctions = assemble_wall_topology(
-        graph,
-        junctions,
-        relationships,
-        viewport_id=scope_id,
+    assembled = _assemble_source_owned_w4_identities_or_unavailable(
+        graph=graph,
+        junctions=junctions,
+        relationships=relationships,
+        scope_id=scope_id,
     )
-    identities = collect_physical_wall_identities(walls, graph)
+    if assembled is None:
+        return _blocked(selector, PHYSICAL_WALL_CANDIDATE_IDENTITY_UNRESOLVED)
+    walls, _rekeyed_junctions, identities = assembled
     collapsed_source_fragments = _source_snap_collapsed_fragment_inventory(graph, identities)
     graph_edges = {str(edge["id"]): edge for edge in graph["edges"]}
 
