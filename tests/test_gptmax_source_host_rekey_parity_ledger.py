@@ -345,6 +345,12 @@ def test_identically_invalid_source_frames_cannot_certify_snapshot_only_rekey(da
             frame["wall_thickness_pt"]="four"
         else:
             frame["u0_pt"]=float("nan")
+    if damage=="missing_wall_candidates":
+        # An empty receipt member list contradicts the independently serialized
+        # frame + physical host. The producer scope fails before parity scoring.
+        with pytest.raises(ValueError, match="inconsistent framed whole-wall candidate membership"):
+            compare_source_host_rekeys(a,b)
+        return
     output=compare_source_host_rekeys(a,b)
     assert output["rekey_classification_counts"]=={
         "ORIGINAL_SOURCE_PROOF_CHANGED_OR_LOST":1
