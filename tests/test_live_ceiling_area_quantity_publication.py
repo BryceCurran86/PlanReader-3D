@@ -589,3 +589,42 @@ def test_different_rooms_with_distinct_area_sources_do_not_quarantine_each_other
     assert {q.input_entity_ids for q in quantities} == {
         ("canonical-ceiling-1",), ("canonical-ceiling-room-2",)
     }
+
+
+def test_final_ceiling_area_rejects_invalid_figured_receipt_collection_type() -> None:
+    # This is the FINAL source→FIRM publication boundary. An upstream guard
+    # cannot be assumed: caller-supplied canonical surfaces remain untrusted.
+    for invalid in (
+        "HV", "dim-h,dim-v",
+        {"horizontal": "dim-h", "vertical": "dim-v"},
+        ("dim-h", 123), ("dim-h", None),
+        ["dim-h", ["dim-v"]],
+    ):
+        candidate = replace(_ceiling(), figured_dimension_ids=invalid)
+        assert publish_live_ceiling_area_quantities(_result(ceiling=candidate)) == ()
+
+
+def test_final_ceiling_area_keeps_genuine_two_native_source_receipts() -> None:
+    for source_ids in (
+        ["dim-v", "dim-h"],
+        ("dim-h", "dim-v", "dim-h"),
+    ):
+        candidate = replace(_ceiling(), figured_dimension_ids=source_ids)
+        published = publish_live_ceiling_area_quantities(_result(ceiling=candidate))
+        assert len(published) == 1
+        assert published[0].metadata["figured_dimension_ids"] == ("dim-h", "dim-v")
+        assert published[0].status == AuthorityStatus.FIRM.value
+
+
+def test_final_ceiling_area_does_not_use_figured_guard_to_block_scaled_source() -> None:
+    candidate = replace(
+        _ceiling(
+            authority=MeasurementAuthorityType.PDF_SCALED.value,
+            physical_scale_record_id="authenticated-scale-1",
+            figured_dimension_ids=(),
+        ),
+        figured_dimension_ids="invalid-figured-only-for-scaled-authority",
+    )
+    published = publish_live_ceiling_area_quantities(_result(ceiling=candidate))
+    assert len(published) == 1
+    assert published[0].metadata["resolved_scale_id"] == "authenticated-scale-1"
