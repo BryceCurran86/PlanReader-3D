@@ -580,3 +580,57 @@ def test_long_grid_wall_with_more_than_two_global_owners_uses_local_adjacency():
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.records) == 1
     assert result.records[0].constituent_face_ids == ("top_left", "top_right")
+
+
+def test_planarized_source_wall_edges_reject_nonfinite_coordinates():
+    # A malformed source edge cannot be a globally shared grid separator.
+    from pb_source_composite_room_face_authority import _edge_key
+
+    assert _edge_key(((0.0, 0.0), (10.0, 0.0))) == (
+        (0.0, 0.0), (10.0, 0.0)
+    )
+    assert _edge_key(((10.0, 0.0), (0.0, 0.0))) == (
+        (0.0, 0.0), (10.0, 0.0)
+    )
+    for value in (float("nan"), float("inf"), float("-inf")):
+        assert _edge_key(((0.0, 0.0), (value, 0.0))) is None
+        assert _edge_key(((value, 1.0), (2.0, 1.0))) is None
+    assert _edge_key(((0.0, 0.0), (0.0, 0.0))) is None
+    assert _edge_key(((0.0, 0.0), ())) is None
+    assert _edge_key(((0.0, 0.0), (10**500, 0.0))) is None
+
+
+def test_nonfinite_source_wall_cannot_generate_local_grid_adjacency():
+    from pb_source_composite_room_face_authority import (
+        _grid_local_adjacency,
+        _local_edge_owners,
+    )
+    from types import SimpleNamespace
+
+    source_face_a = SimpleNamespace(
+        face_id="a",
+        boundary_wall_edges=(("W-grid", ((float("nan"), 0.0), (5.0, 0.0))),),
+    )
+    source_face_b = SimpleNamespace(
+        face_id="b",
+        boundary_wall_edges=(("W-grid", ((float("nan"), 0.0), (5.0, 0.0))),),
+    )
+    source_scope = SimpleNamespace(records=(source_face_a, source_face_b))
+    assert _local_edge_owners(source_scope) == {}
+    assert _grid_local_adjacency(source_scope, {"W-grid"}) == {}
+
+
+
+def test_null_wall_identity_cannot_own_any_composite_room_subedge():
+    from pb_source_composite_room_face_authority import (
+        _grid_local_adjacency,
+        _local_edge_owners,
+    )
+    from types import SimpleNamespace
+
+    source_scope = SimpleNamespace(records=(
+        SimpleNamespace(face_id="a", boundary_wall_edges=((None, ((0, 0), (10, 0))),)),
+        SimpleNamespace(face_id="b", boundary_wall_edges=(("", ((10, 0), (0, 0))),)),
+    ))
+    assert _local_edge_owners(source_scope) == {}
+    assert _grid_local_adjacency(source_scope, {"None", ""}) == {}

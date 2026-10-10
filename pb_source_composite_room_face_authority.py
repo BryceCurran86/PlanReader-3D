@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+import math
 from typing import Mapping
 
 from shapely.geometry import Polygon
@@ -155,7 +156,9 @@ def _edge_key(value) -> tuple[tuple[float, float], tuple[float, float]] | None:
     try:
         first = (float(value[0][0]), float(value[0][1]))
         second = (float(value[1][0]), float(value[1][1]))
-    except (IndexError, TypeError, ValueError):
+    except (IndexError, TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(v) for point in (first, second) for v in point):
         return None
     if first == second:
         return None
@@ -178,7 +181,7 @@ def _local_edge_owners(
         face_id = str(record.face_id)
         for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
             try:
-                wall_id = str(item[0])
+                wall_id = str(item[0] or "").strip()
                 edge = _edge_key(item[1])
             except (IndexError, TypeError):
                 continue
@@ -339,7 +342,7 @@ def _candidate_record(
     for record in constituent:
         for item in tuple(getattr(record, "boundary_wall_edges", ()) or ()):
             try:
-                wall_id = str(item[0])
+                wall_id = str(item[0] or "").strip()
                 edge = _edge_key(item[1])
             except (IndexError, TypeError):
                 return None
