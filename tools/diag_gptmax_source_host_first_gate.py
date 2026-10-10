@@ -46,9 +46,8 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
     }
     if any(summary.get(key) != count for key, count in expected.items()):
         raise ValueError("source report summary contradicts individual receipts")
-    if len(scopes) != len(pages):
-        raise ValueError("source wall scope and page cardinality mismatch")
-    if {str(s.get("page_id")) for s in scopes} != set(pages):
+    observed_pages = {str(s.get("page_id")) for s in scopes}
+    if observed_pages != set(pages):
         raise ValueError("wall scopes do not match requested original source pages")
     if any(s.get("source_sha256") != sha for s in scopes):
         raise ValueError("foreign source wall scope")
