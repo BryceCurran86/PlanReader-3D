@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import pytest
+
 from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_migration_contracts import (
     DocumentEvidence,
@@ -245,3 +248,106 @@ def test_deterministic_replay() -> None:
     first = _build(deductions=(d1,), completion=_complete(("OP-1",)))
     replay = _build(deductions=(d1,), completion=_complete(("OP-1",)))
     assert first.to_dict() == replay.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("value", "blocker"),
+    (
+        (float("nan"), "opening_deduction_value_invalid"),
+        (float("inf"), "opening_deduction_value_invalid"),
+        (-0.01, "opening_deduction_value_invalid"),
+    ),
+)
+def test_bad_opening_deduction_never_authenticates_net_area(
+    value: float, blocker: str,
+) -> None:
+    deduction = _deduction("OP-1", value)
+    result = _build(
+        deductions=(deduction,), completion=_complete(("OP-1",)),
+    )
+    assert result.abstained
+    assert result.value is None
+    assert blocker in result.blocking_reasons
+    assert "opening_universe_completeness_not_authenticated" in result.blocking_reasons
+
+
+@pytest.mark.parametrize(
+    ("value", "blocker"),
+    (
+        (float("nan"), "gross_wall_area_value_invalid"),
+        (float("inf"), "gross_wall_area_value_invalid"),
+        (-2.0, "gross_wall_area_value_invalid"),
+        (0.0, "gross_wall_area_value_invalid"),
+    ),
+)
+def test_invalid_gross_wall_m2_never_authenticates_net_area(
+    value: float, blocker: str,
+) -> None:
+    result = _build(
+        deductions=(_deduction("OP-1", 1.0),),
+        completion=_complete(("OP-1",)),
+        gross=_gross(value),
+    )
+    assert result.abstained
+    assert result.value is None
+    assert blocker in result.blocking_reasons
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    (
+        ("gross", "invalid_gross_wall_area_unit"),
+        ("deduction", "invalid_opening_deduction_unit"),
+    ),
+)
+def test_incorrect_area_units_are_rejected_at_net_wall_boundary(
+    target: str, expected: str,
+) -> None:
+    deduction = _deduction("OP-1", 1.0)
+    gross = _gross()
+    if target == "gross":
+        gross = replace(gross, unit="ft2")
+    else:
+        deduction = replace(deduction, unit="ft2")
+    result = _build(
+        gross=gross, deductions=(deduction,),
+        completion=_complete(("OP-1",)),
+    )
+    assert result.abstained and result.value is None
+    assert expected in result.blocking_reasons
+
+
+@pytest.mark.parametrize(
+    ("metadata_key", "expected"),
+    (
+        ("source_sha256", "opening_deduction_source_sha_mismatch"),
+        ("revision_id", "opening_deduction_revision_mismatch"),
+        ("evidence_snapshot_id", "opening_deduction_evidence_snapshot_mismatch"),
+        ("canonical_graph_snapshot_id", "opening_deduction_graph_snapshot_mismatch"),
+        ("viewport_id", "opening_deduction_viewport_mismatch"),
+    ),
+)
+def test_foreign_opening_deduction_provenance_stays_abstained(
+    metadata_key: str, expected: str,
+) -> None:
+    deduction = _deduction("OP-1", 1.0)
+    copied = replace(
+        deduction,
+        metadata={**dict(deduction.metadata), metadata_key: "foreign-owner"},
+    )
+    result = _build(
+        deductions=(copied,), completion=_complete(("OP-1",)),
+    )
+    assert result.abstained and result.value is None
+    assert expected in result.blocking_reasons
+
+
+def test_two_quantity_ids_for_one_physical_opening_are_not_double_deducted() -> None:
+    source = _deduction("OP-1", 1.25)
+    replay = replace(source, quantity_id="different-quantity-id")
+    result = _build(
+        deductions=(source, replay), completion=_complete(("OP-1",)),
+    )
+    assert result.abstained
+    assert result.value is None
+    assert "duplicate_opening_deduction_identity" in result.blocking_reasons
