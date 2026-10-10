@@ -323,14 +323,15 @@ def test_duplicate_physical_opening_trace_cannot_hide_behind_set_equality() -> N
     assert result.quantity_evidence is None
 
 
-def test_blank_physical_opening_trace_cannot_hide_behind_set_equality() -> None:
+@pytest.mark.parametrize("missing_identity", ("", "   "))
+def test_blank_physical_opening_trace_cannot_hide_behind_set_equality(missing_identity) -> None:
     """A blank additional trace must not be discarded before coverage proof."""
     from dataclasses import replace
 
     wall_opening, physical_void, gross, roles, _void, _gross = _chain()
     forged = replace(
         physical_void.traces[0],
-        opening_identity_id="",
+        opening_identity_id=missing_identity,
     )
     altered = replace(physical_void, traces=(*physical_void.traces, forged))
     result = compose_live_external_physical_net_wall_publication(
