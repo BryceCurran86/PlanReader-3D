@@ -455,18 +455,24 @@ def test_two_canonical_ceilings_cannot_repeat_one_full_room_area_source() -> Non
     ) == ()
 
 
-def test_unmeasured_ceiling_competing_for_area_blocks_firm_reissue() -> None:
+def test_unmeasured_ceiling_without_positive_source_does_not_poison_firm() -> None:
     original = _ceiling()
     unresolved = replace(
         original,
         canonical_ceiling_id="canonical-ceiling-unmeasured",
         ceiling_quantity_id="",
+        metric_area_complete=False,
         area_m2=None,
     )
     result = replace(
         _result(), canonical_ceilings=(original, unresolved),
     )
-    assert publish_live_ceiling_area_quantities(result) == ()
+    expected = publish_live_ceiling_area_quantities(_result())
+    assert len(expected) == 1
+    assert publish_live_ceiling_area_quantities(result) == expected
+    assert publish_live_ceiling_area_quantities(
+        replace(result, canonical_ceilings=(unresolved, original))
+    ) == expected
 
 
 def test_different_room_area_sources_keep_independent_ceilings() -> None:
