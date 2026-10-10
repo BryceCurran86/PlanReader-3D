@@ -318,6 +318,7 @@ def test_external_wall_rejects_foreign_opening_universe_provenance():
         {"document_id": "foreign-document"},
         {"source_sha256": "f" * 64},
         {"snapshot_id": "foreign-snapshot"},
+        {"revision_id": "foreign-revision"},
         {"decision_scope_id": "foreign-decision"},
         {"page_ids": ("unrelated-page",)},
     ):
