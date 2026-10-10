@@ -580,3 +580,116 @@ def test_long_grid_wall_with_more_than_two_global_owners_uses_local_adjacency():
     assert result.status is EvidenceResolutionStatus.CORROBORATED
     assert len(result.records) == 1
     assert result.records[0].constituent_face_ids == ("top_left", "top_right")
+
+
+def test_source_grid_subedges_node_at_exact_split_endpoints():
+    """Two authentic W4 wall receipts may use different exact subedge cuts."""
+    from dataclasses import replace
+
+    scope = _room_scope()
+    left, right = scope.records
+    new_right_edges = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            new_right_edges.extend((
+                (wall, ((10.0, 0.0), (10.0, 4.0))),
+                (wall, ((10.0, 4.0), (10.0, 10.0))),
+            ))
+        else:
+            new_right_edges.append((wall, edge))
+    split_scope = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(new_right_edges)),
+    ))
+
+    result = compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=split_scope,
+        label_scope=_label_scope(),
+    )
+    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert len(result.records) == 1
+    assert result.records[0].area_page_pts2 == 200.0
+    assert result.records[0].separator_wall_ids == ("w_sep",)
+
+
+def test_source_grid_edge_noding_requires_exact_axis_and_same_w4_wall():
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import _grid_local_adjacency
+    scope = _room_scope()
+    left, right = scope.records
+    incompatible = []
+    for wall, edge in right.boundary_wall_edges:
+        if wall == "w_sep":
+            incompatible.extend((
+                (wall, ((10.00001, 0.0), (10.00001, 4.0))),
+                (wall, ((10.00001, 4.0), (10.00001, 10.0))),
+            ))
+        else:
+            incompatible.append((wall, edge))
+    offset_scope = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=tuple(incompatible)),
+    ))
+    assert _grid_local_adjacency(offset_scope, {"w_sep"}) == {}
+    assert compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=offset_scope,
+        label_scope=_label_scope(),
+    ).records == ()
+
+    # Matching geometry associated with a different W4 wall is never an owner.
+    foreign = tuple(
+        ("w_wrong", edge) if wall == "w_sep" else (wall, edge)
+        for wall, edge in right.boundary_wall_edges
+    )
+    foreign_scope = replace(scope, records=(
+        left, replace(right, boundary_wall_edges=foreign),
+    ))
+    assert _grid_local_adjacency(foreign_scope, {"w_sep"}) == {}
+
+
+def test_grid_noding_rejects_duplicate_and_three_sided_source_owners():
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import _grid_local_adjacency
+    scope = _room_scope()
+    left, right = scope.records
+    dup_scope = replace(scope, records=(
+        replace(left, boundary_wall_edges=left.boundary_wall_edges +
+                (("w_sep", ((10.0, 0.0), (10.0, 10.0))),)),
+        right,
+    ))
+    assert _grid_local_adjacency(dup_scope, {"w_sep"}) == {}
+    assert compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=dup_scope,
+        label_scope=_label_scope(),
+    ).records == ()
+
+    third = replace(left, face_id="unrelated_third_face",
+                    record_id="unrelated_third_record")
+    triple_scope = replace(scope, records=(left, right, third))
+    assert _grid_local_adjacency(triple_scope, {"w_sep"}) == {}
+
+
+def test_touching_grid_source_edges_without_positive_span_do_not_connect():
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import _grid_local_adjacency
+    scope = _room_scope()
+    left, right = scope.records
+    left_edges = tuple(
+        (wall, ((10.0, 0.0), (10.0, 5.0))) if wall == "w_sep"
+        else (wall, edge) for wall, edge in left.boundary_wall_edges
+    )
+    right_edges = tuple(
+        (wall, ((10.0, 5.0), (10.0, 10.0))) if wall == "w_sep"
+        else (wall, edge) for wall, edge in right.boundary_wall_edges
+    )
+    disconnected = replace(scope, records=(
+        replace(left, boundary_wall_edges=left_edges),
+        replace(right, boundary_wall_edges=right_edges),
+    ))
+    assert _grid_local_adjacency(disconnected, {"w_sep"}) == {}
+    assert compose_grid_separated_room_faces(
+        wall_scope=_wall_scope((_grid_atom("e_sep"),)),
+        room_scope=disconnected,
+        label_scope=_label_scope(),
+    ).records == ()
