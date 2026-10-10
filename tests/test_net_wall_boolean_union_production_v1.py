@@ -870,7 +870,11 @@ def test_sub_tolerance_opening_overhang_abstains_before_boolean_subtraction(boun
     result = producer.publish(selector)
     assert result.status == EvidenceResolutionStatus.CONFLICT
     assert NET_WALL_VOID_UNRESOLVED in result.reason_codes
-    assert result.record is None
+    # The producer retains a blocked provenance receipt, not a publishable
+    # net-wall quantity. An overhanging opening must never be deducted.
+    assert result.record is not None
+    assert result.record.net_area_m2 is None
+    assert result.record.opening_deduction_record_ids == ()
 
 
 def test_scenario_19_opening_completely_outside_wall_fails_closed() -> None:
