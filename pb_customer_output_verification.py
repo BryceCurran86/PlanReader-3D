@@ -387,9 +387,20 @@ def verify_sealed_customer_output(
             # by dropping its quantity ID and embedded provenance. Manual
             # estimator rows without automated source signatures remain out
             # of scope for source-closed quantity reconciliation.
+            notes = row.get("notes")
+            notes_provenance = None
+            if isinstance(notes, str) and notes.strip():
+                try:
+                    notes_provenance = json.loads(notes)
+                except json.JSONDecodeError:
+                    pass
             if (
                 row.get("commercial_projection_provenance") is not None
                 or _clean(row.get("source_reference")).startswith("QuantityEvidence ")
+                or (
+                    isinstance(notes_provenance, Mapping)
+                    and _clean(notes_provenance.get("adapter")) == "commercial_takeoff"
+                )
             ):
                 raise CustomerOutputVerificationError(
                     "automated customer row is missing quantity identity"
