@@ -2,7 +2,7 @@ name: DIAG GPT2 Page7 Real Source Room Label Ownership
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, gpt2/page7-source-double-border-plan-owner-20261010]
     paths:
       - "pb_viewport_segmentation.py"
       - ".github/workflows/test-gpt2-page7-room-label-owners-after-frame.yml"
