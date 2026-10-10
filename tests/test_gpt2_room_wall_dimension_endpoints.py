@@ -57,3 +57,14 @@ def test_corner_touch_with_two_owners_stays_ambiguous():
 def test_tolerance_cannot_relax_actual_native_wall_evidence(tol):
     with pytest.raises(ValueError):
         inspect(face(),dimension(((0.,5.),(20.,5.))),tolerance_pdf_pt=tol)
+
+
+def test_malformed_source_endpoint_and_wall_edge_rows_abstain():
+    for endpoints in (123, "not-an-endpoint", (), ((0.,5.),)):
+        row=inspect(face(),dimension(endpoints))
+        assert row["first_authority_gate"]=="source_dimension_endpoints_unbound"
+        assert row["room_dimension_owned"] is False
+    malformed=face((("wall-a",),))
+    row=inspect(malformed,dimension(((0.,5.),(20.,5.))))
+    assert row["first_authority_gate"]=="source_owned_wall_subedges_malformed"
+    assert row["metric_area_published"] is False
