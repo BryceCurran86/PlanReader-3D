@@ -270,14 +270,15 @@ def _claim_from_quantity(
         scale_record_id = str(physical.record_id)
     else:
         area_meta = area.metadata if isinstance(area.metadata, dict) else {}
+        raw_figured_ids = area_meta.get("figured_dimension_ids")
+        # Source IDs are producer-owned tokens, not freeform human text.
+        # Treating a bare string as an iterable would turn "dim-h" into
+        # several single-character IDs and falsely satisfy a two-axis gate.
+        if (not isinstance(raw_figured_ids, (tuple, list))
+                or not all(isinstance(value, str) for value in raw_figured_ids)):
+            return None
         figured_dimension_ids = tuple(
-            sorted(
-                {
-                    _clean(value)
-                    for value in (area_meta.get("figured_dimension_ids") or ())
-                    if _clean(value)
-                }
-            )
+            sorted({_clean(value) for value in raw_figured_ids if _clean(value)})
         )
         # The ceiling must carry both independently source-owned axes of
         # the documented room-area proof. One dimension ID, or repetitions of
