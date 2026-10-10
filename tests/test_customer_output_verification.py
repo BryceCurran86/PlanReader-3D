@@ -317,3 +317,54 @@ def test_identical_independently_serialized_commercial_provenance_still_passes()
         )
     verified = verify_sealed_customer_output(sealed, reserialized)
     assert verified.verified_quantity_ids == ("qty-1", "qty-2")
+
+
+def test_source_reference_prefix_cannot_impersonate_exact_source_document() -> None:
+    sealed, rows = sealed_and_rows()
+    tampered = dict(rows[0])
+    tampered["source_reference"] = tampered["source_reference"].replace(
+        "document=doc-1;", "document=doc-1-foreign;"
+    )
+    # The machine notes remain genuine: only the visible receipt is damaged.
+    with pytest.raises(CustomerOutputVerificationError, match="source_reference lineage is incomplete"):
+        verify_sealed_customer_output(sealed, [tampered, rows[1]])
+
+
+def test_source_reference_conflicting_duplicate_identity_token_fails_closed() -> None:
+    sealed, rows = sealed_and_rows()
+    tampered = dict(rows[0])
+    tampered["source_reference"] += "; document=doc-foreign"
+    with pytest.raises(CustomerOutputVerificationError, match="conflicting identity tokens"):
+        verify_sealed_customer_output(sealed, [tampered, rows[1]])
+
+
+def test_source_reference_extra_nonidentity_estimator_note_is_allowed() -> None:
+    sealed, rows = sealed_and_rows()
+    annotated = dict(rows[0])
+    annotated["source_reference"] += "; estimator note: checked"
+    report = verify_sealed_customer_output(sealed, [annotated, rows[1]])
+    assert report.verified_quantity_ids == ("qty-1", "qty-2")
+
+
+def test_live_pb_auto_geometry_caption_preserves_exact_machine_source_identity() -> None:
+    sealed, rows = sealed_and_rows()
+    customer_rows = [dict(row) for row in rows]
+    customer_rows[0]["source_reference"] = (
+        "PB Auto Geometry v1.2.19 · " + customer_rows[0]["source_reference"]
+    )
+    assert verify_sealed_customer_output(sealed, customer_rows).verified_quantity_ids == (
+        "qty-1", "qty-2",
+    )
+
+
+def test_live_caption_cannot_hide_suffix_forged_quantity_id() -> None:
+    sealed, rows = sealed_and_rows()
+    customer_rows = [dict(row) for row in rows]
+    original = customer_rows[0]["source_reference"]
+    assert original.startswith("QuantityEvidence qty-1;")
+    customer_rows[0]["source_reference"] = (
+        "PB Auto Geometry v1.2.19 · "
+        + original.replace("QuantityEvidence qty-1;", "QuantityEvidence qty-1-foreign;", 1)
+    )
+    with pytest.raises(CustomerOutputVerificationError, match="source_reference lineage is incomplete"):
+        verify_sealed_customer_output(sealed, customer_rows)
