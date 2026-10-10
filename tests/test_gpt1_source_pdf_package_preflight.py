@@ -78,9 +78,8 @@ def test_same_size_modified_content_does_not_validate_original_sha(tmp_path):
     a = _pdf(tmp_path / "architecture.pdf")
     path = tmp_path / a["name"]
     data = bytearray(path.read_bytes())
-    position = data.find(b"source")
-    assert position > 0
-    data[position] = ord("S")
+    position = len(data) // 2
+    data[position] ^= 1
     path.write_bytes(data)
     rows = check_source_pdf_package(
         _manifest(tmp_path, [a]), tmp_path
