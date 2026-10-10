@@ -1081,3 +1081,23 @@ def test_rotated_semantic_band_rejects_competing_nonplan_title() -> None:
         assert validate_non_overlapping_viewports(viewports)
     finally:
         doc.close()
+
+
+def test_rotated_native_vertical_words_do_not_inflate_frame_calibration() -> None:
+    """The length of vertical title words is not their glyph height."""
+    from pb_viewport_segmentation import calibrate_viewport_layout
+
+    doc = _rotated_two_rcps_with_central_schedule()
+    try:
+        words = doc[0].get_text("words")
+        assert words
+        raw_median_word_span = sorted(
+            float(word[3]) - float(word[1]) for word in words
+        )[len(words) // 2]
+        calibration = calibrate_viewport_layout(doc[0])
+        assert raw_median_word_span > 30.0
+        assert 0.0 < calibration.median_word_height_pt < 20.0
+        # Source-native 300x200 pt schedule must remain frame-eligible.
+        assert calibration.minimum_frame_span_pt < 200.0
+    finally:
+        doc.close()
