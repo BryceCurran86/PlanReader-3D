@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - "pb_viewport_segmentation.py"
-      - ".github/workflows/test-gpt2-page7-room-label-owners-after-frame.yml"
+      - ".github/workflows/diag-gpt2-page7-source-room-label-owners.yml"
   workflow_dispatch:
 
 jobs:
