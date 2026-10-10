@@ -597,3 +597,25 @@ def test_planarized_source_wall_edges_reject_nonfinite_coordinates():
         assert _edge_key(((value, 1.0), (2.0, 1.0))) is None
     assert _edge_key(((0.0, 0.0), (0.0, 0.0))) is None
     assert _edge_key(((0.0, 0.0), ())) is None
+    assert _edge_key(((0.0, 0.0), (10**500, 0.0))) is None
+
+
+def test_nonfinite_source_wall_cannot_generate_local_grid_adjacency():
+    from pb_source_composite_room_face_authority import (
+        _grid_local_adjacency,
+        _local_edge_owners,
+    )
+    from types import SimpleNamespace
+
+    source_face_a = SimpleNamespace(
+        face_id="a",
+        boundary_wall_edges=(("W-grid", ((float("nan"), 0.0), (5.0, 0.0))),),
+    )
+    source_face_b = SimpleNamespace(
+        face_id="b",
+        boundary_wall_edges=(("W-grid", ((float("nan"), 0.0), (5.0, 0.0))),),
+    )
+    source_scope = SimpleNamespace(records=(source_face_a, source_face_b))
+    assert _local_edge_owners(source_scope) == {}
+    assert _grid_local_adjacency(source_scope, {"W-grid"}) == {}
+
