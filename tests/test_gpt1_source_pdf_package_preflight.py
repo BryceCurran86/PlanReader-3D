@@ -149,3 +149,14 @@ def test_source_manifest_flags_and_gold_are_not_proof(tmp_path):
     assert result["actual_source_package_runtime_complete"]
     assert not result["manifest_declares_source_package_complete"]
     assert "expected_quantity" not in json.dumps(result)
+
+
+def test_entire_source_root_symlink_rejected(tmp_path):
+    real_root = tmp_path / "originals"
+    real_root.mkdir()
+    a = _pdf(real_root / "architecture.pdf")
+    manifest = _manifest(real_root, [a])
+    alias = tmp_path / "linked_sources"
+    alias.symlink_to(real_root, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlinked"):
+        check_source_pdf_package(manifest, alias)
