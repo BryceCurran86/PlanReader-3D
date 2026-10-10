@@ -165,3 +165,29 @@ def test_invalid_receipt_types_fail_closed_as_value_error(broken):
         sample["host_frames"] = [None]
     with pytest.raises(ValueError, match="receipts unavailable"):
         source_first_gate_census(sample)
+
+
+@pytest.mark.parametrize("reasons,expected", [
+    (["ambiguous_physical_wall_equivalence_for_host"],
+     "physical_wall_equivalence_ambiguous_for_host"),
+    (["opening_two_face_wall_lineage_ambiguous",
+      "ambiguous_physical_wall_equivalence_for_host"],
+     "physical_wall_equivalence_ambiguous_for_host"),
+    (["complete_authenticated_host_wall_universe_required",
+      "physical_wall_candidate_scope_unavailable",
+      "no_local_host_wall_candidates"],
+     "source_wall_scope_boundary_or_completeness_unproven"),
+    (["complete_authenticated_host_wall_universe_required",
+      "physical_wall_candidate_scope_cropped_at_viewport_boundary",
+      "ambiguous_physical_wall_equivalence_for_host"],
+     "source_wall_scope_boundary_or_completeness_unproven"),
+])
+def test_source_host_gate_classification_does_not_hide_upstream_authority_failures(
+    reasons, expected
+):
+    sample = report()
+    sample["opening_bindings"][0]["reason_codes"] = reasons
+    census = source_first_gate_census(sample)
+    assert census["unhosted_first_gate_counts"] == {expected: 1}
+    assert not census["physical_wall_equivalence_proven"]
+    assert not census["host_publication_allowed"]
