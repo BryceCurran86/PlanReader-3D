@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+import math
 from typing import Mapping
 
 from shapely.geometry import Polygon
@@ -156,6 +157,8 @@ def _edge_key(value) -> tuple[tuple[float, float], tuple[float, float]] | None:
         first = (float(value[0][0]), float(value[0][1]))
         second = (float(value[1][0]), float(value[1][1]))
     except (IndexError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for point in (first, second) for v in point):
         return None
     if first == second:
         return None
