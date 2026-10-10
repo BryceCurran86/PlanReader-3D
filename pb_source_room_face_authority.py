@@ -300,7 +300,7 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
     tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
     dx, dy = bx - ax, by - ay
     length = math.hypot(dx, dy)
-    if length <= tolerance:
+    if not math.isfinite(length) or length <= tolerance:
         return False
 
     xmin, xmax = min(ax, bx) - tolerance, max(ax, bx) + tolerance
@@ -310,7 +310,7 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
         if not (xmin <= px <= xmax and ymin <= py <= ymax):
             return False
         perpendicular_distance = abs((px - ax) * dy - (py - ay) * dx) / length
-        if perpendicular_distance > tolerance:
+        if not math.isfinite(perpendicular_distance) or perpendicular_distance > tolerance:
             return False
     return child[0] != child[1]
 
@@ -328,12 +328,12 @@ def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
     tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
     vx, vy = bx - ax, by - ay
     length = math.hypot(vx, vy)
-    if length <= tolerance:
+    if not math.isfinite(length) or length <= tolerance:
         return None
 
     for px, py in ((cx, cy), (dx, dy)):
         perpendicular_distance = abs((px - ax) * vy - (py - ay) * vx) / length
-        if perpendicular_distance > tolerance:
+        if not math.isfinite(perpendicular_distance) or perpendicular_distance > tolerance:
             return None
 
     ux, uy = vx / length, vy / length
@@ -341,6 +341,8 @@ def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
         (cx - ax) * ux + (cy - ay) * uy,
         (dx - ax) * ux + (dy - ay) * uy,
     )
+    if not all(math.isfinite(value) for value in right_positions):
+        return None
     start = max(0.0, min(right_positions))
     end = min(length, max(right_positions))
     if end - start <= tolerance:
