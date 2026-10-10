@@ -102,3 +102,52 @@ def test_tampered_sealed_run_cannot_claim_verified(tmp_path: Path) -> None:
     assert verified is False
     assert count is None
     assert blockers == ["sealed_run_integrity_invalid"]
+
+
+def test_missing_produced_quantity_id_blocks_readiness_without_crashing(tmp_path: Path) -> None:
+    target = tmp_path / "au_qld_lot16_power"
+    target.mkdir()
+    # A malformed row still belongs in the production audit; it cannot
+    # disappear or invent a benchmark identity just because the ID is absent.
+    (target / "produced_items.json").write_text(
+        json.dumps([{
+            "trade_category": "opening", "value": 1.8, "unit": "m2",
+            "object_refs": ["physical-opening-1"],
+            "lineage_ok": True, "abstained": False,
+        }]), encoding="utf-8",
+    )
+    report = diagnostic_report(ROOT, tmp_path)
+    project = next(x for x in report["projects"] if x["project_id"] == "au_qld_lot16_power")
+    assert project["produced_file_present"] is True
+    assert project["produced_count"] == 1
+    assert "produced_quantity_id_missing_or_invalid" in project["blockers"]
+    assert project["reconciliation_complete"] is False
+    assert project["coverage_accuracy"] is None
+    assert project["precision_adjusted_accuracy"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
+
+
+def test_invalid_produced_quantity_id_types_do_not_become_fake_id_strings(tmp_path: Path) -> None:
+    target = tmp_path / "au_qld_maryborough_service_station"
+    target.mkdir()
+    def item(quantity_id):
+        return {
+            "quantity_id": quantity_id, "trade_category": "surface",
+            "value": 4.0, "unit": "m2", "object_refs": ["physical-floor-1"],
+            "lineage_ok": True, "abstained": False,
+        }
+    (target / "produced_items.json").write_text(
+        json.dumps([item(None), item(1234), item(" "), item("real-quantity-id")]),
+        encoding="utf-8",
+    )
+    project = next(
+        p for p in diagnostic_report(ROOT, tmp_path)["projects"]
+        if p["project_id"] == "au_qld_maryborough_service_station"
+    )
+    assert project["produced_count"] == 4
+    assert project["duplicate_quantity_ids"] == []
+    assert "produced_quantity_id_missing_or_invalid" in project["blockers"]
+    assert "None" not in project["duplicate_quantity_ids"]
+    assert project["reconciliation_complete"] is False
+    assert project["coverage_accuracy"] is None
