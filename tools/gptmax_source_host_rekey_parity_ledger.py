@@ -106,6 +106,21 @@ def _source_views(report):
     return sha,tuple(map(str,pages)),physical,frames,walls,evidence
 
 
+def _finite_pdf_point(point):
+    """Reject booleans, missing coordinates and non-finite source geometry."""
+    if not isinstance(point,(list,tuple)) or len(point)!=2:
+        return False
+    try:
+        return all(type(v) in (int,float) and math.isfinite(v) for v in point)
+    except (TypeError,ValueError,OverflowError):
+        return False
+
+
+def _finite_pdf_path(points):
+    return (isinstance(points,(tuple,list)) and len(points)>=2
+            and all(_finite_pdf_point(point) for point in points))
+
+
 def _positive_candidate_signature(r):
     """Ignore ONLY generated split-edge/node addresses, not source geometry."""
     if not isinstance(r,dict):
@@ -123,7 +138,8 @@ def _positive_candidate_signature(r):
     path=identity.get("path_fingerprint")
     if (not isinstance(primitive_ids,list) or not primitive_ids
             or any(not isinstance(v,str) or not v for v in primitive_ids)
-            or not isinstance(path,list) or len(path)<2):
+            or not _finite_pdf_path(path)
+            or not _finite_pdf_path(wall.get("centerline_pts"))):
         return None
     # A source-evidence comparison must not call two equally malformed
     # fragments "unchanged source". Require actual original PDF-point
@@ -162,13 +178,34 @@ def _positive_candidate_signature(r):
             "wall_reasons":wall["reason_codes"],
             "source_edges":edges,
         }
-        return json.dumps(core,sort_keys=True,separators=(",",":"))
+        return json.dumps(core,sort_keys=True,separators=(",",":"),allow_nan=False)
     except (KeyError,TypeError,ValueError):
         return None
 
 
 def _frame_geometry_signature(frame):
     if not isinstance(frame,dict):
+        return None
+    # A second equally-corrupted frame must never be accepted as unchanged.
+    if (not _finite_pdf_point(frame.get("origin_pt"))
+            or not _finite_pdf_point(frame.get("axis_unit"))
+            or not _finite_pdf_point(frame.get("normal_unit"))
+            or not isinstance(frame.get("whole_wall_candidate_ids"),list)
+            or not frame["whole_wall_candidate_ids"]
+            or any(not isinstance(wid,str) or not wid
+                   for wid in frame["whole_wall_candidate_ids"])):
+        return None
+    length=frame.get("whole_wall_length_pt")
+    if type(length) not in (int,float):
+        return None
+    try:
+        if not math.isfinite(length) or length<=0:
+            return None
+        for field in ("wall_thickness_pt","u0_pt","u1_pt"):
+            if field in frame and (type(frame[field]) not in (int,float)
+                    or not math.isfinite(frame[field])):
+                return None
+    except (TypeError,OverflowError):
         return None
     # These identifiers are tied to producer snapshot/host record; their
     # removal here does NOT authorize or manufacture replacement receipts.
@@ -177,7 +214,10 @@ def _frame_geometry_signature(frame):
         "host_wall_id","host_binding_record_id",
     }
     core={k:v for k,v in frame.items() if k not in ephemeral}
-    return json.dumps(core,sort_keys=True,separators=(",",":"))
+    try:
+        return json.dumps(core,sort_keys=True,separators=(",",":"),allow_nan=False)
+    except (TypeError,ValueError,OverflowError):
+        return None
 
 
 def compare_source_host_rekeys(baseline,candidate):
@@ -224,8 +264,13 @@ def compare_source_host_rekeys(baseline,candidate):
                 new_geom=be.get(oid)
                 if old_geom is None or new_geom is None:
                     why.append("FRAME_SOURCE_GEOMETRY_UNAVAILABLE")
-                elif _frame_geometry_signature(old_geom)!=_frame_geometry_signature(new_geom):
-                    why.append("FRAME_SOURCE_GEOMETRY_CHANGED")
+                else:
+                    prior_frame_sig=_frame_geometry_signature(old_geom)
+                    next_frame_sig=_frame_geometry_signature(new_geom)
+                    if prior_frame_sig is None or next_frame_sig is None:
+                        why.append("FRAME_SOURCE_GEOMETRY_UNAVAILABLE")
+                    elif prior_frame_sig!=next_frame_sig:
+                        why.append("FRAME_SOURCE_GEOMETRY_CHANGED")
         elif newframe.get("record_id"):
             why.append("NEW_FRAME_REQUIRES_SEPARATE_PROOF")
         if old.get("reason_codes")!=new.get("reason_codes"):
