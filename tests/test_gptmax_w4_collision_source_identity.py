@@ -234,6 +234,9 @@ def test_noncolliding_unchanged_id_is_never_reused_by_disambiguator(monkeypatch)
     ("w4", "W4 collision lacks positive source ancestry"),
     ("w4", "W4 collision has missing original source edge"),
     ("collector", "duplicate W4 candidate id before physical identity collection"),
+    ("w4", "W4 collided wall lost source edge ownership"),
+    ("w4", "W4 source edge owner unexpectedly changed"),
+    ("w4", "W4 source candidate addresses remain duplicated"),
 ])
 def test_production_w4_source_collision_returns_unavailable_not_unhandled(
     monkeypatch, error_source, error_text
