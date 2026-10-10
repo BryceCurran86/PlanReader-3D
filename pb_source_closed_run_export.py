@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from typing import Any
 
 from pb_migration_contracts import (
@@ -188,6 +189,15 @@ def sealed_source_closed_run_from_dict(
                 raise SourceClosedRunConflictError(
                     f"sealed quantity {index} has nonnumeric {numeric_field}"
                 )
+            if numeric_value is not None:
+                try:
+                    finite = math.isfinite(numeric_value)
+                except OverflowError:
+                    finite = False
+                if not finite:
+                    raise SourceClosedRunConflictError(
+                        f"sealed quantity {index} has non-finite {numeric_field}"
+                    )
         try:
             row = SealedSourceClosedQuantity(
                 project_id=_clean(raw.get("project_id")),
