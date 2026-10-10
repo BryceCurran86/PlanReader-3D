@@ -461,7 +461,10 @@ def _canonical_composite_supersedence(
     # The original physical face universe must itself be unique. Otherwise
     # retiring an identity could erase multiple source faces with one claim.
     source_id_counts = Counter(str(record.face_id) for record in originals)
-    source_receipt_counts = Counter(str(record.record_id) for record in originals)
+    source_receipt_counts = Counter(
+        str(getattr(record, "record_id", "") or "").strip()
+        for record in originals
+    )
     known = set(source_id_counts)
     originals_by_face = {str(record.face_id): record for record in originals}
     claimed = Counter(
@@ -494,7 +497,7 @@ def _canonical_composite_supersedence(
             )
         )
         expected_receipts = tuple(
-            str(originals_by_face[face_id].record_id)
+            str(getattr(originals_by_face[face_id], "record_id", "") or "").strip()
             for face_id in ids
         )
         # Distinct geometric face IDs must not share one producer receipt.
