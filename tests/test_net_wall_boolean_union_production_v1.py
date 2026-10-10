@@ -1179,3 +1179,29 @@ def test_subtract_void_union_boundary_touching_contained_geometry_preserved() ->
     assert not net.is_empty
     assert net.area == pytest.approx(10.0 * 3.0 - 1.0 * 2.0)
 
+
+@pytest.mark.parametrize("members", (("op-1", "op-1"), ("op-1", ""), ("op-1", "  ")))
+def test_malformed_complete_opening_universe_members_fail_closed(members) -> None:
+    """Completeness cannot discard repeated or missing physical members."""
+    v = _void_record("op-1")
+    ded = OpeningDeductionResult(
+        EvidenceResolutionStatus.CORROBORATED,
+        (OPENING_DEDUCTION_AUTHORIZED,),
+        _deduction_record("op-1"),
+    )
+    producer, selector = _setup_pipeline(
+        gross=_gross_record(length=10.0, height=3.0),
+        universe=_universe_record(member_ids=members),
+        voids=(v,),
+        deductions=(("op-1", ded),),
+    )
+    result = producer.publish(selector)
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert NET_WALL_OPENING_UNIVERSE_INCOMPLETE in result.reason_codes
+    # Retained blocked gross-wall lineage is not a publishable net area.
+    assert result.record is not None
+    assert result.record.net_area_m2 is None
+    assert not result.record.opening_deduction_record_ids
+    assert result.record.void_union_area_m2 == 0.0
+    assert result.record.union_geometry_id == ""
+    assert result.record.physical_void_record_ids == ()
