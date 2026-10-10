@@ -141,3 +141,12 @@ def test_wrong_family_or_untrusted_measurement_source_stays_unmeasured() -> None
         row = inspect_room_measurement_gates(claim)["rooms"][0]
         assert row["firm_documented_area_receipt"] is False, bad_field
         assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT", bad_field
+
+
+def test_conflicting_source_face_metadata_cannot_validate_documented_area() -> None:
+    claim = _documented_area_claim()
+    claim.canonical_floors[0].source_room_face_record_id = "physical-face-1"
+    claim.room_area_quantity_evidence[0].metadata["source_room_face_record_id"] = "other-face"
+    row = inspect_room_measurement_gates(claim)["rooms"][0]
+    assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT"
+    assert row["firm_documented_area_receipt"] is False
