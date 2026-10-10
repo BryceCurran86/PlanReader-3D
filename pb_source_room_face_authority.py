@@ -270,16 +270,18 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
 
 
 def _finite_source_edge(value: Edge) -> bool:
-    """Reject malformed or nonfinite native geometry before collinearity proofs."""
+    """Reject invalid endpoints and overflowed lengths on either source edge."""
     try:
-        return bool(
-            len(value) == 2
-            and all(len(point) == 2 for point in value)
-            and all(
-                math.isfinite(float(coordinate))
-                for point in value
-                for coordinate in point
-            )
+        if len(value) != 2 or any(len(point) != 2 for point in value):
+            return False
+        first, second = (
+            tuple(float(coordinate) for coordinate in point)
+            for point in value
+        )
+        if not all(math.isfinite(c) for point in (first, second) for c in point):
+            return False
+        return math.isfinite(
+            math.hypot(second[0] - first[0], second[1] - first[1])
         )
     except (TypeError, ValueError, OverflowError):
         return False
