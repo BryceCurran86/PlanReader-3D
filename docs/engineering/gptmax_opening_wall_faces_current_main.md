@@ -74,3 +74,20 @@ This is a positive individual wall-face provenance gate only: it does not
 establish a complete opening candidate universe, wall host, opening count,
 quantity, commercial output or frozen-V2 score. Exact original-source Lot16
 host/identity/source SHA preservation and full CI must pass before merge.
+
+## Safety quarantine after real Lot16 regressions
+
+The clean current-main replay briefly connected this source-positive G17 wall-face
+helper to the live pre-motif W4 stage. **That live call is deliberately disabled**:
+original-source tests showed candidate wall changes (2094 to 2099), a previously
+abstained hostless opening changed to conflict, two page-scope passes, and the
+strict Lot16 source-retention test failed. This is a real unsafe physical-wall
+identity change, not an expendable test assertion.
+
+The helper and optional source-face filter input remain **read-only diagnostic
+capabilities** used only by focused tests and the explicit source-face report.
+Ordinary live W4 does not consume them. Neither a positive G17 face witness nor
+the diagnostic's success proves commercial host binding, metric scale, count
+universe completeness or quantity publication. A later dedicated integration
+must preserve **all** original source identities and cap-based stop conditions,
+without changing benchmark truth or scoring.
