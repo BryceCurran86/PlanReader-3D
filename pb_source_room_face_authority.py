@@ -269,6 +269,22 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
     return tuple(result)
 
 
+def _finite_source_edge(value: Edge) -> bool:
+    """Reject malformed or nonfinite native geometry before collinearity proofs."""
+    try:
+        return bool(
+            len(value) == 2
+            and all(len(point) == 2 for point in value)
+            and all(
+                math.isfinite(float(coordinate))
+                for point in value
+                for coordinate in point
+            )
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
     """Return True only when a child edge is a quantized subsegment of parent.
 
@@ -278,6 +294,8 @@ def _edge_contains_edge(parent: Edge, child: Edge) -> bool:
     the maximum error implied by that quantization. No geometric extension,
     nearest-edge selection, or angle-only matching is permitted.
     """
+    if not (_finite_source_edge(parent) and _finite_source_edge(child)):
+        return False
     (ax, ay), (bx, by) = parent
     tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
     dx, dy = bx - ax, by - ay
@@ -303,6 +321,8 @@ def _collinear_overlap_edge(left: Edge, right: Edge) -> Edge | None:
     The overlap is SOURCE geometry used only to stabilize fail-closed local
     abstention. It never selects an owner or extends either source edge.
     """
+    if not (_finite_source_edge(left) and _finite_source_edge(right)):
+        return None
     (ax, ay), (bx, by) = left
     (cx, cy), (dx, dy) = right
     tolerance = 4.0 * math.sqrt(2.0) * (10.0 ** -_NDIGITS)
