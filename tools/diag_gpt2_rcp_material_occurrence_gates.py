@@ -8,6 +8,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from pb_viewport_segmentation import is_authoritative_derived_viewport
+
 def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,Any]:
     view_id=str(getattr(viewport,"view_id","") or "")
     kind=str(getattr(viewport,"view_type","") or "")
@@ -33,7 +35,13 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
         )
     except (TypeError, ValueError, OverflowError):
         bbox_valid=False
-    supported=kind=="reflected_ceiling_plan" and view_token in ("resolved","derived") and bbox_valid
+    derived_authenticated = (
+        view_token == "derived" and is_authoritative_derived_viewport(viewport)
+    )
+    supported=(
+        kind=="reflected_ceiling_plan" and bbox_valid
+        and (view_token=="resolved" or derived_authenticated)
+    )
     # The occurrence producer authenticates ownership to an exact source
     # viewport. A valid occurrence on a *different* RCP cannot authenticate
     # this viewport (e.g. page9 proposed vs original drawing).
