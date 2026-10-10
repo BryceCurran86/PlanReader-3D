@@ -427,8 +427,13 @@ def main() -> None:
         "pdf_sha256": report["pdf_sha256"],
         "scope_count": len(report["scope_outcomes"]),
         "scope_reason_frequency": report["scope_reason_frequency"],
+        "opening_seal_status": report["opening_sealing_diagnostic"]["status"],
         "output": str(args.output),
     }, sort_keys=True))
+    # The artifact is written even on failure so source/quantity first gates
+    # remain inspectable. Do not quietly pass source-to-customer mismatches.
+    if report["opening_sealing_diagnostic"]["status"] != "source_sealed_and_customer_rows_verified":
+        raise SystemExit("source-to-sealed opening/customer row validation failed")
 
 
 if __name__ == "__main__":
