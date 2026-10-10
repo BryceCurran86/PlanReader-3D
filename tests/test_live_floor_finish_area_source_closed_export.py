@@ -340,3 +340,25 @@ def test_floor_finish_seal_requires_firm_metric_area_quantity(
         seal_live_floor_finish_area_run(
             claim, workspace_id=1, project_id="project-1",
         )
+
+
+@pytest.mark.parametrize(
+    ("receipt_key", "reason"),
+    (
+        ("source_room_face_record_id", "source room face mismatch"),
+        ("page_no", "source page mismatch"),
+    ),
+)
+def test_floor_finish_seal_rejects_stale_source_face_or_page(
+    receipt_key: str, reason: str,
+) -> None:
+    quantity = _quantity()
+    stale = replace(
+        quantity,
+        metadata={**dict(quantity.metadata), receipt_key: "foreign-source"},
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(stale,))
+    with pytest.raises(SourceClosedRunConflictError, match=reason):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
