@@ -1,0 +1,34 @@
+name: DIAG GPT2 Maryborough Page9 Original RCP First Gates
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gpt2_page9_original_rcp_firstgate.py
+      - tests/test_gpt2_page9_original_rcp_firstgate.py
+      - .github/workflows/diag-gpt2-page9-original-rcp-firstgate.yml
+  workflow_dispatch:
+jobs:
+  source-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity and fail closed regression
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_page9_original_rcp_firstgate.py
+      - name: SHA-verified real page9 RCP viewport source gates
+        run: |
+          set -o pipefail
+          PYTHONPATH=. python -u tools/diag_gpt2_page9_original_rcp_firstgate.py | tee page9_rcp_first_gates.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-page9-original-rcp-first-gates
+          path: page9_rcp_first_gates.json
+          retention-days: 7
