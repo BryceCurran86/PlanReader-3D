@@ -344,3 +344,4 @@ def test_external_wall_refuses_missing_opening_host_or_universe_receipts():
         )
         assert result.status is not EvidenceResolutionStatus.CORROBORATED
         assert result.quantity_evidence is None
+        assert result.canonical_walls == ()
