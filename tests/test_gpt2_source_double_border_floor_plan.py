@@ -117,3 +117,27 @@ def test_not_exactly_two_competing_frames_never_selects_an_owner():
     assert _collapse_source_repeated_plan_border_pair(
         Page(paths()),(INNER,OUTER,third),cal(),()
     ) == [INNER,OUTER,third]
+
+
+def test_unknown_native_quad_geometry_is_never_assumed_empty():
+    changed=paths()
+    changed.append({"seqno":441,"type":"s","items":[
+        ("qu",object()),
+    ]})
+    assert _collapse_source_repeated_plan_border_pair(
+        Page(changed),(INNER,OUTER),cal(),()
+    ) == [INNER,OUTER]
+
+
+def test_native_quad_over_border_strip_is_independent_graphic_content():
+    changed=paths()
+    quad=SimpleNamespace(
+        ul=pt(38.,700.),ur=pt(45.,700.),
+        ll=pt(38.,730.),lr=pt(45.,730.)
+    )
+    changed.append({"seqno":442,"type":"s","items":[
+        ("qu",quad),
+    ]})
+    assert _collapse_source_repeated_plan_border_pair(
+        Page(changed),(INNER,OUTER),cal(),()
+    ) == [INNER,OUTER]
