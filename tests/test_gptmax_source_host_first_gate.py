@@ -33,6 +33,8 @@ def report():
         "source_decode_coverage": {
             "document_id": "producer-source-document",
             "revision_id": "source_revision_from_pdf",
+            "decoded_pages": [3],
+            "failed_pages": [],
         },
         "selected_geometry_page_ids": ["3"],
         "primitive_safety_cap": 20_000,
@@ -219,3 +221,17 @@ def test_source_report_never_mixes_a_foreign_snapshot_or_revision(mutate):
     mutate(original)
     with pytest.raises(ValueError, match="revision|snapshot|document"):
         source_first_gate_census(original, expected_source_sha=SHA)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda x: x["source_decode_coverage"].update(decoded_pages=[]),
+    lambda x: x["source_decode_coverage"].update(decoded_pages=[7]),
+    lambda x: x["source_decode_coverage"].update(failed_pages=[3]),
+    lambda x: x["source_decode_coverage"].update(decoded_pages=[3.0]),
+    lambda x: x["source_decode_coverage"].update(failed_pages=["3"]),
+])
+def test_source_first_gate_refuses_unproven_page_decode_receipt(mutate):
+    source = report()
+    mutate(source)
+    with pytest.raises(ValueError, match="not all decoded"):
+        source_first_gate_census(source, expected_source_sha=SHA)
