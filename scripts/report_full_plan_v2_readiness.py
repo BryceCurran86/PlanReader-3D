@@ -15,7 +15,7 @@ from pathlib import Path
 DEFAULT_ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
 
 
-def _unique_produced_json_object(pairs: list[tuple[str, object]]) -> dict:
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
     """Reject duplicated object keys before one may shadow source identity."""
     result: dict = {}
     for key, value in pairs:
@@ -26,7 +26,12 @@ def _unique_produced_json_object(pairs: list[tuple[str, object]]) -> dict:
 
 
 def _object(path: Path) -> dict:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    # A signed or frozen source envelope must never silently accept a second
+    # conflicting JSON key; last-write-wins could replace source identity.
+    value = json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_json_object,
+    )
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
@@ -189,7 +194,7 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             try:
                 produced = json.loads(
                     path.read_text(encoding="utf-8"),
-                    object_pairs_hook=_unique_produced_json_object,
+                    object_pairs_hook=_unique_json_object,
                 )
             except (ValueError, UnicodeError, OSError):
                 produced = []
