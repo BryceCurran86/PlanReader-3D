@@ -42,6 +42,9 @@ from pb_raster_compact_wall_band_segments import (
     compact_band_already_covered_by_source_line,
     detect_compact_raster_wall_band_segments,
 )
+from pb_raster_compact_partial_source_quarantine import (
+    compact_band_has_partial_original_source_coverage,
+)
 from pb_raster_terminal_wall_band_segments import (
     TERMINAL_WALL_BAND_DETECTOR_VERSION,
     TERMINAL_WALL_BAND_IDENTITY_VERSION,
@@ -1817,6 +1820,12 @@ class SourceVisibilityProducer:
                             if compact_band_has_same_visible_paint(s, isolated, full)
                             and not compact_band_already_covered_by_source_line(
                                 s, segments, full, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                source_dpi=RASTER_RENDER_DPI)
+                            # Do not let a partial duplicate compete with an
+                            # already-visible ordinary raster source at W2.
+                            # Do not crop the residual into an invented edge.
+                            and not compact_band_has_partial_original_source_coverage(
+                                s, segments, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
                                 source_dpi=RASTER_RENDER_DPI))
                         terminal_segments = tuple(s for s in terminal_segments
                             if compact_band_has_same_visible_paint(s, isolated, full))
