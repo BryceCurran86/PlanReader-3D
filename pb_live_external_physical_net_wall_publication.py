@@ -511,6 +511,9 @@ def compose_live_external_physical_net_wall_publication(
             or universe is None
             or universe.status is not EvidenceResolutionStatus.CORROBORATED
             or universe.record is None
+            or universe.decision_scope_complete is not True
+            or universe.source_decode_complete is not True
+            or universe.semantic_enumeration_complete is not True
             or not universe.record.decision_scope_complete
         ):
             return _blocked(
