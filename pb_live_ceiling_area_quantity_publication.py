@@ -240,12 +240,25 @@ def publish_live_ceiling_area_quantities(
     # cannot both reissue the SAME original room-area QuantityEvidence source.
     # Quarantine both rather than first/last-writer-wins or double count.
     approved_area_owners: dict[str, set[str]] = {}
+    approved_room_owners: dict[str, set[str]] = {}
     for ceiling, _quantity in approved:
+        ceiling_id = _clean(ceiling.canonical_ceiling_id)
         approved_area_owners.setdefault(
             _clean(ceiling.room_area_quantity_id), set()
-        ).add(_clean(ceiling.canonical_ceiling_id))
+        ).add(ceiling_id)
+        # A second source quantity ID is not an independent physical room.
+        # This adapter republishes the *whole* documented room area, never a
+        # proven ceiling sub-area. Two whole-area ceilings owned by one room
+        # would double count even with different source quantity IDs.
+        approved_room_owners.setdefault(
+            _clean(ceiling.room_entity_id), set()
+        ).add(ceiling_id)
     contested_area_sources = {
         source_id for source_id, owners in approved_area_owners.items()
+        if len(owners) > 1
+    }
+    contested_rooms = {
+        room_id for room_id, owners in approved_room_owners.items()
         if len(owners) > 1
     }
 
@@ -253,7 +266,8 @@ def publish_live_ceiling_area_quantities(
     seen_entity_ids: set[str] = set()
     seen_quantity_ids: set[str] = set()
     for ceiling, quantity in approved:
-        if _clean(ceiling.room_area_quantity_id) in contested_area_sources:
+        if (_clean(ceiling.room_area_quantity_id) in contested_area_sources
+                or _clean(ceiling.room_entity_id) in contested_rooms):
             continue
         entity_id = quantity.input_entity_ids[0]
         if entity_id in seen_entity_ids:
