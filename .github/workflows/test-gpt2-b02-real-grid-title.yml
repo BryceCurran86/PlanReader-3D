@@ -1,0 +1,75 @@
+name: TEST GPT2 B02 Maryborough Grid Title Abstention
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_material_semantic_authority.py"
+      - "tests/test_source_material_semantic_authority_v1.py"
+      - ".github/workflows/test-gpt2-b02-real-grid-title.yml"
+  workflow_dispatch:
+
+jobs:
+  source-grid-title-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install source parsing dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Prove real source GRID title non-occurrences
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b02-grid-title
+          PYTHONPATH=. python - <<'PY' | tee artifacts/gpt2-b02-grid-title/proof.json
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+          import pb_source_material_semantic_authority as material
+
+          pdf_path = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          source_bytes = pdf_path.read_bytes()
+          sha = hashlib.sha256(source_bytes).hexdigest()
+          assert sha == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf = fitz.open(stream=source_bytes, filetype="pdf")
+          assert pdf.page_count == 31
+          title_rows = []
+          raw_titles_with_grid = 0
+          for page_no, page in enumerate(pdf, 1):
+              for block in page.get_text("dict").get("blocks", []):
+                  if block.get("type") != 0:
+                      continue
+                  for line in block.get("lines", []):
+                      text = " ".join(str(span.get("text", "")) for span in line.get("spans", [])).strip()
+                      if not material._NONMATERIAL_GRID_DRAWING_TITLE.fullmatch(text):
+                          continue
+                      if "GRID" in material._defined_codes_in_text(text, {"GRID": {}}):
+                          raw_titles_with_grid += 1
+                      assert material._source_owned_material_codes_in_line(text, {"GRID": {}}) == ()
+                      title_rows.append({"page": page_no, "title": text, "bbox": line.get("bbox")})
+          pdf.close()
+          assert title_rows, "Real drawing set must contain independently observed grid drafting titles"
+          assert raw_titles_with_grid == len(title_rows), "Regression must represent the formerly ambiguous exact token"
+          assert material._source_owned_material_codes_in_line("GRID", {"GRID": {}}) == ("GRID",)
+          print(json.dumps({
+              "source_sha256": sha,
+              "page_count": 31,
+              "native_grid_drafting_title_count": len(title_rows),
+              "titles": title_rows,
+              "material_occurrences_granted": 0,
+              "note": "Lexical abstention proof only; no viewport, surface or quantity authority granted",
+          }, sort_keys=True, default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b02-maryborough-grid-title-proof
+          path: artifacts/gpt2-b02-grid-title
+          retention-days: 5

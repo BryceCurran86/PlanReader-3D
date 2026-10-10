@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import io
+import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -70,6 +71,31 @@ _SCHEDULE_VIEW_TYPES = frozenset(
         DrawingViewType.SPECIFICATION.value,
     }
 )
+
+
+_NONMATERIAL_GRID_DRAWING_TITLE = re.compile(
+    r"^\s*GRID\s+(?:(?:SET\s*OUT|SETOUT|LAYOUT)\s+PLAN|"
+    r"PLAN\s+(?:SET\s*OUT|SETOUT))\s*$",
+    re.IGNORECASE,
+)
+
+
+def _source_owned_material_codes_in_line(
+    raw_text: object,
+    dictionary: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Do not confuse an independently named drafting grid view with GRID finish.
+
+    A complete GRID SETOUT/LAYOUT PLAN title is not a finish placement even
+    when a *different* schedule authenticates GRID as a material code. Other
+    line content is delegated unchanged to the established exact-token
+    extractor. This is a negative lexical gate, not positive material authority.
+    """
+    text = str(raw_text or "")
+    codes = _defined_codes_in_text(text, dictionary)
+    if _NONMATERIAL_GRID_DRAWING_TITLE.fullmatch(text):
+        return tuple(code for code in codes if code != "GRID")
+    return tuple(codes)
 
 
 def _is_explicit_non_material_schedule(viewport: SegmentedViewport) -> bool:
@@ -1945,7 +1971,7 @@ class SourceMaterialSemanticProducer:
                         for code in blocked_definition_codes
                     }
                     if any(
-                        _defined_codes_in_text(raw_text, blocked_lookup)
+                        _source_owned_material_codes_in_line(raw_text, blocked_lookup)
                         for raw_text, _bbox, _ids in lines
                     ):
                         self._occurrence_results[scope_selector.key] = _scope_blocked(
@@ -1955,7 +1981,7 @@ class SourceMaterialSemanticProducer:
                         )
                         continue
                 for raw_text, bbox, text_observation_ids in lines:
-                    for code in _defined_codes_in_text(raw_text, dictionary_for_scan):
+                    for code in _source_owned_material_codes_in_line(raw_text, dictionary_for_scan):
                         entry = confirmed_dictionary.get(code)
                         if entry is None:
                             continue

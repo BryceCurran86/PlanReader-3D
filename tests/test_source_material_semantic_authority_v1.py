@@ -1195,3 +1195,58 @@ def test_dense_native_schedule_grouping_keeps_each_receipt_exactly_once() -> Non
                 ),
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("drafting_title", "expected_grid"),
+    [
+        ("GRID SETOUT PLAN", False),
+        ("GRID SET OUT PLAN", False),
+        ("GRID LAYOUT PLAN", False),
+        ("GRID", True),
+        ("CEILING FINISH GRID", True),
+    ],
+)
+def test_grid_drafting_titles_never_mint_material_occurrences(
+    monkeypatch, drafting_title: str, expected_grid: bool
+) -> None:
+    """A material code with an authenticated definition is not every same word."""
+    source, published = _source(
+        _pdf(
+            (
+                "CEILING FINISH SCHEDULE",
+                "GRID Suspended ceiling grid system",
+            ),
+            ("REFLECTED CEILING PLAN", drafting_title),
+        )
+    )
+    _patch_viewports(
+        monkeypatch,
+        {1: "schedule", 2: "reflected_ceiling_plan"},
+    )
+    authority = semantic.SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source
+    ).publish(published.revision.revision_id)
+    definition = authority.resolve_definition(_definition_selector(published, "GRID"))
+    assert definition.status is EvidenceResolutionStatus.CORROBORATED
+    scope = authority.resolve_occurrences(
+        _occurrence_selector(published, "2", "vp-2")
+    )
+    assert scope.status is EvidenceResolutionStatus.CORROBORATED
+    assert scope.scope_complete
+    assert [row.code for row in scope.records] == (
+        ["GRID"] if expected_grid else []
+    )
+
+
+def test_nonmaterial_grid_titles_do_not_trigger_blocked_definition_lookup() -> None:
+    """The title guard must also apply before unresolved-code scope abstentions."""
+    assert semantic._source_owned_material_codes_in_line(
+        "GRID SETOUT PLAN", {"GRID": {}}
+    ) == ()
+    assert semantic._source_owned_material_codes_in_line(
+        "GRID", {"GRID": {}}
+    ) == ("GRID",)
+    assert semantic._source_owned_material_codes_in_line(
+        "CEILING FINISH GRID", {"GRID": {}}
+    ) == ("GRID",)
