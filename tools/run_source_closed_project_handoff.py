@@ -391,19 +391,41 @@ def generate_project_handoff(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
         )
+        published_new_ids = {
+            _clean(quantity.quantity_id)
+            for quantity in new_ceiling_quantities
+            if _clean(quantity.quantity_id)
+        }
+        # Only a genuinely published new quantity may supersede legacy.
+        # A candidate canonical ceiling without FIRM QuantityEvidence must
+        # leave independently valid legacy output untouched.
+        published_new_ceilings = tuple(
+            ceiling
+            for ceiling in tuple(getattr(claim, "canonical_ceilings", ()) or ())
+            if _clean(getattr(ceiling, "ceiling_quantity_id", ""))
+            in published_new_ids
+        )
         new_room_index_ids = {
             _clean(ceiling.source_room_index_id)
-            for ceiling in tuple(
-                getattr(claim, "canonical_ceilings", ()) or ()
-            )
+            for ceiling in published_new_ceilings
             if _clean(ceiling.source_room_index_id)
         }
-        if new_room_index_ids:
+        # Two different room-index IDs can describe the same authenticated
+        # room-area source after cross-view remapping. A single upstream area
+        # receipt must never mint duplicate legacy + RCP ceiling quantities.
+        new_room_area_quantity_ids = {
+            _clean(ceiling.room_area_quantity_id)
+            for ceiling in published_new_ceilings
+            if _clean(getattr(ceiling, "room_area_quantity_id", ""))
+        }
+        if new_room_index_ids or new_room_area_quantity_ids:
             retained_legacy_ceilings = tuple(
                 ceiling
                 for ceiling in ceiling_result.canonical_ceilings
                 if _clean(ceiling.source_room_index_id)
                 not in new_room_index_ids
+                and _clean(getattr(ceiling, "room_area_quantity_id", ""))
+                not in new_room_area_quantity_ids
             )
             retained_shadow_ids = {
                 _clean(ceiling.ceiling_quantity_id)
