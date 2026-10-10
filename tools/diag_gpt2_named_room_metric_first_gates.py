@@ -35,14 +35,28 @@ def summarize_named_room_metric_first_gates(claim: Any) -> dict[str, Any]:
     )
     ledger: dict[str, list[dict[str, Any]]] = {}
     total: dict[str, int] = {}
+    ambiguous_gate_owners: dict[str, list[str]] = {}
+    witnessed_room_ids: set[str] = set()
     for key, attr in kinds:
         codes = tuple(getattr(claim, attr, ()) or ())
         total[key] = len(codes)
+        owned_reasons: dict[str, set[str]] = defaultdict(set)
+        for source_room_id, reason in codes:
+            rid = str(source_room_id or "").strip()
+            if rid in owners:
+                witnessed_room_ids.add(rid)
+                owned_reasons[rid].add(repr(reason))
+        conflicted = {
+            rid for rid, distinct in owned_reasons.items() if len(distinct) > 1
+        }
+        ambiguous_gate_owners[key] = sorted(conflicted)
         entries = []
+        emitted: set[str] = set()
         for source_room_id, reason in codes:
             room_id = str(source_room_id or "").strip()
-            if room_id not in owners:
+            if room_id not in owners or room_id in conflicted or room_id in emitted:
                 continue
+            emitted.add(room_id)
             if key == "physical_scale":
                 # A scalar string is not a series of independent producer
                 # reasons. Do not silently output its individual characters.
@@ -65,11 +79,6 @@ def summarize_named_room_metric_first_gates(claim: Any) -> dict[str, Any]:
             row["label"], row["physical_room_id"],
             repr(row.get("first_gate", row.get("first_gates"))),
         ))
-    witnessed_room_ids = {
-        row["physical_room_id"]
-        for entries in ledger.values()
-        for row in entries
-    }
     # Absence of a failed measurement receipt does not prove a measurement
     # passed. It may mean that producer was never run for that physical room.
     no_gate_receipt = [
@@ -79,6 +88,7 @@ def summarize_named_room_metric_first_gates(claim: Any) -> dict[str, Any]:
     ]
     return {
         "named_rooms_without_first_failure_receipts": no_gate_receipt,
+        "ambiguous_metric_first_failure_owner_ids": ambiguous_gate_owners,
         "source_named_room_count": len(named),
         "uniquely_attributable_named_room_count": len(owners),
         "ambiguous_named_physical_room_ids": conflicts,
