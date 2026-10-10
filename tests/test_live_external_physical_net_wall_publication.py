@@ -346,3 +346,4 @@ def test_external_wall_refuses_missing_opening_host_or_universe_receipts():
         assert result.quantity_evidence is None
         assert result.canonical_walls == ()
         assert result.physical_void_record_ids == ()
+        assert result.opening_universe_record_ids == ()
