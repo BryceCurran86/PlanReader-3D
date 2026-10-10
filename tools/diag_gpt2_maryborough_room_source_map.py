@@ -26,6 +26,7 @@ _ROOM_LABEL_PATTERNS = {
     "TRUCK DRIVER LOUNGE": r"\bTRUCK\s+DRIVER(?:S|S')?\s+LOUNGE\b",
     "M-AMB": r"\bM[ -]?AMB(?:ULANT)?\b",
     "F-AMB": r"\bF[ -]?AMB(?:ULANT)?\b",
+    "DRY STORE": r"\bDRY\s+STORE\b",
 }
 _COMPILED = {label: re.compile(pattern, re.IGNORECASE) for label, pattern in _ROOM_LABEL_PATTERNS.items()}
 
