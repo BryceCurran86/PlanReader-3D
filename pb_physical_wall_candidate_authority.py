@@ -2984,13 +2984,28 @@ def _assemble_scope_result(
         page_id=page_id,
         viewport_id=scope_id,
     )
-    walls, _rekeyed_junctions = assemble_wall_topology(
-        graph,
-        junctions,
-        relationships,
-        viewport_id=scope_id,
-    )
-    identities = collect_physical_wall_identities(walls, graph)
+    # W4 geometric candidate IDs can collide even for distinct W2 source
+    # records. When positive source edge or junction evidence cannot safely
+    # disambiguate a collided *candidate address*, the entire host universe
+    # must abstain. Never let an exception abort source processing or let a
+    # dictionary silently select the last duplicate wall identity.
+    try:
+        walls, _rekeyed_junctions = assemble_wall_topology(
+            graph,
+            junctions,
+            relationships,
+            viewport_id=scope_id,
+        )
+        identities = collect_physical_wall_identities(walls, graph)
+    except ValueError as exc:
+        if (
+            str(exc).startswith("W4 collision")
+            or str(exc).startswith("duplicate W4 candidate id")
+        ):
+            return _blocked(
+                selector, PHYSICAL_WALL_CANDIDATE_IDENTITY_UNRESOLVED
+            )
+        raise
     collapsed_source_fragments = _source_snap_collapsed_fragment_inventory(graph, identities)
     graph_edges = {str(edge["id"]): edge for edge in graph["edges"]}
 
