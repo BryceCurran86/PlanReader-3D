@@ -217,39 +217,40 @@ def publish_live_ceiling_area_quantities(
         if ceiling_id:
             canonical_ids.add(ceiling_id)
 
-    # A whole-ceiling quantity reuses one already-FIRM room-area quantity.
-    # Two canonical ceilings cannot each mint the FULL area from that SAME
-    # source receipt, even if they carry different shadow ceiling quantity
-    # IDs and distinct canonical IDs. Check the full canonical universe
-    # before filtering provisional candidates, so an unmeasured duplicate
-    # cannot disappear and accidentally authorize its competitor.
-    area_owners: dict[str, set[str]] = {}
-    for ceiling in result.canonical_ceilings:
-        parent = _clean(ceiling.room_area_quantity_id)
-        ceiling_id = _clean(ceiling.canonical_ceiling_id)
-        if parent and ceiling_id:
-            area_owners.setdefault(parent, set()).add(ceiling_id)
-    conflicted_areas = {
-        parent for parent, owners in area_owners.items()
-        if len(owners) > 1
-    }
-
     source_by_id = _source_quantities(result)
-    out: list[QuantityEvidence] = []
-    seen_entity_ids: set[str] = set()
-    seen_quantity_ids: set[str] = set()
-
+    # Run the existing canonical/source measurement authorization FIRST.
+    # An unrelated, unmeasured/ABSTAIN ceiling with no approved source cannot
+    # revoke another ceiling's previously authenticated FIRM quantity.
+    approved: list[tuple[LiveCanonicalCeilingSurfaceObject, QuantityEvidence]] = []
     for ceiling in sorted(
         result.canonical_ceilings,
         key=lambda item: item.canonical_ceiling_id,
     ):
-        if _clean(ceiling.room_area_quantity_id) in conflicted_areas:
-            continue
         source = source_by_id.get(_clean(ceiling.ceiling_quantity_id))
         if source is None:
             continue
         quantity = _publish_one(ceiling, source)
-        if quantity is None:
+        if quantity is not None:
+            approved.append((ceiling, quantity))
+
+    # Conversely, two independently publishable FULL-area ceiling claims
+    # cannot both reissue the SAME original room-area QuantityEvidence source.
+    # Quarantine both rather than first/last-writer-wins or double count.
+    approved_area_owners: dict[str, set[str]] = {}
+    for ceiling, _quantity in approved:
+        approved_area_owners.setdefault(
+            _clean(ceiling.room_area_quantity_id), set()
+        ).add(_clean(ceiling.canonical_ceiling_id))
+    contested_area_sources = {
+        source_id for source_id, owners in approved_area_owners.items()
+        if len(owners) > 1
+    }
+
+    out: list[QuantityEvidence] = []
+    seen_entity_ids: set[str] = set()
+    seen_quantity_ids: set[str] = set()
+    for ceiling, quantity in approved:
+        if _clean(ceiling.room_area_quantity_id) in contested_area_sources:
             continue
         entity_id = quantity.input_entity_ids[0]
         if entity_id in seen_entity_ids:
