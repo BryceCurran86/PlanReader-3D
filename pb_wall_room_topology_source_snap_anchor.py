@@ -75,7 +75,7 @@ _SUPPLEMENTAL_RASTER_NAMESPACES = (
 )
 
 
-def _positive_supplemental_t_branch(edge, raw_at_junction, far, shared_point):
+def _positive_supplemental_t_branch(edge, raw_at_junction, far, shared_point, *, source_overhang_limit_pt=0.0):
     """Authenticate exact endpoint of a supplementary, source-painted T branch.
 
     The W2 lineage is producer-derived: it must contain one and only one
@@ -104,16 +104,33 @@ def _positive_supplemental_t_branch(edge, raw_at_junction, far, shared_point):
         return False
     if not all(math.isfinite(v) for v in (*a,*b)):
         return False
-    # A real supplementary line TERMINATES at the positive source-owned
-    # through-junction. A crossing or a near endpoint is not enough.
-    if not (math.dist(a,shared_point) <= _COORD_EPS
-            or math.dist(b,shared_point) <= _COORD_EPS):
+    # Registered source-paint detection may extend a short distance past the
+    # splitter's exact T. Source contact must be POSITIVE, collinear and
+    # bounded by the ALREADY existing W2 snap footprint. Never extend or
+    # shorten the source itself. A crossing whose source overhang is larger
+    # than this footprint cannot masquerade as a local terminating flank.
+    try:
+        limit=float(source_overhang_limit_pt)
+    except (TypeError,ValueError,OverflowError):
         return False
-    return (
-        math.dist(raw_at_junction,shared_point) <= _COORD_EPS
-        and _point_on_parent(far,parent)
-        and math.dist(far,shared_point) > _COORD_EPS
-    )
+    if not math.isfinite(limit) or limit<0:
+        return False
+    if not (_point_on_parent(shared_point,parent)
+            and _point_on_parent(raw_at_junction,parent)
+            and _point_on_parent(far,parent)
+            and math.dist(raw_at_junction,shared_point)<=_COORD_EPS
+            and math.dist(far,shared_point)>_COORD_EPS):
+        return False
+    dx,dy=b[0]-a[0],b[1]-a[1]
+    extent=math.hypot(dx,dy)
+    if extent<=_COORD_EPS:
+        return False
+    t=((shared_point[0]-a[0])*dx+(shared_point[1]-a[1])*dy)/extent
+    # Opposing source endpoint past local T only -- strictly outside the
+    # accepted positive raw fragment. Longer crossing is unknown/ABSTAIN.
+    if min(t,extent-t)>limit+_COORD_EPS:
+        return False
+    return True
 
 def reanchor_exact_source_through_junctions(graph, *, tolerance_pt):
     """Return a copied graph with only unambiguously exact original anchors.
@@ -192,7 +209,7 @@ def reanchor_exact_source_through_junctions(graph, *, tolerance_pt):
                             "positive":r.get("page_coords_present"),
                             "geometry":[r.get(k) for k in ("x1","y1","x2","y2")],
                         } for r in ((edge.get(LINEAGE_KEY) or {}).get("source_records") or ()) if isinstance(r,Mapping)],
-                        "supplemental_positive":_positive_supplemental_t_branch(edge,p,far,p),
+                        "supplemental_positive":_positive_supplemental_t_branch(edge,p,far,p,source_overhang_limit_pt=tolerance_pt),
                     } for edge,p,far in raw_incident],
                 },sort_keys=True),flush=True)
         candidate_points=set()
@@ -225,7 +242,18 @@ def reanchor_exact_source_through_junctions(graph, *, tolerance_pt):
                         if branch is left[0] or branch is right[0]:
                             continue
                         if not _positive_supplemental_t_branch(
-                                branch, raw_at_node, away, p):
+                                branch, raw_at_node, away, p,
+                                source_overhang_limit_pt=tolerance_pt):
+                            continue
+                        # Do not reinterpret a real source crossing as a T
+                        # merely because one of its raw split pieces ends
+                        # at the source-owned perpendicular intersection.
+                        branch_ids=(branch.get(LINEAGE_KEY) or {}).get("source_primitive_ids") or ()
+                        if any(
+                            other is not branch
+                            and (other.get(LINEAGE_KEY) or {}).get("source_primitive_ids")==branch_ids
+                            for other,_,_ in raw_incident
+                        ):
                             continue
                         stem=(away[0]-p[0],away[1]-p[1])
                         if abs(va[0]*stem[0]+va[1]*stem[1]) > (
