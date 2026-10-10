@@ -10,6 +10,8 @@ on:
       - tests/test_raster_source_wall_frame_projection.py
       - tests/test_raster_visibility_receipt_registration.py
       - tools/diag_opening_wall_face_preservation.py
+      - tools/gptmax_compare_source_face_retention.py
+      - tests/test_gptmax_compare_source_face_retention.py
       - .github/workflows/test-gptmax-raster-connected-frame-source.yml
 concurrency:
   group: gptmax-raster-connected-frame-${{ github.event.pull_request.number }}
@@ -63,6 +65,14 @@ jobs:
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
           --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           --page-id 3 --output lot16-connected-frame-source-handoff.json
+      - name: Original Lot16 verified production prerequisite
+        run: |
+          # Compare against the exact current PR base; archive past source regressions separately.
+          git worktree add /tmp/gptmax-original-lot16-prerequisite ${{ github.event.pull_request.base.sha }}
+          REPORTER="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
+          (cd /tmp/gptmax-original-lot16-prerequisite && PYTHONPATH=. python -u "$REPORTER" \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 --output "$GITHUB_WORKSPACE/lot16-connected-frame-prerequisite.json")
       - name: Verify exact source ownership and safety cap
         run: |
           python - <<'PY'
@@ -79,11 +89,20 @@ jobs:
           assert len(ids) == len(set(ids))
           assert 'quantities' not in report
           PY
+      - name: Reject lost or silently changed exact physical host/frame identities
+        run: |
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline lot16-connected-frame-prerequisite.json \
+            --candidate lot16-connected-frame-source-handoff.json \
+            --output lot16-connected-frame-identity-retention.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: lot16-connected-frame-source-handoff
-          path: lot16-connected-frame-source-handoff.json
+          path: |
+            lot16-connected-frame-source-handoff.json
+            lot16-connected-frame-prerequisite.json
+            lot16-connected-frame-identity-retention.json
           retention-days: 14
   maryborough-source-baseline:
     runs-on: ubuntu-latest
@@ -94,7 +113,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: e73b2e76e31e2ed1174398758ef17bebe0333c6b
+          # Same exact PR base as the candidate's current source code.
+          # Historical 180/3 versus current 183/1 is documented separately.
+          ref: ${{ github.event.pull_request.base.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -179,31 +200,24 @@ jobs:
           path: artifacts/maryborough-source-current
       - name: Compare exact opening hosts and preserved frames
         run: |
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline artifacts/maryborough-source-baseline/maryborough-source-baseline.json \
+            --candidate artifacts/maryborough-source-current/maryborough-connected-frame-source-handoff.json \
+            --output maryborough-source-retention.json
           python - <<'PY'
           import json
           from pathlib import Path
-
-          baseline = json.loads(Path('artifacts/maryborough-source-baseline/maryborough-source-baseline.json').read_text())
-          current = json.loads(Path('artifacts/maryborough-source-current/maryborough-connected-frame-source-handoff.json').read_text())
-          assert current['source_sha256'] == baseline['source_sha256'] == 'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          assert current['primitive_safety_cap'] == baseline['primitive_safety_cap'] == 20_000
-
-          def keyed(rows):
-              result = {row['opening_identity_id']: row for row in rows}
-              assert len(result) == len(rows)
-              return result
-
-          baseline_bindings = keyed(baseline['opening_bindings'])
-          current_bindings = keyed(current['opening_bindings'])
-          assert current_bindings == baseline_bindings
-          old_frames = keyed(baseline['host_frames'])
-          new_frames = keyed(current['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          assert 'quantities' not in current
-          print(json.dumps({
-              'baseline': baseline['summary'],
-              'current': current['summary'],
-              'host_identity_parity': True,
-              'existing_frame_identity_parity': True,
-          }, sort_keys=True))
+          base = json.loads(Path("artifacts/maryborough-source-baseline/maryborough-source-baseline.json").read_text())
+          current = json.loads(Path("artifacts/maryborough-source-current/maryborough-connected-frame-source-handoff.json").read_text())
+          assert current["source_sha256"] == base["source_sha256"] == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert current["primitive_safety_cap"] == base["primitive_safety_cap"] == 20_000
+          assert "quantities" not in current
+          print(json.dumps({"base":base["summary"],"candidate":current["summary"],
+                            "source_ownership_retained":True},sort_keys=True))
           PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maryborough-source-identity-retention
+          path: maryborough-source-retention.json
+          if-no-files-found: ignore
