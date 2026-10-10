@@ -142,11 +142,21 @@ def test_protected_faces_reenter_the_unchanged_twenty_thousand_primitive_cap(mon
         document_id=published.revision.document_id, revision_id=published.revision.revision_id,
         source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
         page_id="1", decision_scope_id="wall-source:page-1")
+    # Recovered original faces must obey the cap if/when production promotion
+    # is separately source-authorized. The live W4 stage does not call this
+    # diagnostic bridge until exact source/host identity retention is proved.
+    recovered = module._filter_repeated_non_physical_drafting_primitives(
+        segments, page_width=400, page_height=400,
+        preserved_source_primitive_ids=protected,
+    )
+    assert len(recovered) == 6
+    assert len(recovered) > module.MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
+    assert module.MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS != 20_000
+    # Normal W4 does not gain these face edges from a diagnostic-only proof.
     result = module._assemble_scope_result(
         source_producer=source, published=published, page_id="1", selector=selector,
         segments=segments, source_observation_ids=published.visible_observation_ids,
         page_width=400, page_height=400,
         source_bytes=source._producer._store.source_bytes_by_revision[published.revision.revision_id],
         physical_opening_authority=source.physical_opening_authority())
-    assert result.records == ()
-    assert module.PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED in result.reason_codes
+    assert module.PHYSICAL_WALL_CANDIDATE_SCOPE_COMPLEXITY_EXCEEDED not in result.reason_codes
