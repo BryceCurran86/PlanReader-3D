@@ -138,6 +138,17 @@ def _customer_quantity_id(row: Mapping[str, Any]) -> str:
     return _clean(qprov.get("quantity_id"))
 
 
+def _has_machine_quantity_receipt(value: Any) -> bool:
+    """Recognize signed auto receipt even after the known UI caption prefix."""
+    source_reference = _clean(value)
+    first_token = source_reference.split(";", 1)[0].strip()
+    if " · " in first_token:
+        first_token = first_token.rsplit(" · ", 1)[-1].strip()
+    return first_token.startswith("QuantityEvidence ") and bool(
+        first_token[len("QuantityEvidence "):].strip()
+    )
+
+
 def _require_optional_equal(
     name: str,
     actual: Any,
@@ -459,7 +470,7 @@ def verify_sealed_customer_output(
                     pass
             if (
                 row.get("commercial_projection_provenance") is not None
-                or _clean(row.get("source_reference")).startswith("QuantityEvidence ")
+                or _has_machine_quantity_receipt(row.get("source_reference"))
                 or (
                     isinstance(notes_provenance, Mapping)
                     and _clean(notes_provenance.get("adapter")) == "commercial_takeoff"

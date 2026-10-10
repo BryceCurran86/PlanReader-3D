@@ -440,3 +440,28 @@ def test_notes_provenance_must_remain_a_structured_commercial_receipt() -> None:
         match="conflicting direct and persisted projection provenance",
     ):
         verify_sealed_customer_output(sealed, (structured, rows[1]))
+
+
+def test_captioned_automated_receipt_cannot_be_disguised_as_manual() -> None:
+    sealed, rows = sealed_and_rows()
+    orphan = dict(rows[0])
+    orphan.pop("quantity_id")
+    orphan.pop("commercial_projection_provenance", None)
+    orphan["notes"] = "damaged persisted provenance"
+    orphan["source_reference"] = (
+        "PB Auto Geometry v1.2.19 · " + rows[0]["source_reference"]
+    )
+    with pytest.raises(CustomerOutputVerificationError, match="missing quantity identity"):
+        verify_sealed_customer_output(sealed, [*rows, orphan])
+
+
+def test_manual_caption_without_machine_quantity_receipt_stays_manual() -> None:
+    sealed, rows = sealed_and_rows()
+    manual = {
+        "description": "Estimator manual observation",
+        "source_reference": "PB Auto Geometry v1.2.19 · estimator note only",
+        "quantity": 1,
+    }
+    report = verify_sealed_customer_output(sealed, [*rows, manual])
+    assert report.verified_quantity_ids == ("qty-1", "qty-2")
+    assert report.customer_row_count == 2
