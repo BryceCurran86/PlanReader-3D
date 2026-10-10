@@ -1202,4 +1202,5 @@ def test_malformed_complete_opening_universe_members_fail_closed(members) -> Non
     assert result.record is not None
     assert result.record.net_area_m2 is None
     assert not result.record.opening_deduction_record_ids
-    assert result.record.void_union_area_m2 is None
+    assert result.record.void_union_area_m2 == 0.0
+    assert result.record.union_geometry_id == ""
