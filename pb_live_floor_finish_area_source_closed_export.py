@@ -154,6 +154,22 @@ def build_live_floor_finish_area_source_traces(
 
         occurrence_id = _clean(metadata.get("finish_occurrence_record_id"))
         definition_id = _clean(metadata.get("finish_definition_record_id"))
+        occurrence_evidence_id = _clean(
+            metadata.get("finish_occurrence_evidence_id")
+        )
+        # Occurrence record and source receipt are different producer IDs.
+        # Require the exact source occurrence witness actually retained in
+        # both QuantityEvidence and its canonical floor; a metadata-only
+        # occurrence assertion cannot authorize a customer finish quantity.
+        if (
+            not occurrence_evidence_id
+            or occurrence_evidence_id not in quantity.evidence_ids
+            or occurrence_evidence_id not in floor.evidence_ids
+        ):
+            raise SourceClosedRunConflictError(
+                "floor-finish occurrence evidence receipt mismatch: "
+                f"{quantity.quantity_id}"
+            )
         if not occurrence_id or not definition_id:
             raise SourceClosedRunConflictError(
                 "floor-finish source occurrence/definition receipt is missing: "
