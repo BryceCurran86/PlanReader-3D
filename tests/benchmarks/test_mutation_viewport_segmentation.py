@@ -1052,7 +1052,7 @@ def _rotated_two_rcps_with_central_schedule() -> fitz.Document:
         rotate=90,
     )
     page.insert_text(
-        (520.0, 180.0),
+        (520.0, 260.0),
         "PROP. REFLECTED CEILING PLAN",
         fontsize=11,
         rotate=90,
