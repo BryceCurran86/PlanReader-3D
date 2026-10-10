@@ -522,3 +522,44 @@ def test_canonical_ceiling_source_axis_metadata_accepts_exact_two_string_tokens(
         )
         assert resolved is not None
         assert resolved[8] == ("dim-h", "dim-v")
+
+
+def test_canonical_ceiling_rejects_conflicting_room_area_source_identity_replays() -> None:
+    live, shadow, original = _documented_area_claim_fixture()
+    authentic = original.room_area_quantities[0]
+    mutations = (
+        replace(authentic, value=authentic.value + 1),
+        replace(
+            authentic,
+            metadata={
+                **dict(authentic.metadata),
+                "source_sha256": "b" * 64,
+            },
+        ),
+        replace(authentic, evidence_ids=("altered-area-source",)),
+    )
+    for changed in mutations:
+        for ordering in ((authentic, changed), (changed, authentic)):
+            live, shadow, source = _documented_area_claim_fixture()
+            source.room_area_quantities = ordering
+            assert live._claim_from_quantity(
+                quantity=shadow,
+                source_result=source,
+                page_no=1,
+                viewport_id="vp-1",
+            ) is None
+
+
+def test_canonical_ceiling_accepts_idempotent_identical_upstream_area_replay() -> None:
+    live, shadow, source = _documented_area_claim_fixture()
+    authentic = source.room_area_quantities[0]
+    source.room_area_quantities = (authentic, authentic)
+    resolved = live._claim_from_quantity(
+        quantity=shadow,
+        source_result=source,
+        page_no=1,
+        viewport_id="vp-1",
+    )
+    assert resolved is not None
+    assert resolved[2] == 13.270425
+    assert resolved[8] == ("dim-h", "dim-v")
