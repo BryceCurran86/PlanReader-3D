@@ -373,3 +373,4 @@ def test_external_wall_requires_full_universe_result_completeness():
         assert result.status is EvidenceResolutionStatus.ABSTAINED
         assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE in result.reason_codes
         assert result.quantity_evidence is None
+        assert result.opening_universe_record_ids == ()
