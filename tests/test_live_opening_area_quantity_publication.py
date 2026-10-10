@@ -47,6 +47,8 @@ def _opening(
         for value in (
             canonical_id,
             "source-observation-1",
+            "host-binding-1",
+            "host-frame-1",
             figured_area_record_id,
             opening_void_record_id,
         )
@@ -160,6 +162,35 @@ def test_host_identity_requires_source_binding_or_frame_record() -> None:
     ) is None
 
 
+@pytest.mark.parametrize("unproven_host", ("host-binding-1", "host-frame-1"))
+def test_opening_requires_exact_host_receipt_in_canonical_provenance(
+    unproven_host: str,
+) -> None:
+    opening = _opening()
+    assert _opening_quantity(opening) is not None
+    tampered = replace(
+        opening,
+        evidence_ids=tuple(
+            receipt for receipt in opening.evidence_ids if receipt != unproven_host
+        ),
+    )
+    assert _opening_quantity(tampered) is None
+
+
+def test_valid_single_source_host_receipt_still_publishes() -> None:
+    opening = _opening()
+    only_binding = replace(
+        opening,
+        host_frame_record_id=None,
+        evidence_ids=tuple(
+            receipt
+            for receipt in opening.evidence_ids
+            if receipt != "host-frame-1"
+        ),
+    )
+    assert _opening_quantity(only_binding) is not None
+
+
 def test_opening_without_owned_viewport_never_publishes_area_quantity() -> None:
     opening = replace(_opening(), viewport_id=None)
     assert _opening_quantity(opening) is None
@@ -231,6 +262,8 @@ def test_authenticated_frame_schedule_area_is_commercial_only_with_frame_basis()
             "source-observation-1",
             "schedule-binding-1",
             "schedule-row-1",
+            "host-binding-1",
+            "host-frame-1",
         ),
     )
     quantity = _opening_quantity(opening)
