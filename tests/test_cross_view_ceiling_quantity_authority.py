@@ -645,3 +645,26 @@ def test_distinct_source_room_area_receipts_allow_two_different_rcp_rooms() -> N
     assert {r.physical_room_id for r in result.records} == {
         "physical-room-1", "physical-room-2"
     }
+
+
+def test_same_canonical_room_cannot_reissue_two_distinct_source_area_receipts() -> None:
+    other_room, other_finish = _second_ceiling_source_scope(face_id="face-2")
+    other_room = replace(other_room, canonical_room_id="canonical-room-1")
+    other_finish = replace(other_finish, canonical_room_id="canonical-room-1")
+    rooms = replace(_rooms(), rooms=(_room(), other_room))
+    finishes = replace(_finish(), records=(_finish().records[0], other_finish))
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=rooms,
+        room_area_bridges=(
+            _bridge(),
+            _bridge(face_id="face-2", quantity_id="room-area-qty-2"),
+        ),
+        finishes=finishes,
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.canonical_ceilings == ()
+    assert result.unresolved_physical_room_ids == (
+        "physical-room-1", "physical-room-2"
+    )
