@@ -8,6 +8,8 @@ on:
       - "pb_*wall*.py"
       - "pb_live_physical_net_wall_integration.py"
       - "tests/test_source_*room*.py"
+      - "tests/test_gpt2_named_room_metric_first_gates.py"
+      - "tools/diag_gpt2_named_room_metric_first_gates.py"
       - ".github/workflows/test_gpt2_maryborough_grid_component_completion.yml"
 
 concurrency:
@@ -66,37 +68,10 @@ jobs:
               for room in claim.canonical_rooms if norm(room.room_label)
           ]
           labels=sorted({row["label"] for row in labelled})
-          # Read-only source-first-failure audit. Only genuinely source-owned
-          # named physical rooms are indexed; absent receipts stay absent,
-          # never silently interpreted as success or metric zero.
-          physical_labels={
-              str(room.physical_room_id):norm(room.room_label)
-              for room in claim.canonical_rooms
-              if norm(room.room_label) and str(room.physical_room_id).strip()
-          }
-          first_failure_counts={
-              "same_view":len(claim.same_view_room_area_first_failure_codes),
-              "cross_view":len(claim.cross_view_room_area_first_failure_codes),
-              "physical_scale":len(claim.physical_scale_first_failure_codes),
-          }
-          named_metric_first_failures={
-              "same_view":[
-                  {"physical_room_id":str(rid),"label":physical_labels[str(rid)],"first_gate":str(reason)}
-                  for rid,reason in claim.same_view_room_area_first_failure_codes
-                  if str(rid) in physical_labels
-              ],
-              "cross_view":[
-                  {"physical_room_id":str(rid),"label":physical_labels[str(rid)],"first_gate":str(reason)}
-                  for rid,reason in claim.cross_view_room_area_first_failure_codes
-                  if str(rid) in physical_labels
-              ],
-              "physical_scale":[
-                  {"physical_room_id":str(rid),"label":physical_labels[str(rid)],
-                   "first_gates":[str(reason) for reason in reasons]}
-                  for rid,reasons in claim.physical_scale_first_failure_codes
-                  if str(rid) in physical_labels
-              ],
-          }
+          from tools.diag_gpt2_named_room_metric_first_gates import (
+              summarize_named_room_metric_first_gates,
+          )
+          named_metric_ledger=summarize_named_room_metric_first_gates(claim)
           firm={
               norm(dict(q.metadata or {}).get("room_label")):float(q.value)
               for q in claim.room_area_quantity_evidence
@@ -126,8 +101,7 @@ jobs:
               "labels":labels,
               "observed_geometry_targets":observed,
               "firm_room_areas":firm,
-              "named_room_metric_first_failure_codes":named_metric_first_failures,
-              "all_source_first_failure_receipt_counts":first_failure_counts,
+              **named_metric_ledger,
               "status":getattr(claim.status,"value",str(claim.status)),
               "reason_codes":list(claim.reason_codes),
           },indent=2,sort_keys=True))
