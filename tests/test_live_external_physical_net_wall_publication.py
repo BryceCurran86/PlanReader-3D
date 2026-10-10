@@ -348,3 +348,4 @@ def test_external_wall_rejects_void_from_different_source_document_or_snapshot()
         assert result.status is not EvidenceResolutionStatus.CORROBORATED
         assert result.quantity_evidence is None
         assert result.canonical_walls == ()
+        assert result.physical_void_record_ids == ()
