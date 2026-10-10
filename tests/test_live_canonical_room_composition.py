@@ -921,17 +921,34 @@ def test_canonical_composite_requires_nonblank_source_receipts():
     from types import SimpleNamespace
     from pb_live_canonical_room_composition import _canonical_composite_supersedence
 
-    originals = (
-        SimpleNamespace(face_id="left", record_id=""),
+    for bad_id in ("", "   ", None):
+        originals = (
+            SimpleNamespace(face_id="left", record_id=bad_id),
+            SimpleNamespace(face_id="right", record_id="receipt_right"),
+        )
+        invalid = SimpleNamespace(
+            record_id="invalid_composite",
+            constituent_face_ids=("left", "right"),
+            constituent_source_room_face_record_ids=(
+                "None" if bad_id is None else str(bad_id), "receipt_right"
+            ),
+        )
+        remaining, accepted = _canonical_composite_supersedence(
+            originals, (invalid,)
+        )
+        assert remaining == originals
+        assert accepted == ()
+    # Missing attributes are not producer-owned source receipts either.
+    missing = (
+        SimpleNamespace(face_id="left"),
         SimpleNamespace(face_id="right", record_id="receipt_right"),
     )
     invalid = SimpleNamespace(
-        record_id="invalid_composite",
         constituent_face_ids=("left", "right"),
         constituent_source_room_face_record_ids=("", "receipt_right"),
     )
     remaining, accepted = _canonical_composite_supersedence(
-        originals, (invalid,)
+        missing, (invalid,)
     )
-    assert remaining == originals
+    assert remaining == missing
     assert accepted == ()
