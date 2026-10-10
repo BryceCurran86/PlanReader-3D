@@ -843,24 +843,49 @@ def calibrate_viewport_layout(page: Any) -> ViewportLayoutCalibration:
         rect = page.rect
         width = float(rect.width); height = float(rect.height)
         rotation = 0
-    word_heights = []
-    for word in _page_text(page, "words"):
-        native_width = float(word[2]) - float(word[0])
-        native_height = float(word[3]) - float(word[1])
-        if native_height <= 0.0:
+    # Text orientation is a native PDF line property, independent of the
+    # sheet's /Rotate flag.  On vertically advancing CAD text, the long Y
+    # extent is word LENGTH, not glyph height.  Prefer the perpendicular
+    # source glyph thickness from actual text lines; do not infer that an
+    # arbitrary tall word necessarily has a vertical text baseline.
+    glyph_heights = []
+    try:
+        text_dict = _page_text(page, "dict") or {}
+    except (ValueError, RuntimeError, TypeError):
+        text_dict = {}
+    for block in text_dict.get("blocks", []) or []:
+        if int(block.get("type", 0)) != 0:
             continue
-        # On /Rotate 90/270 CAD sheets, native vertically advancing text
-        # has a tall *word-length* bbox.  That dimension is not glyph height.
-        # Use the transverse glyph extent only for positively tall words;
-        # horizontal words and every non-rotated sheet retain their baseline.
-        if (
-            rotation in (90, 270)
-            and native_width > 0.0
-            and native_height > native_width * 1.25
-        ):
-            word_heights.append(native_width)
-        else:
-            word_heights.append(native_height)
+        for line in block.get("lines", []) or []:
+            direction = _normalised_direction(line.get("dir") or (1.0, 0.0))
+            vertical = abs(direction[1]) > abs(direction[0])
+            for span in line.get("spans", []) or []:
+                bbox = span.get("bbox") or ()
+                if len(bbox) < 4 or not str(span.get("text") or "").strip():
+                    continue
+                cross_span = (
+                    float(bbox[2]) - float(bbox[0])
+                    if vertical else float(bbox[3]) - float(bbox[1])
+                )
+                if math.isfinite(cross_span) and cross_span > 0.0:
+                    glyph_heights.append(cross_span)
+    if not glyph_heights:
+        # Preserve the existing source-verified /Rotate 90/270 behaviour
+        # for lightweight producer doubles that have only word observations.
+        for word in _page_text(page, "words"):
+            native_width = float(word[2]) - float(word[0])
+            native_height = float(word[3]) - float(word[1])
+            if native_height <= 0.0:
+                continue
+            if (
+                rotation in (90, 270)
+                and native_width > 0.0
+                and native_height > native_width * 1.25
+            ):
+                glyph_heights.append(native_width)
+            else:
+                glyph_heights.append(native_height)
+    word_heights = glyph_heights
     median_h = statistics.median(word_heights) if word_heights else max(min(width, height) / 80.0, 1.0)
     return ViewportLayoutCalibration(
         median_word_height_pt=median_h,
