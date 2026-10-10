@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import fitz
+import pytest
 
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
@@ -62,9 +63,22 @@ def _shadow_quantity(quantity_id: str, room_id: str) -> QuantityEvidence:
     )
 
 
+@pytest.mark.parametrize(
+    ("new_index_id", "overlap_index_id", "new_area_id", "overlap_area_id"),
+    (
+        ("room-index-overlap", "room-index-overlap", "area-new", "area-other"),
+        # Distinct room-index identities can point to the same producer-owned
+        # FIRM room-area receipt; this is still one physical ceiling area.
+        ("room-index-new", "room-index-legacy-alias", "area-shared", "area-shared"),
+    ),
+)
 def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
     tmp_path,
     monkeypatch,
+    new_index_id,
+    overlap_index_id,
+    new_area_id,
+    overlap_area_id,
 ) -> None:
     pdf = tmp_path / "source.pdf"
     source_sha = _pdf(pdf)
@@ -73,7 +87,8 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
     legacy_quantity = _firm_quantity("qty-legacy", "ceiling-legacy")
     new_canonical = SimpleNamespace(
         canonical_ceiling_id="ceiling-new",
-        source_room_index_id="room-index-overlap",
+        source_room_index_id=new_index_id,
+        room_area_quantity_id=new_area_id,
     )
     claim = SimpleNamespace(
         status=SimpleNamespace(value="corroborated"),
@@ -91,12 +106,14 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
 
     overlap_ceiling = SimpleNamespace(
         canonical_ceiling_id="legacy-overlap",
-        source_room_index_id="room-index-overlap",
+        source_room_index_id=overlap_index_id,
+        room_area_quantity_id=overlap_area_id,
         ceiling_quantity_id="shadow-overlap",
     )
     unrelated_ceiling = SimpleNamespace(
         canonical_ceiling_id="legacy-unrelated",
         source_room_index_id="room-index-other",
+        room_area_quantity_id="area-unrelated",
         ceiling_quantity_id="shadow-other",
     )
     legacy_result = LiveCeilingLiningResult(
