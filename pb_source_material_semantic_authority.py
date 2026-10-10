@@ -1115,6 +1115,26 @@ def _material_definition_candidate(
         page_id=int(words[0].page_id) if words else 0,
         page_label=f"page:{words[0].page_id}" if words else "",
     )
+    # Some source-native CAD blocks store a short alphabetic code as an
+    # entire line and its description as the next native line. The parser
+    # does not recognise a bare code. This is a *candidate* only: the
+    # schedule title, every word receipt and exact block ownership must
+    # still be independently authenticated before publication.
+    if not parsed and len(lines) == 2:
+        code_line = str(lines[0][0]).strip()
+        description_line = str(lines[1][0]).strip()
+        if (
+            2 <= len(code_line) <= 4
+            and code_line.isascii()
+            and code_line.isalpha()
+            and code_line.isupper()
+            and len(description_line.split()) >= 2
+        ):
+            parsed = parse_schedule_text(
+                f"{code_line} {description_line}",
+                page_id=int(words[0].page_id) if words else 0,
+                page_label=f"page:{words[0].page_id}" if words else "",
+            )
     candidates = []
     for item in parsed:
         code = str(item.get("code") or "").strip().upper()
