@@ -75,7 +75,7 @@ def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: 
 
     try:
         sealed = sealed_source_closed_run_from_dict(_object(path))
-    except (SourceClosedRunExportError, TypeError, ValueError, KeyError):
+    except (SourceClosedRunExportError, TypeError, ValueError, KeyError, UnicodeError, OSError):
         return False, None, ["sealed_run_integrity_invalid"]
     if sealed.project_id != project_id:
         return False, len(sealed.quantities), ["sealed_run_project_mismatch"]
