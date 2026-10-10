@@ -847,3 +847,257 @@ def test_extreme_aspect_non_table_frame_still_rejected_for_vertical_title() -> N
         assert schedules[0].bounding_box is None
     finally:
         doc.close()
+
+
+def test_rotated_rcps_can_use_resolved_schedule_as_nonoverlapping_band_separator() -> None:
+    doc = _rotated_two_rcps_with_central_schedule()
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    assert validate_non_overlapping_viewports(viewports)
+
+    schedule = [
+        viewport
+        for viewport in viewports
+        if viewport.view_type == DrawingViewType.SCHEDULE.value
+    ]
+    rcps = [
+        viewport
+        for viewport in viewports
+        if viewport.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+    ]
+    assert len(schedule) == 1
+    assert schedule[0].status == ViewportSegmentationStatus.RESOLVED.value, [(v.label, v.status, v.notes, v.provenance) for v in viewports]
+    assert len(rcps) == 2
+    assert all(
+        viewport.status == ViewportSegmentationStatus.DERIVED.value
+        for viewport in rcps
+    )
+    assert all(is_authoritative_derived_viewport(viewport) for viewport in rcps)
+    assert {
+        viewport.provenance.get("separator_side")
+        for viewport in rcps
+    } == {"left", "right"}
+    assert all(
+        viewport.provenance.get("visual_band_validated") is True
+        for viewport in rcps
+    )
+    doc.close()
+
+
+def test_rotated_semantic_band_fails_closed_when_two_plan_titles_compete() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=600.0, height=800.0)
+    page.set_rotation(90)
+    schedule = fitz.Rect(150.0, 300.0, 450.0, 500.0)
+    page.draw_rect(schedule)
+    for x in (210.0, 270.0, 330.0, 390.0):
+        page.draw_line((x, 300.0), (x, 500.0))
+    for y in (340.0, 380.0, 420.0, 460.0):
+        page.draw_line((150.0, y), (450.0, y))
+    page.insert_text(
+        (430.0, 480.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=9,
+        rotate=90,
+    )
+    page.draw_line((80.0, 560.0), (520.0, 560.0))
+    page.draw_line((120.0, 690.0), (480.0, 690.0))
+    page.draw_line((80.0, 120.0), (520.0, 120.0))
+    page.draw_line((120.0, 230.0), (480.0, 230.0))
+    page.insert_text(
+        (520.0, 760.0),
+        "REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    # A second plan title in the same visual left band destroys unique owner.
+    page.insert_text(
+        (480.0, 740.0),
+        "GROUND FLOOR PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    page.insert_text(
+        (520.0, 180.0),
+        "PROP. REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    doc = _reopen(doc)
+
+    viewports = segment_page_viewports(doc[0], page_number=1)
+    left_competitors = [
+        viewport
+        for viewport in viewports
+        if viewport.label in ("REFLECTED CEILING PLAN", "GROUND FLOOR PLAN")
+    ]
+    assert len(left_competitors) == 2
+    assert all(
+        not is_authoritative_derived_viewport(viewport)
+        for viewport in left_competitors
+    )
+    doc.close()
+
+
+def test_single_reflected_ceiling_plan_can_own_printable_area_without_floor_topology() -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=842)
+    page.insert_text((220, 760), "PROP. REFLECTED CEILING PLAN", fontsize=11)
+    page.draw_line((80, 100), (780, 100))
+    page.draw_line((780, 100), (780, 620))
+    page.draw_line((780, 620), (80, 620))
+    page.draw_line((80, 620), (80, 100))
+    page.draw_line((300, 100), (300, 620))
+
+    x = 1000
+    page.insert_text((x, 520), "PROJECT TITLE", fontsize=6)
+    page.insert_text((x, 532), "SYNTHETIC RESIDENCE", fontsize=9)
+    page.insert_text((x, 556), "CLIENT", fontsize=6)
+    page.insert_text((x, 568), "EXAMPLE CLIENT", fontsize=9)
+    page.insert_text((x, 596), "DRAWING TITLE", fontsize=6)
+    page.insert_text((x, 612), "REFLECTED CEILING PLAN", fontsize=11)
+    page.insert_text((x, 650), "DRAWN", fontsize=6)
+    page.insert_text((x + 60, 650), "CHECKED", fontsize=6)
+    page.insert_text((x + 120, 650), "SCALE", fontsize=6)
+    page.insert_text((x, 662), "AB", fontsize=8)
+    page.insert_text((x + 60, 662), "CD", fontsize=8)
+    page.insert_text((x + 120, 662), "1:100", fontsize=8)
+    page.insert_text((x, 690), "DRAWING NO", fontsize=6)
+    page.insert_text((x + 120, 690), "REVISION", fontsize=6)
+    page.insert_text((x, 704), "A-501", fontsize=10)
+    page.insert_text((x + 120, 704), "A", fontsize=10)
+
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        rcp = [
+            v for v in viewports
+            if v.view_type == DrawingViewType.REFLECTED_CEILING_PLAN.value
+        ]
+        assert len(rcp) == 1
+        assert rcp[0].status == ViewportSegmentationStatus.DERIVED.value
+        assert rcp[0].boundary_source == ViewportBoundarySource.TITLE_PARTITION.value
+        assert is_authoritative_derived_viewport(rcp[0])
+        assert authoritative_floor_plan_viewports(doc[0], page_number=1) == []
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize(
+    "title",
+    (
+        "INTERNAL FINISHES SCHEDULE",
+        "EXTERNAL FINISHES SCHEDULE",
+        "CEILING FINISHES SCHEDULE",
+        "FLOOR FINISHES SCHEDULE",
+    ),
+)
+def test_gridded_qualified_finish_schedule_titles_are_authoritative(title: str) -> None:
+    doc = _single_table_frame_view(title)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        assert len(viewports) == 1
+        schedule = viewports[0]
+        assert schedule.view_type == DrawingViewType.SCHEDULE.value
+        assert schedule.status == ViewportSegmentationStatus.RESOLVED.value
+        assert schedule.boundary_source == ViewportBoundarySource.VECTOR_FRAME.value
+        assert schedule.bounding_box == pytest.approx((320, 30, 580, 350))
+    finally:
+        doc.close()
+
+
+def _single_line_grid_frame_view(title: str) -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=420)
+    outer = fitz.Rect(320, 30, 580, 350)
+    page.draw_rect(outer)
+    xs = (340.0, 410.0, 480.0, 550.0)
+    ys = (60.0, 120.0, 180.0, 240.0)
+    for x in xs:
+        page.draw_line((x, 60.0), (x, 240.0))
+    for y in ys:
+        page.draw_line((340.0, y), (550.0, y))
+    page.insert_text((350, 325), title, fontsize=11)
+    return _reopen(doc)
+
+
+
+def _rotated_two_rcps_with_central_schedule() -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=600.0, height=800.0)
+    page.set_rotation(90)
+
+    # Native bbox -> visual center panel at x=300..500, y=150..450.
+    schedule = fitz.Rect(150.0, 300.0, 450.0, 500.0)
+    page.draw_rect(schedule)
+    for x in (210.0, 270.0, 330.0, 390.0):
+        page.draw_line((x, 300.0), (x, 500.0))
+    for y in (340.0, 380.0, 420.0, 460.0):
+        page.draw_line((150.0, y), (450.0, y))
+    page.insert_text(
+        (475.0, 480.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=9,
+        rotate=90,
+    )
+
+    # Two independent plan drawings on opposite visual sides of the table.
+    page.draw_line((80.0, 560.0), (520.0, 560.0))
+    page.draw_line((120.0, 690.0), (480.0, 690.0))
+    page.draw_line((80.0, 120.0), (520.0, 120.0))
+    page.draw_line((120.0, 230.0), (480.0, 230.0))
+    page.insert_text(
+        (520.0, 760.0),
+        "REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    page.insert_text(
+        (520.0, 260.0),
+        "PROP. REFLECTED CEILING PLAN",
+        fontsize=11,
+        rotate=90,
+    )
+    return _reopen(doc)
+
+
+
+def test_rotated_semantic_band_rejects_competing_nonplan_title() -> None:
+    """An elevation title sharing the RCP side band must revoke ownership."""
+    doc = _rotated_two_rcps_with_central_schedule()
+    page = doc[0]
+    page.insert_text(
+        (480.0, 740.0), "NORTH ELEVATION", fontsize=11, rotate=90
+    )
+    doc = _reopen(doc)
+    try:
+        viewports = segment_page_viewports(doc[0], page_number=1)
+        left = [
+            viewport for viewport in viewports
+            if viewport.label == "REFLECTED CEILING PLAN"
+        ]
+        assert len(left) == 1
+        assert not is_authoritative_derived_viewport(left[0])
+        assert left[0].bounding_box is None
+        assert validate_non_overlapping_viewports(viewports)
+    finally:
+        doc.close()
+
+
+def test_rotated_native_vertical_words_do_not_inflate_frame_calibration() -> None:
+    """The length of vertical title words is not their glyph height."""
+    from pb_viewport_segmentation import calibrate_viewport_layout
+
+    doc = _rotated_two_rcps_with_central_schedule()
+    try:
+        words = doc[0].get_text("words")
+        assert words
+        raw_median_word_span = sorted(
+            float(word[3]) - float(word[1]) for word in words
+        )[len(words) // 2]
+        calibration = calibrate_viewport_layout(doc[0])
+        assert raw_median_word_span > 30.0
+        assert 0.0 < calibration.median_word_height_pt < 20.0
+        # Source-native 300x200 pt schedule must remain frame-eligible.
+        assert calibration.minimum_frame_span_pt < 200.0
+    finally:
+        doc.close()
