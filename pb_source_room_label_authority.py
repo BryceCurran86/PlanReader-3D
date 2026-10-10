@@ -441,6 +441,10 @@ class SourceRoomLabelProducer:
         self._source = source
         self._room_faces = room_faces
         self._raster = raster
+        # Reuse one read-only, receipt-backed authority for the producer's
+        # complete source snapshot. Never reconstruct it per native word;
+        # it still resolves each word against the exact producer-owned receipt.
+        self._text_integrity_authority = source.text_integrity_authority()
         self._results: dict[
             tuple[str, str, str, str, str, str],
             SourceRoomLabelScopeResult,
@@ -510,7 +514,7 @@ class SourceRoomLabelProducer:
             snapshot_id=published.snapshot.snapshot_id,
             observation_id=word.observation_id,
         )
-        native = self._source.text_integrity_authority().resolve_text(selector)
+        native = self._text_integrity_authority.resolve_text(selector)
         if (
             native.status is EvidenceResolutionStatus.CORROBORATED
             and native.receipt is not None
@@ -594,7 +598,7 @@ class SourceRoomLabelProducer:
                 snapshot_id=published.snapshot.snapshot_id,
                 observation_id=word.observation_id,
             )
-            text_result = self._source.text_integrity_authority().resolve_text(
+            text_result = self._text_integrity_authority.resolve_text(
                 selector
             )
             receipt = text_result.receipt
@@ -791,7 +795,7 @@ class SourceRoomLabelProducer:
         if page_ids is not None and not selected:
             raise ValueError("page_ids must contain at least one page")
 
-        text_authority = self._source.text_integrity_authority()
+        text_authority = self._text_integrity_authority
         words_by_lineage: dict[
             tuple[str, str, str, str, str],
             list[_Word],
