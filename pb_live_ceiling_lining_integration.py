@@ -231,9 +231,22 @@ def _claim_from_quantity(
         return None
 
     upstream_id = _clean(meta.get("upstream_area_quantity_id"))
-    area_by_id = {
-        item.quantity_id: item for item in source_result.room_area_quantities
-    }
+    # Quantity identity is cryptographic source lineage, never last-writer-wins.
+    # A modified record replay with the SAME upstream source quantity ID
+    # revokes the entire ID instead of choosing the last candidate. Exact
+    # byte-for-byte/equality replays are harmless and remain idempotent.
+    area_by_id = {}
+    conflicting_area_ids = set()
+    for item in source_result.room_area_quantities:
+        item_id = _clean(item.quantity_id)
+        if not item_id or item_id in conflicting_area_ids:
+            continue
+        previous = area_by_id.get(item_id)
+        if previous is not None and previous != item:
+            area_by_id.pop(item_id, None)
+            conflicting_area_ids.add(item_id)
+            continue
+        area_by_id[item_id] = item
     area = area_by_id.get(upstream_id)
     scope = quantity.input_entity_ids[0]
     if (
@@ -270,16 +283,21 @@ def _claim_from_quantity(
         scale_record_id = str(physical.record_id)
     else:
         area_meta = area.metadata if isinstance(area.metadata, dict) else {}
+        raw_figured_ids = area_meta.get("figured_dimension_ids")
+        # Source IDs are producer-owned tokens, not freeform human text.
+        # Treating a bare string as an iterable would turn "dim-h" into
+        # several single-character IDs and falsely satisfy a two-axis gate.
+        if (not isinstance(raw_figured_ids, (tuple, list))
+                or not all(isinstance(value, str) for value in raw_figured_ids)):
+            return None
         figured_dimension_ids = tuple(
-            sorted(
-                {
-                    _clean(value)
-                    for value in (area_meta.get("figured_dimension_ids") or ())
-                    if _clean(value)
-                }
-            )
+            sorted({_clean(value) for value in raw_figured_ids if _clean(value)})
         )
-        if not figured_dimension_ids:
+        # The ceiling must carry both independently source-owned axes of
+        # the documented room-area proof. One dimension ID, or repetitions of
+        # the same ID, cannot establish a metric plane and must not enter the
+        # canonical ceiling pipeline as a source-authenticated area.
+        if len(figured_dimension_ids) < 2:
             return None
 
     return (

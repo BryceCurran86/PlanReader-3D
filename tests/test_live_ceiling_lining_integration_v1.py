@@ -1,6 +1,8 @@
 """Live source-owned ceiling-lining extractor integration tests."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import fitz
 
 import pb_live_ceiling_lining_integration as live_module
@@ -424,3 +426,142 @@ def test_ceiling_topology_pages_must_be_subset_of_evidence_pages(tmp_path) -> No
             pages=(0,),
             topology_pages=(1,),
         )
+
+
+
+def test_canonical_ceiling_denies_single_or_replayed_figured_dimension_axis() -> None:
+    # Even when the upstream room area claims FIRM, an incomplete lineage
+    # cannot establish two independent directions for a whole ceiling plane.
+    for ids in (("dim-h",), ("dim-v",), ("dim-h", "dim-h"), ("", "dim-h", "")):
+        live, ceiling, source_result = _documented_area_claim_fixture()
+        original_area = source_result.room_area_quantities[0]
+        malformed_area = replace(
+            original_area,
+            metadata={
+                **dict(original_area.metadata),
+                "figured_dimension_ids": ids,
+            },
+        )
+        source_result.room_area_quantities = (malformed_area,)
+        assert live._claim_from_quantity(
+            quantity=ceiling,
+            source_result=source_result,
+            page_no=1,
+            viewport_id="vp-1",
+        ) is None
+
+
+def test_canonical_ceiling_preserves_two_independent_documented_dimension_ids() -> None:
+    live, ceiling, source_result = _documented_area_claim_fixture()
+    area = source_result.room_area_quantities[0]
+    modified = replace(
+        area,
+        metadata={
+            **dict(area.metadata),
+            "figured_dimension_ids": ["dim-v", "dim-h", "dim-v"],
+        },
+    )
+    source_result.room_area_quantities = (modified,)
+    receipt = live._claim_from_quantity(
+        quantity=ceiling,
+        source_result=source_result,
+        page_no=1,
+        viewport_id="vp-1",
+    )
+    assert receipt is not None
+    assert receipt[8] == ("dim-h", "dim-v")
+
+
+def test_canonical_ceiling_rejects_string_or_non_source_figured_metadata() -> None:
+    # A single string is iterable: without type checking, its different
+    # characters falsely count as independent dimension witness receipts.
+    malformed_ids = (
+        "dim-h",
+        "dim-h,dim-v",
+        {"horizontal": "dim-h", "vertical": "dim-v"},
+        ("dim-h", 123),
+        ("dim-h", None),
+        ["dim-h", ["dim-v"]],
+    )
+    for raw_ids in malformed_ids:
+        live, ceiling, source_result = _documented_area_claim_fixture()
+        area = source_result.room_area_quantities[0]
+        source_result.room_area_quantities = (
+            replace(
+                area,
+                metadata={
+                    **dict(area.metadata),
+                    "figured_dimension_ids": raw_ids,
+                },
+            ),
+        )
+        assert live._claim_from_quantity(
+            quantity=ceiling,
+            source_result=source_result,
+            page_no=1,
+            viewport_id="vp-1",
+        ) is None
+
+
+def test_canonical_ceiling_source_axis_metadata_accepts_exact_two_string_tokens() -> None:
+    for raw_ids in (["dim-v", "dim-h"], ("dim-h", "dim-v", "dim-h")):
+        live, ceiling, source_result = _documented_area_claim_fixture()
+        area = source_result.room_area_quantities[0]
+        source_result.room_area_quantities = (
+            replace(
+                area,
+                metadata={
+                    **dict(area.metadata),
+                    "figured_dimension_ids": raw_ids,
+                },
+            ),
+        )
+        resolved = live._claim_from_quantity(
+            quantity=ceiling,
+            source_result=source_result,
+            page_no=1,
+            viewport_id="vp-1",
+        )
+        assert resolved is not None
+        assert resolved[8] == ("dim-h", "dim-v")
+
+
+def test_canonical_ceiling_rejects_conflicting_room_area_source_identity_replays() -> None:
+    live, shadow, original = _documented_area_claim_fixture()
+    authentic = original.room_area_quantities[0]
+    mutations = (
+        replace(authentic, value=authentic.value + 1),
+        replace(
+            authentic,
+            metadata={
+                **dict(authentic.metadata),
+                "source_sha256": "b" * 64,
+            },
+        ),
+        replace(authentic, evidence_ids=("altered-area-source",)),
+    )
+    for changed in mutations:
+        for ordering in ((authentic, changed), (changed, authentic)):
+            live, shadow, source = _documented_area_claim_fixture()
+            source.room_area_quantities = ordering
+            assert live._claim_from_quantity(
+                quantity=shadow,
+                source_result=source,
+                page_no=1,
+                viewport_id="vp-1",
+            ) is None
+
+
+def test_canonical_ceiling_accepts_idempotent_identical_upstream_area_replay() -> None:
+    live, shadow, source = _documented_area_claim_fixture()
+    authentic = source.room_area_quantities[0]
+    source.room_area_quantities = (authentic, authentic)
+    resolved = live._claim_from_quantity(
+        quantity=shadow,
+        source_result=source,
+        page_no=1,
+        viewport_id="vp-1",
+    )
+    assert resolved is not None
+    assert resolved[2] == 13.270425
+    assert resolved[8] == ("dim-h", "dim-v")
