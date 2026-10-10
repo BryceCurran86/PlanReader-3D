@@ -247,6 +247,7 @@ def test_conflicting_source_frame_receipts_fail_closed_before_rekey_classificati
 @pytest.mark.parametrize("corruption",[
     "empty_edge_parents","unrelated_edge_parent","nonfinite_source_coord",
     "fabricated_source_coord","incomplete_source_coord",
+    "overflow_source_coord","degenerate_source_edge","finite_coords_overflow_length",
 ])
 def test_identically_corrupted_source_edges_are_never_unchanged_source(corruption):
     old,new=rekey()
@@ -261,6 +262,12 @@ def test_identically_corrupted_source_edges_are_never_unchanged_source(corruptio
             edge["geometry"][0]=float("nan")
         elif corruption=="fabricated_source_coord":
             edge["geometry"][0]="not_pdf_point"
+        elif corruption=="overflow_source_coord":
+            edge["geometry"][0]=10**1000
+        elif corruption=="degenerate_source_edge":
+            edge["geometry"]=[10.,10.,10.,10.]
+        elif corruption=="finite_coords_overflow_length":
+            edge["geometry"]=[-1e308,0.,1e308,0.]
         else:
             edge["geometry"]=[10.,10.,70.]
     result=compare_source_host_rekeys(old,new)
@@ -271,3 +278,82 @@ def test_identically_corrupted_source_edges_are_never_unchanged_source(corruptio
         "W4_POSITIVE_SOURCE_PROOF_UNAVAILABLE"
     ]
     assert not result["official_host_receipt_identity_acceptance"]
+
+
+@pytest.mark.parametrize("damage", [
+    "nonfinite_path","overflow_path","boolean_path","malformed_path",
+    "nonfinite_wall_centerline","foreign_wall_centerline",
+    "finite_path_overflow_length","degenerate_path",
+    "finite_centerline_overflow_length","degenerate_centerline",
+])
+def test_identically_invalid_positive_w4_paths_cannot_certify_snapshot_only_rekey(damage):
+    a,b=rekey()
+    for source in (a,b):
+        record=source["source_owned_wall_scope_results"][0]["records"][0]
+        if damage=="nonfinite_path":
+            record["physical_identity"]["path_fingerprint"][0][0]=float("nan")
+        elif damage=="overflow_path":
+            record["physical_identity"]["path_fingerprint"][0][0]=10**1000
+        elif damage=="boolean_path":
+            record["physical_identity"]["path_fingerprint"][0][0]=True
+        elif damage=="malformed_path":
+            record["physical_identity"]["path_fingerprint"]=[[10.],[70.,10.]]
+        elif damage=="nonfinite_wall_centerline":
+            record["wall_candidate"]["centerline_pts"][0][0]=float("inf")
+        elif damage=="finite_path_overflow_length":
+            record["physical_identity"]["path_fingerprint"]=[[-1e308,0.],[1e308,0.]]
+        elif damage=="degenerate_path":
+            record["physical_identity"]["path_fingerprint"]=[[10.,10.],[10.,10.]]
+        elif damage=="finite_centerline_overflow_length":
+            record["wall_candidate"]["centerline_pts"]=[[-1e308,0.],[1e308,0.]]
+        elif damage=="degenerate_centerline":
+            record["wall_candidate"]["centerline_pts"]=[[10.,10.],[10.,10.]]
+        else:
+            record["wall_candidate"]["centerline_pts"]=[[10.,10.],["wrong",10.]]
+    output=compare_source_host_rekeys(a,b)
+    assert output["rekey_classification_counts"]=={
+        "ORIGINAL_SOURCE_PROOF_CHANGED_OR_LOST":1
+    }
+    assert "W4_POSITIVE_SOURCE_PROOF_UNAVAILABLE" in output["source_comparison_rows"][0]["reason_codes"]
+    assert output["official_host_receipt_identity_acceptance"] is False
+
+
+@pytest.mark.parametrize("damage", [
+    "nonfinite_origin","nonfinite_axis","nonfinite_normal","nonfinite_length",
+    "zero_length","overflow_length","missing_wall_candidates",
+    "nonnumeric_thickness","nonfinite_u_span",
+])
+def test_identically_invalid_source_frames_cannot_certify_snapshot_only_rekey(damage):
+    a,b=rekey()
+    for source in (a,b):
+        frame=source["resolved_host_frame_evidence"][0]
+        if damage=="nonfinite_origin":
+            frame["origin_pt"][0]=float("nan")
+        elif damage=="nonfinite_axis":
+            frame["axis_unit"][0]=float("inf")
+        elif damage=="nonfinite_normal":
+            frame["normal_unit"][0]=float("nan")
+        elif damage=="nonfinite_length":
+            frame["whole_wall_length_pt"]=float("inf")
+        elif damage=="zero_length":
+            frame["whole_wall_length_pt"]=0
+        elif damage=="overflow_length":
+            frame["whole_wall_length_pt"]=10**1000
+        elif damage=="missing_wall_candidates":
+            frame["whole_wall_candidate_ids"]=[]
+        elif damage=="nonnumeric_thickness":
+            frame["wall_thickness_pt"]="four"
+        else:
+            frame["u0_pt"]=float("nan")
+    if damage=="missing_wall_candidates":
+        # An empty receipt member list contradicts the independently serialized
+        # frame + physical host. The producer scope fails before parity scoring.
+        with pytest.raises(ValueError, match="inconsistent framed whole-wall candidate membership"):
+            compare_source_host_rekeys(a,b)
+        return
+    output=compare_source_host_rekeys(a,b)
+    assert output["rekey_classification_counts"]=={
+        "ORIGINAL_SOURCE_PROOF_CHANGED_OR_LOST":1
+    }
+    assert "FRAME_SOURCE_GEOMETRY_UNAVAILABLE" in output["source_comparison_rows"][0]["reason_codes"]
+    assert output["official_host_receipt_identity_acceptance"] is False
