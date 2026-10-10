@@ -51,13 +51,41 @@ def _finite_json_int(token: str) -> int:
 
 
 def _parse_evidence_json(payload: str) -> object:
-    return json.loads(
-        payload,
-        object_pairs_hook=_unique_json_object,
-        parse_constant=_reject_nonfinite_json_constant,
-        parse_float=_finite_json_float,
-        parse_int=_finite_json_int,
-    )
+    # Python JSON parser recursion handling varies across supported runtimes.
+    # Guard genuine JSON object/array nesting before parsing, ignoring bracket
+    # characters inside properly quoted/escaped strings. This is only a
+    # complexity safeguard, not source/evaluator schema inference.
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in payload:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > 512:
+                raise ValueError("JSON nesting exceeds safe parser depth")
+        elif character in "]}":
+            depth -= 1
+    # Preserve the native parser's validation of mismatched braces, malformed
+    # escapes and all strict producer-key and number checks.
+    try:
+        return json.loads(
+            payload,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_nonfinite_json_constant,
+            parse_float=_finite_json_float,
+            parse_int=_finite_json_int,
+        )
+    except RecursionError as exc:
+        raise ValueError("JSON nesting exceeds safe parser depth") from exc
 
 
 def _object(path: Path) -> dict:
