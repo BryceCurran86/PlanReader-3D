@@ -56,8 +56,13 @@ def inspect_source_face_dimension_endpoints(
         status="source_identity_missing"
     elif not edges:
         status="source_owned_wall_subedges_missing"
-    elif endpoints is None or len(endpoints)!=2:
+    elif not isinstance(endpoints,(tuple,list)) or len(endpoints)!=2:
         status="source_dimension_endpoints_unbound"
+    elif any(
+        not isinstance(edge_row,(tuple,list)) or len(edge_row)!=2
+        for edge_row in edges
+    ):
+        status="source_owned_wall_subedges_malformed"
     else:
         contacts=[]
         for point in endpoints:
