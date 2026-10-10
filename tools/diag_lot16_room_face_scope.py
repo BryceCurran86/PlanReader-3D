@@ -19,6 +19,24 @@ from pb_live_physical_net_wall_integration import collect_live_physical_net_wall
 
 
 
+def _has_firm_metric_floor_receipt(floor) -> bool:
+    """Count only source-measured canonical floors with complete metric receipts.
+
+    LiveCanonicalFloorSurfaceObject has no metric_area_complete property.
+    A geometry-complete but unscaled floor is not a metric area.
+    """
+    try:
+        area = float(floor.metric_area_m2)
+    except (TypeError, ValueError, OverflowError, AttributeError):
+        return False
+    return (
+        math.isfinite(area)
+        and area > 0.0
+        and bool(str(floor.metric_area_quantity_id or "").strip())
+        and bool(str(floor.metric_area_authority or "").strip())
+    )
+
+
 def _wall_metric_first_failure(wall) -> str:
     """Classify the first absent producer-owned wall quantity prerequisite.
 
@@ -392,7 +410,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
                 "canonical_floor_count": len(claim.canonical_floors),
                 "canonical_floor_status": str(getattr(claim.canonical_floor_status, "value", claim.canonical_floor_status)),
                 "canonical_floor_reasons": list(claim.canonical_floor_reason_codes),
-                "metric_floor_count": sum(bool(getattr(floor, "metric_area_complete", False)) for floor in claim.canonical_floors),
+                "metric_floor_count": sum(_has_firm_metric_floor_receipt(floor) for floor in claim.canonical_floors),
                 "room_area_quantity_count": len(claim.room_area_quantity_evidence),
                 "floor_finish_quantity_count": len(claim.floor_finish_quantity_evidence),
                 "same_view_first_failures": list(claim.same_view_room_area_first_failure_codes),
