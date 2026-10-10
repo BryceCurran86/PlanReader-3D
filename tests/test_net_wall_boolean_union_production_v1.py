@@ -628,6 +628,7 @@ def test_replayed_deduction_cannot_cross_opening_or_source_scope(change) -> None
     assert result.record is not None
     assert result.record.net_area_m2 is None
     assert not result.record.opening_deduction_record_ids
+    assert result.record.physical_void_record_ids == ()
 
 
 def test_scenario_03_two_distinct_openings() -> None:
