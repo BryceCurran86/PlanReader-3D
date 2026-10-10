@@ -178,9 +178,19 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             produced = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(produced, list) or any(not isinstance(x, dict) for x in produced):
                 raise ValueError(f"{path} must contain a JSON list of objects")
-            ids = [str(item["quantity_id"]) for item in produced]
+            # A malformed production row is a readiness blocker, not a
+            # reason to crash before the remaining four-project diagnostic.
+            # Reject absent, blank and non-string IDs without manufacturing
+            # a replacement identity such as the literal string "None".
+            ids = [
+                item["quantity_id"] for item in produced
+                if isinstance(item.get("quantity_id"), str)
+                and item["quantity_id"].strip()
+            ]
+            invalid_produced_id_count = len(produced) - len(ids)
         else:
             produced, ids = [], []
+            invalid_produced_id_count = 0
         duplicate_ids = sorted(k for k, count in Counter(ids).items() if count > 1)
         eligible = manifest.get("verified_takeoff_items", [])
         denominator = sum(item.get("denominator_eligible", True) is True for item in eligible)
@@ -198,6 +208,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             blockers.insert(0, "frozen_manifest_not_verified")
         if not exists:
             blockers.append("production_items_missing")
+        if invalid_produced_id_count:
+            blockers.append("produced_quantity_id_missing_or_invalid")
         if duplicate_ids:
             blockers.append("duplicate_produced_quantity_ids")
         if any(item.get("lineage_ok") is not True for item in produced):
