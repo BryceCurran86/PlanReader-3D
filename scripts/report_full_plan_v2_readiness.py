@@ -367,6 +367,15 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             "produced_sealed_parity_verified": parity_verified,
             "commercial_trade_authority_verified": False,
             "reconciliation_complete": False,
+            # No frozen evaluator has run on a source-complete universe.
+            # Unknown classification counts must not silently become zero.
+            "reconciliation_evaluation_status": "NOT_EVALUATED",
+            "matched_within_tolerance": None,
+            "matched_outside_tolerance": None,
+            "missed": None,
+            "partial": None,
+            "unresolved": None,
+            "unsupported_extra": None,
             "blockers": sorted(set(blockers)),
             "coverage_accuracy": None,
             "precision_adjusted_accuracy": None,
