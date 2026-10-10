@@ -830,3 +830,33 @@ def test_source_endpoint_sweep_preserves_adjacent_same_face_segments():
         assert noded[("w_sep", ((10.0, start), (10.0, end)))] == {
             "face_left": 1, "face_right": 1,
         }
+
+
+def test_source_w4_node_counts_are_scoped_once_across_competing_labels(monkeypatch):
+    """Candidate abstention semantics stay unchanged without per-label noding."""
+    import pb_source_composite_room_face_authority as module
+
+    original = module._atomic_source_wall_edge_counts
+    calls = []
+
+    def measured(room_scope, grid_walls):
+        calls.append((room_scope, frozenset(grid_walls)))
+        return original(room_scope, grid_walls)
+
+    monkeypatch.setattr(module, "_atomic_source_wall_edge_counts", measured)
+    room_scope = _three_cell_room_scope()
+    result = compose_grid_separated_room_faces(
+        wall_scope=_three_cell_wall_scope(
+            (_grid_atom("e_lm", "ev_lm"), _grid_atom("e_mr", "ev_mr"))
+        ),
+        room_scope=room_scope,
+        label_scope=_three_cell_label_scope(competing_split=True),
+    )
+    assert len(calls) == 1
+    assert calls[0][0] is room_scope
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert set(result.unresolved_label_candidate_ids) == {
+        "split_label_primary",
+        "split_label_competing",
+    }
