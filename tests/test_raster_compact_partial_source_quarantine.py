@@ -67,3 +67,57 @@ def test_input_observations_not_modified():
     before=repr((compact,source))
     assert occupied(compact,(source,),dpi=300,source_dpi=144)
     assert repr((compact,source)) == before
+
+
+
+from pb_raster_compact_partial_source_quarantine import compact_band_crosses_original_source as crosses
+
+
+@pytest.mark.parametrize("vertical",[False, True])
+def test_perpendicular_original_source_fully_crosses_compact_core(vertical):
+    compact, original = fixture(vertical)
+    if vertical:
+        original.orientation = "horizontal"
+        original.geometry_pt = (40*72/300, 60*72/300, 60*72/300, 60*72/300)
+    else:
+        original.orientation = "vertical"
+        original.geometry_pt = (60*72/300, 40*72/300, 60*72/300, 60*72/300)
+    assert crosses(compact, (original,), dpi=300, source_dpi=144)
+
+
+@pytest.mark.parametrize("damage", ["endpoint", "miss", "short", "remote", "wrong_axis", "nonnumeric"])
+def test_corner_touch_or_non_crossing_line_never_quarantines(damage):
+    compact, original = fixture()
+    original.orientation="vertical"
+    original.geometry_pt=(60*72/300,40*72/300,60*72/300,60*72/300)
+    if damage=="endpoint":
+        original.geometry_pt=(40*72/300,40*72/300,40*72/300,60*72/300)
+    elif damage=="miss":
+        original.geometry_pt=(82*72/300,40*72/300,82*72/300,60*72/300)
+    elif damage=="short":
+        original.geometry_pt=(60*72/300,44*72/300,60*72/300,52*72/300)
+    elif damage=="remote":
+        original.geometry_pt=(60*72/300,100*72/300,60*72/300,120*72/300)
+    elif damage=="wrong_axis":
+        original.orientation="horizontal"
+    elif damage=="nonnumeric":
+        original.geometry_pt=("bad",0,0,0)
+    assert not crosses(compact,(original,),dpi=300,source_dpi=144)
+
+
+def test_crossing_requires_authenticated_render_registration():
+    compact, original = fixture()
+    original.orientation="vertical"
+    original.geometry_pt=(60*72/300,40*72/300,60*72/300,60*72/300)
+    assert not crosses(compact,(original,),dpi=0,source_dpi=144)
+    assert not crosses(compact,(original,),dpi=300,source_dpi=0)
+    assert not crosses(compact,(),dpi=300,source_dpi=144)
+
+
+def test_crossing_quarantine_never_modifies_either_source_observation():
+    compact, original = fixture()
+    original.orientation="vertical"
+    original.geometry_pt=(60*72/300,40*72/300,60*72/300,60*72/300)
+    before=repr((compact,original))
+    assert crosses(compact,(original,),dpi=300,source_dpi=144)
+    assert repr((compact,original))==before
