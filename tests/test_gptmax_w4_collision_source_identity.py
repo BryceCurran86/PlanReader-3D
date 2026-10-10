@@ -10,6 +10,7 @@ from pb_physical_wall_identity import collect_physical_wall_identities
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
 from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 from pb_wall_room_topology_wall_assembly import (
+    W4SourceCandidateAddressCollision,
     _source_owned_collision_candidate_addresses,
 )
 
@@ -245,7 +246,7 @@ def test_production_w4_source_collision_returns_unavailable_not_unhandled(
 
     def assemble(*args, **kwargs):
         if error_source == "w4":
-            raise ValueError(error_text)
+            raise W4SourceCandidateAddressCollision(error_text)
         return ["positive-source-wall"], ["source-junction"]
 
     def collect(*args, **kwargs):
@@ -294,6 +295,20 @@ def test_production_w4_scope_does_not_hide_unrelated_assembly_error(monkeypatch)
 
     monkeypatch.setattr(authority, "assemble_wall_topology", fail_unexpected)
     with pytest.raises(ValueError, match="unexpected source graph corruption"):
+        authority._assemble_source_owned_w4_identities_or_unavailable(
+            graph={}, junctions=(), relationships=(),
+            scope_id="wall-source:page-3",
+        )
+
+
+def test_production_guard_refuses_an_unrelated_value_error_with_collision_like_text(monkeypatch):
+    import pb_physical_wall_candidate_authority as authority
+
+    def malicious_untyped_failure(*args, **kwargs):
+        raise ValueError("W4 collision is merely part of an unrelated error string")
+
+    monkeypatch.setattr(authority, "assemble_wall_topology", malicious_untyped_failure)
+    with pytest.raises(ValueError, match="unrelated error string"):
         authority._assemble_source_owned_w4_identities_or_unavailable(
             graph={}, junctions=(), relationships=(),
             scope_id="wall-source:page-3",
