@@ -1,0 +1,26 @@
+name: GPT MAX Source Host Rekey Parity Ledger
+on:
+  pull_request:
+    paths:
+      - tools/gptmax_source_host_rekey_parity_ledger.py
+      - tests/test_gptmax_source_host_rekey_parity_ledger.py
+      - .github/workflows/test-gptmax-host-rekey-parity.yml
+jobs:
+  source-positive-rekey-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reject stale physical host receipt certification
+        run: PYTHONPATH=. python -m pytest -q tests/test_gptmax_source_host_rekey_parity_ledger.py
+      - name: Frozen truth and provider source isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
