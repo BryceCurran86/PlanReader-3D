@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.report_full_plan_v2_readiness import diagnostic_report, _source_sha_proof
 
 ROOT = Path("benchmarks/frozen_holdout/full_plan_v2")
@@ -233,3 +235,46 @@ def test_unreadable_sealed_run_bytes_are_one_project_blocker_not_suite_crash(tmp
     assert lot16["coverage_accuracy"] is None
     assert report["publication_status"] == "UNPUBLISHED"
     assert report["score_claim"] is False
+
+
+
+def test_duplicate_json_keys_in_sealed_run_fail_before_fingerprint_validation(tmp_path: Path) -> None:
+    from scripts.report_full_plan_v2_readiness import _object
+
+    sealed_root = tmp_path / "sealed"
+    target = sealed_root / "au_qld_lot16_power"
+    target.mkdir(parents=True)
+    path = target / "sealed_run.json"
+    # A second apparently well-formed key cannot shadow original project ID.
+    path.write_text(
+        '{"project_id":"au_qld_lot16_power",'
+        '"project_id":"another-project","quantities":[]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="duplicate JSON key: project_id"):
+        _object(path)
+
+    report = diagnostic_report(ROOT, tmp_path / "produced", sealed_root=sealed_root)
+    assert len(report["projects"]) == 4
+    lot16 = next(p for p in report["projects"] if p["project_id"] == "au_qld_lot16_power")
+    other = next(p for p in report["projects"] if p["project_id"] == "au_qld_maryborough_service_station")
+    assert lot16["sealed_run_verified"] is False
+    assert lot16["sealed_quantity_count"] is None
+    assert "sealed_run_integrity_invalid" in lot16["blockers"]
+    assert "sealed_run_missing" in other["blockers"]
+    assert lot16["coverage_accuracy"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
+
+
+def test_nested_duplicate_identity_in_sealed_payload_is_rejected(tmp_path: Path) -> None:
+    from scripts.report_full_plan_v2_readiness import _object
+
+    target = tmp_path / "sealed.json"
+    target.write_text(
+        '{"project_id":"au_qld_lot16_power",'
+        '"quantities":[{"quantity_id":"q1","quantity_id":"q2"}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="duplicate JSON key: quantity_id"):
+        _object(target)
