@@ -99,6 +99,38 @@ jobs:
           for name, env in [('physical_existence_claims','EXPECTED_OPENINGS'), ('host_bindings','EXPECTED_HOSTS'),('host_frames','EXPECTED_FRAMES')]:
               assert base['summary'][name]==candidate['summary'][name]==int(os.environ[env])
           assert len(base['source_owned_wall_scope_results'])==len(candidate['source_owned_wall_scope_results'])
+          before_scopes={scope['decision_scope_id']:scope for scope in base['source_owned_wall_scope_results']}
+          after_scopes={scope['decision_scope_id']:scope for scope in candidate['source_owned_wall_scope_results']}
+          assert set(before_scopes)==set(after_scopes)
+          for scope_id, old in before_scopes.items():
+              new=after_scopes[scope_id]
+              assert len(old['records'])==len(new['records']), ('wall records discarded',scope_id)
+              old_groups={}
+              new_groups={}
+              for record in old['records']:
+                  old_groups.setdefault(record['wall_candidate_id'], []).append(record)
+              for record in new['records']:
+                  new_groups.setdefault(record['wall_candidate_id'], []).append(record)
+              conflicted={wid for wid, rows in old_groups.items() if len(rows)>1}
+              for wid, rows in old_groups.items():
+                  if wid not in conflicted:
+                      assert new_groups.get(wid)==rows, ('unrelated W4 identity changed',scope_id,wid)
+                  else:
+                      assert wid not in new_groups, ('collided key still silently reused',scope_id,wid)
+                      for record in rows:
+                          source_owner=(
+                              tuple(record['wall_candidate']['face_a_segment_ids']),
+                              tuple(record['wall_candidate']['end_node_ids']),
+                          )
+                          replacements=[
+                              row for row in new['records']
+                              if (tuple(row['wall_candidate']['face_a_segment_ids']),
+                                  tuple(row['wall_candidate']['end_node_ids']))==source_owner
+                          ]
+                          assert len(replacements)==1, ('source candidate missing/ambiguous',scope_id,wid)
+                          replacement=replacements[0]
+                          assert replacement['wall_candidate']['metadata']['precollision_w4_candidate_id']==wid
+                          assert replacement['physical_identity']['edge_ids']==record['wall_candidate']['face_a_segment_ids']
           before_collisions=after_collisions=0
           for scope in base['source_owned_wall_scope_results']:
               ids=Counter(r['wall_candidate_id'] for r in scope['records'])
