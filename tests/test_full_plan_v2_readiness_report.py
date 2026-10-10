@@ -445,3 +445,222 @@ def test_direct_produced_sealed_parity_huge_integer_abstains_without_crash(
     assert produced_sealed_parity_blockers(produced, (row,)) == [
         "projection_value_mismatch:source-authenticated-q"
     ]
+
+
+@pytest.mark.parametrize("failure", (
+    FileNotFoundError("sealed file concurrently removed"),
+    UnicodeError("sealed file concurrently corrupted"),
+    ValueError("sealed payload replaced with malformed JSON"),
+))
+def test_concurrent_seal_replacement_is_local_parity_blocker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    from scripts import report_full_plan_v2_readiness as module
+
+    sealed_root = tmp_path / "sealed"
+    path = sealed_root / "au_qld_lot16_power"
+    path.mkdir(parents=True)
+    # This internal parity pass follows a successful independent seal proof.
+    # It must handle a second-read race, not fabricate complete source parity.
+    (path / "sealed_run.json").write_text("{}", encoding="utf-8")
+
+    def changed_seal(_path: Path) -> dict:
+        raise failure
+
+    monkeypatch.setattr(module, "_object", changed_seal)
+    assert module._sealed_projection_proof(
+        sealed_root, "au_qld_lot16_power", [], True
+    ) == (False, ["sealed_run_changed_during_parity"])
+
+
+def test_replaced_seal_cannot_switch_project_during_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    root = tmp_path / "sealed"
+    target = root / "au_qld_lot16_power"
+    target.mkdir(parents=True)
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict",
+        lambda _payload: SimpleNamespace(
+            project_id="au_qld_maryborough_service_station", quantities=()
+        ),
+    )
+    assert module._sealed_projection_proof(
+        root, "au_qld_lot16_power", [], True
+    ) == (False, ["sealed_run_changed_during_parity"])
+
+
+def test_first_seal_proof_captures_exact_verified_fingerprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    project_id = "au_qld_lot16_power"
+    target = tmp_path / project_id
+    target.mkdir()
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+    source_sha = "a" * 64
+    seal = SimpleNamespace(
+        project_id=project_id,
+        source_sha256s=(source_sha,),
+        quantities=(SimpleNamespace(
+            lineage_ok=True,
+            abstained=False,
+            object_identity_refs=("physical-source-object",),
+        ),),
+        fingerprint="verified-cryptographic-run-fingerprint",
+    )
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict", lambda _payload: seal
+    )
+    fingerprints: list[str] = []
+    assert module._sealed_run_proof(
+        tmp_path, project_id, {source_sha},
+        seal_fingerprint_sink=fingerprints,
+    ) == (True, 1, [])
+    assert fingerprints == ["verified-cryptographic-run-fingerprint"]
+
+
+def test_valid_but_swapped_second_seal_is_not_authorized_by_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    project_id = "au_qld_lot16_power"
+    target = tmp_path / project_id
+    target.mkdir()
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict",
+        lambda _payload: SimpleNamespace(
+            project_id=project_id, quantities=(),
+            fingerprint="other-valid-production-run",
+        ),
+    )
+    assert module._sealed_projection_proof(
+        tmp_path, project_id, [], True,
+        expected_seal_fingerprint="first-verified-production-run",
+    ) == (False, ["sealed_run_changed_during_parity"])
+
+
+def test_unchanged_signed_seal_fingerprint_can_reach_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from scripts import report_full_plan_v2_readiness as module
+    import pb_source_closed_run_export as exporter
+
+    project_id = "au_qld_lot16_power"
+    target = tmp_path / project_id
+    target.mkdir()
+    (target / "sealed_run.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(module, "_object", lambda _path: {})
+    monkeypatch.setattr(
+        exporter, "sealed_source_closed_run_from_dict",
+        lambda _payload: SimpleNamespace(
+            project_id=project_id, quantities=(),
+            fingerprint="unchanged-production-run",
+        ),
+    )
+    assert module._sealed_projection_proof(
+        tmp_path, project_id, [], True,
+        expected_seal_fingerprint="unchanged-production-run",
+    ) == (True, [])
+
+
+@pytest.mark.parametrize("structure", ("arrays", "objects"))
+def test_overdeep_produced_json_blocks_one_project_not_full_suite(
+    tmp_path: Path, structure: str
+) -> None:
+    from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+
+    if structure == "arrays":
+        payload = "[" * 1600 + "0" + "]" * 1600
+    else:
+        payload = '{"nested":' * 1600 + "0" + "}" * 1600
+
+    with pytest.raises(ValueError, match="JSON nesting exceeds safe parser depth"):
+        _parse_evidence_json(payload)
+
+    folder = tmp_path / "au_qld_lot16_power"
+    folder.mkdir()
+    (folder / "produced_items.json").write_text(payload, encoding="utf-8")
+    report = diagnostic_report(ROOT, tmp_path)
+    assert len(report["projects"]) == 4
+    lot16 = next(
+        row for row in report["projects"]
+        if row["project_id"] == "au_qld_lot16_power"
+    )
+    maryborough = next(
+        row for row in report["projects"]
+        if row["project_id"] == "au_qld_maryborough_service_station"
+    )
+    assert lot16["produced_file_present"] is True
+    assert lot16["produced_count"] is None
+    assert "produced_items_invalid_json_or_shape" in lot16["blockers"]
+    assert maryborough["produced_file_present"] is False
+    assert "production_items_missing" in maryborough["blockers"]
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
+
+
+def test_overdeep_sealed_json_is_local_integrity_failure(
+    tmp_path: Path,
+) -> None:
+    sealed_root = tmp_path / "sealed"
+    folder = sealed_root / "au_qld_lot16_power"
+    folder.mkdir(parents=True)
+    nested = "[" * 1600 + "0" + "]" * 1600
+    (folder / "sealed_run.json").write_text(
+        '{"project_id":"au_qld_lot16_power","quantities":' + nested + "}",
+        encoding="utf-8",
+    )
+    report = diagnostic_report(
+        ROOT, tmp_path / "produced", sealed_root=sealed_root
+    )
+    lot16 = next(
+        row for row in report["projects"]
+        if row["project_id"] == "au_qld_lot16_power"
+    )
+    assert lot16["sealed_run_verified"] is False
+    assert lot16["sealed_quantity_count"] is None
+    assert "sealed_run_integrity_invalid" in lot16["blockers"]
+    assert report["score_claim"] is False
+
+
+def test_modestly_nested_source_json_still_parses_without_value_changes() -> None:
+    from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+
+    depth = 24
+    payload = "[" * depth + '{"source_qty":13.270425}' + "]" * depth
+    actual = _parse_evidence_json(payload)
+    for _ in range(depth):
+        assert len(actual) == 1
+        actual = actual[0]
+    assert actual == {"source_qty": 13.270425}
+
+
+def test_quoted_and_escaped_brackets_do_not_count_as_json_structure() -> None:
+    import json
+    from scripts.report_full_plan_v2_readiness import _parse_evidence_json
+
+    # The guard must ignore source notes containing drawings, escaped quote
+    # text and literal braces instead of mistaking them for nested JSON.
+    human_note = ("[{" * 1000) + ' witness: "quoted" \\ geometry' + ("}]" * 1000)
+    encoded = json.dumps({"source_note": human_note, "value": 13.270425})
+    assert _parse_evidence_json(encoded) == {
+        "source_note": human_note, "value": 13.270425
+    }

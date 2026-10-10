@@ -1,0 +1,150 @@
+name: DIAG GPT2 RCP Material Occurrence First Gates
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt2-page9-rcp-material-occurrences.yml"
+      - "tools/diag_gpt2_rcp_material_occurrence_gates.py"
+      - "tests/test_gpt2_rcp_material_occurrence_gates.py"
+  workflow_dispatch:
+
+jobs:
+  material-source-scope-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Install authenticated OCR backend
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Frozen V2 integrity and RCP fail-closed regressions
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_rcp_material_occurrence_gates.py
+      - name: Audit producer RCP material occurrence source scopes
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-rcp-material-occurrences
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-rcp-material-occurrences/rcp_source_gates.json
+          import hashlib
+          import json
+          from pathlib import Path
+          import fitz
+
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import (
+              SourceMaterialSemanticProducer, SourceMaterialDefinitionSelector,
+              SourceMaterialOccurrenceSelector,
+          )
+          from pb_viewport_segmentation import segment_page_viewports
+
+          raw=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(raw).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          pdf=fitz.open(stream=raw,filetype="pdf")
+          assert pdf.page_count==31
+          source_views={}
+          producer_views={}
+          for number in (9,11):
+              segments=segment_page_viewports(pdf.load_page(number-1),page_number=number)
+              producer_views[str(number)]=segments
+              source_views[str(number)]=[{
+                  "view_id":v.view_id,
+                  "title":v.label,
+                  "type":v.view_type,
+                  "status":v.status,
+                  "boundary_source":v.boundary_source,
+                  "bbox_pdf_pts":v.bounding_box,
+              } for v in segments]
+          pdf.close()
+
+          import shutil
+          from pb_portable_raster_ocr_authority import TesseractOCRBackend
+          executable=shutil.which("tesseract")
+          assert executable, "Tesseract binary needed for CAD text raster corroboration"
+          ocr_backend=TesseractOCRBackend()
+          assert ocr_backend.is_available(), "Producer OCR backend not available"
+          results=[]
+          for page_ids in (("9","11"),):
+              visibility=SourceVisibilityProducer(
+                  producer_method="gpt2-rcp-material-occurrence-first-gates",
+                  producer_version="1",
+              )
+              published=visibility.ingest_native_pdf_bytes(
+                  document_id="gpt2-material-scope-"+("-".join(page_ids)),
+                  source_bytes=raw,
+                  source_locator="memory://maryborough-material-"+("-".join(page_ids))+".pdf",
+                  page_ids=page_ids,
+              )
+              assert published.revision.source_sha256==sha
+              authority=SourceMaterialSemanticProducer.from_source_visibility_producer(
+                  visibility
+              ).publish(published.revision.revision_id)
+              identity=dict(
+                  document_id=published.revision.document_id,
+                  revision_id=published.revision.revision_id,
+                  source_sha256=sha,
+                  snapshot_id=published.snapshot.snapshot_id,
+              )
+              definitions={}
+              for code in ("FPB","WFPB","IPF1","GRID","FT2","FT3"):
+                  resolved=authority.resolve_definition(
+                      SourceMaterialDefinitionSelector(**identity,code=code)
+                  )
+                  rec=resolved.record
+                  definitions[code]={
+                      "status":str(resolved.status),
+                      "reason_codes":list(resolved.reason_codes),
+                      "finish":getattr(rec,"semantic_finish",None),
+                      "record_id":getattr(rec,"record_id",None),
+                      "source_evidence_ids":list(getattr(rec,"source_definition_ids",()) or ()),
+                  }
+              from tools.diag_gpt2_rcp_material_occurrence_gates import (
+                  scoped_rcp_material_occurrence_gate,
+              )
+              occurrence_scopes=[]
+              for page_id in page_ids:
+                  for viewport in producer_views.get(page_id,()):
+                      exact=authority.resolve_occurrences(
+                          SourceMaterialOccurrenceSelector(
+                              **identity,page_id=page_id,viewport_id=viewport.view_id
+                          )
+                      )
+                      occurrence_scopes.append(scoped_rcp_material_occurrence_gate(
+                          viewport,exact
+                      ))
+              results.append({
+                  "decoded_source_pages":list(page_ids),
+                  "definitions":definitions,
+                  "producer_owned_occurrence_scopes":occurrence_scopes,
+                  "room_finish_quantities_published":0,
+              })
+
+          comparison={
+              "source_sha256":sha,"source_page_count":31,
+              "native_page_viewports":source_views,
+              "source_scope_definition_results":results,
+              "source_scope_uses_exact_schedule_pages_only":True,
+              "tesseract_binary":executable,
+              "ocr_backend_available":bool(ocr_backend.is_available()),
+              "source_authentication_requirement":"exact producer-owned source text/raster receipts only",
+              "not_proven":["room_finish_ownership",
+                            "physical_room_metric","benchmark_match"],
+          }
+          print("GPT2_RCP_MATERIAL_OCCURRENCE_GATES",
+                json.dumps(comparison,sort_keys=True,default=str))
+          # A prerequisite is never semantic authority by itself. The code
+          # must still publish through the source-owned definition selectors.
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-rcp-material-occurrence-gates
+          path: artifacts/gpt2-rcp-material-occurrences
+          retention-days: 7

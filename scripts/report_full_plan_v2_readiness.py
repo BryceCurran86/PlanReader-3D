@@ -51,13 +51,41 @@ def _finite_json_int(token: str) -> int:
 
 
 def _parse_evidence_json(payload: str) -> object:
-    return json.loads(
-        payload,
-        object_pairs_hook=_unique_json_object,
-        parse_constant=_reject_nonfinite_json_constant,
-        parse_float=_finite_json_float,
-        parse_int=_finite_json_int,
-    )
+    # Python JSON parser recursion handling varies across supported runtimes.
+    # Guard genuine JSON object/array nesting before parsing, ignoring bracket
+    # characters inside properly quoted/escaped strings. This is only a
+    # complexity safeguard, not source/evaluator schema inference.
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in payload:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > 512:
+                raise ValueError("JSON nesting exceeds safe parser depth")
+        elif character in "]}":
+            depth -= 1
+    # Preserve the native parser's validation of mismatched braces, malformed
+    # escapes and all strict producer-key and number checks.
+    try:
+        return json.loads(
+            payload,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_nonfinite_json_constant,
+            parse_float=_finite_json_float,
+            parse_int=_finite_json_int,
+        )
+    except RecursionError as exc:
+        raise ValueError("JSON nesting exceeds safe parser depth") from exc
 
 
 def _object(path: Path) -> dict:
@@ -101,7 +129,10 @@ def _source_sha_proof(manifest: dict, source_root: Path | None, project_id: str)
     return not reasons, reasons
 
 
-def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: set[str]) -> tuple[bool, int | None, list[str]]:
+def _sealed_run_proof(
+    sealed_root: Path | None, project_id: str, expected_shas: set[str],
+    *, seal_fingerprint_sink: list[str] | None = None,
+) -> tuple[bool, int | None, list[str]]:
     """Verify complete production seal fingerprints, lineage and source envelope."""
     if sealed_root is None:
         return False, None, ["sealed_run_not_supplied"]
@@ -125,6 +156,10 @@ def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: 
         reasons.append("sealed_run_lineage_conflict")
     if any(not row.object_identity_refs and not row.abstained for row in sealed.quantities):
         reasons.append("sealed_run_missing_physical_identity")
+    # Snapshot the cryptographically verified production run that this proof
+    # actually accepted; a later valid but DIFFERENT seal may not inherit it.
+    if not reasons and seal_fingerprint_sink is not None:
+        seal_fingerprint_sink.append(sealed.fingerprint)
     return not reasons, len(sealed.quantities), reasons
 
 
@@ -198,15 +233,33 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
 
 
 def _sealed_projection_proof(
-    sealed_root: Path | None, project_id: str, produced: list[dict], sealed_run_verified: bool
+    sealed_root: Path | None, project_id: str, produced: list[dict],
+    sealed_run_verified: bool, *,
+    expected_seal_fingerprint: str | None = None,
 ) -> tuple[bool, list[str]]:
     if not sealed_run_verified or sealed_root is None:
         return False, ["produced_sealed_parity_not_proven"]
     from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 
-    sealed = sealed_source_closed_run_from_dict(
-        _object(sealed_root / project_id / "sealed_run.json")
-    )
+    # A parallel production seal writer can replace/remove this file after
+    # _sealed_run_proof succeeded. The second independent read must fail closed
+    # for this project, not abort the four-project readiness diagnostic.
+    from pb_source_closed_run_export import SourceClosedRunExportError
+    try:
+        sealed = sealed_source_closed_run_from_dict(
+            _object(sealed_root / project_id / "sealed_run.json")
+        )
+    except (SourceClosedRunExportError, TypeError, ValueError, KeyError,
+            UnicodeError, OSError):
+        return False, ["sealed_run_changed_during_parity"]
+    if sealed.project_id != project_id:
+        return False, ["sealed_run_changed_during_parity"]
+    # Reverify the *same* signed run as the first seal-integrity stage. Hash
+    # equality of actual production seal payloads is stronger than project ID,
+    # source envelope or mere equality of projected quantity IDs.
+    if (expected_seal_fingerprint is not None
+            and sealed.fingerprint != expected_seal_fingerprint):
+        return False, ["sealed_run_changed_during_parity"]
     blockers = produced_sealed_parity_blockers(produced, sealed.quantities)
     return not blockers, blockers
 
@@ -264,11 +317,22 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         source_verified, source_reasons = _source_sha_proof(manifest, source_root, project_id)
         blockers.extend(source_reasons)
         expected_shas = {doc["sha256"] for doc in manifest.get("source_documents", ())}
-        seal_verified, sealed_count, seal_reasons = _sealed_run_proof(sealed_root, project_id, expected_shas)
+        seal_fingerprints: list[str] = []
+        seal_verified, sealed_count, seal_reasons = _sealed_run_proof(
+            sealed_root, project_id, expected_shas,
+            seal_fingerprint_sink=seal_fingerprints,
+        )
         blockers.extend(seal_reasons)
         parity_verified, parity_reasons = (
-            _sealed_projection_proof(sealed_root, project_id, produced, seal_verified)
-            if exists and not invalid_produced_shape
+            _sealed_projection_proof(
+                sealed_root, project_id, produced, seal_verified,
+                expected_seal_fingerprint=(
+                    seal_fingerprints[0] if seal_fingerprints else None
+                ),
+            )
+            if exists and not invalid_produced_shape and (
+                not seal_verified or len(seal_fingerprints) == 1
+            )
             else (False, ["produced_sealed_parity_not_proven"])
         )
         blockers.extend(parity_reasons)

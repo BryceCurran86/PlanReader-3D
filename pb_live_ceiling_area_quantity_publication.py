@@ -123,7 +123,10 @@ def _publish_one(
         figured_ids = tuple(
             sorted({_clean(value) for value in ceiling.figured_dimension_ids if _clean(value)})
         )
-        if not figured_ids:
+        # One observed dimension cannot define a documented two-axis area.
+        # This canonical adapter does not infer the missing orthogonal axis
+        # from PDF points, a nominal sheet scale, or benchmark quantities.
+        if len(figured_ids) < 2:
             return None
         resolved_scale_id = None
     elif measurement_authority == MeasurementAuthorityType.PDF_SCALED.value:
@@ -218,10 +221,10 @@ def publish_live_ceiling_area_quantities(
             canonical_ids.add(ceiling_id)
 
     source_by_id = _source_quantities(result)
-    out: list[QuantityEvidence] = []
-    seen_entity_ids: set[str] = set()
-    seen_quantity_ids: set[str] = set()
-
+    # Run the existing canonical/source measurement authorization FIRST.
+    # An unrelated, unmeasured/ABSTAIN ceiling with no approved source cannot
+    # revoke another ceiling's previously authenticated FIRM quantity.
+    approved: list[tuple[LiveCanonicalCeilingSurfaceObject, QuantityEvidence]] = []
     for ceiling in sorted(
         result.canonical_ceilings,
         key=lambda item: item.canonical_ceiling_id,
@@ -230,7 +233,27 @@ def publish_live_ceiling_area_quantities(
         if source is None:
             continue
         quantity = _publish_one(ceiling, source)
-        if quantity is None:
+        if quantity is not None:
+            approved.append((ceiling, quantity))
+
+    # Conversely, two independently publishable FULL-area ceiling claims
+    # cannot both reissue the SAME original room-area QuantityEvidence source.
+    # Quarantine both rather than first/last-writer-wins or double count.
+    approved_area_owners: dict[str, set[str]] = {}
+    for ceiling, _quantity in approved:
+        approved_area_owners.setdefault(
+            _clean(ceiling.room_area_quantity_id), set()
+        ).add(_clean(ceiling.canonical_ceiling_id))
+    contested_area_sources = {
+        source_id for source_id, owners in approved_area_owners.items()
+        if len(owners) > 1
+    }
+
+    out: list[QuantityEvidence] = []
+    seen_entity_ids: set[str] = set()
+    seen_quantity_ids: set[str] = set()
+    for ceiling, quantity in approved:
+        if _clean(ceiling.room_area_quantity_id) in contested_area_sources:
             continue
         entity_id = quantity.input_entity_ids[0]
         if entity_id in seen_entity_ids:

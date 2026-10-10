@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from typing import Any
 
 from pb_migration_contracts import (
@@ -170,6 +171,33 @@ def sealed_source_closed_run_from_dict(
             raise SourceClosedRunConflictError(
                 f"sealed quantity {index} must be a mapping"
             )
+        # A valid original seal emits genuine JSON booleans and numeric
+        # quantities. Last-minute string/int coercion during import can let
+        # an altered receipt retain the same normalized fingerprint (e.g.
+        # bool("false") is True, float("13.27") equals 13.27).
+        # Reject a noncanonical wire type before re-verifying the fingerprint.
+        for boolean_field in ("abstained", "lineage_ok"):
+            if type(raw.get(boolean_field)) is not bool:
+                raise SourceClosedRunConflictError(
+                    f"sealed quantity {index} has non-Boolean {boolean_field}"
+                )
+        for numeric_field in ("value", "confidence"):
+            numeric_value = raw.get(numeric_field)
+            if (numeric_field == "confidence" or numeric_value is not None) and (
+                type(numeric_value) not in (int, float)
+            ):
+                raise SourceClosedRunConflictError(
+                    f"sealed quantity {index} has nonnumeric {numeric_field}"
+                )
+            if numeric_value is not None:
+                try:
+                    finite = math.isfinite(numeric_value)
+                except OverflowError:
+                    finite = False
+                if not finite:
+                    raise SourceClosedRunConflictError(
+                        f"sealed quantity {index} has non-finite {numeric_field}"
+                    )
         try:
             row = SealedSourceClosedQuantity(
                 project_id=_clean(raw.get("project_id")),

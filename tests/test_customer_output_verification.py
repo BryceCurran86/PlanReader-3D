@@ -368,3 +368,75 @@ def test_live_caption_cannot_hide_suffix_forged_quantity_id() -> None:
     )
     with pytest.raises(CustomerOutputVerificationError, match="source_reference lineage is incomplete"):
         verify_sealed_customer_output(sealed, customer_rows)
+
+
+def test_boolean_customer_quantity_cannot_impersonate_one_sealed_unit() -> None:
+    q = quantity("qty-boolean", "floor-boolean", value=1.0)
+    source_trace = trace(q)
+    sealed = seal_source_closed_run(
+        (q,), project_id="project-7",
+        traces_by_quantity_id={q.quantity_id: source_trace},
+    )
+    rows = adapter.quantities_to_takeoff_output_rows(
+        (q,),
+        traces_by_quantity_id={q.quantity_id: source_trace},
+        authorities_by_quantity_id={q.quantity_id: authority()},
+    )
+    assert len(rows) == 1
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 1
+
+    false_measurement = dict(rows[0], quantity=True)
+    with pytest.raises(CustomerOutputVerificationError, match="Boolean"):
+        verify_sealed_customer_output(sealed, (false_measurement,))
+
+    # Real numeric representations, including persisted database numeric
+    # strings, are still source/lineage verified against the sealed value.
+    numeric_int = dict(rows[0], quantity=1)
+    numeric_string = dict(rows[0], quantity="1.0")
+    assert verify_sealed_customer_output(sealed, (numeric_int,)).valid_quantity_count == 1
+    assert verify_sealed_customer_output(sealed, (numeric_string,)).valid_quantity_count == 1
+
+
+@pytest.mark.parametrize(
+    "invalid_notes",
+    ('{"adapter":"commercial_takeoff",', '"manual text"', "corrupt notes"),
+)
+def test_direct_customer_provenance_cannot_hide_invalid_persisted_notes(
+    invalid_notes: str,
+) -> None:
+    sealed, rows = sealed_and_rows()
+    corrupted = dict(rows[0], notes=invalid_notes)
+    with pytest.raises(CustomerOutputVerificationError, match="projection provenance"):
+        verify_sealed_customer_output(sealed, (corrupted, rows[1]))
+
+
+def test_nested_duplicate_notes_identity_cannot_hide_behind_direct_copy() -> None:
+    import json
+
+    sealed, rows = sealed_and_rows()
+    corrupted = dict(rows[0])
+    original_notes = json.loads(corrupted["notes"])
+    assert original_notes["source_trace"]["source_sha256"] == SHA
+    encoded = json.dumps(original_notes, sort_keys=True)
+    assert '"source_trace": {' in encoded
+    corrupted["notes"] = encoded.replace(
+        '"source_trace": {',
+        '"source_trace": {"source_sha256": "' + ("b" * 64) + '", ',
+        1,
+    )
+    # Last-write-wins would have accepted the later genuine SHA field while
+    # silently discarding a first, conflicting source identity.
+    with pytest.raises(CustomerOutputVerificationError, match="duplicate provenance key"):
+        verify_sealed_customer_output(sealed, (corrupted, rows[1]))
+
+
+def test_notes_provenance_must_remain_a_structured_commercial_receipt() -> None:
+    import json
+
+    sealed, rows = sealed_and_rows()
+    structured = dict(rows[0], notes=json.dumps({"other": "manual"}))
+    with pytest.raises(
+        CustomerOutputVerificationError,
+        match="conflicting direct and persisted projection provenance",
+    ):
+        verify_sealed_customer_output(sealed, (structured, rows[1]))

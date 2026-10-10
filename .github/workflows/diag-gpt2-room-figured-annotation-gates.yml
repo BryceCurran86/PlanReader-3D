@@ -1,0 +1,37 @@
+name: DIAG GPT2 Native Room Figured Annotation Gates
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/diag_gpt2_support_room_dimension_annotations.py
+      - tests/test_gpt2_support_room_dimension_annotations.py
+      - .github/workflows/diag-gpt2-room-figured-annotation-gates.yml
+  workflow_dispatch:
+
+jobs:
+  real-native-dimension-annotation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 and strict native annotation regressions
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_support_room_dimension_annotations.py
+      - name: Source-native witness annotation first gates only
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-support-annotations
+          PYTHONPATH=. python -u tools/diag_gpt2_support_room_dimension_annotations.py | tee artifacts/gpt2-support-annotations/source_report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-support-room-dimension-annotation-gates
+          path: artifacts/gpt2-support-annotations
+          retention-days: 7

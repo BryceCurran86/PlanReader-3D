@@ -17,6 +17,8 @@ jobs:
         python-version: ["3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -47,6 +49,8 @@ jobs:
             sha: "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

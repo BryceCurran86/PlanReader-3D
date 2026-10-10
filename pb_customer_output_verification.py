@@ -59,23 +59,42 @@ def _string_tuple(values: Any) -> tuple[str, ...]:
         ) from exc
 
 
+def _strict_customer_notes(notes: str) -> Mapping[str, Any]:
+    """Parse automated notes without last-write-wins or corrupted lineage."""
+    def unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise CustomerOutputVerificationError(
+                    f"customer row notes contain duplicate provenance key: {key}"
+                )
+            result[key] = value
+        return result
+
+    try:
+        payload = json.loads(notes, object_pairs_hook=unique_keys)
+    except (json.JSONDecodeError, RecursionError, ValueError) as exc:
+        raise CustomerOutputVerificationError(
+            "customer row notes contain invalid projection provenance JSON"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise CustomerOutputVerificationError(
+            "customer row notes projection provenance is not an object"
+        )
+    return payload
+
+
 def _projection_provenance(row: Mapping[str, Any]) -> Mapping[str, Any]:
     direct = row.get("commercial_projection_provenance")
     if isinstance(direct, Mapping):
-        # The commercial adapter persists the same source-owned projection
-        # in both the structured field and serialized notes. A stale or
-        # overwritten notes receipt must not be hidden behind a valid direct
-        # copy when both identify an automated projection.
+        # Automated notes are a second persisted source receipt, not an
+        # optional escape hatch for a valid-looking structured copy.
         notes = row.get("notes")
         if isinstance(notes, str) and notes.strip():
-            try:
-                notes_payload = json.loads(notes)
-            except json.JSONDecodeError:
-                notes_payload = None
+            persisted = _strict_customer_notes(notes)
             if (
-                isinstance(notes_payload, Mapping)
-                and _clean(notes_payload.get("adapter")) == "commercial_takeoff"
-                and notes_payload != direct
+                _clean(persisted.get("adapter")) != "commercial_takeoff"
+                or persisted != direct
             ):
                 raise CustomerOutputVerificationError(
                     "customer row has conflicting direct and persisted projection provenance"
@@ -84,14 +103,7 @@ def _projection_provenance(row: Mapping[str, Any]) -> Mapping[str, Any]:
 
     notes = row.get("notes")
     if isinstance(notes, str) and notes.strip():
-        try:
-            parsed = json.loads(notes)
-        except json.JSONDecodeError as exc:
-            raise CustomerOutputVerificationError(
-                "customer row notes contain invalid projection provenance JSON"
-            ) from exc
-        if isinstance(parsed, Mapping):
-            return parsed
+        return _strict_customer_notes(notes)
 
     raise CustomerOutputVerificationError(
         "customer row is missing commercial projection provenance"
@@ -289,6 +301,13 @@ def _verify_row_lineage(
     if sealed.value is None:
         raise CustomerOutputVerificationError(
             f"non-abstained sealed quantity {quantity_id!r} has no value"
+        )
+    # bool is a subclass of int in Python; float(True) == 1.0 and
+    # float(False) == 0.0. A Boolean customer field is not a measured
+    # quantity, even if it numerically equals the sealed value.
+    if type(row.get("quantity")) is bool:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} has Boolean instead of measured quantity"
         )
     try:
         row_value = float(row.get("quantity"))
