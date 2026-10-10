@@ -472,7 +472,7 @@ def _canonical_composite_supersedence(
     for composite in composites:
         ids = tuple(str(value) for value in composite.constituent_face_ids)
         if (
-            not ids
+            len(ids) < 2
             or len(ids) != len(set(ids))
             or any(
                 face_id not in known
