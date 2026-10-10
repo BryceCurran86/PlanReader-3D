@@ -1,0 +1,148 @@
+name: TEST GPT2 Page7 Physical Room Faces After Source Frame
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_viewport_segmentation.py"
+      - ".github/workflows/test-gpt2-page7-physical-faces-after-frame.yml"
+  workflow_dispatch:
+
+jobs:
+  source-face-physical-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Prove source-owned floor plan wall and room faces
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-page7-physical-faces
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-page7-physical-faces/source_ledger.json
+          import hashlib
+          import json
+          from pathlib import Path
+
+          import fitz
+
+          from pb_drawing_evidence_binding import DrawingViewType
+          from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+          from pb_source_room_face_authority import (
+              SourceRoomFaceSelector,
+              build_source_room_face_authority,
+          )
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import (
+              segment_page_viewports,
+              validate_non_overlapping_viewports,
+          )
+
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha=hashlib.sha256(payload).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          document=fitz.open(stream=payload,filetype="pdf")
+          assert document.page_count==31
+          page=document.load_page(6)
+          viewports=segment_page_viewports(page,page_number=7)
+          assert validate_non_overlapping_viewports(viewports)
+          floor=[v for v in viewports if v.view_type==DrawingViewType.FLOOR_PLAN.value]
+          assert len(floor)==1 and floor[0].status=="resolved" and floor[0].bounding_box
+          document.close()
+
+          producer=SourceVisibilityProducer(
+              producer_method="gpt2-page7-source-face-after-frame",
+              producer_version="1",
+          )
+          published=producer.ingest_native_pdf_bytes(
+              document_id="gpt2-page7-face-after-frame-source",
+              source_bytes=payload,
+              source_locator="memory://gpt2-page7-face-after-frame.pdf",
+              page_ids=("7",),
+          )
+          assert published.revision.source_sha256==sha
+          producer.augment_with_raster_opening_primitives(
+              published.revision.revision_id,page_ids=("7",)
+          )
+          wall_producer=PhysicalWallCandidateProducer.from_authenticated_viewports(
+              producer,page_ids=("7",)
+          )
+          wall_authority=wall_producer.authority()
+          live=producer.published_snapshot_for_revision(published.revision.revision_id)
+          assert live is not None and live.revision.source_sha256==sha
+          selectors=wall_authority.selectors_for_authenticated_viewports(
+              document_id=live.revision.document_id,
+              revision_id=live.revision.revision_id,
+              source_sha256=live.revision.source_sha256,
+              snapshot_id=live.snapshot.snapshot_id,
+              page_id="7",
+              view_type=DrawingViewType.FLOOR_PLAN.value,
+          )
+          scopes=[]
+          for selector in selectors:
+              walls=wall_authority.resolve_scope(selector)
+              rooms=build_source_room_face_authority(wall_authority)
+              face_scope=rooms.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              scopes.append({
+                  "decision_scope_id":selector.decision_scope_id,
+                  "wall_scope_status":str(walls.status),
+                  "wall_scope_complete":bool(walls.scope_complete),
+                  "wall_candidate_count":len(walls.records),
+                  "wall_reason_codes":list(walls.reason_codes),
+                  "boundary_evaluation_status":str(getattr(
+                      getattr(walls,"boundary_evaluation",None),"status",None)),
+                  "boundary_tainted_wall_ids":list(getattr(
+                      getattr(walls,"boundary_evaluation",None),
+                      "boundary_tainted_wall_candidate_ids",()) or ())[:30],
+                  "room_status":str(face_scope.status),
+                  "room_scope_complete":bool(face_scope.scope_complete),
+                  "room_universe_complete":bool(face_scope.face_universe_complete),
+                  "room_reason_codes":list(face_scope.reason_codes),
+                  "physical_source_face_count":len(face_scope.records),
+                  "physical_source_face_examples":[{
+                      "source_face_record_id":r.record_id,
+                      "face_id":r.face_id,
+                      "native_page":r.page_id,
+                      "decision_scope":r.decision_scope_id,
+                      "source_wall_ids":list(r.bounding_wall_ids),
+                      "area_pdf_points_squared_NOT_metric":r.area_page_pts2,
+                  } for r in face_scope.records[:30]],
+              })
+          result={
+              "source_sha256":sha,
+              "source_page":7,
+              "authenticated_floor_viewport":floor[0].view_id,
+              "native_floor_viewport_bbox":floor[0].bounding_box,
+              "viewport_scope_selector_count":len(selectors),
+              "scopes":scopes,
+              "metric_room_area_claims":0,
+              "finish_occurrence_claims":0,
+              "benchmark_score_claims":0,
+          }
+          print("GPT2_PAGE7_PHYSICAL_ROOM_FACES",json.dumps(result,sort_keys=True,default=str))
+          assert selectors, "floor viewport did not reach producer owned wall scopes"
+          assert any(x["physical_source_face_count"]>0 for x in scopes), (
+              "Source-owned room faces not recovered despite resolved floor-plan viewport"
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-page7-real-physical-room-face-proof
+          path: artifacts/gpt2-page7-physical-faces
+          retention-days: 7
