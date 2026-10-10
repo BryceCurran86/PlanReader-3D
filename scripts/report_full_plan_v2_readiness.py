@@ -38,12 +38,25 @@ def _finite_json_float(token: str) -> float:
     return value
 
 
+def _finite_json_int(token: str) -> int:
+    """Keep oversized JSON integers from overflowing numeric parity checks."""
+    value = int(token)
+    try:
+        finite_as_float = math.isfinite(value)
+    except OverflowError:
+        finite_as_float = False
+    if not finite_as_float:
+        raise ValueError("out-of-range JSON integer magnitude")
+    return value
+
+
 def _parse_evidence_json(payload: str) -> object:
     return json.loads(
         payload,
         object_pairs_hook=_unique_json_object,
         parse_constant=_reject_nonfinite_json_constant,
         parse_float=_finite_json_float,
+        parse_int=_finite_json_int,
     )
 
 
@@ -115,6 +128,16 @@ def _sealed_run_proof(sealed_root: Path | None, project_id: str, expected_shas: 
     return not reasons, len(sealed.quantities), reasons
 
 
+def _safe_finite_quantity_number(value: object) -> bool:
+    """Avoid int-to-float overflow in parity for already-decoded quantities."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tuple) -> list[str]:
     """Prove quantity projection from authenticated production IDs, never V2 truth.
 
@@ -153,7 +176,7 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
                 blockers.append(f"abstained_projection_has_value:{quantity_id}")
         elif (
             type(value) not in (int, float)
-            or not math.isfinite(value)
+            or not _safe_finite_quantity_number(value)
             or row.value is None
             or value != row.value
         ):

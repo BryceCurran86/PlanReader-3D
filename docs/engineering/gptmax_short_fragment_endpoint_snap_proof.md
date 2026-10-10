@@ -104,3 +104,30 @@ are retained. The focused suite passes 249 tests, including both new trace
 checks and the current page-cache, source-membership and strict retention tests.
 Provider/gold isolation, frozen V2 integrity, undefined-name checks and patch
 whitespace checks pass. Python 3.13/3.14 source CI remains an independent gate.
+
+## Current-main integration after source validation
+
+Head `32f00b48d9113fc102c3845860c22e4fd417ea57` passed all 16 checks, including
+full Python 3.13/3.14 CI (9,185 tests passed per version), both fastpaths, both
+focused trace jobs, original Lot16/Maryborough parity, and the Maryborough
+core/grid checks. Both downloaded original-source CI ZIPs have verified
+digests; their complete source reports and endpoint audits equal the local
+Python 3.12.14 results. The unchanged strict receipt-retention checker passes
+on both source pairs. No source or quantity authority was promoted.
+
+During those source jobs, #2176 merged into main, followed by the standalone
+source-rekey and W4 coverage diagnostics. The resulting add/add merge conflict
+is resolved against main `69ca3062ea120be81479186a5ead638f1415af3c`, preserving
+all merged producer-disappearance validations and independent diagnostics.
+The integration changes no source-runtime file relative to the green head:
+all 421 root Python files, both actual source diagnostic entry points and both
+dependency manifests (425 files) have identical Git blob IDs. Source-runtime
+blob-set SHA-256: `943d1ef704bced4d450d60b317e63555b75df26e95cf0f8a6d4937805608e268`.
+The original source PDFs and frozen V2 files remain unchanged. The verified
+source artifacts therefore describe the exact source implementation retained
+by this integration, rather than a substituted source or normalized receipt.
+
+304 focused integration tests pass, including current main's source-rekey and
+W4 coverage checks. CI on the new integration commit must also pass before
+merge. The separate terminal-source experiment grants no graph, identity,
+host/frame migration or commercial authority, and is excluded from this PR.
