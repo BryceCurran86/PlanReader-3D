@@ -10,6 +10,8 @@ on:
       - tests/test_raster_source_wall_frame_projection.py
       - tests/test_raster_visibility_receipt_registration.py
       - tools/diag_opening_wall_face_preservation.py
+      - tools/gptmax_compare_source_face_retention.py
+      - tests/test_gptmax_compare_source_face_retention.py
       - .github/workflows/test-gptmax-raster-connected-frame-source.yml
 concurrency:
   group: gptmax-raster-connected-frame-${{ github.event.pull_request.number }}
@@ -63,6 +65,13 @@ jobs:
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
           --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           --page-id 3 --output lot16-connected-frame-source-handoff.json
+      - name: Original Lot16 verified production prerequisite
+        run: |
+          git worktree add /tmp/gptmax-original-lot16-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          REPORTER="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
+          (cd /tmp/gptmax-original-lot16-prerequisite && PYTHONPATH=. python -u "$REPORTER" \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 --output "$GITHUB_WORKSPACE/lot16-connected-frame-prerequisite.json")
       - name: Verify exact source ownership and safety cap
         run: |
           python - <<'PY'
@@ -79,11 +88,20 @@ jobs:
           assert len(ids) == len(set(ids))
           assert 'quantities' not in report
           PY
+      - name: Reject lost or silently changed exact physical host/frame identities
+        run: |
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline lot16-connected-frame-prerequisite.json \
+            --candidate lot16-connected-frame-source-handoff.json \
+            --output lot16-connected-frame-identity-retention.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: lot16-connected-frame-source-handoff
-          path: lot16-connected-frame-source-handoff.json
+          path: |
+            lot16-connected-frame-source-handoff.json
+            lot16-connected-frame-prerequisite.json
+            lot16-connected-frame-identity-retention.json
           retention-days: 14
   maryborough-source-baseline:
     runs-on: ubuntu-latest
