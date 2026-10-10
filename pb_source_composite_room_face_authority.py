@@ -399,7 +399,12 @@ def _candidate_record(
         or not merged.is_valid
         or merged.area <= 0.0
         or len(tuple(merged.interiors)) != 0
+        or abs(sum(poly.area for poly in polygons) - merged.area)
+        > max(1e-6, merged.length * 1e-6)
     ):
+        # Source faces must partition a physical room, never overlap in area.
+        # This is a fail-closed geometric conservation gate; it does not
+        # authenticate an internal source-grid separator on its own.
         return None
 
     polygon = tuple(
