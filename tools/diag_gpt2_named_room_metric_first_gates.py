@@ -43,11 +43,19 @@ def summarize_named_room_metric_first_gates(claim: Any) -> dict[str, Any]:
             room_id = str(source_room_id or "").strip()
             if room_id not in owners:
                 continue
-            detail = (
-                {"first_gates": [str(code) for code in (reason or ())]}
-                if key == "physical_scale"
-                else {"first_gate": str(reason)}
-            )
+            if key == "physical_scale":
+                # A scalar string is not a series of independent producer
+                # reasons. Do not silently output its individual characters.
+                codes = reason if isinstance(reason, (tuple, list)) else ()
+                detail = {
+                    "first_gates": [str(code) for code in codes],
+                    "source_reason_receipt_valid": bool(codes) and all(
+                        isinstance(code, str) and bool(code.strip())
+                        for code in codes
+                    ),
+                }
+            else:
+                detail = {"first_gate": str(reason)}
             entries.append({
                 "physical_room_id": room_id,
                 "label": owners[room_id],
