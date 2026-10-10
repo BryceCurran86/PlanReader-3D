@@ -43,7 +43,8 @@ def test_area_pdf_points_never_proves_metric_floor() -> None:
 
 def test_floor_label_proof_is_required_before_metric_measurement() -> None:
     assert _floor_quantity_first_failure(
-        _floor(), _room(room_label_binding_record_id=None), {"qty-room-1"}
+        _floor(metric_area_m2=None, metric_area_quantity_id=None, metric_area_authority=None),
+        _room(room_label_binding_record_id=None), {"qty-room-1"}
     ) == "authenticated_room_label_ownership_unavailable"
 
 
@@ -63,3 +64,15 @@ def test_source_face_evidence_precedes_area_measurement() -> None:
     assert _floor_quantity_first_failure(
         _floor(evidence_ids=()), _room(), {"qty-room-1"}
     ) == "source_room_face_evidence_unavailable"
+
+
+def test_authenticated_metric_floor_need_not_have_room_text_label() -> None:
+    assert _floor_quantity_first_failure(
+        _floor(metric_area_authority="source_authenticated_scale"),
+        _room(
+            room_label=None,
+            room_label_binding_record_id=None,
+            room_label_evidence_ids=(),
+        ),
+        {"qty-room-1"},
+    ) == "floor_area_quantity_prerequisites_resolved"
