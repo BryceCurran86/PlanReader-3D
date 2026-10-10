@@ -368,3 +368,30 @@ def test_live_caption_cannot_hide_suffix_forged_quantity_id() -> None:
     )
     with pytest.raises(CustomerOutputVerificationError, match="source_reference lineage is incomplete"):
         verify_sealed_customer_output(sealed, customer_rows)
+
+
+def test_boolean_customer_quantity_cannot_impersonate_one_sealed_unit() -> None:
+    q = quantity("qty-boolean", "floor-boolean", value=1.0)
+    source_trace = trace(q)
+    sealed = seal_source_closed_run(
+        (q,), project_id="project-7",
+        traces_by_quantity_id={q.quantity_id: source_trace},
+    )
+    rows = adapter.quantities_to_takeoff_output_rows(
+        (q,),
+        traces_by_quantity_id={q.quantity_id: source_trace},
+        authorities_by_quantity_id={q.quantity_id: authority()},
+    )
+    assert len(rows) == 1
+    assert verify_sealed_customer_output(sealed, rows).valid_quantity_count == 1
+
+    false_measurement = dict(rows[0], quantity=True)
+    with pytest.raises(CustomerOutputVerificationError, match="Boolean"):
+        verify_sealed_customer_output(sealed, (false_measurement,))
+
+    # Real numeric representations, including persisted database numeric
+    # strings, are still source/lineage verified against the sealed value.
+    numeric_int = dict(rows[0], quantity=1)
+    numeric_string = dict(rows[0], quantity="1.0")
+    assert verify_sealed_customer_output(sealed, (numeric_int,)).valid_quantity_count == 1
+    assert verify_sealed_customer_output(sealed, (numeric_string,)).valid_quantity_count == 1
