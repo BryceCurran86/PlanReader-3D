@@ -24,6 +24,7 @@ def _payload(
     duplicate_dimension_box: bool = False,
     yearlike_vertical_dimension: bool = False,
     second_label: bool = False,
+    second_label_inside_box: bool = False,
 ) -> bytes:
     doc = fitz.open()
     try:
@@ -55,7 +56,10 @@ def _payload(
 
         page.insert_text((150.0, 150.0), "TEST ROOM", fontsize=10.0)
         if second_label:
-            page.insert_text((24.0, 265.0), "SPARE ROOM", fontsize=10.0)
+            page.insert_text(
+                (150.0, 132.0) if second_label_inside_box else (24.0, 265.0),
+                "SPARE ROOM", fontsize=10.0,
+            )
         return doc.tobytes()
     finally:
         doc.close()
@@ -67,6 +71,7 @@ def _source_and_rooms(
     duplicate_dimension_box: bool = False,
     yearlike_vertical_dimension: bool = False,
     second_label: bool = False,
+    second_label_inside_box: bool = False,
 ):
     source = SourceVisibilityProducer(
         producer_method="same-view-room-area-test",
@@ -78,6 +83,7 @@ def _source_and_rooms(
             duplicate_dimension_box=duplicate_dimension_box,
             yearlike_vertical_dimension=yearlike_vertical_dimension,
             second_label=second_label,
+            second_label_inside_box=second_label_inside_box,
         ),
         source_locator="memory://same-view-room-area.pdf",
         page_ids=("1",),
@@ -394,3 +400,34 @@ def test_dimension_bundle_cache_is_scoped_to_source_producer(monkeypatch) -> Non
     assert len(result_a.records) == len(result_b.records) == 1
     assert result_a.records[0].area_evidence.normalized_value == 8.64
     assert result_b.records[0].area_evidence.normalized_value == 8.64
+
+
+def test_one_native_dimension_pair_cannot_supply_two_separate_room_areas() -> None:
+    # Both room labels are independently native and lie inside the same
+    # witnessed figured-dimension rectangle. Source dimensions cannot be
+    # claimed twice just because the labels are different.
+    source, rooms = _source_and_rooms(
+        second_label=True, second_label_inside_box=True,
+    )
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert result.records == ()
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert result.unresolved_first_failure_by_physical_room_id == {
+        "physical-room-1": "same_view_dimension_source_owner_conflict",
+        "physical-room-3": "same_view_dimension_source_owner_conflict",
+    }
+
+
+def test_separate_non_measured_label_does_not_steal_genuine_figured_area() -> None:
+    source, rooms = _source_and_rooms(second_label=True)
+    result = SameViewRoomAreaProducer.from_source(
+        source=source, rooms=rooms,
+    ).publish()
+    assert len(result.records) == 1
+    assert result.records[0].area_evidence.normalized_value == 8.64
+    assert result.records[0].physical_room_id == "physical-room-1"
+    assert result.unresolved_first_failure_by_physical_room_id[
+        "physical-room-3"
+    ] != "same_view_dimension_source_owner_conflict"
