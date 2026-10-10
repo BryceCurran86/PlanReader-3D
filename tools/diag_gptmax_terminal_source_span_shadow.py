@@ -98,6 +98,8 @@ def terminal_source_span_shadow_report(source_bytes: bytes, *, page_ids: tuple[s
     coverage = source_report["source_decode_coverage"]
     document_id = coverage.get("document_id")
     if (not isinstance(document_id, str) or not document_id
+            or any(not isinstance(source_report.get(key), str) or not source_report[key]
+                   for key in ("revision_id", "snapshot_id"))
             or coverage.get("revision_id") != source_report["revision_id"]):
         raise RuntimeError("original decoded source document mismatch")
     scopes = source_report["source_owned_wall_scope_results"]

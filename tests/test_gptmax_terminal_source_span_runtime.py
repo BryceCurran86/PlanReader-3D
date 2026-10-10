@@ -93,6 +93,11 @@ def install_source_call(monkeypatch, corruption=None):
             report["selected_geometry_page_ids"] = ("2",)
         elif corruption == "coverage_revision":
             report["source_decode_coverage"]["revision_id"] = "foreign"
+        elif corruption in {"unknown_revision", "empty_revision"}:
+            value = None if corruption == "unknown_revision" else ""
+            report["revision_id"] = scope["revision_id"] = report["source_decode_coverage"]["revision_id"] = value
+        elif corruption in {"unknown_snapshot", "empty_snapshot"}:
+            report["snapshot_id"] = scope["snapshot_id"] = None if corruption == "unknown_snapshot" else ""
         elif corruption in {"document_id", "source_sha256", "revision_id", "snapshot_id", "page_id"}:
             scope[corruption] = "foreign"
         elif corruption == "missing_scope":
@@ -139,6 +144,7 @@ def test_actual_producer_call_and_scope_linkage_never_replace_graph_identity_or_
 @pytest.mark.parametrize("corruption", [
     "duplicate_graph", "unobserved_graph", "missing_identity_call", "duplicate_identity_call",
     "report_source", "cap", "selected_pages", "document_id", "coverage_revision", "source_sha256", "revision_id", "snapshot_id",
+    "unknown_revision", "empty_revision", "unknown_snapshot", "empty_snapshot",
     "page_id", "missing_scope", "duplicate_scope", "duplicate_record", "foreign_record",
     "changed_identity", "changed_source_geometry",
 ])

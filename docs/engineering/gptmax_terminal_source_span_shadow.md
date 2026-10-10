@@ -96,10 +96,11 @@ required in the real PDF run.
 
 ## Runtime association validation
 
-20 additional runtime tests pass (66 tests with the pure preview suite).
+24 additional runtime tests pass (70 tests with the pure preview suite).
 Missing graph calls, reused graph objects, duplicate identity calls, changed
 source geometry, foreign candidate records, documents, pages, revisions and
-snapshots fail closed. Original graph/identity objects and environment state
+snapshots, including internally consistent unknown/empty revisions or
+snapshots, fail closed. Original graph/identity objects and environment state
 are retained on both successful and failing diagnostic calls.
 
 The actual Lot16 run observes one producer assembly call with all 2,094
