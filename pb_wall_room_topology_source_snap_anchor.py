@@ -84,6 +84,8 @@ def reanchor_exact_source_through_junctions(graph, *, tolerance_pt):
         if len(incident) < 3:
             continue
         npoint = (float(node["x"]), float(node["y"]))
+        if not all(math.isfinite(v) for v in npoint):
+            continue
         by_source = defaultdict(list)
         raw_endpoints = []
         valid = True
