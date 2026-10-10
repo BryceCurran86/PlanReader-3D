@@ -664,3 +664,49 @@ def test_quoted_and_escaped_brackets_do_not_count_as_json_structure() -> None:
     assert _parse_evidence_json(encoded) == {
         "source_note": human_note, "value": 13.270425
     }
+
+
+def test_all_four_frozen_reconciliation_buckets_are_unknown_until_evaluated(
+    tmp_path: Path,
+) -> None:
+    # The user-facing count schema must be complete but never invent zero
+    # matches/misses or unsupported extras before source-complete evaluation.
+    lot16 = tmp_path / "au_qld_lot16_power"
+    lot16.mkdir()
+    (lot16 / "produced_items.json").write_text(
+        json.dumps([{
+            "quantity_id": "source-owned-opening-q",
+            "trade_category": "opening",
+            "value": 1.8,
+            "unit": "m2",
+            "object_refs": ["source-owned-opening"],
+            "lineage_ok": True,
+            "abstained": False,
+        }]), encoding="utf-8",
+    )
+    report = diagnostic_report(ROOT, tmp_path)
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
+    assert len(report["projects"]) == 4
+    expected = (
+        "matched_within_tolerance",
+        "matched_outside_tolerance",
+        "missed",
+        "partial",
+        "unresolved",
+        "unsupported_extra",
+    )
+    for project in report["projects"]:
+        assert project["reconciliation_evaluation_status"] == "NOT_EVALUATED"
+        assert project["reconciliation_complete"] is False
+        assert project["denominator"] > 0
+        assert all(project[key] is None for key in expected)
+        assert project["coverage_accuracy"] is None
+        assert project["precision_adjusted_accuracy"] is None
+    produced = next(
+        item for item in report["projects"]
+        if item["project_id"] == "au_qld_lot16_power"
+    )
+    assert produced["produced_count"] == 1
+    assert produced["matched_within_tolerance"] is None
+    assert produced["missed"] is None
