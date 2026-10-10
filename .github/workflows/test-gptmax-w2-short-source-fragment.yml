@@ -61,6 +61,24 @@ jobs:
             --pdf "$SOURCE_PDF" $SOURCE_PAGES --output source-default.json
           PYTHONPATH=. python -u tools/diag_gptmax_w2_short_fragment_retention.py \
             --pdf "$SOURCE_PDF" $SOURCE_PAGES --output source-endpoint-trace.json
+      - name: Exact-base original source authority prerequisite
+        env:
+          SOURCE_PDF: "${{ matrix.pdf }}"
+          SOURCE_PAGES: "${{ matrix.pages }}"
+        run: |
+          git worktree add /tmp/gptmax-w2-original-source-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/gptmax-w2-original-source-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf "$SOURCE_PDF" $SOURCE_PAGES \
+              --output "$GITHUB_WORKSPACE/source-original-pr-base.json"
+          )
+      - name: Reject changed original host and frame identities against exact base
+        run: |
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline source-original-pr-base.json \
+            --candidate source-default.json \
+            --output original-source-identity-retention.json
       - name: Endpoint observability cannot change original host or frame authority
         env:
           EXPECTED_SOURCE_SHA: "${{ matrix.sha }}"
