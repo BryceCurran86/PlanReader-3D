@@ -62,6 +62,24 @@ def _string_tuple(values: Any) -> tuple[str, ...]:
 def _projection_provenance(row: Mapping[str, Any]) -> Mapping[str, Any]:
     direct = row.get("commercial_projection_provenance")
     if isinstance(direct, Mapping):
+        # The commercial adapter persists the same source-owned projection
+        # in both the structured field and serialized notes. A stale or
+        # overwritten notes receipt must not be hidden behind a valid direct
+        # copy when both identify an automated projection.
+        notes = row.get("notes")
+        if isinstance(notes, str) and notes.strip():
+            try:
+                notes_payload = json.loads(notes)
+            except json.JSONDecodeError:
+                notes_payload = None
+            if (
+                isinstance(notes_payload, Mapping)
+                and _clean(notes_payload.get("adapter")) == "commercial_takeoff"
+                and notes_payload != direct
+            ):
+                raise CustomerOutputVerificationError(
+                    "customer row has conflicting direct and persisted projection provenance"
+                )
         return direct
 
     notes = row.get("notes")

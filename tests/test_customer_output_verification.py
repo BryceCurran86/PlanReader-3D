@@ -271,3 +271,49 @@ def test_orphaned_auto_notes_cannot_hide_even_if_source_reference_is_erased() ->
     orphan["notes"] = json.dumps(notes)
     with pytest.raises(CustomerOutputVerificationError, match="missing quantity identity"):
         verify_sealed_customer_output(sealed, [*rows, orphan])
+
+
+def test_conflicting_persisted_commercial_source_sha_cannot_hide_behind_direct_copy() -> None:
+    import json
+
+    sealed, rows = sealed_and_rows()
+    corrupted = dict(rows[0])
+    notes = json.loads(corrupted["notes"])
+    assert notes["adapter"] == "commercial_takeoff"
+    notes["source_trace"]["source_sha256"] = "b" * 64
+    corrupted["notes"] = json.dumps(notes, sort_keys=True)
+
+    with pytest.raises(
+        CustomerOutputVerificationError,
+        match="conflicting direct and persisted projection provenance",
+    ):
+        verify_sealed_customer_output(sealed, [corrupted, rows[1]])
+
+
+def test_conflicting_persisted_commercial_quantity_id_fails_closed() -> None:
+    import json
+
+    sealed, rows = sealed_and_rows()
+    corrupted = dict(rows[0])
+    notes = json.loads(corrupted["notes"])
+    notes["quantity"]["quantity_id"] = "qty-2"
+    corrupted["notes"] = json.dumps(notes, sort_keys=True)
+
+    with pytest.raises(
+        CustomerOutputVerificationError,
+        match="conflicting direct and persisted projection provenance",
+    ):
+        verify_sealed_customer_output(sealed, [corrupted, rows[1]])
+
+
+def test_identical_independently_serialized_commercial_provenance_still_passes() -> None:
+    import json
+
+    sealed, rows = sealed_and_rows()
+    reserialized = [dict(row) for row in rows]
+    for row in reserialized:
+        row["notes"] = json.dumps(
+            json.loads(row["notes"]), ensure_ascii=False, sort_keys=False,
+        )
+    verified = verify_sealed_customer_output(sealed, reserialized)
+    assert verified.verified_quantity_ids == ("qty-1", "qty-2")
