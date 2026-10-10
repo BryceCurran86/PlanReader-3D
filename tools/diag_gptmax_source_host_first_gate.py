@@ -85,6 +85,22 @@ def source_first_gate_census(report: dict, *, expected_source_sha: str | None = 
         raise ValueError("semantic inventory contains duplicate representative source IDs")
     if len(semantic_opening_ids) != len(bindings):
         raise ValueError("semantic inventory and original opening receipts disagree")
+    # Matching cardinality cannot prove that the same physical source members
+    # reached the opening host gate: require exact producer observation IDs.
+    observed_representatives = tuple(
+        b.get("representative_observation_id") for b in bindings
+    )
+    if (any(not isinstance(x, str) or not x for x in observed_representatives)
+            or set(observed_representatives) != set(semantic_opening_ids)):
+        raise ValueError("semantic source representative IDs disagree with host bindings")
+    semantic_physical_ids = semantic_record.get("physical_opening_record_ids")
+    if (not isinstance(semantic_physical_ids, (tuple, list))
+            or len(semantic_physical_ids) != len(bindings)
+            or len(set(semantic_physical_ids)) != len(semantic_physical_ids)
+            or set(semantic_physical_ids) != {
+                b.get("opening_identity_id") for b in bindings
+            }):
+        raise ValueError("semantic source physical-opening identities disagree with host bindings")
     semantic_census = {
         "status": semantic.get("status"),
         "producer_reason_codes": list(semantic.get("reason_codes") or ()),
