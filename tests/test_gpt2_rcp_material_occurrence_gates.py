@@ -78,3 +78,25 @@ def test_producer_enum_corroboration_only_counts_authentic_records():
     for not_rcp in (vp(kind="schedule"),vp(status="unsupported",box=None)):
         row=gate(not_rcp,scope(complete=True,records=(R(record_id="x",code="FPB"),)))
         assert row["producer_authenticated_record_ids"]==[]
+
+
+def test_rcp_viewport_must_have_finite_positive_native_bbox():
+    from pb_migration_contracts import EvidenceResolutionStatus
+    valid_scope=scope(
+        complete=True,
+        status=EvidenceResolutionStatus.CORROBORATED,
+        records=(R(record_id="native-record",code="FPB"),),
+    )
+    for bad_bbox in (
+        None,
+        (),
+        (0, 0, 0, 20),
+        (0, 0, 5, -1),
+        (float("nan"), 0, 20, 20),
+        (0, float("inf"), 20, 20),
+        ("untrusted", 0, 20, 20),
+    ):
+        row=gate(vp(box=bad_bbox),valid_scope)
+        assert row["first_unclosed_gate"]=="source_rcp_viewport_unresolved"
+        assert row["producer_authenticated_record_ids"]==[]
+        assert row["new_metric_quantity_claim"] is False
