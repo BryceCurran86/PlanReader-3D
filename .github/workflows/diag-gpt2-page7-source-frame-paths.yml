@@ -1,0 +1,54 @@
+name: DIAG GPT2 Page7 Source Frame Path Provenance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt2_page7_frame_border_strip.py"
+      - "tests/test_gpt2_page7_source_frame_path_provenance.py"
+      - ".github/workflows/diag-gpt2-page7-source-frame-paths.yml"
+  workflow_dispatch:
+
+jobs:
+  source-frame-path-receipts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 and source path receipt unit tests
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_page7_source_frame_path_provenance.py
+      - name: SHA-verified page7 source-native path provenance
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b01-residual-rcp
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-b01-residual-rcp/page7_path_provenance.json
+          import json
+          from pathlib import Path
+          from tools.diag_gpt2_page7_frame_border_strip import inspect
+          payload=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          report=inspect(payload)
+          pairs=report["candidate_nested_frame_pairs"]
+          assert pairs, "Actual source title/frame pair not recovered"
+          for pair in pairs:
+              provenance=pair["path_provenance"]
+              assert provenance["line_intersection_count"] == pair["nonframe_native_line_intersections"]
+              assert provenance["classification"]=="SOURCE_PATH_CANDIDATE_ONLY_NOT_BOUNDARY_PROOF"
+              assert provenance["native_source_path_count"] > 0
+          assert report["asserted_equivalence"] is False
+          assert report["created_room_or_metric"] is False
+          print("GPT2_SOURCE_FRAME_PATH_PROVENANCE",json.dumps(report,sort_keys=True,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-page7-competing-frame-source-path-receipts
+          path: artifacts/gpt2-b01-residual-rcp
+          retention-days: 7
