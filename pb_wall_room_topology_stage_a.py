@@ -38,11 +38,13 @@ from __future__ import annotations
 
 import heapq
 import math
+import os
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
 from pb_vector_geometry_v130 import snap_geometry
+from pb_wall_room_topology_short_fragment_audit import audit_short_source_fragments
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     attach_lineage_to_split_fragments,
@@ -621,4 +623,13 @@ def build_wall_graph_for_viewport(
     )
     merged_graph["excluded_segments"] = excluded_segments
     merged_graph["snap_collapsed_fragments"] = snap_collapsed_fragments
+    # Explicit opt-in diagnostic only. This is an observational source
+    # provenance ledger; it never changes the wall graph or creates hosts.
+    if os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1":
+        merged_graph["short_source_fragment_retention_audit"] = (
+            audit_short_source_fragments(
+                split_segment_dicts, snapped_graph, merged_graph,
+                max_length_pt=gap_snap_tolerance_pt,
+            )
+        )
     return merged_graph
