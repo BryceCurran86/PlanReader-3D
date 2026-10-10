@@ -35,6 +35,17 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
     for floor in claim.canonical_floors:
         floors_by_room.setdefault(str(floor.room_entity_id), []).append(floor)
 
+    # A documented dimension can establish a FIRM room area without
+    # establishing a metrically scaled source polygon.  The live floor
+    # bridge explicitly leaves metric_geometry_complete=False in that
+    # case.  Join the exact producer-owned quantity id to its immutable
+    # FIRM receipt rather than misreporting a missing measurement.
+    published_area_by_id: dict[str, list[Any]] = {}
+    for quantity in claim.room_area_quantity_evidence:
+        quantity_id = _clean(getattr(quantity, "quantity_id", ""))
+        if quantity_id:
+            published_area_by_id.setdefault(quantity_id, []).append(quantity)
+
     traces = {
         "same_view": _reason_map(
             claim.same_view_room_area_first_failure_codes
@@ -54,12 +65,46 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         matching_floors = floors_by_room.get(str(room.canonical_room_id), [])
         floor = matching_floors[0] if len(matching_floors) == 1 else None
         metric_area = getattr(floor, "metric_area_m2", None)
-        metric_valid = (
+        numeric_metric = (
             metric_area is not None
             and isinstance(metric_area, (int, float))
             and math.isfinite(float(metric_area))
             and float(metric_area) > 0
-            and bool(getattr(floor, "metric_geometry_complete", False))
+        )
+        floor_quantity_id = _clean(
+            getattr(floor, "metric_area_quantity_id", "") if floor else ""
+        )
+        linked_receipts = published_area_by_id.get(floor_quantity_id, [])
+        firm_documented_receipt = (
+            numeric_metric
+            and bool(floor_quantity_id)
+            and len(linked_receipts) == 1
+            and _clean(getattr(linked_receipts[0], "family", "")) == "room_area"
+            and _clean(getattr(linked_receipts[0], "authority", "")) in {
+                "documented_dimension", "pdf_scaled"
+            }
+            and len(tuple(getattr(linked_receipts[0], "input_entity_ids", ()) or ())) == 1
+            and not tuple(getattr(linked_receipts[0], "blocking_reasons", ()) or ())
+            and not bool(getattr(linked_receipts[0], "abstained", True))
+            and _clean(getattr(linked_receipts[0], "status", "")).casefold() == "firm"
+            and _clean(getattr(linked_receipts[0], "unit", "")).casefold() in {"m2", "m²"}
+            and getattr(linked_receipts[0], "value", None) is not None
+            and math.isfinite(float(linked_receipts[0].value))
+            and abs(float(linked_receipts[0].value) - float(metric_area)) <= 1e-9
+            and bool(tuple(getattr(linked_receipts[0], "evidence_ids", ()) or ()))
+            and _clean(
+                dict(getattr(linked_receipts[0], "metadata", {}) or {}).get("source_sha256")
+            ).lower() == _clean(getattr(floor, "source_sha256", "")).lower()
+            and _clean(
+                dict(getattr(linked_receipts[0], "metadata", {}) or {}).get("revision_id")
+            ) == _clean(getattr(floor, "revision_id", ""))
+        )
+        metric_valid = bool(
+            numeric_metric
+            and (
+                bool(getattr(floor, "metric_geometry_complete", False))
+                or firm_documented_receipt
+            )
         )
         label_trusted = bool(
             _clean(room.room_label_binding_record_id)
@@ -98,6 +143,10 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
                 str(floor.canonical_floor_id) if floor else None
             ),
             "metric_area_m2": float(metric_area) if metric_valid else None,
+            "metric_geometry_complete": bool(
+                getattr(floor, "metric_geometry_complete", False)
+            ) if floor else False,
+            "firm_documented_area_receipt": bool(firm_documented_receipt),
             "metric_authority": (
                 getattr(floor, "metric_area_authority", None) if floor else None
             ),
@@ -114,7 +163,15 @@ def inspect_room_measurement_gates(claim: Any) -> dict[str, Any]:
         })
     return {
         "canonical_room_count": len(claim.canonical_rooms),
+        "canonical_room_status": str(claim.canonical_room_status),
+        "canonical_room_reason_codes": list(claim.canonical_room_reason_codes),
+        "canonical_room_source_pages": list(claim.canonical_room_source_pages),
+        "canonical_wall_status": str(claim.canonical_wall_status),
+        "canonical_wall_reason_codes": list(claim.canonical_wall_reason_codes),
+        "canonical_wall_source_pages": list(claim.canonical_wall_source_pages),
         "canonical_floor_count": len(claim.canonical_floors),
+        "canonical_floor_status": str(claim.canonical_floor_status),
+        "canonical_floor_reason_codes": list(claim.canonical_floor_reason_codes),
         "labelled_room_count": len(rows),
         "rooms": sorted(rows, key=lambda r: (r["room_label"], r["physical_room_id"])),
         "room_area_quantity_evidence_count": len(
