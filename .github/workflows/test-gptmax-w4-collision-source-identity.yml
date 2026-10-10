@@ -25,7 +25,7 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Source-collision and wall equivalence regressions
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gptmax_w4_collision_source_identity.py tests/test_wall_room_topology_wall_assembly.py tests/test_physical_wall_identity.py
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_w4_collision_source_identity.py tests/test_wall_room_topology_wall_assembly.py tests/test_physical_wall_equivalence_candidate_eligibility.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   exact-original-source-parity:
