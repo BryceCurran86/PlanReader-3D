@@ -69,7 +69,14 @@ def summarize_named_room_metric_first_gates(claim: Any) -> dict[str, Any]:
                     ),
                 }
             else:
-                detail = {"first_gate": str(reason)}
+                # None, whitespace, or structured objects are not concrete
+                # same/cross-view source producer first-failure codes.
+                valid_reason = isinstance(reason, str) and bool(reason.strip())
+                detail = (
+                    {"first_gate": reason}
+                    if valid_reason
+                    else {"first_gate": "", "source_reason_receipt_valid": False}
+                )
             entries.append({
                 "physical_room_id": room_id,
                 "label": owners[room_id],
