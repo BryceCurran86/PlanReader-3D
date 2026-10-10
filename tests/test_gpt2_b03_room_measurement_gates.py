@@ -168,3 +168,34 @@ def test_mismatched_room_snapshot_rejects_documented_receipt() -> None:
     row = inspect_room_measurement_gates(claim)["rooms"][0]
     assert row["firm_documented_area_receipt"] is False
     assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT"
+
+
+
+def test_malformed_documented_area_value_never_crashes_or_claims_metric() -> None:
+    for invalid in (None, "not-a-number", "9.25", True, float("nan"),
+                    float("inf"), -1.0, 0.0):
+        claim = _documented_area_claim()
+        claim.room_area_quantity_evidence[0].value = invalid
+        row = inspect_room_measurement_gates(claim)["rooms"][0]
+        assert row["firm_documented_area_receipt"] is False, invalid
+        assert row["metric_area_m2"] is None, invalid
+        assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT", invalid
+
+
+def test_missing_source_owner_sha_and_revision_cannot_prove_documented_area() -> None:
+    for field in ("source_sha256", "revision_id"):
+        claim = _documented_area_claim()
+        setattr(claim.canonical_floors[0], field, "")
+        claim.room_area_quantity_evidence[0].metadata[field] = ""
+        row = inspect_room_measurement_gates(claim)["rooms"][0]
+        assert row["firm_documented_area_receipt"] is False, field
+        assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT", field
+
+
+def test_malformed_documented_receipt_metadata_fails_closed() -> None:
+    for invalid in (None, "not-a-dict", ["not-a-pair"]):
+        claim = _documented_area_claim()
+        claim.room_area_quantity_evidence[0].metadata = invalid
+        row = inspect_room_measurement_gates(claim)["rooms"][0]
+        assert row["firm_documented_area_receipt"] is False, invalid
+        assert row["metric_area_m2"] is None, invalid
