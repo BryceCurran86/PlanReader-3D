@@ -21,7 +21,7 @@ def report():
         "host_frames":[{
             "opening_identity_id":oid, "host_wall_id":"group_old",
             "record_id":"frame_receipt_old",
-            "reason_codes":["opening_host_frame_resolved"],
+            "reason_codes":["opening_host_frame_resolved"],"whole_wall_candidate_ids":[wid],
         }],
         "resolved_host_frame_evidence":[{
             "opening_identity_id":oid,
@@ -134,6 +134,8 @@ def test_changed_or_missing_positive_original_source_never_called_snapshot_only(
         record["wall_candidate"]["centerline_pts"]=[[10.,10.],[69.,10.]]
     elif damage=="host_unavailable":
         opening.update(host_wall_id=None,record_id=None)
+        frames.update(host_wall_id=None,record_id=None)
+        b["resolved_host_frame_evidence"]=[]
     elif damage=="frame_unavailable":
         frames["record_id"]=None
         b["resolved_host_frame_evidence"]=[]
@@ -204,3 +206,35 @@ def test_newly_authenticated_source_host_is_not_prior_receipt_equivalence():
     assert out["source_comparison_rows"]==[]
     assert out["prior_authenticated_host_count"]==0
     assert out["candidate_authenticated_host_count"]==1
+
+
+@pytest.mark.parametrize("corruption", [
+    "frame_host_owner","frame_receipt_id","whole_wall_binding_receipt",
+    "whole_wall_host_owner","frame_membership","whole_wall_membership",
+    "wrong_opening_selector","wrong_source_selector","missing_frame_geometry",
+])
+def test_conflicting_source_frame_receipts_fail_closed_before_rekey_classification(corruption):
+    a,b=rekey()
+    host=b["opening_bindings"][0]
+    frame=b["host_frames"][0]
+    receipt=b["resolved_host_frame_evidence"][0]
+    if corruption=="frame_host_owner":
+        frame["host_wall_id"]="unrelated_physical_wall"
+    elif corruption=="frame_receipt_id":
+        frame["record_id"]="some_other_frame_receipt"
+    elif corruption=="whole_wall_binding_receipt":
+        receipt["host_binding_record_id"]="some_other_binding_receipt"
+    elif corruption=="whole_wall_host_owner":
+        receipt["host_wall_id"]="some_other_wall"
+    elif corruption=="frame_membership":
+        frame["whole_wall_candidate_ids"]=["other_wall_candidate"]
+    elif corruption=="whole_wall_membership":
+        receipt["whole_wall_candidate_ids"]=["other_wall_candidate"]
+    elif corruption=="wrong_opening_selector":
+        receipt["selector"]["opening_identity_id"]="physical_opening_existence_unrelated"
+    elif corruption=="wrong_source_selector":
+        receipt["selector"]["source_sha256"]="b"*64
+    else:
+        b["resolved_host_frame_evidence"]=[]
+    with pytest.raises(ValueError):
+        compare_source_host_rekeys(a,b)
