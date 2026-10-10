@@ -75,6 +75,9 @@ def _documented_area_claim(*, source_sha="source-sha-verified", revision="revisi
     quantity = Row(
         quantity_id="owned-quantity-1",
         family="room_area",
+        authority="documented_dimension",
+        input_entity_ids=("producer-owned-source-room-1",),
+        blocking_reasons=(),
         status="FIRM",
         value=9.25,
         unit="m2",
@@ -116,3 +119,17 @@ def test_duplicate_documented_receipt_ids_do_not_grant_area() -> None:
     room = inspect_room_measurement_gates(claim)["rooms"][0]
     assert room["firm_documented_area_receipt"] is False
     assert room["first_unclosed_gate"] == "METRIC_MEASUREMENT"
+
+
+def test_wrong_family_or_untrusted_measurement_source_stays_unmeasured() -> None:
+    for bad_field, value in (
+        ("family", "wall_area"),
+        ("authority", "raw_label_guess"),
+        ("input_entity_ids", ()),
+        ("blocking_reasons", ("conflicted_measurement",)),
+    ):
+        claim = _documented_area_claim()
+        setattr(claim.room_area_quantity_evidence[0], bad_field, value)
+        row = inspect_room_measurement_gates(claim)["rooms"][0]
+        assert row["firm_documented_area_receipt"] is False, bad_field
+        assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT", bad_field
