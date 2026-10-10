@@ -2923,6 +2923,34 @@ def _source_snap_collapsed_fragment_inventory(graph, identities):
             for candidate_id, rows in inventory.items()}
 
 
+def _assemble_source_owned_w4_identities_or_unavailable(
+    *,
+    graph,
+    junctions,
+    relationships,
+    scope_id: str,
+):
+    """Fail closed on provenance-ambiguous W4 candidate addresses.
+
+    Only known W4 identity-collision errors become unavailable scope. Every
+    other unexpected assembly error still propagates for engineering diagnosis.
+    This function never invents a wall candidate or equivalence relation.
+    """
+    try:
+        walls, rekeyed_junctions = assemble_wall_topology(
+            graph, junctions, relationships, viewport_id=scope_id
+        )
+        identities = collect_physical_wall_identities(walls, graph)
+    except ValueError as exc:
+        if (
+            str(exc).startswith("W4 collision")
+            or str(exc).startswith("duplicate W4 candidate id")
+        ):
+            return None
+        raise
+    return walls, rekeyed_junctions, identities
+
+
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -2984,28 +3012,15 @@ def _assemble_scope_result(
         page_id=page_id,
         viewport_id=scope_id,
     )
-    # W4 geometric candidate IDs can collide even for distinct W2 source
-    # records. When positive source edge or junction evidence cannot safely
-    # disambiguate a collided *candidate address*, the entire host universe
-    # must abstain. Never let an exception abort source processing or let a
-    # dictionary silently select the last duplicate wall identity.
-    try:
-        walls, _rekeyed_junctions = assemble_wall_topology(
-            graph,
-            junctions,
-            relationships,
-            viewport_id=scope_id,
-        )
-        identities = collect_physical_wall_identities(walls, graph)
-    except ValueError as exc:
-        if (
-            str(exc).startswith("W4 collision")
-            or str(exc).startswith("duplicate W4 candidate id")
-        ):
-            return _blocked(
-                selector, PHYSICAL_WALL_CANDIDATE_IDENTITY_UNRESOLVED
-            )
-        raise
+    assembled = _assemble_source_owned_w4_identities_or_unavailable(
+        graph=graph,
+        junctions=junctions,
+        relationships=relationships,
+        scope_id=scope_id,
+    )
+    if assembled is None:
+        return _blocked(selector, PHYSICAL_WALL_CANDIDATE_IDENTITY_UNRESOLVED)
+    walls, _rekeyed_junctions, identities = assembled
     collapsed_source_fragments = _source_snap_collapsed_fragment_inventory(graph, identities)
     graph_edges = {str(edge["id"]): edge for edge in graph["edges"]}
 
