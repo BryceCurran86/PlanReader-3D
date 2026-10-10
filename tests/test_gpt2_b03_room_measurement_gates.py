@@ -62,7 +62,10 @@ def test_verified_metric_floor_requires_commercial_quantity_handoff():
     ready = inspect_room_measurement_gates(
         _claim(_floor(9.25, "firm-q-1"))
     )["rooms"][0]
-    assert ready["first_unclosed_gate"] == "ROOM_FLOOR_QUANTITY_READY"
+    # A caller-supplied flag on a synthetic row is not a producer reissue.
+    assert ready["first_unclosed_gate"] == "FLOOR_QUANTITY_PUBLICATION"
+    assert ready["floor_area_reissued_quantity_id"] is None
+    assert ready["canonical_room_area_reissued_quantity_id"] is None
 
 
 def test_duplicate_floor_owner_never_selects_first():
@@ -199,3 +202,64 @@ def test_malformed_documented_receipt_metadata_fails_closed() -> None:
         row = inspect_room_measurement_gates(claim)["rooms"][0]
         assert row["firm_documented_area_receipt"] is False, invalid
         assert row["metric_area_m2"] is None, invalid
+
+
+
+def test_real_canonical_room_firm_receipt_traces_through_both_reissuers() -> None:
+    from dataclasses import replace
+    from tests.test_live_floor_area_quantity_publication_integrity import (
+        _claim_with_canonical_room, _source_area,
+    )
+
+    claim = _claim_with_canonical_room(_source_area())
+    owned = replace(
+        claim.canonical_rooms[0],
+        room_label="SOURCE-VERIFIED ROOM",
+        room_label_binding_record_id="source-label-binding",
+        room_label_evidence_ids=("source-label-evidence",),
+    )
+    claim = replace(claim, canonical_rooms=(owned,))
+    report = inspect_room_measurement_gates(claim)
+    assert report["reissued_floor_area_quantity_count"] == 1
+    assert report["reissued_canonical_room_area_quantity_count"] == 1
+    assert len(report["rooms"]) == 1
+    room = report["rooms"][0]
+    assert room["metric_area_m2"] == 8.64
+    assert room["metric_geometry_complete"] is False
+    assert room["firm_documented_area_receipt"] is True
+    assert room["commercial_quantity_authority_flag"] is False
+    assert room["floor_area_reissued_quantity_id"]
+    assert room["canonical_room_area_reissued_quantity_id"]
+    # Reissue is authenticated, but no sealing/customer-output verification
+    # has run; the diagnostic may not claim a commercially completed row.
+    assert room["first_unclosed_gate"] == "SEALED_CUSTOMER_PROJECTION_UNVERIFIED"
+
+
+def test_competing_real_room_owner_can_reissue_floor_but_not_room() -> None:
+    from dataclasses import replace
+    from tests.test_live_floor_area_quantity_publication_integrity import (
+        _claim_with_canonical_room, _source_area,
+    )
+
+    claim = _claim_with_canonical_room(_source_area())
+    genuine = replace(
+        claim.canonical_rooms[0],
+        room_label="SOURCE-VERIFIED ROOM",
+        room_label_binding_record_id="source-label-binding",
+        room_label_evidence_ids=("source-label-evidence",),
+    )
+    competing = replace(
+        genuine, canonical_room_id="competing-canonical-room",
+        source_room_face_record_id="another-source-face",
+        room_label=None, room_label_binding_record_id=None,
+        room_label_evidence_ids=(),
+    )
+    claim = replace(claim, canonical_rooms=(genuine, competing))
+    report = inspect_room_measurement_gates(claim)
+    assert report["reissued_floor_area_quantity_count"] == 1
+    assert report["reissued_canonical_room_area_quantity_count"] == 0
+    assert len(report["rooms"]) == 1
+    room = report["rooms"][0]
+    assert room["floor_area_reissued_quantity_id"]
+    assert room["canonical_room_area_reissued_quantity_id"] is None
+    assert room["first_unclosed_gate"] == "CANONICAL_ROOM_AREA_REISSUE"
