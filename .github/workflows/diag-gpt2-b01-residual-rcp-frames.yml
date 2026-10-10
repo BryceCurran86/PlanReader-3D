@@ -1,0 +1,102 @@
+name: DIAG GPT2 B01 Maryborough Residual RCP Frames
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt2-b01-residual-rcp-frames.yml"
+  workflow_dispatch:
+
+jobs:
+  residual-rcp-frames:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-native residual RCP first ownership gate
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/gpt2-b01-residual-rcp
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-b01-residual-rcp/frames.json
+          import hashlib
+          import json
+          from pathlib import Path
+          import fitz
+          import pb_viewport_segmentation as vp
+
+          payload = Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf").read_bytes()
+          sha = hashlib.sha256(payload).hexdigest()
+          assert sha == "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          doc = fitz.open(stream=payload, filetype="pdf")
+          assert doc.page_count == 31
+          pages = []
+          for page_id in (9,):
+              page = doc.load_page(page_id - 1)
+              calibration = vp.calibrate_viewport_layout(page)
+              anchors = vp.extract_view_title_anchors(page)
+              frames = vp.extract_vector_frames(page, calibration)
+              fragments = vp._text_fragments(page)
+              viewports = vp.segment_page_viewports(page, page_number=page_id)
+              assert vp.validate_non_overlapping_viewports(viewports)
+              anchor_rows = []
+              for index, anchor in enumerate(anchors):
+                  if anchor.view_type not in {
+                      "reflected_ceiling_plan", "schedule", "legend"
+                  }:
+                      continue
+                  candidate_frames = vp._frame_candidates_for_title(
+                      page, anchor, frames, calibration, anchors=anchors
+                  )
+                  rejected = [
+                      {
+                          "native_bbox_pdf_pts": frame,
+                          "rejected_by_frame_ownership": vp._rejected_ownership_frame(
+                              page, frame, calibration, fragments,
+                              view_type=anchor.view_type,
+                          ),
+                      }
+                      for frame in candidate_frames
+                  ]
+                  anchor_rows.append({
+                      "text": anchor.text,
+                      "type": anchor.view_type,
+                      "native_title_bbox_pdf_pts": anchor.bbox,
+                      "source_frame_candidates": rejected,
+                      "candidate_count": len(rejected),
+                  })
+              relevant_views = [
+                  {
+                      "id": v.view_id, "title": v.label, "type": v.view_type,
+                      "status": v.status, "native_bbox_pdf_pts": v.bounding_box,
+                      "boundary_source": v.boundary_source,
+                      "first_failure": v.notes,
+                  }
+                  for v in viewports if v.view_type in
+                  {"reflected_ceiling_plan", "schedule", "legend"}
+              ]
+              pages.append({
+                  "page": page_id,
+                  "native_vector_frame_count": len(frames),
+                  "calibration_median_word_height_pt": calibration.median_word_height_pt,
+                  "source_titles": anchor_rows,
+                  "producer_result": relevant_views,
+              })
+          doc.close()
+          print("B01_SECOND_RCP_SOURCE_FRAME_LEDGER", json.dumps({
+              "source_sha256": sha,
+              "pages": pages,
+              "status": "diagnostic_only_no_new_viewport_authority",
+          }, sort_keys=True, default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-b01-residual-rcp-frame-ledger
+          path: artifacts/gpt2-b01-residual-rcp
+          retention-days: 7
