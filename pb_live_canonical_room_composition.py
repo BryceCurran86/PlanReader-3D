@@ -838,7 +838,8 @@ def compose_live_canonical_rooms(
                         )
                     )
                     rooms.extend(
-                        _room_object_from_record(                            record,
+                        _room_object_from_record(
+                            record,
                             viewport_id=wall_scope.viewport_id,
                             canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
                             unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
