@@ -247,7 +247,7 @@ def test_conflicting_source_frame_receipts_fail_closed_before_rekey_classificati
 @pytest.mark.parametrize("corruption",[
     "empty_edge_parents","unrelated_edge_parent","nonfinite_source_coord",
     "fabricated_source_coord","incomplete_source_coord",
-    "overflow_source_coord","degenerate_source_edge",
+    "overflow_source_coord","degenerate_source_edge","finite_coords_overflow_length",
 ])
 def test_identically_corrupted_source_edges_are_never_unchanged_source(corruption):
     old,new=rekey()
@@ -266,6 +266,8 @@ def test_identically_corrupted_source_edges_are_never_unchanged_source(corruptio
             edge["geometry"][0]=10**1000
         elif corruption=="degenerate_source_edge":
             edge["geometry"]=[10.,10.,10.,10.]
+        elif corruption=="finite_coords_overflow_length":
+            edge["geometry"]=[-1e308,0.,1e308,0.]
         else:
             edge["geometry"]=[10.,10.,70.]
     result=compare_source_host_rekeys(old,new)
@@ -281,6 +283,8 @@ def test_identically_corrupted_source_edges_are_never_unchanged_source(corruptio
 @pytest.mark.parametrize("damage", [
     "nonfinite_path","overflow_path","boolean_path","malformed_path",
     "nonfinite_wall_centerline","foreign_wall_centerline",
+    "finite_path_overflow_length","degenerate_path",
+    "finite_centerline_overflow_length","degenerate_centerline",
 ])
 def test_identically_invalid_positive_w4_paths_cannot_certify_snapshot_only_rekey(damage):
     a,b=rekey()
@@ -296,6 +300,14 @@ def test_identically_invalid_positive_w4_paths_cannot_certify_snapshot_only_reke
             record["physical_identity"]["path_fingerprint"]=[[10.],[70.,10.]]
         elif damage=="nonfinite_wall_centerline":
             record["wall_candidate"]["centerline_pts"][0][0]=float("inf")
+        elif damage=="finite_path_overflow_length":
+            record["physical_identity"]["path_fingerprint"]=[[-1e308,0.],[1e308,0.]]
+        elif damage=="degenerate_path":
+            record["physical_identity"]["path_fingerprint"]=[[10.,10.],[10.,10.]]
+        elif damage=="finite_centerline_overflow_length":
+            record["wall_candidate"]["centerline_pts"]=[[-1e308,0.],[1e308,0.]]
+        elif damage=="degenerate_centerline":
+            record["wall_candidate"]["centerline_pts"]=[[10.,10.],[10.,10.]]
         else:
             record["wall_candidate"]["centerline_pts"]=[[10.,10.],["wrong",10.]]
     output=compare_source_host_rekeys(a,b)
