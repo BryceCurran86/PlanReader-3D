@@ -331,9 +331,25 @@ def _verify_row_lineage(
         f"viewport={sealed.viewport_id}",
         f"revision={sealed.revision_id}",
     )
+    # The source reference is a semicolon-delimited machine receipt.
+    # Substring matching accepts e.g. document=doc-1-changed as proof of
+    # document=doc-1. Demand exact receipt tokens and reject duplicate
+    # identity-bearing tokens rather than interpreting prefixes as lineage.
+    reference_parts = tuple(
+        part.strip() for part in source_reference.split(";") if part.strip()
+    )
     missing_reference_parts = [
-        part for part in required_reference_parts if part not in source_reference
+        part for part in required_reference_parts if part not in reference_parts
     ]
+    duplicate_reference_keys = [
+        key for key in ("QuantityEvidence ", "document=", "sha256=", "viewport=", "revision=")
+        if sum(part.startswith(key) for part in reference_parts) > 1
+    ]
+    if duplicate_reference_keys:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} source_reference has conflicting identity tokens: "
+            + ", ".join(duplicate_reference_keys)
+        )
     if missing_reference_parts:
         raise CustomerOutputVerificationError(
             f"customer row {quantity_id!r} source_reference lineage is incomplete: "
