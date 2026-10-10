@@ -13,6 +13,7 @@ from tools import diag_gptmax_terminal_source_span_shadow as diagnostic
 class Wall:
     candidate_id: str = "wall_alpha"
     viewport_id: str = "source-page-one"
+    face_a_segment_ids: tuple = ("edge_surviving",)
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,8 @@ class Identity:
 def install_source_call(monkeypatch, corruption=None):
     source = b"original source owned runtime fixture"
     walls, identities = [Wall()], {"wall_alpha": Identity()}
+    if corruption == "producer_collision":
+        walls.append(Wall(face_a_segment_ids=("distinct_split_source_edge",)))
     graph = {
         "nodes": [{"id": 0, "x": 0., "y": 0.}, {"id": 1, "x": 10., "y": 0.}],
         "edges": [{"id": "edge_surviving", "a": 0, "b": 1,
@@ -85,6 +88,10 @@ def install_source_call(monkeypatch, corruption=None):
             "source_owned_wall_scope_results": [scope],
             "summary": {"physical_existence_claims": 0, "host_bindings": 0, "host_frames": 0},
         }
+        if corruption == "producer_collision":
+            second = deepcopy(scope["records"][0])
+            second["wall_candidate"] = asdict(walls[1])
+            scope["records"].append(second)
         if corruption == "report_source":
             report["source_sha256"] = "0" * 64
         elif corruption == "cap":
@@ -153,8 +160,8 @@ def test_missing_duplicate_or_foreign_runtime_association_fails_closed_and_resto
     assert os.environ["GPTMAX_W2_SHORT_SOURCE_AUDIT"] == "prior-value"
 
 
-def test_identical_repeated_producer_candidate_is_one_observational_identity():
-    """Exact repeated rows cannot create a second preview or production identity."""
+def test_identical_repeated_producer_candidate_rows_keep_original_multiplicity():
+    """Never silently suppress producer duplicates during source receipt comparison."""
     walls = [Wall(), Wall()]
     identities = {"wall_alpha": Identity()}
     graph = {"edges": [{
@@ -166,18 +173,47 @@ def test_identical_repeated_producer_candidate_is_one_observational_identity():
     before = deepcopy((walls, identities, graph))
     unique = diagnostic._records_from_original_call(walls[:1], identities, graph)
     observed = diagnostic._records_from_original_call(walls, identities, graph)
-    assert observed == unique
-    assert len(observed) == 1
+    assert observed == unique + unique
+    assert len(observed) == 2
     assert (walls, identities, graph) == before
 
 
-def test_conflicting_duplicate_producer_candidate_fails_closed():
-    walls = [Wall(), Wall(candidate_id="wall_alpha", viewport_id="foreign-scope")]
-    before = deepcopy(walls)
-    with pytest.raises(RuntimeError, match="conflicting duplicate"):
-        diagnostic._records_from_original_call(
-            walls, {"wall_alpha": Identity()}, {"edges": []})
-    assert walls == before
+def test_conflicting_duplicate_producer_candidate_cannot_be_normalized():
+    walls = [Wall(), Wall(face_a_segment_ids=("a_different_source_edge",))]
+    graph = {"edges": [{
+        "id": "edge_surviving", "x1": 0., "y1": 0., "x2": 10., "y2": 0.,
+        diagnostic.wall_authority.LINEAGE_KEY: {
+            "source_primitive_ids": ["source_positive"],
+        },
+    }]}
+    before = deepcopy((walls, graph))
+    rows = diagnostic._records_from_original_call(
+        walls, {"wall_alpha": Identity()}, graph)
+    assert len(rows) == 2
+    assert rows[0]["wall_candidate"] != rows[1]["wall_candidate"]
+    assert (walls, graph) == before
+
+
+def test_realistic_conflicting_candidate_id_quarantines_entire_scope(monkeypatch):
+    source, graph, walls, identities, outputs, build, collect = install_source_call(
+        monkeypatch, "producer_collision")
+    before = deepcopy((graph, walls, identities))
+    result = diagnostic.terminal_source_span_shadow_report(source, page_ids=("1",))
+    assert result["source_report"] is outputs["source_report"]
+    assert result["quarantined_source_scope_count"] == 1
+    row = result["source_assembly_call_previews"][0]
+    assert row["quarantined_collision_candidate_ids"] == ["wall_alpha"]
+    assert row["source_scope_collision_quarantined"] is True
+    assert row["original_identity_count"] == 2
+    preview = row["terminal_source_path_preview"]
+    assert preview["source_path_previews"] == []
+    assert preview["disposition_counts"] == {
+        "source_identity_collision_scope_quarantined": 1}
+    assert preview["host_count_quantity_publication_allowed"] is False
+    assert result["benchmark_accuracy"] is None
+    assert (graph, walls, identities) == before
+    assert diagnostic.wall_authority.build_wall_graph_for_viewport is build
+    assert diagnostic.wall_authority.collect_physical_wall_identities is collect
 
 
 def test_foreign_or_missing_identity_not_silently_reconciled():
