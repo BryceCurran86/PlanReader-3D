@@ -599,6 +599,7 @@ def test_scenario_02_one_applicable_opening() -> None:
         {"source_sha256": "foreign-source"},
         {"revision_id": "foreign-revision"},
         {"document_id": "foreign-document"},
+        {"snapshot_id": "foreign-snapshot"},
         {"decision_scope_id": "foreign-decision"},
         {"page_id": "foreign-page"},
     ),
