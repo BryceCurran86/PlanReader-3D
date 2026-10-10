@@ -86,7 +86,14 @@ def _source_sha_proof(manifest: dict, source_root: Path | None, project_id: str)
         if not isinstance(expected_sha, str) or len(expected_sha) != 64:
             raise ValueError("source manifest sha256 invalid")
         source = source_root / project_id / name
-        if not source.is_file():
+        try:
+            exists = source.is_file()
+        except OSError:
+            # Path.is_file() can itself raise if a file vanishes while
+            # filesystem metadata is being queried (Python 3.13 included).
+            reasons.append(f"source_file_unreadable:{name}")
+            continue
+        if not exists:
             reasons.append(f"source_file_missing:{name}")
             continue
         # A concurrently replaced or unreadable source PDF must fail this
