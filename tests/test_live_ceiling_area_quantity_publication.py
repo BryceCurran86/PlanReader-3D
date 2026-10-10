@@ -504,3 +504,23 @@ def test_different_room_area_sources_keep_independent_ceilings() -> None:
     assert {q.input_entity_ids for q in published} == {
         ("canonical-ceiling-1",), ("canonical-ceiling-2",),
     }
+
+
+def test_single_figured_dimension_cannot_claim_full_metric_ceiling_area() -> None:
+    for dimension_ids in (
+        ("dim-h",),
+        ("dim-h", "dim-h"),
+        ("", "dim-h", ""),
+    ):
+        candidate = _ceiling(figured_dimension_ids=dimension_ids)
+        assert publish_live_ceiling_area_quantities(
+            _result(ceiling=candidate)
+        ) == ()
+
+
+def test_two_distinct_figured_dimension_receipts_retain_firm_ceiling_area() -> None:
+    candidate = _ceiling(figured_dimension_ids=("dim-h", "dim-v"))
+    published = publish_live_ceiling_area_quantities(_result(ceiling=candidate))
+    assert len(published) == 1
+    assert published[0].authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+    assert published[0].value == 13.270425
