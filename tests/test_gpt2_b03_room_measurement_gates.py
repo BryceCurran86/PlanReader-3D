@@ -33,6 +33,14 @@ def _claim(*floors):
         physical_scale_first_failure_codes=(("room-1", ("scale_unavailable",)),),
         room_area_quantity_evidence=(), floor_finish_quantity_evidence=(),
         ceiling_lining_quantity_evidence=(), reason_codes=(),
+        canonical_room_status="corroborated",
+        canonical_room_reason_codes=(),
+        canonical_room_source_pages=(7,),
+        canonical_wall_status="corroborated",
+        canonical_wall_reason_codes=(),
+        canonical_wall_source_pages=(7,),
+        canonical_floor_status="corroborated",
+        canonical_floor_reason_codes=(),
     )
 
 
