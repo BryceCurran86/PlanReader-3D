@@ -98,3 +98,15 @@ def test_competing_or_duplicate_source_metric_first_failure_receipts_abstain():
     assert row["named_rooms_without_first_failure_receipts"] == []
     assert row["all_source_first_failure_receipt_counts"]["same_view"] == 4
     assert row["metric_quantity_published"] is False
+
+
+def test_none_and_whitespace_metric_gate_reasons_never_become_source_truth():
+    for malformed in (None, "", "  ", 77):
+        report = summarize(claim(
+            (room("room-x", "FREEZER"),), cross=(("room-x", malformed),),
+        ))
+        assert report["named_room_metric_first_failure_codes"]["cross_view"] == [{
+            "physical_room_id": "room-x", "label": "FREEZER",
+            "first_gate": "", "source_reason_receipt_valid": False,
+        }]
+        assert report["metric_quantity_published"] is False
