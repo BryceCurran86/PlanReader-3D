@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import pytest
 from types import MappingProxyType
 
 from pb_gross_wall_geometry_authority import (
