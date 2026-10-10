@@ -558,3 +558,61 @@ def test_missing_rcp_definition_or_occurrence_identity_abstains() -> None:
         assert result.records == ()
         assert result.quantities == ()
         assert result.unresolved_physical_room_ids == ("physical-room-1",)
+
+
+def test_cross_view_ceiling_never_counts_characters_as_figured_dimension_ids() -> None:
+    # A bare two-character STRING used to have len(unique chars)==2 and
+    # could make a documented source area look independently dimensioned.
+    for corrupt_ids in (
+        "HV",
+        "XY",
+        "dim-h,dim-v",
+        {"horizontal": "dim-h", "vertical": "dim-v"},
+        ["dim-h", 123],
+        ("dim-h", None),
+        ["dim-h", ["dim-v"]],
+        [],
+        ["dim-h"],
+        ["dim-h", "dim-h"],
+    ):
+        bridge = _bridge()
+        tampered = replace(
+            bridge.quantities[0],
+            metadata={
+                **dict(bridge.quantities[0].metadata),
+                "figured_dimension_ids": corrupt_ids,
+            },
+        )
+        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+            rooms=_rooms(),
+            room_area_bridges=(replace(bridge, quantities=(tampered,)),),
+            finishes=_finish(),
+        )
+        assert result.records == (), corrupt_ids
+        assert result.quantities == (), corrupt_ids
+        assert result.canonical_ceilings == (), corrupt_ids
+
+
+def test_cross_view_ceiling_keeps_distinct_producer_owned_figured_ids() -> None:
+    bridge = _bridge()
+    for figure_ids in (
+        ("dim-v", "dim-h"),
+        ["dim-h", "dim-v", "dim-h"],
+    ):
+        documented = replace(
+            bridge.quantities[0],
+            metadata={
+                **dict(bridge.quantities[0].metadata),
+                "figured_dimension_ids": figure_ids,
+            },
+        )
+        result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+            rooms=_rooms(),
+            room_area_bridges=(replace(bridge, quantities=(documented,)),),
+            finishes=_finish(),
+        )
+        assert len(result.quantities) == 1
+        assert result.quantities[0].status == "firm"
+        assert result.quantities[0].metadata["figured_dimension_ids"] == [
+            "dim-h", "dim-v"
+        ]
