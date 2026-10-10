@@ -597,6 +597,8 @@ def test_scenario_02_one_applicable_opening() -> None:
         {"opening_identity_id": "unrelated-opening"},
         {"target_scope_id": "unrelated-trade"},
         {"source_sha256": "foreign-source"},
+        {"revision_id": "foreign-revision"},
+        {"document_id": "foreign-document"},
         {"decision_scope_id": "foreign-decision"},
         {"page_id": "foreign-page"},
     ),
