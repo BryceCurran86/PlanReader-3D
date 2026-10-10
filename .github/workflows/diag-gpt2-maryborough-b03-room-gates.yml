@@ -46,6 +46,19 @@ jobs:
               "artifacts/gpt2-b03-room-gates/room_first_gates.json"
           ).read_text())
           rooms=report["rooms"]
+          if not rooms:
+              print("B03_UPSTREAM_ROOM_RECOVERY_REGRESSION", json.dumps({
+                  "canonical_room_status":report.get("canonical_room_status"),
+                  "canonical_room_reason_codes":report.get("canonical_room_reason_codes"),
+                  "canonical_wall_status":report.get("canonical_wall_status"),
+                  "canonical_wall_reason_codes":report.get("canonical_wall_reason_codes"),
+                  "claim_reason_codes":report.get("claim_reason_codes"),
+              }, sort_keys=True))
+              raise AssertionError(
+                  "Expected real source-owned Maryborough rooms are absent; "
+                  "upstream physical room recovery must be repaired before B03 "
+                  "documented-area proof can pass"
+              )
           print("B03_FIRST_GATE_COUNTS", json.dumps({
               gate:sum(r["first_unclosed_gate"]==gate for r in rooms)
               for gate in sorted({r["first_unclosed_gate"] for r in rooms})
