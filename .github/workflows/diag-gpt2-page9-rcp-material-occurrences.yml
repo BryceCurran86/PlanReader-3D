@@ -31,7 +31,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p artifacts/gpt2-rcp-material-occurrences
-          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-material-schedule-scope/rcp_source_gates.json
+          PYTHONPATH=. python -u - <<'PY' | tee artifacts/gpt2-rcp-material-occurrences/rcp_source_gates.json
           import hashlib
           import json
           from pathlib import Path
@@ -145,6 +145,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gpt2-material-schedule-scope-isolation
-          path: artifacts/gpt2-material-schedule-scope
+          name: gpt2-rcp-material-occurrence-gates
+          path: artifacts/gpt2-rcp-material-occurrences
           retention-days: 7
