@@ -462,6 +462,7 @@ def _canonical_composite_supersedence(
     # retiring an identity could erase multiple source faces with one claim.
     source_id_counts = Counter(str(record.face_id) for record in originals)
     known = set(source_id_counts)
+    originals_by_face = {str(record.face_id): record for record in originals}
     claimed = Counter(
         str(face_id)
         for composite in composites
@@ -481,6 +482,21 @@ def _canonical_composite_supersedence(
                 for face_id in ids
             )
         ):
+            continue
+        # A physical face identity is insufficient by itself: the composite
+        # must cite each *exact* authenticated producer-owned source receipt.
+        # Otherwise an older/stale witness could retire an unrelated face.
+        actual_receipts = tuple(
+            str(value)
+            for value in (
+                getattr(composite, "constituent_source_room_face_record_ids", ()) or ()
+            )
+        )
+        expected_receipts = tuple(
+            str(originals_by_face[face_id].record_id)
+            for face_id in ids
+        )
+        if actual_receipts != expected_receipts:
             continue
         accepted.append(composite)
         suppressed.update(ids)
