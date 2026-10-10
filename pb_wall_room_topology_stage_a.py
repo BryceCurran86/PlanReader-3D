@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 from pb_accuracy_v13_engines_v145 import split_segments_at_intersections
 from pb_vector_geometry_v130 import snap_geometry
+from pb_wall_room_topology_source_snap_anchor import reanchor_exact_source_through_junctions
 from pb_wall_room_topology_primitive_lineage import (
     LINEAGE_KEY,
     attach_lineage_to_split_fragments,
@@ -612,6 +613,9 @@ def build_wall_graph_for_viewport(
         split_segment_dicts,
         tolerance_pt=gap_snap_tolerance_pt,
     )
+    snapped_graph = reanchor_exact_source_through_junctions(
+        snapped_graph, tolerance_pt=gap_snap_tolerance_pt,
+    )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
@@ -621,4 +625,6 @@ def build_wall_graph_for_viewport(
     )
     merged_graph["excluded_segments"] = excluded_segments
     merged_graph["snap_collapsed_fragments"] = snap_collapsed_fragments
+    if snapped_graph.get("exact_source_through_junction_anchors"):
+        merged_graph["exact_source_through_junction_anchors"] = snapped_graph["exact_source_through_junction_anchors"]
     return merged_graph
