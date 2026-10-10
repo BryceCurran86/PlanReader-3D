@@ -242,3 +242,32 @@ def test_conflicting_source_frame_receipts_fail_closed_before_rekey_classificati
         b["resolved_host_frame_evidence"]=[]
     with pytest.raises(ValueError):
         compare_source_host_rekeys(a,b)
+
+
+@pytest.mark.parametrize("corruption",[
+    "empty_edge_parents","unrelated_edge_parent","nonfinite_source_coord",
+    "fabricated_source_coord","incomplete_source_coord",
+])
+def test_identically_corrupted_source_edges_are_never_unchanged_source(corruption):
+    old,new=rekey()
+    for report_data in (old,new):
+        edge=report_data["source_owned_wall_scope_results"][0]["records"][0][
+            "source_edge_fragments"][0]
+        if corruption=="empty_edge_parents":
+            edge["source_primitive_ids"]=[]
+        elif corruption=="unrelated_edge_parent":
+            edge["source_primitive_ids"]=["not_the_authenticated_primitive"]
+        elif corruption=="nonfinite_source_coord":
+            edge["geometry"][0]=float("nan")
+        elif corruption=="fabricated_source_coord":
+            edge["geometry"][0]="not_pdf_point"
+        else:
+            edge["geometry"]=[10.,10.,70.]
+    result=compare_source_host_rekeys(old,new)
+    assert result["rekey_classification_counts"]=={
+        "ORIGINAL_SOURCE_PROOF_CHANGED_OR_LOST":1
+    }
+    assert result["source_comparison_rows"][0]["reason_codes"]==[
+        "W4_POSITIVE_SOURCE_PROOF_UNAVAILABLE"
+    ]
+    assert not result["official_host_receipt_identity_acceptance"]
