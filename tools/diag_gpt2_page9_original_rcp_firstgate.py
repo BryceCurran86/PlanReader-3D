@@ -38,6 +38,14 @@ def audit(source: bytes) -> dict:
                 "bounding_box_pdf_pts":None if v.bounding_box is None else list(v.bounding_box),
                 "authoritative_derived":bool(is_authoritative_derived_viewport(v)),
             })
+        for row in rows:
+            row["first_authority_gate"] = (
+                "nonoverlapping_viewports_unproven" if not nonoverlap else
+                "missing_source_viewport_boundary" if row["bounding_box_pdf_pts"] is None else
+                "source_viewport_resolved" if row["status"].lower().split(".")[-1] == "resolved" else
+                "source_derived_viewport_authenticated" if row["authoritative_derived"] else
+                "derived_or_ambiguous_viewport_not_authenticated"
+            )
         rcps=[row for row in rows if row["view_type"]==DrawingViewType.REFLECTED_CEILING_PLAN.value]
         authoritative=[row for row in rcps if
             row["bounding_box_pdf_pts"] is not None
@@ -47,6 +55,10 @@ def audit(source: bytes) -> dict:
             "source_sha256":sha, "source_page_number":9,
             "non_overlapping_source_viewports":bool(nonoverlap),
             "rcp_rows":rcps,"all_viewports":rows,
+            "original_view_p9_2_first_gate":next((
+                row["first_authority_gate"] for row in rows
+                if row["view_id"] == "view_p9_2"
+            ), "source_viewport_record_absent"),
             "authenticated_rcp_count":len(authoritative) if nonoverlap else 0,
             "original_rcp_view_p9_2_authenticated":bool(nonoverlap and any(row["view_id"]=="view_p9_2" for row in authoritative)),
             "material_occurrences_published":0,
