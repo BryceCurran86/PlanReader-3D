@@ -24,6 +24,8 @@ jobs:
         run: |
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. pytest -q tests/test_gpt2_source_double_border_floor_plan.py tests/benchmarks/test_mutation_viewport_segmentation.py
+      - name: Identify strict source frame first rejection without relaxing authority
+        run: PYTHONPATH=. python -u tools/diag_gpt2_page7_double_border_first_gate.py
       - name: Recheck unique real Maryborough floor plan viewport
         shell: bash
         run: |
