@@ -8,10 +8,11 @@ import pb_physical_wall_candidate_authority as module
 from test_wall_visible_observation_page_index import _source
 
 
-def _proof(source,published,authority,page_id='1',rows=None):
+def _proof(source,published,authority,page_id='1',rows=None,scope='direct-full-page'):
     return module._producer_proven_page_opening_records(
         source_producer=source,published=published,page_id=page_id,
-        physical_opening_authority=authority,resolved_visible_observations=rows)
+        physical_opening_authority=authority,resolved_visible_observations=rows,
+        proof_scope_fingerprint=scope)
 
 
 def test_complete_page_is_proven_once_without_a_count_or_scope_claim(monkeypatch):
@@ -100,3 +101,26 @@ def test_small_page_is_still_fully_proven_and_never_defaults_to_one(monkeypatch)
     calls.clear()
     assert _proof(source,published,authority)==()
     assert calls==[]
+
+
+def test_page_proof_cache_cannot_cross_producer_owned_wall_scopes(monkeypatch):
+    source, published, _ = _source(page_count=1)
+    authority = source.physical_opening_authority()
+    rows = source.authority().authenticated_visible_observations(published)
+    calls = []
+    original = authority.prove_existence
+
+    def counted(selector):
+        calls.append(selector.observation_id)
+        return original(selector)
+
+    monkeypatch.setattr(authority, 'prove_existence', counted)
+    first = _proof(source, published, authority, scope='w4-owner-scope-a')
+    assert sorted(calls) == sorted(row[0] for row in rows)
+    calls.clear()
+    assert _proof(source, published, authority, scope='w4-owner-scope-a') is first
+    assert calls == []
+    second = _proof(source, published, authority, scope='w4-owner-scope-b')
+    assert second == first
+    assert second is not first
+    assert sorted(calls) == sorted(row[0] for row in rows)
