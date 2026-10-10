@@ -534,6 +534,12 @@ def _collapse_source_repeated_plan_border_pair(
         return list(frames)
 
     repetitions: dict[tuple[object, ...], set[int]] = {}
+    # Opaque source-native WHITE fill-only background masks can be visually
+    # empty canvas rather than independent stroked geometry. They may be
+    # discounted ONLY if the native drawing order proves they were painted
+    # BEFORE every repeated physical border stroke. Opaque fills drawn
+    # later, nonwhite or translucent fills, or any stroke remain blockers.
+    white_background_mask_seqnos: list[int] = []
     protrusion_tol = max(0.25, calibration.median_word_height_pt * 0.05)
     for path_index, drawing in enumerate(_page_drawings(page)):
         seqno = drawing.get("seqno", path_index)
@@ -560,7 +566,19 @@ def _collapse_source_repeated_plan_border_pair(
                     all(abs(bbox[i]-frame[i]) <= edge_tol for i in range(4))
                     for frame in (inner, outer)
                 ):
-                    return list(frames)
+                    fill = drawing.get("fill")
+                    only_white_background = (
+                        drawing.get("type") == "f"
+                        and len(drawing.get("items", ()) or ()) == 1
+                        and drawing.get("color") is None
+                        and isinstance(fill, (tuple, list))
+                        and len(fill) == 3
+                        and all(abs(float(v) - 1.0) <= 1e-6 for v in fill)
+                        and abs(float(drawing.get("fill_opacity", 0) or 0) - 1.0) <= 1e-6
+                    )
+                    if not only_white_background:
+                        return list(frames)
+                    white_background_mask_seqnos.append(seqno)
                 continue
             if item[0] != "l" or len(item) < 3:
                 # Non-line primitives may be physical symbols. Refuse
@@ -623,6 +641,12 @@ def _collapse_source_repeated_plan_border_pair(
     # There must be independent *positive* repeated source artwork and no
     # unmatched/solo source strokes. This is not a global margin tolerance.
     if len(repetitions) < 2 or any(len(paths) != 2 for paths in repetitions.values()):
+        return list(frames)
+    first_repeated_border_seqno = min(
+        seqno for source_paths in repetitions.values() for seqno in source_paths
+    )
+    if any(mask_seqno >= first_repeated_border_seqno
+           for mask_seqno in white_background_mask_seqnos):
         return list(frames)
     return [inner]
 
