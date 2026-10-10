@@ -328,6 +328,19 @@ def _verify_row_lineage(
         ) from exc
     _require_equal("quantity", row_value, float(sealed.value), quantity_id)
 
+    baseline = row.get("ai_baseline_quantity")
+    if baseline is None or type(baseline) is bool:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} has invalid AI baseline quantity"
+        )
+    try:
+        baseline_value = float(baseline)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise CustomerOutputVerificationError(
+            f"customer row {quantity_id!r} has invalid AI baseline quantity"
+        ) from exc
+    _require_equal("ai_baseline_quantity", baseline_value, float(sealed.value), quantity_id)
+
     if row.get("canonical_entity_ids") is not None:
         _require_equal(
             "canonical_entity_ids",
