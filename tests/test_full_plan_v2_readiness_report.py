@@ -278,3 +278,73 @@ def test_nested_duplicate_identity_in_sealed_payload_is_rejected(tmp_path: Path)
     )
     with pytest.raises(ValueError, match="duplicate JSON key: quantity_id"):
         _object(target)
+
+
+@pytest.mark.parametrize("invalid_number", ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"])
+def test_nonfinite_numbers_reject_entire_production_document_without_fabricated_count(
+    tmp_path: Path, invalid_number: str
+) -> None:
+    target = tmp_path / "au_qld_lot16_power"
+    target.mkdir()
+    (target / "produced_items.json").write_text(
+        '[{"quantity_id":"source-quantity-1","lineage_ok":true,'
+        '"object_refs":["source-opening-1"],"abstained":false,'
+        '"value":' + invalid_number + ',"unit":"m2","trade_category":"opening"}]',
+        encoding="utf-8",
+    )
+    report = diagnostic_report(ROOT, tmp_path)
+    project = next(
+        p for p in report["projects"] if p["project_id"] == "au_qld_lot16_power"
+    )
+    assert project["produced_file_present"] is True
+    assert project["produced_count"] is None
+    assert project["produced_sealed_parity_verified"] is False
+    assert "produced_items_invalid_json_or_shape" in project["blockers"]
+    assert project["coverage_accuracy"] is None
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["score_claim"] is False
+
+
+@pytest.mark.parametrize("invalid_number", ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"])
+def test_nonfinite_numbers_in_sealed_run_fail_integrity_not_other_projects(
+    tmp_path: Path, invalid_number: str
+) -> None:
+    from scripts.report_full_plan_v2_readiness import _object
+
+    sealed_root = tmp_path / "sealed"
+    target = sealed_root / "au_qld_lot16_power"
+    target.mkdir(parents=True)
+    path = target / "sealed_run.json"
+    path.write_text(
+        '{"project_id":"au_qld_lot16_power","quantities":['
+        '{"quantity_id":"source-quantity-1","value":' + invalid_number + '}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="non-finite JSON"):
+        _object(path)
+
+    report = diagnostic_report(ROOT, tmp_path / "produced", sealed_root=sealed_root)
+    lot16 = next(
+        p for p in report["projects"] if p["project_id"] == "au_qld_lot16_power"
+    )
+    other = next(
+        p for p in report["projects"]
+        if p["project_id"] == "au_qld_maryborough_service_station"
+    )
+    assert lot16["sealed_run_verified"] is False
+    assert lot16["sealed_quantity_count"] is None
+    assert "sealed_run_integrity_invalid" in lot16["blockers"]
+    assert "sealed_run_missing" in other["blockers"]
+    assert lot16["coverage_accuracy"] is None
+    assert report["score_claim"] is False
+
+
+def test_nonfinite_manifest_json_is_rejected_before_source_identity_checks(tmp_path: Path) -> None:
+    from scripts.report_full_plan_v2_readiness import _object
+
+    for invalid in ("NaN", "Infinity", "-Infinity", "1e999"):
+        target = tmp_path / "manifest.json"
+        target.write_text('{"source_documents":[{"size_bytes":' + invalid + '}]}',
+                          encoding="utf-8")
+        with pytest.raises(ValueError, match="non-finite JSON"):
+            _object(target)
