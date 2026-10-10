@@ -1,0 +1,26 @@
+name: GPT MAX W4 Positive Source Coverage Delta
+on:
+  pull_request:
+    paths:
+      - tools/gptmax_w4_positive_source_coverage_delta.py
+      - tests/test_gptmax_w4_positive_source_coverage_delta.py
+      - .github/workflows/test-gptmax-w4-positive-source-coverage.yml
+jobs:
+  original-source-coverage-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Fail closed on ungrounded W4 source losses
+        run: PYTHONPATH=. python -m pytest -q tests/test_gptmax_w4_positive_source_coverage_delta.py
+      - name: Frozen V2 and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
