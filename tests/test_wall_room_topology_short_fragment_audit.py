@@ -195,3 +195,15 @@ def test_producer_reported_disappearance_is_not_proven_snap_collapse():
     with pytest.raises(ValueError):
         audit_short_source_fragments([f],s,m,max_length_pt=2.5,
             producer_reported_collapsed_fragments=[{"id":"split_1"},{"id":"split_1"}])
+
+
+def test_disappearance_receipt_must_reference_an_absent_original_split_edge():
+    f=fragment()
+    surviving,merged=graph()
+    with pytest.raises(ValueError, match="conflicts"):
+        audit_short_source_fragments([f],surviving,merged,max_length_pt=2.5,
+            producer_reported_collapsed_fragments=[{"id":"split_1"}])
+    absent,empty=graph(raw=False)
+    with pytest.raises(ValueError, match="conflicts"):
+        audit_short_source_fragments([f],absent,empty,max_length_pt=2.5,
+            producer_reported_collapsed_fragments=[{"id":"unrelated_split"}])
