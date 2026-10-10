@@ -4,6 +4,7 @@ on:
     paths:
       - pb_wall_room_topology_wall_assembly.py
       - pb_physical_wall_identity.py
+      - pb_physical_wall_candidate_authority.py
       - tests/test_gptmax_w4_collision_source_identity.py
       - docs/engineering/gptmax_w4_collision_source_identity.md
       - .github/workflows/test-gptmax-w4-collision-source-identity.yml
