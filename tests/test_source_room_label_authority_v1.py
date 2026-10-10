@@ -547,12 +547,15 @@ def test_room_label_producer_builds_one_sealed_text_authority_per_source(
     producer = SourceRoomLabelProducer.from_authorities_for_tests(
         source, room_faces, MockOCRBackend(), page_ids=("1",),
     )
-    assert len(created) == 1
-    assert producer._text_integrity_authority is created[0]
+    # Raster corroboration owns one separate sealed text resolver. The label
+    # producer must mint its own exactly once rather than once per word.
+    assert len(created) == 2
+    assert producer._raster._text_authority is created[0]
+    assert producer._text_integrity_authority is created[1]
     assert {record.label for record in _records(producer)} == {
         "FOOD PREP", "COLD ROOM",
     }
     # Repeated native selector checks cannot rebuild or alter the sealed
     # authority's source universe.
     assert producer._authorize_word is not None
-    assert len(created) == 1
+    assert len(created) == 2
