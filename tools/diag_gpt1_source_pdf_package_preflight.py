@@ -24,8 +24,8 @@ def check_source_pdf_package(manifest_path: Path, source_root: Path) -> dict:
     if not isinstance(documents, list) or not documents:
         raise ValueError("missing source document inventory")
     root = Path(source_root)
-    if not root.is_dir():
-        raise ValueError("source root directory unavailable")
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("source root directory unavailable or symlinked")
     seen = set()
     rows = []
     for document in documents:
