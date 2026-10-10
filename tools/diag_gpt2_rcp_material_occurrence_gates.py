@@ -34,6 +34,14 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
     except (TypeError, ValueError, OverflowError):
         bbox_valid=False
     supported=kind=="reflected_ceiling_plan" and view_token in ("resolved","derived") and bbox_valid
+    # The occurrence producer authenticates ownership to an exact source
+    # viewport. A valid occurrence on a *different* RCP cannot authenticate
+    # this viewport (e.g. page9 proposed vs original drawing).
+    owned_records=bool(records) and bool(view_id) and all(
+        str(getattr(record,"viewport_id","") or "")==view_id
+        and bool(str(getattr(record,"record_id","") or "").strip())
+        for record in records
+    )
     if kind!="reflected_ceiling_plan":
         gate="not_an_rcp_viewport"
     elif not supported:
@@ -46,6 +54,8 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
         gate="producer_source_occurrence_scope_not_corroborated"
     elif not records:
         gate="producer_no_authenticated_occurrences"
+    elif not owned_records:
+        gate="producer_occurrence_viewport_lineage_mismatch"
     else:
         gate="producer_authenticated_occurrences_require_room_owner_before_quantity"
     return {
@@ -61,7 +71,7 @@ def scoped_rcp_material_occurrence_gate(viewport: Any, result: Any) -> dict[str,
         "producer_authenticated_record_ids":[
             str(getattr(r,"record_id",""))
             for r in records
-        ] if supported and complete and scope_token=="corroborated" else [],
+        ] if supported and complete and scope_token=="corroborated" and owned_records else [],
         "first_unclosed_gate":gate,
         "new_room_material_ownership_claim":False,
         "new_metric_quantity_claim":False,
