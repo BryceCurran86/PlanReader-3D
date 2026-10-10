@@ -463,3 +463,91 @@ def test_unrelated_unmeasured_floor_does_not_poison_firm_source_area() -> None:
     assert quantities == publish_live_floor_area_quantities(
         replace(claim, canonical_floors=(unresolved, authentic))
     )
+
+
+def _independent_second_floor_and_area(*, same_room=False, same_face=False):
+    original = _floor()
+    second = replace(
+        original,
+        canonical_floor_id="floor-2",
+        physical_floor_surface_id="floor-2",
+        room_entity_id=original.room_entity_id if same_room else "room-2",
+        source_room_face_record_id=(
+            original.source_room_face_record_id if same_face else "face-2"
+        ),
+        metric_area_quantity_id="room-area-2",
+    )
+    second_area = replace(
+        _source_area(),
+        quantity_id="room-area-2",
+        semantic_key="room_area:source-room-2",
+    )
+    return second, second_area
+
+
+def test_one_canonical_room_cannot_mint_two_different_full_floor_areas() -> None:
+    second, second_area = _independent_second_floor_and_area(same_room=True)
+    authentic = _floor()
+    # Both quantities are individually eligible, carry different source IDs,
+    # and have unique physical/canonical floor identities. Only the claimed
+    # full canonical ROOM identity is shared.
+    assert len(publish_live_floor_area_quantities(
+        replace(_claim_with(second_area), canonical_floors=(second,))
+    )) == 1
+    claim = replace(
+        _claim_with(_source_area(), second_area),
+        canonical_floors=(authentic, second),
+    )
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_floor_area_quantities(
+        replace(claim, canonical_floors=(second, authentic))
+    ) == ()
+
+
+def test_one_source_room_face_cannot_mint_two_separate_full_floor_areas() -> None:
+    second, second_area = _independent_second_floor_and_area(same_face=True)
+    authentic = _floor()
+    assert len(publish_live_floor_area_quantities(
+        replace(_claim_with(second_area), canonical_floors=(second,))
+    )) == 1
+    claim = replace(
+        _claim_with(_source_area(), second_area),
+        canonical_floors=(authentic, second),
+    )
+    assert publish_live_floor_area_quantities(claim) == ()
+    assert publish_live_floor_area_quantities(
+        replace(claim, canonical_floors=(second, authentic))
+    ) == ()
+
+
+def test_unmeasured_full_floor_replay_cannot_hide_shared_room_owner() -> None:
+    second, _ = _independent_second_floor_and_area(same_room=True)
+    unresolved = replace(
+        second,
+        metric_area_quantity_id=None,
+        metric_area_m2=None,
+        metric_area_authority=None,
+        physical_floor_surface_identity_resolved=False,
+    )
+    claim = replace(
+        _claim_with(_source_area()),
+        canonical_floors=(_floor(), unresolved),
+    )
+    assert publish_live_floor_area_quantities(claim) == ()
+
+
+def test_genuinely_separate_rooms_and_faces_preserve_two_firm_floor_areas() -> None:
+    second, second_area = _independent_second_floor_and_area()
+    claim = replace(
+        _claim_with(_source_area(), second_area),
+        canonical_floors=(_floor(), second),
+    )
+    results = publish_live_floor_area_quantities(claim)
+    assert len(results) == 2
+    assert {q.input_entity_ids for q in results} == {("floor-1",), ("floor-2",)}
+    assert {q.metadata["upstream_room_area_quantity_id"] for q in results} == {
+        "room-area-1", "room-area-2"
+    }
+    assert results == publish_live_floor_area_quantities(
+        replace(claim, canonical_floors=(second, _floor()))
+    )
