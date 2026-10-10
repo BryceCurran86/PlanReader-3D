@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "pb_viewport_segmentation.py"
+      - "tools/diag_gpt2_room_wall_dimension_endpoints.py"
+      - "tests/test_gpt2_room_wall_dimension_endpoints.py"
       - ".github/workflows/diag-gpt2-page7-room-figured-witnesses.yml"
   workflow_dispatch:
 
@@ -288,6 +290,67 @@ jobs:
               "published_metric_area_count":0,
               "full_room_candidate_universe_complete":False,
               "status":"CANDIDATE_ONLY_NO_DIMENSION_OWNERSHIP",
+          },sort_keys=True,default=str))
+          # Only exact producer-owned wall subedges and documented source
+          # witness endpoints may form CONTACT CANDIDATES. This does not
+          # grant room dimension ownership, metric scale or area quantities.
+          from tools.diag_gpt2_room_wall_dimension_endpoints import (
+              inspect_source_face_dimension_endpoints
+          )
+          from collections import Counter
+          contact_rows=[]
+          for selector in selectors:
+              face_result=face_authority.resolve_scope(SourceRoomFaceSelector(
+                  document_id=selector.document_id,
+                  revision_id=selector.revision_id,
+                  source_sha256=selector.source_sha256,
+                  snapshot_id=selector.snapshot_id,
+                  page_id=selector.page_id,
+                  decision_scope_id=selector.decision_scope_id,
+              ))
+              actual_faces={row.record_id:row for row in face_result.records}
+              labels=next(
+                  (item["records"] for item in scoped_labels
+                   if item["scope_id"]==selector.decision_scope_id),
+                  (),
+              )
+              for label in labels:
+                  source_face=actual_faces.get(label["source_room_face_record_id"])
+                  assert source_face is not None, "room label lacks its source face"
+                  contact_rows.append({
+                      "room_label":label["room_label"],
+                      "source_face_record_id":source_face.record_id,
+                      "source_label_record_id":label["source_label_record_id"],
+                      "source_wall_subedge_count":len(source_face.boundary_wall_edges),
+                      "native_dimension_endpoints":[
+                          inspect_source_face_dimension_endpoints(source_face,binding)
+                          for binding in dimension_bundle.bindings
+                      ],
+                  })
+          print("GPT2_PAGE7_ROOM_WALL_DIMENSION_ENDPOINT_GATES",json.dumps({
+              "source_sha256":sha,
+              "page_id":7,
+              "source_viewport":floor[0].view_id,
+              "room_count_with_authenticated_face":len(contact_rows),
+              "native_dimension_binding_count":len(dimension_bundle.bindings),
+              "rooms":[{
+                  "room_label":entry["room_label"],
+                  "source_face_record_id":entry["source_face_record_id"],
+                  "source_label_record_id":entry["source_label_record_id"],
+                  "source_wall_subedge_count":entry["source_wall_subedge_count"],
+                  "endpoint_first_gate_counts":dict(sorted(Counter(
+                      row["first_authority_gate"]
+                      for row in entry["native_dimension_endpoints"]
+                  ).items())),
+                  "two_contact_candidates":[
+                      row for row in entry["native_dimension_endpoints"]
+                      if row["first_authority_gate"]==
+                          "two_source_wall_endpoint_contacts_candidate_only"
+                  ],
+              } for entry in contact_rows],
+              "room_owned_figured_measurement_count":0,
+              "metric_room_area_publications":0,
+              "scope":"EXACT_SOURCE_WALL_ENDPOINT_CONTACTS_CANDIDATE_ONLY",
           },sort_keys=True,default=str))
           PY
       - uses: actions/upload-artifact@v4
