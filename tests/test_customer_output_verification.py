@@ -317,3 +317,30 @@ def test_identical_independently_serialized_commercial_provenance_still_passes()
         )
     verified = verify_sealed_customer_output(sealed, reserialized)
     assert verified.verified_quantity_ids == ("qty-1", "qty-2")
+
+
+def test_source_reference_prefix_cannot_impersonate_exact_source_document() -> None:
+    sealed, rows = sealed_and_rows()
+    tampered = dict(rows[0])
+    tampered["source_reference"] = tampered["source_reference"].replace(
+        "document=doc-1;", "document=doc-1-foreign;"
+    )
+    # The machine notes remain genuine: only the visible receipt is damaged.
+    with pytest.raises(CustomerOutputVerificationError, match="source_reference lineage is incomplete"):
+        verify_sealed_customer_output(sealed, [tampered, rows[1]])
+
+
+def test_source_reference_conflicting_duplicate_identity_token_fails_closed() -> None:
+    sealed, rows = sealed_and_rows()
+    tampered = dict(rows[0])
+    tampered["source_reference"] += "; document=doc-foreign"
+    with pytest.raises(CustomerOutputVerificationError, match="conflicting identity tokens"):
+        verify_sealed_customer_output(sealed, [tampered, rows[1]])
+
+
+def test_source_reference_extra_nonidentity_estimator_note_is_allowed() -> None:
+    sealed, rows = sealed_and_rows()
+    annotated = dict(rows[0])
+    annotated["source_reference"] += "; estimator note: checked"
+    report = verify_sealed_customer_output(sealed, [annotated, rows[1]])
+    assert report.verified_quantity_ids == ("qty-1", "qty-2")
