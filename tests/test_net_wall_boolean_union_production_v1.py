@@ -620,7 +620,10 @@ def test_replayed_deduction_cannot_cross_opening_or_source_scope(change) -> None
     result = producer.publish(selector)
     assert result.status == EvidenceResolutionStatus.CONFLICT
     assert NET_WALL_LINEAGE_MISMATCH in result.reason_codes
-    assert result.record is None
+    # Blocked gross geometry remains as audit evidence; it is not a net quantity.
+    assert result.record is not None
+    assert result.record.net_area_m2 is None
+    assert not result.record.opening_deduction_record_ids
 
 
 def test_scenario_03_two_distinct_openings() -> None:
