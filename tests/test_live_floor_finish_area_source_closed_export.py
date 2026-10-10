@@ -362,3 +362,37 @@ def test_floor_finish_seal_rejects_stale_source_face_or_page(
         seal_live_floor_finish_area_run(
             claim, workspace_id=1, project_id="project-1",
         )
+
+
+def test_floor_finish_seal_rejects_alias_canonical_ids_for_same_physical_floor() -> None:
+    original = _floor()
+    alias = replace(
+        original,
+        canonical_floor_id="floor-alias",
+        # Replayed source owned by the same physical floor, not a second one.
+        physical_floor_surface_id=original.physical_floor_surface_id,
+    )
+    first = _quantity()
+    alias_quantity = replace(
+        first,
+        quantity_id="floor-finish-alias-q2",
+        semantic_key="floor_finish_area:floor-alias:FT2:tile",
+        input_entity_ids=(alias.canonical_floor_id,),
+        metadata={
+            **dict(first.metadata),
+            "canonical_floor_id": alias.canonical_floor_id,
+            "finish_occurrence_record_id": "occ-alias",
+        },
+    )
+    claim = replace(
+        _claim(),
+        canonical_floors=(original, alias),
+        floor_finish_quantity_evidence=(first, alias_quantity),
+    )
+    with pytest.raises(
+        SourceClosedRunConflictError,
+        match="physical floor has competing finish area quantities",
+    ):
+        seal_live_floor_finish_area_run(
+            claim, workspace_id=1, project_id="project-1",
+        )
