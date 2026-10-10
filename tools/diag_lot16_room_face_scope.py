@@ -50,17 +50,20 @@ def _floor_quantity_first_failure(floor, room, area_quantity_ids: set[str]) -> s
         return "source_room_face_evidence_unavailable"
     if room is None:
         return "canonical_room_owner_unavailable"
+    # A separately source-authenticated physical scale can close metric area
+    # without an identifiable room-text label. Check an actual measurement
+    # receipt first; the label branch diagnoses only the unmeasured path.
+    if _has_firm_metric_floor_receipt(floor):
+        if floor.metric_area_quantity_id not in area_quantity_ids:
+            return "metric_floor_area_quantity_evidence_unavailable"
+        return "floor_area_quantity_prerequisites_resolved"
     if (
         not room.room_label
         or not room.room_label_binding_record_id
         or not room.room_label_evidence_ids
     ):
         return "authenticated_room_label_ownership_unavailable"
-    if not _has_firm_metric_floor_receipt(floor):
-        return "documented_dimension_or_physical_scale_measurement_unavailable"
-    if floor.metric_area_quantity_id not in area_quantity_ids:
-        return "metric_floor_area_quantity_evidence_unavailable"
-    return "floor_area_quantity_prerequisites_resolved"
+    return "documented_dimension_or_physical_scale_measurement_unavailable"
 
 
 def _floor_quantity_diagnostic(claim) -> dict:
