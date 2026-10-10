@@ -846,3 +846,39 @@ def test_identical_floor_finish_source_ownership_is_not_a_conflict(
     )
     assert retained == (authentic,)
     assert unresolved == ()
+
+
+def test_shared_floor_finish_conflict_result_is_input_order_independent(
+    monkeypatch,
+) -> None:
+    _patch_material_viewports(monkeypatch)
+    source, room_areas, floors = _source_room_area_and_floor(_payload())
+    verified = CrossViewFloorFinishProducer.from_source(
+        source=source, room_areas=room_areas, floors=floors,
+    ).publish().records[0]
+    competing = replace(
+        verified,
+        canonical_floor_id="floor-b",
+        physical_floor_surface_id="floor-b",
+        physical_room_id="room-b",
+    )
+    unrelated = replace(
+        verified,
+        canonical_floor_id="floor-c",
+        physical_floor_surface_id="floor-c",
+        physical_room_id="room-c",
+        occurrence_record_id="different-authenticated-occurrence",
+    )
+    original, ids = _quarantine_reused_floor_finish_occurrences(
+        (verified, competing, unrelated)
+    )
+    reversed_rows, reversed_ids = _quarantine_reused_floor_finish_occurrences(
+        (unrelated, competing, verified)
+    )
+    assert ids == reversed_ids
+    assert tuple(row.occurrence_record_id for row in original) == (
+        "different-authenticated-occurrence",
+    )
+    assert tuple(row.occurrence_record_id for row in reversed_rows) == (
+        "different-authenticated-occurrence",
+    )
