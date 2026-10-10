@@ -250,47 +250,33 @@ def test_deterministic_replay() -> None:
     assert first.to_dict() == replay.to_dict()
 
 
-@pytest.mark.parametrize(
-    ("value", "blocker"),
-    (
-        (float("nan"), "opening_deduction_value_invalid"),
-        (float("inf"), "opening_deduction_value_invalid"),
-        (-0.01, "opening_deduction_value_invalid"),
-    ),
-)
-def test_bad_opening_deduction_never_authenticates_net_area(
-    value: float, blocker: str,
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), -0.01))
+def test_invalid_opening_deduction_is_rejected_by_quantity_contract(
+    value: float,
 ) -> None:
-    deduction = _deduction("OP-1", value)
-    result = _build(
-        deductions=(deduction,), completion=_complete(("OP-1",)),
-    )
-    assert result.abstained
-    assert result.value is None
-    assert blocker in result.blocking_reasons
-    assert "opening_universe_completeness_not_authenticated" in result.blocking_reasons
+    # QuantityEvidence is sealed before any downstream wall arithmetic.
+    with pytest.raises(ValueError, match="quantity value must be finite"):
+        _deduction("OP-1", value)
 
 
-@pytest.mark.parametrize(
-    ("value", "blocker"),
-    (
-        (float("nan"), "gross_wall_area_value_invalid"),
-        (float("inf"), "gross_wall_area_value_invalid"),
-        (-2.0, "gross_wall_area_value_invalid"),
-        (0.0, "gross_wall_area_value_invalid"),
-    ),
-)
-def test_invalid_gross_wall_m2_never_authenticates_net_area(
-    value: float, blocker: str,
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), -2.0))
+def test_invalid_gross_area_is_rejected_by_quantity_contract(
+    value: float,
 ) -> None:
+    with pytest.raises(ValueError, match="quantity value must be finite"):
+        _gross(value)
+
+
+def test_zero_gross_area_stays_blocked_at_net_wall_measurement_gate() -> None:
+    # Zero is representable in the generic quantity contract, but not an
+    # admissible measured wall gross area from which net m² can be minted.
     result = _build(
         deductions=(_deduction("OP-1", 1.0),),
         completion=_complete(("OP-1",)),
-        gross=_gross(value),
+        gross=_gross(0.0),
     )
-    assert result.abstained
-    assert result.value is None
-    assert blocker in result.blocking_reasons
+    assert result.abstained and result.value is None
+    assert "gross_wall_area_value_invalid" in result.blocking_reasons
 
 
 @pytest.mark.parametrize(
