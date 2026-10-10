@@ -112,5 +112,7 @@ jobs:
         if: always()
         with:
           name: gptmax-endpoint-trace-${{ matrix.name }}
-          path: source-*.json
+          path: |
+            source-*.json
+            original-source-identity-retention.json
           retention-days: 30
