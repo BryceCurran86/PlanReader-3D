@@ -60,7 +60,7 @@ def test_true_w2_snap_collapse_retains_source_proof_but_never_restores_edge():
     f=fragment(coords=(10.,10.,11.9,10.))
     s,m=graph(raw=False)
     result=audit([f],s,m)
-    assert result["w2_retention_reason_counts"]=={"SNAP_COLLAPSED":1}
+    assert result["w2_retention_reason_counts"]=={"EDGE_ABSENT_UNRESOLVED":1}
     witness=result["original_positive_source_short_fragments"][0]
     assert witness["max_endpoint_snap_displacement_pt"] is None
     assert witness["original_source_geometry_pt"]==[10.,10.,11.9,10.]
@@ -182,3 +182,16 @@ def test_w2_opt_in_trace_never_changes_existing_graph_authority(monkeypatch):
     assert witness["physical_host_publication_allowed"] is False
     assert witness["opening_count_publication_allowed"] is False
     assert witness["metric_quantity_publication_allowed"] is False
+
+
+def test_producer_reported_disappearance_is_not_proven_snap_collapse():
+    f=fragment(coords=(10.,10.,11.9,10.))
+    s,m=graph(raw=False)
+    r=audit_short_source_fragments([f],s,m,max_length_pt=2.5,
+        producer_reported_collapsed_fragments=[{"id":"split_1","reason":"snap_collapsed"}])
+    assert r["w2_retention_reason_counts"]=={"PRODUCER_REPORTED_EDGE_ABSENT":1}
+    assert not r["physical_host_publication_allowed"]
+    assert not r["opening_count_publication_allowed"]
+    with pytest.raises(ValueError):
+        audit_short_source_fragments([f],s,m,max_length_pt=2.5,
+            producer_reported_collapsed_fragments=[{"id":"split_1"},{"id":"split_1"}])
