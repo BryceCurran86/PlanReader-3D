@@ -216,7 +216,7 @@ def test_unreadable_sealed_run_bytes_are_one_project_blocker_not_suite_crash(tmp
     sealed_root = tmp_path / "sealed"
     target = sealed_root / "au_qld_lot16_power"
     target.mkdir(parents=True)
-    (target / "sealed_run.json").write_bytes(b"\\xff\\xfe\\xfa")
+    (target / "sealed_run.json").write_bytes(bytes((0xFF, 0xFE, 0xFA)))
 
     report = diagnostic_report(ROOT, tmp_path / "produced", sealed_root=sealed_root)
     assert len(report["projects"]) == 4
