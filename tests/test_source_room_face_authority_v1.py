@@ -461,9 +461,13 @@ def test_nonfinite_source_edges_cannot_supply_wall_ownership_or_collinear_overla
 
 def test_finite_source_coordinates_with_overflowed_intermediates_abstain():
     """Finite inputs still cannot authenticate infinite arithmetic results."""
-    from pb_source_room_face_authority import _collinear_overlap_edge
+    from pb_source_room_face_authority import (
+        _collinear_overlap_edge, _finite_source_edge,
+    )
 
     infinite_length = ((-1e308, 0.0), (1e308, 0.0))
+    assert not _finite_source_edge(infinite_length)
+    assert not _finite_source_edge(tuple(reversed(infinite_length)))
     finite_child = ((0.0, 0.0), (10.0, 0.0))
     assert not _edge_contains_edge(infinite_length, finite_child)
     assert _collinear_overlap_edge(infinite_length, finite_child) is None
