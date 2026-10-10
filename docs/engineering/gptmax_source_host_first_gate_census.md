@@ -46,14 +46,22 @@ It surfaces:
 Exact archived original Lot16 PDF SHA:
 `10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844`.
 Original recorded production handoff has 23 authenticated opening existences,
-14 host bindings, 9 host frames; seven of the nine unhosted opening receipts
+14 host bindings, 9 host frames. Its semantic opening inventory is explicitly
+`conflict` and `physical_opening_universe_complete=false`: it has 23
+representatives, 591 conflicting visible-source observations and 468 residual
+visible-source observations. These are evidence-observation counts, NOT more
+physical openings or schedule quantities. Seven of the nine unhosted opening receipts
 have an explicit left/right source primitive mapping blocker and two contain
 only `no_authenticated_host_wall_band`. This census is **not** a 27-denominator
 benchmark run.
 
 Exact archived original Maryborough PDF SHA:
 `b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`.
-Original report has 180 opening existences, 3 hosts, 0 frames. The **177** unhosted original physical openings have first-gate classes: **94** missing authenticated host wall bands, **62** blocked by ambiguous physical-wall equivalence (42 direct and 20 with concurrent two-face lineage ambiguity), and **21** with incomplete wall-source scope / boundary evidence (14 viewport-cropped and seven scope-bounds unresolved). These source classifications are not a promise that the producer could seal the quantities after a single fix. Page 7 W4
+Original report has 180 opening existences, 3 hosts, 0 frames. Its semantic
+inventory also has status `conflict`, 180 opening representatives, 7,325
+conflicting source observations and 1,533 residual observations, with
+`physical_opening_universe_complete=false` and
+`structural_enumeration_complete=false`. The **177** unhosted original physical openings have first-gate classes: **94** missing authenticated host wall bands, **62** blocked by ambiguous physical-wall equivalence (42 direct and 20 with concurrent two-face lineage ambiguity), and **21** with incomplete wall-source scope / boundary evidence (14 viewport-cropped and seven scope-bounds unresolved). These source classifications are not a promise that the producer could seal the quantities after a single fix. Page 7 W4
 has 3,737 source candidate records but only 3,736 unique addresses. The
 source-edge and junction records `split_2296` and `split_9744`
 share the address `wall_6d948b1b47258597fa66`, and the
