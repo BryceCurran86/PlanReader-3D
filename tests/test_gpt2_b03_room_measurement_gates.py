@@ -159,3 +159,12 @@ def test_mismatched_source_page_rejects_documented_receipt() -> None:
     row = inspect_room_measurement_gates(claim)["rooms"][0]
     assert row["firm_documented_area_receipt"] is False
     assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT"
+
+
+def test_mismatched_room_snapshot_rejects_documented_receipt() -> None:
+    claim = _documented_area_claim()
+    claim.canonical_floors[0].snapshot_id = "room-snapshot-1"
+    claim.room_area_quantity_evidence[0].metadata["room_snapshot_id"] = "room-snapshot-2"
+    row = inspect_room_measurement_gates(claim)["rooms"][0]
+    assert row["firm_documented_area_receipt"] is False
+    assert row["first_unclosed_gate"] == "METRIC_MEASUREMENT"
