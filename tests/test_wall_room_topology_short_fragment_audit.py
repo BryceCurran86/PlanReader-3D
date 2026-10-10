@@ -340,3 +340,14 @@ def test_replay_input_order_and_unrelated_content_preserve_source_observations()
                              w["max_endpoint_snap_displacement_pt"]))
     assert all(v == observations[0] for v in observations)
     assert (f, unrelated) == original
+
+
+@pytest.mark.parametrize("raw", [True, False])
+def test_finite_original_source_points_cannot_overflow_raw_fragment_length(raw):
+    f = fragment(coords=(1.7e308, 1.7e308, -1.7e308, -1.7e308))
+    s, m = graph(raw=raw)
+    original = deepcopy((f, s, m))
+    assert all(math.isfinite(f[key]) for key in ("x1", "y1", "x2", "y2"))
+    with pytest.raises(ValueError, match="nonfinite original split source length"):
+        audit([f], s, m)
+    assert (f, s, m) == original
