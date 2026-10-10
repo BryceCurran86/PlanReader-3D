@@ -6,6 +6,7 @@ association is observational evidence, never a physical-equivalence decision.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from dataclasses import asdict
 import hashlib
 import json
@@ -24,27 +25,18 @@ def _graph_fingerprint(graph):
 
 
 def _records_from_original_call(walls, identities, graph):
-    # The production collector is keyed by candidate_id. An identical repeated
-    # producer row is observable without changing that identity; conflicting
-    # rows under the same key are not, and must remain a hard failure.
-    by_candidate_id = {}
-    for wall in walls:
-        cid = wall.candidate_id
-        if not isinstance(cid, str) or not cid:
-            raise RuntimeError("invalid source assembly candidate identity")
-        prior = by_candidate_id.get(cid)
-        if prior is not None:
-            if asdict(prior) != asdict(wall):
-                raise RuntimeError("conflicting duplicate source assembly identity")
-            continue
-        by_candidate_id[cid] = wall
-    if set(by_candidate_id) != set(identities):
+    # The production collector is keyed by candidate_id; original W4 source
+    # scope rows can nevertheless have a hash collision. Keep every producer
+    # row for multiset verification; never silently pick a duplicate wall.
+    wall_ids = [wall.candidate_id for wall in walls]
+    if (any(not isinstance(cid, str) or not cid for cid in wall_ids)
+            or set(wall_ids) != set(identities)):
         raise RuntimeError("foreign or missing source assembly identity")
     edges = {str(edge["id"]): edge for edge in graph["edges"]}
     if len(edges) != len(graph["edges"]):
         raise RuntimeError("duplicate source assembly graph edge")
     records = []
-    for wall in sorted(by_candidate_id.values(), key=lambda row: row.candidate_id):
+    for wall in sorted(walls, key=lambda row: row.candidate_id):
         identity = identities[wall.candidate_id]
         fragments = []
         for edge_id in sorted(identity.edge_ids):
@@ -90,12 +82,29 @@ def terminal_source_span_shadow_report(source_bytes: bytes, *, page_ids: tuple[s
         fingerprint = _graph_fingerprint(graph)
         identities = original_collect(walls, graph)
         records = _records_from_original_call(walls, identities, graph)
-        preview = preview_terminal_source_spans(
-            records, graph["short_source_fragment_retention_audit"])
+        candidate_counts = Counter(record["wall_candidate_id"] for record in records)
+        collided = sorted(cid for cid, count in candidate_counts.items() if count > 1)
+        if collided:
+            # Scope-wide abstention: removing only colliding records would hide
+            # their competing source endpoints and invent unique ownership.
+            preview = {
+                "source_path_previews": [],
+                "disposition_counts": {
+                    "source_identity_collision_scope_quarantined": len(collided),
+                },
+                "source_scope_association_authenticated_by_this_preview": False,
+                "physical_equivalence_proven": False,
+                "graph_mutation_allowed": False,
+                "host_count_quantity_publication_allowed": False,
+                "benchmark_accuracy": None,
+            }
+        else:
+            preview = preview_terminal_source_spans(
+                records, graph["short_source_fragment_retention_audit"])
         if _graph_fingerprint(graph) != fingerprint:
             raise RuntimeError("shadow preview mutated source graph")
         calls.append({"graph": graph, "records": records, "preview": preview,
-                      "graph_sha256": fingerprint})
+                      "graph_sha256": fingerprint, "collision_ids": collided})
         return identities  # Never replace, extend or rekey an identity.
 
     with patch.dict("os.environ", {"GPTMAX_W2_SHORT_SOURCE_AUDIT": "1"}), \
@@ -132,12 +141,19 @@ def terminal_source_span_shadow_report(source_bytes: bytes, *, page_ids: tuple[s
                 or scope["revision_id"] != source_report["revision_id"]
                 or scope["snapshot_id"] != source_report["snapshot_id"]):
             raise RuntimeError("foreign source assembly scope provenance")
-        actual = {r["wall_candidate_id"]: r for r in scope["records"]}
-        if len(actual) != len(scope["records"]) or set(actual) != {r["wall_candidate_id"] for r in records}:
-            raise RuntimeError("source assembly scope candidate set mismatch")
-        for record in records:
-            if any(actual[record["wall_candidate_id"]].get(k) != value for k, value in record.items()):
-                raise RuntimeError("original source assembly record mismatch")
+        # Compare the complete multiset of raw source rows, not a dict that
+        # overwrites colliding candidate IDs. Physical source identity must be
+        # byte-equivalent even when W4 emitted conflicting candidate instances.
+        fields = ("wall_candidate_id", "wall_candidate",
+                  "physical_identity", "source_edge_fragments")
+        def receipt_key(row):
+            if any(k not in row for k in fields):
+                raise RuntimeError("incomplete original source assembly record")
+            return json.dumps({k: row[k] for k in fields}, sort_keys=True,
+                              allow_nan=False, default=lambda value: value.value)
+        if (Counter(receipt_key(r) for r in scope["records"])
+                != Counter(receipt_key(r) for r in records)):
+            raise RuntimeError("original source assembly record multiset mismatch")
         rows.append({
             "source_scope_provenance": {key: scope[key] for key in (
                 "document_id", "source_sha256", "revision_id", "snapshot_id",
@@ -146,6 +162,8 @@ def terminal_source_span_shadow_report(source_bytes: bytes, *, page_ids: tuple[s
             "original_scope_records_match_observed_call": True,
             "graph_without_diagnostic_sha256": call["graph_sha256"],
             "original_identity_count": len(records),
+            "quarantined_collision_candidate_ids": call["collision_ids"],
+            "source_scope_collision_quarantined": bool(call["collision_ids"]),
             "terminal_source_path_preview": call["preview"],
         })
     if not rows:
@@ -154,6 +172,8 @@ def terminal_source_span_shadow_report(source_bytes: bytes, *, page_ids: tuple[s
         "source_sha256": source_sha,
         "source_report": source_report,
         "source_assembly_call_previews": rows,
+        "quarantined_source_scope_count": sum(
+            bool(row["source_scope_collision_quarantined"]) for row in rows),
         "source_evidence_only": True,
         "physical_equivalence_proven": False,
         "graph_identity_host_frame_quantity_mutation_allowed": False,
