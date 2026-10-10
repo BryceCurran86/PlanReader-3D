@@ -383,6 +383,17 @@ def verify_sealed_customer_output(
             raise TypeError("customer_rows must contain mappings")
         quantity_id = _customer_quantity_id(row)
         if not quantity_id:
+            # A damaged automated projection must not evade the bijection
+            # by dropping its quantity ID and embedded provenance. Manual
+            # estimator rows without automated source signatures remain out
+            # of scope for source-closed quantity reconciliation.
+            if (
+                row.get("commercial_projection_provenance") is not None
+                or _clean(row.get("source_reference")).startswith("QuantityEvidence ")
+            ):
+                raise CustomerOutputVerificationError(
+                    "automated customer row is missing quantity identity"
+                )
             continue
         if quantity_id in customer_by_id:
             raise CustomerOutputVerificationError(
