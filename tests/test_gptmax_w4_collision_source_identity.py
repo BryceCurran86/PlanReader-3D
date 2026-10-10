@@ -182,3 +182,49 @@ def test_source_collision_rekey_is_independent_of_global_page_translation():
     assert len({c.candidate_id for c in translated}) == 2
     assert {c.face_a_segment_ids[0] for c in translated} == {
         c.face_a_segment_ids[0] for c in original_ids}
+
+
+def test_coincident_source_edges_with_shared_ancestry_and_distinct_junctions():
+    """Coincident W2 source edges can still have different original W3 owners.
+
+    Matching geometry and three shared native parents do not justify silently
+    selecting the last row; distinct W4 candidate addresses remain separately
+    subject to physical SAME/AMBIGUOUS equivalence review.
+    """
+    a = wall("source-edge-a", "junction-a")
+    b = wall("source-edge-b", "junction-b", reverse=True)
+    source_edges = edges()
+    lineage = ("original-parent-one", "original-parent-two", "original-parent-three")
+    for name in ("source-edge-a", "source-edge-b"):
+        source_edges[name][LINEAGE_KEY]["source_primitive_ids"] = lineage
+    originals = deepcopy((a, b, source_edges))
+    candidates, owners = _source_owned_collision_candidate_addresses(
+        (a, b), source_edges,
+        {"source-edge-a": a.candidate_id, "source-edge-b": b.candidate_id})
+    assert len(candidates) == 2
+    assert candidates[0].candidate_id != candidates[1].candidate_id
+    assert owners["source-edge-a"] == candidates[0].candidate_id
+    assert owners["source-edge-b"] == candidates[1].candidate_id
+    assert all("source_owned_w4_candidate_address_collision" in x.reason_codes
+               and x.status is EvidenceResolutionStatus.CANDIDATE
+               for x in candidates)
+    assert (a, b, source_edges) == originals
+
+
+def test_noncolliding_unchanged_id_is_never_reused_by_disambiguator(monkeypatch):
+    import pb_wall_room_topology_wall_assembly as w4
+    a = wall("source-edge-a", "junction-a")
+    b = wall("source-edge-b", "junction-b")
+    unrelated = wall("unrelated", "junction-c", candidate_id="wall_other", y=10.)
+    original = w4.stable_contract_id
+    def collide_with_unrelated(prefix, payload):
+        if "geometric_candidate_id" in payload:
+            return unrelated.candidate_id
+        return original(prefix, payload)
+    monkeypatch.setattr(w4, "stable_contract_id", collide_with_unrelated)
+    with pytest.raises(ValueError, match="W4 collision not uniquely source-disambiguated"):
+        _source_owned_collision_candidate_addresses(
+            (a, b, unrelated), edges(),
+            {"source-edge-a": a.candidate_id,
+             "source-edge-b": b.candidate_id,
+             "unrelated": unrelated.candidate_id})
