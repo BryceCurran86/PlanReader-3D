@@ -102,7 +102,19 @@ jobs:
           after=Path("pixel-source-after.json").read_bytes()
           assert before==after, "default original source report changed"
           report=json.loads(after)
-          assert report["summary"]=={"physical_existence_claims":23,"host_bindings":14,"host_frames":9}
+          # Source-verified table/dimension opposition can legitimately change
+          # the number of *unhosted* G17 hypotheses independently of this
+          # read-only positive-pixel audit. The SHA-verified PR-base and HEAD
+          # reports MUST remain byte-identical; existing hosts and frames
+          # remain protected as fixed original physical control receipts.
+          summary=report["summary"]
+          assert summary["physical_existence_claims"]==len(report["opening_bindings"])
+          assert summary["physical_existence_claims"]==len(report["host_frames"])
+          assert len({
+              r["opening_identity_id"] for r in report["opening_bindings"]
+          })==summary["physical_existence_claims"]
+          assert summary["host_bindings"]==14
+          assert summary["host_frames"]==9
           print({"authenticated_pixel_sources":len(records),"unchanged_original_host_frames":True})
           PY
       - uses: actions/upload-artifact@v4
