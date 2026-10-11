@@ -231,3 +231,34 @@ def test_caller_cannot_forge_original_pdf_byte_hash(invalid_pdf):
     raw, required, pixel = fixture()
     with pytest.raises(TypeError, match="immutable bytes"):
         join(raw, required, pixel, pdf_bytes=invalid_pdf)
+
+
+@pytest.mark.parametrize("mutation", [
+    "wrong_render_dpi", "wrong_pixel_scale", "false_vertical_orientation",
+    "component_bbox_excludes_endpoint", "negative_pixel", "boolean_pixel",
+    "pixel_run_endpoints_reversed", "page_geometry_mismatch_with_same_receipt",
+])
+def test_reported_pixel_receipt_must_replay_complete_original_render_coordinates(mutation):
+    raw, required, pixel = fixture()
+    record = pixel["authenticated_pixel_source_records"][0]
+    receipt = record["pixel_receipt"]
+    if mutation == "wrong_render_dpi":
+        pixel["render_dpi"] = 72
+    elif mutation == "wrong_pixel_scale":
+        receipt["pixel_geometry"][2] += 2
+    elif mutation == "false_vertical_orientation":
+        receipt["orientation"] = "vertical"
+    elif mutation == "component_bbox_excludes_endpoint":
+        receipt["component_bbox"][2] -= 1
+    elif mutation == "negative_pixel":
+        receipt["pixel_geometry"][0] = -1
+    elif mutation == "boolean_pixel":
+        receipt["pixel_geometry"][0] = True
+    elif mutation == "pixel_run_endpoints_reversed":
+        receipt["pixel_geometry"][0], receipt["pixel_geometry"][2] = (
+            receipt["pixel_geometry"][2], receipt["pixel_geometry"][0])
+    elif mutation == "page_geometry_mismatch_with_same_receipt":
+        record["source_observation"]["geometry"] = [18., 20., 22., 20.]
+        receipt["geometry"] = [18., 20., 22., 20.]
+    with pytest.raises((ValueError, TypeError)):
+        join(raw, required, pixel)
