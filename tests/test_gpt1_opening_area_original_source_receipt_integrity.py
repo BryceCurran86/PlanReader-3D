@@ -192,3 +192,20 @@ def test_replayed_opening_quantity_fails_final_seal_even_with_unchanged_id_and_r
             replace(claim, opening_quantity_evidence=(forged,)),
             workspace_id=1, project_id="source-opening-original",
         )
+
+
+
+@pytest.mark.parametrize("invalid_id", [True, 17, "", " opening-1", "opening-1 "])
+def test_opening_source_trace_refuses_normalized_canonical_physical_identity(invalid_id):
+    from pb_live_opening_source_closed_export import _opening_map
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    forged = replace(_opening(), canonical_opening_id=invalid_id)
+    with pytest.raises(SourceClosedRunConflictError, match="original typed non-empty source ID"):
+        _opening_map((forged,))
+
+
+def test_opening_source_trace_original_canonical_id_stays_exact():
+    from pb_live_opening_source_closed_export import _opening_map
+    opening = _opening()
+    assert _opening_map((opening,))[opening.canonical_opening_id] is opening
