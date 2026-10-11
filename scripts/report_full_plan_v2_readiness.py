@@ -259,6 +259,17 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
                     blockers.append(
                         f"projection_{produced_field}_mismatch:{quantity_id}"
                     )
+        # Source-sealed quantities are not proof that customer output exists.
+        # The new exporter records false until the existing signed-customer
+        # bijection has been independently executed. A true flag is only a
+        # reported receipt, not estimator approval or trade authentication.
+        if (
+            "customer_output_parity_verified" in item
+            and item["customer_output_parity_verified"] is not True
+        ):
+            blockers.append(
+                f"projection_customer_output_parity_unverified:{quantity_id}"
+            )
         category = item.get("trade_category")
         if not isinstance(category, str) or not category.strip():
             blockers.append(f"projection_trade_category_missing:{quantity_id}")
