@@ -17,6 +17,8 @@ from pb_opening_host_binding_authority import (
     _COORD_TOL, _RASTER_WHOLE_WALL_CENTER_TOL_PT, _OpeningGeometry,
 )
 from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
+from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
+from tools.diag_gptmax_required_flank_source import _reported_flanks
 from tools.diag_gptmax_raster_host_source_membership import (
     _finite_coordinates, _finite_source_axis, _validate_aperture_basis,
 )
@@ -49,7 +51,7 @@ def _opening_geometry(row):
     return geometry
 
 
-def _side_candidates(row, role, opening):
+def _side_candidates(row, role, opening, required):
     if not isinstance(row, dict) or row.get("role") != role:
         raise ValueError("reported flange side ownership unavailable")
     candidates = row.get("pixel_run_candidates")
@@ -74,6 +76,16 @@ def _side_candidates(row, role, opening):
         _, axis, fail = _finite_source_axis(coords, opening)
         if fail:
             raise ValueError("pixel source-run does not follow opening wall axis")
+        lo,hi,offset=axis
+        start,end=required["axis_span_pt"]
+        cross_lo,cross_hi=required["normal_span_pt"]
+        endpoint=hi if role=="left" else lo
+        pixel_tol=_RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+        if (abs(endpoint-required["end_axis_coordinate_pt"])
+                > DEFAULT_GAP_SNAP_TOLERANCE_PT + _COORD_TOL
+                or not cross_lo-pixel_tol <= offset <= cross_hi+pixel_tol
+                or min(hi,end)-max(lo,start) <= pixel_tol):
+            raise ValueError("reported pixel source-run lacks original G17 flank contact")
         mx, my = ((coords[0]+coords[2])*0.5, (coords[1]+coords[3])*0.5)
         offset = (mx-ox)*nx + (my-oy)*ny
         if not isfinite(offset):
@@ -122,13 +134,19 @@ def inspect_cross_flank_rails(original_bytes, foreground, pdf_bytes, *, expected
     observations = []
     for oid, f in sorted(flank_rows.items()):
         opening = _opening_geometry(original_rows[oid])
+        try:
+            required=_reported_flanks(original_rows[oid],opening,original)
+        except (KeyError, TypeError) as exc:
+            raise ValueError("original G17 flank support receipts unavailable") from exc
+        if required is None:
+            raise ValueError("original G17 face/end flank geometry unavailable")
         if not isinstance(f.get("flanks"), list) or len(f["flanks"]) != 2:
             raise ValueError("original left/right source flanks incomplete")
         flanks = {r.get("role"):r for r in f["flanks"] if isinstance(r, dict)}
         if set(flanks) != {"left", "right"} or len(f["flanks"]) != len(flanks):
             raise ValueError("conflicting left/right source flank scope")
-        left = _side_candidates(flanks["left"], "left", opening)
-        right = _side_candidates(flanks["right"], "right", opening)
+        left = _side_candidates(flanks["left"], "left", opening,required["left"])
+        right = _side_candidates(flanks["right"], "right", opening,required["right"])
         side_pairs = {role: _paired_rails(rows, opening.thickness, tol)
                       for role, rows in (("left",left),("right",right))}
         four_line_alternatives = []

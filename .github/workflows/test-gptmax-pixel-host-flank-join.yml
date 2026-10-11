@@ -1,0 +1,121 @@
+name: GPT MAX Original Pixel Flank Read-Only Join
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_pixel_host_flank_join.py
+      - tests/test_gptmax_pixel_host_flank_join.py
+      - docs/engineering/gptmax_pixel_host_flank_join.md
+      - .github/workflows/test-gptmax-pixel-host-flank-join.yml
+jobs:
+  nonpublishing-join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Strict original-source and pixel-flank join regressions
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_pixel_host_flank_join.py tests/test_gptmax_required_flank_source.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+  exact-original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Retain exact source provenance and independent positive-pixel producer
+        run: |
+          git rev-parse HEAD > exact_join_head_sha.txt
+          # Fetch only the source branch ref; require exact pinned commit.
+          git fetch origin refs/pull/2356/head
+          test "$(git rev-parse FETCH_HEAD)" = ac516e5f1478f687e67eff2b014b0f49b9f483c8
+          git worktree add --detach /tmp/gptmax-original-pixel-producer ac516e5f1478f687e67eff2b014b0f49b9f483c8
+          test "$(git -C /tmp/gptmax-original-pixel-producer rev-parse HEAD)" = ac516e5f1478f687e67eff2b014b0f49b9f483c8
+          sha256sum "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
+      - name: Run original physical-host and required-flank evidence
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_raster_host_source_membership.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-g17-w4-membership.json
+          PYTHONPATH=. python tools/diag_gptmax_required_flank_source.py \
+            --source-report original-g17-w4-membership.json \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-required-flanks.json
+      - name: Independently nominate original positive pixels without promoting source visibility
+        run: |
+          (
+            cd /tmp/gptmax-original-pixel-producer
+            PYTHONPATH=. python -u tools/diag_gptmax_raster_positive_pixel_source.py \
+              --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --page-id 3 \
+              --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+              --expected-render-sha 64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab \
+              --output "$GITHUB_WORKSPACE/original-pixel-source.json"
+          )
+      - name: Read-only source flange-to-pixel/W2/W4 proof and unmodified host baseline
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_pixel_host_flank_join.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --original-source-report original-g17-w4-membership.json \
+            --required-flank-report original-required-flanks.json \
+            --pixel-source-report original-pixel-source.json \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-host-flank-pixel-join.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          source=json.loads(Path("original-g17-w4-membership.json").read_text())
+          required=json.loads(Path("original-required-flanks.json").read_text())
+          pixels=json.loads(Path("original-pixel-source.json").read_text())
+          joined=json.loads(Path("original-host-flank-pixel-join.json").read_text())
+          assert (source["source_original_opening_count"],source["source_original_host_count"],source["source_original_frame_count"])==(23,14,9)
+          assert joined["source_sha256"]==source["source_sha256"]==required["source_sha256"]==pixels["source_sha256"]
+          assert pixels["primitive_safety_cap"]==source["primitive_safety_cap"]==20000
+          assert len(source["opening_rows"])==len(required["opening_rows"])==len(joined["opening_rows"])==7
+          assert all(not row["host_publication_allowed"] for row in joined["opening_rows"])
+          assert all(not joined[k] for k in ("host_publication_allowed","opening_count_publication_allowed","metric_quantity_publication_allowed","physical_equivalence_proven","source_universe_completeness_proven"))
+          assert joined["benchmark_accuracy"] is None
+          for row in joined["opening_rows"]:
+              assert len(row["flanks"]) == 2
+              assert {x["role"] for x in row["flanks"]} == {"left","right"}
+              for flank in row["flanks"]:
+                  assert not flank["physical_host_proven"]
+                  for candidate in flank["pixel_run_candidates"]:
+                      assert not candidate["host_publication_allowed"]
+          print({"opened_source_identities":len(joined["opening_rows"]),
+                 "pixel_nominations":pixels["authenticated_pixel_source_count"],
+                 "unaltered_source_hosts":source["source_original_host_count"],
+                 "host_publication_allowed":False})
+          PY
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-lot16-flank-pixel-join
+          retention-days: 30
+          path: |
+            exact_join_head_sha.txt
+            original-required-flanks.json
+            original-host-flank-pixel-join.json
+            original-g17-w4-membership.json
+            original-pixel-source.json
