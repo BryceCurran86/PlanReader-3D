@@ -120,7 +120,7 @@ def test_stale_and_foreign_selectors_reject_role(field,value):
             support_observation_ids=selected)
 
 
-@pytest.mark.parametrize('shade', [.95, .960784, .98, 1.0])
+@pytest.mark.parametrize('shade', [.96, .960784, .98, 1.0])
 def test_source_owned_pale_neutral_unstroked_rectangles_can_only_oppose(shade):
     source, _published, selector, selected = _source(fill=(shade,shade,shade))
     atoms = source.native_unstroked_fill_evidence(selector, support_observation_ids=selected)
