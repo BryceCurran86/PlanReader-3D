@@ -116,10 +116,12 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"floor-finish quantity is not metric: {quantity.quantity_id}"
             ) from exc
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise SourceClosedRunConflictError(
+                f"floor-finish source metric is untyped: {quantity.quantity_id}"
+            )
         if (
-            not math.isfinite(confidence)
-            or not 0.0 <= confidence <= 1.0
-            or not math.isfinite(qvalue)
+            not math.isfinite(qvalue)
             or qvalue <= 0.0
             or not math.isfinite(floor_value)
             or abs(qvalue - floor_value) > 1e-9
