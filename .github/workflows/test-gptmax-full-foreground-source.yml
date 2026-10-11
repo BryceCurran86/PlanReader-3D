@@ -1,0 +1,224 @@
+name: GPT MAX Complete Original Foreground Source Runs
+on:
+  pull_request:
+    paths:
+      - tools/gptmax_full_foreground_run_source.py
+      - tools/diag_gptmax_full_foreground_run_source.py
+      - tools/diag_gptmax_full_foreground_flank.py
+      - tests/test_gptmax_full_foreground_flank.py
+      - tests/test_gptmax_full_foreground_run_source.py
+      - docs/engineering/gptmax_full_foreground_source.md
+      - .github/workflows/test-gptmax-full-foreground-source.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original-positive run/authority regressions
+        run: |
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_gptmax_full_foreground_run_source.py \
+            tests/test_gptmax_full_foreground_flank.py \
+            tests/test_gptmax_raster_positive_pixel_source.py \
+            tests/test_source_visibility_raster_idempotency.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Pin exact original Lot16 PDF and original base
+        run: |
+          git rev-parse HEAD > full-foreground-head.txt
+          echo "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844  documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" | sha256sum --check --status
+          git worktree add --detach /tmp/gptmax-full-run-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/gptmax-full-run-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --page-id 3 --output "$GITHUB_WORKSPACE/original-host-frame-before.json"
+          )
+      - name: Source-authorized all-foreground original raster run inventory
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_full_foreground_run_source.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --expected-render-sha 64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab \
+            --output original-complete-foreground.json
+      - name: Exact original opening flanks versus every authenticated positive pixel run
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_raster_host_source_membership.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-g17-w4-ancestry.json
+          PYTHONPATH=. python tools/diag_gptmax_required_flank_source.py \
+            --source-report original-g17-w4-ancestry.json \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-required-host-flanks.json
+          PYTHONPATH=. python -u tools/diag_gptmax_full_foreground_flank.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --original-source-report original-g17-w4-ancestry.json \
+            --required-flank-report original-required-host-flanks.json \
+            --foreground-source-report original-complete-foreground.json \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-seven-source-flanks.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          ancestry=json.loads(Path("original-g17-w4-ancestry.json").read_text())
+          joined=json.loads(Path("original-seven-source-flanks.json").read_text())
+          assert (ancestry["source_original_opening_count"],
+                  ancestry["source_original_host_count"],
+                  ancestry["source_original_frame_count"]) == (23,14,9)
+          assert joined["input_foreground_source_count"]==6016
+          assert len(joined["opening_rows"])==7
+          assert all(len(r["flanks"])==2 and
+                     {f["role"] for f in r["flanks"]}=={"left","right"}
+                     for r in joined["opening_rows"])
+          for r in joined["opening_rows"]:
+              for f in r["flanks"]:
+                  assert f["pixel_run_candidates"], (r["opening_identity_id"],f["role"])
+                  assert f["first_unproved_authority"]=="ORIGINAL_VISIBLE_STRUCTURAL_WALL_LINE"
+                  assert not f["physical_host_proven"] and not f["host_publication_allowed"]
+          assert joined["source_receipts_freshly_reauthenticated"] is False
+          assert joined["structural_source_universe_complete"] is False
+          for field in ("physical_equivalence_proven","host_publication_allowed",
+                        "opening_count_publication_allowed","metric_quantity_publication_allowed"):
+              assert joined[field] is False
+          assert joined["benchmark_accuracy"] is None
+          print({"source_runs":6016,"original_unhosted_raster_openings":7,
+                 "flanks_with_source_positive_pixels":14,"host_authority":False})
+          PY
+      - name: Strict unchanged original G17 host/frame receipts and cap
+        run: |
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 --output original-host-frame-after.json
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline original-host-frame-before.json \
+            --candidate original-host-frame-after.json \
+            --output full-foreground-source-retention.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("original-complete-foreground.json").read_text())
+          before=Path("original-host-frame-before.json").read_bytes()
+          after=Path("original-host-frame-after.json").read_bytes()
+          assert before==after, "original physical G17 host/frame receipts changed"
+          original=json.loads(after)
+          assert original["summary"]=={"physical_existence_claims":23,"host_bindings":14,"host_frames":9}
+          assert report["source_sha256"]==original["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert report["render_sha256"]=="64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab"
+          assert report["primitive_safety_cap"]==original["primitive_safety_cap"]==20000
+          assert report["authenticated_pixel_source_count"]==6016, "source-only inventory changed"
+          assert report["ordinary_source_record_count"]+report["authenticated_pixel_source_count"] <= 20000
+          assert report["ordinary_source_snapshot_unchanged"]
+          assert report["original_source_render_reauthenticated"]
+          assert report["ordinary_visibility_rejects_shadow_kind"]
+          assert report["inventory_kind"]=="all_complete_original_foreground_runs"
+          assert report["experimental_w2_w4"] is None
+          records=report["authenticated_pixel_source_records"]
+          assert len(records)==6016
+          assert all(x["source_pixels_authenticated"] and x["proposition"]=="source_observation_exists" for x in records)
+          assert all(not x["ordinary_visible_segment_authority"] and not x["physical_wall_authority"] and not x["host_publication_allowed"] for x in records)
+          for key in ("source_universe_completeness_proven","physical_equivalence_proven","host_publication_allowed","opening_count_publication_allowed","metric_quantity_publication_allowed"):
+              assert report[key] is False
+          assert report["benchmark_accuracy"] is None
+          print({"all_positive_source_runs":len(records),"source_cap":20000,"physical_hosts_unchanged":14,"frames_unchanged":9,"host_publication":False})
+          PY
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-full-foreground-lot16
+          retention-days: 30
+          path: |
+            full-foreground-head.txt
+            original-complete-foreground.json
+            original-g17-w4-ancestry.json
+            original-required-host-flanks.json
+            original-seven-source-flanks.json
+            original-host-frame-before.json
+            original-host-frame-after.json
+            full-foreground-source-retention.json
+
+  experimental-original-w2-w4:
+    needs: original-lot16
+    if: ${{ needs['original-lot16'].result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-only experimental complete-original-page W2/W4 graph
+        run: |
+          git rev-parse HEAD > full-foreground-w2-head.txt
+          PYTHONPATH=. python -u tools/diag_gptmax_full_foreground_run_source.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --expected-render-sha 64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab \
+            --trace-w2-w4 \
+            --output original-complete-foreground-w2-w4.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("original-complete-foreground-w2-w4.json").read_text())
+          graph=r["experimental_w2_w4"]
+          assert r["authenticated_pixel_source_count"]==6016
+          assert graph is not None
+          assert graph["input_source_count"] == (
+              r["ordinary_source_record_count"]+r["authenticated_pixel_source_count"])
+          assert graph["input_source_count"] <= r["primitive_safety_cap"] == 20000
+          assert graph["w4_edge_map_consistent"]
+          assert len(graph["source_parent_census"]) == graph["input_source_count"]
+          assert not graph["host_publication_allowed"]
+          assert graph["physical_equivalence_proven"] is False
+          assert graph["scope_authority"].startswith("full-page diagnostic only")
+          for key in ("host_publication_allowed","opening_count_publication_allowed",
+                      "metric_quantity_publication_allowed","physical_equivalence_proven",
+                      "source_universe_completeness_proven"):
+              assert r[key] is False
+          assert r["benchmark_accuracy"] is None
+          print({"source_inputs":graph["input_source_count"],
+                 "w2_edges":len(graph["all_w2_edges"]),
+                 "experimental_w4_candidates":len(graph["all_experimental_w4_candidates"]),
+                 "structural_host_authority":False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-complete-foreground-w2-w4
+          retention-days: 30
+          path: |
+            full-foreground-w2-head.txt
+            original-complete-foreground-w2-w4.json
