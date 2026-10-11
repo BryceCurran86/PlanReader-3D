@@ -108,3 +108,55 @@ def test_existing_source_inventory_with_unresolved_existence_remains_without_cou
     assert publish_live_authenticated_opening_count_quantities(
         source_visibility_producer=source, wall_opening_composition=walls,
     ) == ()
+
+
+
+def _authentic_issued_count_quantity():
+    from dataclasses import replace
+    from pb_live_opening_area_quantity_publication import _opening_quantity
+    from tests.test_live_opening_area_quantity_publication import _opening
+    area = _opening_quantity(_opening())
+    assert area is not None
+    return replace(
+        area,
+        family="opening_count",
+        status="firm",
+        unit="ea",
+        value=1.0,
+        input_entity_ids=("opening-1",),
+        blocking_reasons=(),
+        abstained=False,
+    )
+
+
+def test_exact_positive_firm_count_reaches_final_source_publisher_gate():
+    from pb_live_opening_count_quantity_publication import (
+        _source_count_quantity_ready_for_publication,
+    )
+    assert _source_count_quantity_ready_for_publication(_authentic_issued_count_quantity())
+
+
+@pytest.mark.parametrize("corruption", [
+    {"value": True},
+    {"value": 1.5},
+    {"value": "1"},
+    {"value": 10 ** 400},
+    {"input_entity_ids": ("opening-1", "opening-2")},
+    {"input_entity_ids": ("opening-1", "opening-1")},
+    {"input_entity_ids": ("opening-1", True)},
+    {"input_entity_ids": (" opening-1",)},
+    {"status": "provisional"},
+    {"unit": "m2"},
+    {"abstained": True},
+    {"blocking_reasons": ("incomplete_opening_universe",)},
+])
+def test_invalid_final_count_never_reissues_as_a_commercial_physical_count(corruption):
+    from dataclasses import replace
+    from pb_live_opening_count_quantity_publication import (
+        _source_count_quantity_ready_for_publication,
+    )
+    from copy import copy
+    quantity = copy(_authentic_issued_count_quantity())
+    for key, value in corruption.items():
+        object.__setattr__(quantity, key, value)
+    assert not _source_count_quantity_ready_for_publication(quantity)
