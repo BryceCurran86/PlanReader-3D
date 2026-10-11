@@ -438,6 +438,19 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             else (False, ["produced_sealed_parity_not_proven"])
         )
         blockers.extend(parity_reasons)
+        # The first original-PDF hash is not durable source proof if a long
+        # seal/parity pass rotates the on-disk source package. Rehash just
+        # before the final readiness result, without consulting gold values.
+        if source_verified:
+            source_still_verified, final_source_reasons = _source_sha_proof(
+                manifest, source_root, project_id
+            )
+            if not source_still_verified:
+                source_verified = False
+                source_reasons.extend(final_source_reasons)
+                source_reasons.append("source_changed_during_readiness")
+                blockers.extend(final_source_reasons)
+                blockers.append("source_changed_during_readiness")
         if exists:
             blockers.append("commercial_trade_authority_not_independently_verified")
         if manifest.get("status") != "VERIFIED":
