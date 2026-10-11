@@ -195,3 +195,23 @@ def test_stale_shadow_handoff_only_does_not_self_authorize():
     sealed = seal_source_closed_quantity(q, trace=trace())
     assert not sealed.lineage_ok
     assert "commercial_projection_forbidden" in sealed.lineage_reason_codes
+
+
+
+@pytest.mark.parametrize("review_status", ["provisional", "review_required"])
+def test_unapproved_ai_review_draft_cannot_cross_pricing_publish_or_jobhub_gates(
+    review_status
+):
+    from pb_quantity_takeoff_adapter import existing_commercial_gate_results
+    q=quantity(status=review_status)
+    row=quantity_evidence_to_takeoff_output_row(
+        q,trace=trace(),
+        authority=CommercialMeasurementAuthority(method="direct_evidence"),
+    )
+    assert row["origin"]=="AI"
+    assert row["quantity_status"]=="To review"
+    gates=existing_commercial_gate_results(row)
+    assert gates["publishability"][0] is False
+    assert gates["pricing"][0] is False
+    assert gates["jobhub"][0] is False
+    assert not seal_source_closed_quantity(q,trace=trace()).lineage_ok
