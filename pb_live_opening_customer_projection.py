@@ -6,6 +6,7 @@ counts, measurements, or estimator approval.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
@@ -32,6 +33,17 @@ def _clean(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
+def _authentic_positive_quantity_value(value: object, *, integer: bool = False) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        measured = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (math.isfinite(measured) and measured > 0.0
+            and (not integer or measured.is_integer()))
+
+
 def _eligible_area_quantities(
     claim: LivePhysicalNetWallClaim,
 ) -> tuple[QuantityEvidence, ...]:
@@ -41,7 +53,9 @@ def _eligible_area_quantities(
         if isinstance(quantity, QuantityEvidence)
         and quantity.family == "opening_area"
         and not quantity.abstained
-        and quantity.value is not None
+        and quantity.status == "corroborated"
+        and quantity.unit in {"m2", "m²"}
+        and _authentic_positive_quantity_value(quantity.value)
         and not quantity.blocking_reasons
         and (
             not isinstance(quantity.metadata, Mapping)
@@ -61,7 +75,9 @@ def _eligible_count_quantities(
         if (
             quantity.family != "opening_count"
             or quantity.abstained
-            or quantity.value is None
+            or not _authentic_positive_quantity_value(quantity.value, integer=True)
+            or quantity.status != "firm"
+            or quantity.unit != "ea"
             or quantity.blocking_reasons
             or metadata.get("schedule_corroborated") is not True
             or not _clean(metadata.get("opening_mark"))
