@@ -457,3 +457,30 @@ def test_huge_json_integer_cannot_overflow_authenticated_customer_receipts(
               "--customer-rows",str(customer),"--project-id","project-a",
               "--output",str(destination)])
     assert not destination.exists()
+
+
+
+def test_outer_customer_json_depth_limit_fails_before_quantity_output(tmp_path):
+    source,sealed,_,_,_=_source_run(tmp_path)
+    customer=tmp_path/"customer.json"
+    customer.write_text("["*513+"0"+"]"*513,encoding="utf-8")
+    output=tmp_path/"produced_items.json"
+    with pytest.raises(ValueError,match="customer JSON nesting exceeds safe parser depth"):
+        main(["--sealed-run",str(sealed),"--source",str(source),
+              "--customer-rows",str(customer),"--project-id","project-a",
+              "--output",str(output)])
+    assert not output.exists()
+
+
+def test_machine_notes_json_depth_limit_fails_before_signed_customer_bijection(tmp_path):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    row=_original_projected_customer_row(q,t)
+    row["notes"]="{"*513+"0"+"}"*513
+    with pytest.raises(ValueError,match="customer JSON nesting exceeds safe parser depth"):
+        export_verified_produced_items(sealed,[source],customer_rows=[row])
+
+
+def test_quoted_brackets_and_escaped_quotes_do_not_consume_provenance_depth_budget():
+    from tools.export_gpt3_produced_items import _strict_customer_json
+    notes="["*1200+('source says "'+' and }')*1200
+    assert _strict_customer_json(json.dumps({"notes":notes}))=={"notes":notes}
