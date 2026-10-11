@@ -452,3 +452,45 @@ def test_replayed_physical_count_member_identity_is_not_cast_from_boolean(tmp_pa
             replace(claim, canonical_openings=(forged,)),
             workspace_id=7, project_id="source-project",
         )
+
+
+@pytest.mark.parametrize("forged_complete", (1, "true", [True]))
+def test_opening_count_rejects_truthy_untyped_source_universe_completion(forged_complete):
+    """A replayed non-boolean semantic inventory cannot authorize a count."""
+    from pb_live_opening_count_quantity_publication import (
+        publish_live_authenticated_opening_count_quantities,
+    )
+    from pb_live_wall_opening_authority_composition import (
+        compose_live_wall_opening_authority,
+    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    source = SourceVisibilityProducer(
+        producer_method="typed-count-completeness-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="typed-count-completeness-test",
+        source_bytes=_floor_plan_with_schedule_quantity(quantity=1),
+        source_locator="memory://typed-count-completeness-test.pdf",
+    )
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    original = composition.semantic_enumeration_result
+    assert original.record is not None
+    assert original.record.physical_opening_universe_complete is True
+    forged_record = copy(original.record)
+    object.__setattr__(
+        forged_record, "physical_opening_universe_complete", forged_complete,
+    )
+    untrusted = replace(
+        composition,
+        semantic_enumeration_result=replace(original, record=forged_record),
+    )
+    assert publish_live_authenticated_opening_count_quantities(
+        source_visibility_producer=source,
+        wall_opening_composition=untrusted,
+    ) == ()
