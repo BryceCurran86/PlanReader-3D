@@ -104,6 +104,21 @@ def test_original_ceiling_source_bbox_replay_must_not_crash_run_sealing(bad_poly
         )
 
 
+@pytest.mark.parametrize("fake_face", [
+    ((0., 0.), (10., 10.), (20., 20.)),
+    ((0., 0.), (20., 20.), (0., 20.), (20., 0.)),
+])
+def test_positive_pdf_bbox_cannot_authenticate_zero_area_ceiling_face(fake_face):
+    from pb_live_ceiling_area_source_closed_export import build_live_ceiling_area_source_traces
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    original_area = _result(ceiling=replace(_ceiling(), polygon_pdf_pts=fake_face))
+    with pytest.raises(SourceClosedRunConflictError, match="invalid or degenerate"):
+        build_live_ceiling_area_source_traces(
+            original_area, workspace_id=7, project_id="source-project",
+        )
+
+
 def test_original_ceiling_polygon_retains_positive_bbox_and_produced_area():
     from pb_live_ceiling_area_source_closed_export import build_live_ceiling_area_source_traces
 
