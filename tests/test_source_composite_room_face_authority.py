@@ -1398,3 +1398,38 @@ def test_gpt2_w4_collision_reports_both_original_source_records_without_equivale
         and row["source_room_boundary_published"] is False
         for row in report["original_collision_records_diagnostic_only"]
     )
+
+
+def test_gpt2_missing_original_w4_fragment_or_shadow_identity_is_not_valid_lineage():
+    from tools.diag_gpt2_grid_component_first_failure import (
+        diagnose_original_w4_address_collisions,
+    )
+    broken=SimpleNamespace(
+        wall_candidate_id="reused-native-w4",
+        wall_candidate=SimpleNamespace(centerline_pts=((1.,2.),(3.,4.))),
+        source_edge_fragments=(),
+        physical_identity=None,
+    )
+    well_formed=SimpleNamespace(
+        wall_candidate_id="reused-native-w4",
+        wall_candidate=SimpleNamespace(centerline_pts=((5.,6.),(7.,8.))),
+        source_edge_fragments=(SimpleNamespace(
+            edge_id="source-edge-id",
+            source_primitive_ids=("source-w2-primitive",),
+        ),),
+        physical_identity=SimpleNamespace(
+            candidate_identity_id="w4-shadow-not-equivalence",
+            source_primitive_ids=("source-w2-primitive",),
+            edge_ids=("source-edge-id",),
+            status=EvidenceResolutionStatus.CORROBORATED,
+        ),
+    )
+    report=diagnose_original_w4_address_collisions((broken,well_formed))
+    assert report["individual_original_record_count"]==2
+    missing,real=report["original_collision_records_diagnostic_only"]
+    assert missing["source_fragment_receipts_complete"] is False
+    assert missing["shadow_identity_lineage_valid"] is False
+    assert real["source_fragment_receipts_complete"] is True
+    assert real["shadow_identity_lineage_valid"] is True
+    assert missing["physical_wall_equivalence_proven"] is False
+    assert real["physical_wall_equivalence_proven"] is False
