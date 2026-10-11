@@ -48,6 +48,7 @@ def test_live_count_rejects_replayed_final_number_and_physical_receipts():
         ("quantity", "only_physical_receipts", None),
         ("record", "schedule_row_ids", ("foreign-original-schedule-row",)),
         ("quantity", "unit", "m2"),
+        ("quantity", "metadata", None),
         ("quantity", "family", "floor_area"),
         ("quantity", "input_entity_ids", ("foreign-opening",)),
         ("record", "count", 2),
