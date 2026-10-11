@@ -118,3 +118,40 @@ def test_figured_dim_source_receipts_must_be_exact_original_tokens(bad):
     ))
     assert quantity.abstained is True
     assert "explicit_area_figured_receipts_invalid" in quantity.blocking_reasons
+
+
+
+@pytest.mark.parametrize("source_page", [True, 1.0, " 1", "1 ", "one", 10 ** 400])
+def test_replayed_source_room_page_cannot_crash_or_reassign_documented_area(source_page):
+    room = copy(_room())
+    object.__setattr__(room, "source_page", source_page)
+    result = build_room_area_quantity(
+        room=room, context=_context(), document=_document(),
+        viewport=_viewport(), entity=_entity(), page_no=1,
+        explicit_area_evidence=_explicit_area(25.0),
+    )
+    assert result.abstained
+    assert "room_source_page_mismatch" in result.blocking_reasons
+
+
+@pytest.mark.parametrize("invalid", [
+    None, "room-ev", True, ("room-ev", ["nested"]),
+    ("room-ev", "room-ev"), (" room-ev", "area-ev"),
+])
+def test_unhashable_or_coerced_source_room_entity_receipts_abstain_with_audit(invalid):
+    entity = copy(_entity())
+    object.__setattr__(entity, "evidence_ids", invalid)
+    result = build_room_area_quantity(
+        room=_room(), context=_context(), document=_document(),
+        viewport=_viewport(), entity=entity, page_no=1,
+        explicit_area_evidence=_explicit_area(25.0),
+    )
+    assert result.abstained
+    assert "entity_evidence_not_owned_by_document" in result.blocking_reasons
+    assert all(type(source) is str for source in result.evidence_ids)
+
+
+def test_original_source_room_page_and_receipts_still_allow_documented_area():
+    result = source_area(_explicit_area(25.0))
+    assert result.abstained is False
+    assert result.value == 25.0
