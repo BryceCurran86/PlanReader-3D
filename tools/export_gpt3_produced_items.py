@@ -122,9 +122,21 @@ def main(argv: list[str] | None = None) -> int:
     input_paths = [args.sealed_run, *args.source]
     if args.output.resolve() in {source.resolve() for source in input_paths}:
         raise ValueError("produced-items output must not overwrite original source inputs")
+    # A concurrent source producer can rotate PDFs or the sealed run after
+    # the initial verification. Recheck both immediately before publication.
+    original_seal = load_verified_sealed_run(args.sealed_run)
     produced = export_verified_produced_items(
         args.sealed_run, args.source, expected_project_id=args.project_id
     )
+    current_seal = load_verified_sealed_run(args.sealed_run)
+    if current_seal.fingerprint != original_seal.fingerprint:
+        raise SourceClosedRunConflictError("sealed run changed during produced-items export")
+    current_source_shas = [_sha256(Path(path)) for path in args.source]
+    if (
+        len(set(current_source_shas)) != len(current_source_shas)
+        or set(current_source_shas) != set(original_seal.source_sha256s)
+    ):
+        raise SourceClosedRunConflictError("original source changed during produced-items export")
     _atomic_write(args.output, produced)
     return 0
 
