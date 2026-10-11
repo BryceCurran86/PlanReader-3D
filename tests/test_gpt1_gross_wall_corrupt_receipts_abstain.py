@@ -13,10 +13,16 @@ from tests.test_wall_gross_area_quantity import _ctx, _length, _height
 @pytest.mark.parametrize("damaged", ["length", "height"])
 def test_corrupt_wall_source_receipts_never_crash_or_sign_gross_area(bad, damaged):
     length, height = _length(), _height()
+    # Persisted QuantityEvidence validates uniqueness at construction.
+    # Model tampering at the untrusted imported dependency boundary, where
+    # malformed wire/source collections can still enter a replay.
+    from copy import copy
     if damaged == "length":
-        length = replace(length, evidence_ids=bad)
+        length = copy(length)
+        object.__setattr__(length, "evidence_ids", bad)
     else:
-        height = replace(height, evidence_ids=bad)
+        height = copy(height)
+        object.__setattr__(height, "evidence_ids", bad)
     blocked = build_gross_wall_area_quantity(
         wall_id="WALL-1", wall_length=length, wall_height=height, context=_ctx()
     )
