@@ -106,6 +106,17 @@ def _ancestry(report, pixel_ids):
                             "experimental W2 collapsed fragment")
     census = _rows_by_id(graph.get("source_parent_census"), "source_observation_id",
                          "experimental source parent")
+    expected_count = graph.get("input_source_count")
+    if type(expected_count) is not int or expected_count > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+        raise ValueError("invalid experimental source census count")
+    if expected_count != len(census):
+        raise ValueError("incomplete experimental source parent census")
+    if any(not isinstance(row.get("source_observation_ids"), list)
+           or not row["source_observation_ids"]
+           or len(set(row["source_observation_ids"])) != len(row["source_observation_ids"])
+           or any(parent not in census for parent in row["source_observation_ids"])
+           for row in (*edges.values(), *collapsed.values())):
+        raise ValueError("unverifiable experimental graph source ancestry")
     if any(oid not in census for oid in pixel_ids):
         raise ValueError("pixel source observation missing experimental W2 census")
     # W4 addresses are observed candidate alternatives, never physical owners.
@@ -144,8 +155,13 @@ def _ancestry(report, pixel_ids):
         w4 = sorted({owner for eid in edge_ids for owner in
                      edges[eid].get("experimental_w4_candidate_ids", [])
                      if isinstance(owner, str) and owner.strip()})
+        if any(not isinstance(edges[eid].get("experimental_w4_candidate_ids"), list)
+               or len(set(edges[eid]["experimental_w4_candidate_ids"]))
+                    != len(edges[eid]["experimental_w4_candidate_ids"])
+               for eid in edge_ids):
+            raise ValueError("invalid experimental W4 candidate list")
         if any(not isinstance(w, str) or not w.strip()
-               for eid in edge_ids for w in edges[eid].get("experimental_w4_candidate_ids", [])):
+               for eid in edge_ids for w in edges[eid]["experimental_w4_candidate_ids"]):
             raise ValueError("invalid experimental W4 address")
         if any(eid not in members.get(cid, set())
                for eid in edge_ids for cid in edges[eid].get("experimental_w4_candidate_ids", [])):
