@@ -138,6 +138,30 @@ def _opening_quantity(
             != "frame"
         ):
             return None
+        # This area's source-backed schedule explicitly supplies the OUTER
+        # FRAME dimensions in mm. Verify the canonical area is their product,
+        # not an independently replayed number that happens to carry a valid
+        # source binding receipt. A leaf size is never substituted for frame.
+        width_mm = opening.schedule_declared_width_mm
+        height_mm = opening.schedule_declared_height_mm
+        if type(width_mm) not in (int, float) or type(height_mm) not in (int, float):
+            return None
+        try:
+            width_value = float(width_mm)
+            height_value = float(height_mm)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if (
+            not math.isfinite(width_value)
+            or not math.isfinite(height_value)
+            or width_value <= 0.0 or height_value <= 0.0
+        ):
+            return None
+        frame_area = width_value * height_value / 1_000_000.0
+        if not math.isfinite(frame_area) or not math.isclose(
+            value, frame_area, rel_tol=0.0, abs_tol=1e-6,
+        ):
+            return None
         quantity_authority = LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY
     else:
         # Unknown area bases cannot silently become commercial quantities.
