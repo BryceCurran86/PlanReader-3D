@@ -326,7 +326,11 @@ def _source_owned_collision_candidate_addresses(
                 # original W2 geometry, even when float(value) would succeed.
                 if any(type(value) not in (int, float) for value in raw_coordinates):
                     raise W4SourceCandidateAddressCollision("W4 collision lacks original source geometry")
-                a, b = raw_coordinates[:2], raw_coordinates[2:]
+                try:
+                    a = tuple(float(value) for value in raw_coordinates[:2])
+                    b = tuple(float(value) for value in raw_coordinates[2:])
+                except OverflowError:
+                    raise W4SourceCandidateAddressCollision("W4 collision lacks original source geometry") from None
                 if (not all(math.isfinite(x) for x in (*a, *b)) or a == b):
                     raise W4SourceCandidateAddressCollision("W4 collision has invalid source geometry")
                 source_parts.append({
