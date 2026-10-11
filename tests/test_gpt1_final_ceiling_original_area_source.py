@@ -82,3 +82,34 @@ def test_final_ceiling_area_rejects_shadow_claim_from_foreign_semantic_room():
     authentic = publish_live_ceiling_area_quantities(_result(shadow=original))
     assert len(authentic) == 1
     assert authentic[0].value == 13.270425
+
+
+
+@pytest.mark.parametrize("bad_polygon", [
+    ((0.0, 0.0), (10 ** 400, 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), (True, 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), ("10", 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), (float("nan"), 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), (10.0, float("inf")), (10.0, 10.0)),
+    ((0.0, 0.0), (0.0, 10.0), (0.0, 20.0)),
+])
+def test_original_ceiling_source_bbox_replay_must_not_crash_run_sealing(bad_polygon):
+    from pb_live_ceiling_area_source_closed_export import build_live_ceiling_area_source_traces
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    source = _result(ceiling=replace(_ceiling(), polygon_pdf_pts=bad_polygon))
+    with pytest.raises(SourceClosedRunConflictError, match="source polygon is invalid"):
+        build_live_ceiling_area_source_traces(
+            source, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_original_ceiling_polygon_retains_positive_bbox_and_produced_area():
+    from pb_live_ceiling_area_source_closed_export import build_live_ceiling_area_source_traces
+
+    original = _result()
+    traces = build_live_ceiling_area_source_traces(
+        original, workspace_id=7, project_id="source-project",
+    )
+    assert len(traces) == 1
+    assert next(iter(traces.values())).source_bbox == (0.0, 0.0, 10.0, 10.0)
