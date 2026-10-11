@@ -47,9 +47,9 @@ page 3. Source baseline: `5de14446b5909cd6f2982e8691525bda0568a9b6`.
 
 The original hostless native hypothesis
 `physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d`
-uses six supports across two separate dimension chains. The existing
-component compiler covers four supports. It leaves these two on the lower
-chain uncovered:
+uses six supports across two separate dimension chains. The earlier historical compiler snapshot covered only four supports and
+left these two on the lower chain uncovered (this is **not** the current
+source-authenticated producer state):
 
 - `source_observation_365be490820455db4ed5a612e88775fe`
 - `source_observation_d118d71458996fc12c8808f6593fb0d1`
@@ -62,11 +62,19 @@ command 956 contains `450`. Between them, command 955 is a fill path with
 source bbox `[1016.8800048828125,584.760009765625,
 1028.6400146484375,593.6400146484375]`.
 
-The audit retains that exact partition and negative receipt. Neither raw
-numeric text nor the paint partition enters the component compiler without
-the existing text authority. Both supports remain uncovered, complete shadow
-opposition is false, and the original live hypothesis is unchanged. This
-case is **not closed** by the new diagnostic.
+The audit retains the exact raw partition and negative text-integrity receipt.
+Neither the raw `90450` word nor its separate paint commands acquire a
+corroborated numeric receipt. However, **current original-source replay**
+[run 38149315040](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38149315040)
+found a *different complete source-owned dimension-opposition path* using
+already trusted text and real line/tick topology: 254 unique **CANDIDATE**
+dimension-opposition atoms cover all six original supports. Both historically
+uncovered supports are now covered in the shadow diagnostic. The original
+live producer had already abstained from publishing an opening for this
+native look-alike; `existence_record_id` is null, and the live producer state
+remains unchanged. Candidate opposition is **not physical nonexistence proof**,
+a wall host, an opening count, a quantity, or a V2 scoring result. The audit
+itself is nonpublishing and must never upgrade the untrusted `90450` text.
 
 There are 1,727 authenticated native visible segments in this page scope;
 that is a source observation count, not a wall or opening count.
@@ -84,18 +92,22 @@ IDs; no input mutation; and unchanged live candidate state. The trusted
 synthetic positive can nominate complete CANDIDATE opposition in shadow;
 the untrusted source case cannot.
 
-Fresh local head source replay retained all 23 opening claims, all 14 host
-receipts and all nine frame receipts from the independently recorded
-unchanged `9dc7125` source report. The unchanged strict comparator passed
-with zero lost or changed host/frame proofs. Provider isolation, V2 integrity,
-Ruff F821/F823 and workflow YAML/inline Python checks passed.
+The earlier 23-positive G17 claim snapshot applied before source-authenticated
+native false-positive opposition was merged. The current original source run
+retains **21 positive opening hypotheses, 14 authenticated hosts and nine
+frames**, with the original PR-base and candidate reports identical and strict
+retention passing with zero changed or lost host/frame proof. Existing paint
+partition tests still require exact glyph/paint provenance and no change to
+live production claims.
 
 The original-source CI gate replays the exact PR-base and head opening
 reports, uses the unchanged strict retention comparator, and requires exact
-old opening, host and frame payloads. It pins the original PDF digest and
-retains the original 23/14/9 control. It separately requires the exact
-negative text receipt, two uncovered supports and original intervening paint.
-Keep this PR draft until exact-head source and ordinary CI pass.
+opening, host and frame payloads, original PDF SHA and the original **14
+authenticated hosts / nine frames**. It retains the exact negative raw `90450`
+paint receipt and intervening paint, but separately requires the current
+source-authenticated complete *candidate* dimension opposition and six-source
+support ownership. Keep draft until latest-head original source, focused and
+full CI pass.
 
 The source-opposition branch's full-suite result was 11,190 passes, 51 skips,
 13 expected failures and one schedule-identity failure independently
