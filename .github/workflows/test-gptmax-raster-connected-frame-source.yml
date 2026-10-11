@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -89,10 +90,69 @@ jobs:
           assert len(ids) == len(set(ids))
           assert 'quantities' not in report
           PY
+      - name: Authenticate exactly one opposed original native source hypothesis
+        run: |
+          PYTHONPATH=. python -u tools/diag_native_opening_source_roles.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output lot16-neutral-fill-original-roles.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base=json.loads(Path('lot16-connected-frame-prerequisite.json').read_text())
+          after=json.loads(Path('lot16-connected-frame-source-handoff.json').read_text())
+          roles=json.loads(Path('lot16-neutral-fill-original-roles.json').read_text())
+          sha='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert base['source_sha256']==after['source_sha256']==roles['source_sha256']==sha
+          assert base['primitive_safety_cap']==after['primitive_safety_cap']==20000
+          assert base['summary']=={'physical_existence_claims':22,'host_bindings':14,'host_frames':9}
+          assert after['summary']=={'physical_existence_claims':21,'host_bindings':14,'host_frames':9}
+          def by_id(rows):
+              ids=[r['opening_identity_id'] for r in rows]
+              assert len(ids)==len(set(ids))
+              return dict(zip(ids,rows))
+          old,new=by_id(base['opening_bindings']),by_id(after['opening_bindings'])
+          missing=set(old)-set(new)
+          table='physical_opening_existence_b222d5310a7df1d632d5daab1a676645'
+          assert missing=={table} and set(new)<=set(old)
+          assert all(new[key]==rec for key,rec in old.items() if key in new)
+          assert old[table]['record_id'] is None and old[table]['host_wall_id'] is None
+          original_frames, current_frames=by_id(base['host_frames']),by_id(after['host_frames'])
+          assert original_frames[table]['record_id'] is None
+          assert set(current_frames)==set(new)
+          assert all(current_frames[key]==record for key,record in original_frames.items()
+                     if record['record_id'] is not None)
+          matching=[row for row in roles['retained_opposed_candidates']
+                    if row['status']=='abstained'
+                    and old[table]['representative_observation_id'] in row['candidate']['source_observation_ids']]
+          assert len(matching)==1
+          assert any(
+              atom['kind']=='annotation_border'
+              and atom['reason_codes']==['native_unstroked_pale_neutral_fill_boundary']
+              and atom['metadata']['polarity']=='opposing'
+              and atom['metadata']['paint_type']=='f'
+              and atom['metadata']['stroke'] is None
+              and atom['metadata']['fill_opacity']==1.0
+              and atom['metadata']['all_source_primitives_covered'] is True
+              and set(atom['metadata']['source_observation_ids'])==set(matching[0]['candidate']['source_observation_ids'])
+              for atom in matching[0]['opposing_evidence_atoms'])
+          # Keep original report immutable; a comparison-only copy removes
+          # exactly the proven annotation from the prior positive universe.
+          source_copy=dict(base)
+          source_copy['opening_bindings']=[row for row in base['opening_bindings']
+                                         if row['opening_identity_id']!=table]
+          source_copy['host_frames']=[row for row in base['host_frames']
+                                      if row['opening_identity_id']!=table]
+          source_copy['summary']=dict(base['summary'],physical_existence_claims=21)
+          Path('lot16-opposed-baseline-for-comparison.json').write_text(
+              json.dumps(source_copy,indent=2,sort_keys=True)+'\n')
+          assert not roles.get('opening_count_publication_allowed',False)
+          assert not roles.get('metric_quantity_publication_allowed',False)
+          print({'source_opposed_id':table,'strict_old_host_count':14,'strict_old_frame_count':9})
+          PY
       - name: Reject lost or silently changed exact physical host/frame identities
         run: |
           PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
-            --baseline lot16-connected-frame-prerequisite.json \
+            --baseline lot16-opposed-baseline-for-comparison.json \
             --candidate lot16-connected-frame-source-handoff.json \
             --output lot16-connected-frame-identity-retention.json
       - uses: actions/upload-artifact@v4
@@ -103,6 +163,8 @@ jobs:
             lot16-connected-frame-source-handoff.json
             lot16-connected-frame-prerequisite.json
             lot16-connected-frame-identity-retention.json
+            lot16-opposed-baseline-for-comparison.json
+            lot16-neutral-fill-original-roles.json
           retention-days: 14
   maryborough-source-baseline:
     runs-on: ubuntu-latest
