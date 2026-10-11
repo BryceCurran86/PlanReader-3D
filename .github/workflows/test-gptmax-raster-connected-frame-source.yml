@@ -12,6 +12,8 @@ on:
       - tools/diag_opening_wall_face_preservation.py
       - tools/gptmax_compare_source_face_retention.py
       - tests/test_gptmax_compare_source_face_retention.py
+      - scripts/gptmax_source_opposition_retention.py
+      - tests/test_gptmax_source_opposition_retention.py
       - .github/workflows/test-gptmax-raster-connected-frame-source.yml
 concurrency:
   group: gptmax-raster-connected-frame-${{ github.event.pull_request.number }}
@@ -91,9 +93,10 @@ jobs:
           PY
       - name: Reject lost or silently changed exact physical host/frame identities
         run: |
-          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+          PYTHONPATH=. python scripts/gptmax_source_opposition_retention.py \
             --baseline lot16-connected-frame-prerequisite.json \
             --candidate lot16-connected-frame-source-handoff.json \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
             --output lot16-connected-frame-identity-retention.json
       - uses: actions/upload-artifact@v4
         if: always()
