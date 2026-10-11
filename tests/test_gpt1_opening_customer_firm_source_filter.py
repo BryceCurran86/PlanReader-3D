@@ -150,3 +150,47 @@ def test_cross_family_blocked_duplicate_cannot_mask_firm_source_area_claim():
         project_live_opening_customer_rows(
             claim, workspace_id=1, project_id="customer-integrity-test",
         )
+
+
+def _physical_original_opening_claim():
+    opening = _opening()
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+    return replace(
+        _claim(),
+        canonical_openings=(opening,),
+        opening_quantity_evidence=(quantity,),
+        opening_count_quantity_evidence=(),
+    )
+
+
+@pytest.mark.parametrize("changes", [
+    {"value": 3.14},
+    {"status": "firm"},
+    {"formula": "guessed_opening_area"},
+    {"metadata": {"source_sha256": "f" * 64}},
+])
+def test_customer_source_area_replay_rejects_copied_original_quantity_id(changes):
+    from pb_live_opening_customer_projection import project_live_opening_customer_rows
+    claim = _physical_original_opening_claim()
+    original = claim.opening_quantity_evidence[0]
+    if "metadata" in changes:
+        changes = {"metadata": {**dict(original.metadata), **changes["metadata"]}}
+    forged = replace(original, **changes)
+    assert forged.quantity_id == original.quantity_id
+    assert forged.evidence_ids == original.evidence_ids
+    with pytest.raises(ValueError, match="claim differs from physical source producer"):
+        project_live_opening_customer_rows(
+            replace(claim, opening_quantity_evidence=(forged,)),
+            workspace_id=7, project_id="gpt1-source-replay",
+        )
+
+
+def test_customer_original_canonical_source_area_still_reaches_one_sealed_row():
+    from pb_live_opening_customer_projection import project_live_opening_customer_rows
+    rows = project_live_opening_customer_rows(
+        _physical_original_opening_claim(),
+        workspace_id=7, project_id="gpt1-source-replay",
+    )
+    assert len(rows) == 1
+    assert rows[0]["quantity"] == 2.172
