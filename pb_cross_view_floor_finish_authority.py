@@ -403,7 +403,12 @@ class CrossViewFloorFinishResult:
 
     @property
     def quantities(self) -> tuple[QuantityEvidence, ...]:
-        return tuple(record.quantity for record in self.records)
+        # External quantity consumers must observe the same unambiguous
+        # canonical floor identity gate as records_by_floor_id. A duplicate
+        # floor finish cannot reach takeoff through this convenience property.
+        return tuple(
+            record.quantity for record in self.records_by_floor_id.values()
+        )
 
     @property
     def records_by_floor_id(self) -> Mapping[str, CrossViewFloorFinishRecord]:
