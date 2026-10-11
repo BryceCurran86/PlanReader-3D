@@ -145,12 +145,21 @@ def _ancestry(report, pixel_ids):
         raise ValueError("invalid experimental source census count")
     if expected_count != len(census):
         raise ValueError("incomplete experimental source parent census")
-    if any(not isinstance(row.get("source_observation_ids"), list)
-           or not row["source_observation_ids"]
-           or len(set(row["source_observation_ids"])) != len(row["source_observation_ids"])
-           or any(parent not in census for parent in row["source_observation_ids"])
-           for row in (*edges.values(), *collapsed.values())):
-        raise ValueError("unverifiable experimental graph source ancestry")
+    # Original W2 occasionally records a genuine snap-collapsed fragment
+    # without any recoverable source parents. Preserve that as *negative*
+    # diagnostic evidence; do not assign a parent or make it an owned edge.
+    # Surviving edges, in contrast, require positive recorded source ancestry.
+    for rows, positive_required in ((edges.values(), True),
+                                    (collapsed.values(), False)):
+        for row in rows:
+            parents = row.get("source_observation_ids")
+            if (not isinstance(parents, list)
+                    or (positive_required and not parents)
+                    or any(not isinstance(parent, str) or not parent.strip()
+                           for parent in parents)
+                    or len(set(parents)) != len(parents)
+                    or any(parent not in census for parent in parents)):
+                raise ValueError("unverifiable experimental graph source ancestry")
     if any(oid not in census for oid in pixel_ids):
         raise ValueError("pixel source observation missing experimental W2 census")
     # W4 addresses are observed candidate alternatives, never physical owners.
