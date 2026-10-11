@@ -178,7 +178,16 @@ def build_net_wall_area_quantity(
         blockers.append("gross_wall_area_abstained")
     if gross_wall_area.status != AuthorityStatus.FIRM.value:
         blockers.append("gross_wall_area_not_firm")
-    if tuple(gross_wall_area.input_entity_ids) != (wall_id,):
+    # Never treat scalar or missing imported source member collections as
+    # iterable witnesses. Net wall remains BLOCKED unless the physical gross
+    # wall identity was present in the unchanged source receipt.
+    gross_members = gross_wall_area.input_entity_ids
+    if (
+        not isinstance(gross_members, (tuple, list))
+        or len(gross_members) != 1
+        or type(gross_members[0]) is not str
+        or gross_members[0] != wall_id
+    ):
         blockers.append("gross_wall_entity_identity_mismatch")
 
     if wall_entity.candidate_entity_id != wall_id:
