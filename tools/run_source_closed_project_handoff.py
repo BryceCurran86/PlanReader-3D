@@ -127,7 +127,8 @@ def _non_abstained(
         if type(quantity.value) not in (int, float):
             continue
         try:
-            if not math.isfinite(quantity.value):
+            if not math.isfinite(quantity.value) or quantity.value < 0:
+                # Reject impossible physical area/count while retaining real zero.
                 continue
         except OverflowError:
             continue
