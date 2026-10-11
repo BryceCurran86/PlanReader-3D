@@ -57,3 +57,23 @@ def test_authentic_original_floor_face_still_seals_exact_8_64_m2_finish():
     assert len(result) == 1
     assert next(iter(result.values())).source_bbox == (10.0, 10.0, 20.0, 20.0)
     assert claim.floor_finish_quantity_evidence[0].value == 8.64
+
+
+
+@pytest.mark.parametrize("oversized", [10 ** 400, -(10 ** 400)])
+def test_original_floor_finish_confidence_overflow_is_blocked_and_not_a_run_crash(oversized):
+    claim = _claim()
+    tampered_qty = copy(claim.floor_finish_quantity_evidence[0])
+    object.__setattr__(tampered_qty, "confidence", oversized)
+    with pytest.raises(SourceClosedRunConflictError, match="untyped"):
+        build_live_floor_finish_area_source_traces(
+            replace(claim, floor_finish_quantity_evidence=(tampered_qty,)),
+            workspace_id=7, project_id="source-project",
+        )
+
+
+def test_original_floor_finish_confidence_is_accepted_when_typed_and_finite():
+    claim = _claim()
+    assert len(build_live_floor_finish_area_source_traces(
+        claim, workspace_id=7, project_id="source-project",
+    )) == 1
