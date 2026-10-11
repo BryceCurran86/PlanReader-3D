@@ -13,7 +13,7 @@ def _two_linen_original_pdf() -> bytes:
         page = doc.new_page(width=595.0, height=842.0)
         page.insert_text((90.0, 120.0), "WC", fontsize=12)
         page.insert_text((210.0, 145.0), "LINEN", fontsize=12)
-        page.insert_text((205.0, 195.0), "LINEN", fontsize=12)
+        page.insert_text((205.0, 195.0), "LINEN /", fontsize=12)
         page.insert_text((280.0, 195.0), "BROOM", fontsize=12)
         return doc.tobytes()
     finally:
@@ -32,6 +32,9 @@ def test_duplicate_native_linen_words_remain_distinct_untrusted_occurrences():
     ]
     assert len(linen) == 2
     assert linen[0]["bbox_pt"] != linen[1]["bbox_pt"]
+    assert {row["same_original_native_line_text_not_authority"] for row in linen} == {
+        "LINEN", "LINEN /",
+    }
     assert all(
         row["room_face_or_measurement_authority_granted"] is False
         for row in result["occurrences"]
