@@ -230,25 +230,63 @@ def diagnose_original_w4_address_collisions(records):
                 continue
             if len(pair) == 2 and all(math.isfinite(v) for v in pair):
                 source_points.append(list(pair))
-        fragments = tuple(getattr(record, "source_edge_fragments", ()) or ())
+        raw_fragments = getattr(record, "source_edge_fragments", ()) or ()
+        valid_fragments = isinstance(raw_fragments, (tuple, list))
+        fragments = tuple(raw_fragments) if valid_fragments else ()
+        physical_identity = getattr(record, "physical_identity", None)
+        raw_identity_primitives = getattr(
+            physical_identity, "source_primitive_ids", ()
+        ) or ()
+        identity_primitives_valid = isinstance(
+            raw_identity_primitives, (tuple, list)
+        ) and all(exact(value) for value in raw_identity_primitives)
+        identity_primitives = (
+            tuple(raw_identity_primitives) if identity_primitives_valid else ()
+        )
+        raw_identity_edges = getattr(physical_identity, "edge_ids", ()) or ()
+        identity_edges_valid = isinstance(
+            raw_identity_edges, (tuple, list)
+        ) and all(exact(value) for value in raw_identity_edges)
+        identity_edges = tuple(raw_identity_edges) if identity_edges_valid else ()
+        fragment_receipts_complete = valid_fragments and all(
+            exact(getattr(fragment, "edge_id", None))
+            and isinstance(getattr(fragment, "source_primitive_ids", None), (tuple, list))
+            and all(
+                exact(value) for value in fragment.source_primitive_ids
+            )
+            for fragment in fragments
+        )
         evidence.append({
             "source_record_ordinal": index,
             "original_wall_candidate_id": native_id,
             "original_centerline_points_diagnostic_only": source_points[:16],
             "original_centerline_point_count": len(source_points),
             "source_edge_fragment_count": len(fragments),
+            "source_fragment_receipts_complete": fragment_receipts_complete,
             "source_fragment_edge_ids_sample": [
-                str(getattr(frag, "edge_id", "") or "")
-                for frag in fragments[:8]
+                frag.edge_id for frag in fragments[:8]
+                if exact(getattr(frag, "edge_id", None))
             ],
             "source_fragment_primitive_ids_sample": [
-                [
-                    primitive_id for primitive_id
-                    in tuple(getattr(frag, "source_primitive_ids", ()) or ())
-                    if exact(primitive_id)
-                ][:16]
+                list(getattr(frag, "source_primitive_ids", ())[:16])
                 for frag in fragments[:8]
+                if isinstance(getattr(frag, "source_primitive_ids", None), (tuple, list))
             ],
+            # An original W4 physical candidate ID is only a producer shadow
+            # identifier, not same-wall proof. Keep its independent W2 lineage
+            # separate from candidate-adjacent source fragment evidence.
+            "shadow_physical_candidate_identity_id": (
+                getattr(physical_identity, "candidate_identity_id", None)
+            ),
+            "shadow_physical_identity_status": (
+                getattr(getattr(physical_identity, "status", None), "value", None)
+            ),
+            "shadow_identity_source_primitive_id_count": len(identity_primitives),
+            "shadow_identity_source_primitive_ids_sample": list(identity_primitives[:16]),
+            "shadow_identity_edge_ids_sample": list(identity_edges[:16]),
+            "shadow_identity_lineage_valid": (
+                identity_primitives_valid and identity_edges_valid
+            ),
             "physical_wall_equivalence_proven": False,
             "source_room_boundary_published": False,
         })
