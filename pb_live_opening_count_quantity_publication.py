@@ -111,7 +111,7 @@ def publish_live_authenticated_opening_count_quantities(
         published is None
         or semantic.status is not EvidenceResolutionStatus.CORROBORATED
         or semantic_record is None
-        or not bool(semantic_record.physical_opening_universe_complete)
+        or semantic_record.physical_opening_universe_complete is not True
         or published.revision.document_id != semantic_record.document_id
         or published.revision.revision_id != semantic_record.revision_id
         or published.revision.source_sha256 != semantic_record.source_sha256
