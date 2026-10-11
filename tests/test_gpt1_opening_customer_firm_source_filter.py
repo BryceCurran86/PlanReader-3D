@@ -28,7 +28,8 @@ def _source_opening_count():
         value=1.0,
         unit="ea",
         status="firm",
-        metadata={"schedule_corroborated": True, "opening_mark": "W1"},
+        metadata={"schedule_corroborated": True, "opening_mark": "W1",
+                  "commercial_projection_allowed": True},
     )
 
 
@@ -65,6 +66,28 @@ def test_untyped_or_fractional_source_count_cannot_reach_customer(bad):
     count = _replay(_source_opening_count(), value=bad)
     claim = replace(_claim(), opening_count_quantity_evidence=(count,))
     assert _eligible_count_quantities(claim) == ()
+
+
+@pytest.mark.parametrize("permission", [None, False, "true", 1])
+def test_customer_area_cannot_infer_commercial_permission_from_missing_or_replayed_flag(permission):
+    authentic = _source_opening_area()
+    tampered = replace(authentic, metadata={
+        **dict(authentic.metadata), "commercial_projection_allowed": permission,
+    })
+    assert _eligible_area_quantities(
+        replace(_claim(), opening_quantity_evidence=(tampered,))
+    ) == ()
+
+
+@pytest.mark.parametrize("permission", [None, False, "true", 1])
+def test_customer_count_cannot_infer_commercial_permission_from_missing_or_replayed_flag(permission):
+    authentic = _source_opening_count()
+    tampered = replace(authentic, metadata={
+        **dict(authentic.metadata), "commercial_projection_allowed": permission,
+    })
+    assert _eligible_count_quantities(
+        replace(_claim(), opening_count_quantity_evidence=(tampered,))
+    ) == ()
 
 
 def test_count_customer_requires_source_schedule_corrob_and_firm_each():
