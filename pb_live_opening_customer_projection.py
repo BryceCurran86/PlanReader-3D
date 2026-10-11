@@ -6,10 +6,12 @@ counts, measurements, or estimator approval.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 
+from pb_live_opening_area_quantity_publication import _opening_quantity
 from pb_live_opening_count_source_closed_export import (
     build_live_opening_count_source_traces,
 )
@@ -32,6 +34,17 @@ def _clean(value: Any) -> str:
     return str(value if value is not None else "").strip()
 
 
+def _authentic_positive_quantity_value(value: object, *, integer: bool = False) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        measured = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (math.isfinite(measured) and measured > 0.0
+            and (not integer or measured.is_integer()))
+
+
 def _eligible_area_quantities(
     claim: LivePhysicalNetWallClaim,
 ) -> tuple[QuantityEvidence, ...]:
@@ -41,12 +54,12 @@ def _eligible_area_quantities(
         if isinstance(quantity, QuantityEvidence)
         and quantity.family == "opening_area"
         and not quantity.abstained
-        and quantity.value is not None
+        and quantity.status == "corroborated"
+        and quantity.unit in {"m2", "m²"}
+        and _authentic_positive_quantity_value(quantity.value)
         and not quantity.blocking_reasons
-        and (
-            not isinstance(quantity.metadata, Mapping)
-            or quantity.metadata.get("commercial_projection_allowed") is not False
-        )
+        and isinstance(quantity.metadata, Mapping)
+        and quantity.metadata.get("commercial_projection_allowed") is True
     )
 
 
@@ -61,9 +74,12 @@ def _eligible_count_quantities(
         if (
             quantity.family != "opening_count"
             or quantity.abstained
-            or quantity.value is None
+            or not _authentic_positive_quantity_value(quantity.value, integer=True)
+            or quantity.status != "firm"
+            or quantity.unit != "ea"
             or quantity.blocking_reasons
             or metadata.get("schedule_corroborated") is not True
+            or metadata.get("commercial_projection_allowed") is not True
             or not _clean(metadata.get("opening_mark"))
         ):
             continue
@@ -83,11 +99,55 @@ def project_live_opening_customer_rows(
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
 
+    # Detect a recycled original source quantity ID before provisional or
+    # abstained entries are filtered away. Across opening area and count,
+    # the same ID can never authenticate two separate physical claims.
+    source_claims = tuple(
+        q for q in (*claim.opening_quantity_evidence,
+                    *claim.opening_count_quantity_evidence)
+        if isinstance(q, QuantityEvidence)
+        and q.family in {"opening_area", "opening_count"}
+    )
+    source_ids = tuple(q.quantity_id for q in source_claims)
+    if (
+        any(type(i) is not str or not i or i != i.strip() for i in source_ids)
+        or len(set(source_ids)) != len(source_ids)
+    ):
+        raise ValueError(
+            "opening customer quantity identities collide before commercial filtering"
+        )
+
     area_quantities = _eligible_area_quantities(claim)
     count_quantities = _eligible_count_quantities(claim)
-    quantities = (*area_quantities, *count_quantities)
-    if not quantities:
+    if not area_quantities and not count_quantities:
         return ()
+
+    # Verify the actual canonical source producer's area, not merely a copied
+    # quantity ID or evidence list. A changed m² value cannot inherit a seal.
+    physical_by_id = {}
+    for opening in claim.canonical_openings:
+        oid = opening.canonical_opening_id
+        if type(oid) is not str or not oid or oid != oid.strip() or oid in physical_by_id:
+            raise ValueError("opening customer physical source identities are ambiguous")
+        physical_by_id[oid] = opening
+    for quantity in area_quantities:
+        if (
+            not isinstance(quantity.input_entity_ids, (tuple, list))
+            or len(quantity.input_entity_ids) != 1
+            or type(quantity.input_entity_ids[0]) is not str
+        ):
+            raise ValueError("opening customer area physical source identity is missing")
+        original_source = physical_by_id.get(quantity.input_entity_ids[0])
+        original = _opening_quantity(original_source) if original_source is not None else None
+        if original is None or original.to_dict() != quantity.to_dict():
+            raise ValueError("opening customer area claim differs from physical source producer")
+    quantities = (*area_quantities, *count_quantities)
+    ids = tuple(q.quantity_id for q in quantities)
+    if (
+        any(type(i) is not str or not i or i != i.strip() for i in ids)
+        or len(set(ids)) != len(ids)
+    ):
+        raise ValueError("opening customer quantity identities collide across source claims")
 
     traces = {}
     if area_quantities:
