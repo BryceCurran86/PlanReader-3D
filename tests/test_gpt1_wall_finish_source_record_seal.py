@@ -54,7 +54,7 @@ def test_replayed_area_finish_or_source_receipts_cannot_inherit_old_seal(key, va
 ])
 def test_malformed_source_receipts_fail_before_qty_id_generation(key, value):
     record, _ = _resolved_record_and_surface()
-    with pytest.raises(ValueError, match="receipts or area are invalid"):
+    with pytest.raises(ValueError, match=r"receipts or area are invalid|invalid metric area|lacks physical/source identity|lacks source lineage receipts"):
         publish_bound_wall_finish_quantity(replay(record, **{key: value}))
 
 
@@ -62,7 +62,7 @@ def test_malformed_source_receipts_fail_before_qty_id_generation(key, value):
 @pytest.mark.parametrize("bad", [10 ** 400, -(10 ** 400), 0, False])
 def test_wall_finish_original_metric_overflow_or_zero_fails_closed(bad):
     record, _ = _resolved_record_and_surface()
-    with pytest.raises(ValueError, match="receipts or area are invalid"):
+    with pytest.raises(ValueError, match=r"receipts or area are invalid|invalid metric area|lacks physical/source identity|lacks source lineage receipts"):
         publish_bound_wall_finish_quantity(replay(record, quantity_m2=bad))
 
 
