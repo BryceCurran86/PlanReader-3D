@@ -248,7 +248,7 @@ def diagnose_original_w4_address_collisions(records):
             raw_identity_edges, (tuple, list)
         ) and all(exact(value) for value in raw_identity_edges)
         identity_edges = tuple(raw_identity_edges) if identity_edges_valid else ()
-        fragment_receipts_complete = valid_fragments and all(
+        fragment_receipts_complete = bool(fragments) and valid_fragments and all(
             exact(getattr(fragment, "edge_id", None))
             and isinstance(getattr(fragment, "source_primitive_ids", None), (tuple, list))
             and all(
@@ -285,7 +285,10 @@ def diagnose_original_w4_address_collisions(records):
             "shadow_identity_source_primitive_ids_sample": list(identity_primitives[:16]),
             "shadow_identity_edge_ids_sample": list(identity_edges[:16]),
             "shadow_identity_lineage_valid": (
-                identity_primitives_valid and identity_edges_valid
+                physical_identity is not None
+                and identity_primitives_valid and bool(identity_primitives)
+                and identity_edges_valid and bool(identity_edges)
+                and exact(getattr(physical_identity, "candidate_identity_id", None))
             ),
             "physical_wall_equivalence_proven": False,
             "source_room_boundary_published": False,
