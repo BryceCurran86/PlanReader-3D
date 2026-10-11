@@ -319,10 +319,14 @@ def _source_owned_collision_candidate_addresses(
                         or len(set(raw)) != len(raw)):
                     raise W4SourceCandidateAddressCollision("W4 collision lacks unique positive source ancestry")
                 try:
-                    a = (float(edge["x1"]), float(edge["y1"]))
-                    b = (float(edge["x2"]), float(edge["y2"]))
-                except (KeyError, ValueError, TypeError, OverflowError):
+                    raw_coordinates = tuple(edge[key] for key in ("x1", "y1", "x2", "y2"))
+                except KeyError:
                     raise W4SourceCandidateAddressCollision("W4 collision lacks original source geometry") from None
+                # bool and numeric-looking strings must never be laundered into
+                # original W2 geometry, even when float(value) would succeed.
+                if any(type(value) not in (int, float) for value in raw_coordinates):
+                    raise W4SourceCandidateAddressCollision("W4 collision lacks original source geometry")
+                a, b = raw_coordinates[:2], raw_coordinates[2:]
                 if (not all(math.isfinite(x) for x in (*a, *b)) or a == b):
                     raise W4SourceCandidateAddressCollision("W4 collision has invalid source geometry")
                 source_parts.append({
