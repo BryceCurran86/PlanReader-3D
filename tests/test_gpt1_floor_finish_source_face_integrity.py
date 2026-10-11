@@ -77,3 +77,25 @@ def test_original_floor_finish_confidence_is_accepted_when_typed_and_finite():
     assert len(build_live_floor_finish_area_source_traces(
         claim, workspace_id=7, project_id="source-project",
     )) == 1
+
+
+
+@pytest.mark.parametrize("bad_polygon", [
+    ((0., 0.), (10 ** 400, 0.), (10., 20.)),
+    ((0., 0.), (True, 0.), (10., 20.)),
+    ((0., 0.), ("10", 0.), (10., 20.)),
+    ((0., 0.), (float("nan"), 0.), (10., 20.)),
+])
+def test_floor_finish_untyped_or_overflow_source_polygon_is_conflict(bad_polygon):
+    claim = _claim(replace(_floor(), polygon_pdf_pts=bad_polygon))
+    with pytest.raises(SourceClosedRunConflictError, match="source polygon is invalid"):
+        build_live_floor_finish_area_source_traces(
+            claim, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_floor_finish_original_physical_source_square_bbox_preserved():
+    traces = build_live_floor_finish_area_source_traces(
+        _claim(), workspace_id=7, project_id="source-project",
+    )
+    assert next(iter(traces.values())).source_bbox == (10.0, 10.0, 20.0, 20.0)
