@@ -41,8 +41,10 @@ def _default_source(source_bytes, source_sha, page_id):
     return producer, published, tuple(records)
 
 
-def _trace_sources(records):
+def _trace_sources(records, *, exact_endpoint_shadow=False):
     """Experimental candidates only; input receipts are checked by the caller."""
+    if type(exact_endpoint_shadow) is not bool:
+        raise ValueError("exact endpoint shadow mode must be explicit boolean")
     records = tuple(sorted(records, key=lambda r:r.observation_id))
     source_ids = frozenset(r.observation_id for r in records)
     if len(records) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
@@ -63,7 +65,10 @@ def _trace_sources(records):
             x2=geometry[2], y2=geometry[3], document_id=record.document_id, page_id=record.page_id,
             viewport_id="full-page-pixel-shadow", kind=record.observation_kind,
             source_observation_id=record.observation_id))
-    graph = build_wall_graph_for_viewport(segments)
+    # Diagnostic-only control: reuse the existing W2 stack with exact endpoint
+    # joins. The ordinary source report continues using its unchanged default.
+    graph = (build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=0.0)
+        if exact_endpoint_shadow else build_wall_graph_for_viewport(segments))
     deduped, removed = deduplicate_coincident_edges(graph)
     junctions, relationships = classify_junctions(deduped, document_id="source-pixel-shadow",
         page_id=next(iter(pages),"1"), viewport_id="full-page-pixel-shadow")

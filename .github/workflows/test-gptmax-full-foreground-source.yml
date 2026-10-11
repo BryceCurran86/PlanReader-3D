@@ -91,7 +91,7 @@ jobs:
           joined=json.loads(Path("original-seven-source-flanks.json").read_text())
           assert (ancestry["source_original_opening_count"],
                   ancestry["source_original_host_count"],
-                  ancestry["source_original_frame_count"]) == (23,14,9)
+                  ancestry["source_original_frame_count"]) == (21,14,9)
           assert joined["input_foreground_source_count"]==6016
           assert len(joined["opening_rows"])==7
           assert all(len(r["flanks"])==2 and
@@ -128,7 +128,19 @@ jobs:
           after=Path("original-host-frame-after.json").read_bytes()
           assert before==after, "original physical G17 host/frame receipts changed"
           original=json.loads(after)
-          assert original["summary"]=={"physical_existence_claims":23,"host_bindings":14,"host_frames":9}
+          baseline=json.loads(before)
+          assert baseline["summary"]==original["summary"]=={"physical_existence_claims":21,"host_bindings":14,"host_frames":9}
+          def keyed(rows):
+              by_id={x["opening_identity_id"]:x for x in rows}
+              assert len(by_id)==len(rows), "duplicate original opening identity"
+              return by_id
+          # Both annotation lookalikes have already abstained on the current
+          # source-reproduced PR base. Preserve every complete receipt, not
+          # the obsolete 23-positive-hypothesis source control.
+          for field in ("opening_bindings","host_frames"):
+              old,new=keyed(baseline[field]),keyed(original[field])
+              assert len(old)==len(new)==21
+              assert old==new, "original identity-keyed host/frame receipt changed"
           assert report["source_sha256"]==original["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           assert report["render_sha256"]=="64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab"
           assert report["primitive_safety_cap"]==original["primitive_safety_cap"]==20000

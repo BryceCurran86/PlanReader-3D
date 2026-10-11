@@ -1,0 +1,108 @@
+name: GPT MAX Original Exact Endpoint Flank Shadow
+on:
+  pull_request:
+    paths:
+      - scripts/gptmax_exact_endpoint_flank_shadow.py
+      - tools/diag_gptmax_full_foreground_run_source.py
+      - tests/test_gptmax_exact_endpoint_flank_shadow.py
+      - docs/engineering/gptmax_exact_endpoint_flank_shadow.md
+      - .github/workflows/test-gptmax-exact-endpoint-flank-shadow.yml
+concurrency:
+  group: gptmax-exact-endpoint-shadow-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_exact_endpoint_flank_shadow.py tests/test_gptmax_full_foreground_run_source.py tests/test_gptmax_full_foreground_flank_stages.py tests/test_gptmax_cross_opening_source_usage.py
+          ruff check --select F821,F823 scripts/gptmax_exact_endpoint_flank_shadow.py tools/diag_gptmax_full_foreground_run_source.py tests/test_gptmax_exact_endpoint_flank_shadow.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reauthenticate original source and preserve default production receipts
+        run: |
+          git rev-parse HEAD > exact-head.txt
+          PYTHONPATH=. python -u scripts/gptmax_exact_endpoint_flank_shadow.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-exact-endpoint-shadow.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('original-exact-endpoint-shadow.json').read_bytes())
+          assert r['original_source_reauthenticated'] is True
+          assert r['default_production_state_unchanged'] is True
+          assert r['full_source_input_primitive_count'] <= r['source_primitive_safety_cap'] == 20000
+          assert len(r['original_opening_bindings']) >= 14
+          assert sum(b['status']=='corroborated' for b in r['original_opening_bindings'])==14
+          assert sum(f['status']=='corroborated' for f in r['original_host_frames'])==9
+          assert len(r['opening_rows'])==7
+          for key in ('physical_wall_authority','physical_equivalence_proven','source_parent_transfer_allowed',
+                      'structural_source_universe_complete','host_publication_allowed',
+                      'opening_count_publication_allowed','metric_quantity_publication_allowed'):
+              assert r[key] is False
+          assert r['benchmark_accuracy'] is None
+          for row in r['opening_rows']:
+              assert row['identical_local_source_inputs_for_both_modes'] is True
+              assert row['local_scope_is_authenticated_floor_plan_viewport'] is False
+              assert row['local_scope_matches_full_page_topology'] is False
+              assert row['host_publication_allowed'] is False
+              for mode in ('default_snap_local_shadow','exact_endpoint_local_shadow'):
+                  graph=row[mode]['source_graph']
+                  assert graph['input_source_count']==len(row['source_inputs'])<=20000
+                  assert graph['host_publication_allowed'] is False
+                  assert graph['physical_equivalence_proven'] is False
+                  assert all(e['physical_host_authority'] is False for e in graph['all_w2_edges'])
+                  for f in row[mode]['opening_rows'][0]['flanks']:
+                      for p in f['source_run_rows']:
+                          coverage=p['exact_source_span_coverage']
+                          assert coverage['combined_graph_edge_created'] is False
+                          assert coverage['physical_wall_authority'] is False
+                          assert coverage['host_publication_allowed'] is False
+          # Original-source experiment control only: retain the precise
+          # difference between owned interval survival and a one-fragment
+          # predicate. No runtime algorithm reads these identities/counts.
+          expected={
+              'physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8':('left',7),
+              'physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d':('right',5),
+              'physical_opening_existence_f819752382d44a00d9f28feca4b00787':('left',6),
+          }
+          for row in r['opening_rows']:
+              if row['opening_identity_id'] not in expected: continue
+              role,count=expected[row['opening_identity_id']]
+              flanks=row['exact_endpoint_local_shadow']['opening_rows'][0]['flanks']
+              flank,=(f for f in flanks if f['role']==role)
+              assert sum(p['single_fragment_contact_failure_with_complete_retained_source_span']
+                         for p in flank['source_run_rows'])==count
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-exact-endpoint-shadow
+          retention-days: 30
+          path: |
+            exact-head.txt
+            original-exact-endpoint-shadow.json

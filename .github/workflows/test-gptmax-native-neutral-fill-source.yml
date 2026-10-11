@@ -73,7 +73,9 @@ jobs:
           sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           assert old['source_sha256']==new['source_sha256']==roles['source_sha256']==sha
           assert old['primitive_safety_cap']==new['primitive_safety_cap']==20000
-          assert old['summary']=={"physical_existence_claims":23,"host_bindings":14,"host_frames":9}
+          # Native annotation opposition has already been integrated on main.
+          # Confirm authentic current source counts and identity-level retention.
+          assert old['summary']==new['summary']=={"physical_existence_claims":21,"host_bindings":14,"host_frames":9}
           def keyed(key,report):
               values=report[key]
               ids=[x['opening_identity_id'] for x in values]
@@ -81,20 +83,16 @@ jobs:
               return dict(zip(ids,values))
           oldbind,newbind=keyed('opening_bindings',old),keyed('opening_bindings',new)
           oldframe,newframe=keyed('host_frames',old),keyed('host_frames',new)
-          assert len(oldframe)==23 and len(newframe)==len(newbind)
-          assert set(newbind)<=set(oldbind)
-          assert len(newbind)==21
-          extra=set(oldbind)-set(newbind)
-          assert extra=={
+          assert len(oldbind)==len(newbind)==len(oldframe)==len(newframe)==21
+          assert oldbind==newbind, "original opening identity/source proof changed"
+          assert oldframe==newframe, "original opening frame/source proof changed"
+          # Two independently source-opposed native annotation hypotheses
+          # must remain absent, not be silently republished on later changes.
+          historically_opposed={
               'physical_opening_existence_b222d5310a7df1d632d5daab1a676645',
-              'physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d'},extra
-          for identity,record in oldbind.items():
-              if record['record_id'] is not None:
-                  assert newbind[identity]==record,('host changed',identity)
-          for identity,record in oldframe.items():
-              if record['record_id'] is not None:
-                  assert newframe[identity]==record,('frame changed',identity)
-          assert new['summary']=={"physical_existence_claims":21,"host_bindings":14,"host_frames":9}
+              'physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d'}
+          assert not historically_opposed.intersection(oldbind)
+          assert not historically_opposed.intersection(newbind)
           assert any(
               any(atom['reason_codes']==['native_unstroked_pale_neutral_fill_boundary']
                   and atom['kind']=='annotation_border' for atom in row['opposing_evidence_atoms'])
@@ -107,7 +105,7 @@ jobs:
               for row in roles['retained_opposed_candidates'])
           assert not roles.get('opening_count_publication_allowed',False)
           assert not roles.get('metric_quantity_publication_allowed',False)
-          print({'correctly_abstained_false_native_opening':list(extra),
+          print({'correctly_abstained_false_native_opening':sorted(historically_opposed),
                  'authenticated_existing_hosts':14,'authenticated_existing_frames':9})
           PY
       - uses: actions/upload-artifact@v4
