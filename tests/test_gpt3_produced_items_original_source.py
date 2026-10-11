@@ -199,3 +199,47 @@ def test_exact_source_seal_parity_is_true_but_trade_authority_still_unavailable(
     assert blockers==["projection_trade_category_missing:qty-room-1"]
     assert rows[0]["trade_category"] is None
     assert rows[0]["trade_authority_status"]=="UNAVAILABLE_NOT_INFERRED"
+
+
+
+def _multi_physical_source_run(tmp_path,*, overlap=True,other_family=False):
+    source=tmp_path/"multi.pdf"
+    source.write_bytes(b"%PDF-original-source-two-physical-rooms")
+    sha=hashlib.sha256(source.read_bytes()).hexdigest()
+    first=replace(quantity("qa","room-a",sha),
+                  semantic_key="area:shared",
+                  input_entity_ids=("room-a","shared-parent"))
+    second=replace(quantity("qb","room-b",sha),
+                   semantic_key="area:shared",
+                   family="ceiling_area" if other_family else "room_area",
+                   input_entity_ids=("room-b","shared-parent") if overlap
+                   else ("room-b","disjoint-parent"))
+    ta=replace(trace("room-a",sha),canonical_entity_ids=first.input_entity_ids)
+    tb=replace(trace("room-b",sha),canonical_entity_ids=second.input_entity_ids)
+    run=seal_source_closed_run(
+        [first,second],project_id="project-a",
+        traces_by_quantity_id={"qa":ta,"qb":tb},
+    )
+    out=tmp_path/"multi.sealed.json"
+    out.write_text(run.to_json(),encoding="utf-8")
+    return source,out
+
+
+def test_historically_signed_partially_overlapping_physical_claims_not_exportable(tmp_path):
+    original,sealed=_multi_physical_source_run(tmp_path)
+    with pytest.raises(SourceClosedRunConflictError,match="overlapping or duplicate signed physical"):
+        export_verified_produced_items(sealed,[original])
+
+
+def test_independent_physical_quantities_with_same_semantic_type_still_export(tmp_path):
+    original,sealed=_multi_physical_source_run(tmp_path,overlap=False)
+    rows=export_verified_produced_items(sealed,[original])
+    assert [r["quantity_id"] for r in rows]==["qa","qb"]
+    assert set(rows[0]["object_refs"]).isdisjoint(rows[1]["object_refs"])
+
+
+def test_same_physical_object_may_have_distinct_floor_and_ceiling_families(tmp_path):
+    original,sealed=_multi_physical_source_run(tmp_path,other_family=True)
+    rows=export_verified_produced_items(sealed,[original])
+    assert len(rows)==2
+    assert rows[0]["family"] != rows[1]["family"]
