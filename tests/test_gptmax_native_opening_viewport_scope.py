@@ -8,7 +8,7 @@ from pb_physical_opening_viewport_scope_shadow import (
     OUTSIDE_AUTHENTICATED_VIEWPORTS, NO_AUTHENTICATED_VIEWPORT,
     EVIDENCE_DIRECTION_AGAINST_PROMOTION, EVIDENCE_DIRECTION_SCOPE_ONLY,
 )
-from tools.diag_gptmax_native_opening_viewport_scope import audit_native_candidate_viewports
+from scripts.diag_gptmax_native_opening_viewport_scope import audit_native_candidate_viewports
 
 
 def binding(oid, source_id, *, host=None):
