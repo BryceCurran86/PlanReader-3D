@@ -324,6 +324,61 @@ def _sealed_projection_proof(
     return not blockers, blockers
 
 
+def _customer_output_bijection_proof(
+    sealed_root: Path | None, customer_root: Path | None,
+    project_id: str, sealed_run_verified: bool, *,
+    expected_seal_fingerprint: str | None = None,
+) -> tuple[bool, list[str]]:
+    """Authenticate real customer rows against the *same* signed production run.
+
+    A produced-items JSON claim of customer parity is never enough. This gate
+    reopens customer bytes and the independently verified V1 seal, and runs
+    the existing source-to-customer bijection verifier. It is diagnostic only.
+    """
+    if customer_root is None:
+        return False, ["customer_rows_not_supplied"]
+    if not sealed_run_verified or sealed_root is None or not expected_seal_fingerprint:
+        return False, ["customer_sealed_run_not_verified"]
+    customer_path = customer_root / project_id / "customer_rows.json"
+    if not customer_path.is_file():
+        return False, ["customer_rows_missing"]
+    from pb_customer_output_verification import (
+        CustomerOutputVerificationError, verify_sealed_customer_output,
+    )
+    from pb_source_closed_run_export import (
+        SourceClosedRunExportError, sealed_source_closed_run_from_dict,
+    )
+    from tools.export_gpt3_produced_items import _verify_embedded_customer_notes
+
+    sealed_path = sealed_root / project_id / "sealed_run.json"
+    try:
+        before = customer_path.read_bytes()
+        customer_rows = _parse_evidence_json(before.decode("utf-8"))
+        if not isinstance(customer_rows, list) or any(
+            not isinstance(row, dict) for row in customer_rows
+        ):
+            return False, ["customer_rows_invalid_shape"]
+        _verify_embedded_customer_notes(customer_rows)
+        sealed = sealed_source_closed_run_from_dict(_object(sealed_path))
+        if sealed.project_id != project_id or sealed.fingerprint != expected_seal_fingerprint:
+            return False, ["customer_sealed_run_changed"]
+        # The verifier proves the complete bijection or raises a specific
+        # CustomerOutputVerificationError. Its return value is a summary
+        # receipt, not an object with a `.complete` attribute.
+        verify_sealed_customer_output(sealed, customer_rows)
+        # Do not let a concurrent writer change either signed input after
+        # this proof while still reporting that its earlier bytes passed.
+        if customer_path.read_bytes() != before:
+            return False, ["customer_rows_changed_during_readiness"]
+        reopened = sealed_source_closed_run_from_dict(_object(sealed_path))
+        if reopened.fingerprint != expected_seal_fingerprint:
+            return False, ["customer_sealed_run_changed"]
+    except (SourceClosedRunExportError, CustomerOutputVerificationError,
+            TypeError, ValueError, KeyError, UnicodeError, OSError, OverflowError):
+        return False, ["customer_bijection_integrity_invalid"]
+    return True, []
+
+
 def _first_failing_authority_stage(
     *, source_verified: bool, source_reasons: list[str],
     manifest_status: str, manifest_reasons: list[str],
@@ -331,6 +386,7 @@ def _first_failing_authority_stage(
     produced_present: bool, produced_valid: bool, produced_count: int | None,
     produced_reasons: list[str],
     parity_verified: bool, parity_reasons: list[str],
+    customer_verified: bool = True, customer_reasons: list[str] | None = None,
 ) -> tuple[str, str]:
     """Return a grounded earliest authority failure, never a benchmark match.
 
@@ -363,10 +419,18 @@ def _first_failing_authority_stage(
         return "SIGNED_QUANTITY_PARITY", (
             sorted(parity_reasons)[0] if parity_reasons else "produced_sealed_parity_not_proven"
         )
+    if not customer_verified:
+        return "CUSTOMER_OUTPUT_BIJECTION", (
+            sorted(customer_reasons or ())[0] if customer_reasons
+            else "customer_output_bijection_not_verified"
+        )
     return "COMMERCIAL_TRADE_AUTHORITY", "commercial_trade_authority_not_independently_verified"
 
 
-def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None = None, sealed_root: Path | None = None) -> dict:
+def diagnostic_report(
+    root: Path, produced_root: Path, source_root: Path | None = None,
+    sealed_root: Path | None = None, customer_root: Path | None = None,
+) -> dict:
     suite = _object(root / "manifest.json")
     project_ids = suite["projects"]
     required_count = suite["required_project_count"]
@@ -442,6 +506,13 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             else (False, ["produced_sealed_parity_not_proven"])
         )
         blockers.extend(parity_reasons)
+        customer_verified, customer_reasons = _customer_output_bijection_proof(
+            sealed_root, customer_root, project_id, seal_verified,
+            expected_seal_fingerprint=(
+                seal_fingerprints[0] if len(seal_fingerprints) == 1 else None
+            ),
+        )
+        blockers.extend(customer_reasons)
         # The first original-PDF hash is not durable source proof if a long
         # seal/parity pass rotates the on-disk source package. Rehash just
         # before the final readiness result, without consulting gold values.
@@ -502,6 +573,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             ),
             parity_verified=parity_verified,
             parity_reasons=parity_reasons,
+            customer_verified=customer_verified,
+            customer_reasons=customer_reasons,
         )
         projects.append({
             "project_id": project_id,
@@ -516,6 +589,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             "sealed_run_verified": seal_verified,
             "sealed_quantity_count": sealed_count,
             "produced_sealed_parity_verified": parity_verified,
+            "customer_output_bijection_verified": customer_verified,
+            "customer_output_bijection_reason_codes": customer_reasons,
             "commercial_trade_authority_verified": False,
             "reconciliation_complete": False,
             "first_failing_authority_stage": first_stage,
@@ -548,9 +623,14 @@ def main() -> int:
     parser.add_argument("--produced-root", type=Path, required=True)
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--sealed-root", type=Path)
+    parser.add_argument("--customer-root", type=Path,
+                        help="Per-project customer_rows.json files to independently verify")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    report = diagnostic_report(args.benchmark_root, args.produced_root, args.source_root, args.sealed_root)
+    report = diagnostic_report(
+        args.benchmark_root, args.produced_root, args.source_root,
+        args.sealed_root, args.customer_root,
+    )
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
