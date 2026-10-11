@@ -452,3 +452,53 @@ def test_replayed_physical_count_member_identity_is_not_cast_from_boolean(tmp_pa
             replace(claim, canonical_openings=(forged,)),
             workspace_id=7, project_id="source-project",
         )
+
+
+@pytest.mark.parametrize(("field", "invalid"), (
+    ("physical_opening_universe_complete", "true"),
+    ("structural_enumeration_complete", False),
+    ("page_ids", ("2",)),
+    ("page_ids", ("1", "1")),
+    ("page_ids", (None,)),
+    ("physical_opening_record_ids", ("foreign-opening",)),
+    ("physical_opening_record_ids", ("   ",)),
+    ("physical_opening_record_ids", ("same", "same")),
+))
+def test_original_complete_count_universe_must_match_exact_source_page_and_members(
+    field, invalid,
+):
+    """Never invent a complete count from a replayed or truncated source universe."""
+    from pb_live_opening_count_quantity_publication import (
+        publish_live_authenticated_opening_count_quantities,
+    )
+    from pb_live_wall_opening_authority_composition import (
+        compose_live_wall_opening_authority,
+    )
+    from pb_source_visibility_authority import SourceVisibilityProducer
+
+    source = SourceVisibilityProducer(
+        producer_method="count-closed-source-scope-test",
+        producer_version="1",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="count-closed-source-scope-test",
+        source_bytes=_floor_plan_with_schedule_quantity(quantity=1),
+        source_locator="memory://count-closed-source-scope-test.pdf",
+    )
+    composition = compose_live_wall_opening_authority(
+        source_visibility_producer=source,
+        revision_id=published.revision.revision_id,
+        page_ids=("1",),
+    )
+    semantic = composition.semantic_enumeration_result
+    assert semantic.record is not None
+    forged = copy(semantic.record)
+    object.__setattr__(forged, field, invalid)
+    altered = replace(
+        composition,
+        semantic_enumeration_result=replace(semantic, record=forged),
+    )
+    assert publish_live_authenticated_opening_count_quantities(
+        source_visibility_producer=source,
+        wall_opening_composition=altered,
+    ) == ()

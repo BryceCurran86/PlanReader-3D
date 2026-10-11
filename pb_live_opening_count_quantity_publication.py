@@ -111,7 +111,7 @@ def publish_live_authenticated_opening_count_quantities(
         published is None
         or semantic.status is not EvidenceResolutionStatus.CORROBORATED
         or semantic_record is None
-        or not bool(semantic_record.physical_opening_universe_complete)
+        or semantic_record.physical_opening_universe_complete is not True
         or published.revision.document_id != semantic_record.document_id
         or published.revision.revision_id != semantic_record.revision_id
         or published.revision.source_sha256 != semantic_record.source_sha256
@@ -120,8 +120,21 @@ def publish_live_authenticated_opening_count_quantities(
     ):
         return ()
 
-    scope_id = str(semantic_record.decision_scope_id or "").strip()
-    if not scope_id:
+    # Original semantic completeness must account for every source plan page
+    # and exactly the declared physical opening identities. Never certify a
+    # convenient subset as the entire count universe.
+    semantic_pages = semantic_record.page_ids
+    semantic_member_ids = semantic_record.physical_opening_record_ids
+    if (
+        semantic_record.structural_enumeration_complete is not True
+        or not _authentic_source_id_universe(semantic_pages)
+        or set(semantic_pages) != set(wall_opening_composition.page_ids)
+        or not _authentic_source_id_universe(semantic_member_ids)
+        or len(semantic_member_ids) != len(semantic_record.representative_observation_ids)
+    ):
+        return ()
+    scope_id = semantic_record.decision_scope_id
+    if type(scope_id) is not str or not scope_id or scope_id != scope_id.strip():
         return ()
 
     binding_producer = (
@@ -165,6 +178,18 @@ def publish_live_authenticated_opening_count_quantities(
             or opening.record_id in seen_physical_opening_ids
         ):
             return ()
+        # The producer's source-owned physical opening must belong to this
+        # original document, revision, snapshot, page and observation receipt.
+        if (
+            opening.document_id != published.revision.document_id
+            or opening.revision_id != published.revision.revision_id
+            or opening.source_sha256 != published.revision.source_sha256
+            or opening.snapshot_id != published.snapshot.snapshot_id
+            or opening.page_id not in semantic_pages
+            or not _authentic_source_id_universe(opening.source_observation_ids)
+            or observation_id not in opening.source_observation_ids
+        ):
+            return ()
         seen_physical_opening_ids.add(opening.record_id)
         selector = ScheduleOpeningInstanceBindingSelector(
             document_id=opening.document_id,
@@ -180,7 +205,16 @@ def publish_live_authenticated_opening_count_quantities(
             decision_scope_id=scope_id,
         )
 
-    if not binding_selectors:
+    if (
+        not binding_selectors
+        or len(binding_selectors) != len(semantic_record.representative_observation_ids)
+        or set(binding_selectors) != set(semantic_member_ids)
+        or any(
+            result.status is not EvidenceResolutionStatus.CORROBORATED
+            or result.record is None
+            for result in binding_results.values()
+        )
+    ):
         return ()
 
     binding_authority = binding_producer.authority()
