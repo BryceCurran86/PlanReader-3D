@@ -322,6 +322,8 @@ def publish_live_authenticated_opening_count_quantities(
             or quantity.value != float(record.count)
             or tuple(quantity.input_entity_ids) != tuple(physical_ids)
             or not _authentic_source_id_universe(receipt_ids)
+            or not _authentic_source_id_universe(record.schedule_row_ids)
+            or not set(record.schedule_row_ids).issubset(set(receipt_ids))
             or any(
                 not set(physical_source_receipts[opening_id]).issubset(set(receipt_ids))
                 for opening_id in physical_ids
