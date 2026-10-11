@@ -74,6 +74,11 @@ jobs:
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
           --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           --page-id 3 --output lot16-connected-frame-source-handoff.json
+      - name: Reauthenticate exact native source-role opposition before allowing an opening abstention
+        run: >-
+          PYTHONPATH=. python -u tools/diag_native_opening_source_roles.py
+          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          --page-id 3 --output lot16-aperture-native-source-roles.json
       - name: Verify exact source ownership and safety cap
         run: |
           python - <<'PY'
@@ -93,10 +98,52 @@ jobs:
           keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
           assert baseline['source_sha256'] == report['source_sha256']
           assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
-          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
+          old_bindings = keyed(baseline['opening_bindings'])
+          new_bindings = keyed(report['opening_bindings'])
+          assert len(old_bindings) == len(baseline['opening_bindings'])
+          assert set(new_bindings) <= set(old_bindings), 'new opening identity without original source evidence'
+          # Every surviving *physical* existence and its source-bound binding stays
+          # identical. Any lost source hypothesis requires exact opposing
+          # producer evidence; never silently change an authenticated host.
+          assert all(new_bindings[oid] == row for oid, row in old_bindings.items()
+                     if oid in new_bindings), 'original G17 binding rekeyed'
+          missing = set(old_bindings) - set(new_bindings)
+          roles = json.loads(Path('lot16-aperture-native-source-roles.json').read_text())
+          assert roles['source_sha256'] == report['source_sha256']
+          assert roles['summary']['positive_existence_claims'] == len(new_bindings)
+          assert len(missing) <= 1, 'unexpected disappearance of source-backed G17 hypotheses'
+          for oid in sorted(missing):
+              old = old_bindings[oid]
+              assert old['record_id'] is None and old['host_wall_id'] is None
+              representative = old['representative_observation_id']
+              opposition = [
+                  row for row in roles['retained_opposed_candidates']
+                  if representative in row['candidate']['source_observation_ids']
+                  and row['status'] == 'abstained'
+              ]
+              assert len(opposition) == 1, ('native source-role opposition missing or ambiguous',oid)
+              assert any(
+                  atom['status']=='candidate'
+                  and atom['kind']=='annotation_border'
+                  and atom['reason_codes']==['native_unstroked_pale_neutral_fill_boundary']
+                  and atom['metadata']['polarity']=='opposing'
+                  and atom['metadata']['all_source_primitives_covered'] is True
+                  and atom['metadata']['paint_type']=='f'
+                  and atom['metadata']['stroke'] is None
+                  and atom['metadata']['fill_opacity']==1.
+                  and set(atom['metadata']['source_observation_ids'])
+                      == set(row['candidate']['source_observation_ids'])
+                  for row in opposition
+                  for atom in row['opposing_evidence_atoms']
+              ),('removed hypothesis lacks complete exact source paint-role evidence',oid)
           old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
+          assert len(new_frames)==len(report['host_frames'])
           assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
+          assert baseline['summary']['host_bindings']==report['summary']['host_bindings']==14
+          assert baseline['summary']['host_frames']==report['summary']['host_frames']==9
+          print({'bindings_and_proved_frames_retained': True,
+                 'opposed_unhosted_hypotheses':sorted(missing),
+                 'baseline': baseline['summary'], 'current': report['summary']})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
