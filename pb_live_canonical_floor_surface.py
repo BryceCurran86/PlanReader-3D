@@ -234,8 +234,14 @@ def _valid_metric_area_quantity(
         return False
     if tuple(quantity.input_entity_ids or ()) != (source_room_id,):
         return False
-    if floor.source_room_face_record_id not in tuple(
-        str(value) for value in (source_room_entity.evidence_ids or ())
+    original_entity_receipts = getattr(source_room_entity, "evidence_ids", None)
+    if (
+        not isinstance(original_entity_receipts, (tuple, list))
+        or not original_entity_receipts
+        or any(type(receipt) is not str or not receipt
+               or receipt != receipt.strip() for receipt in original_entity_receipts)
+        or len(set(original_entity_receipts)) != len(original_entity_receipts)
+        or floor.source_room_face_record_id not in original_entity_receipts
     ):
         return False
     source_metadata = dict(source_room_entity.metadata or {})
@@ -291,9 +297,7 @@ def _valid_metric_area_quantity(
     quantity_evidence_ids = tuple(quantity.evidence_ids)
     if not quantity_evidence_ids:
         return False
-    if not set(quantity_evidence_ids).issubset(
-        {str(value) for value in (source_room_entity.evidence_ids or ())}
-    ):
+    if not set(quantity_evidence_ids).issubset(set(original_entity_receipts)):
         return False
     return True
 
