@@ -127,14 +127,24 @@ def build_live_ceiling_area_source_traces(
         source_bbox = None
         if points:
             try:
+                if any(
+                    not isinstance(point, (tuple, list)) or len(point) != 2
+                    or any(type(v) not in (int, float) for v in point)
+                    for point in points
+                ):
+                    raise ValueError("untyped ceiling PDF geometry")
                 xs = tuple(float(point[0]) for point in points)
                 ys = tuple(float(point[1]) for point in points)
-            except (TypeError, ValueError, IndexError) as exc:
+                if (
+                    not all(math.isfinite(v) for v in (*xs, *ys))
+                    or max(xs) <= min(xs) or max(ys) <= min(ys)
+                ):
+                    raise ValueError("degenerate ceiling PDF geometry")
+            except (TypeError, ValueError, IndexError, OverflowError) as exc:
                 raise SourceClosedRunConflictError(
                     f"ceiling source polygon is invalid: {quantity.quantity_id}"
                 ) from exc
-            if xs and ys:
-                source_bbox = (min(xs), min(ys), max(xs), max(ys))
+            source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
         trace = CommercialTakeoffSourceTrace(
             workspace_id=int(workspace_id),
