@@ -19,6 +19,33 @@ from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
+def source_complete_dimension_opposition(atom_rows: list[dict], support_ids: tuple[str, ...]) -> bool:
+    """An individual original-source opponent must cover EVERY G17 support.
+
+    A union of individually partial native annotation components is not
+    evidence of one complete dimension. This is read-only classification of
+    candidate atoms, not a source-role or physical-nonexistence decision.
+    """
+    required = frozenset(support_ids)
+    if not required or len(required) != len(support_ids):
+        return False
+    for atom in atom_rows:
+        if (atom.get("kind") != "dimension_annotation"
+                or atom.get("status") != "candidate"
+                or atom.get("reason_codes") != ["native_dimension_cap_tick_text_topology"]
+                or atom.get("all_opening_support_covered") is not True):
+            continue
+        owned = atom.get("source_observation_ids")
+        claimed = atom.get("opening_support_observation_ids")
+        if (not isinstance(owned, list) or not isinstance(claimed, list)
+                or len(owned) != len(set(owned))
+                or len(claimed) != len(set(claimed))):
+            continue
+        if set(claimed) == required and required <= set(owned):
+            return True
+    return False
+
+
 def probe_original_native_opening(
     original_pdf_bytes: bytes, *, expected_source_sha: str,
     page_id: str, representative_observation_id: str,
@@ -121,7 +148,9 @@ def probe_original_native_opening(
         "opening_source_observation_count": len(support),
         "opening_source_observations": support,
         "native_dimension_cap_opposing_atoms": atom_rows,
-        "native_dimension_cap_opposition_proven": bool(atom_rows),
+        "native_dimension_cap_opposition_proven": source_complete_dimension_opposition(
+            atom_rows, support_ids,
+        ),
         "physical_host_proven": False,
         "opening_count_publication_allowed": False,
         "metric_quantity_publication_allowed": False,
