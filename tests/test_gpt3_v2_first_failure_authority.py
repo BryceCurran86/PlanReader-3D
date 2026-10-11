@@ -143,8 +143,9 @@ def test_original_pdf_rotated_after_initial_sha_before_final_readiness_is_reject
 
 
 
+@pytest.mark.parametrize("mutation", ["replaced", "removed"])
 def test_produced_item_replaced_after_initial_parse_invalidates_readiness(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, mutation
 ):
     import json
     import scripts.report_full_plan_v2_readiness as readiness
@@ -170,8 +171,11 @@ def test_produced_item_replaced_after_initial_parse_invalidates_readiness(
     monkeypatch.setattr(readiness, "_source_sha_proof",
                         lambda *_args: (True, []))
     def rotated_after_initial_read(*args, **kwargs):
-        produced_path.write_text('[{"quantity_id":"q2","value":99.0}]',
-                                 encoding="utf-8")
+        if mutation == "replaced":
+            produced_path.write_text('[{"quantity_id":"q2","value":99.0}]',
+                                     encoding="utf-8")
+        else:
+            produced_path.unlink()
         return True, 1, []
     monkeypatch.setattr(readiness, "_sealed_run_proof",
                         rotated_after_initial_read)
