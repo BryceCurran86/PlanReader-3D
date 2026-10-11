@@ -234,8 +234,14 @@ def _valid_metric_area_quantity(
         return False
     if tuple(quantity.input_entity_ids or ()) != (source_room_id,):
         return False
-    if floor.source_room_face_record_id not in tuple(
-        str(value) for value in (source_room_entity.evidence_ids or ())
+    original_entity_receipts = getattr(source_room_entity, "evidence_ids", None)
+    if (
+        not isinstance(original_entity_receipts, (tuple, list))
+        or not original_entity_receipts
+        or any(type(receipt) is not str or not receipt
+               or receipt != receipt.strip() for receipt in original_entity_receipts)
+        or len(set(original_entity_receipts)) != len(original_entity_receipts)
+        or floor.source_room_face_record_id not in original_entity_receipts
     ):
         return False
     source_metadata = dict(source_room_entity.metadata or {})
@@ -244,6 +250,22 @@ def _valid_metric_area_quantity(
     if str(source_metadata.get("revision_id") or "") != floor.revision_id:
         return False
     if str(source_metadata.get("page_id") or "") != str(floor.page_id):
+        return False
+    if (
+        type(quantity.value) not in (int, float)
+        or type(quantity.confidence) not in (int, float)
+        or not isinstance(quantity.evidence_ids, (tuple, list))
+        or not quantity.evidence_ids
+        or any(type(receipt) is not str or not receipt or receipt != receipt.strip()
+               for receipt in quantity.evidence_ids)
+        or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
+    ):
+        return False
+    try:
+        source_confidence = float(quantity.confidence)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(source_confidence) or not 0.0 <= source_confidence <= 1.0:
         return False
     if not str(quantity.quantity_id or "").strip():
         return False
@@ -272,12 +294,10 @@ def _valid_metric_area_quantity(
         return False
     if str(metadata.get("page_no") or "") != str(floor.page_id):
         return False
-    quantity_evidence_ids = tuple(str(value) for value in (quantity.evidence_ids or ()))
+    quantity_evidence_ids = tuple(quantity.evidence_ids)
     if not quantity_evidence_ids:
         return False
-    if not set(quantity_evidence_ids).issubset(
-        {str(value) for value in (source_room_entity.evidence_ids or ())}
-    ):
+    if not set(quantity_evidence_ids).issubset(set(original_entity_receipts)):
         return False
     return True
 
@@ -432,6 +452,8 @@ def enrich_live_canonical_floor_metric_areas(
     # from the CUMULATIVE floor state, not just matches in this bridge.
     def _measured(floor: LiveCanonicalFloorSurfaceObject) -> bool:
         if not floor.metric_area_quantity_id or not floor.metric_area_authority:
+            return False
+        if type(floor.metric_area_m2) not in (int, float):
             return False
         try:
             area = float(floor.metric_area_m2)
