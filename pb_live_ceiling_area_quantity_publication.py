@@ -79,6 +79,13 @@ def _publish_one(
         type(ceiling.area_m2) not in (int, float)
         or type(source.value) not in (int, float)
         or type(source.confidence) not in (int, float)
+        or type(source.quantity_id) is not str
+        or not source.quantity_id or source.quantity_id != source.quantity_id.strip()
+        or not isinstance(source.input_entity_ids, (tuple, list))
+        or len(source.input_entity_ids) != 1
+        or type(source.input_entity_ids[0]) is not str
+        or not source.input_entity_ids[0]
+        or source.input_entity_ids[0] != source.input_entity_ids[0].strip()
         or not isinstance(source.evidence_ids, (tuple, list))
         or not isinstance(ceiling.evidence_ids, (tuple, list))
         or any(
