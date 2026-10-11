@@ -147,6 +147,26 @@ jobs:
                   label:[q.quantity_id for q in firm_receipts.get(label,())]
                   for label in control_labels
               },
+              # Diagnose the first producer stage dropout, not just the
+              # last room-area assertion. Counts preserve existing ABSTAIN.
+              "claim_status":getattr(claim.status,"value",str(claim.status)),
+              "claim_reason_codes":list(claim.reason_codes),
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "all_source_labelled_rooms":labels,
+              "labelled_room_count":len(labelled),
+              "physical_room_face_id_count":sum(
+                  bool(row["source_room_face_record_id"]) for row in labelled
+              ),
+              "geometry_complete_labelled_room_count":sum(
+                  bool(row["geometry_complete"]) for row in labelled
+              ),
+              "total_room_area_quantity_evidence":len(claim.room_area_quantity_evidence),
+              "firm_room_area_quantity_evidence_count":sum(
+                  q.value is not None and not q.abstained
+                  for q in claim.room_area_quantity_evidence
+              ),
+              "production_floor_area_quantity_count":len(published_floors),
           },sort_keys=True),flush=True)
           for label,expected in (
               ("FOOD PREP",13.270425),
