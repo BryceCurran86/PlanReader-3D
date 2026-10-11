@@ -251,6 +251,7 @@ def diagnose_original_w4_address_collisions(records):
         fragment_receipts_complete = bool(fragments) and valid_fragments and all(
             exact(getattr(fragment, "edge_id", None))
             and isinstance(getattr(fragment, "source_primitive_ids", None), (tuple, list))
+            and bool(fragment.source_primitive_ids)
             and all(
                 exact(value) for value in fragment.source_primitive_ids
             )
@@ -263,6 +264,15 @@ def diagnose_original_w4_address_collisions(records):
             "original_centerline_point_count": len(source_points),
             "source_edge_fragment_count": len(fragments),
             "source_fragment_receipts_complete": fragment_receipts_complete,
+            "original_fragment_primitives_owned_by_shadow_identity": (
+                fragment_receipts_complete
+                and identity_primitives_valid
+                and bool(identity_primitives)
+                and all(
+                    set(fragment.source_primitive_ids).issubset(identity_primitives)
+                    for fragment in fragments
+                )
+            ),
             "source_fragment_edge_ids_sample": [
                 frag.edge_id for frag in fragments[:8]
                 if exact(getattr(frag, "edge_id", None))
