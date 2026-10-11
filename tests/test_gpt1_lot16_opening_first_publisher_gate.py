@@ -267,3 +267,35 @@ def test_lot16_source_trace_validation_reports_missing_trace_without_crashing(mo
     assert result["finish_quantity_count"] == 1
     assert result["source_trace_validated_finish_quantity_count"] == 0
     assert "fixture lacks source trace" in result["finish_source_trace_failure"]
+
+
+
+@pytest.mark.parametrize("bad", [True, False, "8.64", 10 ** 400,
+                                  float("nan"), float("inf"), None])
+def test_lot16_floor_metric_diagnostic_rejects_untyped_or_overflowed_m2(bad):
+    from copy import copy
+    from tests.test_live_floor_finish_area_source_closed_export import _floor
+    from tools.diag_lot16_room_face_scope import _has_firm_metric_floor_receipt
+
+    floor = copy(_floor())
+    object.__setattr__(floor, "metric_area_m2", bad)
+    assert _has_firm_metric_floor_receipt(floor) is False
+
+
+def test_lot16_original_documented_floor_metric_receipt_can_still_be_diagnosed():
+    from tests.test_live_floor_finish_area_source_closed_export import _floor
+    from tools.diag_lot16_room_face_scope import _has_firm_metric_floor_receipt
+
+    assert _has_firm_metric_floor_receipt(_floor()) is True
+
+
+@pytest.mark.parametrize(("field", "bad", "reason"), [
+    ("length_m", 10 ** 400, "metric_wall_length_unavailable"),
+    ("height_m", 10 ** 400, "authenticated_wall_height_unavailable"),
+    ("gross_area_m2", 10 ** 400, "gross_wall_area_unavailable"),
+    ("net_area_m2", 10 ** 400, "net_wall_area_or_deduction_unavailable"),
+])
+def test_lot16_wall_first_failure_handles_extreme_source_numbers_without_crashing(field, bad, reason):
+    from tools.diag_lot16_room_face_scope import _wall_metric_first_failure
+
+    assert _wall_metric_first_failure(_metric_wall(**{field: bad})) == reason
