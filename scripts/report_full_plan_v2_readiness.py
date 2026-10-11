@@ -283,6 +283,7 @@ def _first_failing_authority_stage(
     manifest_status: str, manifest_reasons: list[str],
     sealed_verified: bool, seal_reasons: list[str],
     produced_present: bool, produced_valid: bool, produced_count: int | None,
+    produced_reasons: list[str],
     parity_verified: bool, parity_reasons: list[str],
 ) -> tuple[str, str]:
     """Return a grounded earliest authority failure, never a benchmark match.
@@ -306,7 +307,10 @@ def _first_failing_authority_stage(
     if not produced_present:
         return "PRODUCED_ITEMS", "production_items_missing"
     if not produced_valid:
-        return "PRODUCED_ITEMS", "produced_items_invalid_json_or_shape"
+        return "PRODUCED_ITEMS", (
+            sorted(produced_reasons)[0] if produced_reasons
+            else "produced_items_invalid_json_or_shape"
+        )
     if not produced_count:
         return "PRODUCED_ITEMS", "empty_produced_items_unverified"
     if not parity_verified:
@@ -414,6 +418,11 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             produced_present=exists,
             produced_valid=not invalid_produced_shape and invalid_produced_id_count == 0 and not duplicate_ids,
             produced_count=len(produced) if exists and not invalid_produced_shape else None,
+            produced_reasons=(
+                (["produced_items_invalid_json_or_shape"] if invalid_produced_shape else [])
+                + (["produced_quantity_id_missing_or_invalid"] if invalid_produced_id_count else [])
+                + (["duplicate_produced_quantity_ids"] if duplicate_ids else [])
+            ),
             parity_verified=parity_verified,
             parity_reasons=parity_reasons,
         )
