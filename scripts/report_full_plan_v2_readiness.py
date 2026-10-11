@@ -298,6 +298,7 @@ def _sealed_projection_proof(
     sealed_root: Path | None, project_id: str, produced: list[dict],
     sealed_run_verified: bool, *,
     expected_seal_fingerprint: str | None = None,
+    downstream_reason_sink: list[str] | None = None,
 ) -> tuple[bool, list[str]]:
     if not sealed_run_verified or sealed_root is None:
         return False, ["produced_sealed_parity_not_proven"]
@@ -329,12 +330,17 @@ def _sealed_projection_proof(
     # their *independent* original-source/customer-row evidence arrives.
     # Do not relabel those expected downstream blockers as signed quantity
     # identity failures or hide the first actual failed authority stage.
+    downstream_prefixes = (
+        "projection_trade_category_missing:",
+        "projection_customer_output_parity_unverified:",
+    )
+    if downstream_reason_sink is not None:
+        downstream_reason_sink.extend(
+            reason for reason in blockers if reason.startswith(downstream_prefixes)
+        )
     signed_quantity_blockers = [
         reason for reason in blockers
-        if not reason.startswith((
-            "projection_trade_category_missing:",
-            "projection_customer_output_parity_unverified:",
-        ))
+        if not reason.startswith(downstream_prefixes)
     ]
     return not signed_quantity_blockers, signed_quantity_blockers
 
@@ -508,12 +514,14 @@ def diagnostic_report(
             seal_fingerprint_sink=seal_fingerprints,
         )
         blockers.extend(seal_reasons)
+        downstream_parity_reasons: list[str] = []
         parity_verified, parity_reasons = (
             _sealed_projection_proof(
                 sealed_root, project_id, produced, seal_verified,
                 expected_seal_fingerprint=(
                     seal_fingerprints[0] if seal_fingerprints else None
                 ),
+                downstream_reason_sink=downstream_parity_reasons,
             )
             if exists and not invalid_produced_shape and (
                 not seal_verified or len(seal_fingerprints) == 1
@@ -521,6 +529,9 @@ def diagnostic_report(
             else (False, ["produced_sealed_parity_not_proven"])
         )
         blockers.extend(parity_reasons)
+        # Retain precise per-quantity downstream facts in the report while
+        # keeping them outside the signed *quantity* identity/metric verdict.
+        blockers.extend(downstream_parity_reasons)
         customer_verified, customer_reasons = _customer_output_bijection_proof(
             sealed_root, customer_root, project_id, seal_verified,
             expected_seal_fingerprint=(
