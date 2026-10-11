@@ -10,6 +10,7 @@ on:
       - tests/test_raster_source_wall_frame_projection.py
       - tests/test_raster_visibility_receipt_registration.py
       - tools/diag_opening_wall_face_preservation.py
+      - scripts/gptmax_source_opposition_retention.py
       - .github/workflows/test-gpt3-source-frame-proof.yml
       - tests/test_raster_opening_whole_wall_frame.py
 permissions:
@@ -23,23 +24,28 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ORT_DISABLE_TELEMETRY: "1"
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: lot16-connected-frame-source-handoff
-          path: prerequisite-lot16
+      - name: Replay exact PR-base Lot16 source receipts in their original code
+        run: |
+          mkdir -p prerequisite-lot16
+          git worktree add --detach /tmp/source-frame-lot16-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/source-frame-lot16-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json"
+          )
       - name: Real Lot16 source, wall and host handoff
         run: >-
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
@@ -47,6 +53,11 @@ jobs:
           --page-id 3 --output lot16-connected-frame-source-handoff.json
       - name: Verify exact source ownership and safety cap
         run: |
+          PYTHONPATH=. python scripts/gptmax_source_opposition_retention.py \
+            --baseline prerequisite-lot16/lot16-connected-frame-source-handoff.json \
+            --candidate lot16-connected-frame-source-handoff.json \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --output lot16-source-opposition-fresh-retention.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -64,7 +75,10 @@ jobs:
           keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
           assert baseline['source_sha256'] == report['source_sha256']
           assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
-          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
+          old_bindings, new_bindings = keyed(baseline['opening_bindings']), keyed(report['opening_bindings'])
+          assert len(old_bindings) == len(baseline['opening_bindings'])
+          assert set(new_bindings) <= set(old_bindings)
+          assert all(old_bindings[key] == row for key, row in new_bindings.items())
           old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
           assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
           print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
@@ -73,33 +87,39 @@ jobs:
         if: always()
         with:
           name: lot16-connected-frame-source-handoff
-          path: lot16-connected-frame-source-handoff.json
+          path: |
+            prerequisite-lot16/lot16-connected-frame-source-handoff.json
+            lot16-connected-frame-source-handoff.json
+            lot16-source-opposition-fresh-retention.json
           retention-days: 14
   maryborough-source-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 90
     env:
       ORT_DISABLE_TELEMETRY: "1"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: maryborough-connected-frame-source-handoff
-          path: prerequisite-maryborough
+      - name: Replay exact PR-base Maryborough source receipts in their original code
+        run: |
+          git worktree add --detach /tmp/source-frame-maryborough-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/source-frame-maryborough-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+              --page-id 7 --page-id 30 --page-id 31 --output "$GITHUB_WORKSPACE/maryborough-source-baseline.json"
+          )
       - name: Compare real Maryborough source and host identities with prerequisite
         run: |
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
-          cp prerequisite-maryborough/maryborough-connected-frame-source-handoff.json maryborough-source-baseline.json
           python - <<'PY'
           import json
           from pathlib import Path

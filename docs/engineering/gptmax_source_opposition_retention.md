@@ -63,6 +63,16 @@ truth or expected quantities.
   discovery gain.
 - Connected frame source retention uses the separate fresh-opposition audit
   for Lot16. Its Maryborough exact-source parity comparison is unchanged.
+- GPT3 source frame proof now executes each exact PR-base diagnostic in its
+  own checkout, replacing historical artifact dependencies for both sources.
+  Lot16 uses fresh original fill opposition before admitting an unhosted
+  claim delta; every shared binding and old firm frame stays identical.
+  Maryborough still requires exact binding and firm-frame parity.
+  Exact-head job `114456830360` exposed this fourth stale comparison: the
+  current source run produced 22/14/9, but the historical positive universe
+  equality rejected the independently opposed table claim. The revised
+  Lot16 inline assertions pass against the fresh original reports. The
+  updated remote job must still pass; its prior failure is not waived.
 - The dedicated neutral-fill job requires both the exact known source delta
   and the freshly authenticated generic explanation.
 
@@ -71,7 +81,12 @@ truth or expected quantities.
 Initial focused runs: 74 opposition/strict-retention tests and 107 existing
 opening/source/frame regressions passed. Provider gold isolation, frozen V2
 integrity, compileall, Ruff F821/F823 and edited workflow YAML/embedded Python
-checks passed. Full suite and exact-head CI/source jobs remain required.
+checks passed. `tests/ci_smoke.py` passed. Full local suite: 11,190 passed,
+51 skipped, 13 xfailed and one schedule-identity failure
+(`test_removing_explicit_identity_removes_firm_opening`), independently
+reproduced on unchanged `9dc7125`. This is not a passed full-suite claim.
+Exact-head CI/source jobs remain required, including strict Maryborough
+source parity.
 
 Frozen V2 manifests, object universe, references, scoring, tolerances and
 denominators are untouched. The input source-primitive cap remains 20,000.
