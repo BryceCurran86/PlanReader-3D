@@ -96,7 +96,7 @@ def _reference(render_sha, proof):
         "schema_version": FULL_RUN_SCHEMA_VERSION, "orientation": proof.orientation,
         "pixel_geometry": proof.pixel_geometry,
     }, digest_chars=32)
-    return f"raster_full_foreground_run:{render_sha}:{FULL_RUN_SCHEMA_VERSION}:{address}"
+    return f"{FULL_RUN_KIND}:{render_sha}:{FULL_RUN_SCHEMA_VERSION}:{address}"
 
 
 def _blocked(reason, *, conflict=False):
