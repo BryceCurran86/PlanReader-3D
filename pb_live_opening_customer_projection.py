@@ -113,7 +113,7 @@ def project_live_opening_customer_rows(
         or len(set(source_claim_ids)) != len(source_claim_ids)
     ):
         raise ValueError(
-            "opening customer source claim identities collide before commercial filtering"
+            "opening customer quantity identities collide before commercial filtering"
         )
 
     area_quantities = _eligible_area_quantities(claim)
