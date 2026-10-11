@@ -159,6 +159,21 @@ def publish_live_floor_area_quantities(
         if len(floors) != 1:
             continue
         floor = floors[0]
+        # A numeric match cannot be transferred by coercing or trimming an
+        # imported canonical-floor receipt to look like the original physical
+        # source room and quantity. Require unchanged typed identities.
+        if any(
+            type(identity) is not str or not identity
+            or identity != identity.strip()
+            for identity in (
+                floor.canonical_floor_id,
+                floor.physical_floor_surface_id,
+                floor.room_entity_id,
+                floor.source_room_face_record_id,
+                floor.metric_area_quantity_id,
+            )
+        ):
+            continue
         if not floor.physical_floor_surface_identity_resolved:
             continue
         if not floor.physical_floor_surface_id or not floor.canonical_floor_id:
