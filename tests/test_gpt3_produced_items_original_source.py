@@ -267,3 +267,79 @@ def test_failed_produced_items_atomic_rename_preserves_existing_report_and_input
     assert output.read_bytes()==previous_output
     assert (source.read_bytes(),sealed.read_bytes())==previous_inputs
     assert not list(tmp_path.glob(".produced_items.json.*.tmp"))
+
+
+
+def _original_projected_customer_row(q,t):
+    from pb_quantity_takeoff_adapter import (
+        CommercialMeasurementAuthority,quantity_evidence_to_takeoff_output_row,
+    )
+    return quantity_evidence_to_takeoff_output_row(
+        q,trace=t,authority=CommercialMeasurementAuthority(method="direct_evidence"),
+    )
+
+
+def test_original_source_and_exact_customer_row_bijection_explicitly_verified(tmp_path):
+    source,sealed,sha,q,t=_source_run(tmp_path)
+    customer=_original_projected_customer_row(q,t)
+    produced=export_verified_produced_items(
+        sealed,[source],customer_rows=[customer],
+    )
+    assert produced[0]["customer_output_parity_verified"] is True
+    assert produced[0]["customer_output_parity_status"]=="SIGNED_CUSTOMER_BIJECTION_VERIFIED"
+    assert produced[0]["trade_category"] is None
+
+
+@pytest.mark.parametrize("corruption",["missing","duplicate","wrong-quantity"])
+def test_missing_duplicate_or_unknown_customer_rows_block_produced_bijection(
+    tmp_path,corruption
+):
+    from pb_customer_output_verification import CustomerOutputVerificationError
+    source,sealed,_,q,t=_source_run(tmp_path)
+    customer=_original_projected_customer_row(q,t)
+    if corruption=="missing":
+        rows=[]
+    elif corruption=="duplicate":
+        rows=[customer,dict(customer)]
+    else:
+        forged=dict(customer)
+        forged["quantity_id"]="unsealed-fabricated-id"
+        rows=[forged]
+    with pytest.raises(CustomerOutputVerificationError):
+        export_verified_produced_items(sealed,[source],customer_rows=rows)
+
+
+def test_customer_rows_file_cannot_be_overwritten_by_produced_items(tmp_path):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    customer_path=tmp_path/"customer.json"
+    customer_path.write_text(json.dumps([_original_projected_customer_row(q,t)]),encoding="utf-8")
+    previous=customer_path.read_bytes()
+    with pytest.raises(ValueError,match="must not overwrite"):
+        main([
+            "--sealed-run",str(sealed),"--source",str(source),
+            "--customer-rows",str(customer_path),
+            "--project-id","project-a","--output",str(customer_path),
+        ])
+    assert customer_path.read_bytes()==previous
+
+
+def test_cli_source_and_customer_verified_export_remains_unpriced_unapproved(tmp_path):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    customer_path=tmp_path/"customer.json"
+    customer_path.write_text(json.dumps([_original_projected_customer_row(q,t)]),encoding="utf-8")
+    output=tmp_path/"produced_items.json"
+    assert main([
+        "--sealed-run",str(sealed),"--source",str(source),
+        "--customer-rows",str(customer_path),
+        "--project-id","project-a","--output",str(output),
+    ])==0
+    rows=json.loads(output.read_text())
+    assert rows[0]["customer_output_parity_verified"] is True
+    assert rows[0]["trade_category"] is None
+
+
+def test_without_customer_rows_source_export_must_explicitly_mark_parity_unchecked(tmp_path):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    items=export_verified_produced_items(sealed,[source])
+    assert items[0]["customer_output_parity_verified"] is False
+    assert items[0]["customer_output_parity_status"]=="NOT_CHECKED_SOURCE_SEAL_ONLY"
