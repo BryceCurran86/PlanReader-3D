@@ -403,16 +403,20 @@ def _verify_row_lineage(
     # but a present direct copy must agree exactly with the signed producer
     # provenance. Do not let changed spatial scope inherit a valid fingerprint.
     if row.get("workspace_id") is not None:
-        if type(row["workspace_id"]) is bool or type(row["workspace_id"]) not in (int, str):
+        raw_workspace_id = row["workspace_id"]
+        if type(raw_workspace_id) is int and raw_workspace_id > 0:
+            workspace_id = raw_workspace_id
+        elif type(raw_workspace_id) is str and re.fullmatch(r"[1-9][0-9]*", raw_workspace_id):
+            try:
+                workspace_id = int(raw_workspace_id)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise CustomerOutputVerificationError(
+                    f"customer row {quantity_id!r} has invalid workspace_id"
+                ) from exc
+        else:
             raise CustomerOutputVerificationError(
                 f"customer row {quantity_id!r} has invalid workspace_id"
             )
-        try:
-            workspace_id = int(row["workspace_id"])
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise CustomerOutputVerificationError(
-                f"customer row {quantity_id!r} has invalid workspace_id"
-            ) from exc
         _require_equal("workspace_id", workspace_id, tprov.get("workspace_id"), quantity_id)
     if row.get("source_bbox") is not None:
         direct_box = row["source_bbox"]
