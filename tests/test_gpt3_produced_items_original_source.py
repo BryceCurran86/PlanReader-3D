@@ -240,7 +240,7 @@ def _multi_physical_source_run(tmp_path,*, overlap=True,other_family=False):
 
 def test_historically_signed_partially_overlapping_physical_claims_not_exportable(tmp_path):
     original,sealed=_multi_physical_source_run(tmp_path)
-    with pytest.raises(SourceClosedRunConflictError,match=r"(overlapping or duplicate signed physical|conflicting sealed physical claim)"):
+    with pytest.raises(SourceClosedRunConflictError,match=r"(overlapping or duplicate signed physical|conflicting sealed physical claim.*overlapping source identity)"):
         export_verified_produced_items(sealed,[original])
 
 
