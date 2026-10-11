@@ -277,7 +277,7 @@ def build_gross_wall_area_quantity(
             or not quantity.input_entity_ids[0].strip()
             or not isinstance(quantity.evidence_ids, (tuple, list))
             or not quantity.evidence_ids
-            or any(type(v) is not str or not v.strip() for v in quantity.evidence_ids)
+            or any(type(v) is not str or not v or v != v.strip() for v in quantity.evidence_ids)
             or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
         ):
             blockers.append(f"{prefix}_source_receipts_invalid")
@@ -285,13 +285,22 @@ def build_gross_wall_area_quantity(
             if type(quantity.value) not in (int, float):
                 blockers.append(f"{prefix}_value_invalid")
             else:
-                value = float(quantity.value)
-                if not math.isfinite(value) or value <= 0.0:
+                try:
+                    value = float(quantity.value)
+                except (TypeError, ValueError, OverflowError):
                     blockers.append(f"{prefix}_value_invalid")
-        if type(quantity.confidence) not in (int, float) or (
-            not math.isfinite(float(quantity.confidence))
-            or not 0.0 <= float(quantity.confidence) <= 1.0
-        ):
+                else:
+                    if not math.isfinite(value) or value <= 0.0:
+                        blockers.append(f"{prefix}_value_invalid")
+        try:
+            confidence = (
+                float(quantity.confidence)
+                if type(quantity.confidence) in (int, float)
+                else float("nan")
+            )
+        except (TypeError, ValueError, OverflowError):
+            confidence = float("nan")
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
             blockers.append(f"{prefix}_confidence_invalid")
 
     if blockers:
