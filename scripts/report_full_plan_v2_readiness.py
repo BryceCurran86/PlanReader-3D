@@ -238,6 +238,52 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
             or set(refs) != set(row.object_identity_refs)
         ):
             blockers.append(f"projection_object_identity_mismatch:{quantity_id}")
+        # New source exporter records additional original signed V1 fields.
+        # These are optional for legacy diagnostic inputs, but an explicit
+        # field is never allowed to drift under the same quantity_id.
+        for produced_field, sealed_field in (
+            ("project_id", "project_id"),
+            ("family", "family"),
+            ("status", "status"),
+            ("authority", "authority"),
+            ("source_page", "source_page"),
+            ("viewport_id", "viewport_id"),
+            ("semantic_key", "semantic_key"),
+            ("source_document_id", "document_id"),
+            ("source_sha256", "source_sha256"),
+            ("revision_id", "revision_id"),
+            ("sealed_quantity_fingerprint", "fingerprint"),
+        ):
+            if produced_field in item:
+                source_value = getattr(row, sealed_field, None)
+                if (
+                    type(item[produced_field]) is not str
+                    or not item[produced_field]
+                    or item[produced_field] != source_value
+                ):
+                    blockers.append(
+                        f"projection_{produced_field}_mismatch:{quantity_id}"
+                    )
+        if "confidence" in item:
+            original_confidence = getattr(row, "confidence", None)
+            candidate_confidence = item["confidence"]
+            if (
+                not _safe_finite_quantity_number(candidate_confidence)
+                or original_confidence is None
+                or candidate_confidence != original_confidence
+            ):
+                blockers.append(f"projection_confidence_mismatch:{quantity_id}")
+        # Source-sealed quantities are not proof that customer output exists.
+        # The new exporter records false until the existing signed-customer
+        # bijection has been independently executed. A true flag is only a
+        # reported receipt, not estimator approval or trade authentication.
+        if (
+            "customer_output_parity_verified" in item
+            and item["customer_output_parity_verified"] is not True
+        ):
+            blockers.append(
+                f"projection_customer_output_parity_unverified:{quantity_id}"
+            )
         category = item.get("trade_category")
         if not isinstance(category, str) or not category.strip():
             blockers.append(f"projection_trade_category_missing:{quantity_id}")
@@ -278,6 +324,48 @@ def _sealed_projection_proof(
     return not blockers, blockers
 
 
+def _first_failing_authority_stage(
+    *, source_verified: bool, source_reasons: list[str],
+    manifest_status: str, manifest_reasons: list[str],
+    sealed_verified: bool, seal_reasons: list[str],
+    produced_present: bool, produced_valid: bool, produced_count: int | None,
+    produced_reasons: list[str],
+    parity_verified: bool, parity_reasons: list[str],
+) -> tuple[str, str]:
+    """Return a grounded earliest authority failure, never a benchmark match.
+
+    Stage order is source bytes -> physical universe -> sealed production ->
+    produced identity -> parity -> independent commercial trade authority.
+    No stage consults gold descriptions, matches or evaluator quantities.
+    """
+    if not source_verified:
+        return "ORIGINAL_SOURCE_SHA_AUTHORITY", (
+            sorted(source_reasons)[0] if source_reasons else "source_sha_unverified"
+        )
+    if manifest_status != "VERIFIED":
+        return "SOURCE_UNIVERSE_CLOSURE", (
+            manifest_reasons[0] if manifest_reasons else "frozen_manifest_not_verified"
+        )
+    if not sealed_verified:
+        return "SEALED_PRODUCTION_AUTHORITY", (
+            sorted(seal_reasons)[0] if seal_reasons else "sealed_run_unverified"
+        )
+    if not produced_present:
+        return "PRODUCED_ITEMS", "production_items_missing"
+    if not produced_valid:
+        return "PRODUCED_ITEMS", (
+            sorted(produced_reasons)[0] if produced_reasons
+            else "produced_items_invalid_json_or_shape"
+        )
+    if not produced_count:
+        return "PRODUCED_ITEMS", "empty_produced_items_unverified"
+    if not parity_verified:
+        return "SIGNED_QUANTITY_PARITY", (
+            sorted(parity_reasons)[0] if parity_reasons else "produced_sealed_parity_not_proven"
+        )
+    return "COMMERCIAL_TRADE_AUTHORITY", "commercial_trade_authority_not_independently_verified"
+
+
 def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None = None, sealed_root: Path | None = None) -> dict:
     suite = _object(root / "manifest.json")
     project_ids = suite["projects"]
@@ -299,9 +387,13 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         path = produced_root / project_id / "produced_items.json"
         exists = path.is_file()
         invalid_produced_shape = False
+        produced_initial_sha: str | None = None
         if exists:
             try:
-                produced = _parse_evidence_json(path.read_text(encoding="utf-8"))
+                # Bind the actual bytes parsed for parity, not a later read.
+                produced_bytes = path.read_bytes()
+                produced_initial_sha = hashlib.sha256(produced_bytes).hexdigest()
+                produced = _parse_evidence_json(produced_bytes.decode("utf-8"))
             except (ValueError, UnicodeError, OSError):
                 produced = []
                 invalid_produced_shape = True
@@ -350,6 +442,32 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             else (False, ["produced_sealed_parity_not_proven"])
         )
         blockers.extend(parity_reasons)
+        # The first original-PDF hash is not durable source proof if a long
+        # seal/parity pass rotates the on-disk source package. Rehash just
+        # before the final readiness result, without consulting gold values.
+        if source_verified:
+            source_still_verified, final_source_reasons = _source_sha_proof(
+                manifest, source_root, project_id
+            )
+            if not source_still_verified:
+                source_verified = False
+                source_reasons.extend(final_source_reasons)
+                source_reasons.append("source_changed_during_readiness")
+                blockers.extend(final_source_reasons)
+                blockers.append("source_changed_during_readiness")
+        if exists and produced_initial_sha is not None:
+            # A concurrent producer may replace a valid produced file after
+            # first parsing but before parity/report publication. Never use
+            # the stale in-memory rows as proof of the on-disk artifact.
+            try:
+                current_produced_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                current_produced_sha = None
+            if current_produced_sha != produced_initial_sha:
+                parity_verified = False
+                invalid_produced_shape = True
+                parity_reasons.append("produced_items_changed_during_readiness")
+                blockers.append("produced_items_changed_during_readiness")
         if exists:
             blockers.append("commercial_trade_authority_not_independently_verified")
         if manifest.get("status") != "VERIFIED":
@@ -366,6 +484,25 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             blockers.append("produced_items_invalid_json_or_shape")
         elif not produced and exists:
             blockers.append("empty_produced_items_unverified")
+        first_stage, first_reason = _first_failing_authority_stage(
+            source_verified=source_verified,
+            source_reasons=source_reasons,
+            manifest_status=manifest.get("status"),
+            manifest_reasons=list(manifest.get("reason_codes") or ()),
+            sealed_verified=seal_verified,
+            seal_reasons=seal_reasons,
+            produced_present=exists,
+            produced_valid=not invalid_produced_shape and invalid_produced_id_count == 0 and not duplicate_ids,
+            produced_count=len(produced) if exists and not invalid_produced_shape else None,
+            produced_reasons=(
+                (["produced_items_changed_during_readiness"] if "produced_items_changed_during_readiness" in blockers else [])
+                + (["produced_items_invalid_json_or_shape"] if invalid_produced_shape else [])
+                + (["produced_quantity_id_missing_or_invalid"] if invalid_produced_id_count else [])
+                + (["duplicate_produced_quantity_ids"] if duplicate_ids else [])
+            ),
+            parity_verified=parity_verified,
+            parity_reasons=parity_reasons,
+        )
         projects.append({
             "project_id": project_id,
             "manifest_status": manifest.get("status"),
@@ -381,6 +518,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             "produced_sealed_parity_verified": parity_verified,
             "commercial_trade_authority_verified": False,
             "reconciliation_complete": False,
+            "first_failing_authority_stage": first_stage,
+            "first_failing_authority_reason": first_reason,
             # No frozen evaluator has run on a source-complete universe.
             # Unknown classification counts must not silently become zero.
             "reconciliation_evaluation_status": "NOT_EVALUATED",
