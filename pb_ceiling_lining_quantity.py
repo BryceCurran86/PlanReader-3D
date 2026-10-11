@@ -378,7 +378,8 @@ def _validate_area_quantity(
     if (
         not isinstance(area_quantity.evidence_ids, (tuple, list))
         or not area_quantity.evidence_ids
-        or any(type(value) is not str or not value.strip() for value in area_quantity.evidence_ids)
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in area_quantity.evidence_ids)
         or len(set(area_quantity.evidence_ids)) != len(area_quantity.evidence_ids)
     ):
         blockers.append("upstream_area_source_receipts_invalid")
