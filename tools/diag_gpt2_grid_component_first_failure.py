@@ -273,6 +273,12 @@ def diagnose_original_w4_address_collisions(records):
                     for fragment in fragments
                 )
             ),
+            "original_fragment_edges_owned_by_shadow_identity": (
+                fragment_receipts_complete
+                and identity_edges_valid
+                and bool(identity_edges)
+                and all(fragment.edge_id in identity_edges for fragment in fragments)
+            ),
             "source_fragment_edge_ids_sample": [
                 frag.edge_id for frag in fragments[:8]
                 if exact(getattr(frag, "edge_id", None))
