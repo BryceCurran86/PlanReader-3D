@@ -66,3 +66,35 @@ def test_replayed_untyped_confidence_never_authorizes_area(which, confidence):
     result = _gross(**{which: q})
     assert result.abstained
     assert f"wall_{which}_confidence_invalid" in result.blocking_reasons
+
+
+
+@pytest.mark.parametrize("which", ["length", "height"])
+def test_oversized_original_source_dimension_must_abstain_without_overflow(which):
+    source = altered_quantity(
+        _length() if which == "length" else _height(), value=10 ** 400,
+    )
+    result = _gross(**{which: source})
+    assert result.abstained is True
+    assert f"wall_{which}_value_invalid" in result.blocking_reasons
+
+
+@pytest.mark.parametrize("which", ["length", "height"])
+def test_oversized_original_source_confidence_must_abstain_without_overflow(which):
+    source = altered_quantity(
+        _length() if which == "length" else _height(), confidence=10 ** 400,
+    )
+    result = _gross(**{which: source})
+    assert result.abstained is True
+    assert f"wall_{which}_confidence_invalid" in result.blocking_reasons
+
+
+@pytest.mark.parametrize("which", ["length", "height"])
+def test_modified_original_source_receipt_whitespace_does_not_authorize_gross_area(which):
+    source = altered_quantity(
+        _length() if which == "length" else _height(),
+        evidence_ids=(" ev",),
+    )
+    result = _gross(**{which: source})
+    assert result.abstained
+    assert f"wall_{which}_source_receipts_invalid" in result.blocking_reasons
