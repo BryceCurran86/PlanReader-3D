@@ -315,8 +315,9 @@ def _source_owned_collision_candidate_addresses(
                 lineage = edge.get(LINEAGE_KEY) or {}
                 raw = lineage.get("source_primitive_ids") if isinstance(lineage, dict) else None
                 if (not isinstance(raw, (list, tuple)) or not raw
-                        or any(not isinstance(v, str) or not v.strip() for v in raw)):
-                    raise W4SourceCandidateAddressCollision("W4 collision lacks positive source ancestry")
+                        or any(not isinstance(v, str) or not v.strip() for v in raw)
+                        or len(set(raw)) != len(raw)):
+                    raise W4SourceCandidateAddressCollision("W4 collision lacks unique positive source ancestry")
                 try:
                     a = (float(edge["x1"]), float(edge["y1"]))
                     b = (float(edge["x2"]), float(edge["y2"]))
@@ -329,7 +330,8 @@ def _source_owned_collision_candidate_addresses(
                     "source_line": tuple(sorted((a, b))),
                 })
             terminals = tuple(wall.end_node_ids)
-            if len(terminals) != 2 or any(not isinstance(x, str) or not x for x in terminals):
+            if (len(terminals) != 2
+                    or any(not isinstance(x, str) or not x.strip() for x in terminals)):
                 raise W4SourceCandidateAddressCollision("W4 collision lacks junction ownership")
             new_id = stable_contract_id("wall", {
                 "geometric_candidate_id": old_id,
