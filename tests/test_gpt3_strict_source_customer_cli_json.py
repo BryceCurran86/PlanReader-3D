@@ -80,3 +80,24 @@ def test_cli_rejects_huge_integer_identity_alias_in_customer_row(tmp_path,monkey
         '"workspace_id": '+("1"+"0"*500),1)
     with pytest.raises(ValueError,match="out-of-range source/customer JSON integer"):
         execute(tmp_path,monkeypatch,signed.to_json(),corrupted)
+
+
+
+def test_duplicate_embedded_machine_notes_adapter_cannot_override_source_proof(tmp_path,monkeypatch):
+    signed,rows=sealed_and_rows()
+    notes=rows[0]["notes"]
+    assert notes.startswith("{")
+    rows[0]["notes"]='{"adapter":"forged",'+notes[1:]
+    with pytest.raises(ValueError,match="duplicate source/customer JSON key: adapter"):
+        execute(tmp_path,monkeypatch,signed.to_json(),json.dumps(rows))
+
+
+def test_overflowed_embedded_machine_notes_workspace_cannot_claim_authority(tmp_path,monkeypatch):
+    signed,rows=sealed_and_rows()
+    notes=rows[0]["notes"]
+    assert '"workspace_id":7' in notes
+    rows[0]["notes"]=notes.replace(
+        '"workspace_id":7','"workspace_id":'+("1"+"0"*500),1,
+    )
+    with pytest.raises(ValueError,match="out-of-range source/customer JSON integer"):
+        execute(tmp_path,monkeypatch,signed.to_json(),json.dumps(rows))
