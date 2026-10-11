@@ -14,7 +14,7 @@ FLAGS = dict(host_publication_allowed=False, opening_count_publication_allowed=F
 
 
 def fixture():
-    basis = dict(origin=[0.0, 0.0], axis=[1.0, 0.0], normal=[0.0, 1.0],
+    basis = dict(origin=[20.0, 20.0], axis=[1.0, 0.0], normal=[0.0, 1.0],
                  length=10.0, thickness=2.0)
     original = {**FLAGS, "source_sha256": SOURCE, "page_id": "3", "opening_rows": [{
         "opening_identity_id": "opening-one", "original_binding_reason_codes":
@@ -34,8 +34,9 @@ def fixture():
     receipts = []
     edges = []
     census = []
-    for name, coords in (("pixel-left", [-4., 0., 0., 0.]),
-                         ("pixel-right", [10., 0., 14., 0.])):
+    for name, coords in (("pixel-left", [16., 20., 20., 20.]),
+                         ("pixel-right", [30., 20., 34., 20.])):
+        pixels = [int(v * 2) for v in coords]
         receipts.append({
             "source_pixels_authenticated": True,
             "proposition": "source_observation_exists",
@@ -47,7 +48,12 @@ def fixture():
                 "observation_kind": "raster_positive_pixel_run_shadow",
                 "viewport_id": None, "geometry": coords,
             },
-            "pixel_receipt": {"geometry": coords},
+            "pixel_receipt": {
+                "geometry": coords,
+                "orientation": "horizontal",
+                "pixel_geometry": pixels,
+                "component_bbox": [pixels[0], pixels[1], pixels[2], pixels[3]],
+            },
         })
         edges.append({"edge_id": "edge-" + name, "source_observation_ids": [name],
                       "experimental_w4_candidate_ids":
@@ -58,6 +64,7 @@ def fixture():
     pixel = {**FLAGS, "source_sha256": SOURCE, "page_id": "3",
              "ordinary_visibility_rejects_shadow_kind": True,
              "original_source_render_reauthenticated": True,
+             "render_dpi": 144,
              "ordinary_source_snapshot_unchanged": True,
              "source_universe_completeness_proven": False,
              "authenticated_pixel_source_count": 2,
@@ -109,9 +116,12 @@ def test_both_visible_flank_pixel_candidates_remain_unpublished():
 
 def test_nearby_but_not_endpoint_anchored_pixel_is_not_an_opening_host():
     raw, required, pixel = fixture()
-    far = [2., 0., 6., 0.]
-    pixel["authenticated_pixel_source_records"][0]["source_observation"]["geometry"] = far
-    pixel["authenticated_pixel_source_records"][0]["pixel_receipt"]["geometry"] = far
+    far = [22., 20., 26., 20.]
+    record = pixel["authenticated_pixel_source_records"][0]
+    record["source_observation"]["geometry"] = far
+    record["pixel_receipt"]["geometry"] = far
+    record["pixel_receipt"]["pixel_geometry"] = [44, 40, 52, 40]
+    record["pixel_receipt"]["component_bbox"] = [44, 40, 52, 40]
     result = join(raw, required, pixel)
     left = result["opening_rows"][0]["flanks"][0]
     assert left["pixel_run_candidates"] == []
