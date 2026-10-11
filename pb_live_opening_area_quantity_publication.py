@@ -101,7 +101,20 @@ def _opening_quantity(
         return None
 
     evidence_ids = tuple(sorted(opening.evidence_ids))
-    if not evidence_ids:
+    source_observation_ids = opening.source_observation_ids
+    source_sha256 = opening.source_sha256
+    if (
+        not evidence_ids
+        or len(source_sha256) != 64
+        or any(letter not in "0123456789abcdefABCDEF" for letter in source_sha256)
+        or not isinstance(source_observation_ids, (tuple, list))
+        or not source_observation_ids
+        or any(type(identity) is not str or not identity
+               or identity != identity.strip() for identity in source_observation_ids)
+        or len(set(source_observation_ids)) != len(source_observation_ids)
+        or opening.representative_observation_id not in source_observation_ids
+        or opening.representative_observation_id not in evidence_ids
+    ):
         return None
     # A caller-replayed host string alone cannot certify the physical opening
     # owner. The composer retains each authenticated host binding/frame record
