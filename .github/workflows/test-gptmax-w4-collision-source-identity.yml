@@ -39,14 +39,12 @@ jobs:
             pdf: "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
             pages: "--page-id 3"
             expected_sha: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
-            expected_openings: 23
             expected_hosts: 14
             expected_frames: 9
           - name: maryborough
             pdf: "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
             pages: "--page-id 7 --page-id 30 --page-id 31"
             expected_sha: "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
-            expected_openings: 180
             expected_hosts: 3
             expected_frames: 0
     steps:
@@ -80,7 +78,6 @@ jobs:
       - name: Verify exact source, old host/frame receipts and no collided W4 identities
         env:
           EXPECTED_SHA: "${{ matrix.expected_sha }}"
-          EXPECTED_OPENINGS: "${{ matrix.expected_openings }}"
           EXPECTED_HOSTS: "${{ matrix.expected_hosts }}"
           EXPECTED_FRAMES: "${{ matrix.expected_frames }}"
         run: |
@@ -97,7 +94,11 @@ jobs:
           assert base['source_sha256']==candidate['source_sha256']==os.environ['EXPECTED_SHA']
           assert base['primitive_safety_cap']==candidate['primitive_safety_cap']==20000
           assert len(base['opening_bindings']) == len(candidate['opening_bindings'])
-          for name, env in [('physical_existence_claims','EXPECTED_OPENINGS'), ('host_bindings','EXPECTED_HOSTS'),('host_frames','EXPECTED_FRAMES')]:
+          # Native source-role opposition evolves independently of W4 assembly.
+          # The exact original PR-base receipt is the opening-universe control:
+          # W4 address repair must not add, remove, or silently rekey openings.
+          assert base['summary']['physical_existence_claims'] == candidate['summary']['physical_existence_claims'] == len(base['opening_bindings'])
+          for name, env in [('host_bindings','EXPECTED_HOSTS'), ('host_frames','EXPECTED_FRAMES')]:
               assert base['summary'][name]==candidate['summary'][name]==int(os.environ[env])
           assert len(base['source_owned_wall_scope_results'])==len(candidate['source_owned_wall_scope_results'])
           before_scopes={scope['decision_scope_id']:scope for scope in base['source_owned_wall_scope_results']}
