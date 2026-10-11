@@ -103,3 +103,23 @@ def test_persisted_rows_may_omit_adapter_only_native_bbox():
     rows=deepcopy(rows)
     rows[0].pop("source_bbox")
     assert verify_sealed_customer_output(sealed,rows).valid_quantity_count==1
+
+
+
+@pytest.mark.parametrize("bad_workspace",[
+    " 7", "7 ", "+7", "07", "-7", "7.0", "7e0", 0, -7,
+])
+def test_aliased_customer_workspace_ids_cannot_replace_exact_source_identity(bad_workspace):
+    sealed,rows=sealed_and_rows()
+    rows=deepcopy(rows)
+    rows[0]["workspace_id"]=bad_workspace
+    with pytest.raises(CustomerOutputVerificationError,match="invalid workspace_id"):
+        verify_sealed_customer_output(sealed,rows)
+
+
+@pytest.mark.parametrize("legitimate",[7,"7"])
+def test_canonical_customer_workspace_id_preserves_signed_source_identity(legitimate):
+    sealed,rows=sealed_and_rows()
+    rows=deepcopy(rows)
+    rows[0]["workspace_id"]=legitimate
+    assert verify_sealed_customer_output(sealed,rows).valid_quantity_count==2
