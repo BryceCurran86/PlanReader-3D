@@ -1,0 +1,27 @@
+# GPT2 → GPT1/GPT3 exact source-room metric handoff (read-only)
+
+Task tracker: [#2009](https://github.com/BryceCurran86/PlanReader-3D/issues/2009).
+Original SHA-pinned Maryborough source: `b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`, 31 pages. Real handoff invocation selects topology page 7 (zero-index 6) and *separately source-decodes* support page 11 (zero-index 10). Never turn a support-page label or finish code into a physical wall.
+
+This new **read-only** tool inspects production `LivePhysicalNetWallClaim`; it neither creates missing rooms, geometry, scale, finishes or output quantities nor accesses frozen evaluator truth. It reports the **first missing source authority** for 15 specifically requested labels; those names are **targets for reporting only**. They cannot mint `canonical_rooms`.
+
+## Eight independent ownership gates
+
+1. **Unique original physical source room identity**: exact room face receipt/physical identity/document/revision/snapshot, source SHA, authenticated view and distinct physical face (no nearest-label matches).
+2. **Original trusted text receipt**: one original room label binding and unique unshared native source text observation IDs.
+3. **Positive original closed room polygon**: finite PDF source vertices, source-complete polygon and positive *page-point²* area, not a metric conversion.
+4. **Unique canonical floor owner**: one floor owned by the exact canonical source room, no last-write-winning duplicate canonical floor identity.
+5. **Immutable source face-to-floor lineage**: same original face, document, page, viewport, snapshot and source polygon.
+6. **Source-owned firm figured/scale metric evidence**: one uniquely identifiable numeric, finite, independently supported `QuantityEvidence` owned by the exact canonical floor. Missing evidence is **UNAVAILABLE**, never 0 m².
+7. **Exact commercial floor permission**: floor quantity ID equals the independently measured quantity, matching finite metric area and producer-authenticated surface/metric/commercial authority. A valid *room area* does not bypass this.
+8. **Separate actual finish/ceiling occurrence authority**: no finish or ceiling lining is published just because a floor, grid title, code or material definition exists; both require separately authenticated placement, view and exact room ownership. This report always leaves such output `False`.
+
+Tests exercise each missing and conflicting stage, original SHA mismatch, malformed and duplicated label evidence, nonfinite polygon/area, duplicate quantities and floor IDs, and missing targets. A required SHA-verified original source run will report first failing stages for Food Prep, Cold Room, Office, Freezer, PWD, Airlock, Laundry, Sales, POS Counter, Food Service, Wash Up, Truck Driver Lounge, M-AMB, F-AMB and Dry Store.
+
+## Verified historical controls versus current integration
+
+Historical original-source runs already produced Food Prep **13.270425 m²**, Office **9.05352 m²**, Cold Room **25.37875 m²** through documented-area evidence. Those control values are historical evidence, **not constructor defaults or acceptance bypasses**. A new source run must establish its own exact area QuantityEvidence and customer-ready floor status. [#2451](https://github.com/BryceCurran86/PlanReader-3D/pull/2451) merged original positive text-to-face ownership for these three rooms plus five others; the page-7 authenticated floor viewport still has a PARTIAL face universe (687 positive source face receipts and 511 withheld). [#2453](https://github.com/BryceCurran86/PlanReader-3D/pull/2453) found six withheld unresolved boundaries, only one sharing source W4 candidate IDs with directly labelled **Freezer** and **Sales**. A source-ID intersection does not prove face adjacency or metric area.
+
+**GPT1 handoff:** every reported target carries only a source-proven physical room ID, exact source face receipt, canonical floor ID and source quantity ID if and only if the matching gates pass. Do not infer area from PDF points² or a printed finish code; do not treat missing evidence as zero. **GPT3 handoff:** seal no commercial floor/finish/ceiling row without producer-owned quantified floor authority, unique lineage and all independently required view/material occurrence gates. No customer row, final V2 scorer or benchmark numerator is produced here.
+
+DRY STORE **ABSTAIN**. M-AMB/F-AMB and POS/FOOD SERVICE/WASH UP/TRUCK DRIVER LOUNGE **ABSTAIN** on missing unique genuine physical room closure until original-source evidence proves otherwise. The frozen 24 Maryborough +27 Lot16 object universes, evaluator, reference values, tolerances and 20,000 input primitive safety limit are unchanged.
