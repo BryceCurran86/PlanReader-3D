@@ -15,8 +15,10 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Sequence
+from collections.abc import Mapping
 
 from pb_combine_source_closed_runs import load_verified_sealed_run
+from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import SourceClosedRunConflictError
 
 
@@ -33,6 +35,7 @@ def export_verified_produced_items(
     original_sources: Sequence[Path | str],
     *,
     expected_project_id: str | None = None,
+    customer_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return only exact source-verified signed quantities, without inferred trades.
 
@@ -59,6 +62,12 @@ def export_verified_produced_items(
         raise SourceClosedRunConflictError("duplicate original source SHA receipts")
     if set(actual_hashes) != set(sealed.source_sha256s):
         raise SourceClosedRunConflictError("original source SHA does not match sealed envelope")
+
+    # Source-closed quantity proof is not proof the customer ever saw the
+    # row. Only the existing exact source→customer bijection can assert that.
+    customer_verified = customer_rows is not None
+    if customer_rows is not None:
+        verify_sealed_customer_output(sealed,customer_rows)
 
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -108,6 +117,11 @@ def export_verified_produced_items(
             "quantity_id": row.quantity_id,
             "trade_category": None,
             "trade_authority_status": "UNAVAILABLE_NOT_INFERRED",
+            "customer_output_parity_verified": customer_verified,
+            "customer_output_parity_status": (
+                "SIGNED_CUSTOMER_BIJECTION_VERIFIED" if customer_verified
+                else "NOT_CHECKED_SOURCE_SEAL_ONLY"
+            ),
             "family": row.family,
             "semantic_key": row.semantic_key,
             "value": row.value,
@@ -146,16 +160,40 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True, action="append")
     parser.add_argument("--project-id", type=str, required=True)
+    parser.add_argument("--customer-rows", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     input_paths = [args.sealed_run, *args.source]
+    if args.customer_rows is not None:
+        input_paths.append(args.customer_rows)
     if args.output.resolve() in {source.resolve() for source in input_paths}:
         raise ValueError("produced-items output must not overwrite original source inputs")
     # A concurrent source producer can rotate PDFs or the sealed run after
     # the initial verification. Recheck both immediately before publication.
+    customer_rows = None
+    original_customer_sha = None
+    if args.customer_rows is not None:
+        def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            obj: dict[str, Any] = {}
+            for key,value in pairs:
+                if key in obj:
+                    raise ValueError(f"duplicate customer JSON key: {key}")
+                obj[key] = value
+            return obj
+        def _no_nonfinite(token: str) -> None:
+            raise ValueError(f"non-finite customer JSON value: {token}")
+        original_customer_sha = _sha256(args.customer_rows)
+        customer_rows = json.loads(
+            args.customer_rows.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_keys,
+            parse_constant=_no_nonfinite,
+        )
+        if not isinstance(customer_rows,list):
+            raise TypeError("customer rows must be a JSON array")
     original_seal = load_verified_sealed_run(args.sealed_run)
     produced = export_verified_produced_items(
-        args.sealed_run, args.source, expected_project_id=args.project_id
+        args.sealed_run, args.source, expected_project_id=args.project_id,
+        customer_rows=customer_rows,
     )
     current_seal = load_verified_sealed_run(args.sealed_run)
     if current_seal.fingerprint != original_seal.fingerprint:
@@ -166,6 +204,10 @@ def main(argv: list[str] | None = None) -> int:
         or set(current_source_shas) != set(original_seal.source_sha256s)
     ):
         raise SourceClosedRunConflictError("original source changed during produced-items export")
+    if args.customer_rows is not None and (
+        _sha256(args.customer_rows) != original_customer_sha
+    ):
+        raise SourceClosedRunConflictError("customer rows changed during produced-items export")
     _atomic_write(args.output, produced)
     return 0
 
