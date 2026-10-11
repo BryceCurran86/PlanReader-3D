@@ -74,3 +74,42 @@ Maryborough grid-component workflow keeps its strict three-room
 QuantityEvidence controls. Frozen Full Plan V2 truth, evaluator,
 denominators, tolerances and the 20,000 original primitive cap remain
 unchanged.
+
+
+## Second diagnostic stage — actual source-room label owners
+
+The source-verified original run from [#2446](https://github.com/BryceCurran86/PlanReader-3D/pull/2446),
+[artifact 11709139348](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38156449123/artifacts/11709139348),
+determined the exact first failures on Maryborough PDF page 7:
+
+| Producer scope | Wall candidates | Positive physical faces | Withheld faces | First gate |
+| --- | ---: | ---: | ---: | --- |
+| Page-wide | 3737 | 0 | 0 | source room face scope unavailable |
+| Authenticated `FLOOR_PLAN` viewport `view_p7_2` | 3467 | 687 | 511 | partial physical face universe |
+
+Of the 511 withheld faces, 505 have the original reason
+`source_room_face_tiny_or_degenerate` and six have
+`source_room_face_boundary_unresolved`. Their negative receipts remain
+negative. The source returned 687 positive face records, but these are
+**not** 687 proven labelled rooms, floor quantities or whole-page
+completeness. The composer's candidate rooms cannot be assumed to be
+source-complete merely because there are many raw faces.
+
+This follow-up stage invokes the **existing production**
+`SourceRoomLabelProducer.from_authorities` with the separately
+source-authenticated viewport's `SourceRoomFaceAuthority`, same
+SHA/revision/snapshot/decision scope. It records the exact positive
+physical face receipt on every direct label and the exact original
+constituent physical faces behind each unresolved split-label
+`CANDIDATE`. It rejects mismatched source revision, cross-scope labels,
+duplicate original text observation IDs, duplicate physical face
+identities or a split label missing its authenticated source face.
+
+This diagnoses whether Food Prep, Cold Room and Office fail at original
+positive text ownership, split-face binding, incomplete physical
+room-face universe or the **later** documented-area/QuantityEvidence
+gate. It never infers a room from OCR, promotes a split label to
+`CORROBORATED`, replaces missing W4 wall owners by proximity, publishes
+an area or changes frozen benchmark truth. All floor and room quantities
+continue to depend on existing production physical and metric
+authority.

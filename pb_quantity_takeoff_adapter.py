@@ -97,12 +97,22 @@ class CommercialTakeoffSourceTrace:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if isinstance(self.workspace_id, bool):
+        if type(self.workspace_id) is int:
+            workspace_id = self.workspace_id
+        elif (
+            type(self.workspace_id) is str
+            and self.workspace_id.isascii()
+            and self.workspace_id.isdecimal()
+        ):
+            try:
+                workspace_id = int(self.workspace_id)
+            except (ValueError, OverflowError) as exc:
+                raise MissingCommercialAuthorityError(
+                    "workspace_id must be a positive integer"
+                ) from exc
+        else:
+            # A lossy int(7.8) or int(True) is not original source identity.
             raise MissingCommercialAuthorityError("workspace_id must be a positive integer")
-        try:
-            workspace_id = int(self.workspace_id)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise MissingCommercialAuthorityError("workspace_id must be a positive integer") from exc
         if workspace_id <= 0:
             raise MissingCommercialAuthorityError("workspace_id must be a positive integer")
         object.__setattr__(self, "workspace_id", workspace_id)
@@ -137,11 +147,13 @@ class CommercialTakeoffSourceTrace:
         )
 
         if self.source_bbox is not None:
-            if len(self.source_bbox) != 4:
+            if type(self.source_bbox) not in (list, tuple) or len(self.source_bbox) != 4:
                 raise MissingCommercialAuthorityError("source_bbox must contain four coordinates")
+            if any(type(v) not in (int, float) for v in self.source_bbox):
+                raise MissingCommercialAuthorityError("source_bbox must contain numeric coordinates")
             try:
                 bbox = tuple(float(v) for v in self.source_bbox)
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise MissingCommercialAuthorityError("source_bbox must contain numeric coordinates") from exc
             if not all(math.isfinite(v) for v in bbox):
                 raise MissingCommercialAuthorityError("source_bbox must be finite")
@@ -224,10 +236,19 @@ def _metadata_identity_matches(quantity: QuantityEvidence, trace: CommercialTake
             continue
         candidate = metadata.get(key)
         if key == "workspace_id":
-            try:
-                candidate = int(candidate)
-            except (TypeError, ValueError, OverflowError):
+            if type(candidate) is int and candidate > 0:
                 pass
+            elif type(candidate) is str and candidate.isascii() and candidate.isdecimal():
+                try:
+                    candidate = int(candidate)
+                except (ValueError, OverflowError) as exc:
+                    raise CommercialTakeoffConflictError(
+                        "QuantityEvidence workspace_id has invalid source identity type"
+                    ) from exc
+            else:
+                raise CommercialTakeoffConflictError(
+                    "QuantityEvidence workspace_id has invalid source identity type"
+                )
         if str(candidate).strip() != str(authoritative).strip():
             raise CommercialTakeoffConflictError(
                 f"QuantityEvidence {key} does not match commercial source trace"
@@ -240,6 +261,12 @@ def _validate_quantity_trace(
     authority: CommercialMeasurementAuthority,
 ) -> None:
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+    # Stale/superseded are explicit source-decision blockers, not review grants.
+    for flag in ("is_stale", "is_superseded"):
+        if flag in metadata and metadata[flag] is not False:
+            raise CommercialTakeoffConflictError(
+                f"QuantityEvidence {flag} cannot enter commercial projection"
+            )
     if metadata.get("shadow_only") is True:
         raise MissingCommercialAuthorityError(
             "shadow-only QuantityEvidence cannot enter commercial projection"
@@ -270,6 +297,16 @@ def _validate_quantity_trace(
             f"unit {quantity.unit!r} is not valid for the commercial takeoff projection"
         )
 
+    for source_field, identifiers in (
+        ("quantity input_entity_ids", quantity.input_entity_ids),
+        ("quantity evidence_ids", quantity.evidence_ids),
+        ("source trace canonical_entity_ids", trace.canonical_entity_ids),
+        ("source trace evidence_ids", trace.evidence_ids),
+    ):
+        if any(type(value) is not str or not value or value != value.strip() for value in identifiers):
+            raise MissingCommercialAuthorityError(
+                f"{source_field} must contain canonical nonblank source identities"
+            )
     missing_evidence = set(quantity.evidence_ids) - set(trace.evidence_ids)
     if missing_evidence:
         raise MissingCommercialAuthorityError(
