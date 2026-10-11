@@ -186,14 +186,19 @@ def source_room_label_first_gate(
             raise TypeError("split label must be producer sealed")
         if any(getattr(row, key) != getattr(room, key) for key in _SCOPE_KEYS):
             raise ValueError("foreign split source label scope")
-        face_ids = tuple(row.word_face_ids)
+        # Each WORD has one face ID. Multiple words may legitimately
+        # occupy one face, whereas producer receipts are one per DISTINCT
+        # face in first-occurrence word order. Never zip these inventories.
+        word_face_ids = tuple(row.word_face_ids)
+        distinct_face_ids = tuple(dict.fromkeys(word_face_ids))
         receipts = tuple(row.source_room_face_record_ids)
-        if (not face_ids or not receipts
-                or len(face_ids) != len(receipts)
-                or len(face_ids) != len(set(face_ids))
-                or any(f not in physical_faces or
-                       physical_faces[f].record_id != rid
-                       for f, rid in zip(face_ids, receipts))):
+        if (len(distinct_face_ids) < 2
+                or len(distinct_face_ids) != len(receipts)
+                or any(not isinstance(f, str) or not f.strip()
+                       for f in word_face_ids)
+                or any(f not in physical_faces
+                       or physical_faces[f].record_id != rid
+                       for f, rid in zip(distinct_face_ids, receipts))):
             raise ValueError("split label references missing original physical faces")
         ids = tuple(row.observation_ids)
         if (not ids or len(set(ids)) != len(ids)
@@ -205,7 +210,8 @@ def source_room_label_first_gate(
             raise ValueError("split face label must remain candidate only")
         split.append({
             "label": row.label,
-            "original_source_face_ids": list(face_ids),
+            "original_word_face_ids": list(word_face_ids),
+            "original_source_face_ids": list(distinct_face_ids),
             "original_source_face_receipt_ids": list(receipts),
             "original_text_observation_ids": sorted(ids),
             "room_identity_publication_allowed": False,
