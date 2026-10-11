@@ -1118,6 +1118,9 @@ def test_gpt2_finish_result_floor_lookup_never_silently_overwrites_conflicts(
     unrelated=replace(
         authentic,canonical_floor_id="other-canonical-floor",
         physical_floor_surface_id="other-canonical-floor",
+        quantity=replace(
+            authentic.quantity,input_entity_ids=("other-canonical-floor",)
+        ),
         occurrence_record_id="other-original-occurrence",
     )
     disputed=replace(produced,records=(authentic,competing,unrelated))
