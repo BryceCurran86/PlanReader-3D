@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from pb_live_opening_area_quantity_publication import (
+    _opening_quantity,
     publish_live_opening_area_quantities,
 )
 from pb_live_physical_opening_void_composition import (
@@ -91,6 +92,17 @@ def _build_opening_area_source_traces(
         if opening.physical_opening_id != canonical_id:
             raise SourceClosedRunConflictError(
                 f"canonical/physical opening identity mismatch: {canonical_id}"
+            )
+
+        # A sealed source trace proves ownership, not the numerical value.
+        # Recalculate the exact producer-owned quantity from this very
+        # canonical opening before any customer run can seal it. A copied
+        # quantity ID and evidence set must not bless altered m², method,
+        # status, confidence, source SHA or semantic ownership metadata.
+        authentic = _opening_quantity(opening)
+        if authentic is None or quantity.to_dict() != authentic.to_dict():
+            raise SourceClosedRunConflictError(
+                f"opening area published quantity does not match current physical source: {canonical_id}"
             )
 
         viewport_id = str(opening.viewport_id or "").strip()
