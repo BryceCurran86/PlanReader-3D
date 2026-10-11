@@ -239,9 +239,24 @@ def _multi_physical_source_run(tmp_path,*, overlap=True,other_family=False):
 
 
 def test_historically_signed_partially_overlapping_physical_claims_not_exportable(tmp_path):
-    original,sealed=_multi_physical_source_run(tmp_path)
-    with pytest.raises(SourceClosedRunConflictError,match="overlapping or duplicate signed physical"):
+    from pathlib import Path
+    # This real historical V1 run was produced before #2394. The current
+    # producer correctly refuses to manufacture this old overlapping fixture.
+    original=tmp_path/"multi.pdf"
+    original.write_bytes(b"%PDF-original-source-two-physical-rooms")
+    sealed=tmp_path/"multi.sealed.json"
+    fixture=Path(__file__).parent/"fixtures/gpt3/pre_overlap_guard_signed_run.json"
+    sealed.write_bytes(fixture.read_bytes())
+    before=(original.read_bytes(),sealed.read_bytes())
+    with pytest.raises(SourceClosedRunConflictError,match="overlapping"):
         export_verified_produced_items(sealed,[original])
+    assert (original.read_bytes(),sealed.read_bytes())==before
+
+
+def test_current_producer_cannot_issue_partially_overlapping_signed_run(tmp_path):
+    with pytest.raises(SourceClosedRunConflictError,match="overlapping source identity"):
+        _multi_physical_source_run(tmp_path)
+    assert not (tmp_path/"multi.sealed.json").exists()
 
 
 def test_independent_physical_quantities_with_same_semantic_type_still_export(tmp_path):

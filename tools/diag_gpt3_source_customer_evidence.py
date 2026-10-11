@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -30,11 +31,31 @@ def _reject_nonfinite_json_number(token: str) -> None:
     raise ValueError(f"non-finite source/customer JSON number: {token}")
 
 
+def _finite_evidence_json_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("out-of-range source/customer JSON float")
+    return value
+
+
+def _finite_evidence_json_int(token: str) -> int:
+    value = int(token)
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError("out-of-range source/customer JSON integer")
+    return value
+
+
 def _read_strict_evidence_json(path: Path) -> Any:
     return json.loads(
         path.read_text(encoding="utf-8"),
         object_pairs_hook=_reject_duplicate_payload_keys,
         parse_constant=_reject_nonfinite_json_number,
+        parse_float=_finite_evidence_json_float,
+        parse_int=_finite_evidence_json_int,
     )
 
 
@@ -129,6 +150,21 @@ def main() -> None:
     rows = _read_strict_evidence_json(args.customer_rows)
     if not isinstance(rows, list):
         raise TypeError("customer-rows JSON must be an array")
+    # Automated commercial provenance is also serialized inside the persisted
+    # notes column. Last-write-wins in that second JSON layer must not bypass
+    # the already strict outer customer row and signed source receipts.
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise TypeError("customer rows must be mappings")
+        notes = row.get("notes")
+        if isinstance(notes, str) and notes.lstrip().startswith("{"):
+            json.loads(
+                notes,
+                object_pairs_hook=_reject_duplicate_payload_keys,
+                parse_constant=_reject_nonfinite_json_number,
+                parse_float=_finite_evidence_json_float,
+                parse_int=_finite_evidence_json_int,
+            )
     report = build_source_customer_evidence_report(sealed_payload, rows)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
