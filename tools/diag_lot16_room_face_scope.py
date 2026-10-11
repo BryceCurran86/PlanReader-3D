@@ -463,11 +463,22 @@ def _native_word_label_census(
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         if page_index >= len(doc) or page_index < 0:
             raise ValueError("native label census page index out of source bounds")
-        for word in doc[page_index].get_text("words"):
-            if len(word) < 8 or str(word[4]).casefold() not in allowed:
+        source_words = tuple(word for word in doc[page_index].get_text("words") if len(word) >= 8)
+        native_line_words: dict[tuple[int, int], list[tuple[int, str]]] = {}
+        for word in source_words:
+            native_line_words.setdefault((int(word[5]), int(word[6])), []).append(
+                (int(word[7]), str(word[4]))
+            )
+        for word in source_words:
+            if str(word[4]).casefold() not in allowed:
                 continue
+            native_line_key = (int(word[5]), int(word[6]))
+            native_line_text = " ".join(
+                item[1] for item in sorted(native_line_words[native_line_key])
+            )
             occurrences.append({
                 "raw_native_text": str(word[4]),
+                "same_original_native_line_text_not_authority": native_line_text,
                 "source_page_index_zero_based": page_index,
                 "bbox_pt": [float(value) for value in word[:4]],
                 "block_no": int(word[5]),
