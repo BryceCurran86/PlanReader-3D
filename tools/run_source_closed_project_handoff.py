@@ -278,6 +278,21 @@ def generate_project_handoff(
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    # The extractor may be terminated by an external memory/time limit rather
+    # than a catchable Python exception. Preserve what source was attempted,
+    # without minting a sealed quantity, provenance authority or V2 score.
+    _write_json(output_dir / "source_attempt_preflight.json", {
+        "status": "SOURCE_INPUT_RECORDED_UNSEALED",
+        "benchmark_score_granted": False,
+        "project_id": project_id,
+        "source_sha256_at_start": source_sha256,
+        "source_page_count": page_count,
+        "execution_page_numbers": list(summary["execution_pages"]),
+        "topology_mode": topology_mode,
+        "family_group": clean_family_group,
+        "complete_source_coverage_proven": False,
+        "sealed_run_file": None,
+    })
 
     try:
         claim = collect_live_physical_net_wall_claim(
