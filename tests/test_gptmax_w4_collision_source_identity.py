@@ -350,3 +350,29 @@ def test_w4_collision_refuses_whitespace_source_ancestry(bad_parent):
             {"source-edge-a": a.candidate_id, "source-edge-b": b.candidate_id},
         )
     assert source_edges == original
+
+
+@pytest.mark.parametrize("bad", ["duplicate_native_parent", "space_junction", "tab_junction"])
+def test_w4_collided_source_addresses_do_not_normalize_invalid_positive_ancestry(bad):
+    a = wall("source-edge-a", "junction-a")
+    b = wall("source-edge-b", "junction-b", reverse=True)
+    source_edges = edges()
+    if bad == "duplicate_native_parent":
+        source_edges["source-edge-a"][LINEAGE_KEY]["source_primitive_ids"] = (
+            "original-parent", "original-parent",
+        )
+    elif bad == "space_junction":
+        b = replace(b, end_node_ids=("   ", "junction_common"))
+    else:
+        b = replace(b, end_node_ids=("\t", "junction_common"))
+    before = deepcopy((a, b, source_edges))
+    with pytest.raises(
+        W4SourceCandidateAddressCollision,
+        match="unique positive source ancestry|junction ownership",
+    ):
+        _source_owned_collision_candidate_addresses(
+            (a, b), source_edges,
+            {"source-edge-a": a.candidate_id,
+             "source-edge-b": b.candidate_id},
+        )
+    assert (a, b, source_edges) == before
