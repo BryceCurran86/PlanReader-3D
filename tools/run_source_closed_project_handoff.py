@@ -146,8 +146,16 @@ def _non_abstained(
             continue
         if "shadow_only" in metadata and metadata["shadow_only"] is not False:
             continue
-        if "commercial_projection_allowed" in metadata and metadata["commercial_projection_allowed"] is not True:
-            continue
+        # A final source-owned ceiling/floor QuantityEvidence may be flagged
+        # handoff-only: valid for the signed production seal, but forbidden
+        # from *direct* customer projection until a distinct reviewed adapter
+        # authenticates its presentation. Never grant this exception to shadow,
+        # provisional, conflicted or stale records (already rejected above).
+        if "commercial_projection_allowed" in metadata:
+            permission = metadata["commercial_projection_allowed"]
+            source_handoff_only = metadata.get("quantity_handoff_only") is True
+            if permission is not True and not (source_handoff_only and permission is False):
+                continue
         if metadata.get("is_stale") is not None and metadata.get("is_stale") is not False:
             continue
         if metadata.get("is_superseded") is not None and metadata.get("is_superseded") is not False:
