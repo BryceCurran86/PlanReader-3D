@@ -387,9 +387,13 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
         path = produced_root / project_id / "produced_items.json"
         exists = path.is_file()
         invalid_produced_shape = False
+        produced_initial_sha: str | None = None
         if exists:
             try:
-                produced = _parse_evidence_json(path.read_text(encoding="utf-8"))
+                # Bind the actual bytes parsed for parity, not a later read.
+                produced_bytes = path.read_bytes()
+                produced_initial_sha = hashlib.sha256(produced_bytes).hexdigest()
+                produced = _parse_evidence_json(produced_bytes.decode("utf-8"))
             except (ValueError, UnicodeError, OSError):
                 produced = []
                 invalid_produced_shape = True
@@ -451,6 +455,19 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
                 source_reasons.append("source_changed_during_readiness")
                 blockers.extend(final_source_reasons)
                 blockers.append("source_changed_during_readiness")
+        if exists and produced_initial_sha is not None:
+            # A concurrent producer may replace a valid produced file after
+            # first parsing but before parity/report publication. Never use
+            # the stale in-memory rows as proof of the on-disk artifact.
+            try:
+                current_produced_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                current_produced_sha = None
+            if current_produced_sha != produced_initial_sha:
+                parity_verified = False
+                invalid_produced_shape = True
+                parity_reasons.append("produced_items_changed_during_readiness")
+                blockers.append("produced_items_changed_during_readiness")
         if exists:
             blockers.append("commercial_trade_authority_not_independently_verified")
         if manifest.get("status") != "VERIFIED":
@@ -478,7 +495,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             produced_valid=not invalid_produced_shape and invalid_produced_id_count == 0 and not duplicate_ids,
             produced_count=len(produced) if exists and not invalid_produced_shape else None,
             produced_reasons=(
-                (["produced_items_invalid_json_or_shape"] if invalid_produced_shape else [])
+                (["produced_items_changed_during_readiness"] if "produced_items_changed_during_readiness" in blockers else [])
+                + (["produced_items_invalid_json_or_shape"] if invalid_produced_shape else [])
                 + (["produced_quantity_id_missing_or_invalid"] if invalid_produced_id_count else [])
                 + (["duplicate_produced_quantity_ids"] if duplicate_ids else [])
             ),
