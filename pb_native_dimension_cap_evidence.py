@@ -171,10 +171,52 @@ def compile_native_dimension_cap_components(
                         continue
                     # Entire native axis coverage requires both terminal
                     # overhangs to be bounded by their own diagonal ticks.
-                    valid0 = tuple(pair for pair in ticks0
-                        if -tolerance <= u0 <= max(t[2] for t in pair) + tolerance)
-                    valid1 = tuple(pair for pair in ticks1
-                        if -tolerance <= length - u1 <= max(t[2] for t in pair) + tolerance)
+                    # A valid *interior* figured dimension (e.g. 90 mm
+                    # between two ticks on a long 1360/90/450 chain) need
+                    # not terminate the complete collinear source axis.
+                    # The original endpoint-overhang gate still applies to
+                    # outside terminators. For interior terminators, require
+                    # source-owned separate cap and opposing diagonal tick
+                    # halves at BOTH exact axis intersections. Do not infer
+                    # a cap or gap from text or a nearest point.
+                    def local_native_terminator(u, ticks, caps, *, is_first):
+                        radius = max(t[2] for pair in ticks for t in pair)
+                        outer_overhang = u if is_first else length - u
+                        if outer_overhang <= radius + tolerance:
+                            return ticks
+                        # Strictly interior terminators must be *actual*
+                        # meeting endpoints of two different collinear PDF
+                        # primitives extending in opposite axis directions.
+                        # A single long overhanging witness never qualifies:
+                        # this preserves the existing anti-false-opening test.
+                        junction = (start[0] + axis[0]*u, start[1] + axis[1]*u)
+                        before_ids, after_ids = set(), set()
+                        for sid in line_ids:
+                            segment = segments[sid]
+                            a, b = segment[:2], segment[2:]
+                            if (math.hypot(*_sub(a, junction)) > tolerance
+                                    and math.hypot(*_sub(b, junction)) > tolerance):
+                                continue
+                            other = b if math.hypot(*_sub(a, junction)) <= tolerance else a
+                            direction = _dot(_sub(other, junction), axis)
+                            if direction < -tolerance:
+                                before_ids.add(sid)
+                            elif direction > tolerance:
+                                after_ids.add(sid)
+                        if not before_ids or not after_ids:
+                            return ()
+                        return tuple(pair for pair in ticks
+                            if len({pair[0][0], pair[1][0]}) == 2
+                            and all(t[0] not in line_ids for t in pair)
+                            and any(cap[0] not in line_ids
+                                    and cap[0] not in {pair[0][0], pair[1][0]}
+                                    for cap in caps))
+                    valid0 = local_native_terminator(u0, ticks0, caps0, is_first=True)
+                    valid1 = local_native_terminator(u1, ticks1, caps1, is_first=False)
+                    # Outer-axis overhangs retain the pre-existing strict
+                    # terminal tick-radius condition, not the interior rule.
+                    if u0 < 0 or u1 > length:
+                        continue
                     cap_pairs = tuple((a, b) for a in caps0 for b in caps1
                         if _dot(a[1], b[1]) > 0 and abs(_cross(a[1], b[1])) <= 1e-4)
                     if not valid0 or not valid1 or not cap_pairs:
