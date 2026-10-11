@@ -93,3 +93,50 @@ def test_real_four_project_readiness_retains_unpublished_scores_and_source_gate(
         assert project["unsupported_extra"] is None
         assert project["coverage_accuracy"] is None
         assert project["precision_adjusted_accuracy"] is None
+
+
+def test_original_pdf_rotated_after_initial_sha_before_final_readiness_is_rejected(
+    tmp_path,monkeypatch
+):
+    import hashlib
+    import json
+    import scripts.report_full_plan_v2_readiness as readiness
+    project_id="au_qld_synthetic_source_rotation"
+    root=tmp_path/"frozen-fixture"
+    proj=root/"projects"/project_id
+    proj.mkdir(parents=True)
+    (root/"manifest.json").write_text(json.dumps({
+        "projects":[project_id],"required_project_count":1,
+    }),encoding="utf-8")
+    source_root=tmp_path/"original-source"
+    source_dir=source_root/project_id
+    source_dir.mkdir(parents=True)
+    original=b"%PDF-known-original-bytes"
+    source=source_dir/"evidence.pdf"
+    source.write_bytes(original)
+    (proj/"source_manifest.json").write_text(json.dumps({
+        "project_id":project_id,
+        "status":"VERIFIED",
+        "reason_codes":[],
+        "verified_takeoff_items":[],
+        "source_documents":[{
+            "name":"evidence.pdf",
+            "sha256":hashlib.sha256(original).hexdigest(),
+            "size_bytes":len(original),
+        }],
+    }),encoding="utf-8")
+
+    def sealed_stage_after_source_read(*args,**kwargs):
+        source.write_bytes(b"%PDF-other-after-first-source-hash")
+        return False,None,["sealed_run_missing"]
+    monkeypatch.setattr(readiness,"_sealed_run_proof",sealed_stage_after_source_read)
+    result=readiness.diagnostic_report(
+        root,tmp_path/"produced",source_root=source_root,sealed_root=tmp_path/"sealed",
+    )["projects"][0]
+    assert result["source_sha_verified"] is False
+    assert result["reconciliation_complete"] is False
+    assert result["first_failing_authority_stage"]=="ORIGINAL_SOURCE_SHA_AUTHORITY"
+    assert "source_changed_during_readiness" in result["blockers"]
+    assert "source_file_size_mismatch:evidence.pdf" in result["blockers"]
+    assert result["coverage_accuracy"] is None
+    assert result["precision_adjusted_accuracy"] is None
