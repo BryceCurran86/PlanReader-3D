@@ -44,6 +44,11 @@ jobs:
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
           --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           --page-id 3 --output lot16-connected-frame-source-handoff.json
+      - name: Reauthenticate original native pale-fill opposition before changing a source claim
+        run: >-
+          PYTHONPATH=. python -u tools/diag_native_opening_source_roles.py
+          --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          --page-id 3 --output lot16-native-source-roles.json
       - name: Verify exact source ownership and safety cap
         run: |
           python - <<'PY'
@@ -63,10 +68,56 @@ jobs:
           keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
           assert baseline['source_sha256'] == report['source_sha256']
           assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
-          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
+          old_bindings=keyed(baseline['opening_bindings'])
+          new_bindings=keyed(report['opening_bindings'])
+          assert len(old_bindings)==len(baseline['opening_bindings'])
+          assert len(new_bindings)==len(report['opening_bindings'])
+          assert set(new_bindings)<=set(old_bindings), 'unproved new source opening'
+          assert all(new_bindings[oid]==old_bindings[oid] for oid in new_bindings), (
+              'an existing source-backed opening binding changed'
+          )
+          missing=set(old_bindings)-set(new_bindings)
+          assert missing=={'physical_opening_existence_b222d5310a7df1d632d5daab1a676645'}, (
+              'source openings were added or a non-table candidate was removed',missing
+          )
+          roles=json.loads(Path('lot16-native-source-roles.json').read_text())
+          assert roles['source_sha256']==report['source_sha256']
+          assert roles['summary']['positive_existence_claims']==len(new_bindings)
+          for oid in missing:
+              previous=old_bindings[oid]
+              assert previous['record_id'] is None and previous['host_wall_id'] is None, (
+                  'removed opening had an authenticated host',oid
+              )
+              representative=previous['representative_observation_id']
+              matching=[
+                  row for row in roles['retained_opposed_candidates']
+                  if row['status']=='abstained'
+                  and representative in row['candidate']['source_observation_ids']
+              ]
+              assert len(matching)==1,('original native opposition absent or ambiguous',oid)
+              assert any(
+                  atom['kind']=='annotation_border' and atom['status']=='candidate'
+                  and atom['reason_codes']==['native_unstroked_pale_neutral_fill_boundary']
+                  and atom['metadata']['polarity']=='opposing'
+                  and atom['metadata']['paint_type']=='f'
+                  and atom['metadata']['stroke'] is None
+                  and atom['metadata']['fill_opacity']==1.0
+                  and atom['metadata']['all_source_primitives_covered'] is True
+                  and set(atom['metadata']['source_observation_ids'])
+                      ==set(row['candidate']['source_observation_ids'])
+                  for row in matching for atom in row['opposing_evidence_atoms']
+              ),('original source-owned pale fill does not oppose the complete candidate',oid)
           old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          advanced = [key for key, row in old_frames.items() if 'opening_host_frame_selected_opening_not_discovered' in row['reason_codes'] and 'opening_host_frame_selected_opening_not_discovered' not in new_frames[key]['reason_codes']]
+          assert len(old_frames)==len(baseline['host_frames'])
+          assert len(new_frames)==len(report['host_frames'])
+          assert set(new_frames)==set(new_bindings)
+          assert all(new_frames[key] == row for key, row in old_frames.items()
+                     if row['record_id'] is not None), 'an authenticated source frame changed'
+          assert baseline['summary']['host_bindings']==report['summary']['host_bindings']==14
+          assert baseline['summary']['host_frames']==report['summary']['host_frames']==9
+          advanced = [key for key, row in old_frames.items() if key in new_frames
+                      and 'opening_host_frame_selected_opening_not_discovered' in row['reason_codes']
+                      and 'opening_host_frame_selected_opening_not_discovered' not in new_frames[key]['reason_codes']]
           assert advanced, 'No previously undiscovered source frame reached its geometry gate'
           print({'source_discovery_advanced': advanced, 'bindings_and_proved_frames_retained': True})
           PY
@@ -74,7 +125,9 @@ jobs:
         if: always()
         with:
           name: lot16-connected-frame-source-handoff
-          path: lot16-connected-frame-source-handoff.json
+          path: |
+            lot16-connected-frame-source-handoff.json
+            lot16-native-source-roles.json
           retention-days: 14
   maryborough-source-proof:
     runs-on: ubuntu-latest
