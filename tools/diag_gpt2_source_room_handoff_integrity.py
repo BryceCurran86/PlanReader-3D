@@ -99,6 +99,10 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
         owners=grouped.get(name,[])
         gate="SOURCE_PHYSICAL_FACE_UNAVAILABLE"
         room_id=face_id=floor_id=quantity_id=None
+        label_binding_id=None
+        original_label_evidence_ids=()
+        original_metric_evidence_ids=()
+        original_metric_authority=None
         amount=None
         if len(owners)>1:
             gate="ROOM_LABEL_MULTIPLE_SOURCE_FACES"
@@ -125,6 +129,8 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
             elif not _polygon(r) or not getattr(r,"geometry_complete",False):
                 gate="SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE"
             else:
+                label_binding_id=label_id
+                original_label_evidence_ids=tuple(sorted(texts))
                 matches=floor_by_room.get(getattr(r,"canonical_room_id",None),[])
                 if len(matches)!=1:
                     gate="CANONICAL_FLOOR_OWNER_UNAVAILABLE"
@@ -158,6 +164,10 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
                         else:
                             q=matches[0]
                             quantity_id=q.quantity_id
+                            original_metric_evidence_ids=tuple(sorted(q.evidence_ids))
+                            original_metric_authority=(
+                                q.authority if _owned(getattr(q,"authority",None)) else None
+                            )
                             amount=float(q.value)
                             if (not getattr(f,"metric_geometry_complete",False)
                                 or f.metric_area_quantity_id!=quantity_id
@@ -174,7 +184,11 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
             "original_physical_room_id":room_id if _owned(room_id) else None,
             "original_source_face_receipt_id":face_id if _owned(face_id) else None,
             "canonical_floor_id":floor_id if _owned(floor_id) else None,
+            "original_label_binding_record_id":label_binding_id,
+            "original_label_evidence_ids":list(original_label_evidence_ids),
             "documented_area_quantity_id":quantity_id,
+            "documented_area_source_evidence_ids":list(original_metric_evidence_ids),
+            "documented_area_original_authority":original_metric_authority,
             "source_proven_area_m2":amount,
             "floor_finish_publication_allowed":False,
             "ceiling_lining_publication_allowed":False,
