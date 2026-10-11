@@ -243,3 +243,27 @@ def test_same_physical_object_may_have_distinct_floor_and_ceiling_families(tmp_p
     rows=export_verified_produced_items(sealed,[original])
     assert len(rows)==2
     assert rows[0]["family"] != rows[1]["family"]
+
+
+
+def test_failed_produced_items_atomic_rename_preserves_existing_report_and_inputs(
+    tmp_path,monkeypatch
+):
+    from tools import export_gpt3_produced_items as exporter
+    source,sealed,_,_,_=_source_run(tmp_path)
+    output=tmp_path/"produced_items.json"
+    output.write_bytes(b'["existing independently verified output"]')
+    previous_output=output.read_bytes()
+    previous_inputs=(source.read_bytes(),sealed.read_bytes())
+
+    def deny_publication(*_args):
+        raise OSError("simulated produced-items publication failure")
+    monkeypatch.setattr(exporter.os,"replace",deny_publication)
+    with pytest.raises(OSError,match="simulated produced-items publication failure"):
+        exporter.main([
+            "--sealed-run",str(sealed),"--source",str(source),
+            "--project-id","project-a","--output",str(output),
+        ])
+    assert output.read_bytes()==previous_output
+    assert (source.read_bytes(),sealed.read_bytes())==previous_inputs
+    assert not list(tmp_path.glob(".produced_items.json.*.tmp"))
