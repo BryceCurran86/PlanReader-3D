@@ -94,7 +94,27 @@ def _lineage_reasons(
     status = _clean(quantity.status).lower()
     if "conflict" in status:
         reasons.append("quantity_status_conflict")
-    if not quantity.abstained and quantity_status_not_publishable(quantity.status):
+    # Source-owned ceiling review promotion has a different contract from a
+    # final firm commercial quantity. The dedicated ceiling review exporter
+    # first proves the promoted source candidate, To review customer row, and
+    # all three commercial gates remain closed. Keep its review *lineage*
+    # seal valid without relabelling review_required as a publishable status.
+    # Arbitrary provisional/candidate, shadow, unsigned or stale identities
+    # must not receive this exception.
+    review_promotion_receipt = (
+        quantity.family == "ceiling_lining"
+        and _clean(quantity.status).lower() == "review_required"
+        and metadata.get("source_owned_ceiling_promotion") is True
+        and metadata.get("shadow_only") is False
+        and metadata.get("commercial_projection_allowed") is True
+        and not quantity.blocking_reasons
+        and not any("conflict" in _clean(code).lower() for code in quantity.reason_codes)
+    )
+    if (
+        not quantity.abstained
+        and quantity_status_not_publishable(quantity.status)
+        and not review_promotion_receipt
+    ):
         reasons.append("quantity_status_not_publishable")
     if any("conflict" in _clean(reason).lower() for reason in quantity.reason_codes):
         reasons.append("quantity_reason_conflict")
