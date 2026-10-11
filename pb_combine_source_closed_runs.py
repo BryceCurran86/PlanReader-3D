@@ -78,11 +78,11 @@ def load_verified_sealed_run(path: Path | str) -> SealedSourceClosedRun:
     _reject_excessive_sealed_json_nesting(source_text)
     try:
         payload = json.loads(
-        source_text,
-        object_pairs_hook=_no_duplicate_source_keys,
-        parse_constant=_no_nonfinite_source_constant,
-        parse_float=_finite_sealed_json_float,
-        parse_int=_finite_sealed_json_int,
+            source_text,
+            object_pairs_hook=_no_duplicate_source_keys,
+            parse_constant=_no_nonfinite_source_constant,
+            parse_float=_finite_sealed_json_float,
+            parse_int=_finite_sealed_json_int,
         )
     except RecursionError as exc:
         raise ValueError("sealed JSON nesting exceeds safe parser depth") from exc
