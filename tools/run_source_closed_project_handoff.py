@@ -144,8 +144,14 @@ def _non_abstained(
             continue
         if "shadow_only" in metadata and metadata["shadow_only"] is not False:
             continue
-        if "commercial_projection_allowed" in metadata and metadata["commercial_projection_allowed"] is not True:
-            continue
+        # Final source-owned QuantityEvidence may be eligible for an authenticated
+        # signed-family handoff without being eligible for *direct* customer
+        # projection. Keep the latter denied until a distinct projection gate.
+        if "commercial_projection_allowed" in metadata:
+            permission = metadata["commercial_projection_allowed"]
+            handoff_only = metadata.get("quantity_handoff_only") is True
+            if permission is not True and not (handoff_only and permission is False):
+                continue
         if metadata.get("is_stale") is not None and metadata.get("is_stale") is not False:
             continue
         if metadata.get("is_superseded") is not None and metadata.get("is_superseded") is not False:
