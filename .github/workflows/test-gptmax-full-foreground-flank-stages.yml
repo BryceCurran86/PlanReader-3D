@@ -4,6 +4,7 @@ on:
     paths:
       - scripts/gptmax_full_foreground_flank_stages.py
       - tests/test_gptmax_full_foreground_flank_stages.py
+      - tests/test_gptmax_cross_opening_source_usage.py
       - docs/engineering/gptmax_full_foreground_flank_stages.md
       - .github/workflows/test-gptmax-full-foreground-flank-stages.yml
 concurrency:
@@ -26,9 +27,9 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Fresh source, losses, collisions and authority boundaries
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gptmax_full_foreground_flank_stages.py tests/test_gptmax_full_foreground_run_source.py tests/test_gptmax_full_foreground_flank.py
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_full_foreground_flank_stages.py tests/test_gptmax_full_foreground_run_source.py tests/test_gptmax_full_foreground_flank.py tests/test_gptmax_cross_opening_source_usage.py
           python -m compileall -q scripts/gptmax_full_foreground_flank_stages.py
-          ruff check --select F821,F823 scripts/gptmax_full_foreground_flank_stages.py tests/test_gptmax_full_foreground_flank_stages.py
+          ruff check --select F821,F823 scripts/gptmax_full_foreground_flank_stages.py tests/test_gptmax_full_foreground_flank_stages.py tests/test_gptmax_cross_opening_source_usage.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   original-lot16:
@@ -74,7 +75,13 @@ jobs:
           from pathlib import Path
           original=json.loads(Path('original-ancestry.json').read_bytes())
           result=json.loads(Path('original-flank-stages.json').read_bytes())
-          assert (original['source_original_opening_count'],original['source_original_host_count'],original['source_original_frame_count'])==(23,14,9)
+          # Opposed native fill/dimension hypotheses can change the G17
+          # count. Require actual producer-owned source receipts instead.
+          assert original['source_original_opening_count']>=original['source_original_host_count']==14
+          assert original['source_original_frame_count']==9
+          assert len(original['opening_bindings'])==original['source_original_opening_count']
+          assert len({x['opening_identity_id'] for x in original['opening_bindings']})==len(original['opening_bindings'])
+          assert len(original['host_frames'])==original['source_original_opening_count']
           assert result['original_source_and_topology_freshly_reproduced'] is True
           assert result['input_source_primitive_count']<=result['source_primitive_safety_cap']==20000
           assert len(result['opening_rows'])==7
@@ -83,6 +90,25 @@ jobs:
           for flag in ('full_page_graph_has_authenticated_floor_plan_scope','structural_source_universe_complete','physical_equivalence_proven','host_publication_allowed','opening_count_publication_allowed','metric_quantity_publication_allowed'):
               assert result[flag] is False
           assert result['benchmark_accuracy'] is None
+          assert result['cross_opening_source_parent_transfer_allowed'] is False
+          shared=result['cross_opening_shared_original_pixel_sources']
+          assert len({s['source_observation_id'] for s in shared})==len(shared)
+          assert all(len(s['opening_identity_ids'])>=2
+                     and s['physical_equivalence_proven'] is False
+                     and s['source_parent_transfer_allowed'] is False
+                     and s['host_publication_allowed'] is False
+                     and s['opening_count_publication_allowed'] is False
+                     for s in shared)
+          # This exact original pixel source is independently visible along
+          # flanks of two different raster opening hypotheses. Sharing the
+          # source observation does NOT establish the same physical opening.
+          witness='source_observation_3d28f64dab481b6bdadb5861baa0605a'
+          matches=[s for s in shared if s['source_observation_id']==witness]
+          assert len(matches)==1, 'authenticated cross-opening source reuse disappeared'
+          assert set(matches[0]['opening_identity_ids'])=={
+              'physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d',
+              'physical_opening_existence_f819752382d44a00d9f28feca4b00787',
+          }
           for r in result['opening_rows']:
               for f in r['flanks']:
                   for p in f['source_run_rows']:
