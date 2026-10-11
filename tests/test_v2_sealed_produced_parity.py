@@ -91,3 +91,47 @@ def test_independent_firm_and_abstained_claims_stay_independent() -> None:
         lineage_ok=True,
     )
     assert produced_sealed_parity_blockers([_produced()], (_sealed(), second)) == []
+
+
+def test_customer_bijection_status_and_boolean_receipt_must_agree():
+    proven = _produced()
+    proven["customer_output_parity_verified"] = True
+    proven["customer_output_parity_status"] = "SIGNED_CUSTOMER_BIJECTION_VERIFIED"
+    assert produced_sealed_parity_blockers([proven], (_sealed(),)) == []
+
+    contradictory = dict(proven)
+    contradictory["customer_output_parity_status"] = "NOT_CHECKED_SOURCE_SEAL_ONLY"
+    assert "projection_customer_output_status_inconsistent:source-q-1" in (
+        produced_sealed_parity_blockers([contradictory], (_sealed(),))
+    )
+
+
+def test_forged_customer_parity_status_without_true_bool_is_rejected():
+    row = _produced()
+    row["customer_output_parity_status"] = "SIGNED_CUSTOMER_BIJECTION_VERIFIED"
+    for false_or_missing in (False, "true", None):
+        row["customer_output_parity_verified"] = false_or_missing
+        blockers = produced_sealed_parity_blockers([row], (_sealed(),))
+        assert "projection_customer_output_status_inconsistent:source-q-1" in blockers
+        assert "projection_customer_output_parity_unverified:source-q-1" in blockers
+    del row["customer_output_parity_verified"]
+    assert "projection_customer_output_status_inconsistent:source-q-1" in (
+        produced_sealed_parity_blockers([row], (_sealed(),))
+    )
+
+
+def test_unchecked_source_seal_only_receipt_never_proves_customer_publication():
+    row = _produced()
+    row.update(
+        customer_output_parity_verified=False,
+        customer_output_parity_status="NOT_CHECKED_SOURCE_SEAL_ONLY",
+    )
+    blockers = produced_sealed_parity_blockers([row], (_sealed(),))
+    assert "projection_customer_output_parity_unverified:source-q-1" in blockers
+    assert "projection_customer_output_status_inconsistent:source-q-1" not in blockers
+
+
+def test_legacy_projection_without_status_still_requires_independent_customer_proof():
+    # The source-to-quantity parity helper is backward compatible; actual
+    # customer publication is a separate checked customer_rows.json gate.
+    assert produced_sealed_parity_blockers([_produced()], (_sealed(),)) == []
