@@ -110,6 +110,11 @@ def build_live_floor_finish_area_source_traces(
             )
         try:
             confidence = float(quantity.confidence)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SourceClosedRunConflictError(
+                f"floor-finish source metric is untyped: {quantity.quantity_id}"
+            ) from exc
+        try:
             qvalue = float(quantity.value)
             floor_value = float(floor.metric_area_m2)
         except (TypeError, ValueError, OverflowError) as exc:
