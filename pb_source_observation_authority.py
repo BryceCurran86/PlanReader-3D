@@ -44,6 +44,7 @@ PRODUCER_INTEGRITY_FAILURE = "producer_integrity_failure"
 # leaking decoded observations or cache state across independent producers.
 _NATIVE_PAGE_DECODE_CACHE_MAX_PAGES = 24
 _NATIVE_PAGE_COUNT_CACHE_MAX_DOCUMENTS = 16
+_HISTORIC_VERIFIED_CACHE_TARGET = 150_000
 
 
 @dataclass(frozen=True)
@@ -1494,6 +1495,22 @@ class SourceObservationProducer:
                 record.observation_payload_sha256,
                 result,
             )
+        # Verified-result cache entries are disposable acceleration hints, not
+        # source truth. Keep the immutable source snapshot, the just-published
+        # snapshot, and its immediate parent hot. When many historic derived
+        # snapshots accumulate, evict *only* older verified-read hints, never
+        # any observation, snapshot, fingerprint, source bytes, or lineage.
+        # Older selectors still resolve by independently hashing the retained
+        # immutable record and proving its exact snapshot membership.
+        if len(self._store.verified_resolution_cache) > _HISTORIC_VERIFIED_CACHE_TARGET:
+            keep_snapshot_ids = {
+                snapshot.snapshot_id,
+                snapshot.parent_snapshot_id,
+                self._store.source_snapshot_by_revision.get(revision.revision_id),
+            }
+            for historic_key in tuple(self._store.verified_resolution_cache):
+                if historic_key[0] not in keep_snapshot_ids:
+                    self._store.verified_resolution_cache.pop(historic_key, None)
         if mark_source_snapshot:
             self._store.source_snapshot_by_revision[revision.revision_id] = snapshot.snapshot_id
 
