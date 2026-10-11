@@ -60,7 +60,8 @@ def fixture():
              "authenticated_pixel_source_count": 2,
              "authenticated_pixel_source_records": receipts,
              "experimental_w2_w4": {
-                 "host_publication_allowed": False, "all_w2_edges": edges,
+                 "host_publication_allowed": False, "input_source_count": 2,
+                 "all_w2_edges": edges,
                  "all_snap_collapsed_fragments": [],
                  "source_parent_census": census,
                  "all_experimental_w4_candidates": [
@@ -124,6 +125,7 @@ def test_nearby_but_not_endpoint_anchored_pixel_is_not_an_opening_host():
     "pixel_missing_experimental_graph", "pixel_extra_w2_parent",
     "pixel_unbacked_w4_member", "pixel_missing_w4_member",
     "false_flank_geometry_flag", "partial_reported_flanks",
+    "wrong_w2_input_count", "missing_w2_source_parent", "malformed_w4_alternatives",
 ])
 def test_corrupt_source_or_ancestry_fails_closed(mutation):
     raw, required, pixel = fixture()
@@ -181,6 +183,12 @@ def test_corrupt_source_or_ancestry_fails_closed(mutation):
         required["opening_rows"][0]["reported_flank_geometry_available"] = False
     elif mutation == "partial_reported_flanks":
         required["opening_rows"][0]["flanks"].pop()
+    elif mutation == "wrong_w2_input_count":
+        pixel["experimental_w2_w4"]["input_source_count"] = 3
+    elif mutation == "missing_w2_source_parent":
+        pixel["experimental_w2_w4"]["all_w2_edges"][0]["source_observation_ids"] = ["unknown"]
+    elif mutation == "malformed_w4_alternatives":
+        pixel["experimental_w2_w4"]["all_w2_edges"][0]["experimental_w4_candidate_ids"] = "unproved-wall-left"
     with pytest.raises((ValueError, TypeError, KeyError)):
         join(raw, required, pixel, pdf_bytes=pdf_bytes)
 
