@@ -249,7 +249,12 @@ def publish_live_authenticated_opening_count_quantities(
             or not record.schedule_corroborated
             or quantity is None
             or quantity.abstained
-            or not quantity.input_entity_ids
+            or quantity.status != "firm"
+            or quantity.unit != "ea"
+            or not _valid_explicit_source_count(quantity.value)
+            or not _authentic_source_id_universe(quantity.input_entity_ids)
+            or int(quantity.value) != len(quantity.input_entity_ids)
+            or quantity.blocking_reasons
         ):
             continue
         if quantity.quantity_id in seen_quantity_ids:
