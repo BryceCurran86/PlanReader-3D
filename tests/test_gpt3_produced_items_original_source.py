@@ -429,3 +429,31 @@ def test_customer_provenance_changed_after_signed_verification_cannot_publish(
             "--project-id","project-a","--output",str(output),
         ])
     assert not output.exists()
+
+
+
+@pytest.mark.parametrize("location",["outer","embedded-notes"])
+def test_huge_json_integer_cannot_overflow_authenticated_customer_receipts(
+    tmp_path,location
+):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    row=_original_projected_customer_row(q,t)
+    customer=tmp_path/"customer.json"
+    huge_int="1"+"0"*500
+    if location=="outer":
+        original=json.dumps([row])
+        assert '"workspace_id": 1' in original
+        forged=original.replace('"workspace_id": 1',
+            '"workspace_id": '+huge_int,1)
+    else:
+        assert '"workspace_id":1' in row["notes"]
+        row["notes"]=row["notes"].replace('"workspace_id":1',
+            '"workspace_id":'+huge_int,1)
+        forged=json.dumps([row])
+    customer.write_text(forged,encoding="utf-8")
+    destination=tmp_path/"produced_items.json"
+    with pytest.raises(ValueError,match="out-of-range customer JSON integer"):
+        main(["--sealed-run",str(sealed),"--source",str(source),
+              "--customer-rows",str(customer),"--project-id","project-a",
+              "--output",str(destination)])
+    assert not destination.exists()
