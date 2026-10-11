@@ -53,6 +53,40 @@ def _finite_customer_json_int(token: str) -> int:
     return value
 
 
+def _strict_customer_json(text: str) -> Any:
+    # Mirror the source-run importer complexity bound. Serialized notes may
+    # contain many quoted brackets; only genuine JSON structure counts.
+    depth=0
+    in_string=False
+    escaped=False
+    for character in text:
+        if in_string:
+            if escaped:
+                escaped=False
+            elif ord(character)==92:
+                escaped=True
+            elif character=='"':
+                in_string=False
+        elif character=='"':
+            in_string=True
+        elif character in "[{":
+            depth+=1
+            if depth>512:
+                raise ValueError("customer JSON nesting exceeds safe parser depth")
+        elif character in "]}":
+            depth-=1
+    try:
+        return json.loads(
+            text,
+            object_pairs_hook=_unique_customer_json_keys,
+            parse_constant=_reject_customer_json_constant,
+            parse_float=_finite_customer_json_float,
+            parse_int=_finite_customer_json_int,
+        )
+    except RecursionError as exc:
+        raise ValueError("customer JSON nesting exceeds safe parser depth") from exc
+
+
 def _verify_embedded_customer_notes(rows: Sequence[Mapping[str, Any]]) -> None:
     # Commercial adapter provenance can be embedded as JSON text in notes.
     # Outer strict parsing alone does not stop last-write-wins inside it.
@@ -61,13 +95,7 @@ def _verify_embedded_customer_notes(rows: Sequence[Mapping[str, Any]]) -> None:
             raise TypeError("customer rows must contain mappings")
         notes = row.get("notes")
         if isinstance(notes,str) and notes.lstrip().startswith("{"):
-            json.loads(
-                notes,
-                object_pairs_hook=_unique_customer_json_keys,
-                parse_constant=_reject_customer_json_constant,
-                parse_float=_finite_customer_json_float,
-                parse_int=_finite_customer_json_int,
-            )
+            _strict_customer_json(notes)
 
 
 def _sha256(path: Path) -> str:
@@ -230,12 +258,8 @@ def main(argv: list[str] | None = None) -> int:
     original_customer_sha = None
     if args.customer_rows is not None:
         original_customer_sha = _sha256(args.customer_rows)
-        customer_rows = json.loads(
-            args.customer_rows.read_text(encoding="utf-8"),
-            object_pairs_hook=_unique_customer_json_keys,
-            parse_constant=_reject_customer_json_constant,
-            parse_float=_finite_customer_json_float,
-            parse_int=_finite_customer_json_int,
+        customer_rows = _strict_customer_json(
+            args.customer_rows.read_text(encoding="utf-8")
         )
         if not isinstance(customer_rows,list):
             raise TypeError("customer rows must be a JSON array")
