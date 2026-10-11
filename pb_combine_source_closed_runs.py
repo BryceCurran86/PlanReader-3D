@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 from pathlib import Path
+import tempfile
 from typing import Iterable
 
 from pb_source_closed_run_export import (
@@ -27,13 +30,62 @@ def _no_nonfinite_source_constant(token: str) -> None:
     raise ValueError(f"non-finite sealed JSON number: {token}")
 
 
+def _finite_sealed_json_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("out-of-range sealed JSON float")
+    return value
+
+
+def _finite_sealed_json_int(token: str) -> int:
+    value = int(token)
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError("out-of-range sealed JSON integer")
+    return value
+
+
+def _reject_excessive_sealed_json_nesting(payload: str) -> None:
+    # This is a parser complexity bound, not source evidence inference. Quoted
+    # and escaped '[' or '{' text cannot inflate structural nesting depth.
+    depth = 0
+    inside_string = False
+    escaped = False
+    for character in payload:
+        if inside_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                inside_string = False
+        elif character == '"':
+            inside_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > 512:
+                raise ValueError("sealed JSON nesting exceeds safe parser depth")
+        elif character in "]}":
+            depth -= 1
+
+
 def load_verified_sealed_run(path: Path | str) -> SealedSourceClosedRun:
     source = Path(path)
-    payload = json.loads(
-        source.read_text(encoding="utf-8"),
-        object_pairs_hook=_no_duplicate_source_keys,
-        parse_constant=_no_nonfinite_source_constant,
-    )
+    source_text = source.read_text(encoding="utf-8")
+    _reject_excessive_sealed_json_nesting(source_text)
+    try:
+        payload = json.loads(
+            source_text,
+            object_pairs_hook=_no_duplicate_source_keys,
+            parse_constant=_no_nonfinite_source_constant,
+            parse_float=_finite_sealed_json_float,
+            parse_int=_finite_sealed_json_int,
+        )
+    except RecursionError as exc:
+        raise ValueError("sealed JSON nesting exceeds safe parser depth") from exc
     if not isinstance(payload, dict):
         raise TypeError(f"{source} must contain a JSON object")
     return sealed_source_closed_run_from_dict(payload)
@@ -74,12 +126,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
+    # Original signed family inputs must not be overwritten, even by symlink.
+    output_identity = args.output.resolve()
+    if any(output_identity == source.resolve() for source in args.inputs):
+        raise ValueError("combined output must not overwrite a sealed source input")
+
     combined = combine_sealed_run_files(
         args.inputs,
         project_id=args.project_id,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(combined.to_json(), encoding="utf-8")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=args.output.parent,
+            prefix=f".{args.output.name}.", suffix=".tmp", delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(combined.to_json())
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, args.output)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return 0
 
 
