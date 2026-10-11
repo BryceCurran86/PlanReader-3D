@@ -129,3 +129,28 @@ def test_missing_canonical_quantity_receipt_is_not_promoted_by_scope_metadata():
     fake=replace(q,value=999.0)
     with pytest.raises(SourceClosedRunConflictError,match="differs from V1"):
         build_v2_preview_scope_sidecar(sealed,[fake],{fake.quantity_id:t})
+
+
+
+@pytest.mark.parametrize(("level","extra_field"),[
+    ("envelope","estimator_approved"),
+    ("envelope","source_truth_verified"),
+    ("record","commercial_projection_allowed"),
+    ("record","signed_source_proof"),
+])
+def test_resigned_injected_sidecar_approval_fields_cannot_be_accepted(
+    level,extra_field
+):
+    q,t=_pair()
+    sealed=_run([(q,t)])
+    forged=copy.deepcopy(build_v2_preview_scope_sidecar(
+        sealed,[q],{q.quantity_id:t},
+    ))
+    if level=="envelope":
+        forged[extra_field]=True
+    else:
+        forged["scope_records"][0][extra_field]=True
+    body={k:v for k,v in forged.items() if k!="integrity_fingerprint"}
+    forged["integrity_fingerprint"]=_fingerprint(body)
+    with pytest.raises(SourceClosedRunConflictError,match="unsupported"):
+        verify_v2_preview_scope_sidecar(forged,sealed)
