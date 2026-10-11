@@ -9,6 +9,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -542,6 +544,39 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
     }
 
 
+
+def _write_readiness_report(
+    output: Path, encoded: str, *, protected_roots: tuple[Path | None, ...],
+) -> None:
+    """Publish diagnostics atomically without mutating any evidence directory.
+
+    Frozen manifests, source PDFs, signed runs, produced rows and customer rows
+    remain immutable inputs to this read-only report, including symlink aliases.
+    """
+    destination = output.resolve()
+    for original_root in protected_roots:
+        if original_root is None:
+            continue
+        protected = original_root.resolve()
+        if destination == protected or destination.is_relative_to(protected):
+            raise ValueError("readiness output may not overwrite evidence or frozen benchmark inputs")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=output.parent,
+            prefix=f".{output.name}.", suffix=".tmp", delete=False,
+        ) as writer:
+            temporary_path = Path(writer.name)
+            writer.write(encoded)
+            writer.flush()
+            os.fsync(writer.fileno())
+        os.replace(temporary_path, output)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark-root", type=Path, default=DEFAULT_ROOT)
@@ -553,8 +588,13 @@ def main() -> int:
     report = diagnostic_report(args.benchmark_root, args.produced_root, args.source_root, args.sealed_root)
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(encoded, encoding="utf-8")
+        _write_readiness_report(
+            args.output, encoded,
+            protected_roots=(
+                args.benchmark_root, args.produced_root, args.source_root,
+                args.sealed_root, args.customer_root,
+            ),
+        )
     else:
         print(encoded, end="")
     return 0
