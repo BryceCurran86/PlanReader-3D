@@ -31,6 +31,13 @@ from pb_source_room_face_authority import (
     SourceRoomFaceSelector,
     build_source_room_face_authority,
 )
+from pb_source_room_label_authority import (
+    SourceRoomLabelProducer,
+    SourceRoomLabelScopeResult,
+    SourceRoomLabelSelector,
+    SourceRoomLabelRecord,
+    SourceRoomSplitLabelCandidate,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
@@ -125,6 +132,103 @@ def source_room_owner_first_gate(
     }
 
 
+
+def source_room_label_first_gate(
+    room: SourceRoomFaceScopeResult,
+    labels: SourceRoomLabelScopeResult,
+    *,
+    expected_source_sha: str,
+) -> dict:
+    """Trace exact source-label ownership without converting text into geometry."""
+    if (type(room) is not SourceRoomFaceScopeResult
+            or type(labels) is not SourceRoomLabelScopeResult):
+        raise TypeError("producer-owned source room/label scope required")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(expected_source_sha or "")):
+        raise ValueError("invalid original source hash")
+    if any(
+        getattr(room, key) != getattr(labels, key)
+        for key in _SCOPE_KEYS
+    ) or room.source_sha256 != expected_source_sha:
+        raise ValueError("source room/label scope provenance mismatch")
+    if (not isinstance(labels.reason_codes, tuple)
+            or any(not isinstance(code, str) or not code.strip()
+                   for code in labels.reason_codes)):
+        raise ValueError("invalid original label reason receipt")
+    physical_faces = {row.face_id: row for row in room.records}
+    if len(physical_faces) != len(room.records):
+        raise ValueError("ambiguous original physical face identities")
+
+    direct, split, observation_ids = [], [], set()
+    for row in labels.records:
+        if type(row) is not SourceRoomLabelRecord:
+            raise TypeError("label must be producer sealed")
+        if any(getattr(row, key) != getattr(room, key) for key in _SCOPE_KEYS):
+            raise ValueError("foreign original label source scope")
+        target = physical_faces.get(row.face_id)
+        if target is None or target.record_id != row.source_room_face_record_id:
+            raise ValueError("label has no exact source physical face receipt")
+        ids = tuple(row.observation_ids)
+        if (not ids or len(set(ids)) != len(ids)
+                or any(not isinstance(i, str) or not i.strip()
+                       or i in observation_ids for i in ids)):
+            raise ValueError("reused or invalid original text observation")
+        observation_ids.update(ids)
+        if row.status is not EvidenceResolutionStatus.CORROBORATED:
+            raise ValueError("untrusted direct room label is not publishable")
+        direct.append({
+            "label": row.label,
+            "source_face_id": row.face_id,
+            "source_face_receipt_id": row.source_room_face_record_id,
+            "original_text_observation_ids": sorted(ids),
+        })
+    for row in labels.split_face_candidates:
+        if type(row) is not SourceRoomSplitLabelCandidate:
+            raise TypeError("split label must be producer sealed")
+        if any(getattr(row, key) != getattr(room, key) for key in _SCOPE_KEYS):
+            raise ValueError("foreign split source label scope")
+        face_ids = tuple(row.word_face_ids)
+        receipts = tuple(row.source_room_face_record_ids)
+        if (not face_ids or not receipts
+                or len(face_ids) != len(receipts)
+                or len(face_ids) != len(set(face_ids))
+                or any(f not in physical_faces or
+                       physical_faces[f].record_id != rid
+                       for f, rid in zip(face_ids, receipts))):
+            raise ValueError("split label references missing original physical faces")
+        ids = tuple(row.observation_ids)
+        if (not ids or len(set(ids)) != len(ids)
+                or any(not isinstance(i, str) or not i.strip()
+                       or i in observation_ids for i in ids)):
+            raise ValueError("reused or invalid split source text observation")
+        observation_ids.update(ids)
+        if row.status is not EvidenceResolutionStatus.CANDIDATE:
+            raise ValueError("split face label must remain candidate only")
+        split.append({
+            "label": row.label,
+            "original_source_face_ids": list(face_ids),
+            "original_source_face_receipt_ids": list(receipts),
+            "original_text_observation_ids": sorted(ids),
+            "room_identity_publication_allowed": False,
+        })
+    return {
+        "original_label_scope_status": labels.status.value,
+        "original_label_reason_codes": list(labels.reason_codes),
+        "direct_source_label_count": len(direct),
+        "split_source_label_candidate_count": len(split),
+        "direct_source_labels": sorted(
+            direct, key=lambda v:(v["label"],v["source_face_id"])
+        ),
+        "split_source_label_candidates": sorted(
+            split, key=lambda v:(v["label"],tuple(v["original_source_face_ids"]))
+        ),
+        "all_label_source_observation_ids_unique": True,
+        "source_room_face_universe_complete": room.face_universe_complete,
+        "source_room_geometry_inferred_from_labels": False,
+        "split_label_room_publication_allowed": False,
+        "firm_room_area_publication_allowed": False,
+    }
+
+
 def replay_original_maryborough_room_gate(
     pdf_bytes: bytes, *, expected_source_sha: str,
 ) -> dict:
@@ -187,6 +291,11 @@ def replay_original_maryborough_room_gate(
             or viewport_published.revision.revision_id != final.revision.revision_id
             or viewport_published.revision.source_sha256 != digest):
         raise ValueError("foreign authenticated viewport source revision")
+    # Reuse production's sealed label producer and explicit real source faces.
+    # Text never mints physical rooms; ambiguous split labels remain CANDIDATE.
+    viewport_labels = SourceRoomLabelProducer.from_authorities(
+        source, viewport_room_auth, page_ids=("7",),
+    ).authority()
     selectors = viewport_auth.selectors_for_authenticated_viewports(
         document_id=viewport_published.revision.document_id,
         revision_id=viewport_published.revision.revision_id,
@@ -200,9 +309,16 @@ def replay_original_maryborough_room_gate(
         r = viewport_room_auth.resolve_scope(SourceRoomFaceSelector(
             **{key: getattr(wall_selector, key) for key in _SCOPE_KEYS}
         ))
-        scopes.append(source_room_owner_first_gate(
+        report = source_room_owner_first_gate(
             w, r, expected_source_sha=digest,
+        )
+        label_scope = viewport_labels.resolve_scope(SourceRoomLabelSelector(
+            **{key: getattr(wall_selector, key) for key in _SCOPE_KEYS}
         ))
+        report["original_source_label_gate"] = source_room_label_first_gate(
+            r, label_scope, expected_source_sha=digest,
+        )
+        scopes.append(report)
     return {
         "schema_version": "1.0.0",
         "original_pdf_sha_verified": digest,
