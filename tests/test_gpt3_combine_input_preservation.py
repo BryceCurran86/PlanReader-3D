@@ -132,7 +132,7 @@ def test_signed_run_loader_denies_pathological_json_depth_before_crypto(tmp_path
 
 def test_escaped_brackets_inside_signed_json_strings_do_not_consume_depth_budget():
     from pb_combine_source_closed_runs import _reject_excessive_sealed_json_nesting
-    text=json.dumps({"notes":"["*900+"escaped quote \\" and }"*900})
+    text = json.dumps({"notes": "["*900 + ('escaped quote "' + ' and }')*900})
     _reject_excessive_sealed_json_nesting(text)
 
 
