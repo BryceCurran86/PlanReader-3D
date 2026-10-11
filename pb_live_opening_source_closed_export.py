@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from pb_live_opening_area_quantity_publication import (
+    _opening_quantity,
     publish_live_opening_area_quantities,
 )
 from pb_live_physical_opening_void_composition import (
@@ -38,10 +39,14 @@ def _opening_map(
             raise TypeError(
                 "canonical_openings must contain LiveCanonicalOpeningObject"
             )
-        canonical_id = str(opening.canonical_opening_id or "").strip()
-        if not canonical_id:
+        canonical_id = opening.canonical_opening_id
+        if (
+            type(canonical_id) is not str
+            or not canonical_id
+            or canonical_id != canonical_id.strip()
+        ):
             raise SourceClosedRunConflictError(
-                "canonical opening identity must be non-empty"
+                "canonical opening identity must be original typed non-empty source ID"
             )
         if canonical_id in by_id:
             raise SourceClosedRunConflictError(
@@ -82,7 +87,15 @@ def _build_opening_area_source_traces(
             raise SourceClosedRunConflictError(
                 "opening area quantity must reference exactly one canonical opening"
             )
-        canonical_id = str(quantity.input_entity_ids[0])
+        canonical_id = quantity.input_entity_ids[0]
+        if (
+            type(canonical_id) is not str
+            or not canonical_id
+            or canonical_id != canonical_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "opening area quantity has invalid source canonical identity"
+            )
         opening = openings.get(canonical_id)
         if opening is None:
             raise SourceClosedRunConflictError(
@@ -91,6 +104,17 @@ def _build_opening_area_source_traces(
         if opening.physical_opening_id != canonical_id:
             raise SourceClosedRunConflictError(
                 f"canonical/physical opening identity mismatch: {canonical_id}"
+            )
+
+        # A sealed source trace proves ownership, not the numerical value.
+        # Recalculate the exact producer-owned quantity from this very
+        # canonical opening before any customer run can seal it. A copied
+        # quantity ID and evidence set must not bless altered m², method,
+        # status, confidence, source SHA or semantic ownership metadata.
+        authentic = _opening_quantity(opening)
+        if authentic is None or quantity.to_dict() != authentic.to_dict():
+            raise SourceClosedRunConflictError(
+                f"opening area published quantity does not match current physical source: {canonical_id}"
             )
 
         viewport_id = str(opening.viewport_id or "").strip()
