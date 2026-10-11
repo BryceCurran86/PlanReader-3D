@@ -68,8 +68,16 @@ def test_ceiling_nonphysical_page_polygon_cannot_seal_m2(polygon):
         _build(_claim(q, canonical_ceiling=ceiling))
 
 
-@pytest.mark.parametrize("bad", [True, "9.05352", 10**400])
-def test_ceiling_quantity_requires_typed_metric_not_coerced(bad):
-    q = replace(_quantity(), value=bad)
-    with pytest.raises(SourceClosedRunConflictError, match="typed metric"):
+@pytest.mark.parametrize("bad,expected", [
+    (True, "typed metric"), ("9.05352", "typed metric"),
+    (10**400, "not metric"),
+])
+def test_ceiling_quantity_requires_typed_metric_not_coerced(bad, expected):
+    # QuantityEvidence's constructor normalizes some numeric-like values.
+    # Recreate an imported/replayed wire value AFTER construction to test the
+    # actual final export boundary, without accidentally sanitizing the input.
+    from copy import copy
+    q = copy(_quantity())
+    object.__setattr__(q, "value", bad)
+    with pytest.raises(SourceClosedRunConflictError, match=expected):
         _build(_claim(q, canonical_ceiling=_canonical_ceiling(_quantity())))
