@@ -1,0 +1,115 @@
+name: GPT MAX Source Native Opening Viewport Opposition
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_native_opening_viewport_scope.py
+      - tests/test_gptmax_native_opening_viewport_scope.py
+      - docs/engineering/gptmax_native_opening_viewport_scope.md
+      - .github/workflows/test-gptmax-native-opening-viewport-scope.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Strict G17 source view scope and no deletion test
+        run: |
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_gptmax_native_opening_viewport_scope.py \
+            tests/test_physical_opening_viewport_scope_shadow.py \
+            tests/test_physical_opening_viewport_scope_shadow_adversarial.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact original source and independent base receipts
+        run: |
+          git rev-parse HEAD > native-viewport-head-sha.txt
+          echo "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844  documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" | sha256sum --check --status
+          git worktree add --detach /tmp/gptmax-native-viewport-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/gptmax-native-viewport-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --page-id 3 --output "$GITHUB_WORKSPACE/native-viewport-original-base.json"
+          )
+      - name: Source-authenticated G17 physical opening native/viewport scope
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_native_opening_viewport_scope.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-native-viewport-ownership.json
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 --output native-viewport-original-after.json
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline native-viewport-original-base.json \
+            --candidate native-viewport-original-after.json \
+            --output native-viewport-source-retention.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=Path("native-viewport-original-base.json").read_bytes()
+          after=Path("native-viewport-original-after.json").read_bytes()
+          assert before==after, "original G17 source identities changed"
+          source=json.loads(after)
+          scope=json.loads(Path("original-native-viewport-ownership.json").read_text())
+          assert scope["source_sha256"]==source["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert scope["opening_existence_count"]==source["summary"]["physical_existence_claims"]==23
+          assert scope["original_authenticated_host_count"]==source["summary"]["host_bindings"]==14
+          assert scope["original_authenticated_frame_count"]==source["summary"]["host_frames"]==9
+          rows=scope["source_opening_rows"]
+          assert len(rows)==23
+          assert len({r["opening_identity_id"] for r in rows})==23
+          assert all(r["original_existence_retracted"] is False and
+                     r["physical_host_publication_allowed"] is False and
+                     r["opening_count_publication_allowed"] is False for r in rows)
+          assert scope["source_universe_completeness_proven"] is False
+          assert scope["original_source_existence_retraction_allowed"] is False
+          assert scope["host_publication_allowed"] is False
+          assert scope["opening_count_publication_allowed"] is False
+          assert scope["metric_quantity_publication_allowed"] is False
+          assert scope["benchmark_accuracy"] is None
+          suspects=["415d34ddc0c7591b181ddadc11aefe1d","b222d5310a7df1d632d5daab1a676645"]
+          for sid in suspects:
+              matches=[r for r in rows if sid in r["opening_identity_id"]]
+              assert len(matches)==1
+              print({"unhosted_original":sid,
+                     "first_viewport_gate":matches[0]["first_unproved_or_opposing_scope"],
+                     "candidate_views":matches[0]["all_viewport_scope_alternatives"],
+                     "host_created":False})
+          PY
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-native-viewport-opposition
+          retention-days: 30
+          path: |
+            native-viewport-head-sha.txt
+            original-native-viewport-ownership.json
+            native-viewport-original-base.json
+            native-viewport-original-after.json
+            native-viewport-source-retention.json
