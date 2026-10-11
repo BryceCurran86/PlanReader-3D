@@ -117,6 +117,7 @@ def _publish_one(
         or source.blocking_reasons
         or _clean(source.quantity_id) != _clean(ceiling.ceiling_quantity_id)
         or _clean(source.family) != "ceiling_lining"
+        or source.semantic_key != f"ceiling_lining:{_clean(ceiling.room_entity_id)}"
         or _clean(source.unit).lower() not in {"m2", "m²"}
         or _clean(source.status) != AuthorityStatus.PROVISIONAL.value
         or _clean(source.authority) != MeasurementAuthorityType.MODEL_DERIVED.value
