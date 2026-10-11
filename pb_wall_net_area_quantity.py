@@ -59,6 +59,16 @@ def _completion_fingerprint(evidence: EvidenceAtom) -> str:
     ).hexdigest()
 
 
+def _completion_abstention_fingerprint(evidence: EvidenceAtom) -> str:
+    # An invalid source-declared opening universe may be blocked and reported,
+    # but malformed metadata must never throw before the BLOCKED result exists.
+    try:
+        return _completion_fingerprint(evidence)
+    except (TypeError, ValueError, OverflowError):
+        token = f"invalid_opening_universe:{evidence.evidence_id}:{evidence.kind}"
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _opening_id_from_deduction(quantity: QuantityEvidence, wall_id: str) -> str | None:
     if len(quantity.input_entity_ids) != 2:
         return None
@@ -123,7 +133,7 @@ def _abstain(
             "gross_dependency_fingerprint": gross_fp,
             "deduction_dependency_fingerprints": deduction_fps,
             "opening_set_completion_fingerprint": (
-                _completion_fingerprint(completion_evidence)
+                _completion_abstention_fingerprint(completion_evidence)
                 if completion_evidence is not None
                 else None
             ),
