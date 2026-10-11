@@ -104,13 +104,12 @@ def build_live_floor_finish_area_source_traces(
             type(quantity.value) not in (int, float)
             or type(floor.metric_area_m2) not in (int, float)
             or type(quantity.confidence) not in (int, float)
-            or not math.isfinite(float(quantity.confidence))
-            or not 0.0 <= float(quantity.confidence) <= 1.0
         ):
             raise SourceClosedRunConflictError(
                 f"floor-finish source metric is untyped: {quantity.quantity_id}"
             )
         try:
+            confidence = float(quantity.confidence)
             qvalue = float(quantity.value)
             floor_value = float(floor.metric_area_m2)
         except (TypeError, ValueError, OverflowError) as exc:
@@ -118,7 +117,9 @@ def build_live_floor_finish_area_source_traces(
                 f"floor-finish quantity is not metric: {quantity.quantity_id}"
             ) from exc
         if (
-            not math.isfinite(qvalue)
+            not math.isfinite(confidence)
+            or not 0.0 <= confidence <= 1.0
+            or not math.isfinite(qvalue)
             or qvalue <= 0.0
             or not math.isfinite(floor_value)
             or abs(qvalue - floor_value) > 1e-9
