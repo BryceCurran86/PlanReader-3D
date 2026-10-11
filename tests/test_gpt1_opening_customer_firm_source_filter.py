@@ -166,7 +166,6 @@ def _physical_original_opening_claim():
 
 @pytest.mark.parametrize("changes", [
     {"value": 3.14},
-    {"status": "firm"},
     {"formula": "guessed_opening_area"},
     {"metadata": {"source_sha256": "f" * 64}},
 ])
@@ -194,3 +193,14 @@ def test_customer_original_canonical_source_area_still_reaches_one_sealed_row():
     )
     assert len(rows) == 1
     assert rows[0]["quantity"] == 2.172
+
+
+def test_customer_replayed_firm_status_does_not_get_customer_row():
+    from pb_live_opening_customer_projection import project_live_opening_customer_rows
+    claim = _physical_original_opening_claim()
+    original = claim.opening_quantity_evidence[0]
+    forged = replace(original, status="firm")
+    assert project_live_opening_customer_rows(
+        replace(claim, opening_quantity_evidence=(forged,)),
+        workspace_id=7, project_id="gpt1-source-replay",
+    ) == ()
