@@ -1,0 +1,89 @@
+name: GPT MAX Original Maryborough Room Face First Owner Gate
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_maryborough_room_first_owner_gate.py
+      - tests/test_gptmax_maryborough_room_first_owner_gate.py
+      - .github/workflows/test-gptmax-maryborough-room-first-owner.yml
+      - docs/engineering/gptmax_maryborough_room_first_owner_gate.md
+concurrency:
+  group: gptmax-maryborough-room-first-owner-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Fail-closed original authority summary
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_maryborough_room_first_owner_gate.py tests/test_source_room_face_authority_v1.py
+          ruff check --select F821,F823 tools/diag_gptmax_maryborough_room_first_owner_gate.py tests/test_gptmax_maryborough_room_first_owner_gate.py
+          python -m compileall -q tools/diag_gptmax_maryborough_room_first_owner_gate.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Authenticate original PDF and trace first wall/room scope failure
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          echo "$SHA  $PDF" | sha256sum --check --status
+          PYTHONPATH=. python -u tools/diag_gptmax_maryborough_room_first_owner_gate.py \
+            --pdf "$PDF" --expected-source-sha "$SHA" \
+            --output original-maryborough-room-first-owner.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('original-maryborough-room-first-owner.json').read_text())
+          assert d['original_pdf_sha_verified']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert d['topology_page_id']=='7'
+          assert d['documented_area_support_page_id']=='11'
+          assert len(d['source_scope_first_failures'])==1+d['authenticated_floor_plan_viewport_count']
+          assert len({(r['page_id'],r['decision_scope_id']) for r in d['source_scope_first_failures']})==len(d['source_scope_first_failures'])
+          assert all(r['source_sha256']==d['original_pdf_sha_verified']
+                     and r['page_id']=='7'
+                     and r['diagnostic_only'] is True
+                     and r['wall_host_publication_allowed'] is False
+                     and r['room_face_promotion_allowed'] is False
+                     and r['room_area_quantity_publication_allowed'] is False
+                     and r['benchmark_accuracy'] is None
+                     for r in d['source_scope_first_failures'])
+          assert d['room_area_quantity_publication_allowed'] is False
+          assert d['wall_host_publication_allowed'] is False
+          assert d['benchmark_accuracy'] is None
+          print({
+              'source_authenticated_scope_gate_count': len(d['source_scope_first_failures']),
+              'first_unproved_gates': [
+                  r['first_unproved_authority'] for r in d['source_scope_first_failures']
+              ],
+              'no_room_or_host_publication': True,
+          })
+          PY
+      - name: Preserve original source gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gptmax-original-maryborough-room-first-owner
+          path: original-maryborough-room-first-owner.json
+          retention-days: 30
