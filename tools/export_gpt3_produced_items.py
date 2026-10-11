@@ -62,6 +62,9 @@ def export_verified_produced_items(
 
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
+    # Old V1 seals may predate the partial-physical-overlap fix. Do not
+    # publish A+B and B+C as two quantities of the same physical claim.
+    physical_claims: dict[tuple[str,str], set[str]] = {}
     for row in sealed.quantities:
         if row.quantity_id in seen:
             raise SourceClosedRunConflictError("duplicate signed quantity ID")
@@ -92,6 +95,15 @@ def export_verified_produced_items(
             raise SourceClosedRunConflictError("firm source quantity has no valid value or object")
         if row.source_sha256 not in actual_hashes:
             raise SourceClosedRunConflictError("signed quantity has no verified original source SHA")
+        if not row.abstained:
+            identity_key = (row.family.strip().lower(),row.semantic_key)
+            claimed_ids = physical_claims.setdefault(identity_key,set())
+            refs = set(row.object_identity_refs)
+            if len(refs) != len(row.object_identity_refs) or claimed_ids.intersection(refs):
+                raise SourceClosedRunConflictError(
+                    "overlapping or duplicate signed physical source claims cannot be exported"
+                )
+            claimed_ids.update(refs)
         items.append({
             "quantity_id": row.quantity_id,
             "trade_category": None,
