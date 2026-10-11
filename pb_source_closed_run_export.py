@@ -516,6 +516,35 @@ def _build_sealed_run(
                 f"document {row.document_id!r}"
             )
         document_sources[row.document_id] = source_identity
+
+        # Persisted and imported signed receipts must retain the producer's
+        # canonical sorted, unique source IDs. Normalizing them after sealing
+        # would launder duplicate, padded or reordered physical identities.
+        for field in (
+            "object_identity_refs", "trace_canonical_entity_ids",
+            "evidence_ids", "trace_evidence_ids",
+        ):
+            receipts = getattr(row, field)
+            if (
+                type(receipts) not in (list, tuple)
+                or any(
+                    type(value) is not str or not value or value != value.strip()
+                    for value in receipts
+                )
+                or tuple(receipts) != tuple(sorted(set(receipts)))
+            ):
+                raise SourceClosedRunConflictError(
+                    f"noncanonical sealed source identity array: {field}"
+                )
+        if row.lineage_ok != (not row.lineage_reason_codes):
+            raise SourceClosedRunConflictError(
+                f"sealed quantity {row.quantity_id!r} has contradictory lineage validity receipt"
+            )
+        if not row.abstained and not row.object_identity_refs and row.lineage_ok:
+            raise SourceClosedRunConflictError(
+                f"sealed quantity {row.quantity_id!r} falsely authenticates a missing physical identity"
+            )
+
         if row.quantity_id in quantity_ids:
             raise SourceClosedRunConflictError(
                 f"duplicate sealed quantity id: {row.quantity_id}"
