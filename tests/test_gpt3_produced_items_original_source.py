@@ -348,3 +348,52 @@ def test_without_customer_rows_source_export_must_explicitly_mark_parity_uncheck
     items=export_verified_produced_items(sealed,[source])
     assert items[0]["customer_output_parity_verified"] is False
     assert items[0]["customer_output_parity_status"]=="NOT_CHECKED_SOURCE_SEAL_ONLY"
+
+
+
+def test_duplicate_json_key_inside_embedded_machine_notes_never_counts_as_customer_proof(tmp_path):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    row=_original_projected_customer_row(q,t)
+    assert row["notes"].lstrip().startswith("{")
+    forged=dict(row)
+    forged["notes"]='{"adapter":"forged",'+row["notes"].lstrip()[1:]
+    with pytest.raises(ValueError,match="duplicate customer provenance JSON key: adapter"):
+        export_verified_produced_items(sealed,[source],customer_rows=[forged])
+
+
+def test_outer_customer_json_overflow_is_not_finite_provenance(tmp_path):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    row=_original_projected_customer_row(q,t)
+    customer_path=tmp_path/"customer.json"
+    data=json.dumps([row])
+    assert '"quantity": 10.0' in data
+    customer_path.write_text(data.replace('"quantity": 10.0','"quantity": 1e999',1),
+                             encoding="utf-8")
+    output=tmp_path/"produced_items.json"
+    with pytest.raises(ValueError,match="out-of-range customer JSON number"):
+        main([
+            "--sealed-run",str(sealed),"--source",str(source),
+            "--customer-rows",str(customer_path),
+            "--project-id","project-a","--output",str(output),
+        ])
+    assert not output.exists()
+
+
+def test_duplicate_outer_customer_quantity_id_does_not_last_write_win(tmp_path):
+    source,sealed,_,q,t=_source_run(tmp_path)
+    row=_original_projected_customer_row(q,t)
+    customer_path=tmp_path/"customer.json"
+    data=json.dumps([row])
+    assert '"quantity_id": "qty-room-1"' in data
+    customer_path.write_text(data.replace(
+        '"quantity_id": "qty-room-1"',
+        '"quantity_id": "forged", "quantity_id": "qty-room-1"',1,
+    ),encoding="utf-8")
+    output=tmp_path/"produced_items.json"
+    with pytest.raises(ValueError,match="duplicate customer provenance JSON key: quantity_id"):
+        main([
+            "--sealed-run",str(sealed),"--source",str(source),
+            "--customer-rows",str(customer_path),
+            "--project-id","project-a","--output",str(output),
+        ])
+    assert not output.exists()
