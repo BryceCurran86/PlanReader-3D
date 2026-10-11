@@ -494,7 +494,10 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
     face's BOUNDING RECTANGLE does not prove point-in-face or authenticated
     wall continuity. This helper only localizes the earliest failed gate.
     """
-    rows = []
+    # For crowded architectural sheets prefer label-adjacent candidate faces,
+    # not arbitrary first-N planarizer ordering. Still strictly bounded.
+    matching_rows = []
+    sample_unmatched = []
     labels = tuple(native_census.get("occurrences", ()) or ())
     count = 0
     for candidate in faces:
@@ -502,8 +505,8 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
         if not polygon:
             continue
         count += 1
-        if len(rows) >= 150:
-            continue
+        # Every candidate contributes to total count. Candidate geometry is
+        # not a source-room face, even when text happens to be inside its bbox.
         xs, ys = (point[0] for point in polygon), (point[1] for point in polygon)
         x_coordinates = tuple(xs)
         y_coordinates = tuple(ys)
@@ -517,15 +520,22 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
             cy = (label_bbox[1] + label_bbox[3]) * 0.5
             if bbox[0] <= cx <= bbox[2] and bbox[1] <= cy <= bbox[3]:
                 hits.append(index)
-        rows.append({
+        row = {
             "raw_planar_candidate_bbox_pt": list(bbox),
             "raw_planar_candidate_area_pt2": face_authority._polygon_area(polygon),
             "native_label_occurrence_indices_inside_bbox_only": hits,
             "room_face_or_measurement_authority_granted": False,
-        })
+        }
+        if hits:
+            matching_rows.append(row)
+        elif len(sample_unmatched) < 20:
+            sample_unmatched.append(row)
+    rows = matching_rows[:150]
+    rows.extend(sample_unmatched[:max(0, 150 - len(rows))])
     return {
         "diagnostic_only": True,
         "raw_candidate_count": count,
+        "bbox_candidate_label_intersection_count": len(matching_rows),
         "bbox_rows": rows,
         "truncated": count > len(rows),
         "bbox_overlap_is_not_physical_ownership": True,
