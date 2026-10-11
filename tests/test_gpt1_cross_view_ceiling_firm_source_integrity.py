@@ -69,3 +69,27 @@ def test_unproven_dimension_universe_cannot_mint_firm_rcp_area(bad_dimension_ids
     metadata = {**area.metadata, "figured_dimension_ids": bad_dimension_ids}
     bad = replace(bridge, quantities=(replace(area, metadata=metadata),))
     assert outcome(bad).quantities == ()
+
+
+
+@pytest.mark.parametrize("bad_confidence", [10 ** 400, -(10 ** 400)])
+def test_cross_view_ceiling_source_probability_overflow_is_blocked_not_crashed(bad_confidence):
+    rejected = outcome(with_modified_area(confidence=bad_confidence))
+    assert rejected.quantities == ()
+    assert rejected.unresolved_physical_room_ids == ("physical-room-1",)
+
+
+@pytest.mark.parametrize("bad_receipts", [
+    ("face-1", " room-geometry-evidence"),
+    ("face-1", "room-geometry-evidence "),
+])
+def test_cross_view_ceiling_preserves_exact_room_area_source_receipts(bad_receipts):
+    rejected = outcome(with_modified_area(evidence_ids=bad_receipts))
+    assert rejected.quantities == ()
+
+
+def test_valid_original_room_area_and_rcp_finish_still_publish_area_9_05352():
+    firm = outcome(_bridge())
+    assert len(firm.quantities) == 1
+    assert firm.quantities[0].value == 9.05352
+    assert firm.quantities[0].unit == "m2"
