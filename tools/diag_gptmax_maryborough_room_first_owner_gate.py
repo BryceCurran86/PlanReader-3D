@@ -10,6 +10,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 
@@ -257,6 +258,116 @@ def source_room_label_first_gate(
     }
 
 
+
+def source_withheld_boundary_w4_census(
+    room: SourceRoomFaceScopeResult,
+    label_gate: dict,
+    *,
+    expected_source_sha: str,
+) -> list[dict]:
+    """Report original W4 IDs common to withheld boundaries and proven labels.
+
+    This is a source-ID intersection only, NOT proof that the two geometries
+    touch, that a withheld face is a room, or that a wall host can publish.
+    """
+    if type(room) is not SourceRoomFaceScopeResult or not isinstance(label_gate, dict):
+        raise TypeError("original room scope and authenticated label ledger required")
+    if (not isinstance(expected_source_sha, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_source_sha) is None
+            or room.source_sha256 != expected_source_sha):
+        raise ValueError("untrusted boundary source revision")
+    if label_gate.get("firm_room_area_publication_allowed") is not False:
+        raise ValueError("source label ledger must be nonpublishing")
+    direct = label_gate.get("direct_source_labels")
+    if not isinstance(direct, list):
+        raise ValueError("original source-labelled face ledger unavailable")
+
+    def wall_ids(face):
+        ids = getattr(face, "bounding_wall_ids", None)
+        if not isinstance(ids, (tuple, list)):
+            raise ValueError("missing source W4 wall ID inventory")
+        if (any(not isinstance(x, str) or not x or x != x.strip() for x in ids)
+                or len(ids) != len(set(ids))):
+            raise ValueError("ambiguous original W4 wall candidate inventory")
+        return set(ids)
+
+    positive_by_receipt = {}
+    for face in room.records:
+        if any(getattr(face, key, None) != getattr(room, key) for key in _SCOPE_KEYS):
+            raise ValueError("foreign source positive face")
+        rid = face.record_id
+        if (not isinstance(rid, str) or not rid or rid != rid.strip()
+                or rid in positive_by_receipt):
+            raise ValueError("duplicate or invalid positive source face receipt")
+        positive_by_receipt[rid] = face
+    attached = []
+    owned_faces = set()
+    for label in direct:
+        if not isinstance(label, dict):
+            raise ValueError("invalid original direct source label")
+        rid, face_id = label.get("source_face_receipt_id"), label.get("source_face_id")
+        face = positive_by_receipt.get(rid)
+        if face is None or face.face_id != face_id or rid in owned_faces:
+            raise ValueError("label does not have one exact positive physical face")
+        owned_faces.add(rid)
+        name = label.get("label")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("missing original authenticated room label")
+        attached.append((name, rid, face_id, wall_ids(face)))
+
+    census = []
+    face_ids = set()
+    for face in room.abstained_faces:
+        if any(getattr(face, key, None) != getattr(room, key) for key in _SCOPE_KEYS):
+            raise ValueError("foreign withheld source face revision")
+        face_id = face.face_id
+        if (not isinstance(face_id, str) or not face_id or face_id != face_id.strip()
+                or face_id in face_ids
+                or face_id in {f.face_id for f in room.records}):
+            raise ValueError("duplicate or foreign withheld source face identity")
+        face_ids.add(face_id)
+        if face.reason != "source_room_face_boundary_unresolved":
+            continue
+        walls = wall_ids(face)
+        source_points = getattr(face, "polygon_pdf_pts", None)
+        if (not isinstance(source_points, (tuple, list))
+                or len(source_points) < 3 or any(
+                    not isinstance(point, (tuple, list)) or len(point) != 2
+                    or any(type(value) not in (int, float)
+                           or not math.isfinite(value) for value in point)
+                    for point in source_points
+                )):
+            raise ValueError("untrusted original withheld polygon points")
+        overlaps = [
+            {
+                "original_authenticated_label": name,
+                "source_positive_room_face_id": positive_face_id,
+                "source_positive_room_face_receipt_id": positive_receipt,
+                "shared_source_w4_candidate_ids": sorted(walls & candidate_ids),
+                "physical_wall_adjacency_proven": False,
+                "withheld_face_promotion_allowed": False,
+            }
+            for name, positive_receipt, positive_face_id, candidate_ids in attached
+            if walls & candidate_ids
+        ]
+        census.append({
+            "source_withheld_face_id": face_id,
+            "source_withheld_reason": face.reason,
+            "original_source_polygon_pdf_pts": [list(pt) for pt in source_points],
+            "original_w4_candidate_ids": sorted(walls),
+            "same_w4_candidate_receipt_seen_on_authenticated_label": sorted(
+                overlaps, key=lambda r: (
+                    r["original_authenticated_label"],
+                    r["source_positive_room_face_receipt_id"],
+                )
+            ),
+            "original_physical_wall_adjacency_proven": False,
+            "original_withheld_face_room_publication_allowed": False,
+            "original_metric_quantity_publication_allowed": False,
+        })
+    return sorted(census, key=lambda r:r["source_withheld_face_id"])
+
+
 def replay_original_maryborough_room_gate(
     pdf_bytes: bytes, *, expected_source_sha: str,
 ) -> dict:
@@ -345,6 +456,12 @@ def replay_original_maryborough_room_gate(
         ))
         report["original_source_label_gate"] = source_room_label_first_gate(
             r, label_scope, expected_source_sha=digest,
+        )
+        report["original_withheld_boundary_w4_census"] = (
+            source_withheld_boundary_w4_census(
+                r, report["original_source_label_gate"],
+                expected_source_sha=digest,
+            )
         )
         scopes.append(report)
     return {

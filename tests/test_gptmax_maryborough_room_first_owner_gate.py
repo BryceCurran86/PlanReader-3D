@@ -14,6 +14,7 @@ from pb_source_room_face_authority import (
 from tools.diag_gptmax_maryborough_room_first_owner_gate import (
     source_room_owner_first_gate,
     source_room_label_first_gate,
+    source_withheld_boundary_w4_census,
     _distinct_source_faces_for_word_ownership,
 )
 
@@ -246,3 +247,106 @@ def test_split_word_owner_never_fabricates_original_room_face(damage):
         receipts = (first.record_id, object())
     with pytest.raises((ValueError, TypeError)):
         _distinct_source_faces_for_word_ownership(words, receipts, inventory)
+
+
+def _boundary_owner_source_fixture():
+    """Two independent original face identities; shared W4 ID is NOT adjacency."""
+    _, room = _scopes()
+    face = _face()
+    withheld = replace(
+        _abstained(),
+        reason="source_room_face_boundary_unresolved",
+        bounding_wall_ids=("original-wall", "other-unproven-wall"),
+    )
+    room = replace(room, status=S.CORROBORATED, scope_complete=True,
+                   records=(face,), abstained_faces=(withheld,))
+    labels = {
+        "firm_room_area_publication_allowed": False,
+        "direct_source_labels": [{
+            "label": "ORIGINAL LABEL",
+            "source_face_id": face.face_id,
+            "source_face_receipt_id": face.record_id,
+        }],
+    }
+    return room, labels
+
+
+def test_boundary_receipt_shared_wall_id_does_not_claim_adjacency_or_quantity():
+    room, labels = _boundary_owner_source_fixture()
+    result = source_withheld_boundary_w4_census(
+        room, labels, expected_source_sha=SHA,
+    )
+    assert len(result) == 1
+    row = result[0]
+    assert row["source_withheld_face_id"] == "abstained-source-face-id"
+    assert row["source_withheld_reason"] == "source_room_face_boundary_unresolved"
+    assert row["original_w4_candidate_ids"] == [
+        "original-wall", "other-unproven-wall",
+    ]
+    assert row["original_physical_wall_adjacency_proven"] is False
+    assert row["original_withheld_face_room_publication_allowed"] is False
+    assert row["original_metric_quantity_publication_allowed"] is False
+    assert row["same_w4_candidate_receipt_seen_on_authenticated_label"] == [{
+        "original_authenticated_label": "ORIGINAL LABEL",
+        "source_positive_room_face_id": "original-face-id",
+        "source_positive_room_face_receipt_id": "original-face-record",
+        "shared_source_w4_candidate_ids": ["original-wall"],
+        "physical_wall_adjacency_proven": False,
+        "withheld_face_promotion_allowed": False,
+    }]
+    assert len(row["original_source_polygon_pdf_pts"]) == 3
+
+
+def test_missing_shared_w4_id_does_not_mean_no_physical_adjacency():
+    room, labels = _boundary_owner_source_fixture()
+    withheld = replace(
+        room.abstained_faces[0], bounding_wall_ids=("other-source-wall",)
+    )
+    room = replace(room, abstained_faces=(withheld,))
+    result = source_withheld_boundary_w4_census(
+        room, labels, expected_source_sha=SHA,
+    )
+    assert result[0]["same_w4_candidate_receipt_seen_on_authenticated_label"] == []
+    assert result[0]["original_physical_wall_adjacency_proven"] is False
+
+
+@pytest.mark.parametrize("damage", [
+    "wrong_sha", "missing_positive", "duplicate_direct_label",
+    "wrong_direct_face", "foreign_abstained", "duplicate_abstained",
+    "duplicate_wall", "bad_wall", "bad_polygon", "wrong_label_gate",
+])
+def test_withheld_boundary_census_does_not_borrow_source_owner(damage):
+    room, labels = _boundary_owner_source_fixture()
+    if damage == "wrong_sha":
+        room = replace(room, source_sha256="b"*64)
+    elif damage == "missing_positive":
+        room = replace(room, records=())
+    elif damage == "duplicate_direct_label":
+        labels["direct_source_labels"].append(
+            dict(labels["direct_source_labels"][0])
+        )
+    elif damage == "wrong_direct_face":
+        labels["direct_source_labels"][0]["source_face_id"] = "different"
+    elif damage == "foreign_abstained":
+        room = replace(room, abstained_faces=(
+            replace(room.abstained_faces[0], revision_id="foreign"),))
+    elif damage == "duplicate_abstained":
+        room = replace(room, abstained_faces=(
+            room.abstained_faces[0], room.abstained_faces[0]))
+    elif damage == "duplicate_wall":
+        room = replace(room, abstained_faces=(
+            replace(room.abstained_faces[0],
+                    bounding_wall_ids=("original-wall","original-wall")),))
+    elif damage == "bad_wall":
+        room = replace(room, abstained_faces=(
+            replace(room.abstained_faces[0],bounding_wall_ids=("",)),))
+    elif damage == "bad_polygon":
+        room = replace(room, abstained_faces=(
+            replace(room.abstained_faces[0],
+                    polygon_pdf_pts=((0.,0.), (float("nan"),1.), (2.,2.))),))
+    elif damage == "wrong_label_gate":
+        labels["firm_room_area_publication_allowed"] = True
+    with pytest.raises((TypeError, ValueError)):
+        source_withheld_boundary_w4_census(
+            room, labels, expected_source_sha=SHA,
+        )
