@@ -84,6 +84,13 @@ def original_common_w4_candidates(source_bytes, original_report, flank_report, g
                 or any(w not in walls for w in owners)
                 or (edge.get("w3_removed") is True and owners)):
             raise ValueError("unverifiable W2→W3→W4 source ownership")
+    # Require both directions of actual source graph ownership. An edge
+    # advertising a wall that does not list it as an original member is not
+    # independently authenticated W3→W4 ancestry.
+    for eid, edge in edges.items():
+        if any(eid not in walls[wid].get("w2_edge_ids",[])
+               for wid in edge["experimental_w4_candidate_ids"]):
+            raise ValueError("W2 owner points to W4 without original member receipt")
     for wall_id,wall in walls.items():
         parents=wall.get("w2_edge_ids")
         if (not isinstance(parents,list) or len(parents)!=len(set(parents))
