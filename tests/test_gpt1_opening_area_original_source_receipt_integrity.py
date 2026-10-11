@@ -99,3 +99,34 @@ def test_untyped_frame_source_dimensions_cannot_mint_opening_area(field, bad):
     altered = copy(opening)
     object.__setattr__(altered, field, bad)
     assert _opening_quantity(altered) is None
+
+
+
+@pytest.mark.parametrize("fake_sha", ["f" * 63, "bad", "z" * 64, "f" * 65])
+def test_opening_area_requires_full_original_source_hash(fake_sha):
+    assert _opening_quantity(replace(_opening(), source_sha256=fake_sha)) is None
+
+
+@pytest.mark.parametrize("altered_source", [
+    (), ("foreign-source-observation",), ("source-observation-1", True),
+    ("source-observation-1", "source-observation-1"),
+    (" source-observation-1",),
+])
+def test_opening_area_requires_exact_producer_owned_source_observation_universe(altered_source):
+    assert _opening_quantity(
+        replace(_opening(), source_observation_ids=altered_source)
+    ) is None
+
+
+def test_opening_area_cannot_keep_host_and_figured_receipts_but_lose_physical_observation():
+    opening = _opening()
+    tampered = replace(
+        opening,
+        evidence_ids=tuple(
+            value for value in opening.evidence_ids
+            if value != opening.representative_observation_id
+        ),
+    )
+    assert _opening_quantity(tampered) is None
+    valid = _opening_quantity(opening)
+    assert valid is not None and valid.value == 2.172
