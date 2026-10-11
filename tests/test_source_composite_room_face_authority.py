@@ -1329,12 +1329,24 @@ def test_gpt2_w4_collision_reports_both_original_source_records_without_equivale
             wall_candidate=SimpleNamespace(centerline_pts=((0.,0.),(1.,0.))),
             source_edge_fragments=(SimpleNamespace(edge_id="source-edge-1",
                 source_primitive_ids=("native-primitive-1",)),),
+            physical_identity=SimpleNamespace(
+                candidate_identity_id="shadow-wall-one",
+                source_primitive_ids=("native-primitive-1",),
+                edge_ids=("source-edge-1",),
+                status=EvidenceResolutionStatus.CORROBORATED,
+            ),
         ),
         SimpleNamespace(
             wall_candidate_id="w4-reused",
             wall_candidate=SimpleNamespace(centerline_pts=((5.,5.),(6.,5.))),
             source_edge_fragments=(SimpleNamespace(edge_id="source-edge-2",
                 source_primitive_ids=("native-primitive-2",)),),
+            physical_identity=SimpleNamespace(
+                candidate_identity_id="shadow-wall-two",
+                source_primitive_ids=("native-primitive-2",),
+                edge_ids=("source-edge-2",),
+                status=EvidenceResolutionStatus.CORROBORATED,
+            ),
         ),
         SimpleNamespace(
             wall_candidate_id="independent",
@@ -1366,6 +1378,20 @@ def test_gpt2_w4_collision_reports_both_original_source_records_without_equivale
     ] != report["original_collision_records_diagnostic_only"][1][
         "original_centerline_points_diagnostic_only"
     ]
+    assert [
+        row["shadow_physical_candidate_identity_id"]
+        for row in report["original_collision_records_diagnostic_only"]
+    ] == ["shadow-wall-one", "shadow-wall-two"]
+    assert [
+        row["shadow_identity_source_primitive_ids_sample"]
+        for row in report["original_collision_records_diagnostic_only"]
+    ] == [["native-primitive-1"], ["native-primitive-2"]]
+    assert all(
+        row["source_fragment_receipts_complete"]
+        and row["shadow_identity_lineage_valid"]
+        and row["shadow_physical_identity_status"] == "corroborated"
+        for row in report["original_collision_records_diagnostic_only"][:2]
+    )
     assert not report["physical_wall_equivalence_proven"]
     assert all(
         row["physical_wall_equivalence_proven"] is False
