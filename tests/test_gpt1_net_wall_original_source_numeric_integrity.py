@@ -125,3 +125,24 @@ def test_corrupt_deduction_member_collection_cannot_crash_net_wall(corrupt_membe
     )
     assert result.abstained is True
     assert "opening_deduction_identity_mismatch" in result.blocking_reasons
+
+
+
+@pytest.mark.parametrize("corrupt_wall_members", [
+    None, True, 17, "WALL-1", (), ("WALL-1", True),
+    (" WALL-1",), ("WALL-1 ",),
+])
+def test_original_gross_source_membership_cannot_be_cast_to_net_wall_identity(corrupt_wall_members):
+    gross = replay(_gross(), input_entity_ids=corrupt_wall_members)
+    result = _build(gross=gross)
+    assert result.abstained is True
+    assert result.value is None
+    assert "gross_wall_entity_identity_mismatch" in result.blocking_reasons
+    assert "opening_set_completeness_not_evidenced" in result.blocking_reasons
+
+
+def test_firm_source_gross_member_still_reaches_opening_completeness_blocker():
+    result = _build(gross=_gross())
+    assert result.abstained is True
+    assert "gross_wall_entity_identity_mismatch" not in result.blocking_reasons
+    assert "opening_set_completeness_not_evidenced" in result.blocking_reasons
