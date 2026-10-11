@@ -1714,5 +1714,37 @@ def test_gpt2_original_w4_fragment_lineage_mismatch_does_not_prove_shared_wall()
     ))["original_collision_records_diagnostic_only"]
     assert rows[0]["original_fragment_primitives_owned_by_shadow_identity"] is True
     assert rows[1]["original_fragment_primitives_owned_by_shadow_identity"] is False
+    assert rows[0]["original_fragment_edges_owned_by_shadow_identity"] is True
+    assert rows[1]["original_fragment_edges_owned_by_shadow_identity"] is True
     assert all(r["physical_wall_equivalence_proven"] is False for r in rows)
     assert all(r["source_room_boundary_published"] is False for r in rows)
+
+
+def test_gpt2_original_w4_fragment_edge_id_must_belong_to_its_shadow_lineage():
+    from tools.diag_gpt2_grid_component_first_failure import (
+        diagnose_original_w4_address_collisions,
+    )
+    def row(fragment_edge, shadow_edge):
+        return SimpleNamespace(
+            wall_candidate_id="one-reused-native-w4-address",
+            wall_candidate=SimpleNamespace(centerline_pts=((0.,0.),(10.,0.))),
+            source_edge_fragments=(SimpleNamespace(
+                edge_id=fragment_edge,
+                source_primitive_ids=("source-primitive",),
+            ),),
+            physical_identity=SimpleNamespace(
+                candidate_identity_id="original-shadow-only",
+                source_primitive_ids=("source-primitive",),
+                edge_ids=(shadow_edge,),
+                status=EvidenceResolutionStatus.CORROBORATED,
+            ),
+        )
+    rows=diagnose_original_w4_address_collisions((
+        row("original-edge-a","original-edge-a"),
+        row("foreign-edge","different-shadow-edge"),
+    ))["original_collision_records_diagnostic_only"]
+    assert rows[0]["original_fragment_primitives_owned_by_shadow_identity"]
+    assert rows[1]["original_fragment_primitives_owned_by_shadow_identity"]
+    assert rows[0]["original_fragment_edges_owned_by_shadow_identity"] is True
+    assert rows[1]["original_fragment_edges_owned_by_shadow_identity"] is False
+    assert all(r["physical_wall_equivalence_proven"] is False for r in rows)
