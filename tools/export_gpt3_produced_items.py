@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -69,6 +70,22 @@ def export_verified_produced_items(
             raise SourceClosedRunConflictError(
                 f"cannot export quantity with unverified lineage: {row.quantity_id}"
             )
+        # Historical V1 seals may have been created before final-vs-review
+        # status gates existed. A valid fingerprint never authorizes a
+        # provisional numeric quantity as production takeoff.
+        status = str(getattr(row.status, "value", row.status)).strip().lower()
+        if not row.abstained and status not in {"firm", "corroborated"}:
+            raise SourceClosedRunConflictError("nonfirm sealed quantity cannot be exported")
+        if not row.abstained and (
+            row.blocking_reasons
+            or any("conflict" in str(reason).lower() for reason in row.reason_codes)
+        ):
+            raise SourceClosedRunConflictError("blocked sealed quantity cannot be exported")
+        if not row.abstained and (
+            type(row.value) not in (int,float)
+            or not math.isfinite(row.value)
+        ):
+            raise SourceClosedRunConflictError("nonfinite sealed quantity cannot be exported")
         if row.abstained and row.value is not None:
             raise SourceClosedRunConflictError("ABSTAIN source quantity has a fabricated numeric value")
         if not row.abstained and (row.value is None or not row.object_identity_refs):
