@@ -14,7 +14,7 @@ def _two_linen_original_pdf() -> bytes:
         page.insert_text((90.0, 120.0), "WC", fontsize=12)
         page.insert_text((210.0, 145.0), "LINEN", fontsize=12)
         page.insert_text((205.0, 195.0), "LINEN", fontsize=12)
-        page.insert_text((230.0, 195.0), "BROOM", fontsize=12)
+        page.insert_text((280.0, 195.0), "BROOM", fontsize=12)
         return doc.tobytes()
     finally:
         doc.close()
