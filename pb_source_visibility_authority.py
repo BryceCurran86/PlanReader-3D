@@ -898,16 +898,32 @@ class SourceVisibilityProducer:
                 self._native_paint_page_cache.popitem(last=False)
         self._native_paint_page_cache.move_to_end(cache_key)
         owned = []
+        supported_fills = []
         for observation_id, record in sorted(records.items()):
             primitive = record.source_primitive_ref.removeprefix('visible:segment:')
             facts = paint.get(primitive)
             if facts is None or tuple(record.geometry) != facts[0]:
                 raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
             geometry, kind, paint_type, color, fill, opacity, seqno = facts
+            # A fill-only *very pale neutral* rectangle is a printed layout
+            # mask, not a stroked line. The entire native six-edge support
+            # must independently have that exact owned paint role. Dark fills,
+            # chromatic room shading, mixed strokes or translucency abstain.
+            # These are opposing CANDIDATE atoms, never non-existence proof.
             if (kind != 'rect_edge' or paint_type != 'f' or color is not None
-                    or fill is None or tuple(fill) != (1.,1.,1.) or opacity != 1.):
+                    or not isinstance(fill, (tuple, list)) or len(fill) != 3
+                    or any(type(v) not in (int, float) or not math.isfinite(v)
+                           for v in fill)
+                    or min(fill) < .95 or max(fill) > 1.
+                    or max(fill) - min(fill) > (1. / 255.)
+                    or opacity != 1.):
                 return ()
             owned.append((primitive, observation_id, geometry, seqno))
+            supported_fills.append(tuple(fill))
+        palette = tuple(sorted(set(supported_fills)))
+        # Preserve the exact prior atom identity and metadata when every fill
+        # is white. Source-role extension must not churn existing receipts.
+        all_white = palette == ((1., 1., 1.),)
         metadata = dict(revision_id=selector.revision_id, source_sha256=selector.source_sha256,
             snapshot_id=selector.snapshot_id, polarity=POLARITY_OPPOSING,
             source_primitive_ids=tuple(sorted(p for p,_,_,_ in owned)),
@@ -915,10 +931,18 @@ class SourceVisibilityProducer:
             primitive_paint_ownership=tuple(owned),
             all_source_primitives_covered=True, paint_type='f', fill=(1.,1.,1.),
             fill_opacity=1., stroke=None)
-        return (EvidenceAtom(evidence_id=stable_contract_id('native_unstroked_white_fill', metadata),
+        if not all_white:
+            metadata['fill_palette'] = palette
+            metadata['fill'] = None
+        return (EvidenceAtom(
+            evidence_id=stable_contract_id(
+                'native_unstroked_white_fill' if all_white
+                else 'native_unstroked_pale_neutral_fill', metadata),
             document_id=selector.document_id, page_id=page_id, kind=KIND_ANNOTATION_BORDER,
             method='native_pdf_unstroked_fill_source_role', status=EvidenceResolutionStatus.CANDIDATE,
-            reason_codes=('native_unstroked_white_fill_boundary',), metadata=metadata),)
+            reason_codes=(('native_unstroked_white_fill_boundary' if all_white
+                           else 'native_unstroked_pale_neutral_fill_boundary'),),
+            metadata=metadata),)
 
     def native_dimension_cap_evidence(
         self, selector: ObservationSelector, *, opening_support_ids: Sequence[str]
