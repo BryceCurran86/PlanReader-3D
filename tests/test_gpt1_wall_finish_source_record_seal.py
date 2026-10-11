@@ -56,3 +56,19 @@ def test_malformed_source_receipts_fail_before_qty_id_generation(key, value):
     record, _ = _resolved_record_and_surface()
     with pytest.raises(ValueError, match="receipts or area are invalid"):
         publish_bound_wall_finish_quantity(replay(record, **{key: value}))
+
+
+
+@pytest.mark.parametrize("bad", [10 ** 400, -(10 ** 400), 0, False])
+def test_wall_finish_original_metric_overflow_or_zero_fails_closed(bad):
+    record, _ = _resolved_record_and_surface()
+    with pytest.raises(ValueError, match="receipts or area are invalid"):
+        publish_bound_wall_finish_quantity(replay(record, quantity_m2=bad))
+
+
+def test_authentic_source_net_wall_face_keeps_same_area_after_overflow_guard():
+    record, surface = _resolved_record_and_surface()
+    valid = publish_bound_wall_finish_quantity(record)
+    assert valid.value == 12.5
+    assert valid.unit == "m2"
+    assert valid.input_entity_ids == (surface.physical_surface_id,)
