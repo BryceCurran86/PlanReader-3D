@@ -297,3 +297,66 @@ def test_live_g17_does_not_treat_missing_text_receipt_as_absent_opposition():
     closure=physical.assess_visible_candidate_closure(selector)
     assert not closure.candidate_universe_complete
     assert result.candidate.candidate_id in closure.unresolved_candidate_ids
+
+
+def _interior_dimension_chain():
+    """Original-style 1360/90/450 ink: two tick joints inside longer axis."""
+    segments = {
+        'axis-before': (0.,0.,30.,0.),
+        'axis-90': (30.,0.,35.,0.),
+        'axis-after': (35.,0.,60.,0.),
+    }
+    selected = ['axis-90']
+    for name, x in (('first',30.),('last',35.)):
+        segments[name+'cap-up'] = (x,0.,x,5.)
+        segments[name+'cap-down'] = (x,0.,x,-5.)
+        segments[name+'tick-up'] = (x,0.,x-2.,2.)
+        segments[name+'tick-down'] = (x,0.,x+2.,-2.)
+        selected.extend((name+'cap-up',name+'tick-up',name+'tick-down'))
+    words = [dict(id='native-internal-90',text='90',
+                  bbox=(31.,-8.,34.,-3.), axis=(1.,0.))]
+    return segments,words,selected
+
+
+def test_source_owned_chain_inside_collinear_dimension_axis_is_not_a_wall_opening():
+    segments, words, selected = _interior_dimension_chain()
+    before = deepcopy((segments, words, selected))
+    atoms = _collect(segments, words, selected)
+    assert atoms
+    assert all(atom.status is Status.CANDIDATE
+               and atom.kind == 'dimension_annotation'
+               and atom.metadata['polarity'] == 'opposing'
+               and set(selected) <= set(atom.metadata['source_observation_ids'])
+               and atom.normalized_value is None and atom.unit is None
+               for atom in atoms)
+    assert (segments, words, selected) == before
+    assert _collect(dict(reversed(tuple(segments.items()))),
+                    list(reversed(words)), tuple(reversed(selected))) == atoms
+
+
+@pytest.mark.parametrize('mutation', [
+    'no_internal_axis', 'middle_rail_offset','missing_middle_span',
+    'one_diagonal_half','missing_perpendicular_cap',
+    'non_numeric_text','wrong_text_axis','floating_annotation_text',
+])
+def test_internal_dimension_chain_requires_complete_native_original_source(mutation):
+    segments, words, selected = _interior_dimension_chain()
+    if mutation == 'no_internal_axis':
+        del segments['axis-90']
+    elif mutation == 'middle_rail_offset':
+        segments['axis-90']=(30.,.1,35.,.1)
+    elif mutation == 'missing_middle_span':
+        segments['axis-90']=(30.,0.,31.,0.)
+        segments['right-middle']=(31.1,0.,35.,0.)
+    elif mutation == 'one_diagonal_half':
+        del segments['firsttick-down']
+    elif mutation == 'missing_perpendicular_cap':
+        del segments['lastcap-up']
+        del segments['lastcap-down']
+    elif mutation == 'non_numeric_text':
+        words[0]['text']='W01'
+    elif mutation == 'wrong_text_axis':
+        words[0]['axis']=(0.,1.)
+    elif mutation == 'floating_annotation_text':
+        words[0]['bbox']=(31.,-30.,34.,-25.)
+    assert _collect(segments,words,selected) == ()
