@@ -62,3 +62,20 @@ def test_null_source_document_receipt_is_mismatch_not_implicit_authority():
     assert f"projection_source_document_id_mismatch:{signed.quantity_id}" in (
         produced_sealed_parity_blockers([produced],(signed,))
     )
+
+
+
+def test_source_only_verified_quantity_is_not_customer_bijection_proof():
+    signed,produced=_original()
+    produced["customer_output_parity_verified"]=False
+    assert f"projection_customer_output_parity_unverified:{signed.quantity_id}" in (
+        produced_sealed_parity_blockers([produced],(signed,))
+    )
+
+
+def test_reported_signed_customer_bijection_still_requires_independent_trade_authority():
+    signed,produced=_original()
+    produced["customer_output_parity_verified"]=True
+    assert produced_sealed_parity_blockers([produced],(signed,))==[]
+    # This is only local signed-quantity parity; frozen suite remains
+    # UNPUBLISHED until independent source/trade proof and evaluator closure.
