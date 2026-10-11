@@ -1124,5 +1124,9 @@ def test_gpt2_finish_result_floor_lookup_never_silently_overwrites_conflicts(
     assert dict(disputed.records_by_floor_id)=={
         "other-canonical-floor":unrelated
     }
+    # The direct QuantityEvidence accessor cannot bypass the duplicate
+    # canonical-floor quarantine into customer-facing finish takeoff.
+    assert disputed.quantities == (unrelated.quantity,)
+    assert authentic.quantity not in disputed.quantities
     assert authentic.canonical_floor_id not in disputed.records_by_floor_id
     assert competing.canonical_floor_id not in disputed.records_by_floor_id
