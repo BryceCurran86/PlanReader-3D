@@ -58,3 +58,31 @@ def test_duplicate_or_coerced_source_evidence_cannot_enrich_floor(bad):
         _floor(), _replay(_source_area(), evidence_ids=bad),
         source_room_entity=_source_entity(),
     )
+
+
+
+@pytest.mark.parametrize("bad", [
+    (), ("face-1", "face-1", "ev-area"),
+    ("face-1", " ev-room", "ev-area"),
+    ("face-1", True, "ev-area"),
+    ("face-1", ["nested"], "ev-area"),
+])
+def test_original_room_face_receipts_cannot_be_normalized_or_duplicated(bad):
+    entity = _source_entity()
+    entity.evidence_ids = bad
+    assert not _valid_metric_area_quantity(
+        _floor(), _source_area(), source_room_entity=entity,
+    )
+
+
+def test_original_source_room_face_and_area_stay_independently_authored():
+    entity = _source_entity()
+    assert _valid_metric_area_quantity(
+        _floor(), _source_area(), source_room_entity=entity,
+    )
+    entity.evidence_ids = ("ev-room", "ev-area")
+    # The metric quantity's evidence is still present but its physical source
+    # room-face record ID is not: quantity must not leap into this floor.
+    assert not _valid_metric_area_quantity(
+        _floor(), _source_area(), source_room_entity=entity,
+    )
