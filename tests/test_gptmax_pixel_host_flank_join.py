@@ -23,7 +23,8 @@ def fixture():
     required = {**FLAGS, "source_sha256": SOURCE, "page_id": "3",
                 "input_report_sha256": sha256(raw).hexdigest(),
                 "original_pdf_reauthenticated": False,
-                "opening_rows": [{"opening_identity_id": "opening-one", "flanks": [
+                "opening_rows": [{"opening_identity_id": "opening-one",
+                                  "reported_flank_geometry_available": True, "flanks": [
                     dict(role="left", axis_span_pt=[-4., 0.], normal_span_pt=[-1., 1.],
                          end_axis_coordinate_pt=0.0),
                     dict(role="right", axis_span_pt=[10., 14.], normal_span_pt=[-1., 1.],
@@ -121,6 +122,7 @@ def test_nearby_but_not_endpoint_anchored_pixel_is_not_an_opening_host():
     "bad_original_basis", "bad_original_status", "bad_pixel_count",
     "pixel_missing_experimental_graph", "pixel_extra_w2_parent",
     "pixel_unbacked_w4_member", "pixel_missing_w4_member",
+    "false_flank_geometry_flag", "partial_reported_flanks",
 ])
 def test_corrupt_source_or_ancestry_fails_closed(mutation):
     raw, required, pixel = fixture()
@@ -174,6 +176,10 @@ def test_corrupt_source_or_ancestry_fails_closed(mutation):
             "w2_edge_ids"] = ["edge-pixel-right"]
     elif mutation == "pixel_missing_w4_member":
         pixel["experimental_w2_w4"]["all_experimental_w4_candidates"] = []
+    elif mutation == "false_flank_geometry_flag":
+        required["opening_rows"][0]["reported_flank_geometry_available"] = False
+    elif mutation == "partial_reported_flanks":
+        required["opening_rows"][0]["flanks"].pop()
     with pytest.raises((ValueError, TypeError, KeyError)):
         join(raw, required, pixel, pdf_sha=pdf_sha)
 
@@ -181,6 +187,7 @@ def test_corrupt_source_or_ancestry_fails_closed(mutation):
 def test_empty_original_flanks_stay_unavailable_without_fabrication():
     raw, required, pixel = fixture()
     required["opening_rows"][0]["flanks"] = []
+    required["opening_rows"][0]["reported_flank_geometry_available"] = False
     result = join(raw, required, pixel)
     assert result["opening_rows"][0]["flank_geometry_reported"] is False
     assert result["opening_rows"][0]["flanks"] == []
