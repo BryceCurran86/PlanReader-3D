@@ -9,6 +9,12 @@ def _original():
     row=seal_source_closed_quantity(quantity(),trace=trace())
     produced={
         "quantity_id":row.quantity_id,
+        "project_id":row.project_id,
+        "status":row.status,
+        "authority":row.authority,
+        "confidence":row.confidence,
+        "source_page":row.source_page,
+        "viewport_id":row.viewport_id,
         "trade_category":"flooring",
         "value":row.value,
         "unit":row.unit,
@@ -31,6 +37,11 @@ def test_exact_source_and_quantity_signatures_pass_diagnostic_projection():
 
 
 @pytest.mark.parametrize(("field","value"),[
+    ("project_id","other-project"),
+    ("status","provisional"),
+    ("authority","invented-authority"),
+    ("source_page","wrong-source-page"),
+    ("viewport_id","wrong-viewport"),
     ("family","invented-family"),
     ("semantic_key","different-room-semantics"),
     ("source_document_id","another-document"),
@@ -54,6 +65,15 @@ def test_unprovided_legacy_optional_fields_do_not_fabricate_a_source_scope():
     ):
         produced.pop(field)
     assert produced_sealed_parity_blockers([produced],(signed,))==[]
+
+
+@pytest.mark.parametrize("invalid",[True,None,"1.0",0.75,float("nan"),float("inf")])
+def test_signed_confidence_receipt_cannot_change_or_be_coerced(invalid):
+    signed,produced=_original()
+    produced["confidence"]=invalid
+    assert f"projection_confidence_mismatch:{signed.quantity_id}" in (
+        produced_sealed_parity_blockers([produced],(signed,))
+    )
 
 
 def test_null_source_document_receipt_is_mismatch_not_implicit_authority():
