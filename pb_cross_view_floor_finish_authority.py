@@ -511,6 +511,20 @@ def _unique_documented_area_owner_receipts(
         for source_ids in receipt_owners.values():
             if len(source_ids) > 1:
                 disputed.update(source_ids)
+    # Distinct source faces that claim the SAME physical room also cannot
+    # independently seal a finish area for that one canonical floor.
+    # Checking just source-face IDs would miss this producer identity clash.
+    physical_owners = {}
+    for source_id, record in selected.items():
+        physical_id = getattr(record, "physical_room_id", None)
+        if not valid(physical_id):
+            disputed.add(source_id)
+            continue
+        physical_owners.setdefault(physical_id, set()).add(source_id)
+    for owner_ids in physical_owners.values():
+        if len(owner_ids) > 1:
+            disputed.update(owner_ids)
+
     for source_id in disputed:
         selected.pop(source_id, None)
     return selected, tuple(sorted(disputed))
