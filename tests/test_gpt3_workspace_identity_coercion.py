@@ -46,3 +46,20 @@ def test_source_trace_constructor_preserves_canonical_integer_source_id(source_w
     q=quantity("qty-workspace","floor-workspace")
     received=replace(trace(q),workspace_id=source_workspace)
     assert received.workspace_id==7
+
+
+
+def test_oversized_numeric_workspace_receipt_fails_closed_without_numeric_overflow():
+    from pb_quantity_takeoff_adapter import MissingCommercialAuthorityError
+    too_long="9"*5000
+    q=quantity("qty-overlong-workspace","floor-oversized")
+    with pytest.raises(MissingCommercialAuthorityError,match="workspace_id"):
+        replace(trace(q),workspace_id=too_long)
+    modified=replace(q,metadata={**q.metadata,"workspace_id":too_long})
+    signed=seal_source_closed_quantity(modified,trace=trace(q))
+    assert signed.lineage_ok is False
+    assert "workspace_id_mismatch" in signed.lineage_reason_codes
+    with pytest.raises(CommercialTakeoffConflictError,match="workspace_id"):
+        quantity_evidence_to_takeoff_output_row(
+            modified,trace=trace(q),authority=authority(),
+        )
