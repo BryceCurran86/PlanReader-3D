@@ -118,3 +118,47 @@ def test_stale_and_foreign_selectors_reject_role(field,value):
     with pytest.raises(RuntimeError):
         source.native_unstroked_fill_evidence(replace(selector, **{field:value}),
             support_observation_ids=selected)
+
+
+@pytest.mark.parametrize('shade', [.96, .960784, .98, 1.0])
+def test_source_owned_pale_neutral_unstroked_rectangles_can_only_oppose(shade):
+    source, _published, selector, selected = _source(fill=(shade,shade,shade))
+    atoms = source.native_unstroked_fill_evidence(selector, support_observation_ids=selected)
+    assert len(atoms) == 1
+    atom = atoms[0]
+    assert atom.status is Status.CANDIDATE
+    assert atom.kind == 'annotation_border'
+    assert atom.metadata['polarity'] == 'opposing'
+    assert atom.metadata['all_source_primitives_covered'] is True
+    assert set(atom.metadata['source_observation_ids']) == set(selected)
+    assert atom.normalized_value is None and atom.unit is None
+    assert atom.reason_codes == ((
+        'native_unstroked_white_fill_boundary' if shade == 1.
+        else 'native_unstroked_pale_neutral_fill_boundary'),)
+
+
+@pytest.mark.parametrize('kwargs', [
+    dict(fill=(.90,.90,.90)), dict(fill=(.96,.95,.94)),
+    dict(fill=(.96,1.,.96)), dict(fill=(.96,.96,.96),stroke=(0,0,0)),
+    dict(fill=(.96,.96,.96),opacity=.8),
+])
+def test_native_wall_paint_or_chromatic_fill_is_not_reclassified_as_annotation(kwargs):
+    source, _published, selector, selected = _source(**kwargs)
+    assert source.native_unstroked_fill_evidence(selector,
+        support_observation_ids=selected) == ()
+
+
+def test_pale_fill_opposition_retains_original_source_and_count_abstention():
+    source, published, selector, selected = _source(fill=(.960784,.960784,.960784))
+    old_published = asdict(published)
+    physical = source.physical_opening_authority()
+    results = tuple(physical.prove_existence(replace(selector, observation_id=i))
+                    for i in selected)
+    opposing = [r for r in results if r.opposing_evidence_atoms]
+    assert opposing
+    assert all(r.status is Status.ABSTAINED and r.existence_record is None
+               and r.candidate is not None for r in opposing)
+    assert all(r.reason_codes == ('native_unstroked_fill_boundary_opposes_opening',)
+               for r in opposing)
+    assert not physical.assess_visible_candidate_closure(selector).candidate_universe_complete
+    assert asdict(published) == old_published

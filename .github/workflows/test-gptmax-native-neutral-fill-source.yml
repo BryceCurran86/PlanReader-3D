@@ -1,0 +1,112 @@
+name: GPT MAX Original Neutral Fill Native Opening Opposition
+on:
+  pull_request:
+    paths:
+      - pb_source_visibility_authority.py
+      - tests/test_native_unstroked_fill_evidence.py
+      - scripts/gptmax_source_opposition_retention.py
+      - tests/test_gptmax_source_opposition_retention.py
+      - docs/engineering/gptmax_native_neutral_fill_source_opposition.md
+      - .github/workflows/test-gptmax-native-neutral-fill-source.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_native_unstroked_fill_evidence.py tests/test_native_opening_source_role_diagnostic.py tests/test_physical_opening_identity_stability.py tests/test_gptmax_source_opposition_retention.py tests/test_gptmax_compare_source_face_retention.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Independent exact PR-base source graph, not changed benchmark truth
+        run: |
+          git worktree add --detach /tmp/neutral-fill-original-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/neutral-fill-original-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --page-id 3 --output "$GITHUB_WORKSPACE/source-before.json"
+          )
+      - name: Current original-source graph and retained opposing atoms
+        run: |
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 --output source-after.json
+          PYTHONPATH=. python -u tools/diag_native_opening_source_roles.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 --output native-neutral-roles.json
+      - name: Preserve every authenticated host and frame, reject table false opening only with real evidence
+        run: |
+          PYTHONPATH=. python scripts/gptmax_source_opposition_retention.py \
+            --baseline source-before.json --candidate source-after.json \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --output source-opposition-fresh-retention.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          old=json.loads(Path('source-before.json').read_text())
+          new=json.loads(Path('source-after.json').read_text())
+          roles=json.loads(Path('native-neutral-roles.json').read_text())
+          sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert old['source_sha256']==new['source_sha256']==roles['source_sha256']==sha
+          assert old['primitive_safety_cap']==new['primitive_safety_cap']==20000
+          assert old['summary']=={"physical_existence_claims":23,"host_bindings":14,"host_frames":9}
+          def keyed(key,report):
+              values=report[key]
+              ids=[x['opening_identity_id'] for x in values]
+              assert len(ids)==len(set(ids))
+              return dict(zip(ids,values))
+          oldbind,newbind=keyed('opening_bindings',old),keyed('opening_bindings',new)
+          oldframe,newframe=keyed('host_frames',old),keyed('host_frames',new)
+          assert len(oldframe)==23 and len(newframe)==len(newbind)
+          assert set(newbind)<=set(oldbind)
+          assert len(newbind)==22
+          extra=set(oldbind)-set(newbind)
+          assert extra=={'physical_opening_existence_b222d5310a7df1d632d5daab1a676645'},extra
+          for identity,record in oldbind.items():
+              if record['record_id'] is not None:
+                  assert newbind[identity]==record,('host changed',identity)
+          for identity,record in oldframe.items():
+              if record['record_id'] is not None:
+                  assert newframe[identity]==record,('frame changed',identity)
+          assert new['summary']=={"physical_existence_claims":22,"host_bindings":14,"host_frames":9}
+          assert any(
+              any(atom['reason_codes']==['native_unstroked_pale_neutral_fill_boundary']
+                  and atom['kind']=='annotation_border' for atom in row['opposing_evidence_atoms'])
+              for row in roles['retained_opposed_candidates'])
+          assert not roles.get('opening_count_publication_allowed',False)
+          assert not roles.get('metric_quantity_publication_allowed',False)
+          print({'correctly_abstained_false_native_opening':list(extra),
+                 'authenticated_existing_hosts':14,'authenticated_existing_frames':9})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-lot16-neutral-fill-source-proof
+          path: |
+            source-before.json
+            source-after.json
+            native-neutral-roles.json
+            source-opposition-fresh-retention.json
+          retention-days: 14
