@@ -157,3 +157,32 @@ def test_sealed_run_swapped_after_verification_never_rekeys_produced_items(tmp_p
         main(["--sealed-run",str(path),"--source",str(source),
               "--project-id","project-a","--output",str(out)])
     assert not out.exists()
+
+
+
+@pytest.mark.parametrize("old_status",["provisional","review_required","candidate","pending","shadow"])
+def test_historically_signed_review_quantity_is_not_a_firm_produced_item(
+    old_status,tmp_path
+):
+    source,path,sha,q,t=_source_run(tmp_path)
+    provisional=replace(q,status=old_status)
+    sealed=seal_source_closed_run(
+        [provisional],project_id="project-a",
+        traces_by_quantity_id={q.quantity_id:t},
+    )
+    path.write_text(sealed.to_json(),encoding="utf-8")
+    with pytest.raises(SourceClosedRunConflictError,match="nonfirm"):
+        export_verified_produced_items(path,[source])
+
+
+def test_genuinely_corroborated_original_quantity_is_still_exportable(tmp_path):
+    source,path,sha,q,t=_source_run(tmp_path)
+    corroborated=replace(q,status="corroborated")
+    sealed=seal_source_closed_run(
+        [corroborated],project_id="project-a",
+        traces_by_quantity_id={q.quantity_id:t},
+    )
+    path.write_text(sealed.to_json(),encoding="utf-8")
+    items=export_verified_produced_items(path,[source])
+    assert items[0]["value"]==q.value
+    assert items[0]["lineage_ok"] is True
