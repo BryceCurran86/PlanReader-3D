@@ -76,3 +76,30 @@ def test_deduction_source_physical_identity_must_be_exact_typed_pair(untrusted):
     )
     assert result.abstained
     assert "opening_deduction_identity_mismatch" in result.blocking_reasons
+
+
+
+def test_blocked_net_wall_still_serializes_a_corrupt_nonfinite_dependency_receipt():
+    from copy import copy
+    gross = copy(_gross())
+    object.__setattr__(gross, "value", float("nan"))
+    deduction = copy(_deduction("OP-1", 1.25))
+    object.__setattr__(deduction, "value", float("inf"))
+    result = _build(
+        gross=gross, deductions=(deduction,), completion=_complete(("OP-1",)),
+    )
+    assert result.abstained and result.value is None
+    assert "gross_wall_area_value_invalid" in result.blocking_reasons
+    assert "opening_deduction_value_invalid" in result.blocking_reasons
+    assert len(result.metadata["dependency_fingerprints"]) if (
+        "dependency_fingerprints" in result.metadata
+    ) else len(result.metadata["deduction_dependency_fingerprints"]) == 1
+
+
+def test_invalid_unhashable_evidence_receipt_never_crashes_blocked_net_wall():
+    gross = replay(_gross(), evidence_ids=("ev-wall", ["unhashable-source"]))
+    result = _build(gross=gross, completion=None)
+    assert result.abstained
+    assert result.value is None
+    assert "ev-wall" in result.evidence_ids
+    assert all(type(value) is str for value in result.evidence_ids)
