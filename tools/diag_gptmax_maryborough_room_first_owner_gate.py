@@ -133,6 +133,34 @@ def source_room_owner_first_gate(
 
 
 
+
+def _distinct_source_faces_for_word_ownership(
+    word_face_ids, face_receipts, physical_faces,
+) -> tuple[str, ...]:
+    """Match repeated per-word source faces to one original receipt per face."""
+    if not isinstance(word_face_ids, (tuple, list)):
+        raise ValueError("invalid original word-face ownership")
+    if not isinstance(face_receipts, (tuple, list)):
+        raise ValueError("invalid original source face receipts")
+    if not isinstance(physical_faces, dict):
+        raise TypeError("exact original physical face census required")
+    words = tuple(word_face_ids)
+    if any(not isinstance(f, str) or not f.strip() or f != f.strip()
+           for f in words):
+        raise ValueError("foreign original word face identity")
+    distinct = tuple(dict.fromkeys(words))
+    receipts = tuple(face_receipts)
+    if (len(distinct) < 2 or len(distinct) != len(receipts)
+            or any(not isinstance(rid, str) or not rid.strip()
+                   for rid in receipts)
+            or len(set(receipts)) != len(receipts)
+            or any(f not in physical_faces
+                   or physical_faces[f].record_id != rid
+                   for f, rid in zip(distinct, receipts))):
+        raise ValueError("original split word face has no unique source receipt")
+    return distinct
+
+
 def source_room_label_first_gate(
     room: SourceRoomFaceScopeResult,
     labels: SourceRoomLabelScopeResult,
@@ -190,16 +218,10 @@ def source_room_label_first_gate(
         # occupy one face, whereas producer receipts are one per DISTINCT
         # face in first-occurrence word order. Never zip these inventories.
         word_face_ids = tuple(row.word_face_ids)
-        distinct_face_ids = tuple(dict.fromkeys(word_face_ids))
         receipts = tuple(row.source_room_face_record_ids)
-        if (len(distinct_face_ids) < 2
-                or len(distinct_face_ids) != len(receipts)
-                or any(not isinstance(f, str) or not f.strip()
-                       for f in word_face_ids)
-                or any(f not in physical_faces
-                       or physical_faces[f].record_id != rid
-                       for f, rid in zip(distinct_face_ids, receipts))):
-            raise ValueError("split label references missing original physical faces")
+        distinct_face_ids = _distinct_source_faces_for_word_ownership(
+            word_face_ids, receipts, physical_faces,
+        )
         ids = tuple(row.observation_ids)
         if (not ids or len(set(ids)) != len(ids)
                 or any(not isinstance(i, str) or not i.strip()
