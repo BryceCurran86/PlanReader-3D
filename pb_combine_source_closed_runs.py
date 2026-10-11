@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -29,12 +30,32 @@ def _no_nonfinite_source_constant(token: str) -> None:
     raise ValueError(f"non-finite sealed JSON number: {token}")
 
 
+def _finite_sealed_json_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("out-of-range sealed JSON float")
+    return value
+
+
+def _finite_sealed_json_int(token: str) -> int:
+    value = int(token)
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError("out-of-range sealed JSON integer")
+    return value
+
+
 def load_verified_sealed_run(path: Path | str) -> SealedSourceClosedRun:
     source = Path(path)
     payload = json.loads(
         source.read_text(encoding="utf-8"),
         object_pairs_hook=_no_duplicate_source_keys,
         parse_constant=_no_nonfinite_source_constant,
+        parse_float=_finite_sealed_json_float,
+        parse_int=_finite_sealed_json_int,
     )
     if not isinstance(payload, dict):
         raise TypeError(f"{source} must contain a JSON object")
