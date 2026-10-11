@@ -1,0 +1,90 @@
+{
+  "fingerprint": "9b52b55fe53942007ba1e02f93428b13ca0229f74bae463e09f1b57eb642aff9",
+  "project_id": "project-a",
+  "quantities": [
+    {
+      "abstained": false,
+      "authority": "documented_dimension",
+      "blocking_reasons": [],
+      "confidence": 1.0,
+      "document_id": "doc-room-a",
+      "evidence_ids": [
+        "ev-room-a"
+      ],
+      "family": "room_area",
+      "fingerprint": "1d1dc54f01c90a4c0d9cde2a5b667841f2b23615b2233d41eaae64d0d400a8d5",
+      "lineage_ok": true,
+      "lineage_reason_codes": [],
+      "object_identity_refs": [
+        "room-a",
+        "shared-parent"
+      ],
+      "project_id": "project-a",
+      "quantity_id": "qa",
+      "reason_codes": [],
+      "revision_id": "rev-room-a",
+      "schema_version": "1.0.0",
+      "semantic_key": "area:shared",
+      "source_page": "p1",
+      "source_sha256": "3c8def5c21b869a8322a68a9287921a4d17f82c619773fc15ca25eb138fcc343",
+      "status": "firm",
+      "trace_canonical_entity_ids": [
+        "room-a",
+        "shared-parent"
+      ],
+      "trace_evidence_ids": [
+        "ev-room-a"
+      ],
+      "unit": "m2",
+      "value": 10.0,
+      "viewport_id": "vp-room-a"
+    },
+    {
+      "abstained": false,
+      "authority": "documented_dimension",
+      "blocking_reasons": [],
+      "confidence": 1.0,
+      "document_id": "doc-room-b",
+      "evidence_ids": [
+        "ev-room-b"
+      ],
+      "family": "room_area",
+      "fingerprint": "74561ee5b5ff9255883e641574588a345e389bfc5889fef57cf1c9f27c11c021",
+      "lineage_ok": true,
+      "lineage_reason_codes": [],
+      "object_identity_refs": [
+        "room-b",
+        "shared-parent"
+      ],
+      "project_id": "project-a",
+      "quantity_id": "qb",
+      "reason_codes": [],
+      "revision_id": "rev-room-b",
+      "schema_version": "1.0.0",
+      "semantic_key": "area:shared",
+      "source_page": "p1",
+      "source_sha256": "3c8def5c21b869a8322a68a9287921a4d17f82c619773fc15ca25eb138fcc343",
+      "status": "firm",
+      "trace_canonical_entity_ids": [
+        "room-b",
+        "shared-parent"
+      ],
+      "trace_evidence_ids": [
+        "ev-room-b"
+      ],
+      "unit": "m2",
+      "value": 10.0,
+      "viewport_id": "vp-room-b"
+    }
+  ],
+  "revision_ids": [
+    "rev-room-a",
+    "rev-room-b"
+  ],
+  "run_id": "source_closed_run_c20fdf8dcef0294ff6b73b8f9d3849c9",
+  "schema_version": "1.0.0",
+  "source_sha256s": [
+    "3c8def5c21b869a8322a68a9287921a4d17f82c619773fc15ca25eb138fcc343"
+  ]
+}
+
