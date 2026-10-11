@@ -397,3 +397,58 @@ def test_opening_count_source_seal_requires_explicit_commercial_publication_perm
                 replace(claim, opening_count_quantity_evidence=(forged,)),
                 workspace_id=7, project_id="source-project",
             )
+
+
+
+@pytest.mark.parametrize("bad_member", [" recorded-opening", "recorded-opening "])
+def test_count_source_member_identity_cannot_be_silently_trimmed(tmp_path, bad_member):
+    path = tmp_path / "count-source-member-whitespace.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert len(claim.opening_count_quantity_evidence) == 1
+    source = claim.opening_count_quantity_evidence[0]
+    forged = replace(source, input_entity_ids=(bad_member,))
+    with pytest.raises(SourceClosedRunConflictError, match="unique physical member identities"):
+        build_live_opening_count_source_traces(
+            replace(claim, opening_count_quantity_evidence=(forged,)),
+            workspace_id=7, project_id="source-project",
+        )
+
+
+def test_blocked_duplicate_count_id_cannot_disappear_before_sealing(tmp_path):
+    path = tmp_path / "count-source-blocked-duplicate.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    source = claim.opening_count_quantity_evidence[0]
+    forged_blocked = replace(
+        source,
+        value=None,
+        status="blocked",
+        abstained=True,
+        blocking_reasons=("incomplete_opening_candidate_universe",),
+    )
+    conflicting = replace(
+        claim,
+        opening_count_quantity_evidence=(source, forged_blocked),
+    )
+    with pytest.raises(SourceClosedRunConflictError, match="duplicate or invalid opening-count quantity id"):
+        seal_live_opening_count_run(
+            conflicting, workspace_id=7, project_id="source-project",
+        )
+
+    # The unchanged original explicit count is still sealable.
+    assert len(seal_live_opening_count_run(
+        claim, workspace_id=7, project_id="source-project",
+    ).quantities) == 1
+
+
+def test_replayed_physical_count_member_identity_is_not_cast_from_boolean(tmp_path):
+    path = tmp_path / "count-source-physical-bool.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    forged = replace(claim.canonical_openings[0], physical_opening_id=True)
+    with pytest.raises(SourceClosedRunConflictError, match="exact original canonical/physical identities"):
+        build_live_opening_count_source_traces(
+            replace(claim, canonical_openings=(forged,)),
+            workspace_id=7, project_id="source-project",
+        )
