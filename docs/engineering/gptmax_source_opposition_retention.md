@@ -63,16 +63,10 @@ truth or expected quantities.
   discovery gain.
 - Connected frame source retention uses the separate fresh-opposition audit
   for Lot16. Its Maryborough exact-source parity comparison is unchanged.
-- GPT3 source frame proof now executes each exact PR-base diagnostic in its
-  own checkout, replacing historical artifact dependencies for both sources.
-  Lot16 uses fresh original fill opposition before admitting an unhosted
-  claim delta; every shared binding and old firm frame stays identical.
-  Maryborough still requires exact binding and firm-frame parity.
-  Exact-head job `114456830360` exposed this fourth stale comparison: the
-  current source run produced 22/14/9, but the historical positive universe
-  equality rejected the independently opposed table claim. The revised
-  Lot16 inline assertions pass against the fresh original reports. The
-  updated remote job must still pass; its prior failure is not waived.
+- GPT3 source frame proof executes each exact PR-base diagnostic in its own
+  checkout for both sources. Lot16 uses freshly reauthenticated native
+  opposition; Maryborough still requires exact binding and firm-frame parity.
+  This preserves the newer branch work from `76675643`.
 - The dedicated neutral-fill job requires both the exact known source delta
   and the freshly authenticated generic explanation.
 
@@ -81,14 +75,55 @@ truth or expected quantities.
 Initial focused runs: 74 opposition/strict-retention tests and 107 existing
 opening/source/frame regressions passed. Provider gold isolation, frozen V2
 integrity, compileall, Ruff F821/F823 and edited workflow YAML/embedded Python
-checks passed. `tests/ci_smoke.py` passed. Full local suite: 11,190 passed,
-51 skipped, 13 xfailed and one schedule-identity failure
-(`test_removing_explicit_identity_removes_firm_opening`), independently
-reproduced on unchanged `9dc7125`. This is not a passed full-suite claim.
-Exact-head CI/source jobs remain required, including strict Maryborough
-source parity.
+checks passed. Full suite and exact-head CI/source jobs remain required.
 
 Frozen V2 manifests, object universe, references, scoring, tolerances and
 denominators are untouched. The input source-primitive cap remains 20,000.
 Do not merge if any old source host/frame proof is lost, any source-role
 receipt is incomplete, or current-head source parity fails.
+
+## Native dimension opposition integration review
+
+**Observed:** the interior native dimension experiment separately proves the
+original `415d...` annotation hypothesis opposed while preserving every old
+host and frame. `_fresh_opposition` currently accepts only fill opposition;
+integrating that legitimate dimension evidence would fail unrelated source
+retention jobs. `SourceVisibilityProducer.native_dimension_cap_evidence`
+already reauthenticates original PDF geometry, native text and complete source
+components; `PhysicalOpeningAuthority.prove_existence` retains opposed raw
+candidates rather than deleting them.
+
+**Proposed:** compose the existing neutral-fill and interior-dimension changes
+on current main, and permit the secondary source audit to explain a missing
+unhosted/unframed claim only through its exact original typed fill or dimension
+opposition. Recompute the original physical geometry key as before. Dimension
+atoms must retain matching document/page/revision/hash/snapshot, the full exact
+opening support selection, authentic native source observations and typed
+candidate/opposing status. Their independently source-owned component union
+must cover every candidate support. An unrelated component, missing support,
+untrusted text or any old host/frame change must fail. The strict default
+comparator and all commercial quantity gates stay unchanged.
+
+**Benchmark observations:** the two prior positive claim IDs, 23→21 experiment
+and 14/9 controls are test-only. No project-specific source geometry, material,
+expected quantity or benchmark tolerance enters the generic implementation.
+Seven raster host identities remain unresolved; annotation opposition does
+not prove physical nonexistence or complete opening counts.
+
+## Combined original-source verification
+
+On main `ebb24868`, the composed native changes produce exactly 21 positive
+Lot16 claims, 14 existing authenticated hosts and 9 existing authenticated
+frames. The missing positive claim IDs are only the original dimension
+`415d...` and pale fill-only table `b222...`; every surviving binding and
+every previously authenticated frame remains exact. A fresh source-role
+replay retains 60 opposed candidates (43 native fill, 17 dimension), and the
+secondary audit independently reauthenticates both missing geometries from
+the original PDF. It does not consume a caller-supplied role report.
+
+153 focused dimension/fill/source-role/identity/opposition/strict-retention
+tests pass, including native dimension text/support/scope mutations. The
+exact original-source workflow must still pass on the updated remote head,
+as must unchanged strict Maryborough parity. No passed full-suite result is
+claimed here: the independently reproduced W21 OCR and historical-seal
+fixture failures are being repaired separately.

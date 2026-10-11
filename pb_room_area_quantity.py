@@ -39,19 +39,48 @@ ROOM_AREA_FAMILY = "room_area"
 ROOM_AREA_FORMULA_VERSION = "1.1.0"
 
 
+def _original_pdf_ring(points: object) -> tuple[tuple[float, float], ...] | None:
+    """Do not turn bool, string, NaN or overflowing PDF-point data into metres."""
+    if not isinstance(points, (tuple, list)):
+        return None
+    output = []
+    for point in points:
+        if (
+            not isinstance(point, (tuple, list)) or len(point) != 2
+            or any(type(value) not in (int, float) for value in point)
+        ):
+            return None
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(x) or not math.isfinite(y):
+            return None
+        output.append((x, y))
+    return tuple(output)
+
+
 def _polygon_area(points: Sequence[tuple[float, float]]) -> float:
-    if len(points) < 3:
+    original = _original_pdf_ring(points)
+    if original is None or len(original) < 3:
         return 0.0
-    total = 0.0
-    for i, (x1, y1) in enumerate(points):
-        x2, y2 = points[(i + 1) % len(points)]
-        total += float(x1) * float(y2) - float(x2) * float(y1)
-    return abs(total) / 2.0
+    try:
+        total = math.fsum(
+            original[i][0] * original[(i + 1) % len(original)][1]
+            - original[(i + 1) % len(original)][0] * original[i][1]
+            for i in range(len(original))
+        )
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return abs(total) / 2.0 if math.isfinite(total) else 0.0
 
 
 def _canonical_ring(points: Sequence[tuple[float, float]]) -> tuple[tuple[float, float], ...]:
     """Cyclic/reversal-invariant signature used only for duplicate protection."""
-    pts = tuple((round(float(x), 8), round(float(y), 8)) for x, y in points)
+    original = _original_pdf_ring(points)
+    if original is None:
+        return ()
+    pts = tuple((round(x, 8), round(y, 8)) for x, y in original)
     if len(pts) > 1 and pts[0] == pts[-1]:
         pts = pts[:-1]
     if not pts:
@@ -94,7 +123,7 @@ def _abstention(
         input_entity_ids=(room.room_ref,),
         formula="owned_explicit_area OR polygon_area / trusted_px_per_m^2",
         formula_version=ROOM_AREA_FORMULA_VERSION,
-        evidence_ids=tuple(entity.evidence_ids),
+        evidence_ids=_original_room_receipts(entity.evidence_ids) or (),
         authority=authority,
         status=AuthorityStatus.BLOCKED.value,
         confidence=0.0,
@@ -103,6 +132,27 @@ def _abstention(
         reason_codes=blockers,
         metadata=metadata or {},
     )
+
+
+def _original_room_receipts(value: object) -> tuple[str, ...] | None:
+    """Preserve unmodified typed source membership; None means invalid input."""
+    if not isinstance(value, (tuple, list)):
+        return None
+    if any(type(item) is not str or not item or item != item.strip() for item in value):
+        return None
+    if len(set(value)) != len(value):
+        return None
+    return tuple(value)
+
+
+def _valid_source_confidence(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(numeric) and 0.0 <= numeric <= 1.0
 
 
 def _validate_common(
@@ -147,12 +197,39 @@ def _validate_common(
     mapped_page = context.page_for_viewport(viewport.viewport_id)
     if mapped_page is not None and int(mapped_page) != int(page_no):
         blockers.append("viewport_page_mismatch")
-    if room.source_page and int(room.source_page) != int(page_no):
-        blockers.append("room_source_page_mismatch")
-    if not set(entity.evidence_ids).issubset(set(document.evidence_ids)):
+    if room.source_page:
+        try:
+            original_page = room.source_page
+            if (
+                type(original_page) not in (str, int)
+                or (type(original_page) is str and (
+                    original_page != original_page.strip()
+                    or not original_page.isdecimal()
+                ))
+                or int(original_page) != int(page_no)
+            ):
+                blockers.append("room_source_page_mismatch")
+        except (TypeError, ValueError, OverflowError):
+            blockers.append("room_source_page_mismatch")
+    document_receipts = _original_room_receipts(document.evidence_ids)
+    entity_receipts = _original_room_receipts(entity.evidence_ids)
+    room_receipts = _original_room_receipts(room.evidence)
+    if (
+        document_receipts is None or entity_receipts is None
+        or not entity_receipts
+        or not set(entity_receipts).issubset(set(document_receipts))
+    ):
         blockers.append("entity_evidence_not_owned_by_document")
-    if room.evidence and not set(room.evidence).issubset(set(document.evidence_ids)):
+    if (
+        document_receipts is None or room_receipts is None
+        or (room_receipts and not set(room_receipts).issubset(set(document_receipts)))
+    ):
         blockers.append("room_evidence_not_owned_by_document")
+    if (
+        not _valid_source_confidence(room.geometry_confidence)
+        or not _valid_source_confidence(entity.confidence)
+    ):
+        blockers.append("room_area_source_confidence_invalid")
     if room.area_conflict:
         blockers.append("room_area_conflict")
     return tuple(blockers)
@@ -178,16 +255,34 @@ def _validate_explicit_area(
         blockers.append("explicit_area_viewport_mismatch")
     if evidence.status != EvidenceResolutionStatus.CORROBORATED:
         blockers.append("explicit_area_not_corroborated")
+    if (
+        not _valid_source_confidence(evidence.confidence)
+    ):
+        blockers.append("explicit_area_confidence_invalid")
     if evidence.normalized_value is None:
         blockers.append("explicit_area_missing_normalized_value")
+    elif type(evidence.normalized_value) not in (int, float):
+        blockers.append("explicit_area_invalid")
     else:
         try:
             value = float(evidence.normalized_value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             blockers.append("explicit_area_invalid")
         else:
             if not math.isfinite(value) or value <= 0.0:
                 blockers.append("explicit_area_invalid")
+    # Figured-dimension receipts are optional for genuinely explicit printed
+    # area labels, but when supplied may never be an iterable string that
+    # masquerades as two independent source dimensions.
+    meta = evidence.metadata if isinstance(evidence.metadata, dict) else {}
+    figured = meta.get("figured_dimension_ids")
+    if figured is not None and (
+        not isinstance(figured, (tuple, list))
+        or len(figured) != 2
+        or any(type(item) is not str or not item or item != item.strip() for item in figured)
+        or len(set(figured)) != 2
+    ):
+        blockers.append("explicit_area_figured_receipts_invalid")
     if str(evidence.unit or "").strip().lower() not in {"m2", "m²"}:
         blockers.append("explicit_area_unit_not_m2")
     return tuple(blockers)
@@ -252,16 +347,10 @@ def build_room_area_quantity(
             if isinstance(explicit_area_evidence.metadata, dict)
             else {}
         )
+        # Validated by _validate_explicit_area; do not coerce an arbitrary
+        # string into a false two-axis figured source receipt at publication.
         figured_dimension_ids = tuple(
-            sorted(
-                {
-                    str(value).strip()
-                    for value in (
-                        explicit_metadata.get("figured_dimension_ids") or ()
-                    )
-                    if str(value).strip()
-                }
-            )
+            sorted(explicit_metadata.get("figured_dimension_ids") or ())
         )
         payload = {
             "family": ROOM_AREA_FAMILY,

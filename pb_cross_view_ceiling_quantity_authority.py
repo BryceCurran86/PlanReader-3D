@@ -67,7 +67,10 @@ def _ceiling_id(room: LiveCanonicalRoomObject) -> str:
 
 
 def _quantity_value(quantity: QuantityEvidence) -> Optional[float]:
-    if quantity.abstained or quantity.value is None:
+    if (
+        quantity.abstained or quantity.value is None
+        or type(quantity.value) not in (int, float)
+    ):
         return None
     try:
         value = float(quantity.value)
@@ -76,6 +79,16 @@ def _quantity_value(quantity: QuantityEvidence) -> Optional[float]:
     if not math.isfinite(value) or value <= 0.0:
         return None
     return value
+
+
+def _valid_source_area_confidence(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        probability = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(probability) and 0.0 <= probability <= 1.0
 
 
 def _source_figured_dimension_ids(metadata: Mapping) -> Optional[tuple[str, ...]]:
@@ -88,10 +101,13 @@ def _source_figured_dimension_ids(metadata: Mapping) -> Optional[tuple[str, ...]
     raw = metadata.get("figured_dimension_ids")
     if not isinstance(raw, (tuple, list)):
         return None
-    if not all(isinstance(item, str) for item in raw):
+    if (
+        len(raw) != 2
+        or any(type(item) is not str or not item or item != item.strip() for item in raw)
+        or len(set(raw)) != 2
+    ):
         return None
-    ids = tuple(sorted({_clean(item) for item in raw if _clean(item)}))
-    return ids if len(ids) == 2 else None
+    return tuple(sorted(raw))
 
 
 def _valid_room_area_quantity(
@@ -107,6 +123,11 @@ def _valid_room_area_quantity(
         or _clean(quantity.unit).lower() not in {"m2", "m²"}
         or quantity.blocking_reasons
         or not quantity.evidence_ids
+        or not isinstance(quantity.evidence_ids, (tuple, list))
+        or any(type(item) is not str or not item or item != item.strip()
+               for item in quantity.evidence_ids)
+        or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
+        or not _valid_source_area_confidence(quantity.confidence)
         or _clean(quantity.authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
         or _quantity_value(quantity) is None

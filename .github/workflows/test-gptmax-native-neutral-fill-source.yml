@@ -1,8 +1,10 @@
-name: GPT MAX Original Neutral Fill Native Opening Opposition
+name: GPT MAX Original Table And Dimension Native Opening Opposition
 on:
   pull_request:
     paths:
       - pb_source_visibility_authority.py
+      - pb_native_dimension_cap_evidence.py
+      - tests/test_native_dimension_cap_evidence.py
       - tests/test_native_unstroked_fill_evidence.py
       - scripts/gptmax_source_opposition_retention.py
       - tests/test_gptmax_source_opposition_retention.py
@@ -24,7 +26,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
       - run: |
-          PYTHONPATH=. python -m pytest -q tests/test_native_unstroked_fill_evidence.py tests/test_native_opening_source_role_diagnostic.py tests/test_physical_opening_identity_stability.py tests/test_gptmax_source_opposition_retention.py tests/test_gptmax_compare_source_face_retention.py
+          PYTHONPATH=. python -m pytest -q tests/test_native_dimension_cap_evidence.py tests/test_native_unstroked_fill_evidence.py tests/test_native_opening_source_role_diagnostic.py tests/test_physical_opening_identity_stability.py tests/test_gptmax_source_opposition_retention.py tests/test_gptmax_compare_source_face_retention.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   original-lot16-retention:
@@ -56,7 +58,7 @@ jobs:
           PYTHONPATH=. python -u tools/diag_native_opening_source_roles.py \
             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
             --page-id 3 --output native-neutral-roles.json
-      - name: Preserve every authenticated host and frame, reject table false opening only with real evidence
+      - name: Preserve every authenticated host and frame with exact table and dimension opposition
         run: |
           PYTHONPATH=. python scripts/gptmax_source_opposition_retention.py \
             --baseline source-before.json --candidate source-after.json \
@@ -81,19 +83,27 @@ jobs:
           oldframe,newframe=keyed('host_frames',old),keyed('host_frames',new)
           assert len(oldframe)==23 and len(newframe)==len(newbind)
           assert set(newbind)<=set(oldbind)
-          assert len(newbind)==22
+          assert len(newbind)==21
           extra=set(oldbind)-set(newbind)
-          assert extra=={'physical_opening_existence_b222d5310a7df1d632d5daab1a676645'},extra
+          assert extra=={
+              'physical_opening_existence_b222d5310a7df1d632d5daab1a676645',
+              'physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d'},extra
           for identity,record in oldbind.items():
               if record['record_id'] is not None:
                   assert newbind[identity]==record,('host changed',identity)
           for identity,record in oldframe.items():
               if record['record_id'] is not None:
                   assert newframe[identity]==record,('frame changed',identity)
-          assert new['summary']=={"physical_existence_claims":22,"host_bindings":14,"host_frames":9}
+          assert new['summary']=={"physical_existence_claims":21,"host_bindings":14,"host_frames":9}
           assert any(
               any(atom['reason_codes']==['native_unstroked_pale_neutral_fill_boundary']
                   and atom['kind']=='annotation_border' for atom in row['opposing_evidence_atoms'])
+              for row in roles['retained_opposed_candidates'])
+          assert any(
+              any(atom['reason_codes']==['native_dimension_cap_tick_text_topology']
+                  and atom['kind']=='dimension_annotation'
+                  and atom['metadata']['all_opening_support_covered'] is True
+                  for atom in row['opposing_evidence_atoms'])
               for row in roles['retained_opposed_candidates'])
           assert not roles.get('opening_count_publication_allowed',False)
           assert not roles.get('metric_quantity_publication_allowed',False)

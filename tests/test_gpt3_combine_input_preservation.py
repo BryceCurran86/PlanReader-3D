@@ -98,3 +98,44 @@ def test_cli_atomic_publication_leaves_no_staging_file_on_success(tmp_path):
     assert cli.main(["--input", str(source), "--output", str(output)]) == 0
     assert cli.load_verified_sealed_run(output).project_id == "project-a"
     assert not list(tmp_path.glob(".combined.json.*.tmp"))
+
+
+
+@pytest.mark.parametrize(("literal","expected_error"),[
+    ("1e999","out-of-range sealed JSON float"),
+    ("1"+"0"*500,"out-of-range sealed JSON integer"),
+])
+@pytest.mark.parametrize(("field","old_number"),[
+    ("value","10.0"),
+    ("confidence","1.0"),
+])
+def test_signed_run_json_numeric_overflow_is_rejected_before_seal_rehydration(
+    tmp_path,literal,expected_error,field,old_number
+):
+    source=_original_source(tmp_path)
+    original=json.dumps(json.loads(source.read_text()),sort_keys=True)
+    target=f'"{field}": {old_number}'
+    assert target in original
+    forged=original.replace(target,f'"{field}": '+literal,1)
+    source.write_text(forged,encoding="utf-8")
+    with pytest.raises(ValueError,match=expected_error):
+        cli.load_verified_sealed_run(source)
+
+
+
+def test_signed_run_loader_denies_pathological_json_depth_before_crypto(tmp_path):
+    source=tmp_path/"pathological.json"
+    source.write_text("["*513+"0"+"]"*513,encoding="utf-8")
+    with pytest.raises(ValueError,match="sealed JSON nesting exceeds safe parser depth"):
+        cli.load_verified_sealed_run(source)
+
+
+def test_escaped_brackets_inside_signed_json_strings_do_not_consume_depth_budget():
+    from pb_combine_source_closed_runs import _reject_excessive_sealed_json_nesting
+    text = json.dumps({"notes": "["*900 + ('escaped quote "' + ' and }')*900})
+    _reject_excessive_sealed_json_nesting(text)
+
+
+def test_original_signatures_still_load_after_structural_depth_guard(tmp_path):
+    original=_original_source(tmp_path)
+    assert cli.load_verified_sealed_run(original).project_id=="project-a"

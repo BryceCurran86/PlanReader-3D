@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+from pb_figured_dimension_evidence import classify_dimension_token
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_opening_authority import _physical_opening_geometry_identity
 from pb_source_observation_authority import ObservationSelector
@@ -34,6 +35,63 @@ def _index(rows, name):
             raise ValueError(name + " has missing or repeated physical identities")
         result[identity] = row
     return result
+
+
+def _source_ids(value):
+    if (not isinstance(value,(tuple,list)) or not value
+            or any(not isinstance(x,str) or not x.strip() for x in value)
+            or len(value)!=len(set(value))):
+        raise ValueError("incomplete original opposing source inventory")
+    return set(value)
+
+
+def _validate_opposition(source,selector,candidate,result):
+    """Reauthenticate complete typed native support; never trust count changes."""
+    fill=result.reason_codes==("native_unstroked_fill_boundary_opposes_opening",)
+    dimension=result.reason_codes==("native_dimension_annotation_opposes_opening",)
+    if not (fill or dimension):
+        raise ValueError("missing claim lacks complete original native fill opposition or dimension opposition")
+    support=_source_ids(candidate.source_observation_ids)
+    covered=set()
+    for atom in result.opposing_evidence_atoms:
+        metadata=atom.metadata
+        if (atom.status is not EvidenceResolutionStatus.CANDIDATE
+                or atom.document_id!=candidate.document_id or atom.page_id!=candidate.page_id
+                or metadata.get("polarity")!="opposing"
+                or metadata.get("source_sha256")!=selector.source_sha256
+                or metadata.get("revision_id")!=selector.revision_id
+                or metadata.get("snapshot_id")!=selector.snapshot_id):
+            raise ValueError("foreign original native opposing receipt")
+        ids=_source_ids(metadata.get("source_observation_ids"))
+        if fill:
+            if (atom.kind!="annotation_border"
+                    or metadata.get("all_source_primitives_covered") is not True
+                    or ids!=support):
+                raise ValueError("incomplete original native paint-role receipt")
+        else:
+            if (atom.kind!="dimension_annotation"
+                    or atom.reason_codes!=("native_dimension_cap_tick_text_topology",)
+                    or metadata.get("all_opening_support_covered") is not True
+                    or _source_ids(metadata.get("opening_support_observation_ids"))!=support
+                    or not _source_ids(metadata.get("dimension_line_observation_ids"))<=ids):
+                raise ValueError("incomplete original native dimension-role receipt")
+            word_id=metadata.get("text_observation_id")
+            if not isinstance(word_id,str) or not word_id.strip():
+                raise ValueError("original dimension text ownership unavailable")
+            text=source.text_integrity_authority().resolve_text(replace(selector,observation_id=word_id))
+            if (text.status is not EvidenceResolutionStatus.CORROBORATED
+                    or text.receipt is None or text.receipt.page_id!=candidate.page_id
+                    or not classify_dimension_token(str(text.trusted_text)).is_linear_dimension):
+                raise ValueError("original dimension text receipt unavailable")
+        for observation_id in ids:
+            owned=source.authority().resolve_visible(replace(selector,observation_id=observation_id))
+            if (owned.status is not EvidenceResolutionStatus.CORROBORATED
+                    or owned.observation is None
+                    or owned.observation.page_id!=candidate.page_id):
+                raise ValueError("opposing component lacks original visible source ownership")
+        covered.update(ids)
+    if not support<=covered:
+        raise ValueError("opposing component union misses original opening support")
 
 
 def _fresh_opposition(source_bytes, pages, missing):
@@ -60,9 +118,8 @@ def _fresh_opposition(source_bytes, pages, missing):
         if (result.status is not EvidenceResolutionStatus.ABSTAINED
                 or result.existence_record is not None or candidate is None
                 or not result.opposing_evidence_atoms
-                or result.reason_codes != ("native_unstroked_fill_boundary_opposes_opening",)
                 or candidate.page_id != previous.get("page_id")):
-            raise ValueError("missing claim lacks complete original native fill opposition")
+            raise ValueError("missing claim lacks complete original native fill opposition or dimension opposition")
         support = candidate.source_observation_ids
         if (not support or len(support) != len(set(support))
                 or representative not in support):
@@ -87,17 +144,7 @@ def _fresh_opposition(source_bytes, pages, missing):
         if original_identity != identity:
             raise ValueError("opposing source belongs to a different physical geometry")
         atoms = result.opposing_evidence_atoms
-        for atom in atoms:
-            metadata = atom.metadata
-            if (atom.kind != "annotation_border"
-                    or atom.status is not EvidenceResolutionStatus.CANDIDATE
-                    or atom.document_id != candidate.document_id
-                    or atom.page_id != candidate.page_id
-                    or metadata.get("polarity") != "opposing"
-                    or metadata.get("source_sha256") != digest
-                    or metadata.get("all_source_primitives_covered") is not True
-                    or set(metadata.get("source_observation_ids", ())) != set(support)):
-                raise ValueError("incomplete original native paint-role receipt")
+        _validate_opposition(source,selector,candidate,result)
         proofs.append({"opening_identity_id": identity,
             "representative_observation_id": representative,
             "candidate": asdict(candidate),
