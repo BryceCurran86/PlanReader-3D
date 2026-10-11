@@ -39,19 +39,56 @@ def _meta(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _dependency_abstention_fingerprint(quantity: QuantityEvidence) -> str:
+    """Never crash BLOCKED net-wall publication while hashing corrupt inputs.
+
+    A normal source receipt retains its exact canonical hash. Non-JSON/nonfinite
+    imported evidence is represented by a deterministic invalid receipt token;
+    it may only enter ABSTAIN and never authorize a calculated net area.
+    """
+    try:
+        return quantity_evidence_fingerprint(quantity)
+    except (TypeError, ValueError, OverflowError):
+        token = f"invalid_net_wall_dependency:{quantity.quantity_id}:{quantity.family}"
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _completion_fingerprint(evidence: EvidenceAtom) -> str:
     return hashlib.sha256(
         canonical_contract_json(evidence.to_dict()).encode("utf-8")
     ).hexdigest()
 
 
+def _completion_abstention_fingerprint(evidence: EvidenceAtom) -> str:
+    # An invalid source-declared opening universe may be blocked and reported,
+    # but malformed metadata must never throw before the BLOCKED result exists.
+    try:
+        return _completion_fingerprint(evidence)
+    except (TypeError, ValueError, OverflowError):
+        token = f"invalid_opening_universe:{evidence.evidence_id}:{evidence.kind}"
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _opening_id_from_deduction(quantity: QuantityEvidence, wall_id: str) -> str | None:
-    if len(quantity.input_entity_ids) != 2:
+    if not isinstance(quantity.input_entity_ids, (tuple, list)) or len(quantity.input_entity_ids) != 2:
         return None
-    first, second = (str(v) for v in quantity.input_entity_ids)
+    if any(type(value) is not str or not value or value != value.strip()
+           for value in quantity.input_entity_ids):
+        return None
+    first, second = quantity.input_entity_ids
     if second == wall_id and first != wall_id:
         return first
     return None
+
+
+def _valid_blocked_source_receipts(original: object) -> tuple[str, ...]:
+    # Invalid imported evidence can block net wall publication but can never
+    # become authenticated receipts. Keep ABSTAIN serializable even when a
+    # replayed evidence_ids field is None, a scalar or nested mutable values.
+    if not isinstance(original, (tuple, list)):
+        return ()
+    return tuple(value for value in original
+                 if type(value) is str and value and value == value.strip())
 
 
 def _abstain(
@@ -62,8 +99,8 @@ def _abstain(
     blockers: tuple[str, ...],
     completion_evidence: EvidenceAtom | None,
 ) -> QuantityEvidence:
-    gross_fp = quantity_evidence_fingerprint(gross)
-    deduction_fps = [quantity_evidence_fingerprint(q) for q in deductions]
+    gross_fp = _dependency_abstention_fingerprint(gross)
+    deduction_fps = [_dependency_abstention_fingerprint(q) for q in deductions]
     payload = {
         "family": NET_WALL_AREA_FAMILY,
         "wall_id": wall_id,
@@ -74,10 +111,13 @@ def _abstain(
         "completion_evidence_id": completion_evidence.evidence_id if completion_evidence else None,
         "blockers": list(blockers),
     }
-    evidence_ids = list(gross.evidence_ids)
+    # Diagnostic BLOCKED records must remain serializable when an imported
+    # evidence list contains unhashable or non-string data. Only exact native
+    # source tokens are kept; this does not authenticate any corrupt receipt.
+    evidence_ids = list(_valid_blocked_source_receipts(gross.evidence_ids))
     for deduction in deductions:
-        evidence_ids.extend(deduction.evidence_ids)
-    if completion_evidence is not None:
+        evidence_ids.extend(_valid_blocked_source_receipts(deduction.evidence_ids))
+    if completion_evidence is not None and type(completion_evidence.evidence_id) is str:
         evidence_ids.append(completion_evidence.evidence_id)
     return QuantityEvidence(
         quantity_id=stable_contract_id("qty", payload),
@@ -99,7 +139,7 @@ def _abstain(
             "gross_dependency_fingerprint": gross_fp,
             "deduction_dependency_fingerprints": deduction_fps,
             "opening_set_completion_fingerprint": (
-                _completion_fingerprint(completion_evidence)
+                _completion_abstention_fingerprint(completion_evidence)
                 if completion_evidence is not None
                 else None
             ),
@@ -138,7 +178,16 @@ def build_net_wall_area_quantity(
         blockers.append("gross_wall_area_abstained")
     if gross_wall_area.status != AuthorityStatus.FIRM.value:
         blockers.append("gross_wall_area_not_firm")
-    if tuple(gross_wall_area.input_entity_ids) != (wall_id,):
+    # Never treat scalar or missing imported source member collections as
+    # iterable witnesses. Net wall remains BLOCKED unless the physical gross
+    # wall identity was present in the unchanged source receipt.
+    gross_members = gross_wall_area.input_entity_ids
+    if (
+        not isinstance(gross_members, (tuple, list))
+        or len(gross_members) != 1
+        or type(gross_members[0]) is not str
+        or gross_members[0] != wall_id
+    ):
         blockers.append("gross_wall_entity_identity_mismatch")
 
     if wall_entity.candidate_entity_id != wall_id:
@@ -208,11 +257,14 @@ def build_net_wall_area_quantity(
         if not isinstance(raw_ids, (list, tuple)):
             blockers.append("opening_set_completion_ids_missing")
         else:
-            declared_opening_ids = tuple(str(v) for v in raw_ids)
-            if any(not v for v in declared_opening_ids):
-                blockers.append("opening_set_completion_id_empty")
-            if len(set(declared_opening_ids)) != len(declared_opening_ids):
-                blockers.append("opening_set_completion_ids_duplicate")
+            if any(type(value) is not str or not value or value != value.strip()
+                   for value in raw_ids):
+                blockers.append("opening_set_completion_ids_invalid")
+                declared_opening_ids = ()
+            else:
+                declared_opening_ids = tuple(raw_ids)
+                if len(set(declared_opening_ids)) != len(declared_opening_ids):
+                    blockers.append("opening_set_completion_ids_duplicate")
 
         # Critical fail-closed boundary: an ordinary EvidenceAtom and a caller
         # declared list cannot prove that omitted physical openings do not exist.
@@ -250,11 +302,18 @@ def build_net_wall_area_quantity(
         if dmeta.get("wall_id") != wall_id:
             blockers.append("opening_deduction_wall_metadata_mismatch")
         if deduction.value is not None:
-            numeric = float(deduction.value)
-            if not math.isfinite(numeric) or numeric < 0.0:
+            if type(deduction.value) not in (int, float):
                 blockers.append("opening_deduction_value_invalid")
             else:
-                total_deduction += numeric
+                try:
+                    numeric = float(deduction.value)
+                except (TypeError, ValueError, OverflowError):
+                    blockers.append("opening_deduction_value_invalid")
+                else:
+                    if not math.isfinite(numeric) or numeric < 0.0:
+                        blockers.append("opening_deduction_value_invalid")
+                    else:
+                        total_deduction += numeric
 
     if len(set(observed_opening_ids)) != len(observed_opening_ids):
         blockers.append("duplicate_opening_deduction_identity")
@@ -262,11 +321,18 @@ def build_net_wall_area_quantity(
         blockers.append("opening_deduction_set_not_complete")
 
     if gross_wall_area.value is not None:
-        gross_value = float(gross_wall_area.value)
-        if not math.isfinite(gross_value) or gross_value <= 0.0:
+        if type(gross_wall_area.value) not in (int, float):
             blockers.append("gross_wall_area_value_invalid")
-        elif total_deduction > gross_value:
-            blockers.append("opening_deductions_exceed_gross_area")
+        else:
+            try:
+                gross_value = float(gross_wall_area.value)
+            except (TypeError, ValueError, OverflowError):
+                blockers.append("gross_wall_area_value_invalid")
+            else:
+                if not math.isfinite(gross_value) or gross_value <= 0.0:
+                    blockers.append("gross_wall_area_value_invalid")
+                elif total_deduction > gross_value:
+                    blockers.append("opening_deductions_exceed_gross_area")
 
     if blockers:
         return _abstain(
