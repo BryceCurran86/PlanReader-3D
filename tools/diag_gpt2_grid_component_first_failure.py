@@ -54,6 +54,8 @@ def _physical_union_first_unclosed_gate(
         "physical_union_external_grid_edge_count": 0,
         "physical_union_external_grid_w4_ids_diagnostic_only": [],
         "physical_union_internal_separator_edge_count": 0,
+        "invalid_constituent_source_face_receipts_diagnostic_only": [],
+        "first_invalid_internal_wall_receipt_diagnostic_only": None,
         "new_room_geometry_published": False,
         "new_metric_area_published": False,
     }
@@ -90,7 +92,27 @@ def _physical_union_first_unclosed_gate(
         return result
     try:
         polygons = [Polygon(records[face_id].polygon_pdf_pts) for face_id in component]
-        if any(p.is_empty or not p.is_valid or p.area <= 0 for p in polygons):
+        invalid_faces = [
+            (face_id, poly)
+            for face_id, poly in zip(component, polygons)
+            if poly.is_empty or not poly.is_valid or poly.area <= 0
+        ]
+        if invalid_faces:
+            from shapely.validation import explain_validity
+            result["invalid_constituent_source_face_receipts_diagnostic_only"] = [
+                {
+                    "original_source_face_id": face_id,
+                    "original_source_face_record_id": records[face_id].record_id,
+                    "native_polygon_validity_failure": (
+                        explain_validity(poly)[:180]
+                        if not poly.is_valid else
+                        "source_polygon_empty_or_nonpositive_area"
+                    ),
+                    "physical_room_polygon_published": False,
+                }
+                for face_id, poly in invalid_faces[:16]
+            ]
+            result["physical_union_invalid_constituent_face_count"] = len(invalid_faces)
             result["physical_union_first_unclosed_gate"] = "source_component_polygon_invalid"
             return result
         merged = unary_union(polygons)
@@ -153,6 +175,23 @@ def _physical_union_first_unclosed_gate(
                 wall_id not in fully_grid_wall_ids or len(global_owners) != 2
                 or not set(global_owners).issubset(component_set)
             ):
+                # Preserve actual atomic W4 source wall and its *global*
+                # source face owners. This tells the upstream wall/face agent
+                # which witness is missing, without inferring equivalence.
+                result["first_invalid_internal_wall_receipt_diagnostic_only"] = {
+                    "original_w4_wall_id": wall_id,
+                    "original_atomic_wall_edge_pdf_pts": [
+                        list(point) for point in _edge
+                    ],
+                    "original_global_source_face_ids": list(global_owners),
+                    "source_component_face_ids": sorted(
+                        component_set.intersection(global_owners)
+                    ),
+                    "grid_opposed_source_wall_authenticated": (
+                        wall_id in fully_grid_wall_ids
+                    ),
+                    "no_wall_or_room_equivalence_inferred": True,
+                }
                 result["physical_union_first_unclosed_gate"] = (
                     "source_internal_wall_edge_not_two_sided_grid_owned"
                 )
