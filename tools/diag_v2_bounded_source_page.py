@@ -118,6 +118,10 @@ def main(argv: list[str] | None = None) -> int:
         or len(args.page_index) != len(set(args.page_index))
     ):
         parser.error("invalid diagnostic time, memory or distinct page constraints")
+    # A missing /proc would silently disable the advertised RSS safeguard.
+    # Windows users can run this diagnostic in WSL or a Linux CI runner.
+    if not Path("/proc/self/status").is_file():
+        parser.error("RSS guard requires Linux /proc; use WSL or Linux CI")
     if args.expected_sha256 is not None and (
         len(args.expected_sha256) != 64
         or any(c not in "0123456789abcdef" for c in args.expected_sha256)
