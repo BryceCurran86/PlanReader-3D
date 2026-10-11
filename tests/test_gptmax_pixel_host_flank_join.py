@@ -262,3 +262,27 @@ def test_reported_pixel_receipt_must_replay_complete_original_render_coordinates
         receipt["geometry"] = [18., 20., 22., 20.]
     with pytest.raises((ValueError, TypeError)):
         join(raw, required, pixel)
+
+
+def test_derived_w2_snap_losses_above_source_cap_do_not_break_source_cap():
+    """W2 splits may create >20,000 derived losses from two actual source rows."""
+    raw, required, pixel = fixture()
+    graph = pixel["experimental_w2_w4"]
+    identifiers = [f"derived-snap-loss-{i}" for i in range(20001)]
+    graph["all_snap_collapsed_fragments"] = [
+        {"fragment_id": identity, "source_observation_ids": ["pixel-left"]}
+        for identity in identifiers
+    ]
+    graph["source_parent_census"][0]["snap_collapsed_fragment_ids"] = identifiers
+    assert graph["input_source_count"] == 2
+    joined = join(raw, required, pixel)
+    left = joined["opening_rows"][0]["flanks"][0]["pixel_run_candidates"][0]
+    assert len(left["experimental_lineage"]["snap_collapsed_fragment_ids"]) == 20001
+    assert not left["host_publication_allowed"]
+    assert not joined["host_publication_allowed"]
+
+def test_unmodified_twenty_thousand_source_primitive_limit_still_fail_closed():
+    raw, required, pixel = fixture()
+    pixel["experimental_w2_w4"]["input_source_count"] = 20001
+    with pytest.raises(ValueError, match="source census count"):
+        join(raw, required, pixel)
