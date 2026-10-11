@@ -957,6 +957,7 @@ def test_gpt2_invalid_source_room_area_id_never_becomes_finish_owner():
     )
     authentic = SimpleNamespace(
         source_room_face_record_id="source-face-1",
+        physical_room_id="authenticated-physical-room-1",
         area_evidence=SimpleNamespace(evidence_id="independent-source-area-1"),
     )
     invalid = tuple(
@@ -983,6 +984,7 @@ def test_gpt2_reused_source_area_evidence_cannot_quantify_two_room_finishes():
     def source_room(room_id, receipt):
         return Record(
             source_room_face_record_id=room_id,
+            physical_room_id=room_id,
             area_evidence=Record(evidence_id=receipt),
         )
     first=source_room("physical-source-room-one","same-figured-area-receipt")
@@ -1008,6 +1010,7 @@ def test_gpt2_invalid_figured_area_receipt_quarantines_only_its_source_room():
     )
     good=Record(
         source_room_face_record_id="room-valid",
+        physical_room_id="authenticated-valid-room",
         area_evidence=Record(evidence_id="real-source-figured-area"),
     )
     for invalid in (None, 79, "", "  ", " source-area-receipt"):
@@ -1032,6 +1035,7 @@ def test_gpt2_room_label_source_observation_cannot_own_two_floor_finishes():
     def room(face,evidence,word,label_receipt):
         return R(
             source_room_face_record_id=face,
+            physical_room_id=face,
             area_evidence=R(evidence_id=evidence),
             source_label_observation_ids=(word,),
             source_label_receipt_ids=(label_receipt,),
@@ -1063,6 +1067,7 @@ def test_gpt2_malformed_floor_room_label_receipts_preserve_unrelated_area():
     )
     good=R(
         source_room_face_record_id="room-authentic",
+        physical_room_id="authenticated-physical-room",
         area_evidence=R(evidence_id="real-figured-source-area"),
         source_label_observation_ids=("observed-room-text",),
         source_label_receipt_ids=("source-room-label",),
