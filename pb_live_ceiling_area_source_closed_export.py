@@ -36,6 +36,10 @@ def build_live_ceiling_area_source_traces(
     """Build exact canonical-ceiling source traces for final ceiling quantities."""
     if type(result) is not LiveCeilingLiningResult:
         raise TypeError("result must be LiveCeilingLiningResult")
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise SourceClosedRunConflictError(
+            "canonical ceiling source workspace_id must be an original positive integer"
+        )
 
     ceilings = {}
     for ceiling in result.canonical_ceilings:
@@ -111,13 +115,20 @@ def build_live_ceiling_area_source_traces(
                 f"ceiling quantity page mismatch: {quantity.quantity_id}"
             )
 
-        evidence_ids = tuple(
-            dict.fromkeys(
-                _clean(value)
-                for value in ceiling.evidence_ids
-                if _clean(value)
-            )
-        )
+        # Preserve original native ceiling receipts; source normalization may
+        # not silently repair a padded, untyped or duplicated source identity.
+        for original_receipts in (ceiling.evidence_ids, quantity.evidence_ids):
+            if (
+                type(original_receipts) not in (tuple, list)
+                or not original_receipts
+                or any(type(v) is not str or not v or v != v.strip()
+                       for v in original_receipts)
+                or len(set(original_receipts)) != len(original_receipts)
+            ):
+                raise SourceClosedRunConflictError(
+                    f"ceiling source evidence receipts are invalid: {quantity.quantity_id}"
+                )
+        evidence_ids = tuple(ceiling.evidence_ids)
         if not set(quantity.evidence_ids).issubset(set(evidence_ids)):
             raise SourceClosedRunConflictError(
                 f"ceiling source trace does not cover quantity evidence: {quantity.quantity_id}"
@@ -169,8 +180,8 @@ def build_live_ceiling_area_source_traces(
             source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
         trace = CommercialTakeoffSourceTrace(
-            workspace_id=int(workspace_id),
-            project_id=str(project_id),
+            workspace_id=workspace_id,
+            project_id=project_id,
             document_id=ceiling.document_id,
             source_sha256=ceiling.source_sha256,
             source_page=str(ceiling.source_page),
