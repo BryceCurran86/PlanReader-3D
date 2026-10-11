@@ -75,6 +75,35 @@ def _publish_one(
     ):
         return None
 
+    if (
+        type(ceiling.area_m2) not in (int, float)
+        or type(source.value) not in (int, float)
+        or type(source.confidence) not in (int, float)
+        or type(source.quantity_id) is not str
+        or not source.quantity_id or source.quantity_id != source.quantity_id.strip()
+        or not isinstance(source.input_entity_ids, (tuple, list))
+        or len(source.input_entity_ids) != 1
+        or type(source.input_entity_ids[0]) is not str
+        or not source.input_entity_ids[0]
+        or source.input_entity_ids[0] != source.input_entity_ids[0].strip()
+        or not isinstance(source.evidence_ids, (tuple, list))
+        or not isinstance(ceiling.evidence_ids, (tuple, list))
+        or any(
+            type(receipt) is not str or not receipt or receipt != receipt.strip()
+            for group in (source.evidence_ids, ceiling.evidence_ids)
+            for receipt in group
+        )
+        or len(set(source.evidence_ids)) != len(source.evidence_ids)
+        or len(set(ceiling.evidence_ids)) != len(ceiling.evidence_ids)
+    ):
+        return None
+    try:
+        source_confidence = float(source.confidence)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(source_confidence) or not 0.0 <= source_confidence <= 1.0:
+        return None
+
     try:
         area = float(ceiling.area_m2)
         source_value = float(source.value)
@@ -95,6 +124,7 @@ def _publish_one(
         or source.blocking_reasons
         or _clean(source.quantity_id) != _clean(ceiling.ceiling_quantity_id)
         or _clean(source.family) != "ceiling_lining"
+        or source.semantic_key != f"ceiling_lining:{_clean(ceiling.room_entity_id)}"
         or _clean(source.unit).lower() not in {"m2", "m²"}
         or _clean(source.status) != AuthorityStatus.PROVISIONAL.value
         or _clean(source.authority) != MeasurementAuthorityType.MODEL_DERIVED.value
@@ -127,7 +157,8 @@ def _publish_one(
         raw_figured_ids = ceiling.figured_dimension_ids
         if (
             not isinstance(raw_figured_ids, (tuple, list))
-            or not all(isinstance(value, str) for value in raw_figured_ids)
+            or any(type(value) is not str or not value or value != value.strip()
+                   for value in raw_figured_ids)
         ):
             return None
         figured_ids = tuple(
@@ -136,7 +167,7 @@ def _publish_one(
         # One observed dimension cannot define a documented two-axis area.
         # This canonical adapter does not infer the missing orthogonal axis
         # from PDF points, a nominal sheet scale, or benchmark quantities.
-        if len(figured_ids) < 2:
+        if len(figured_ids) != 2:
             return None
         resolved_scale_id = None
     elif measurement_authority == MeasurementAuthorityType.PDF_SCALED.value:
