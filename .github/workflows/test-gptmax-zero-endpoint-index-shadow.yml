@@ -88,6 +88,30 @@ jobs:
           assert r['benchmark_accuracy'] is None
           for mode in ('default_full_page_shadow','indexed_exact_endpoint_full_page_shadow'):
               graph=r[mode]['source_graph']
+              if graph is None:
+                  assert mode=='indexed_exact_endpoint_full_page_shadow'
+                  assert r[mode]['opening_rows'] is None
+                  assert r[mode]['w4_assembly_status']=='abstained'
+                  receipt=r[mode]['first_failure_receipt']
+                  assert receipt['reason_codes']==['a wall candidate cannot start and end at the same node']
+                  assert receipt['end_node_ids'][0]==receipt['end_node_ids'][1]
+                  assert receipt['only_first_assembly_failure_observed'] is True
+                  assert receipt['w4_candidate_universe_available'] is False
+                  assert receipt['physical_wall_authority'] is False and receipt['host_publication_allowed'] is False
+                  assert receipt['actual_owned_w3_fragment_rows']
+                  assert all(e['w3_retained'] is True and e['physical_host_authority'] is False for e in receipt['actual_owned_w3_fragment_rows'])
+                  spans=r[mode]['source_span_rows_before_w4']
+                  assert len(spans)==7
+                  for row in spans:
+                      assert row['w4_membership_available'] is False and row['host_publication_allowed'] is False
+                      for flank in row['flanks']:
+                          for pixel in flank['source_run_rows']:
+                              assert pixel['w4_membership_available'] is False
+                              coverage=pixel['exact_source_span_coverage']
+                              assert coverage['combined_graph_edge_created'] is False
+                              assert coverage['physical_wall_authority'] is False and coverage['host_publication_allowed'] is False
+                              assert all(e['experimental_w4_candidate_ids'] is None and e['physical_host_authority'] is False for e in pixel['actual_w2_edge_rows'])
+                  continue
               assert graph['input_source_count']==10099
               assert graph['scope_authority'].startswith('full-page diagnostic only')
               assert graph['physical_equivalence_proven'] is False and graph['host_publication_allowed'] is False

@@ -68,7 +68,7 @@ the active stage, not a universal speed claim or whole-page legacy result.
 
 ## Initial synthetic evidence
 
-173 new/related regressions pass locally. The zero-index option preserves
+236 new/related regressions pass locally. The zero-index option preserves
 exact complete legacy snap output under seeded duplicate/decimal mixtures,
 input permutations, transformations, graph splitting, subnormals, signed zero
 and arithmetic overflow. In particular, repeated `0.1` endpoints still create
@@ -80,3 +80,36 @@ calls instead of asserting a hardware-dependent elapsed time.
 
 Original-source replay and exact-head CI are required additional gates. This
 change cannot publish physical hosts even if fragment geometry survives.
+
+## Original full-page W4 first failure
+
+The fresh indexed-zero original replay reaches W4, whose existing
+`WallCandidate.__post_init__` guard rejects a chain with identical start/end
+node IDs. Do not weaken that guard or label the incomplete W4 universe empty.
+The diagnostic records only this precise actual constructor failure, reading
+the failing traceback's W2 graph/W3 retained edges and rejected constructor
+fields. Every reported edge must actually belong to the rejected chain and
+retain source parents from the exact input inventory. No class is patched,
+no failed instance is published and no substitute candidate is constructed.
+Unexpected errors and unavailable/foreign constructor receipts still raise.
+
+The indexed mode's completed graph and opening inventory are `null` when W4
+abstains; a source-owned first-failure receipt is available separately. This
+is not a proof of the number or extent of later rejected chains. Original
+production replay still completes independently, and bounded local legacy
+controls remain mandatory. Full-page fragment survival through W4 remains
+unproved until that constructor boundary is resolved safely.
+
+The failed call also exposes actual full-page W2/W3 fragment coverage for
+every original required flank. This inventory reads the same failed trace;
+it does not rerun or replace the topology pipeline. Existing exact interval
+and contact predicates are reused. W4 ownership is explicitly unavailable
+(`null` candidate IDs), never an empty known owner set. Complete W3 coverage
+still cannot establish W4 membership, structural role or physical equivalence.
+
+The rejected-constructor synthetic control executes the real guard against an
+actual W2/W3 trace. Eight intersection-split owned fragments cover the original
+source span even though none meets the single-fragment contact predicate. All
+eight W4 membership fields remain unavailable, no combined edge is created,
+and no wall or host publication is enabled. Foreign fragments, unowned errors
+and unrelated errors cannot masquerade as an authenticated first failure.

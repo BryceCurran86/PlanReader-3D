@@ -8,9 +8,12 @@ import json
 from pathlib import Path
 
 from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
+from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_observation_authority import SourceObservationRecord
+from pb_opening_host_binding_authority import _OpeningGeometry
+from pb_wall_room_topology_contracts import WallCandidate
 from scripts.gptmax_exact_endpoint_flank_shadow import _local_records, annotate_source_span_coverage
-from scripts.gptmax_full_foreground_flank_stages import _flank_stage_rows
+from scripts.gptmax_full_foreground_flank_stages import _flank_stage_rows, _contacts
 from tools.diag_gptmax_full_foreground_flank import full_foreground_flank_census
 from tools.diag_gptmax_full_foreground_run_source import original_full_foreground_report, _trace_sources
 from tools.diag_gptmax_raster_host_source_membership import original_raster_host_ancestry_census
@@ -19,6 +22,89 @@ from tools.diag_gptmax_required_flank_source import required_flank_source_census
 
 def _encoded(value):
     return json.dumps(value, sort_keys=True, allow_nan=False).encode()
+
+
+def _closed_chain_abstention_receipt(error, records):
+    """Observe an actual rejected constructor, never create a replacement wall.
+
+    Read the failing call's traceback only. Do not patch a class, bypass its
+    guard, reassemble a partial universe, or infer later failures from this one.
+    """
+    trace, rejected, tb = None, None, error.__traceback__
+    while tb is not None:
+        frame=tb.tb_frame
+        if frame.f_code is _trace_sources.__code__: trace=frame.f_locals
+        if frame.f_code is WallCandidate.__post_init__.__code__: rejected=frame.f_locals.get('self')
+        tb=tb.tb_next
+    if trace is None or rejected is None or rejected.end_node_ids[0]!=rejected.end_node_ids[1]:
+        raise RuntimeError('actual rejected W4 constructor receipt unavailable') from error
+    original={r.observation_id:r for r in records}
+    edges={str(e['id']):e for e in trace['graph']['edges']}
+    retained={str(e['id']) for e in trace['deduped']['edges']}
+    ids=rejected.face_a_segment_ids
+    if not ids or len(set(ids))!=len(ids) or not set(ids)<=retained:
+        raise RuntimeError('rejected W4 chain has unavailable original W3 fragments') from error
+    rows=[]
+    for key in ids:
+        e=edges[key]
+        parents=tuple(e['primitive_lineage']['source_primitive_ids'])
+        if not parents or not set(parents)<=original.keys():
+            raise RuntimeError('rejected W4 chain has foreign source ancestry') from error
+        rows.append(dict(edge_id=key,w2_fragment_geometry_pt=[e[k] for k in ('x1','y1','x2','y2')],
+            source_observation_ids=sorted(parents),w3_retained=True,physical_host_authority=False))
+    return dict(status=EvidenceResolutionStatus.ABSTAINED.value,
+        reason_codes=[str(error)],rejected_attempt_candidate_id=rejected.candidate_id,
+        end_node_ids=rejected.end_node_ids,centerline_pt=rejected.centerline_pts,
+        actual_owned_w3_fragment_rows=rows,
+        only_first_assembly_failure_observed=True,w4_candidate_universe_available=False,
+        physical_wall_authority=False,host_publication_allowed=False,
+        source_parent_transfer_allowed=False)
+
+
+def _source_spans_before_failed_w4(error, joined, original, required, records):
+    """Inventory actual W2/W3 coverage while W4 membership stays unavailable."""
+    trace,tb=None,error.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code is _trace_sources.__code__: trace=tb.tb_frame.f_locals
+        tb=tb.tb_next
+    if trace is None: raise RuntimeError('actual failed W4 graph context unavailable') from error
+    source_ids={r.observation_id for r in records}
+    retained={str(e['id']) for e in trace['deduped']['edges']}
+    by_parent={key:[] for key in source_ids}
+    for edge in trace['graph']['edges']:
+        parents=edge['primitive_lineage']['source_primitive_ids']
+        if not set(parents)<=source_ids:
+            raise RuntimeError('failed W4 graph has foreign source ancestry') from error
+        row=dict(edge_id=str(edge['id']),source_observation_ids=sorted(parents),
+            w2_fragment_geometry_pt=[edge[k] for k in ('x1','y1','x2','y2')],
+            w3_retained=str(edge['id']) in retained,
+            w4_membership_available=False,experimental_w4_candidate_ids=None,
+            physical_host_authority=False)
+        for parent in parents: by_parent[parent].append(row)
+    output=[]
+    for opening in joined['opening_rows']:
+        identity=opening['opening_identity_id']
+        source,=(r for r in original['opening_rows'] if r['opening_identity_id']==identity)
+        requirement,=(r for r in required['opening_rows'] if r['opening_identity_id']==identity)
+        geometry=_OpeningGeometry(**source['original_aperture_coordinate_basis'])
+        flanks=[]
+        for flank in opening['flanks']:
+            req,=(f for f in requirement['flanks'] if f['role']==flank['role'])
+            pixels=[]
+            for pixel in flank['pixel_run_candidates']:
+                key=pixel['source_observation_id']
+                if key not in by_parent: raise RuntimeError('original flank source unavailable')
+                edges=[dict(e,matches_original_required_flank_geometry=
+                    _contacts(e['w2_fragment_geometry_pt'],geometry,req)) for e in by_parent[key]]
+                pixels.append(dict(source_observation_id=key,source_line_pt=pixel['source_line_pt'],
+                    actual_w2_edge_rows=edges,w4_membership_available=False,
+                    host_publication_allowed=False,physical_equivalence_proven=False))
+            flanks.append(dict(role=flank['role'],source_run_rows=pixels,
+                w4_membership_available=False,host_publication_allowed=False))
+        output.append(dict(opening_identity_id=identity,flanks=flanks,
+            w4_membership_available=False,host_publication_allowed=False))
+    annotate_source_span_coverage(output,original,required)
+    return output
 
 
 def full_page_endpoint_source_report(source_bytes, *, page_id, expected_source_sha):
@@ -39,11 +125,24 @@ def full_page_endpoint_source_report(source_bytes, *, page_id, expected_source_s
     manifest=_encoded([asdict(r) for r in records])
     modes={}
     for name,indexed in (('default_full_page_shadow',False),('indexed_exact_endpoint_full_page_shadow',True)):
-        graph=_trace_sources(records,exact_endpoint_shadow=indexed,
-            exact_endpoint_index_shadow=indexed)
-        rows=_flank_stage_rows(joined,original,required,graph)
-        annotate_source_span_coverage(rows,original,required)
-        modes[name]=dict(source_graph=graph,opening_rows=rows)
+        try:
+            graph=_trace_sources(records,exact_endpoint_shadow=indexed,
+                exact_endpoint_index_shadow=indexed)
+        except ValueError as error:
+            if not indexed or str(error)!='a wall candidate cannot start and end at the same node':
+                raise
+            receipt=_closed_chain_abstention_receipt(error,records)
+            modes[name]=dict(source_graph=None,opening_rows=None,
+                w4_assembly_status=EvidenceResolutionStatus.ABSTAINED.value,
+                first_failure_receipt=receipt,
+                source_span_rows_before_w4=_source_spans_before_failed_w4(
+                    error,joined,original,required,records))
+        else:
+            rows=_flank_stage_rows(joined,original,required,graph)
+            annotate_source_span_coverage(rows,original,required)
+            modes[name]=dict(source_graph=graph,opening_rows=rows,
+                w4_assembly_status=EvidenceResolutionStatus.CANDIDATE.value,
+                first_failure_receipt=None,source_span_rows_before_w4=None)
     # Bounded original-source legacy controls use exactly the same local
     # inventories as #2445. They do not claim full-page legacy-zero parity.
     controls=[]
