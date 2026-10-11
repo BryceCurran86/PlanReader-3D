@@ -167,7 +167,7 @@ jobs:
 
   experimental-original-w2-w4:
     needs: original-lot16
-    if: ${{ needs.original-lot16.result == 'success' }}
+    if: ${{ needs['original-lot16'].result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
