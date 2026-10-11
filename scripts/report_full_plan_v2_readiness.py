@@ -238,6 +238,27 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
             or set(refs) != set(row.object_identity_refs)
         ):
             blockers.append(f"projection_object_identity_mismatch:{quantity_id}")
+        # New source exporter records additional original signed V1 fields.
+        # These are optional for legacy diagnostic inputs, but an explicit
+        # field is never allowed to drift under the same quantity_id.
+        for produced_field, sealed_field in (
+            ("family", "family"),
+            ("semantic_key", "semantic_key"),
+            ("source_document_id", "document_id"),
+            ("source_sha256", "source_sha256"),
+            ("revision_id", "revision_id"),
+            ("sealed_quantity_fingerprint", "fingerprint"),
+        ):
+            if produced_field in item:
+                source_value = getattr(row, sealed_field, None)
+                if (
+                    type(item[produced_field]) is not str
+                    or not item[produced_field]
+                    or item[produced_field] != source_value
+                ):
+                    blockers.append(
+                        f"projection_{produced_field}_mismatch:{quantity_id}"
+                    )
         category = item.get("trade_category")
         if not isinstance(category, str) or not category.strip():
             blockers.append(f"projection_trade_category_missing:{quantity_id}")
