@@ -14,6 +14,7 @@ from pb_source_room_face_authority import (
 from tools.diag_gptmax_maryborough_room_first_owner_gate import (
     source_room_owner_first_gate,
     source_room_label_first_gate,
+    _distinct_source_faces_for_word_ownership,
 )
 
 SHA = "a" * 64
@@ -192,3 +193,56 @@ def test_label_source_scope_cannot_launder_foreign_room_or_text(damage):
         room = replace(room, records=(_face(), _face()))
     with pytest.raises((TypeError, ValueError)):
         source_room_label_first_gate(room, labels, expected_source_sha=SHA)
+
+
+def test_split_source_words_can_repeat_the_same_authenticated_face():
+    first = _face()
+    second = replace(
+        first, face_id="second-authenticated-face",
+        record_id="second-authenticated-receipt",
+    )
+    inventory = {first.face_id:first, second.face_id:second}
+    assert _distinct_source_faces_for_word_ownership(
+        (first.face_id, first.face_id, second.face_id, second.face_id),
+        (first.record_id, second.record_id),
+        inventory,
+    ) == (first.face_id, second.face_id)
+
+
+@pytest.mark.parametrize("damage", [
+    "foreign_face", "reversed_receipts", "duplicate_receipt", "bad_count",
+    "only_one_face", "blank_word_face", "whitespace_word_face",
+    "non_string_face", "missing_inventory", "malformed_receipts",
+])
+def test_split_word_owner_never_fabricates_original_room_face(damage):
+    first = _face()
+    second = replace(
+        first, face_id="second-authenticated-face",
+        record_id="second-authenticated-receipt",
+    )
+    inventory = {first.face_id:first, second.face_id:second}
+    words = (first.face_id, first.face_id, second.face_id)
+    receipts = (first.record_id, second.record_id)
+    if damage == "foreign_face":
+        words = (*words, "foreign")
+    elif damage == "reversed_receipts":
+        receipts = tuple(reversed(receipts))
+    elif damage == "duplicate_receipt":
+        receipts = (first.record_id, first.record_id)
+    elif damage == "bad_count":
+        receipts = (first.record_id,)
+    elif damage == "only_one_face":
+        words = (first.face_id, first.face_id)
+        receipts = (first.record_id,)
+    elif damage == "blank_word_face":
+        words = (first.face_id, "", second.face_id)
+    elif damage == "whitespace_word_face":
+        words = (first.face_id, " " + second.face_id, second.face_id)
+    elif damage == "non_string_face":
+        words = (first.face_id, object(), second.face_id)
+    elif damage == "missing_inventory":
+        inventory.pop(second.face_id)
+    elif damage == "malformed_receipts":
+        receipts = (first.record_id, object())
+    with pytest.raises((ValueError, TypeError)):
+        _distinct_source_faces_for_word_ownership(words, receipts, inventory)
