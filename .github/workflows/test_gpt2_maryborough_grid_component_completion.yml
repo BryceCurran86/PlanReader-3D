@@ -129,12 +129,34 @@ jobs:
 
           # Independent owner-provided source dimension controls; not used
           # as producer inputs or frozen benchmark expected quantities.
+          # Always persist observed producer cardinalities BEFORE asserting the
+          # control. A failing source run must distinguish an absent quantity
+          # from duplicate source receipts or a dropped room-face association.
+          # This is read-only CI diagnostics, never a producer input or score.
+          control_labels=("FOOD PREP","COLD ROOM","OFFICE")
+          print(json.dumps({
+              "source_control_diagnostic_only":True,
+              "source_control_firm_receipt_counts":{
+                  label:len(firm_receipts.get(label,())) for label in control_labels
+              },
+              "source_control_room_face_counts":{
+                  label:sum(row["label"]==label for row in labelled)
+                  for label in control_labels
+              },
+              "source_control_firm_receipt_ids":{
+                  label:[q.quantity_id for q in firm_receipts.get(label,())]
+                  for label in control_labels
+              },
+          },sort_keys=True),flush=True)
           for label,expected in (
               ("FOOD PREP",13.270425),
               ("COLD ROOM",25.37875),
               ("OFFICE",9.05352),
           ):
-              assert len(firm_receipts.get(label,()))==1
+              assert len(firm_receipts.get(label,()))==1, (
+                  "source control firm receipt cardinality",label,
+                  [q.quantity_id for q in firm_receipts.get(label,())]
+              )
               assert abs(firm[label]-expected) < 1e-9
               matching=[row for row in labelled if row["label"]==label]
               assert len(matching)==1
