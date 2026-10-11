@@ -42,6 +42,17 @@ def _finite_customer_json_float(token: str) -> float:
     return value
 
 
+def _finite_customer_json_int(token: str) -> int:
+    value = int(token)
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError("out-of-range customer JSON integer")
+    return value
+
+
 def _verify_embedded_customer_notes(rows: Sequence[Mapping[str, Any]]) -> None:
     # Commercial adapter provenance can be embedded as JSON text in notes.
     # Outer strict parsing alone does not stop last-write-wins inside it.
@@ -55,6 +66,7 @@ def _verify_embedded_customer_notes(rows: Sequence[Mapping[str, Any]]) -> None:
                 object_pairs_hook=_unique_customer_json_keys,
                 parse_constant=_reject_customer_json_constant,
                 parse_float=_finite_customer_json_float,
+                parse_int=_finite_customer_json_int,
             )
 
 
@@ -223,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             object_pairs_hook=_unique_customer_json_keys,
             parse_constant=_reject_customer_json_constant,
             parse_float=_finite_customer_json_float,
+            parse_int=_finite_customer_json_int,
         )
         if not isinstance(customer_rows,list):
             raise TypeError("customer rows must be a JSON array")
