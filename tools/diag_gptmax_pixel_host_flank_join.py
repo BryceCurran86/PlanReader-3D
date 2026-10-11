@@ -108,6 +108,24 @@ def _ancestry(report, pixel_ids):
                          "experimental source parent")
     if any(oid not in census for oid in pixel_ids):
         raise ValueError("pixel source observation missing experimental W2 census")
+    # W4 addresses are observed candidate alternatives, never physical owners.
+    # Geometric W4 address collisions are permitted, but an edge cannot cite
+    # an address absent from every corresponding experimental W4 member row.
+    members = {}
+    walls = graph.get("all_experimental_w4_candidates")
+    if not isinstance(walls, list) or len(walls) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+        raise ValueError("invalid experimental W4 candidate inventory")
+    for wall in walls:
+        if not isinstance(wall, dict):
+            raise ValueError("invalid experimental W4 candidate row")
+        cid = wall.get("candidate_id")
+        owned = wall.get("w2_edge_ids")
+        if (not isinstance(cid, str) or not cid.strip()
+                or not isinstance(owned, list) or not owned
+                or any(not isinstance(eid, str) or eid not in edges for eid in owned)
+                or len(set(owned)) != len(owned)):
+            raise ValueError("invalid experimental W4 edge membership")
+        members.setdefault(cid, set()).update(owned)
     mapped = {}
     for oid in pixel_ids:
         row = census[oid]
@@ -129,6 +147,9 @@ def _ancestry(report, pixel_ids):
         if any(not isinstance(w, str) or not w.strip()
                for eid in edge_ids for w in edges[eid].get("experimental_w4_candidate_ids", [])):
             raise ValueError("invalid experimental W4 address")
+        if any(eid not in members.get(cid, set())
+               for eid in edge_ids for cid in edges[eid].get("experimental_w4_candidate_ids", [])):
+            raise ValueError("unbacked experimental W4 edge address")
         mapped[oid] = {"w2_edge_ids": sorted(edge_ids),
                        "snap_collapsed_fragment_ids": sorted(collapsed_ids),
                        "experimental_w4_candidate_alternatives": w4}
