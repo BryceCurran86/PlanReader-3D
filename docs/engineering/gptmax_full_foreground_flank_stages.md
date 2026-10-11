@@ -95,3 +95,33 @@ passes, 51 skips, 13 expected failures and one schedule W21 identity/count
 failure. The exact same failing test independently reproduces on unchanged
 baseline main. This is not a passed full-suite claim or permission to bypass
 remote CI; the new diagnostic still needs its own exact-head CI.
+
+
+## Cross-opening reuse of authentic pixel-source parents
+
+The stage report now includes `cross_opening_shared_original_pixel_sources`.
+Each entry has one original source-observation ID, the independent G17
+opening/flank records that cite that same PDF painted source run, and explicit
+negative flags for physical equivalence, source-parent transfer, wall hosting,
+and opening-count publication. This is **not** a de-duplication algorithm: two
+opening identities sharing a source observation may still be physically
+different. It also never promotes a pixel run into a structural wall.
+
+The authenticated original Lot16 page-3 receipt
+`source_observation_3d28f64dab481b6bdadb5861baa0605a`
+is referenced by at least two separate opening/flank hypotheses:
+`81a45c3a...` on the right and `f8197523...` on the left. The new
+exact-original workflow re-proves the full pixel/W2/W3/W4 report from immutable
+source bytes, verifies the original source SHA, and requires that the shared
+source ID still has exactly those two G17 opening owners. A change to the
+underlying source or lineage must fail the test rather than silently elect an
+opening host.
+
+The read-only census rejects nonfinite or conflicting line geometries for
+one source ID, duplicate opening or flank addresses, repeated parent IDs
+within a flank, and a record that claims either published hosting or proven
+physical equivalence. When source parents are not shared across opening
+identities the census is empty; that alone does **not** prove host-scope
+completeness. Frozen Full Plan V2 truths, evaluator, denominators, original
+PDF, and the 20,000 input-primitive limit are unaffected.
+
