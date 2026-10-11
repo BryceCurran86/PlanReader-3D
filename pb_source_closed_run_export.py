@@ -79,7 +79,10 @@ def _lineage_reasons(
         if type(workspace) is int and workspace > 0:
             original_workspace = workspace
         elif type(workspace) is str and workspace.isascii() and workspace.isdecimal():
-            original_workspace = int(workspace)
+            try:
+                original_workspace = int(workspace)
+            except (ValueError, OverflowError):
+                original_workspace = None
         else:
             original_workspace = None
         if original_workspace != trace.workspace_id:
