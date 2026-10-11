@@ -68,3 +68,17 @@ def test_legitimate_two_dimensional_receipts_preserve_firm_ceiling_and_identity(
     assert len(result) == 1
     assert result[0].value == 13.270425
     assert result[0].metadata["figured_dimension_ids"] == ("dim-h", "dim-v")
+
+
+
+def test_final_ceiling_area_rejects_shadow_claim_from_foreign_semantic_room():
+    original = _shadow_quantity()
+    foreign = replace(
+        original,
+        semantic_key="ceiling_lining:other-room",
+        input_entity_ids=("room-1",),
+    )
+    assert publish_live_ceiling_area_quantities(_result(shadow=foreign)) == ()
+    authentic = publish_live_ceiling_area_quantities(_result(shadow=original))
+    assert len(authentic) == 1
+    assert authentic[0].value == 13.270425
