@@ -69,6 +69,25 @@ jobs:
                      and r['room_area_quantity_publication_allowed'] is False
                      and r['benchmark_accuracy'] is None
                      for r in d['source_scope_first_failures'])
+          for row in d['source_scope_first_failures'][1:]:
+              gate=row['original_source_label_gate']
+              assert gate['source_room_geometry_inferred_from_labels'] is False
+              assert gate['split_label_room_publication_allowed'] is False
+              assert gate['firm_room_area_publication_allowed'] is False
+              assert gate['all_label_source_observation_ids_unique'] is True
+              assert gate['source_room_face_universe_complete'] == row['room_face_universe_complete']
+              assert gate['direct_source_label_count']==len(gate['direct_source_labels'])
+              assert gate['split_source_label_candidate_count']==len(gate['split_source_label_candidates'])
+              original_room_ids=set(row['room_source_face_receipt_ids'])
+              assert all(
+                  label['source_face_receipt_id'] in original_room_ids
+                  for label in gate['direct_source_labels']
+              )
+              assert all(
+                  set(label['original_source_face_receipt_ids']) <= original_room_ids
+                  and label['room_identity_publication_allowed'] is False
+                  for label in gate['split_source_label_candidates']
+              )
           assert d['room_area_quantity_publication_allowed'] is False
           assert d['wall_host_publication_allowed'] is False
           assert d['benchmark_accuracy'] is None

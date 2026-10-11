@@ -5,6 +5,7 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus as S
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateScopeResult
+from pb_source_room_label_authority import SourceRoomLabelScopeResult
 from pb_source_room_face_authority import (
     SourceRoomFaceAbstention,
     SourceRoomFaceRecord,
@@ -12,6 +13,8 @@ from pb_source_room_face_authority import (
 )
 from tools.diag_gptmax_maryborough_room_first_owner_gate import (
     source_room_owner_first_gate,
+    source_room_label_first_gate,
+    _distinct_source_faces_for_word_ownership,
 )
 
 SHA = "a" * 64
@@ -138,3 +141,108 @@ def test_foreign_or_conflicted_source_receipts_fail_closed(damage):
         wall = replace(wall, reason_codes=("",))
     with pytest.raises((ValueError, TypeError)):
         source_room_owner_first_gate(wall, room, expected_source_sha=SHA)
+
+
+def _label_scope():
+    return SourceRoomLabelScopeResult(
+        status=S.ABSTAINED, reason_codes=("source_room_label_unavailable",),
+        records=(), split_face_candidates=(), **KEY,
+    )
+
+
+def test_no_authenticated_labels_does_not_elect_physical_room_identity():
+    _, room = _scopes()
+    result = source_room_label_first_gate(
+        room, _label_scope(), expected_source_sha=SHA,
+    )
+    assert result["direct_source_label_count"] == 0
+    assert result["split_source_label_candidate_count"] == 0
+    assert result["original_label_reason_codes"] == ["source_room_label_unavailable"]
+    assert result["firm_room_area_publication_allowed"] is False
+    assert result["source_room_geometry_inferred_from_labels"] is False
+    assert result["split_label_room_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("damage", [
+    "foreign_revision", "foreign_snapshot", "foreign_page", "foreign_sha",
+    "invalid_expected_sha", "invalid_reason", "forged_record",
+    "forged_split_candidate", "duplicate_physical_face",
+])
+def test_label_source_scope_cannot_launder_foreign_room_or_text(damage):
+    _, room = _scopes()
+    labels = _label_scope()
+    if damage == "foreign_revision":
+        labels = replace(labels, revision_id="foreign")
+    elif damage == "foreign_snapshot":
+        labels = replace(labels, snapshot_id="foreign")
+    elif damage == "foreign_page":
+        labels = replace(labels, page_id="11")
+    elif damage == "foreign_sha":
+        labels = replace(labels, source_sha256="b" * 64)
+    elif damage == "invalid_expected_sha":
+        with pytest.raises(ValueError):
+            source_room_label_first_gate(room, labels, expected_source_sha="not-sha")
+        return
+    elif damage == "invalid_reason":
+        labels = replace(labels, reason_codes=("",))
+    elif damage == "forged_record":
+        labels = replace(labels, records=(object(),))
+    elif damage == "forged_split_candidate":
+        labels = replace(labels, split_face_candidates=(object(),))
+    elif damage == "duplicate_physical_face":
+        room = replace(room, records=(_face(), _face()))
+    with pytest.raises((TypeError, ValueError)):
+        source_room_label_first_gate(room, labels, expected_source_sha=SHA)
+
+
+def test_split_source_words_can_repeat_the_same_authenticated_face():
+    first = _face()
+    second = replace(
+        first, face_id="second-authenticated-face",
+        record_id="second-authenticated-receipt",
+    )
+    inventory = {first.face_id:first, second.face_id:second}
+    assert _distinct_source_faces_for_word_ownership(
+        (first.face_id, first.face_id, second.face_id, second.face_id),
+        (first.record_id, second.record_id),
+        inventory,
+    ) == (first.face_id, second.face_id)
+
+
+@pytest.mark.parametrize("damage", [
+    "foreign_face", "reversed_receipts", "duplicate_receipt", "bad_count",
+    "only_one_face", "blank_word_face", "whitespace_word_face",
+    "non_string_face", "missing_inventory", "malformed_receipts",
+])
+def test_split_word_owner_never_fabricates_original_room_face(damage):
+    first = _face()
+    second = replace(
+        first, face_id="second-authenticated-face",
+        record_id="second-authenticated-receipt",
+    )
+    inventory = {first.face_id:first, second.face_id:second}
+    words = (first.face_id, first.face_id, second.face_id)
+    receipts = (first.record_id, second.record_id)
+    if damage == "foreign_face":
+        words = (*words, "foreign")
+    elif damage == "reversed_receipts":
+        receipts = tuple(reversed(receipts))
+    elif damage == "duplicate_receipt":
+        receipts = (first.record_id, first.record_id)
+    elif damage == "bad_count":
+        receipts = (first.record_id,)
+    elif damage == "only_one_face":
+        words = (first.face_id, first.face_id)
+        receipts = (first.record_id,)
+    elif damage == "blank_word_face":
+        words = (first.face_id, "", second.face_id)
+    elif damage == "whitespace_word_face":
+        words = (first.face_id, " " + second.face_id, second.face_id)
+    elif damage == "non_string_face":
+        words = (first.face_id, object(), second.face_id)
+    elif damage == "missing_inventory":
+        inventory.pop(second.face_id)
+    elif damage == "malformed_receipts":
+        receipts = (first.record_id, object())
+    with pytest.raises((ValueError, TypeError)):
+        _distinct_source_faces_for_word_ownership(words, receipts, inventory)
