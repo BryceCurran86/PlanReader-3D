@@ -176,11 +176,22 @@ def replay_original_maryborough_room_gate(
     )
     viewport_auth = viewport_producer.authority()
     viewport_room_auth = build_source_room_face_authority(viewport_auth)
+    # Viewport wall materialization may advance the immutable source snapshot.
+    # Match production's late selector creation against the new sealed
+    # revision/snapshot rather than addressing the pre-viewport snapshot.
+    viewport_published = source.published_snapshot_for_revision(
+        composition.revision_id
+    )
+    if (viewport_published is None
+            or viewport_published.revision.document_id != final.revision.document_id
+            or viewport_published.revision.revision_id != final.revision.revision_id
+            or viewport_published.revision.source_sha256 != digest):
+        raise ValueError("foreign authenticated viewport source revision")
     selectors = viewport_auth.selectors_for_authenticated_viewports(
-        document_id=final.revision.document_id,
-        revision_id=final.revision.revision_id,
+        document_id=viewport_published.revision.document_id,
+        revision_id=viewport_published.revision.revision_id,
         source_sha256=digest,
-        snapshot_id=final.snapshot.snapshot_id,
+        snapshot_id=viewport_published.snapshot.snapshot_id,
         page_id="7",
         view_type=DrawingViewType.FLOOR_PLAN.value,
     )
