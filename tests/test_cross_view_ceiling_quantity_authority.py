@@ -597,7 +597,7 @@ def test_cross_view_ceiling_keeps_distinct_producer_owned_figured_ids() -> None:
     bridge = _bridge()
     for figure_ids in (
         ("dim-v", "dim-h"),
-        ["dim-h", "dim-v", "dim-h"],
+        ["dim-h", "dim-v"],
     ):
         documented = replace(
             bridge.quantities[0],
@@ -616,6 +616,24 @@ def test_cross_view_ceiling_keeps_distinct_producer_owned_figured_ids() -> None:
         assert result.quantities[0].metadata["figured_dimension_ids"] == [
             "dim-h", "dim-v"
         ]
+
+
+def test_cross_view_ceiling_rejects_replayed_duplicate_figured_dimension_source_id() -> None:
+    bridge = _bridge()
+    repeated = replace(
+        bridge.quantities[0],
+        metadata={
+            **dict(bridge.quantities[0].metadata),
+            "figured_dimension_ids": ["dim-h", "dim-v", "dim-h"],
+        },
+    )
+    result = ceiling_quantity.publish_cross_view_ceiling_quantities(
+        rooms=_rooms(),
+        room_area_bridges=(replace(bridge, quantities=(repeated,)),),
+        finishes=_finish(),
+    )
+    assert result.quantities == ()
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
 
 
 def _second_ceiling_source_scope(*, face_id: str) -> tuple:
