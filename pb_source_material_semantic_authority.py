@@ -1189,6 +1189,11 @@ def _recover_native_material_block(
 ) -> tuple[_TrustedTextWord, ...]:
     if not block_words:
         return ()
+    # Both downstream recovery paths skip already trusted native words, and
+    # the line path cannot change an all-trusted source block. Preserve the
+    # exact original receipts without constructing OCR targets or backends.
+    if all(word.trusted for word in block_words):
+        return tuple(block_words)
     bbox = _native_block_bbox(block_words)
     try:
         page_number = int(block_words[0].page_id)
