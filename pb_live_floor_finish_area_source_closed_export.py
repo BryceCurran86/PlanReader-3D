@@ -35,6 +35,10 @@ def build_live_floor_finish_area_source_traces(
     """Build exact source traces for already-authenticated floor finishes."""
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise SourceClosedRunConflictError(
+            "floor finish source workspace_id must be an original positive integer"
+        )
 
     floors_by_id: dict[str, LiveCanonicalFloorSurfaceObject] = {}
     for floor in claim.canonical_floors:
@@ -260,7 +264,8 @@ def build_live_floor_finish_area_source_traces(
             if (
                 not isinstance(receipts, (tuple, list))
                 or not receipts
-                or any(type(value) is not str or not value.strip() for value in receipts)
+                or any(type(value) is not str or not value or value != value.strip()
+                       for value in receipts)
                 or len(set(receipts)) != len(receipts)
             ):
                 raise SourceClosedRunConflictError(
@@ -326,8 +331,8 @@ def build_live_floor_finish_area_source_traces(
                 source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
         trace = CommercialTakeoffSourceTrace(
-            workspace_id=int(workspace_id),
-            project_id=str(project_id),
+            workspace_id=workspace_id,
+            project_id=project_id,
             document_id=floor.document_id,
             source_sha256=floor.source_sha256,
             source_page=str(floor.page_id),
