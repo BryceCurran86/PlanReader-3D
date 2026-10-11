@@ -67,3 +67,34 @@ def test_original_firm_source_and_orthogonal_figured_area_work_without_scale():
     assert len(floor) == len(room) == 1
     assert floor[0].value == room[0].value == 8.64
     assert floor[0].unit == room[0].unit == "m2"
+
+
+
+@pytest.mark.parametrize("corrupt_owner", [
+    None, True, 7, "source-room-1", (), (" source-room-1",),
+    ("source-room-1 ",), ("source-room-1", True),
+])
+def test_firm_floor_or_room_area_rejects_copied_source_owner_collection(corrupt_owner):
+    forged = replay(input_entity_ids=corrupt_owner)
+    assert publish_live_floor_area_quantities(_claim_with(forged)) == ()
+    assert publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(forged)
+    ) == ()
+
+
+@pytest.mark.parametrize("corrupt_id", [True, 123, "", " room-area-1", "room-area-1 "])
+def test_firm_floor_or_room_area_rejects_copied_source_quantity_identity(corrupt_id):
+    forged = replay(quantity_id=corrupt_id)
+    assert publish_live_floor_area_quantities(_claim_with(forged)) == ()
+    assert publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(forged)
+    ) == ()
+
+
+def test_original_unmodified_source_membership_remains_firm_in_both_paths():
+    source = _source_area()
+    assert source.input_entity_ids == ("source-room-1",)
+    assert len(publish_live_floor_area_quantities(_claim_with(source))) == 1
+    assert len(publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(source)
+    )) == 1
