@@ -70,6 +70,29 @@ def _opening_quantity(
     ):
         return None
 
+    # Never turn bool/string area values or synthetically stringified source
+    # receipt IDs into an authenticated physical opening quantity.
+    required_source_ids = (
+        opening.canonical_opening_id, opening.physical_opening_id,
+        opening.document_id, opening.revision_id, opening.source_sha256,
+        opening.snapshot_id, opening.page_id, opening.viewport_id,
+        opening.host_wall_id, opening.representative_observation_id,
+    )
+    if (
+        type(opening.area_m2) not in (int, float)
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in required_source_ids)
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in (opening.host_binding_record_id, opening.host_frame_record_id)
+               if value not in (None, ""))
+        or not isinstance(opening.evidence_ids, (tuple, list))
+        or not opening.evidence_ids
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in opening.evidence_ids)
+        or len(set(opening.evidence_ids)) != len(opening.evidence_ids)
+    ):
+        return None
+
     try:
         value = float(opening.area_m2)
     except (TypeError, ValueError, OverflowError):
@@ -77,16 +100,21 @@ def _opening_quantity(
     if not math.isfinite(value) or value <= 0.0:
         return None
 
-    evidence_ids = tuple(
-        sorted(
-            {
-                str(value).strip()
-                for value in opening.evidence_ids
-                if str(value).strip()
-            }
-        )
-    )
-    if not evidence_ids:
+    evidence_ids = tuple(sorted(opening.evidence_ids))
+    source_observation_ids = opening.source_observation_ids
+    source_sha256 = opening.source_sha256
+    if (
+        not evidence_ids
+        or len(source_sha256) != 64
+        or any(letter not in "0123456789abcdefABCDEF" for letter in source_sha256)
+        or not isinstance(source_observation_ids, (tuple, list))
+        or not source_observation_ids
+        or any(type(identity) is not str or not identity
+               or identity != identity.strip() for identity in source_observation_ids)
+        or len(set(source_observation_ids)) != len(source_observation_ids)
+        or opening.representative_observation_id not in source_observation_ids
+        or opening.representative_observation_id not in evidence_ids
+    ):
         return None
     # A caller-replayed host string alone cannot certify the physical opening
     # owner. The composer retains each authenticated host binding/frame record
@@ -121,6 +149,30 @@ def _opening_quantity(
             or measurement_record_id not in evidence_ids
             or str(opening.schedule_row_dimension_basis or "").strip().lower()
             != "frame"
+        ):
+            return None
+        # This area's source-backed schedule explicitly supplies the OUTER
+        # FRAME dimensions in mm. Verify the canonical area is their product,
+        # not an independently replayed number that happens to carry a valid
+        # source binding receipt. A leaf size is never substituted for frame.
+        width_mm = opening.schedule_declared_width_mm
+        height_mm = opening.schedule_declared_height_mm
+        if type(width_mm) not in (int, float) or type(height_mm) not in (int, float):
+            return None
+        try:
+            width_value = float(width_mm)
+            height_value = float(height_mm)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if (
+            not math.isfinite(width_value)
+            or not math.isfinite(height_value)
+            or width_value <= 0.0 or height_value <= 0.0
+        ):
+            return None
+        frame_area = width_value * height_value / 1_000_000.0
+        if not math.isfinite(frame_area) or not math.isclose(
+            value, frame_area, rel_tol=0.0, abs_tol=1e-6,
         ):
             return None
         quantity_authority = LIVE_OPENING_FRAME_SCHEDULE_AREA_QUANTITY_AUTHORITY

@@ -1,0 +1,158 @@
+"""Q02 final ceiling authority rejects source replay before commercial sealing."""
+from __future__ import annotations
+
+from copy import copy
+from dataclasses import replace
+
+import pytest
+
+from pb_live_ceiling_area_quantity_publication import publish_live_ceiling_area_quantities
+from tests.test_live_ceiling_area_quantity_publication import _result, _ceiling, _shadow_quantity
+
+
+def source_replay(**fields):
+    source = copy(_shadow_quantity())
+    for key, val in fields.items():
+        object.__setattr__(source, key, val)
+    return source
+
+
+@pytest.mark.parametrize("value", [True, False, "13.270425", 10 ** 400,
+                                   float("nan"), float("inf")])
+def test_imported_untyped_upstream_shadow_area_cannot_make_firm_ceiling(value):
+    assert publish_live_ceiling_area_quantities(
+        _result(shadow=source_replay(value=value))
+    ) == ()
+
+
+@pytest.mark.parametrize("value", [True, False, "13.270425", 10 ** 400,
+                                   float("nan"), float("inf")])
+def test_imported_canonical_ceiling_area_cannot_mint_firm_meter_measurement(value):
+    candidate = copy(_ceiling())
+    object.__setattr__(candidate, "area_m2", value)
+    assert publish_live_ceiling_area_quantities(_result(ceiling=candidate)) == ()
+
+
+@pytest.mark.parametrize("value", [True, "0.98", float("nan"), -0.1, 1.1, 10 ** 400])
+def test_invalid_original_ceiling_source_confidence_abstains(value):
+    assert publish_live_ceiling_area_quantities(
+        _result(shadow=source_replay(confidence=value))
+    ) == ()
+
+
+@pytest.mark.parametrize("receipts", [
+    ("ev-finish", "ev-finish"),
+    ("ev-dim-h", True, "ev-finish"),
+    ("ev-dim-h", "", "ev-finish"),
+    ("ev-dim-h", " ev-dim-v", "ev-finish"),
+])
+def test_final_ceiling_area_does_not_sanitize_original_source_receipts(receipts):
+    assert publish_live_ceiling_area_quantities(
+        _result(shadow=source_replay(evidence_ids=receipts))
+    ) == ()
+
+
+@pytest.mark.parametrize("ids", [
+    ("dim-h", "dim-v", "unrelated-third-dimension"),
+    ("dim-h", " dim-v"),
+    ("dim-h", "dim-v "),
+])
+def test_documented_ceiling_area_needs_exact_two_original_dimensional_owners(ids):
+    assert publish_live_ceiling_area_quantities(
+        _result(ceiling=replace(_ceiling(), figured_dimension_ids=ids))
+    ) == ()
+
+
+def test_legitimate_two_dimensional_receipts_preserve_firm_ceiling_and_identity():
+    result = publish_live_ceiling_area_quantities(_result())
+    assert len(result) == 1
+    assert result[0].value == 13.270425
+    assert result[0].metadata["figured_dimension_ids"] == ("dim-h", "dim-v")
+
+
+
+def test_final_ceiling_area_rejects_shadow_claim_from_foreign_semantic_room():
+    original = _shadow_quantity()
+    foreign = replace(
+        original,
+        semantic_key="ceiling_lining:other-room",
+        input_entity_ids=("room-1",),
+    )
+    assert publish_live_ceiling_area_quantities(_result(shadow=foreign)) == ()
+    authentic = publish_live_ceiling_area_quantities(_result(shadow=original))
+    assert len(authentic) == 1
+    assert authentic[0].value == 13.270425
+
+
+
+@pytest.mark.parametrize("bad_polygon", [
+    ((0.0, 0.0), (10 ** 400, 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), (True, 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), ("10", 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), (float("nan"), 0.0), (10.0, 10.0)),
+    ((0.0, 0.0), (10.0, float("inf")), (10.0, 10.0)),
+    ((0.0, 0.0), (0.0, 10.0), (0.0, 20.0)),
+])
+def test_original_ceiling_source_bbox_replay_must_not_crash_run_sealing(bad_polygon):
+    from pb_live_ceiling_area_source_closed_export import build_live_ceiling_area_source_traces
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    source = _result(ceiling=replace(_ceiling(), polygon_pdf_pts=bad_polygon))
+    with pytest.raises(SourceClosedRunConflictError, match="source polygon is invalid"):
+        build_live_ceiling_area_source_traces(
+            source, workspace_id=7, project_id="source-project",
+        )
+
+
+@pytest.mark.parametrize("fake_face", [
+    ((0., 0.), (10., 10.), (20., 20.)),
+    ((0., 0.), (20., 20.), (0., 20.), (20., 0.)),
+])
+def test_positive_pdf_bbox_cannot_authenticate_zero_area_ceiling_face(fake_face):
+    from pb_live_ceiling_area_source_closed_export import build_live_ceiling_area_source_traces
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    original_area = _result(ceiling=replace(_ceiling(), polygon_pdf_pts=fake_face))
+    with pytest.raises(SourceClosedRunConflictError, match="invalid or degenerate"):
+        build_live_ceiling_area_source_traces(
+            original_area, workspace_id=7, project_id="source-project",
+        )
+
+
+def test_original_ceiling_polygon_retains_positive_bbox_and_produced_area():
+    from pb_live_ceiling_area_source_closed_export import build_live_ceiling_area_source_traces
+
+    original = _result()
+    traces = build_live_ceiling_area_source_traces(
+        original, workspace_id=7, project_id="source-project",
+    )
+    assert len(traces) == 1
+    assert next(iter(traces.values())).source_bbox == (0.0, 0.0, 10.0, 10.0)
+
+
+
+@pytest.mark.parametrize("bad_members", [
+    None, True, 17, "room-1", (), (" room-1",),
+    ("room-1 ",), ("room-1", True),
+])
+def test_final_ceiling_rejects_normalized_or_missing_upstream_room_member(bad_members):
+    assert publish_live_ceiling_area_quantities(
+        _result(shadow=source_replay(input_entity_ids=bad_members))
+    ) == ()
+
+
+@pytest.mark.parametrize("bad_id", [
+    True, 17, "", " qty-shadow-ceiling-1", "qty-shadow-ceiling-1 ",
+])
+def test_final_ceiling_rejects_replayed_upstream_shadow_quantity_id(bad_id):
+    assert publish_live_ceiling_area_quantities(
+        _result(shadow=source_replay(quantity_id=bad_id))
+    ) == ()
+
+
+def test_final_ceiling_keeps_exact_source_room_member_and_original_quantity_id():
+    shadow = _shadow_quantity()
+    ceiling = _ceiling()
+    assert shadow.input_entity_ids == (ceiling.room_entity_id,)
+    assert shadow.quantity_id == ceiling.ceiling_quantity_id
+    assert len(publish_live_ceiling_area_quantities(_result())) == 1

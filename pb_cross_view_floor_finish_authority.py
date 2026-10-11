@@ -111,6 +111,8 @@ def _bbox(
 ) -> Optional[tuple[float, float, float, float]]:
     if not isinstance(value, (tuple, list)) or len(value) != 4:
         return None
+    if any(type(item) not in (int, float) for item in value):
+        return None
     try:
         result = tuple(float(item) for item in value)
     except (TypeError, ValueError, OverflowError):
@@ -199,7 +201,11 @@ def _area_value(
     record: CrossViewRoomAreaRecord | SameViewRoomAreaRecord,
 ) -> Optional[float]:
     evidence = record.area_evidence
-    if _clean(evidence.unit).lower() not in {"m2", "m²"}:
+    if (
+        evidence.status is not EvidenceResolutionStatus.CORROBORATED
+        or _clean(evidence.unit).lower() not in {"m2", "m²"}
+        or type(evidence.normalized_value) not in (int, float)
+    ):
         return None
     try:
         value = float(evidence.normalized_value)
@@ -253,13 +259,21 @@ def _matching_floor(
     area_evidence = area_record.area_evidence
     if (
         area_evidence.status is not EvidenceResolutionStatus.CORROBORATED
-        or not _clean(area_evidence.evidence_id)
-        or _clean(area_evidence.evidence_id)
-        not in {_clean(value) for value in floor.evidence_ids}
+        or type(area_evidence.evidence_id) is not str
+        or not area_evidence.evidence_id
+        or area_evidence.evidence_id != area_evidence.evidence_id.strip()
+        or not isinstance(floor.evidence_ids, (tuple, list))
+        or not floor.evidence_ids
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in floor.evidence_ids)
+        or len(set(floor.evidence_ids)) != len(floor.evidence_ids)
+        or area_evidence.evidence_id not in floor.evidence_ids
     ):
         return None
     value = _area_value(area_record)
     if value is None:
+        return None
+    if type(floor.metric_area_m2) not in (int, float):
         return None
     try:
         floor_value = float(floor.metric_area_m2)
@@ -268,7 +282,9 @@ def _matching_floor(
     if (
         not math.isfinite(floor_value)
         or abs(floor_value - value) > 1e-9
-        or not _clean(floor.metric_area_quantity_id)
+        or type(floor.metric_area_quantity_id) is not str
+        or not floor.metric_area_quantity_id
+        or floor.metric_area_quantity_id != floor.metric_area_quantity_id.strip()
         or _clean(floor.metric_area_authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
     ):

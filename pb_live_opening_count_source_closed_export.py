@@ -18,6 +18,7 @@ from typing import Mapping
 
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
 from pb_source_closed_run_export import (
@@ -37,8 +38,15 @@ def _clean(value: object) -> str:
 def _opening_by_identity(claim: LivePhysicalNetWallClaim) -> Mapping[str, object]:
     by_id: dict[str, object] = {}
     for opening in claim.canonical_openings:
-        canonical_id = _clean(opening.canonical_opening_id)
-        physical_id = _clean(opening.physical_opening_id)
+        if any(
+            type(value) is not str or not value or value != value.strip()
+            for value in (opening.canonical_opening_id, opening.physical_opening_id)
+        ):
+            raise SourceClosedRunConflictError(
+                "opening-count sealing requires exact original canonical/physical identities"
+            )
+        canonical_id = opening.canonical_opening_id
+        physical_id = opening.physical_opening_id
         if not canonical_id or canonical_id != physical_id:
             raise SourceClosedRunConflictError(
                 "opening-count sealing requires canonical/physical identity equality"
@@ -63,15 +71,20 @@ def _validated_count_quantities(
             )
         if quantity.family != "opening_count":
             continue
-        if quantity.abstained or quantity.value is None:
-            continue
-        if quantity.blocking_reasons:
-            continue
-        if quantity.quantity_id in seen:
+        # A blocked duplicate with the same ID still contests the physical
+        # opening universe. Never filter it away before checking source IDs.
+        if (
+            type(quantity.quantity_id) is not str
+            or not quantity.quantity_id
+            or quantity.quantity_id != quantity.quantity_id.strip()
+            or quantity.quantity_id in seen
+        ):
             raise SourceClosedRunConflictError(
-                f"duplicate opening-count quantity id: {quantity.quantity_id}"
+                f"duplicate or invalid opening-count quantity id: {quantity.quantity_id}"
             )
         seen.add(quantity.quantity_id)
+        if quantity.abstained or quantity.value is None or quantity.blocking_reasons:
+            continue
         quantities.append(quantity)
     return tuple(sorted(quantities, key=lambda item: item.quantity_id))
 
@@ -90,10 +103,24 @@ def build_live_opening_count_source_traces(
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
 
     for quantity in _validated_count_quantities(claim):
-        identities = tuple(_clean(v) for v in quantity.input_entity_ids if _clean(v))
+        raw_members = quantity.input_entity_ids
+        if (
+            not isinstance(raw_members, (tuple, list))
+            or not raw_members
+            or any(type(value) is not str or not value or value != value.strip() for value in raw_members)
+            or len(set(raw_members)) != len(raw_members)
+        ):
+            raise SourceClosedRunConflictError(
+                "opening-count quantity requires unique physical member identities"
+            )
+        identities = tuple(raw_members)
         if not identities or len(identities) != len(set(identities)):
             raise SourceClosedRunConflictError(
                 "opening-count quantity requires unique physical member identities"
+            )
+        if type(quantity.value) not in (int, float):
+            raise SourceClosedRunConflictError(
+                "opening-count quantity value must be a numeric physical count"
             )
         try:
             count_value = float(quantity.value)
@@ -103,15 +130,24 @@ def build_live_opening_count_source_traces(
             ) from exc
         if (
             not math.isfinite(count_value)
-            or count_value < 0
-            or abs(count_value - round(count_value)) > 1e-9
-            or int(round(count_value)) != len(identities)
+            or count_value <= 0
+            or not count_value.is_integer()
+            or int(count_value) != len(identities)
         ):
             raise SourceClosedRunConflictError(
                 "opening-count quantity must equal its authenticated physical member count"
             )
 
         metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
+        if (
+            quantity.unit != "ea"
+            or quantity.status != AuthorityStatus.FIRM.value
+            or quantity.authority != MeasurementAuthorityType.PDF_SCALED.value
+            or metadata.get("commercial_projection_allowed") is not True
+        ):
+            raise SourceClosedRunConflictError(
+                "opening-count quantity lacks producer-owned commercial measurement authority"
+            )
         if metadata.get("schedule_corroborated") is not True:
             raise SourceClosedRunConflictError(
                 "opening-count sealing requires source schedule corroboration"
@@ -125,6 +161,15 @@ def build_live_opening_count_source_traces(
 
         members = []
         physical_evidence: set[str] = set()
+        if (
+            not isinstance(quantity.evidence_ids, (tuple, list))
+            or not quantity.evidence_ids
+            or any(type(v) is not str or not v or v != v.strip() for v in quantity.evidence_ids)
+            or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
+        ):
+            raise SourceClosedRunConflictError(
+                "opening-count source evidence receipts are incomplete"
+            )
         for identity in identities:
             opening = openings.get(identity)
             if opening is None:
@@ -140,11 +185,18 @@ def build_live_opening_count_source_traces(
                 raise SourceClosedRunConflictError(
                     f"opening-count member {identity} lacks owned viewport"
                 )
-            physical_evidence.update(
-                _clean(value)
-                for value in opening.source_observation_ids
-                if _clean(value)
-            )
+            source_observations = opening.source_observation_ids
+            if (
+                not isinstance(source_observations, (tuple, list))
+                or not source_observations
+                or any(type(value) is not str or not value or value != value.strip()
+                       for value in source_observations)
+                or len(set(source_observations)) != len(source_observations)
+            ):
+                raise SourceClosedRunConflictError(
+                    f"opening-count member {identity} lacks original source observation evidence"
+                )
+            physical_evidence.update(source_observations)
             members.append(opening)
 
         first = members[0]
