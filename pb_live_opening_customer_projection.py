@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from pb_customer_output_verification import verify_sealed_customer_output
 
+from pb_live_opening_area_quantity_publication import _opening_quantity
 from pb_live_opening_count_source_closed_export import (
     build_live_opening_count_source_traces,
 )
@@ -117,6 +118,26 @@ def project_live_opening_customer_rows(
         )
 
     area_quantities = _eligible_area_quantities(claim)
+    # Source-closed trace lineage by itself cannot detect a copied quantity ID
+    # carrying a changed numerical area. Re-prove the original producer output
+    # before it reaches either customer review or commercial sealing.
+    physical_by_id = {}
+    for opening in claim.canonical_openings:
+        oid = opening.canonical_opening_id
+        if type(oid) is not str or not oid or oid != oid.strip() or oid in physical_by_id:
+            raise ValueError("opening customer physical source identities are ambiguous")
+        physical_by_id[oid] = opening
+    for quantity in area_quantities:
+        if (
+            not isinstance(quantity.input_entity_ids, (tuple, list))
+            or len(quantity.input_entity_ids) != 1
+            or type(quantity.input_entity_ids[0]) is not str
+        ):
+            raise ValueError("opening customer area physical source identity is missing")
+        source = physical_by_id.get(quantity.input_entity_ids[0])
+        original = _opening_quantity(source) if source is not None else None
+        if original is None or original.to_dict() != quantity.to_dict():
+            raise ValueError("opening customer area claim differs from physical source producer")
     count_quantities = _eligible_count_quantities(claim)
     quantities = (*area_quantities, *count_quantities)
     if not quantities:
