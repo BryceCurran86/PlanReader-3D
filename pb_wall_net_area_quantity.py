@@ -39,6 +39,20 @@ def _meta(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _dependency_abstention_fingerprint(quantity: QuantityEvidence) -> str:
+    """Never crash BLOCKED net-wall publication while hashing corrupt inputs.
+
+    A normal source receipt retains its exact canonical hash. Non-JSON/nonfinite
+    imported evidence is represented by a deterministic invalid receipt token;
+    it may only enter ABSTAIN and never authorize a calculated net area.
+    """
+    try:
+        return quantity_evidence_fingerprint(quantity)
+    except (TypeError, ValueError, OverflowError):
+        token = f"invalid_net_wall_dependency:{quantity.quantity_id}:{quantity.family}"
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _completion_fingerprint(evidence: EvidenceAtom) -> str:
     return hashlib.sha256(
         canonical_contract_json(evidence.to_dict()).encode("utf-8")
@@ -65,8 +79,8 @@ def _abstain(
     blockers: tuple[str, ...],
     completion_evidence: EvidenceAtom | None,
 ) -> QuantityEvidence:
-    gross_fp = quantity_evidence_fingerprint(gross)
-    deduction_fps = [quantity_evidence_fingerprint(q) for q in deductions]
+    gross_fp = _dependency_abstention_fingerprint(gross)
+    deduction_fps = [_dependency_abstention_fingerprint(q) for q in deductions]
     payload = {
         "family": NET_WALL_AREA_FAMILY,
         "wall_id": wall_id,
@@ -77,10 +91,17 @@ def _abstain(
         "completion_evidence_id": completion_evidence.evidence_id if completion_evidence else None,
         "blockers": list(blockers),
     }
-    evidence_ids = list(gross.evidence_ids)
+    # Diagnostic BLOCKED records must remain serializable when an imported
+    # evidence list contains unhashable or non-string data. Only exact native
+    # source tokens are kept; this does not authenticate any corrupt receipt.
+    evidence_ids = [receipt for receipt in gross.evidence_ids
+                    if type(receipt) is str and receipt and receipt == receipt.strip()]
     for deduction in deductions:
-        evidence_ids.extend(deduction.evidence_ids)
-    if completion_evidence is not None:
+        evidence_ids.extend(
+            receipt for receipt in deduction.evidence_ids
+            if type(receipt) is str and receipt and receipt == receipt.strip()
+        )
+    if completion_evidence is not None and type(completion_evidence.evidence_id) is str:
         evidence_ids.append(completion_evidence.evidence_id)
     return QuantityEvidence(
         quantity_id=stable_contract_id("qty", payload),
