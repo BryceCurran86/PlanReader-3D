@@ -113,3 +113,101 @@ def test_any_untrusted_native_material_word_retains_original_recovery_path(monke
         source=None, published=None, raster=None, block_words=words,
     ) == words
     assert calls == ["word", "line"]
+
+
+
+def _source_trusted_material_words(*, foreign_rows: bool, include_owned: bool):
+    from dataclasses import replace
+
+    def trusted(text, block, partition="source-partition-1", page="1"):
+        return replace(
+            _word(text, block), text=text, trusted=True, reason_codes=(),
+            page_id=page, source_partition_id=partition,
+        )
+
+    title = trusted("MATERIAL FINISH SCHEDULE", 1)
+    foreign = "source-partition-2" if foreign_rows else "source-partition-1"
+    words = [
+        title,
+        trusted("FT1 floor tile", 2, partition=foreign),
+        trusted("FT2 vinyl flooring", 3, partition=foreign),
+    ]
+    if include_owned:
+        words.extend((
+            trusted("FT4 porcelain floor tile", 4),
+            trusted("FT5 floor coating", 5),
+        ))
+    return tuple(words)
+
+
+def _patch_trusted_native_material_definition_rows(monkeypatch):
+    # Limit this unit test to provenance grouping. Real parsing and source
+    # text/finish evidence are covered by their existing producer tests.
+    def raw_candidates(words):
+        return tuple(
+            (word.source_partition_id, word.block_no, (word,),
+             word.text.split()[0], {"description": word.text.partition(" ")[2]})
+            for word in words if word.text.startswith("FT")
+        )
+
+    def authenticated_row(words):
+        original = words[0].text
+        code = original.split()[0]
+        return code, {"description": original.partition(" ")[2]}
+
+    monkeypatch.setattr(material, "_raw_material_definition_candidates", raw_candidates)
+    monkeypatch.setattr(material, "_material_definition_candidate", authenticated_row)
+    monkeypatch.setattr(
+        material, "_is_material_schedule_title",
+        lambda value: str(value).strip() == "MATERIAL FINISH SCHEDULE",
+    )
+
+
+def test_native_material_rows_on_another_source_partition_cannot_borrow_title_receipts(monkeypatch):
+    _patch_trusted_native_material_definition_rows(monkeypatch)
+    words = _source_trusted_material_words(foreign_rows=True, include_owned=False)
+    blocks, rejected = material._trusted_native_material_schedule_cluster_blocks(
+        source=None, published=None, raster=None, words=words,
+    )
+    assert blocks == ()
+    assert rejected == ("FT1", "FT2")
+
+
+def test_material_schedule_title_owns_only_exact_original_partition_rows(monkeypatch):
+    _patch_trusted_native_material_definition_rows(monkeypatch)
+    words = _source_trusted_material_words(foreign_rows=True, include_owned=True)
+    blocks, rejected = material._trusted_native_material_schedule_cluster_blocks(
+        source=None, published=None, raster=None, words=words,
+    )
+    assert {block.text for block in blocks} == {
+        "FT4 porcelain floor tile", "FT5 floor coating",
+    }
+    assert {block.source_partition_id for block in blocks} == {"source-partition-1"}
+    assert rejected == ("FT1", "FT2")
+
+
+def test_material_schedule_title_does_not_authenticate_same_partition_other_page(monkeypatch):
+    from dataclasses import replace
+    _patch_trusted_native_material_definition_rows(monkeypatch)
+    words = _source_trusted_material_words(foreign_rows=False, include_owned=False)
+    foreign_page_rows = tuple(
+        replace(word, page_id="2") if word.text.startswith("FT") else word
+        for word in words
+    )
+    blocks, rejected = material._trusted_native_material_schedule_cluster_blocks(
+        source=None, published=None, raster=None, words=foreign_page_rows,
+    )
+    assert blocks == ()
+    assert rejected == ("FT1", "FT2")
+
+
+def test_same_original_schedule_page_and_partition_retains_two_authenticated_rows(monkeypatch):
+    _patch_trusted_native_material_definition_rows(monkeypatch)
+    words = _source_trusted_material_words(foreign_rows=False, include_owned=False)
+    blocks, rejected = material._trusted_native_material_schedule_cluster_blocks(
+        source=None, published=None, raster=None, words=words,
+    )
+    assert {block.text for block in blocks} == {
+        "FT1 floor tile", "FT2 vinyl flooring",
+    }
+    assert rejected == ()
