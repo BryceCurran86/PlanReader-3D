@@ -155,3 +155,33 @@ def test_original_source_room_page_and_receipts_still_allow_documented_area():
     result = source_area(_explicit_area(25.0))
     assert result.abstained is False
     assert result.value == 25.0
+
+
+
+@pytest.mark.parametrize("corrupt_polygon", [
+    ((0., 0.), (True, 0.), (10., 10.)),
+    ((0., 0.), ("100", 0.), (100., 100.)),
+    ((0., 0.), (10 ** 400, 0.), (100., 100.)),
+    ((0., 0.), (float("nan"), 0.), (100., 100.)),
+    ((0., 0.), (float("inf"), 0.), (100., 100.)),
+    ((0., 0.), (100., 0.), (100., "100")),
+])
+def test_untyped_scaled_room_pdf_points_never_become_metric_area(corrupt_polygon):
+    from tests.test_room_area_quantity_v2 import _scale, _scaled_qty
+    result = _scaled_qty(room=_room(points=corrupt_polygon), scale=_scale())
+    assert result.abstained is True
+    assert result.value is None
+    assert "room_polygon_area_invalid" in result.blocking_reasons
+
+
+def test_bad_pdf_ring_signature_cannot_crash_batch_room_identity_detection():
+    from pb_room_area_quantity import _canonical_ring, _polygon_area
+    assert _canonical_ring(((0., 0.), (10 ** 400, 0.), (1., 1.))) == ()
+    assert _polygon_area(((0., 0.), (10 ** 400, 0.), (1., 1.))) == 0.0
+
+
+def test_genuine_pdf_scaled_room_with_trusted_scale_remains_firm():
+    from tests.test_room_area_quantity_v2 import _scaled_qty
+    measured = _scaled_qty()
+    assert measured.abstained is False
+    assert measured.value == 25.0
