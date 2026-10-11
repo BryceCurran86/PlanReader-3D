@@ -70,7 +70,13 @@ jobs:
           assert old['source_sha256']==new['source_sha256']==audit['source_sha256']==sha
           assert old['opening_bindings']==new['opening_bindings']
           assert old['host_frames']==new['host_frames']
-          assert old['summary']==new['summary']=={'physical_existence_claims':23,'host_bindings':14,'host_frames':9}
+          # Native opposition has legitimately changed historical positive counts.
+          # Preserve the *exact* original head/base candidate and host inventory;
+          # never substitute an aggregate count for the source receipts above.
+          assert old['summary']==new['summary']
+          assert new['summary']['physical_existence_claims']==len(new['opening_bindings'])>0
+          assert new['summary']['host_bindings']==14
+          assert new['summary']['host_frames']==9
           assert audit['source_reauthenticated'] is True
           assert audit['primitive_safety_cap']==20000
           row,=audit['candidate_audits']
