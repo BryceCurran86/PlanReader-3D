@@ -83,10 +83,10 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
     for floor in floors:
         floor_by_room.setdefault(getattr(floor,"room_entity_id",None),[]).append(floor)
     q_ids=Counter(getattr(q,"quantity_id",None) for q in quantities)
-    q_by_input={}
-    for q in quantities:
-        for entity_id in (getattr(q,"input_entity_ids",()) or ()):
-            q_by_input.setdefault(entity_id,[]).append(q)
+    # Room-area producer QuantityEvidence is explicitly keyed to original
+    # room.face_id, NOT to a canonical floor ID. Its source receipt/evidence
+    # and SHA/revision/viewport must be authenticated before the later
+    # floor metric projection can be checked.
     room_ids=Counter(getattr(r,"physical_room_id",None) for r in eligible)
     face_ids=Counter(getattr(r,"source_room_face_record_id",None) for r in eligible)
     direct_labels=Counter(getattr(r,"room_label_binding_record_id",None)
@@ -143,9 +143,16 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
                         gate="FLOOR_ORIGINAL_PHYSICAL_FACE_LINEAGE_CONFLICT"
                     else:
                         # Support-only source dimensions are NOT page geometry.
-                        matches=[q for q in q_by_input.get(floor_id,())
+                        matches=[q for q in quantities
                                  if _metric_quantity(q)
-                                 and q_ids[q.quantity_id]==1]
+                                 and q_ids[q.quantity_id]==1
+                                 and face_id in q.evidence_ids
+                                 and isinstance(getattr(q,"metadata",None),dict)
+                                 and q.metadata.get("source_sha256")==original_source_sha
+                                 and q.metadata.get("revision_id")==r.revision_id
+                                 and q.metadata.get("viewport_id")==r.viewport_id
+                                 and len(q.input_entity_ids)==1
+                                 and q.semantic_key=="room_area:"+q.input_entity_ids[0]]
                         if len(matches)!=1:
                             gate="FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"
                         else:
