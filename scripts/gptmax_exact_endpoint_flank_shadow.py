@@ -15,7 +15,8 @@ from pathlib import Path
 
 from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
 from pb_source_observation_authority import SourceObservationRecord
-from scripts.gptmax_full_foreground_flank_stages import _flank_stage_rows
+from pb_opening_host_binding_authority import _OpeningGeometry
+from scripts.gptmax_full_foreground_flank_stages import _flank_stage_rows, _contacts
 from tools.diag_gptmax_full_foreground_flank import full_foreground_flank_census
 from tools.diag_gptmax_full_foreground_run_source import original_full_foreground_report, _trace_sources
 from tools.diag_gptmax_raster_host_source_membership import original_raster_host_ancestry_census
@@ -72,6 +73,78 @@ def _local_records(records, source_ids):
     return local, extent
 
 
+def source_interval_coverage(pixel):
+    """Exact axis-aligned source coverage, not a merged edge or physical wall.
+
+    Preserve every actual fragment address. Do not bridge a missing interval,
+    absorb an offset line, borrow a parent or transfer W3-discarded ancestry.
+    """
+    source_id = pixel['source_observation_id']
+    line = pixel['source_line_pt']
+    _line_box(line)
+    if line[1] == line[3]:
+        axis, normal = 0, 1
+    elif line[0] == line[2]:
+        axis, normal = 1, 0
+    else:
+        raise ValueError('original pixel source is not axis-aligned')
+    lo, hi = sorted((line[axis], line[axis+2]))
+    intervals, retained, evidence, seen = [], [], [], set()
+    for edge in sorted(pixel['actual_w2_edge_rows'], key=lambda e: e['edge_id']):
+        key = edge['edge_id']
+        if (not isinstance(key, str) or not key or key in seen
+                or source_id not in edge['source_observation_ids']
+                or type(edge['w3_retained']) is not bool):
+            raise ValueError('invalid actual source fragment ownership')
+        seen.add(key)
+        coords = edge['w2_fragment_geometry_pt']
+        _line_box(coords)
+        if coords[normal] != line[normal] or coords[normal+2] != line[normal]:
+            continue
+        a, b = sorted((coords[axis], coords[axis+2]))
+        a, b = max(a,lo), min(b,hi)
+        if b <= a:
+            continue
+        intervals.append((a,b))
+        if edge['w3_retained']: retained.append((a,b))
+        evidence.append(dict(edge_id=key, original_axis_interval_pt=[a,b],
+            w3_retained=edge['w3_retained']))
+    def uncovered(spans):
+        gaps, cursor = [], lo
+        for a,b in sorted(spans):
+            if a > cursor: gaps.append([cursor,a])
+            cursor = max(cursor,b)
+        if cursor < hi: gaps.append([cursor,hi])
+        return gaps
+    w2_gaps, w3_gaps = uncovered(intervals), uncovered(retained)
+    return dict(original_axis_interval_pt=[lo,hi], exact_owned_fragment_intervals=evidence,
+        w2_uncovered_source_intervals_pt=w2_gaps, w3_uncovered_source_intervals_pt=w3_gaps,
+        complete_actual_w2_source_span_coverage=not w2_gaps,
+        complete_actual_w3_retained_source_span_coverage=not w3_gaps,
+        combined_graph_edge_created=False, physical_wall_authority=False,
+        host_publication_allowed=False)
+
+
+def annotate_source_span_coverage(rows, original, required):
+    """Distinguish a single-fragment predicate from complete interval survival."""
+    for row in rows:
+        identity = row['opening_identity_id']
+        source, = (r for r in original['opening_rows'] if r['opening_identity_id']==identity)
+        requirement, = (r for r in required['opening_rows'] if r['opening_identity_id']==identity)
+        opening = _OpeningGeometry(**source['original_aperture_coordinate_basis'])
+        for flank in row['flanks']:
+            required_flank, = (f for f in requirement['flanks'] if f['role']==flank['role'])
+            for pixel in flank['source_run_rows']:
+                coverage = source_interval_coverage(pixel)
+                contact = _contacts(pixel['source_line_pt'], opening, required_flank)
+                pixel['original_source_span_meets_required_flank_geometry'] = contact
+                pixel['exact_source_span_coverage'] = coverage
+                pixel['single_fragment_contact_failure_with_complete_retained_source_span'] = (
+                    contact and coverage['complete_actual_w3_retained_source_span_coverage']
+                    and not any(e['matches_original_required_flank_geometry']
+                                for e in pixel['actual_w2_edge_rows']))
+
+
 def compare_local_flank_graphs(joined, original, required, records):
     """Pure shadow experiment; input receipts must come from the fresh reader."""
     records = tuple(records)
@@ -87,7 +160,9 @@ def compare_local_flank_graphs(joined, original, required, records):
         modes = {}
         for name, exact in (('default_snap_local_shadow', False), ('exact_endpoint_local_shadow', True)):
             graph = _trace_sources(local, exact_endpoint_shadow=exact)
+            graph['scope_authority'] = 'local source bounds experiment only; no authenticated floor-plan viewport'
             rows = _flank_stage_rows(scoped, original, required, graph)
+            annotate_source_span_coverage(rows, original, required)
             modes[name] = dict(opening_rows=rows, source_graph=graph,
                 observed_geometry_barrier_counts=dict(sorted(Counter(
                     p['observed_geometry_barrier'] for r in rows for f in r['flanks']

@@ -58,7 +58,9 @@ def test_real_w2_short_source_collapse_is_separate_from_exact_shadow_survival():
         assert graph['physical_equivalence_proven'] is False
         assert all(e['physical_host_authority'] is False for e in graph['all_w2_edges'])
     assert args == before
-    assert _trace_sources(args[3]) == result['default_snap_local_shadow']['source_graph']
+    control = _trace_sources(args[3])
+    control['scope_authority'] = 'local source bounds experiment only; no authenticated floor-plan viewport'
+    assert control == result['default_snap_local_shadow']['source_graph']
 
 
 def test_parallel_faces_and_annotation_lookalikes_remain_separate_candidates():
@@ -199,3 +201,98 @@ def test_independent_post_shadow_production_replay_must_remain_identical(monkeyp
     monkeypatch.setattr(shadow,'original_raster_host_ancestry_census',changed)
     with pytest.raises(RuntimeError,match='production source state'):
         shadow.exact_endpoint_source_report(data,page_id='1',expected_source_sha=sha256(data).hexdigest())
+
+
+def pixel_fragments(*, gap=False, discarded=False, offset=False):
+    rows = []
+    for i in range(8):
+        if gap and i==3: continue
+        rows.append(dict(edge_id=f'edge-{i}', source_observation_ids=['pixel'],
+            w2_fragment_geometry_pt=[16.+i/2,20.+(1. if offset else 0.),16.+(i+1)/2,20.+(1. if offset else 0.)],
+            w3_retained=not(discarded and i==3),
+            matches_original_required_flank_geometry=False))
+    return dict(source_observation_id='pixel',source_line_pt=[16.,20.,20.,20.],
+        actual_w2_edge_rows=rows)
+
+
+def test_complete_owned_interval_coverage_does_not_require_one_large_fragment():
+    pixel = pixel_fragments()
+    before = deepcopy(pixel)
+    coverage = shadow.source_interval_coverage(pixel)
+    assert coverage['complete_actual_w2_source_span_coverage'] is True
+    assert coverage['complete_actual_w3_retained_source_span_coverage'] is True
+    assert len(coverage['exact_owned_fragment_intervals']) == 8
+    assert coverage['w2_uncovered_source_intervals_pt'] == []
+    assert coverage['combined_graph_edge_created'] is False
+    assert coverage['physical_wall_authority'] is False
+    assert coverage['host_publication_allowed'] is False
+    assert pixel == before
+    pixel['actual_w2_edge_rows'].reverse()
+    assert shadow.source_interval_coverage(pixel)==coverage
+
+
+def test_real_source_interval_gap_is_never_closed_by_adjacent_or_duplicate_spans():
+    pixel = pixel_fragments(gap=True)
+    pixel['actual_w2_edge_rows'].append({**pixel['actual_w2_edge_rows'][0],'edge_id':'duplicate-geometry'})
+    coverage = shadow.source_interval_coverage(pixel)
+    assert coverage['w2_uncovered_source_intervals_pt']==[[17.5,18.]]
+    assert coverage['w3_uncovered_source_intervals_pt']==[[17.5,18.]]
+    assert coverage['complete_actual_w2_source_span_coverage'] is False
+
+
+def test_w3_discarded_fragment_never_transfers_coverage_to_retained_sibling():
+    coverage = shadow.source_interval_coverage(pixel_fragments(discarded=True))
+    assert coverage['complete_actual_w2_source_span_coverage'] is True
+    assert coverage['complete_actual_w3_retained_source_span_coverage'] is False
+    assert coverage['w3_uncovered_source_intervals_pt']==[[17.5,18.]]
+
+
+def test_parallel_offset_or_remote_owned_edges_cannot_fill_local_source_interval():
+    pixel = pixel_fragments(offset=True)
+    pixel['actual_w2_edge_rows'].append(dict(edge_id='remote',source_observation_ids=['pixel'],
+        w2_fragment_geometry_pt=[200.,20.,201.,20.],w3_retained=True))
+    coverage = shadow.source_interval_coverage(pixel)
+    assert coverage['w2_uncovered_source_intervals_pt']==[[16.,20.]]
+    assert not coverage['exact_owned_fragment_intervals']
+
+
+@pytest.mark.parametrize('turn',[0,1,2,3])
+def test_rotated_translated_scaled_source_interval_coverage_keeps_all_receipt_addresses(turn):
+    pixel = pixel_fragments()
+    def line(coords):
+        result=[]
+        for x,y in (coords[:2],coords[2:]):
+            for _ in range(turn): x,y = -y,x
+            result.extend([x*4.+99.,y*4.+77.])
+        return result
+    pixel['source_line_pt']=line(pixel['source_line_pt'])
+    for edge in pixel['actual_w2_edge_rows']:
+        edge['w2_fragment_geometry_pt']=line(edge['w2_fragment_geometry_pt'])
+    coverage = shadow.source_interval_coverage(pixel)
+    assert coverage['complete_actual_w2_source_span_coverage'] is True
+    assert coverage['complete_actual_w3_retained_source_span_coverage'] is True
+    assert {r['edge_id'] for r in coverage['exact_owned_fragment_intervals']}=={f'edge-{i}' for i in range(8)}
+
+
+@pytest.mark.parametrize('damage',['foreign_parent','duplicate_address','truthy_retained','nonfinite','non_axis_source'])
+def test_forged_source_interval_facts_fail_closed(damage):
+    pixel = pixel_fragments()
+    if damage=='foreign_parent': pixel['actual_w2_edge_rows'][0]['source_observation_ids']=['foreign']
+    elif damage=='duplicate_address': pixel['actual_w2_edge_rows'][1]['edge_id']='edge-0'
+    elif damage=='truthy_retained': pixel['actual_w2_edge_rows'][0]['w3_retained']=1
+    elif damage=='nonfinite': pixel['actual_w2_edge_rows'][0]['w2_fragment_geometry_pt'][0]=float('nan')
+    else: pixel['source_line_pt']=[16.,19.,20.,20.]
+    with pytest.raises(ValueError): shadow.source_interval_coverage(pixel)
+
+
+def test_single_fragment_predicate_failure_is_not_misreported_as_absent_source_geometry():
+    _, original, required, _ = _fixture()
+    pixel = pixel_fragments()
+    rows=[dict(opening_identity_id='original-opening',flanks=[dict(role='left',source_run_rows=[pixel])])]
+    shadow.annotate_source_span_coverage(rows,original,required)
+    assert pixel['original_source_span_meets_required_flank_geometry'] is True
+    assert pixel['single_fragment_contact_failure_with_complete_retained_source_span'] is True
+    assert pixel['exact_source_span_coverage']['combined_graph_edge_created'] is False
+    pixel['actual_w2_edge_rows'][0]['w3_retained']=False
+    shadow.annotate_source_span_coverage(rows,original,required)
+    assert pixel['single_fragment_contact_failure_with_complete_retained_source_span'] is False

@@ -69,17 +69,62 @@ receipts. Derived fragments are not counted as input source primitives.
 
 ## Synthetic verification
 
-37 focused new regressions cover collapse/survival; parallel alternatives;
+51 focused new regressions cover collapse/survival; parallel alternatives;
 annotation ticks; actual white gaps; full uncut source lines; translation,
 quarter-turn rotation and scaling; input order and unrelated-content
 invariance; real intersection splitting; deterministic replay; no mutation;
 foreign/missing/duplicate source scope; invalid/overflow coordinates; input
 safety cap; explicit boolean mode; source SHA rejection; fresh synthetic PDF
 reauthentication; and rejection of a changed post-shadow production census.
-36 existing foreground/source-stage regressions pass. Ruff F821/F823, diff
+Additional coverage cases preserve real source gaps, W3-discarded intervals,
+all fragment addresses, foreign-parent rejection, offset/remote negatives,
+rotation and input-order invariance, and unchanged nonpublication. The interval
+reader clips only its **coverage inventory**, never source or graph geometry.
+No combined graph edge, physical wall or host is created from that union.
+
+51 existing foreground/source-stage/cross-opening regressions pass. Ruff F821/F823, diff
 checks, provider isolation and Full Plan V2 integrity pass locally.
 
 Original Lot16 replay and exact-head Python 3.13/3.14 CI are additional gates.
 Do not merge until the source replay preserves all original binding/frame
 receipts and all required CI checks pass. A shadow geometric survivor is not
 a recovered physical host or a benchmark accuracy increase.
+
+## Original-source experiment and revised inference
+
+Local replay of the original PDF SHA
+`10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844`,
+page 3, preserves exact complete production reports before/after: 21 positive
+opening hypotheses, 14 authenticated hosts and nine frames. The complete
+ordinary plus positive-pixel inventory has 10,099 input primitives. Seven local
+input sets have 59, 66, 34, 39, 37, 125 and 37 source primitives respectively;
+these are input counts, not physical wall or opening quantities.
+
+The unchanged single-fragment flank predicate still abstains on three required
+flanks even with endpoint tolerance zero. Inspection of the actual output
+shows why: real raster lattice intersections split each source run into short
+fragments, typically half-point spans. All original intervals survive with
+their own source parents and retained W3 addresses, but no individual fragment
+satisfies the existing combined endpoint/local-overlap predicate. Thus "no qualifying
+single fragment" does not establish that all source geometry was lost.
+
+The new read-only interval inventory distinguishes complete W2 coverage and
+complete W3-retained coverage from that existing single-fragment result.
+It joins only mathematically adjacent/overlapping intervals on the exact same
+original axis, retains every address, and exposes every uncovered interval.
+It does not smooth, pad, bridge gaps, rewrite graph edges or borrow ancestry.
+Original predicate results remain visible and unchanged.
+
+| Source identity prefix | Required side | Original source runs completely retained but no qualifying single fragment in exact-endpoint shadow |
+|---|---|---:|
+| `33d277d4` | left | 7 |
+| `81a45c3a` | right | 5 |
+| `f8197523` | left | 6 |
+
+These 18 source-run alternatives are not 18 walls or new hosts. In the default
+local controls they do not have complete retained interval coverage. Several
+other default W3 source losses disappear in the exact-endpoint experiment,
+but all alternatives still need structural role, authenticated viewport and
+physical equivalence. The next source hypothesis must reason about owned
+fragment bundles, with opposing evidence and every candidate retained, before
+any authority promotion. Merely reducing a snap tolerance is insufficient.

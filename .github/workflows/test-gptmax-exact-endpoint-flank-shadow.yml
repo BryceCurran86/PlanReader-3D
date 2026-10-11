@@ -76,6 +76,27 @@ jobs:
                   assert graph['host_publication_allowed'] is False
                   assert graph['physical_equivalence_proven'] is False
                   assert all(e['physical_host_authority'] is False for e in graph['all_w2_edges'])
+                  for f in row[mode]['opening_rows'][0]['flanks']:
+                      for p in f['source_run_rows']:
+                          coverage=p['exact_source_span_coverage']
+                          assert coverage['combined_graph_edge_created'] is False
+                          assert coverage['physical_wall_authority'] is False
+                          assert coverage['host_publication_allowed'] is False
+          # Original-source experiment control only: retain the precise
+          # difference between owned interval survival and a one-fragment
+          # predicate. No runtime algorithm reads these identities/counts.
+          expected={
+              'physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8':('left',7),
+              'physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d':('right',5),
+              'physical_opening_existence_f819752382d44a00d9f28feca4b00787':('left',6),
+          }
+          for row in r['opening_rows']:
+              if row['opening_identity_id'] not in expected: continue
+              role,count=expected[row['opening_identity_id']]
+              flanks=row['exact_endpoint_local_shadow']['opening_rows'][0]['flanks']
+              flank,=(f for f in flanks if f['role']==role)
+              assert sum(p['single_fragment_contact_failure_with_complete_retained_source_span']
+                         for p in flank['source_run_rows'])==count
           PY
       - uses: actions/upload-artifact@v4
         if: always()
