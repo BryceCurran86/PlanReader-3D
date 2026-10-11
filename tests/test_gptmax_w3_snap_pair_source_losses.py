@@ -72,3 +72,63 @@ def test_cross_node_pair_does_not_create_a_false_removed_edge():
     source["nodes"].append({"id": 2, "degree": 1})
     source["edges"][1]["b"] = 2
     assert audit(source) == []
+
+
+@pytest.mark.parametrize("damage", [
+    "geometry", "tiny_geometry", "parent", "foreign_id", "blank_id",
+    "missing_removed", "overlap", "duplicate_removed", "non_string_removed",
+    "foreign_node", "boolean_node", "duplicate_node", "missing_node",
+])
+def test_actual_w3_output_must_partition_and_preserve_original_w2(damage):
+    original = graph()
+    output, removed = deduplicate_coincident_edges(original)
+    output = deepcopy(output)
+    if damage == "geometry": output["edges"][0]["y1"] += 1
+    elif damage == "tiny_geometry": output["edges"][0]["y1"] += 1e-10
+    elif damage == "parent":
+        output["edges"][0]["primitive_lineage"]["source_primitive_ids"] = ["borrowed"]
+    elif damage == "foreign_id": output["edges"][0]["id"] = "foreign"
+    elif damage == "blank_id": output["edges"][0]["id"] = " "
+    elif damage == "missing_removed": removed = []
+    elif damage == "overlap": removed = ["edge-a"]
+    elif damage == "duplicate_removed": removed.append(removed[0])
+    elif damage == "non_string_removed": removed = [None]
+    elif damage == "foreign_node": original["edges"][1]["b"] = 17
+    elif damage == "boolean_node": original["edges"][1]["b"] = False
+    elif damage == "duplicate_node": original["nodes"].append(deepcopy(original["nodes"][0]))
+    else: original["nodes"].pop()
+    before = deepcopy((original, output, removed))
+    with pytest.raises(ValueError):
+        _nonpublishing_w3_snap_pair_source_losses(original, output, removed)
+    assert (original, output, removed) == before
+
+
+def test_missing_parent_inventory_stays_negative_without_disjointness_claim():
+    original = graph()
+    original["edges"][1]["primitive_lineage"]["source_primitive_ids"] = []
+    row, = audit(original)
+    assert row["removed_source_observation_ids"] == []
+    assert row["source_parent_inventory_complete"] is False
+    assert row["source_parent_sets_disjoint"] is False
+    assert row["host_publication_allowed"] is False
+
+
+def test_complete_original_census_has_deterministic_loss_order_without_mutation():
+    original = graph()
+    third = deepcopy(original["edges"][1])
+    third.update(id="edge-c", y1=12., y2=12.)
+    third["primitive_lineage"]["source_primitive_ids"] = ["original-source-c"]
+    original["edges"].append(third)
+    output, removed = deduplicate_coincident_edges(original)
+    before = deepcopy((original, output, removed))
+    expected = _nonpublishing_w3_snap_pair_source_losses(original, output, removed)
+    assert expected == _nonpublishing_w3_snap_pair_source_losses(original, output, list(reversed(removed)))
+    assert (original, output, removed) == before
+
+
+def test_finite_source_coordinates_cannot_yield_infinite_displacement():
+    original = graph()
+    original["edges"][0].update(x1=-1e308, y1=-1e308, x2=-1e308, y2=1e308)
+    original["edges"][1].update(x1=1e308, y1=1e308, x2=1e308, y2=-1e308)
+    with pytest.raises(ValueError, match="displacement"):
+        audit(original)

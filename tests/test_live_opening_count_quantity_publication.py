@@ -456,6 +456,8 @@ def test_replayed_physical_count_member_identity_is_not_cast_from_boolean(tmp_pa
 
 @pytest.mark.parametrize(("field", "invalid"), (
     ("physical_opening_universe_complete", "true"),
+    ("physical_opening_universe_complete", 1),
+    ("physical_opening_universe_complete", [True]),
     ("structural_enumeration_complete", False),
     ("page_ids", ("2",)),
     ("page_ids", ("1", "1")),
