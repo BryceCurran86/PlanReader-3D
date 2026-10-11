@@ -118,6 +118,11 @@ def project_live_opening_customer_rows(
         )
 
     area_quantities = _eligible_area_quantities(claim)
+    count_quantities = _eligible_count_quantities(claim)
+    # Source-less empty claims are a legitimate no-output result, including
+    # lightweight workspace-identity checks without a canonical object list.
+    if not area_quantities and not count_quantities:
+        return ()
     # Source-closed trace lineage by itself cannot detect a copied quantity ID
     # carrying a changed numerical area. Re-prove the original producer output
     # before it reaches either customer review or commercial sealing.
@@ -138,7 +143,6 @@ def project_live_opening_customer_rows(
         original = _opening_quantity(source) if source is not None else None
         if original is None or original.to_dict() != quantity.to_dict():
             raise ValueError("opening customer area claim differs from physical source producer")
-    count_quantities = _eligible_count_quantities(claim)
     quantities = (*area_quantities, *count_quantities)
     if not quantities:
         return ()
