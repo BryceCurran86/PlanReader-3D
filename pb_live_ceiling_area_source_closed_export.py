@@ -144,6 +144,28 @@ def build_live_ceiling_area_source_traces(
                 raise SourceClosedRunConflictError(
                     f"ceiling source polygon is invalid: {quantity.quantity_id}"
                 ) from exc
+            # A positive bounding rectangle may enclose a collinear or
+            # self-cancelling ring. PDF points are source geometry only;
+            # neither the rectangle nor a prior metric value can authorize
+            # a physically zero-area ceiling face.
+            if len(points) < 3:
+                raise SourceClosedRunConflictError(
+                    f"ceiling source polygon is invalid: {quantity.quantity_id}"
+                )
+            try:
+                signed_twice_area = math.fsum(
+                    xs[i] * ys[(i + 1) % len(points)]
+                    - xs[(i + 1) % len(points)] * ys[i]
+                    for i in range(len(points))
+                )
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise SourceClosedRunConflictError(
+                    f"ceiling source polygon is invalid: {quantity.quantity_id}"
+                ) from exc
+            if not math.isfinite(signed_twice_area) or abs(signed_twice_area) <= 2e-9:
+                raise SourceClosedRunConflictError(
+                    f"ceiling source polygon is invalid or degenerate: {quantity.quantity_id}"
+                )
             source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
         trace = CommercialTakeoffSourceTrace(
