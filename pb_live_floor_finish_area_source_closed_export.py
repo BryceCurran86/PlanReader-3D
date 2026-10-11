@@ -278,9 +278,15 @@ def build_live_floor_finish_area_source_traces(
         source_bbox = None
         if points:
             try:
+                if any(
+                    not isinstance(point, (tuple, list)) or len(point) != 2
+                    or any(type(v) not in (int, float) for v in point)
+                    for point in points
+                ):
+                    raise ValueError("untyped source point coordinates")
                 xs = tuple(float(point[0]) for point in points)
                 ys = tuple(float(point[1]) for point in points)
-            except (TypeError, ValueError, IndexError) as exc:
+            except (TypeError, ValueError, IndexError, OverflowError) as exc:
                 raise SourceClosedRunConflictError(
                     f"floor source polygon is invalid: {quantity.quantity_id}"
                 ) from exc
