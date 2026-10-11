@@ -1,0 +1,121 @@
+"""GPT3 produced-items exporter uses only authentic source bytes and signed quantities."""
+from dataclasses import replace
+import hashlib
+import json
+
+import pytest
+
+from test_combine_source_closed_runs_cli import quantity, trace
+from pb_source_closed_run_export import (
+    SourceClosedRunConflictError, seal_source_closed_run,
+)
+from tools.export_gpt3_produced_items import (
+    export_verified_produced_items, main,
+)
+
+
+def _source_run(tmp_path, *, source_bytes=b"%PDF-original-source-a", entity="room-1"):
+    source=tmp_path/f"{entity}.pdf"
+    source.write_bytes(source_bytes)
+    sha=hashlib.sha256(source_bytes).hexdigest()
+    q=quantity(f"qty-{entity}",entity,sha)
+    t=trace(entity,sha)
+    sealed=seal_source_closed_run(
+        [q],project_id="project-a",traces_by_quantity_id={q.quantity_id:t},
+    )
+    run_path=tmp_path/f"{entity}.sealed.json"
+    run_path.write_text(sealed.to_json(),encoding="utf-8")
+    return source,run_path,sha,q,t
+
+
+def test_original_source_verified_items_preserve_exact_quantity_and_object(tmp_path):
+    source,path,sha,q,t=_source_run(tmp_path)
+    items=export_verified_produced_items(path,[source],expected_project_id="project-a")
+    assert len(items)==1
+    row=items[0]
+    assert row["quantity_id"]==q.quantity_id
+    assert row["value"]==10.0 and row["unit"]=="m2"
+    assert row["object_refs"]==["room-1"]
+    assert row["source_sha256"]==sha
+    assert row["trade_category"] is None
+    assert row["trade_authority_status"]=="UNAVAILABLE_NOT_INFERRED"
+    assert row["lineage_ok"] is True
+    assert row["abstained"] is False
+
+
+def test_missing_original_source_bytes_cannot_be_inferred_from_seal(tmp_path):
+    _,path,_,_,_=_source_run(tmp_path)
+    with pytest.raises(SourceClosedRunConflictError,match="original source files"):
+        export_verified_produced_items(path,[],expected_project_id="project-a")
+
+
+def test_producer_source_pdf_changed_does_not_write_quantities(tmp_path):
+    source,path,_,_,_=_source_run(tmp_path)
+    source.write_bytes(b"%PDF-replaced-source-a")
+    output=tmp_path/"produced_items.json"
+    with pytest.raises(SourceClosedRunConflictError,match="original source SHA"):
+        main(["--sealed-run",str(path),"--source",str(source),
+              "--project-id","project-a","--output",str(output)])
+    assert not output.exists()
+
+
+def test_project_identity_mismatch_rejected_before_any_produced_items(tmp_path):
+    source,path,_,_,_=_source_run(tmp_path)
+    with pytest.raises(SourceClosedRunConflictError,match="project identity"):
+        export_verified_produced_items(path,[source],expected_project_id="other-project")
+
+
+def test_missing_source_input_path_does_not_create_output(tmp_path):
+    _,path,_,_,_=_source_run(tmp_path)
+    output=tmp_path/"produced.json"
+    with pytest.raises(FileNotFoundError):
+        main(["--sealed-run",str(path),"--source",str(tmp_path/"no.pdf"),
+              "--project-id","project-a","--output",str(output)])
+    assert not output.exists()
+
+
+def test_signed_abstention_remains_null_without_claiming_commercial_quantity(tmp_path):
+    source,path,sha,q,t=_source_run(tmp_path)
+    blocked=replace(q,value=None,abstained=True,status="abstained",
+                    input_entity_ids=(),evidence_ids=(),
+                    blocking_reasons=("metric_source_unavailable",))
+    source_trace=replace(t,canonical_entity_ids=(),evidence_ids=())
+    sealed=seal_source_closed_run(
+        [blocked],project_id="project-a",traces_by_quantity_id={q.quantity_id:source_trace},
+    )
+    path.write_text(sealed.to_json(),encoding="utf-8")
+    row=export_verified_produced_items(path,[source])[0]
+    assert row["abstained"] is True
+    assert row["value"] is None
+    assert row["object_refs"]==[]
+
+
+def test_tampered_signed_quantity_value_cannot_be_exported(tmp_path):
+    source,path,_,_,_=_source_run(tmp_path)
+    payload=json.loads(path.read_text())
+    payload["quantities"][0]["value"]=500
+    path.write_text(json.dumps(payload),encoding="utf-8")
+    with pytest.raises(SourceClosedRunConflictError,match="fingerprint"):
+        export_verified_produced_items(path,[source])
+
+
+def test_exporter_preserves_original_bytes_and_writes_deterministic_array(tmp_path):
+    source,path,sha,q,_=_source_run(tmp_path)
+    output=tmp_path/"produced_items.json"
+    original=path.read_bytes(),source.read_bytes()
+    assert main(["--sealed-run",str(path),"--source",str(source),
+                 "--project-id","project-a","--output",str(output)])==0
+    assert (path.read_bytes(),source.read_bytes())==original
+    assert json.loads(output.read_text())[0]["quantity_id"]==q.quantity_id
+    assert not list(tmp_path.glob(".produced_items.json.*.tmp"))
+
+
+@pytest.mark.parametrize("which",["seal","source"])
+def test_produced_output_never_overwrites_original_source(which,tmp_path):
+    source,path,_,_,_=_source_run(tmp_path)
+    target=path if which=="seal" else source
+    before=target.read_bytes()
+    with pytest.raises(ValueError,match="must not overwrite"):
+        main(["--sealed-run",str(path),"--source",str(source),
+              "--project-id","project-a","--output",str(target)])
+    assert target.read_bytes()==before
