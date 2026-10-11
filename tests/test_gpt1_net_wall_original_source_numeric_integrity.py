@@ -49,3 +49,30 @@ def test_valid_source_gross_and_opening_deduction_remain_blocked_until_universe_
     assert "gross_wall_area_value_invalid" not in result.blocking_reasons
     assert "opening_deduction_value_invalid" not in result.blocking_reasons
     assert "opening_universe_completeness_not_authenticated" in result.blocking_reasons
+
+
+
+@pytest.mark.parametrize("untrusted", [
+    (True,), (123,), (" OP-1",), ("OP-1 ",),
+])
+def test_completion_source_member_ids_cannot_be_stringified_or_trimmed(untrusted):
+    result = _build(
+        deductions=(_deduction("OP-1", 1.25),),
+        completion=_complete(untrusted),
+    )
+    assert result.abstained
+    assert "opening_set_completion_ids_invalid" in result.blocking_reasons
+
+
+@pytest.mark.parametrize("untrusted", [
+    ("OP-1", True), (True, "WALL-1"),
+    (" OP-1", "WALL-1"), ("OP-1 ", "WALL-1"),
+])
+def test_deduction_source_physical_identity_must_be_exact_typed_pair(untrusted):
+    deduction = replay(_deduction("OP-1", 1.25), input_entity_ids=untrusted)
+    result = _build(
+        deductions=(deduction,),
+        completion=_complete(("OP-1",)),
+    )
+    assert result.abstained
+    assert "opening_deduction_identity_mismatch" in result.blocking_reasons
