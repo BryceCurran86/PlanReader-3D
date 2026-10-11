@@ -63,3 +63,62 @@ source visibility, source PDFs, source topology geometry, frozen holdout
 reference/universe/manifests, evaluator, denominator, tolerances, performance
 gates or the 20,000-source-primitive hard limit. No verified accuracy
 improvement is claimed.
+
+## Exact original-source progress — seven absent visible raster flanks
+
+Authenticated source references only; these are not benchmark expected
+quantities or project-specific runtime predicates:
+
+- Lot16 original PDF SHA: `10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844`.
+- Archived [source/G17-W4 run #38111200641](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38111200641), artifact
+  `11691794534`: exact original ancestry JSON digest
+  `b557a9061509f5a8058ea5d09bccc05f4a400534b062eef80e1a36572fecfb66`
+  and exact required-flank digest
+  `3100908d00529376c33b3b6daa08590d551370ba23af35640e724adb2cbab99f`.
+- Archived [pixel producer run #38116673934](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38116673934),
+  artifact `11695374575`: pixel report SHA
+  `a078f369abdbb3a2428750f1e0989094d21c13717e99a7341501bb44dd5de289`.
+  All source and retention checks passed on source producer #2356, merged at
+  `c1953a55e4a54a8f0e0ff7b03d5ca9257f302ef2`. It nominated
+  1,952 original-positive run records and retained 23 opening existence
+  proofs, 14 host bindings and nine frames unchanged.
+
+An independent **offline diagnostic projection** of every full positive run
+onto the seven G17 opening-flank geometry receipts, using only the existing
+production 2.5pt snap allowance and dual-render 0.74pt pixel allowance,
+found the following candidate counts. These are *matching source-pixel runs*,
+not source-visible wall segments, physical hosts or verified equivalent walls.
+W4 counts are from the separate **full-page experimental** W2/W4 trace,
+which has no authenticated production floor-plan viewport.
+
+| Opening source identity (short prefix) | Original missing side | Matching positive runs on that side | Experimental W4 alternatives on that side |
+| --- | --- | ---: | ---: |
+| `2b2a91e8` | left | 0 | 0 |
+| `33d277d4` | left | 2 | 0 |
+| `81a45c3a` | right | 6 | 2 |
+| `a68d0b7d` | left | 0 | 0 |
+| `b2489726` | left | 0 | 0 |
+| `ba7f75a2` | left | 0 | 0 |
+| `f8197523` | left | 6 | 2 |
+
+**Actual next gates:** The two candidates for `33d277d4` reach W2 but not
+experimental W4. `81a45c3a` and `f8197523` have multiple alternative
+experimental W4 candidates; their original source-visible identity,
+authenticated page-viewport membership, positive structural-wall
+classification, physical equivalence and both flank owner closure remain
+unproved. Zero candidates for the other four missing flanks does not prove
+there is no wall: it means the independent rejected-component source-run
+inventory cannot presently nominate that missing segment. No nearest wall,
+W4 first-owner selection or manufactured counterpart is permissible.
+
+The remaining two of the original **nine unhosted physical opening
+identities** are `415d34ddc0c7591b181ddadc11aefe1d` and
+`b222d5310a7df1d632d5daab1a676645`, both without an authenticated
+host band in the original 23/14/9 production report. The historical native
+two-face/equivalence conflict for the former is not overridden by this raster
+pixel audit. Neither is covered by a positive pixel-run proof.
+
+The dedicated exact-original-source job in this PR consumes the independent
+producer and actual source PDF, checks all seven G17 join rows and publishes
+the full read-only artifact for subsequent physical-host verification.
+No original customer quantity or frozen Full Plan V2 scoring is changed.
