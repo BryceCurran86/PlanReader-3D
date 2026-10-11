@@ -11,6 +11,7 @@ on:
       - tests/test_raster_visibility_receipt_registration.py
       - tools/diag_opening_wall_face_preservation.py
       - .github/workflows/test-gpt3-source-frame-proof.yml
+      - tests/test_native_unstroked_fill_evidence.py
       - tests/test_raster_opening_whole_wall_frame.py
 permissions:
   contents: read
@@ -23,30 +24,38 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ORT_DISABLE_TELEMETRY: "1"
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: lot16-connected-frame-source-handoff
-          path: prerequisite-lot16
+      - name: Independent source replay from exact PR-base commit
+        run: |
+          mkdir -p prerequisite-lot16
+          git worktree add --detach /tmp/source-frame-lot16-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/source-frame-lot16-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json"
+          )
       - name: Real Lot16 source, wall and host handoff
         run: >-
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
           --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           --page-id 3 --output lot16-connected-frame-source-handoff.json
-      - name: Verify exact source ownership and safety cap
+      - name: Verify exact source-owned neutral fill opposition
         run: |
+          PYTHONPATH=. python -u tools/diag_native_opening_source_roles.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output lot16-native-source-roles.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -61,45 +70,84 @@ jobs:
           assert len(ids) == len(set(ids))
           assert 'quantities' not in report
           baseline = json.loads(Path('prerequisite-lot16/lot16-connected-frame-source-handoff.json').read_text())
-          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
-          assert baseline['source_sha256'] == report['source_sha256']
-          assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
-          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
-          old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
+          roles = json.loads(Path('lot16-native-source-roles.json').read_text())
+          expected_sha = '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert baseline['source_sha256'] == report['source_sha256'] == roles['source_sha256'] == expected_sha
+          assert baseline['primitive_safety_cap'] == report['primitive_safety_cap'] == 20000
+          assert baseline['summary'] == {'physical_existence_claims': 22, 'host_bindings': 14, 'host_frames': 9}
+          assert report['summary'] == {'physical_existence_claims': 21, 'host_bindings': 14, 'host_frames': 9}
+          def keyed(rows):
+              ids = [row['opening_identity_id'] for row in rows]
+              assert len(ids) == len(set(ids))
+              return dict(zip(ids, rows))
+          before, after = keyed(baseline['opening_bindings']), keyed(report['opening_bindings'])
+          assert set(after) <= set(before)
+          missing = set(before) - set(after)
+          assert missing == {'physical_opening_existence_b222d5310a7df1d632d5daab1a676645'}, missing
+          assert all(before[oid] == row for oid, row in after.items())
+          assert before[next(iter(missing))]['record_id'] is None
+          assert before[next(iter(missing))]['host_wall_id'] is None
+          representative = before[next(iter(missing))]['representative_observation_id']
+          opposing = [row for row in roles['retained_opposed_candidates']
+                      if row['status'] == 'abstained'
+                      and representative in row['candidate']['source_observation_ids']]
+          assert len(opposing) == 1
+          assert any(
+              atom['kind'] == 'annotation_border'
+              and atom['reason_codes'] == ['native_unstroked_pale_neutral_fill_boundary']
+              and atom['metadata']['polarity'] == 'opposing'
+              and atom['metadata']['all_source_primitives_covered'] is True
+              and atom['metadata']['paint_type'] == 'f'
+              and atom['metadata']['stroke'] is None
+              and atom['metadata']['fill_opacity'] == 1.0
+              and set(atom['metadata']['source_observation_ids']) == set(opposing[0]['candidate']['source_observation_ids'])
+              for atom in opposing[0]['opposing_evidence_atoms'])
+          frames_before, frames_after = keyed(baseline['host_frames']), keyed(report['host_frames'])
+          assert set(frames_after) == set(after)
+          assert all(frames_after[oid] == row for oid, row in frames_before.items()
+                     if row['record_id'] is not None)
+          assert not roles.get('opening_count_publication_allowed', False)
+          assert not roles.get('metric_quantity_publication_allowed', False)
+          print({'only_original_table_annotation_opposed': sorted(missing),
+                 'authenticated_old_hosts': 14, 'authenticated_old_frames': 9})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: lot16-connected-frame-source-handoff
-          path: lot16-connected-frame-source-handoff.json
+          path: |
+            prerequisite-lot16/lot16-connected-frame-source-handoff.json
+            lot16-connected-frame-source-handoff.json
+            lot16-native-source-roles.json
           retention-days: 14
   maryborough-source-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 90
     env:
       ORT_DISABLE_TELEMETRY: "1"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: maryborough-connected-frame-source-handoff
-          path: prerequisite-maryborough
+      - name: Independently extract current PR-base Maryborough source receipts
+        run: |
+          git worktree add --detach /tmp/source-frame-maryborough-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/source-frame-maryborough-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+              --page-id 7 --page-id 30 --page-id 31 --output "$GITHUB_WORKSPACE/maryborough-source-baseline.json"
+          )
       - name: Compare real Maryborough source and host identities with prerequisite
         run: |
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
-          cp prerequisite-maryborough/maryborough-connected-frame-source-handoff.json maryborough-source-baseline.json
           python - <<'PY'
           import json
           from pathlib import Path
