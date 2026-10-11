@@ -18,6 +18,7 @@ Schedule-only quantities and implicit default counts remain fail-closed.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 from pb_generic_opening_count_authority import (
     GenericOpeningCountProducer,
@@ -328,6 +329,7 @@ def publish_live_authenticated_opening_count_quantities(
                 not set(physical_source_receipts[opening_id]).issubset(set(receipt_ids))
                 for opening_id in physical_ids
             )
+            or not isinstance(quantity.metadata, Mapping)
             or quantity.metadata.get("schedule_corroborated") is not True
             or quantity.metadata.get("commercial_projection_allowed") is not True
         ):
