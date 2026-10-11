@@ -102,3 +102,26 @@ def test_invalid_unhashable_evidence_receipt_never_crashes_blocked_net_wall():
     assert result.value is None
     assert "ev-wall" in result.evidence_ids
     assert all(type(value) is str for value in result.evidence_ids)
+
+
+
+@pytest.mark.parametrize("corrupt_receipts", [None, "ev-wall", 42, True, ("ev-wall", None)])
+def test_blocked_net_wall_with_missing_or_scalar_original_receipts_is_serializable(corrupt_receipts):
+    gross = replay(_gross(), evidence_ids=corrupt_receipts)
+    result = _build(gross=gross, completion=None)
+    assert result.abstained is True
+    assert result.value is None
+    assert all(type(source_id) is str for source_id in result.evidence_ids)
+
+
+@pytest.mark.parametrize("corrupt_members", [None, "OP-1", True, 123])
+def test_corrupt_deduction_member_collection_cannot_crash_net_wall(corrupt_members):
+    deduction = replay(
+        _deduction("OP-1", 1.25),
+        input_entity_ids=corrupt_members,
+    )
+    result = _build(
+        deductions=(deduction,), completion=_complete(("OP-1",)),
+    )
+    assert result.abstained is True
+    assert "opening_deduction_identity_mismatch" in result.blocking_reasons
