@@ -128,3 +128,31 @@ def test_original_ceiling_polygon_retains_positive_bbox_and_produced_area():
     )
     assert len(traces) == 1
     assert next(iter(traces.values())).source_bbox == (0.0, 0.0, 10.0, 10.0)
+
+
+
+@pytest.mark.parametrize("bad_members", [
+    None, True, 17, "room-1", (), (" room-1",),
+    ("room-1 ",), ("room-1", True),
+])
+def test_final_ceiling_rejects_normalized_or_missing_upstream_room_member(bad_members):
+    assert publish_live_ceiling_area_quantities(
+        _result(shadow=source_replay(input_entity_ids=bad_members))
+    ) == ()
+
+
+@pytest.mark.parametrize("bad_id", [
+    True, 17, "", " qty-shadow-ceiling-1", "qty-shadow-ceiling-1 ",
+])
+def test_final_ceiling_rejects_replayed_upstream_shadow_quantity_id(bad_id):
+    assert publish_live_ceiling_area_quantities(
+        _result(shadow=source_replay(quantity_id=bad_id))
+    ) == ()
+
+
+def test_final_ceiling_keeps_exact_source_room_member_and_original_quantity_id():
+    shadow = _shadow_quantity()
+    ceiling = _ceiling()
+    assert shadow.input_entity_ids == (ceiling.room_entity_id,)
+    assert shadow.quantity_id == ceiling.ceiling_quantity_id
+    assert len(publish_live_ceiling_area_quantities(_result())) == 1
