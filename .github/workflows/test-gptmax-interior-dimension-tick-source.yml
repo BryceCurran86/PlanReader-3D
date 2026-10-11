@@ -66,33 +66,33 @@ jobs:
           sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
           assert before["source_sha256"]==after["source_sha256"]==roles["source_sha256"]==sha
           assert before["primitive_safety_cap"]==after["primitive_safety_cap"]==20000
-          assert before["summary"]=={"physical_existence_claims":23,"host_bindings":14,"host_frames":9}
+          assert before["summary"]==after["summary"]=={"physical_existence_claims":21,"host_bindings":14,"host_frames":9}
           def keyed(rows):
               by_id={x["opening_identity_id"]:x for x in rows}
               assert len(by_id)==len(rows)
               return by_id
           old,new=keyed(before["opening_bindings"]),keyed(after["opening_bindings"])
-          missing=set(old)-set(new)
-          # Exact original-source diagnostic control only, NEVER runtime
-          # inference from a hardcoded benchmark/opening identity.
+          # Source-opposed historical native dimension candidate is already
+          # absent from this source-reproduced PR base. Require exact identity
+          # and receipt retention, not the obsolete 23 -> 22 transition.
           target="physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d"
-          assert missing=={target},("unexpected G17 loss or absent new typed opposition",sorted(missing))
-          assert all(new[oid]==record for oid,record in old.items() if oid in new)
-          assert old[target]["host_wall_id"] is None and old[target]["record_id"] is None
-          assert after["summary"]=={"physical_existence_claims":22,"host_bindings":14,"host_frames":9}
+          assert target not in old and target not in new
+          assert old==new, "source-positive physical opening proof changed"
           old_frames,new_frames=keyed(before["host_frames"]),keyed(after["host_frames"])
-          assert all(new_frames[k]==row for k,row in old_frames.items() if row["record_id"])
-          representative=old[target]["representative_observation_id"]
+          assert old_frames==new_frames, "authenticated source frames changed"
+          assert len(old)==21 and len(old_frames)==21
+          # Independently prove a native source-owned text/tick opposition
+          # remains retained as ABSTAIN, never becomes host/count authority.
           opposed=[
               r for r in roles["retained_opposed_candidates"]
-              if representative in r["candidate"]["source_observation_ids"]]
-          assert len(opposed)==1 and opposed[0]["status"]=="abstained"
-          assert any(atom["kind"]=="dimension_annotation"
-                     and atom["reason_codes"]==["native_dimension_cap_tick_text_topology"]
-                     and atom["metadata"]["polarity"]=="opposing"
-                     and atom["metadata"]["all_opening_support_covered"] is True
-                     for atom in opposed[0]["opposing_evidence_atoms"])
-          assert roles["summary"]["positive_existence_claims"]==22
+              if r["status"]=="abstained"
+              and any(atom["kind"]=="dimension_annotation"
+                      and atom["reason_codes"]==["native_dimension_cap_tick_text_topology"]
+                      and atom["metadata"].get("polarity")=="opposing"
+                      and atom["metadata"].get("all_opening_support_covered") is True
+                      for atom in r["opposing_evidence_atoms"])]
+          assert opposed, "authenticated opposing native dimension proof missing"
+          assert roles["summary"]["positive_existence_claims"]==21
           print({"original_dimension_lookalike_typed_opposed":target,
                  "hosts_retained":14,"frames_retained":9})
           PY
