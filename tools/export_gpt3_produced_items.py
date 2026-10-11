@@ -133,8 +133,9 @@ def export_verified_produced_items(
         if not row.abstained and (
             type(row.value) not in (int,float)
             or not math.isfinite(row.value)
+            or row.value < 0
         ):
-            raise SourceClosedRunConflictError("nonfinite sealed quantity cannot be exported")
+            raise SourceClosedRunConflictError("nonfinite or negative sealed quantity cannot be exported")
         if row.abstained and row.value is not None:
             raise SourceClosedRunConflictError("ABSTAIN source quantity has a fabricated numeric value")
         if not row.abstained and (row.value is None or not row.object_identity_refs):
