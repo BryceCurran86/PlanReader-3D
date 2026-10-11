@@ -98,3 +98,25 @@ def test_original_unmodified_source_membership_remains_firm_in_both_paths():
     assert len(publish_live_canonical_room_area_quantities(
         _claim_with_canonical_room(source)
     )) == 1
+
+
+
+@pytest.mark.parametrize("field,forged", [
+    ("metric_area_quantity_id", "room-area-1 "),
+    ("metric_area_quantity_id", True),
+    ("canonical_floor_id", " floor-1"),
+    ("physical_floor_surface_id", "floor-1 "),
+    ("room_entity_id", True),
+    ("source_room_face_record_id", " face-1"),
+])
+def test_final_canonical_floor_refuses_cast_or_trim_of_original_physical_identity(field, forged):
+    floor = replace(_floor(), **{field: forged})
+    claim = replace(_claim_with(_source_area()), canonical_floors=(floor,))
+    assert publish_live_floor_area_quantities(claim) == ()
+
+
+def test_final_canonical_floor_keeps_original_source_room_area_identity():
+    published = publish_live_floor_area_quantities(_claim_with(_source_area()))
+    assert len(published) == 1
+    assert published[0].value == 8.64
+    assert published[0].metadata["upstream_room_area_quantity_id"] == "room-area-1"
