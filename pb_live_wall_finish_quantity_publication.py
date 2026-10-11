@@ -23,6 +23,16 @@ LIVE_WALL_FINISH_QUANTITY_AUTHORITY = (
 )
 
 
+def _positive_source_finish_area(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        metric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(metric) and metric > 0.0
+
+
 def publish_bound_wall_finish_quantity(
     record: SourceBoundWallFinishQuantityRecord,
 ) -> QuantityEvidence:
@@ -83,9 +93,7 @@ def publish_bound_wall_finish_quantity(
     # seal so a stale or forged material/face/area cannot inherit authority.
     if (
         record.schema_version != SOURCE_BOUND_WALL_FINISH_QUANTITY_SCHEMA_VERSION
-        or type(record.quantity_m2) not in (int, float)
-        or not math.isfinite(float(record.quantity_m2))
-        or record.quantity_m2 <= 0.0
+        or not _positive_source_finish_area(record.quantity_m2)
         or any(
             type(value) is not str or not value or value != value.strip()
             for value in (
