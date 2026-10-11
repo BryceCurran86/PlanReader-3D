@@ -1,0 +1,109 @@
+name: GPT MAX Original Interior Dimension Chain Typed Opening Opposition
+on:
+  pull_request:
+    paths:
+      - pb_native_dimension_cap_evidence.py
+      - tests/test_native_dimension_cap_evidence.py
+      - docs/engineering/gptmax_native_interior_dimension_chain.md
+      - .github/workflows/test-gptmax-interior-dimension-tick-source.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_native_dimension_cap_evidence.py tests/test_native_unstroked_fill_evidence.py tests/test_g17_visible_opening_existence_v1.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Byte-authenticate real Lot16 PDF and untouched PR-base wall/opening proof
+        run: |
+          echo '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844  documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' | sha256sum --check --status
+          git worktree add --detach /tmp/gptmax-original-dimension-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/gptmax-original-dimension-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/original-dimension-before.json"
+          )
+      - name: Source-native interior tick correction and opposing physical-opening hypothesis
+        run: |
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output original-dimension-after.json
+          PYTHONPATH=. python -u tools/diag_native_opening_source_roles.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output original-dimension-native-roles.json
+      - name: Strict original physical host and frame retention with typed exact opening opposition
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path("original-dimension-before.json").read_text())
+          after=json.loads(Path("original-dimension-after.json").read_text())
+          roles=json.loads(Path("original-dimension-native-roles.json").read_text())
+          sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert before["source_sha256"]==after["source_sha256"]==roles["source_sha256"]==sha
+          assert before["primitive_safety_cap"]==after["primitive_safety_cap"]==20000
+          assert before["summary"]=={"physical_existence_claims":23,"host_bindings":14,"host_frames":9}
+          def keyed(rows):
+              by_id={x["opening_identity_id"]:x for x in rows}
+              assert len(by_id)==len(rows)
+              return by_id
+          old,new=keyed(before["opening_bindings"]),keyed(after["opening_bindings"])
+          missing=set(old)-set(new)
+          # Exact original-source diagnostic control only, NEVER runtime
+          # inference from a hardcoded benchmark/opening identity.
+          target="physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d"
+          assert missing=={target},("unexpected G17 loss or absent new typed opposition",sorted(missing))
+          assert all(new[oid]==record for oid,record in old.items() if oid in new)
+          assert old[target]["host_wall_id"] is None and old[target]["record_id"] is None
+          assert after["summary"]=={"physical_existence_claims":22,"host_bindings":14,"host_frames":9}
+          old_frames,new_frames=keyed(before["host_frames"]),keyed(after["host_frames"])
+          assert all(new_frames[k]==row for k,row in old_frames.items() if row["record_id"])
+          representative=old[target]["representative_observation_id"]
+          opposed=[
+              r for r in roles["retained_opposed_candidates"]
+              if representative in r["candidate"]["source_observation_ids"]]
+          assert len(opposed)==1 and opposed[0]["status"]=="abstained"
+          assert any(atom["kind"]=="dimension_annotation"
+                     and atom["reason_codes"]==["native_dimension_cap_tick_text_topology"]
+                     and atom["metadata"]["polarity"]=="opposing"
+                     and atom["metadata"]["all_opening_support_covered"] is True
+                     for atom in opposed[0]["opposing_evidence_atoms"])
+          assert roles["summary"]["positive_existence_claims"]==22
+          print({"original_dimension_lookalike_typed_opposed":target,
+                 "hosts_retained":14,"frames_retained":9})
+          PY
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-lot16-internal-dimension-tick-opposition
+          retention-days: 21
+          path: |
+            original-dimension-before.json
+            original-dimension-after.json
+            original-dimension-native-roles.json
