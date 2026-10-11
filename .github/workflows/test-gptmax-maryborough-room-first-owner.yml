@@ -71,6 +71,23 @@ jobs:
                      for r in d['source_scope_first_failures'])
           for row in d['source_scope_first_failures'][1:]:
               gate=row['original_source_label_gate']
+              boundary=row['original_withheld_boundary_w4_census']
+              assert len(boundary)==row['room_abstention_reason_counts'].get(
+                  'source_room_face_boundary_unresolved',0)
+              assert len({x['source_withheld_face_id'] for x in boundary})==len(boundary)
+              assert all(
+                  x['source_withheld_reason']=='source_room_face_boundary_unresolved'
+                  and x['original_physical_wall_adjacency_proven'] is False
+                  and x['original_withheld_face_room_publication_allowed'] is False
+                  and x['original_metric_quantity_publication_allowed'] is False
+                  and all(y['physical_wall_adjacency_proven'] is False
+                          and y['withheld_face_promotion_allowed'] is False
+                          and y['source_positive_room_face_receipt_id'] in set(
+                              row['room_source_face_receipt_ids'])
+                          and y['shared_source_w4_candidate_ids']
+                          for y in x['same_w4_candidate_receipt_seen_on_authenticated_label'])
+                  for x in boundary
+              )
               assert gate['source_room_geometry_inferred_from_labels'] is False
               assert gate['split_label_room_publication_allowed'] is False
               assert gate['firm_room_area_publication_allowed'] is False
