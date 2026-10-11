@@ -90,7 +90,12 @@ class CommercialTakeoffSourceTrace:
             and self.workspace_id.isascii()
             and self.workspace_id.isdecimal()
         ):
-            workspace_id = int(self.workspace_id)
+            try:
+                workspace_id = int(self.workspace_id)
+            except (ValueError, OverflowError) as exc:
+                raise MissingCommercialAuthorityError(
+                    "workspace_id must be a positive integer"
+                ) from exc
         else:
             # int(7.8) == 7 is not a valid original workspace authority.
             # Numeric strings remain supported for persisted integer IDs.
@@ -227,7 +232,12 @@ def _metadata_identity_matches(quantity: QuantityEvidence, trace: CommercialTake
             if type(candidate) is int and candidate > 0:
                 pass
             elif type(candidate) is str and candidate.isascii() and candidate.isdecimal():
-                candidate = int(candidate)
+                try:
+                    candidate = int(candidate)
+                except (ValueError, OverflowError) as exc:
+                    raise CommercialTakeoffConflictError(
+                        "QuantityEvidence workspace_id has invalid source identity type"
+                    ) from exc
             else:
                 raise CommercialTakeoffConflictError(
                     "QuantityEvidence workspace_id has invalid source identity type"
