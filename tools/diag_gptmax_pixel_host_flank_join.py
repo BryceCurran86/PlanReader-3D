@@ -15,6 +15,7 @@ from pb_opening_host_binding_authority import (
     _COORD_TOL, _RASTER_WHOLE_WALL_CENTER_TOL_PT, _OpeningGeometry,
 )
 from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
+from pb_source_visibility_authority import RASTER_RENDER_DPI
 from pb_wall_room_topology_stage_a import DEFAULT_GAP_SNAP_TOLERANCE_PT
 from tools.diag_gptmax_raster_host_source_membership import (
     _finite_coordinates, _finite_source_axis, _validate_aperture_basis,
@@ -60,6 +61,8 @@ def _opening_basis(row):
 
 
 def _pixel_inventory(report, source_sha, page_id):
+    if report.get("render_dpi") != RASTER_RENDER_DPI:
+        raise ValueError("original pixel source render resolution mismatch")
     if report.get("ordinary_visibility_rejects_shadow_kind") is not True:
         raise ValueError("pixel shadow visibility exclusion unavailable")
     if report.get("original_source_render_reauthenticated") is not True:
@@ -97,6 +100,22 @@ def _pixel_inventory(report, source_sha, page_id):
         receipt_coords = _finite_coordinates(proof.get("geometry"), 4, "pixel receipt geometry")
         if coords != receipt_coords or coords[:2] == coords[2:]:
             raise ValueError("pixel source/receipt geometry disagreement")
+        pixels = proof.get("pixel_geometry")
+        bbox = proof.get("component_bbox")
+        orientation = proof.get("orientation")
+        if (orientation not in ("horizontal", "vertical")
+                or not isinstance(pixels, (list, tuple)) or len(pixels) != 4
+                or not isinstance(bbox, (list, tuple)) or len(bbox) != 4
+                or any(type(p) is not int or p < 0 for p in (*pixels, *bbox))):
+            raise ValueError("invalid original-positive pixel source address")
+        x1, y1, x2, y2 = pixels
+        bx1, by1, bx2, by2 = bbox
+        if ((orientation == "horizontal" and not (y1 == y2 and x1 < x2))
+                or (orientation == "vertical" and not (x1 == x2 and y1 < y2))
+                or not (bx1 <= min(x1, x2) <= max(x1, x2) <= bx2)
+                or not (by1 <= min(y1, y2) <= max(y1, y2) <= by2)
+                or coords != tuple(p * 72.0 / RASTER_RENDER_DPI for p in pixels)):
+            raise ValueError("pixel geometry is not a complete original render-space run")
         verified[oid] = coords
     return verified
 
