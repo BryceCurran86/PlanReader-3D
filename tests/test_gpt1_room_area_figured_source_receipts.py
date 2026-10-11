@@ -168,7 +168,14 @@ def test_original_source_room_page_and_receipts_still_allow_documented_area():
 ])
 def test_untyped_scaled_room_pdf_points_never_become_metric_area(corrupt_polygon):
     from tests.test_room_area_quantity_v2 import _scale, _scaled_qty
-    result = _scaled_qty(room=_room(points=corrupt_polygon), scale=_scale())
+    # RoomCandidate construction itself converts normalizable PDF source
+    # numerics and rejects NaN/huge values. Exercise the real quantity seam
+    # against an imported/replayed record whose data has been changed since
+    # construction, rather than incorrectly expecting the constructor to
+    # preserve invalid original input.
+    room = copy(_room())
+    object.__setattr__(room, "polygon_pdf_pts", corrupt_polygon)
+    result = _scaled_qty(room=room, scale=_scale())
     assert result.abstained is True
     assert result.value is None
     assert "room_polygon_area_invalid" in result.blocking_reasons
