@@ -15,6 +15,7 @@ def _first(**replacements):
         manifest_status="VERIFIED",manifest_reasons=[],
         sealed_verified=True,seal_reasons=[],
         produced_present=True,produced_valid=True,produced_count=2,
+        produced_reasons=[],
         parity_verified=True,parity_reasons=[],
     )
     state.update(replacements)
@@ -48,11 +49,21 @@ def test_completed_source_universe_but_missing_signed_production_run_stops_at_se
 
 @pytest.mark.parametrize(("state","reason"),[
     ({"produced_present":False},"production_items_missing"),
-    ({"produced_valid":False},"produced_items_invalid_json_or_shape"),
+    ({"produced_valid":False,"produced_reasons":["produced_items_invalid_json_or_shape"]},"produced_items_invalid_json_or_shape"),
     ({"produced_count":0},"empty_produced_items_unverified"),
 ])
 def test_missing_or_malformed_produced_items_never_become_complete(state,reason):
     assert _first(**state)==("PRODUCED_ITEMS",reason)
+
+
+@pytest.mark.parametrize("actual_reason",[
+    "duplicate_produced_quantity_ids",
+    "produced_quantity_id_missing_or_invalid",
+    "produced_items_invalid_json_or_shape",
+])
+def test_exact_produced_id_failure_is_reported_instead_of_generic_json_error(actual_reason):
+    assert _first(produced_valid=False,produced_reasons=[actual_reason])==(
+        "PRODUCED_ITEMS",actual_reason)
 
 
 def test_signed_quantity_mismatch_is_reported_as_exact_first_parity_reason():
