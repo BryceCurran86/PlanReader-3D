@@ -227,18 +227,22 @@ def _publication_boundary_ownership(
         if face_edge[0] == face_edge[1]:
             return None
 
+        # An explicitly indexed W4 owner cannot silently lose its source
+        # identity and be replaced by a convenient containing wall. A null,
+        # malformed or foreign indexed owner is a source conflict, never an
+        # invitation to infer ownership from geometry alone.
+        indexed = face_edge in edge_owner
         owner = edge_owner.get(face_edge)
-        if owner is not None:
-            # Exact index ownership is strong only when the claimed W4
-            # owner still has an actual original source wall subedge. A
-            # dangling/stale index key is not physical wall evidence.
+        if indexed:
+            if not isinstance(owner, str) or not owner or owner != owner.strip():
+                return None
             original_source_edges = wall_edges.get(owner, ())
             if not any(
                 _edge_contains_edge(source_edge, face_edge)
                 for source_edge in original_source_edges
             ):
                 return None
-        if owner is None:
+        if not indexed:
             containing = _containing_wall_ids(
                 face_edge,
                 grid=ownership_grid,
