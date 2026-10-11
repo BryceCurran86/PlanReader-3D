@@ -212,6 +212,7 @@ def _snap_geometry_indexed(
     tolerance_pt: float = DEFAULT_GAP_SNAP_TOLERANCE_PT,
     *,
     include_endpoint_assignments: bool = False,
+    exact_endpoint_index_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Exact Stage-A equivalent of snap_geometry with a local endpoint index.
 
@@ -221,12 +222,24 @@ def _snap_geometry_indexed(
     historical strict distance comparison is retained. Node centroids still
     move by the same running mean after every accepted endpoint.
     """
-    if tolerance_pt <= 0:
+    if type(exact_endpoint_index_shadow) is not bool:
+        raise ValueError("exact endpoint index shadow must be explicit boolean")
+    if exact_endpoint_index_shadow and tolerance_pt != 0:
+        raise ValueError("exact endpoint index shadow requires zero tolerance")
+    if tolerance_pt <= 0 and not exact_endpoint_index_shadow:
         return snap_geometry(segments, tolerance_pt=tolerance_pt)
+    if exact_endpoint_index_shadow:
+        if any(not math.isfinite(float(seg[key]))
+               for seg in segments for key in ("x1", "y1", "x2", "y2")):
+            return snap_geometry(segments, tolerance_pt=tolerance_pt)
+        # Legacy zero-mode never exposed these optional audit assignments.
+        include_endpoint_assignments = False
 
     nodes: List[Dict[str, Any]] = []
     endpoint_assignments: Dict[str, Tuple[int, int]] = {}
-    cell_size = float(tolerance_pt)
+    # A bin is a lookup aid, never a geometric join tolerance. Zero-mode still
+    # uses the unchanged exact distance predicate and running-centroid update.
+    cell_size = 1.0 if exact_endpoint_index_shadow else float(tolerance_pt)
     grid: Dict[Tuple[int, int], set[int]] = {}
 
     def cell_for(x: float, y: float) -> Tuple[int, int]:
@@ -240,6 +253,18 @@ def _snap_geometry_indexed(
         grid.setdefault(cell_for(node["x"], node["y"]), set()).add(node_idx)
 
     def move_in_grid(node_idx: int, old_cell: Tuple[int, int]) -> None:
+        node = nodes[node_idx]
+        if exact_endpoint_index_shadow and not (
+            math.isfinite(node["x"]) and math.isfinite(node["y"])
+        ):
+            # Preserve a legacy overflowed graph node, which cannot match any
+            # finite endpoint. Do not floor infinity or invent a new position.
+            members = grid.get(old_cell)
+            if members is not None:
+                members.discard(node_idx)
+                if not members:
+                    grid.pop(old_cell, None)
+            return
         new_cell = cell_for(nodes[node_idx]["x"], nodes[node_idx]["y"])
         if new_cell == old_cell:
             return
@@ -601,6 +626,7 @@ def build_wall_graph_for_viewport(
     *,
     gap_snap_tolerance_pt: float = DEFAULT_GAP_SNAP_TOLERANCE_PT,
     collinear_angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
+    exact_endpoint_index_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -613,6 +639,10 @@ def build_wall_graph_for_viewport(
     ``"excluded_segments"`` key recording what Section 6.11's pre-filter
     removed and why (never silently dropped from observability).
     """
+    if type(exact_endpoint_index_shadow) is not bool:
+        raise ValueError("exact endpoint index shadow must be explicit boolean")
+    if exact_endpoint_index_shadow and gap_snap_tolerance_pt != 0:
+        raise ValueError("exact endpoint index shadow requires zero tolerance")
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
     split_pairs = split_segments_at_intersections(point_pairs)
@@ -624,6 +654,7 @@ def build_wall_graph_for_viewport(
         split_segment_dicts,
         tolerance_pt=gap_snap_tolerance_pt,
         include_endpoint_assignments=audit_short_source,
+        **({"exact_endpoint_index_shadow": True} if exact_endpoint_index_shadow else {}),
     )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(

@@ -1,0 +1,114 @@
+name: GPT MAX Original Full Page Endpoint Index Shadow
+on:
+  pull_request:
+    paths:
+      - pb_wall_room_topology_stage_a.py
+      - tools/diag_gptmax_full_foreground_run_source.py
+      - scripts/gptmax_full_page_exact_endpoint_shadow.py
+      - tests/test_wall_room_topology_zero_snap_index_shadow.py
+      - tests/test_gptmax_full_page_exact_endpoint_shadow.py
+      - docs/engineering/gptmax_zero_endpoint_index_shadow.md
+      - .github/workflows/test-gptmax-zero-endpoint-index-shadow.yml
+concurrency:
+  group: gptmax-zero-index-shadow-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_wall_room_topology_zero_snap_index_shadow.py tests/test_gptmax_full_page_exact_endpoint_shadow.py tests/test_wall_room_topology_snap_index.py tests/test_wall_room_topology_stage_a.py tests/test_wall_room_topology_collinear_merge_index.py tests/test_gptmax_exact_endpoint_flank_shadow.py tests/test_gptmax_full_foreground_run_source.py tests/test_gptmax_full_foreground_flank_stages.py tests/test_gptmax_cross_opening_source_usage.py
+          ruff check --select F821,F823 pb_wall_room_topology_stage_a.py tools/diag_gptmax_full_foreground_run_source.py scripts/gptmax_full_page_exact_endpoint_shadow.py tests/test_wall_room_topology_zero_snap_index_shadow.py tests/test_gptmax_full_page_exact_endpoint_shadow.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-full-page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Independent original PR-base production receipt control
+        run: |
+          git rev-parse HEAD > zero-index-head.txt
+          git worktree add --detach /tmp/gptmax-zero-index-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/gptmax-zero-index-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/zero-index-base-production.json"
+          )
+      - name: Original full-page shadow and independent production receipts
+        run: |
+          PYTHONPATH=. python -u scripts/gptmax_full_page_exact_endpoint_shadow.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output zero-index-full-page-source.json
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output zero-index-head-production.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('zero-index-full-page-source.json').read_bytes())
+          assert Path('zero-index-base-production.json').read_bytes()==Path('zero-index-head-production.json').read_bytes()
+          p=json.loads(Path('zero-index-head-production.json').read_bytes())
+          assert p['summary']=={'physical_existence_claims':21,'host_bindings':14,'host_frames':9}
+          assert p['primitive_safety_cap']==r['source_primitive_safety_cap']==20000
+          assert p['source_sha256']==r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert r['original_source_reauthenticated'] is True
+          assert r['default_production_state_unchanged'] is True
+          assert r['identical_full_page_source_inputs_for_both_modes'] is True
+          assert r['full_source_input_primitive_count']==10099<=20000
+          assert len(r['local_legacy_exact_controls'])==7
+          assert all(c['complete_local_legacy_graph_equal'] is True for c in r['local_legacy_exact_controls'])
+          for key in ('complete_full_page_legacy_zero_graph_equality_proven',
+                      'full_page_scope_is_authenticated_floor_plan_viewport','physical_wall_authority',
+                      'physical_equivalence_proven','source_parent_transfer_allowed',
+                      'structural_source_universe_complete','host_publication_allowed',
+                      'opening_count_publication_allowed','metric_quantity_publication_allowed'):
+              assert r[key] is False
+          assert r['benchmark_accuracy'] is None
+          for mode in ('default_full_page_shadow','indexed_exact_endpoint_full_page_shadow'):
+              graph=r[mode]['source_graph']
+              assert graph['input_source_count']==10099
+              assert graph['scope_authority'].startswith('full-page diagnostic only')
+              assert graph['physical_equivalence_proven'] is False and graph['host_publication_allowed'] is False
+              assert graph['w4_edge_map_consistent'] is True
+              assert len(graph['source_parent_census'])==10099
+              assert all(e['physical_host_authority'] is False for e in graph['all_w2_edges'])
+              assert len(r[mode]['opening_rows'])==7
+              for row in r[mode]['opening_rows']:
+                  for flank in row['flanks']:
+                      for pixel in flank['source_run_rows']:
+                          c=pixel['exact_source_span_coverage']
+                          assert c['combined_graph_edge_created'] is False
+                          assert c['physical_wall_authority'] is False and c['host_publication_allowed'] is False
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-full-page-zero-index
+          retention-days: 30
+          path: |
+            zero-index-head.txt
+            zero-index-base-production.json
+            zero-index-head-production.json
+            zero-index-full-page-source.json
