@@ -278,6 +278,44 @@ def _sealed_projection_proof(
     return not blockers, blockers
 
 
+def _first_failing_authority_stage(
+    *, source_verified: bool, source_reasons: list[str],
+    manifest_status: str, manifest_reasons: list[str],
+    sealed_verified: bool, seal_reasons: list[str],
+    produced_present: bool, produced_valid: bool, produced_count: int | None,
+    parity_verified: bool, parity_reasons: list[str],
+) -> tuple[str, str]:
+    """Return a grounded earliest authority failure, never a benchmark match.
+
+    Stage order is source bytes -> physical universe -> sealed production ->
+    produced identity -> parity -> independent commercial trade authority.
+    No stage consults gold descriptions, matches or evaluator quantities.
+    """
+    if not source_verified:
+        return "ORIGINAL_SOURCE_SHA_AUTHORITY", (
+            sorted(source_reasons)[0] if source_reasons else "source_sha_unverified"
+        )
+    if manifest_status != "VERIFIED":
+        return "SOURCE_UNIVERSE_CLOSURE", (
+            manifest_reasons[0] if manifest_reasons else "frozen_manifest_not_verified"
+        )
+    if not sealed_verified:
+        return "SEALED_PRODUCTION_AUTHORITY", (
+            sorted(seal_reasons)[0] if seal_reasons else "sealed_run_unverified"
+        )
+    if not produced_present:
+        return "PRODUCED_ITEMS", "production_items_missing"
+    if not produced_valid:
+        return "PRODUCED_ITEMS", "produced_items_invalid_json_or_shape"
+    if not produced_count:
+        return "PRODUCED_ITEMS", "empty_produced_items_unverified"
+    if not parity_verified:
+        return "SIGNED_QUANTITY_PARITY", (
+            sorted(parity_reasons)[0] if parity_reasons else "produced_sealed_parity_not_proven"
+        )
+    return "COMMERCIAL_TRADE_AUTHORITY", "commercial_trade_authority_not_independently_verified"
+
+
 def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None = None, sealed_root: Path | None = None) -> dict:
     suite = _object(root / "manifest.json")
     project_ids = suite["projects"]
@@ -366,6 +404,19 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             blockers.append("produced_items_invalid_json_or_shape")
         elif not produced and exists:
             blockers.append("empty_produced_items_unverified")
+        first_stage, first_reason = _first_failing_authority_stage(
+            source_verified=source_verified,
+            source_reasons=source_reasons,
+            manifest_status=manifest.get("status"),
+            manifest_reasons=list(manifest.get("reason_codes") or ()),
+            sealed_verified=seal_verified,
+            seal_reasons=seal_reasons,
+            produced_present=exists,
+            produced_valid=not invalid_produced_shape and invalid_produced_id_count == 0 and not duplicate_ids,
+            produced_count=len(produced) if exists and not invalid_produced_shape else None,
+            parity_verified=parity_verified,
+            parity_reasons=parity_reasons,
+        )
         projects.append({
             "project_id": project_id,
             "manifest_status": manifest.get("status"),
@@ -381,6 +432,8 @@ def diagnostic_report(root: Path, produced_root: Path, source_root: Path | None 
             "produced_sealed_parity_verified": parity_verified,
             "commercial_trade_authority_verified": False,
             "reconciliation_complete": False,
+            "first_failing_authority_stage": first_stage,
+            "first_failing_authority_reason": first_reason,
             # No frozen evaluator has run on a source-complete universe.
             # Unknown classification counts must not silently become zero.
             "reconciliation_evaluation_status": "NOT_EVALUATED",
