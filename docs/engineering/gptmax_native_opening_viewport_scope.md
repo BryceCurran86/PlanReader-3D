@@ -56,3 +56,12 @@ whole-foreground positive pixel evidence under #2373. Those pixel runs must
 also prove structural visibility, W2/W4 local identity and physical
 equivalence before any host/quantity publication. This native view audit
 cannot supply those missing raster authorities.
+
+
+## CI isolation correction
+
+The full and focused tests reject production-namespace imports of the
+`pb_physical_opening_viewport_scope_shadow` authority. The diagnostic is now
+isolated under `scripts/diag_gptmax_native_opening_viewport_scope.py`, so
+no production source module imports it. This is a file relocation only;
+original source ownership, 23/14/9 parity and nonpublication gates remain.
