@@ -1463,3 +1463,55 @@ def test_gpt2_original_w4_fragment_lineage_mismatch_does_not_prove_shared_wall()
     assert rows[1]["original_fragment_primitives_owned_by_shadow_identity"] is False
     assert all(r["physical_wall_equivalence_proven"] is False for r in rows)
     assert all(r["source_room_boundary_published"] is False for r in rows)
+
+
+def test_gpt2_first_invalid_source_polygon_reports_original_face_receipt():
+    from dataclasses import replace
+    from tools.diag_gpt2_grid_component_first_failure import (
+        _physical_union_first_unclosed_gate,
+    )
+    faces=_room_scope()
+    original,other=faces.records
+    invalid=replace(original,polygon_pdf_pts=(
+        (0.,0.),(10.,10.),(10.,0.),(0.,10.),
+    ))
+    report=_physical_union_first_unclosed_gate(
+        ("face_left","face_right"),
+        room_scope=replace(faces,records=(invalid,other)),
+        fully_grid_wall_ids=set(),grid_evidence={},local_counts=None,
+    )
+    assert report["physical_union_first_unclosed_gate"] == "source_component_polygon_invalid"
+    failed=report["invalid_constituent_source_face_receipts_diagnostic_only"]
+    assert any(
+        row["original_source_face_id"]=="face_left"
+        and row["original_source_face_record_id"]==original.record_id
+        and row["physical_room_polygon_published"] is False
+        for row in failed
+    )
+    assert report["physical_union_invalid_constituent_face_count"]>=1
+    assert report["new_room_geometry_published"] is False
+
+
+def test_gpt2_failed_two_sided_source_w4_reports_original_edge_and_owners():
+    from tools.diag_gpt2_grid_component_first_failure import (
+        _physical_union_first_unclosed_gate,
+    )
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts,_fully_grid_opposed_wall_evidence,
+    )
+    faces=_room_scope()
+    grid,_=_fully_grid_opposed_wall_evidence(_wall_scope((_grid_atom("e_sep"),)))
+    counts=_atomic_source_wall_edge_counts(faces,grid)
+    report=_physical_union_first_unclosed_gate(
+        ("face_left","face_right"),room_scope=faces,
+        fully_grid_wall_ids=set(),grid_evidence={},local_counts=counts,
+    )
+    assert report["physical_union_first_unclosed_gate"]==(
+        "source_internal_wall_edge_not_two_sided_grid_owned"
+    )
+    witness=report["first_invalid_internal_wall_receipt_diagnostic_only"]
+    assert witness["original_w4_wall_id"]
+    assert len(witness["original_atomic_wall_edge_pdf_pts"])==2
+    assert witness["grid_opposed_source_wall_authenticated"] is False
+    assert witness["no_wall_or_room_equivalence_inferred"] is True
+    assert report["new_metric_area_published"] is False
