@@ -273,6 +273,12 @@ def diagnose_original_w4_address_collisions(records):
                     for fragment in fragments
                 )
             ),
+            "original_fragment_edges_owned_by_shadow_identity": (
+                fragment_receipts_complete
+                and identity_edges_valid
+                and bool(identity_edges)
+                and all(fragment.edge_id in identity_edges for fragment in fragments)
+            ),
             "source_fragment_edge_ids_sample": [
                 frag.edge_id for frag in fragments[:8]
                 if exact(getattr(frag, "edge_id", None))
@@ -290,6 +296,21 @@ def diagnose_original_w4_address_collisions(records):
             ),
             "shadow_physical_identity_status": (
                 getattr(getattr(physical_identity, "status", None), "value", None)
+            ),
+            "shadow_source_geometry_and_lineage_usable_diagnostic_only": (
+                bool(source_points)
+                and fragment_receipts_complete
+                and identity_primitives_valid
+                and bool(identity_primitives)
+                and identity_edges_valid
+                and bool(identity_edges)
+                and all(
+                    set(fragment.source_primitive_ids).issubset(identity_primitives)
+                    and fragment.edge_id in identity_edges
+                    for fragment in fragments
+                )
+                and getattr(getattr(physical_identity, "status", None), "value", None)
+                    == "corroborated"
             ),
             "shadow_identity_source_primitive_id_count": len(identity_primitives),
             "shadow_identity_source_primitive_ids_sample": list(identity_primitives[:16]),
