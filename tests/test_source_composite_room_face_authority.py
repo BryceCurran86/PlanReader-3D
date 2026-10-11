@@ -1431,5 +1431,35 @@ def test_gpt2_missing_original_w4_fragment_or_shadow_identity_is_not_valid_linea
     assert missing["shadow_identity_lineage_valid"] is False
     assert real["source_fragment_receipts_complete"] is True
     assert real["shadow_identity_lineage_valid"] is True
+    assert real["original_fragment_primitives_owned_by_shadow_identity"] is True
+    assert missing["original_fragment_primitives_owned_by_shadow_identity"] is False
     assert missing["physical_wall_equivalence_proven"] is False
     assert real["physical_wall_equivalence_proven"] is False
+
+
+def test_gpt2_original_w4_fragment_lineage_mismatch_does_not_prove_shared_wall():
+    from tools.diag_gpt2_grid_component_first_failure import (
+        diagnose_original_w4_address_collisions,
+    )
+    def row(source_primitive,shadow_primitive):
+        return SimpleNamespace(
+            wall_candidate_id="colliding-original-address",
+            wall_candidate=SimpleNamespace(centerline_pts=((0.,0.),(10.,0.))),
+            source_edge_fragments=(SimpleNamespace(
+                edge_id="real-original-edge",source_primitive_ids=(source_primitive,),
+            ),),
+            physical_identity=SimpleNamespace(
+                candidate_identity_id="candidate-shadow-only",
+                source_primitive_ids=(shadow_primitive,),
+                edge_ids=("real-original-edge",),
+                status=EvidenceResolutionStatus.CORROBORATED,
+            ),
+        )
+    rows=diagnose_original_w4_address_collisions((
+        row("source-primitive-one","source-primitive-one"),
+        row("source-primitive-two","unrelated-primitive"),
+    ))["original_collision_records_diagnostic_only"]
+    assert rows[0]["original_fragment_primitives_owned_by_shadow_identity"] is True
+    assert rows[1]["original_fragment_primitives_owned_by_shadow_identity"] is False
+    assert all(r["physical_wall_equivalence_proven"] is False for r in rows)
+    assert all(r["source_room_boundary_published"] is False for r in rows)
