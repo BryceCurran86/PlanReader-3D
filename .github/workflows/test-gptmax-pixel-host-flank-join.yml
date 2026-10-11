@@ -43,7 +43,9 @@ jobs:
       - name: Retain exact source provenance and independent positive-pixel producer
         run: |
           git rev-parse HEAD > exact_join_head_sha.txt
-          # Pinned upstream draft SHA. Never silently consume a modified producer.
+          # Fetch only the source branch ref; require exact pinned commit.
+          git fetch origin refs/pull/2356/head
+          test "$(git rev-parse FETCH_HEAD)" = ac516e5f1478f687e67eff2b014b0f49b9f483c8
           git worktree add --detach /tmp/gptmax-original-pixel-producer ac516e5f1478f687e67eff2b014b0f49b9f483c8
           test "$(git -C /tmp/gptmax-original-pixel-producer rev-parse HEAD)" = ac516e5f1478f687e67eff2b014b0f49b9f483c8
           sha256sum "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
@@ -87,7 +89,7 @@ jobs:
           joined=json.loads(Path("original-host-flank-pixel-join.json").read_text())
           assert (source["source_original_opening_count"],source["source_original_host_count"],source["source_original_frame_count"])==(23,14,9)
           assert joined["source_sha256"]==source["source_sha256"]==required["source_sha256"]==pixels["source_sha256"]
-          assert joined["primitive_safety_cap"] if "primitive_safety_cap" in joined else True
+          assert pixels["primitive_safety_cap"]==source["primitive_safety_cap"]==20000
           assert len(source["opening_rows"])==len(required["opening_rows"])==len(joined["opening_rows"])==7
           assert all(not row["host_publication_allowed"] for row in joined["opening_rows"])
           assert all(not joined[k] for k in ("host_publication_allowed","opening_count_publication_allowed","metric_quantity_publication_allowed","physical_equivalence_proven","source_universe_completeness_proven"))
