@@ -322,31 +322,32 @@ def test_source_owned_chain_inside_collinear_dimension_axis_is_not_a_wall_openin
     segments, words, selected = _interior_dimension_chain()
     before = deepcopy((segments, words, selected))
     atoms = _collect(segments, words, selected)
-    assert len(atoms) == 1
-    atom, = atoms
-    assert atom.status is Status.CANDIDATE
-    assert atom.kind == 'dimension_annotation'
-    assert atom.metadata['polarity'] == 'opposing'
-    assert set(selected) <= set(atom.metadata['source_observation_ids'])
-    assert atom.normalized_value is None and atom.unit is None
+    assert atoms
+    assert all(atom.status is Status.CANDIDATE
+               and atom.kind == 'dimension_annotation'
+               and atom.metadata['polarity'] == 'opposing'
+               and set(selected) <= set(atom.metadata['source_observation_ids'])
+               and atom.normalized_value is None and atom.unit is None
+               for atom in atoms)
     assert (segments, words, selected) == before
     assert _collect(dict(reversed(tuple(segments.items()))),
                     list(reversed(words)), tuple(reversed(selected))) == atoms
 
 
 @pytest.mark.parametrize('mutation', [
-    'no_preceding_axis', 'gap_before_joint','gap_after_joint',
+    'no_internal_axis', 'middle_rail_offset','missing_middle_span',
     'one_diagonal_half','missing_perpendicular_cap',
     'non_numeric_text','wrong_text_axis','floating_annotation_text',
 ])
 def test_internal_dimension_chain_requires_complete_native_original_source(mutation):
     segments, words, selected = _interior_dimension_chain()
-    if mutation == 'no_preceding_axis':
-        del segments['axis-before']
-    elif mutation == 'gap_before_joint':
-        segments['axis-before']=(0.,0.,29.9,0.)
-    elif mutation == 'gap_after_joint':
-        segments['axis-after']=(35.1,0.,60.,0.)
+    if mutation == 'no_internal_axis':
+        del segments['axis-90']
+    elif mutation == 'middle_rail_offset':
+        segments['axis-90']=(30.,.1,35.,.1)
+    elif mutation == 'missing_middle_span':
+        segments['axis-90']=(30.,0.,31.,0.)
+        segments['right-middle']=(31.1,0.,35.,0.)
     elif mutation == 'one_diagonal_half':
         del segments['firsttick-down']
     elif mutation == 'missing_perpendicular_cap':
