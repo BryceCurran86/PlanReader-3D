@@ -84,3 +84,24 @@ def test_original_source_room_area_and_finish_match_after_exact_receipt_gate():
     source_area = areas.records[0]
     assert _matching_floor(floors, source_area) is not None
     assert _matching_floor(floors, source_area).metric_area_m2 == 8.64
+
+
+
+@pytest.mark.parametrize("forged_id", [
+    True, False, 17, " room-area-id", "room-area-id ", "",
+])
+def test_canonical_floor_finish_rejects_normalized_source_area_quantity_id(forged_id):
+    _source, areas, floors = _source_room_area_and_floor(_payload())
+    altered_floor = copy(floors.floors[0])
+    object.__setattr__(altered_floor, "metric_area_quantity_id", forged_id)
+    assert _matching_floor(
+        replace(floors, floors=(altered_floor,)), areas.records[0],
+    ) is None
+
+
+def test_canonical_floor_finish_preserves_producer_metric_source_identity():
+    _source, areas, floors = _source_room_area_and_floor(_payload())
+    record = _matching_floor(floors, areas.records[0])
+    assert record is not None
+    assert type(record.metric_area_quantity_id) is str
+    assert record.metric_area_quantity_id
