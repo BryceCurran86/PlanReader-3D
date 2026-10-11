@@ -80,3 +80,50 @@ def test_count_customer_requires_source_schedule_corrob_and_firm_each():
         assert _eligible_count_quantities(
             replace(_claim(), opening_count_quantity_evidence=(bad,))
         ) == ()
+
+
+
+def test_provisional_duplicate_must_not_disappear_before_source_customer_collision_gate():
+    from pb_live_opening_customer_projection import project_live_opening_customer_rows
+
+    authentic = _source_opening_area()
+    replayed = replace(
+        authentic,
+        status="provisional",
+        value=None,
+        abstained=True,
+        blocking_reasons=("missing_source_measurement",),
+    )
+    # The second claim cannot publish, but it still contests the same source
+    # quantity ID. Filtering it away would hide a physically conflicting claim.
+    claim = replace(
+        _claim(),
+        opening_quantity_evidence=(authentic, replayed),
+    )
+    with pytest.raises(ValueError, match="identities collide before commercial filtering"):
+        project_live_opening_customer_rows(
+            claim, workspace_id=1, project_id="customer-integrity-test",
+        )
+
+
+def test_cross_family_blocked_duplicate_cannot_mask_firm_source_area_claim():
+    from pb_live_opening_customer_projection import project_live_opening_customer_rows
+
+    area = _source_opening_area()
+    count = replace(
+        _source_opening_count(),
+        quantity_id=area.quantity_id,
+        status="blocked",
+        value=None,
+        abstained=True,
+        blocking_reasons=("incomplete_opening_universe",),
+    )
+    claim = replace(
+        _claim(),
+        opening_quantity_evidence=(area,),
+        opening_count_quantity_evidence=(count,),
+    )
+    with pytest.raises(ValueError, match="identities collide before commercial filtering"):
+        project_live_opening_customer_rows(
+            claim, workspace_id=1, project_id="customer-integrity-test",
+        )
