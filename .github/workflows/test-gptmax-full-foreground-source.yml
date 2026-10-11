@@ -164,3 +164,61 @@ jobs:
             original-host-frame-before.json
             original-host-frame-after.json
             full-foreground-source-retention.json
+
+  experimental-original-w2-w4:
+    needs: original-lot16
+    if: ${{ needs.original-lot16.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-only experimental complete-original-page W2/W4 graph
+        run: |
+          git rev-parse HEAD > full-foreground-w2-head.txt
+          PYTHONPATH=. python -u tools/diag_gptmax_full_foreground_run_source.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --expected-render-sha 64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab \
+            --trace-w2-w4 \
+            --output original-complete-foreground-w2-w4.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("original-complete-foreground-w2-w4.json").read_text())
+          graph=r["experimental_w2_w4"]
+          assert r["authenticated_pixel_source_count"]==6016
+          assert graph is not None
+          assert graph["input_source_count"] == (
+              r["ordinary_source_record_count"]+r["authenticated_pixel_source_count"])
+          assert graph["input_source_count"] <= r["primitive_safety_cap"] == 20000
+          assert graph["w4_edge_map_consistent"]
+          assert len(graph["source_parent_census"]) == graph["input_source_count"]
+          assert not graph["host_publication_allowed"]
+          assert graph["physical_equivalence_proven"] is False
+          assert graph["scope_authority"].startswith("full-page diagnostic only")
+          for key in ("host_publication_allowed","opening_count_publication_allowed",
+                      "metric_quantity_publication_allowed","physical_equivalence_proven",
+                      "source_universe_completeness_proven"):
+              assert r[key] is False
+          assert r["benchmark_accuracy"] is None
+          print({"source_inputs":graph["input_source_count"],
+                 "w2_edges":len(graph["all_w2_edges"]),
+                 "experimental_w4_candidates":len(graph["all_experimental_w4_candidates"]),
+                 "structural_host_authority":False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-complete-foreground-w2-w4
+          retention-days: 30
+          path: |
+            full-foreground-w2-head.txt
+            original-complete-foreground-w2-w4.json
