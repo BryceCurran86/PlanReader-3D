@@ -128,3 +128,46 @@ but all alternatives still need structural role, authenticated viewport and
 physical equivalence. The next source hypothesis must reason about owned
 fragment bundles, with opposing evidence and every candidate retained, before
 any authority promotion. Merely reducing a snap tolerance is insufficient.
+
+## Required inherited workflow source gate
+
+Observed: exact-head Python 3.13/3.14 shadow regressions and the new original
+source replay pass. The inherited complete-foreground source workflow fails
+at its historical `(23,14,9)` opening/host/frame assertion before executing
+its strict before/after receipt check. Current main independently reproduces
+21 positive opening hypotheses, 14 hosts and nine frames following the two
+native annotation oppositions. The replay itself completed successfully.
+
+Inference: this failure is a stale source control, not evidence of a lost
+host or frame. It must still be corrected and re-run; it cannot be waived.
+
+Proposed correction: update only this required workflow to the independently
+reproduced 21/14/9 baseline, check complete unique identity-keyed opening and
+frame receipts against the freshly executed PR base, and retain the existing
+byte-for-byte whole-report equality. Keep source SHA/render receipts, all
+6,016 pixel alternatives, the seven unresolved raster cases, the 20,000 input
+cap and every abstention/nonpublication assertion. No extraction predicate,
+production authority, commercial output or frozen V2 definition changes.
+The 21/14/9 counts are source experiment controls only, never algorithm inputs.
+
+Validation: parse the workflow and its inline Python; execute its assertions
+against fresh original source reports; require exact-head CI including the
+previously skipped full-page W2/W4 source experiment before merging.
+
+## Follow-up owned W4 membership inspection
+
+Read-only inspection of the original-source exact-endpoint report finds that
+each of the 18 flank/source-run associations above has complete retained W3
+coverage whose actual contributing fragments all belong to one common W4
+candidate in that local experiment. No contributing fragment lacks W4
+membership and none reports a W4 address collision. This confirms a bundle
+can survive W4 while the individual-fragment contact predicate abstains.
+
+These associations contain only 13 distinct source observation IDs: five
+source runs participate in both `81a45c3a` right and `f8197523` left. Each local
+graph is separately scoped; its W4 address cannot authenticate cross-opening
+physical equivalence or transfer ownership. The seven parallel alternatives
+on the first flank and five/six on the others must all remain visible. No
+single physical representative is elected. Structural role, authenticated
+floor-plan scope and physical equivalence remain unproved, so all seven
+production raster host abstentions remain correct.
