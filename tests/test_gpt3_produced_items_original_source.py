@@ -186,3 +186,16 @@ def test_genuinely_corroborated_original_quantity_is_still_exportable(tmp_path):
     items=export_verified_produced_items(path,[source])
     assert items[0]["value"]==q.value
     assert items[0]["lineage_ok"] is True
+
+
+
+def test_exact_source_seal_parity_is_true_but_trade_authority_still_unavailable(tmp_path):
+    from pb_combine_source_closed_runs import load_verified_sealed_run
+    from scripts.report_full_plan_v2_readiness import produced_sealed_parity_blockers
+    source,path,_,_,_=_source_run(tmp_path)
+    signed=load_verified_sealed_run(path)
+    rows=export_verified_produced_items(path,[source])
+    blockers=produced_sealed_parity_blockers(rows,signed.quantities)
+    assert blockers==["projection_trade_category_missing:qty-room-1"]
+    assert rows[0]["trade_category"] is None
+    assert rows[0]["trade_authority_status"]=="UNAVAILABLE_NOT_INFERRED"
