@@ -127,6 +127,13 @@ def verify_v2_preview_scope_sidecar(
     sealed = sealed_source_closed_run_from_dict(sealed.to_dict())
     if not isinstance(payload, Mapping):
         raise TypeError("scope sidecar must be a mapping")
+    expected_envelope_keys = {
+        "schema_version", "publication_status", "source_authenticated",
+        "project_id", "sealed_run_fingerprint", "scope_records",
+        "integrity_fingerprint",
+    }
+    if set(payload) != expected_envelope_keys:
+        raise SourceClosedRunConflictError("scope sidecar envelope contains unsupported fields")
     if (
         payload.get("schema_version") != SCOPE_SIDECAR_SCHEMA
         or payload.get("publication_status") != "UNPUBLISHED"
@@ -149,6 +156,15 @@ def verify_v2_preview_scope_sidecar(
     for record in records:
         if not isinstance(record,dict):
             raise SourceClosedRunConflictError("scope sidecar row must be an object")
+        expected_record_keys = {
+            "quantity_id", "sealed_quantity_fingerprint",
+            "source_document_id", "source_sha256", "revision_id",
+            "source_page", "viewport_id", "physical_object_refs",
+            "source_scope_record_id", "source_snapshot_id",
+            "decision_scope_id", "source_record_authentication",
+        }
+        if set(record) != expected_record_keys:
+            raise SourceClosedRunConflictError("scope sidecar contains unsupported source record fields")
         quantity_id = record.get("quantity_id")
         if quantity_id in seen or quantity_id not in by_id:
             raise SourceClosedRunConflictError("duplicate or unsealed scope quantity identity")
