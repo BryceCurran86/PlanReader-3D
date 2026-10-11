@@ -388,3 +388,57 @@ def test_combination_conflict_cannot_leave_partially_published_family_seals(tmp_
     summary=json.loads((output/"production_summary.json").read_text())
     assert summary["status"]=="sealed_project_combination_failed"
     assert "sealed_project_combination_error:RuntimeError" in summary["claim_reason_codes"]
+
+
+def test_corrupted_negative_source_quantity_cannot_pass_final_handoff_filter():
+    # QuantityEvidence construction rejects negative measurements, but a
+    # deserialized/corrupted frozen record may bypass its constructor. The
+    # final producer selection must independently fail closed.
+    q=_q()
+    object.__setattr__(q,"value",-2.5)
+    assert handoff._non_abstained((q,))==()
+
+
+def test_authenticated_zero_quantity_remains_distinct_from_abstention():
+    q=_q(value=0.0)
+    assert not q.abstained
+    assert handoff._non_abstained((q,))==(q,)
+
+
+
+def test_final_source_owned_ceiling_handoff_only_quantity_remains_sealable():
+    q=_q(status="firm",metadata={
+        "shadow_only":False,
+        "quantity_handoff_only":True,
+        "commercial_projection_allowed":False,
+    })
+    assert handoff._non_abstained((q,))==(q,)
+
+
+@pytest.mark.parametrize("status",["provisional","review_required","candidate","conflict"])
+def test_handoff_only_flag_cannot_promote_unfirm_ceiling_draft_to_seal(status):
+    q=_q(status=status,metadata={
+        "shadow_only":False,
+        "quantity_handoff_only":True,
+        "commercial_projection_allowed":False,
+    })
+    assert handoff._non_abstained((q,))==()
+
+
+@pytest.mark.parametrize("metadata",[
+    {"shadow_only":True, "quantity_handoff_only":True, "commercial_projection_allowed":False},
+    {"quantity_handoff_only":"true","commercial_projection_allowed":False},
+    {"quantity_handoff_only":True,"commercial_projection_allowed":"false"},
+    {"quantity_handoff_only":True,"commercial_projection_allowed":None},
+    {"quantity_handoff_only":True,"commercial_projection_allowed":0},
+])
+def test_handoff_only_exception_requires_exact_flag_and_nonshadow_source(metadata):
+    assert handoff._non_abstained((_q(metadata=metadata),))==()
+
+
+def test_stale_firm_handoff_only_source_does_not_seal():
+    q=_q(status="firm",metadata={
+        "shadow_only":False, "quantity_handoff_only":True,
+        "commercial_projection_allowed":False,"is_superseded":True,
+    })
+    assert handoff._non_abstained((q,))==()
