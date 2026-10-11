@@ -28,6 +28,11 @@ def _has_firm_metric_floor_receipt(floor) -> bool:
     LiveCanonicalFloorSurfaceObject has no metric_area_complete property.
     A geometry-complete but unscaled floor is not a metric area.
     """
+    # A canonical floor can carry printable PDF-point area with no metric
+    # authority. Never treat bool/string/replayed numeric source fields as a
+    # genuine verified m² receipt just because float() could parse them.
+    if type(getattr(floor, "metric_area_m2", None)) not in (int, float):
+        return False
     try:
         area = float(floor.metric_area_m2)
     except (TypeError, ValueError, OverflowError, AttributeError):
@@ -177,23 +182,27 @@ def _wall_metric_first_failure(wall) -> str:
         ("gross_area_m2", "gross_wall_area_unavailable", True),
     ):
         measurement = getattr(wall, attr, None)
-        if (
-            type(measurement) not in (int, float)
-            or not math.isfinite(float(measurement))
-            or (measurement <= 0.0 if strictly_positive else measurement < 0.0)
-        ):
+        if type(measurement) not in (int, float):
+            return reason
+        try:
+            real_measurement = float(measurement)
+        except (OverflowError, TypeError, ValueError):
+            return reason
+        if (not math.isfinite(real_measurement) or
+                (real_measurement <= 0.0 if strictly_positive else real_measurement < 0.0)):
             return reason
     if not wall.gross_polygon_wkb_hex:
         return "gross_wall_area_unavailable"
     if not wall.role or not wall.whole_wall_role_record_id:
         return "authenticated_whole_wall_role_unavailable"
     net_value = getattr(wall, "net_area_m2", None)
-    if (
-        type(net_value) not in (int, float)
-        or not math.isfinite(float(net_value))
-        or net_value < 0.0
-        or not wall.net_polygon_wkb_hex
-    ):
+    if type(net_value) not in (int, float):
+        return "net_wall_area_or_deduction_unavailable"
+    try:
+        net_number = float(net_value)
+    except (OverflowError, TypeError, ValueError):
+        return "net_wall_area_or_deduction_unavailable"
+    if not math.isfinite(net_number) or net_number < 0.0 or not wall.net_polygon_wkb_hex:
         return "net_wall_area_or_deduction_unavailable"
     if net_value > wall.gross_area_m2 + 1e-6:
         return "net_wall_greater_than_authenticated_gross_area"
