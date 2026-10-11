@@ -58,7 +58,7 @@ def _reject_excessive_sealed_json_nesting(payload: str) -> None:
         if inside_string:
             if escaped:
                 escaped = False
-            elif character == "\\\\":
+            elif character == "\\":
                 escaped = True
             elif character == '"':
                 inside_string = False
