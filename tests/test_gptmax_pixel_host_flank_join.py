@@ -38,6 +38,8 @@ def fixture():
                          ("pixel-right", [10., 0., 14., 0.])):
         receipts.append({
             "source_pixels_authenticated": True,
+            "proposition": "source_observation_exists",
+            "physical_wall_authority": False,
             "ordinary_visible_segment_authority": False,
             "host_publication_allowed": False,
             "source_observation": {
@@ -55,13 +57,14 @@ def fixture():
                        "snap_collapsed_fragment_ids": []})
     pixel = {**FLAGS, "source_sha256": SOURCE, "page_id": "3",
              "ordinary_visibility_rejects_shadow_kind": True,
+             "original_source_render_reauthenticated": True,
              "ordinary_source_snapshot_unchanged": True,
              "source_universe_completeness_proven": False,
              "authenticated_pixel_source_count": 2,
              "authenticated_pixel_source_records": receipts,
              "experimental_w2_w4": {
-                 "host_publication_allowed": False, "input_source_count": 2,
-                 "all_w2_edges": edges,
+                 "host_publication_allowed": False, "physical_equivalence_proven": False,
+                 "input_source_count": 2, "all_w2_edges": edges,
                  "all_snap_collapsed_fragments": [],
                  "source_parent_census": census,
                  "all_experimental_w4_candidates": [
@@ -126,6 +129,8 @@ def test_nearby_but_not_endpoint_anchored_pixel_is_not_an_opening_host():
     "pixel_unbacked_w4_member", "pixel_missing_w4_member",
     "false_flank_geometry_flag", "partial_reported_flanks",
     "wrong_w2_input_count", "missing_w2_source_parent", "malformed_w4_alternatives",
+    "render_not_authenticated", "forged_physical_wall", "wrong_pixel_proposition",
+    "experimental_claims_equivalence",
 ])
 def test_corrupt_source_or_ancestry_fails_closed(mutation):
     raw, required, pixel = fixture()
@@ -189,6 +194,14 @@ def test_corrupt_source_or_ancestry_fails_closed(mutation):
         pixel["experimental_w2_w4"]["all_w2_edges"][0]["source_observation_ids"] = ["unknown"]
     elif mutation == "malformed_w4_alternatives":
         pixel["experimental_w2_w4"]["all_w2_edges"][0]["experimental_w4_candidate_ids"] = "unproved-wall-left"
+    elif mutation == "render_not_authenticated":
+        pixel["original_source_render_reauthenticated"] = False
+    elif mutation == "forged_physical_wall":
+        pixel["authenticated_pixel_source_records"][0]["physical_wall_authority"] = True
+    elif mutation == "wrong_pixel_proposition":
+        pixel["authenticated_pixel_source_records"][0]["proposition"] = "physical_wall_exists"
+    elif mutation == "experimental_claims_equivalence":
+        pixel["experimental_w2_w4"]["physical_equivalence_proven"] = True
     with pytest.raises((ValueError, TypeError, KeyError)):
         join(raw, required, pixel, pdf_bytes=pdf_bytes)
 
