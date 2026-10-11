@@ -94,7 +94,7 @@ def _abstention(
         input_entity_ids=(room.room_ref,),
         formula="owned_explicit_area OR polygon_area / trusted_px_per_m^2",
         formula_version=ROOM_AREA_FORMULA_VERSION,
-        evidence_ids=tuple(entity.evidence_ids),
+        evidence_ids=_original_room_receipts(entity.evidence_ids) or (),
         authority=authority,
         status=AuthorityStatus.BLOCKED.value,
         confidence=0.0,
@@ -103,6 +103,17 @@ def _abstention(
         reason_codes=blockers,
         metadata=metadata or {},
     )
+
+
+def _original_room_receipts(value: object) -> tuple[str, ...] | None:
+    """Preserve unmodified typed source membership; None means invalid input."""
+    if not isinstance(value, (tuple, list)):
+        return None
+    if any(type(item) is not str or not item or item != item.strip() for item in value):
+        return None
+    if len(set(value)) != len(value):
+        return None
+    return tuple(value)
 
 
 def _valid_source_confidence(value: object) -> bool:
@@ -157,11 +168,33 @@ def _validate_common(
     mapped_page = context.page_for_viewport(viewport.viewport_id)
     if mapped_page is not None and int(mapped_page) != int(page_no):
         blockers.append("viewport_page_mismatch")
-    if room.source_page and int(room.source_page) != int(page_no):
-        blockers.append("room_source_page_mismatch")
-    if not set(entity.evidence_ids).issubset(set(document.evidence_ids)):
+    if room.source_page:
+        try:
+            original_page = room.source_page
+            if (
+                type(original_page) not in (str, int)
+                or (type(original_page) is str and (
+                    original_page != original_page.strip()
+                    or not original_page.isdecimal()
+                ))
+                or int(original_page) != int(page_no)
+            ):
+                blockers.append("room_source_page_mismatch")
+        except (TypeError, ValueError, OverflowError):
+            blockers.append("room_source_page_mismatch")
+    document_receipts = _original_room_receipts(document.evidence_ids)
+    entity_receipts = _original_room_receipts(entity.evidence_ids)
+    room_receipts = _original_room_receipts(room.evidence)
+    if (
+        document_receipts is None or entity_receipts is None
+        or not entity_receipts
+        or not set(entity_receipts).issubset(set(document_receipts))
+    ):
         blockers.append("entity_evidence_not_owned_by_document")
-    if room.evidence and not set(room.evidence).issubset(set(document.evidence_ids)):
+    if (
+        document_receipts is None or room_receipts is None
+        or (room_receipts and not set(room_receipts).issubset(set(document_receipts)))
+    ):
         blockers.append("room_evidence_not_owned_by_document")
     if (
         not _valid_source_confidence(room.geometry_confidence)
