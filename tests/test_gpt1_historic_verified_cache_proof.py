@@ -63,3 +63,8 @@ def test_old_snapshot_after_hint_eviction_reauthenticates_and_detects_tamper(mon
     assert PRODUCER_INTEGRITY_FAILURE in blocked.reason_codes
     latest = replace(selector, snapshot_id=third.snapshot_id)
     assert producer.authority().resolve(latest).status is EvidenceResolutionStatus.CORROBORATED
+    # Historic hint eviction never weakens the immutable original PDF proof.
+    producer._store.source_bytes_by_revision[published.revision.revision_id] = b"tampered-source-bytes"
+    denied = producer.authority().resolve(latest)
+    assert denied.status is EvidenceResolutionStatus.CONFLICT
+    assert PRODUCER_INTEGRITY_FAILURE in denied.reason_codes
