@@ -1,0 +1,103 @@
+name: GPT MAX Original Native Text Paint Partition Audit
+on:
+  pull_request:
+    paths:
+      - scripts/gptmax_native_dimension_source_partition.py
+      - tests/test_gptmax_native_dimension_source_partition.py
+      - pb_native_dimension_cap_evidence.py
+      - pb_pdf_text_integrity_authority.py
+      - docs/engineering/gptmax_native_dimension_source_partition.md
+      - .github/workflows/test-gptmax-native-paint-partition-shadow.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_native_dimension_source_partition.py tests/test_native_dimension_cap_evidence.py tests/test_pdf_text_integrity_source_state_v1.py tests/test_pdf_text_integrity_production_v1.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact original PR-base and head opening receipts
+        run: |
+          git worktree add --detach /tmp/native-partition-original-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/native-partition-original-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/source-before.json"
+          )
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output source-after.json
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline source-before.json --candidate source-after.json --output source-retention.json
+      - name: Preserve untrusted original paint partitions without promotion
+        run: |
+          PYTHONPATH=. python -u scripts/gptmax_native_dimension_source_partition.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 \
+            --representative-observation-id source_observation_50346acbb28e7a0a9e7311b4b6965f8a \
+            --output native-paint-partitions.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          old=json.loads(Path('source-before.json').read_text())
+          new=json.loads(Path('source-after.json').read_text())
+          audit=json.loads(Path('native-paint-partitions.json').read_text())
+          sha='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert old['source_sha256']==new['source_sha256']==audit['source_sha256']==sha
+          assert old['opening_bindings']==new['opening_bindings']
+          assert old['host_frames']==new['host_frames']
+          assert old['summary']==new['summary']=={'physical_existence_claims':23,'host_bindings':14,'host_frames':9}
+          assert audit['source_reauthenticated'] is True
+          assert audit['primitive_safety_cap']==20000
+          row,=audit['candidate_audits']
+          assert row['live_state_unchanged'] is True
+          assert row['original_uncovered_support_ids']==row['partition_uncovered_support_ids']
+          assert len(row['partition_uncovered_support_ids'])==2
+          assert row['complete_shadow_dimension_opposition'] is False
+          assert row['shadow_opposing_evidence_atoms']==[]
+          partition,=row['relevant_original_text_paint_partitions']
+          assert partition['raw_text']=='90450'
+          assert partition['text_integrity_status']=='abstained'
+          assert partition['text_integrity_reason_codes']==['text_trace_unavailable']
+          assert partition['text_integrity_authenticated'] is False
+          assert [(p['seqno'],p['text']) for p in partition['original_paint_partitions']]==[(954,'90'),(956,'450')]
+          assert partition['intervening_paint_commands']==[{'seqno':955,'kind':'fill-path',
+              'bbox':[1016.8800048828125,584.760009765625,1028.6400146484375,593.6400146484375]}]
+          for key in ('live_producer_changed','hypotheses_deletion_allowed','physical_nonexistence_proven',
+              'host_publication_allowed','opening_count_publication_allowed','metric_quantity_publication_allowed'):
+              assert audit[key] is False
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-native-paint-partitions
+          path: |
+            source-before.json
+            source-after.json
+            source-retention.json
+            native-paint-partitions.json
+          retention-days: 14
