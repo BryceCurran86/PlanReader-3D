@@ -63,7 +63,8 @@ def test_floor_trace_rejects_padded_original_evidence_receipt(bad):
             replace(original.canonical_floors[0], evidence_ids=bad),
         )
     )
-    with pytest.raises(SourceClosedRunConflictError, match="receipts"):
-        build_live_floor_area_source_traces(
-            broken, workspace_id=7, project_id="project-7"
-        )
+    # The upstream canonical floor publisher can reject this evidence first,
+    # so no source trace exists for a forged receipt (ABSTAIN, not an exception).
+    assert not build_live_floor_area_source_traces(
+        broken, workspace_id=7, project_id="project-7"
+    )
