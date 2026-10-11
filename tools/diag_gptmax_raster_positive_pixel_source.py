@@ -41,6 +41,90 @@ def _default_source(source_bytes, source_sha, page_id):
     return producer, published, tuple(records)
 
 
+
+def _nonpublishing_w3_snap_pair_source_losses(graph, deduped, removed):
+    """Audit exact W3 node-pair discards without asserting physical equivalence.
+
+    W3's production deduplicator intentionally remains unchanged. A shared
+    snapped node pair is NOT proof that raw source-painted lines coincide.
+    """
+    kept_by_pair = {}
+    edges_by_id = {}
+    def pair(edge):
+        a, b = edge.get("a"), edge.get("b")
+        if (type(a) is not int or type(b) is not int or a == b):
+            raise ValueError("invalid W3 snapped node ownership")
+        return tuple(sorted((a, b)))
+    def geometry(edge):
+        values = tuple(edge.get(k) for k in ("x1", "y1", "x2", "y2"))
+        if any(type(v) not in (int, float) or not math.isfinite(v) for v in values):
+            raise ValueError("invalid actual W2 original geometry")
+        if values[:2] == values[2:]:
+            raise ValueError("degenerate original W2 source geometry")
+        return values
+    def parents(edge):
+        lineage = edge.get("primitive_lineage") or {}
+        if not isinstance(lineage, dict):
+            raise ValueError("invalid W2 graph parent dictionary")
+        ids = lineage.get("source_primitive_ids", ())
+        if not isinstance(ids, (list, tuple)) or any(
+            not isinstance(x, str) or not x.strip() for x in ids
+        ) or len(ids) != len(set(ids)):
+            raise ValueError("invalid W3 source parent receipt")
+        return tuple(sorted(ids))
+
+    for edge in graph["edges"]:
+        eid = edge.get("id")
+        if not isinstance(eid, str) or not eid or eid in edges_by_id:
+            raise ValueError("invalid original W2 edge identity")
+        geometry(edge)
+        parents(edge)
+        edges_by_id[eid] = edge
+    for edge in deduped["edges"]:
+        key = pair(edge)
+        if key in kept_by_pair:
+            raise ValueError("W3 deduplication still has collided snapped edge pair")
+        kept_by_pair[key] = edge
+
+    removed_ids = tuple(map(str, removed))
+    if len(removed_ids) != len(set(removed_ids)):
+        raise ValueError("duplicate W3 removed edge addresses")
+    out = []
+    for eid in removed_ids:
+        lost = edges_by_id.get(eid)
+        if lost is None:
+            raise ValueError("W3 removed edge not found in original W2")
+        keep = kept_by_pair.get(pair(lost))
+        if keep is None or keep.get("id") == eid:
+            raise ValueError("W3 original snapped-pair retained edge absent")
+        a, b = geometry(lost), geometry(keep)
+        # Geometry direction is not an owner selector. Both endpoint
+        # permutations are tested solely for an observational separation.
+        def dist(p, q):
+            return math.hypot(p[0]-q[0], p[1]-q[1])
+        qa, qb = (a[:2], a[2:]), (b[:2], b[2:])
+        forward = max(dist(qa[0], qb[0]), dist(qa[1], qb[1]))
+        backward = max(dist(qa[0], qb[1]), dist(qa[1], qb[0]))
+        delta = min(forward, backward)
+        removed_parents, kept_parents = parents(lost), parents(keep)
+        out.append({
+            "removed_edge_id": eid, "retained_edge_id": keep["id"],
+            "same_actual_snapped_node_pair": True,
+            "snapped_node_pair": list(pair(lost)),
+            "removed_original_w2_geometry_pt": list(a),
+            "retained_original_w2_geometry_pt": list(b),
+            "removed_source_observation_ids": list(removed_parents),
+            "retained_source_observation_ids": list(kept_parents),
+            "max_endpoint_displacement_pt": delta,
+            "source_parent_sets_disjoint": not bool(set(removed_parents) & set(kept_parents)),
+            "physically_distinct_wall_lines_proven": False,
+            "source_parent_transfer_allowed": False,
+            "host_publication_allowed": False,
+        })
+    if len(out) != len(graph["edges"]) - len(deduped["edges"]):
+        raise ValueError("incomplete W3 original lost-edge census")
+    return out
+
 def _trace_sources(records):
     """Experimental candidates only; input receipts are checked by the caller."""
     records = tuple(sorted(records, key=lambda r:r.observation_id))
@@ -65,6 +149,7 @@ def _trace_sources(records):
             source_observation_id=record.observation_id))
     graph = build_wall_graph_for_viewport(segments)
     deduped, removed = deduplicate_coincident_edges(graph)
+    snap_pair_losses = _nonpublishing_w3_snap_pair_source_losses(graph, deduped, removed)
     junctions, relationships = classify_junctions(deduped, document_id="source-pixel-shadow",
         page_id=next(iter(pages),"1"), viewport_id="full-page-pixel-shadow")
     walls, edge_map = assemble_wall_candidates(deduped, junctions, relationships,
@@ -114,7 +199,9 @@ def _trace_sources(records):
             else "w2_snap_collapsed" if collapsed_by_parent[r.observation_id]
             else "w2_parent_unmapped"),"physical_host_authority":False} for r in records]
     counts = Counter(w.candidate_id for w in walls)
-    return {"input_source_count":len(records),"all_w2_edges":edge_rows,
+    return {"input_source_count":len(records),
+        "w3_snap_pair_source_losses":snap_pair_losses,
+        "all_w2_edges":edge_rows,
         "all_snap_collapsed_fragments":collapsed,"source_parent_census":census,
         "all_experimental_w4_candidates":[{"candidate_id":w.candidate_id,
             "w2_edge_ids":list(w.face_a_segment_ids), "centerline_pt":w.centerline_pts,
