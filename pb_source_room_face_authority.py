@@ -524,8 +524,8 @@ def _unique_containing_wall_owner(
     edge. Competing physical wall ids fail closed instead of selecting first,
     nearest, shortest, or longest.
     """
-    exact = edge_owner.get(edge)
-    if exact is not None:
+    if edge in edge_owner:
+        exact = edge_owner[edge]
         # An indexed owner is only source evidence while its original W4
         # wall still contains this exact quantized face subedge. A stale
         # or foreign index entry is not a physical wall identity.
