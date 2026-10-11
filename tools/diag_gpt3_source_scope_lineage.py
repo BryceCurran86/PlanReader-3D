@@ -73,11 +73,19 @@ def audit_source_scope_receipts(
             reasons.append("DECISION_SCOPE_SOURCE_OWNERSHIP_INCOMPLETE")
         elif scope_q != scope_t:
             reasons.append("DECISION_SCOPE_RECEIPTS_DISAGREE")
-        if trace is not None and isinstance(qmeta.get("source_sha256"), str):
-            if qmeta["source_sha256"].lower() != trace.source_sha256:
+        if "source_sha256" in qmeta:
+            receipt = qmeta["source_sha256"]
+            if type(receipt) is not str or len(receipt) != 64 or any(
+                c not in "0123456789abcdefABCDEF" for c in receipt
+            ):
+                reasons.append("SOURCE_SHA_RECEIPT_MALFORMED")
+            elif trace is not None and receipt.lower() != trace.source_sha256:
                 reasons.append("SOURCE_SHA_RECEIPTS_DISAGREE")
-        if trace is not None and isinstance(qmeta.get("revision_id"), str):
-            if qmeta["revision_id"] != trace.revision_id:
+        if "revision_id" in qmeta:
+            receipt = qmeta["revision_id"]
+            if type(receipt) is not str or not receipt or receipt.strip() != receipt:
+                reasons.append("REVISION_RECEIPT_MALFORMED")
+            elif trace is not None and receipt != trace.revision_id:
                 reasons.append("REVISION_RECEIPTS_DISAGREE")
         rows.append({
             "quantity_id": quantity.quantity_id,
