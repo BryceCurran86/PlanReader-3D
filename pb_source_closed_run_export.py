@@ -87,6 +87,38 @@ def _lineage_reasons(
         if actual != expected_value:
             reasons.append(f"{key}_mismatch")
 
+    # A stale/superseded original quantity remains unavailable even when
+    # all its other trace receipts happen to match a signed source.
+    for marker in ("is_stale", "is_superseded"):
+        if marker in metadata and metadata[marker] is not False:
+            reasons.append(f"quantity_{marker}")
+
+    # Never equate a lossy Boolean/fractional/whitespace alias to a producer's
+    # positive integer workspace. Persisted canonical digit strings are allowed.
+    workspace = metadata.get("workspace_id")
+    if workspace is not None:
+        if type(workspace) is int and workspace > 0:
+            original_workspace = workspace
+        elif type(workspace) is str and workspace.isascii() and workspace.isdecimal():
+            try:
+                original_workspace = int(workspace)
+            except (ValueError, OverflowError):
+                original_workspace = None
+        else:
+            original_workspace = None
+        if original_workspace != trace.workspace_id:
+            reasons.append("workspace_id_mismatch")
+
+    if not quantity.abstained and any(
+        type(value) is not str or not value or value != value.strip()
+        for value in quantity.input_entity_ids
+    ):
+        reasons.append("quantity_identity_malformed")
+    if not quantity.abstained and any(
+        type(value) is not str or not value or value != value.strip()
+        for value in (*quantity.evidence_ids, *trace.evidence_ids, *trace.canonical_entity_ids)
+    ):
+        reasons.append("source_trace_identity_malformed")
     missing_entities = set(quantity.input_entity_ids) - set(trace.canonical_entity_ids)
     if missing_entities:
         reasons.append("canonical_entity_trace_incomplete")
