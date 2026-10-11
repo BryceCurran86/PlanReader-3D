@@ -486,6 +486,52 @@ def _native_word_label_census(
     }
 
 
+def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
+    """Diagnostic bbox intersections only; never prove room face ownership.
+
+    Original native label text and independently unvalidated planarizer walks
+    remain two distinct candidate streams. In particular, a label inside a
+    face's BOUNDING RECTANGLE does not prove point-in-face or authenticated
+    wall continuity. This helper only localizes the earliest failed gate.
+    """
+    rows = []
+    labels = tuple(native_census.get("occurrences", ()) or ())
+    count = 0
+    for candidate in faces:
+        polygon = face_authority._canonical_polygon(candidate)
+        if not polygon:
+            continue
+        count += 1
+        if len(rows) >= 150:
+            continue
+        xs, ys = (point[0] for point in polygon), (point[1] for point in polygon)
+        x_coordinates = tuple(xs)
+        y_coordinates = tuple(ys)
+        bbox = (min(x_coordinates), min(y_coordinates), max(x_coordinates), max(y_coordinates))
+        hits = []
+        for index, label in enumerate(labels):
+            label_bbox = label.get("bbox_pt", ())
+            if len(label_bbox) != 4:
+                continue
+            cx = (label_bbox[0] + label_bbox[2]) * 0.5
+            cy = (label_bbox[1] + label_bbox[3]) * 0.5
+            if bbox[0] <= cx <= bbox[2] and bbox[1] <= cy <= bbox[3]:
+                hits.append(index)
+        rows.append({
+            "raw_planar_candidate_bbox_pt": list(bbox),
+            "raw_planar_candidate_area_pt2": face_authority._polygon_area(polygon),
+            "native_label_occurrence_indices_inside_bbox_only": hits,
+            "room_face_or_measurement_authority_granted": False,
+        })
+    return {
+        "diagnostic_only": True,
+        "raw_candidate_count": count,
+        "bbox_rows": rows,
+        "truncated": count > len(rows),
+        "bbox_overlap_is_not_physical_ownership": True,
+    }
+
+
 def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, ...] = ()) -> dict:
     payload = pdf.read_bytes()
     original_native_label_census = _native_word_label_census(
@@ -564,6 +610,11 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
         areas = sorted(
             (round(face_authority._polygon_area(face_authority._canonical_polygon(face)), 6)
              for face in faces if face_authority._canonical_polygon(face))
+        )
+        observations[-1]["raw_face_label_bbox_candidate_ledger"] = (
+            _raw_face_bbox_label_candidate_ledger(
+                faces, original_native_label_census,
+            )
         )
         observations[-1]["planar_faces"] = {
             "count": len(faces),
