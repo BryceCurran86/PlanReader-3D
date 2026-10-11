@@ -61,6 +61,10 @@ def fixture():
                  "host_publication_allowed": False, "all_w2_edges": edges,
                  "all_snap_collapsed_fragments": [],
                  "source_parent_census": census,
+                 "all_experimental_w4_candidates": [
+                     {"candidate_id": "unproved-wall-left",
+                      "w2_edge_ids": ["edge-pixel-left"]},
+                 ],
              }}
     return raw, required, pixel
 
@@ -116,6 +120,7 @@ def test_nearby_but_not_endpoint_anchored_pixel_is_not_an_opening_host():
     "duplicate_pixel_id", "duplicate_opening_id", "missing_flank",
     "bad_original_basis", "bad_original_status", "bad_pixel_count",
     "pixel_missing_experimental_graph", "pixel_extra_w2_parent",
+    "pixel_unbacked_w4_member", "pixel_missing_w4_member",
 ])
 def test_corrupt_source_or_ancestry_fails_closed(mutation):
     raw, required, pixel = fixture()
@@ -164,6 +169,11 @@ def test_corrupt_source_or_ancestry_fails_closed(mutation):
     elif mutation == "pixel_extra_w2_parent":
         pixel["experimental_w2_w4"]["all_w2_edges"][0][
             "source_observation_ids"] = ["unrelated"]
+    elif mutation == "pixel_unbacked_w4_member":
+        pixel["experimental_w2_w4"]["all_experimental_w4_candidates"][0][
+            "w2_edge_ids"] = ["edge-pixel-right"]
+    elif mutation == "pixel_missing_w4_member":
+        pixel["experimental_w2_w4"]["all_experimental_w4_candidates"] = []
     with pytest.raises((ValueError, TypeError, KeyError)):
         join(raw, required, pixel, pdf_sha=pdf_sha)
 
