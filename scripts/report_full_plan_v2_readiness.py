@@ -592,7 +592,7 @@ def main() -> int:
             args.output, encoded,
             protected_roots=(
                 args.benchmark_root, args.produced_root, args.source_root,
-                args.sealed_root, args.customer_root,
+                args.sealed_root, getattr(args, "customer_root", None),
             ),
         )
     else:
