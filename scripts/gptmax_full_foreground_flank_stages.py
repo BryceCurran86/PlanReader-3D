@@ -9,6 +9,7 @@ import argparse
 from collections import Counter, defaultdict
 from hashlib import sha256
 import json
+import math
 from pathlib import Path
 
 from pb_opening_host_binding_authority import (
@@ -132,6 +133,90 @@ def _flank_stage_rows(joined, original, required, graph):
     return sorted(output, key=lambda r: r["opening_identity_id"])
 
 
+def cross_opening_source_usage(opening_rows):
+    """Read-only census of original pixel parents reused by distinct G17 opens.
+
+    Sharing a painted original source observation is not proof that opening
+    identities, wall hosts or physical geometry are interchangeable.
+    """
+    if not isinstance(opening_rows, list):
+        raise ValueError("source-owned opening rows must be a list")
+    observations = defaultdict(list)
+    unique_openings = set()
+    for opening in opening_rows:
+        if not isinstance(opening, dict):
+            raise ValueError("malformed source opening row")
+        opening_id = opening.get("opening_identity_id")
+        if (not isinstance(opening_id, str) or not opening_id.strip()
+                or opening_id in unique_openings):
+            raise ValueError("missing or duplicate source opening identity")
+        unique_openings.add(opening_id)
+        flanks = opening.get("flanks")
+        if not isinstance(flanks, list):
+            raise ValueError("missing source-owned opening flanks")
+        roles = set()
+        for flank in flanks:
+            if not isinstance(flank, dict):
+                raise ValueError("malformed source-owned opening flank")
+            role = flank.get("role")
+            if (not isinstance(role, str) or not role.strip() or role in roles):
+                raise ValueError("ambiguous source opening flank role")
+            roles.add(role)
+            rows = flank.get("source_run_rows")
+            if not isinstance(rows, list):
+                raise ValueError("missing original pixel source observation rows")
+            seen = set()
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise ValueError("malformed original pixel source row")
+                source_id = row.get("source_observation_id")
+                if (not isinstance(source_id, str) or not source_id.strip()
+                        or source_id in seen):
+                    raise ValueError("duplicate or missing original pixel source parent")
+                seen.add(source_id)
+                coords = row.get("source_line_pt")
+                if (not isinstance(coords, (list, tuple)) or len(coords) != 4
+                        or any(type(v) not in (int, float) or
+                               not math.isfinite(v) for v in coords)):
+                    raise ValueError("invalid original source line geometry")
+                a, b = tuple(coords[:2]), tuple(coords[2:])
+                if a == b:
+                    raise ValueError("degenerate original pixel source line")
+                if (row.get("source_pixel_receipt_freshly_reauthenticated") is not True
+                        or row.get("host_publication_allowed") is not False
+                        or row.get("physical_equivalence_proven") is not False):
+                    raise ValueError("source parent lacks original nonpublishing receipt")
+                observations[source_id].append({
+                    "opening_identity_id": opening_id,
+                    "flank_role": role,
+                    "source_line_pt": list(coords),
+                })
+    shared = []
+    for source_id, uses in sorted(observations.items()):
+        identities = {use["opening_identity_id"] for use in uses}
+        if len(identities) < 2:
+            continue
+        # One source observation cannot own two different original geometries.
+        originals = {
+            tuple(sorted((tuple(u["source_line_pt"][:2]),
+                          tuple(u["source_line_pt"][2:]))))
+            for u in uses
+        }
+        if len(originals) != 1:
+            raise ValueError("same source observation has inconsistent original geometry")
+        shared.append({
+            "source_observation_id": source_id,
+            "opening_identity_ids": sorted(identities),
+            "source_uses": sorted(uses, key=lambda u: (
+                u["opening_identity_id"], u["flank_role"])),
+            "physical_equivalence_proven": False,
+            "source_parent_transfer_allowed": False,
+            "host_publication_allowed": False,
+            "opening_count_publication_allowed": False,
+        })
+    return shared
+
+
 def full_foreground_stage_report(original_bytes, required, foreground, *, pdf_bytes, expected_source_sha):
     original = json.loads(original_bytes)
     # The existing reader validates complete required-flank ownership and all
@@ -141,7 +226,10 @@ def full_foreground_stage_report(original_bytes, required, foreground, *, pdf_by
     original, foreground = _fresh_source_reports(pdf_bytes, original, foreground, expected_source_sha)
     graph = foreground["experimental_w2_w4"]
     rows = _flank_stage_rows(joined, original, required, graph)
+    shared_original_source = cross_opening_source_usage(rows)
     return {"schema_version": "1.0.0", "source_sha256": expected_source_sha,
+        "cross_opening_shared_original_pixel_sources": shared_original_source,
+        "cross_opening_source_parent_transfer_allowed": False,
         "page_id": original["page_id"], "opening_rows": rows,
         "original_source_and_topology_freshly_reproduced": True,
         "input_source_primitive_count": graph["input_source_count"],
