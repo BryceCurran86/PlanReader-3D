@@ -1,0 +1,107 @@
+name: GPT MAX Original Cross-Flank Pixel Wall-Rail Alternatives
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_cross_flank_rail_bands.py
+      - tests/test_gptmax_cross_flank_rail_bands.py
+      - docs/engineering/gptmax_cross_flank_source_rails.md
+      - .github/workflows/test-gptmax-cross-flank-rail-bands.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_cross_flank_rail_bands.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reauthenticate original PDF and seven source flanks independently
+        run: |
+          echo '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844  documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' | sha256sum --check --status
+          PYTHONPATH=. python -u tools/diag_gptmax_full_foreground_run_source.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --expected-render-sha 64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab \
+            --output original-foreground-source.json
+          PYTHONPATH=. python -u tools/diag_gptmax_raster_host_source_membership.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-g17-source.json
+          PYTHONPATH=. python tools/diag_gptmax_required_flank_source.py \
+            --source-report original-g17-source.json \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-required-flanks.json
+          PYTHONPATH=. python -u tools/diag_gptmax_full_foreground_flank.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --original-source-report original-g17-source.json \
+            --required-flank-report original-required-flanks.json \
+            --foreground-source-report original-foreground-source.json \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-foreground-flanks.json
+      - name: Prove nonpublishing candidate rail census for every genuine raster opening
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_cross_flank_rail_bands.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --original-g17-report original-g17-source.json \
+            --source-flank-report original-foreground-flanks.json \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-paired-rail-alternatives.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('original-paired-rail-alternatives.json').read_text())
+          source=json.loads(Path('original-g17-source.json').read_text())
+          assert report['source_sha256']==source['source_sha256']
+          assert source['primitive_safety_cap']==20000
+          assert len(report['opening_rows'])==7
+          assert all(len(row['cross_flank_source_pixel_band_alternatives'])>=1
+              for row in report['opening_rows'])
+          assert source['source_original_host_count']>=14
+          assert source['source_original_frame_count']>=9
+          assert all(not x['physical_wall_pair_equivalence_proven']
+              and not x['physical_host_publication_allowed']
+              for row in report['opening_rows']
+              for x in row['cross_flank_source_pixel_band_alternatives'])
+          for k in ['host_publication_allowed','physical_equivalence_proven',
+                     'source_universe_completeness_proven',
+                     'opening_count_publication_allowed','metric_quantity_publication_allowed']:
+              assert report[k] is False
+          assert report['benchmark_accuracy'] is None
+          print({'seven_openings':len(report['opening_rows']),
+                 'source_band_alternatives':[len(x['cross_flank_source_pixel_band_alternatives'])
+                  for x in report['opening_rows']],
+                 'real_wall_host_authority':False})
+          PY
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-lot16-cross-flank-rail-alternatives
+          retention-days: 21
+          path: |
+            original-paired-rail-alternatives.json
+            original-foreground-flanks.json
+            original-g17-source.json
