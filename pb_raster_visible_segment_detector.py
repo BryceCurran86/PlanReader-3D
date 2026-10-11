@@ -127,6 +127,42 @@ def _dedupe(
     return result
 
 
+def _axis_spatial_buckets(
+    segments: list[tuple[float, float, float, float]],
+    *,
+    axis_start: int,
+    axis_end: int,
+    tolerance_px: float,
+) -> tuple[float, float, dict[int, list[tuple[float, float, float, float]]]]:
+    """Index source-order segments by a static perpendicular-axis range.
+
+    The snap pass only mutates the *other* axis. Therefore prefiltering by
+    these original bounds does not lose a chain-snap, and source iteration
+    order (which determines tie results) is preserved inside each bucket.
+    The adaptive bin width caps the number of references for long lines.
+    """
+    if not segments:
+        return 0.0, 32.0, {}
+    low = min(min(s[axis_start], s[axis_end]) for s in segments) - tolerance_px
+    high = max(max(s[axis_start], s[axis_end]) for s in segments) + tolerance_px
+    width = max(32.0, 16.0 * tolerance_px, (high - low) / 128.0)
+    buckets: dict[int, list[tuple[float, float, float, float]]] = {}
+    for segment in segments:
+        first = math.floor((min(segment[axis_start], segment[axis_end]) - tolerance_px - low) / width)
+        last = math.floor((max(segment[axis_start], segment[axis_end]) + tolerance_px - low) / width)
+        for bucket_id in range(first, last + 1):
+            buckets.setdefault(bucket_id, []).append(segment)
+    return low, width, buckets
+
+
+def _axis_candidates(
+    index: tuple[float, float, dict[int, list[tuple[float, float, float, float]]]],
+    coordinate: float,
+) -> list[tuple[float, float, float, float]]:
+    low, width, buckets = index
+    return buckets.get(math.floor((coordinate - low) / width), [])
+
+
 def _snap_intersections(
     horizontal: list[tuple[float, float, float, float]],
     vertical: list[tuple[float, float, float, float]],
@@ -136,11 +172,14 @@ def _snap_intersections(
     list[tuple[float, float, float, float]],
     list[tuple[float, float, float, float]],
 ]:
+    vertical_y = _axis_spatial_buckets(
+        vertical, axis_start=1, axis_end=3, tolerance_px=tolerance_px,
+    )
     snapped_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in horizontal:
         left = x0
         right = x1
-        for vx0, vy0, _vx1, vy1 in vertical:
+        for vx0, vy0, _vx1, vy1 in _axis_candidates(vertical_y, y0):
             vx = vx0
             if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
                 if abs(left - vx) <= tolerance_px:
@@ -150,11 +189,14 @@ def _snap_intersections(
         if right - left > 0.0:
             snapped_h.append((left, y0, right, y0))
 
+    horizontal_x = _axis_spatial_buckets(
+        snapped_h, axis_start=0, axis_end=2, tolerance_px=tolerance_px,
+    )
     snapped_v: list[tuple[float, float, float, float]] = []
     for x0, y0, _x1, y1 in vertical:
         top = y0
         bottom = y1
-        for hx0, hy0, hx1, _hy1 in snapped_h:
+        for hx0, hy0, hx1, _hy1 in _axis_candidates(horizontal_x, x0):
             if hx0 - tolerance_px <= x0 <= hx1 + tolerance_px:
                 if abs(top - hy0) <= tolerance_px:
                     top = hy0
@@ -165,11 +207,14 @@ def _snap_intersections(
 
     # A second horizontal pass picks up any y coordinates standardized by the
     # vertical pass without ever bridging a real gap.
+    snapped_vertical_y = _axis_spatial_buckets(
+        snapped_v, axis_start=1, axis_end=3, tolerance_px=tolerance_px,
+    )
     final_h: list[tuple[float, float, float, float]] = []
     for x0, y0, x1, _y1 in snapped_h:
         left = x0
         right = x1
-        for vx0, vy0, _vx1, vy1 in snapped_v:
+        for vx0, vy0, _vx1, vy1 in _axis_candidates(snapped_vertical_y, y0):
             if vy0 - tolerance_px <= y0 <= vy1 + tolerance_px:
                 if abs(left - vx0) <= tolerance_px:
                     left = vx0
