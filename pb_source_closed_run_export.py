@@ -60,7 +60,14 @@ def _lineage_reasons(
         candidate = metadata.get(key)
         if candidate is None:
             continue
-        if _clean(candidate).lower() != _clean(authoritative).lower():
+        # Project/document/revision IDs are exact, case-sensitive producer
+        # identities. Only the hexadecimal SHA representation is normalized.
+        actual = _clean(candidate)
+        expected_value = _clean(authoritative)
+        if key == "source_sha256":
+            actual = actual.lower()
+            expected_value = expected_value.lower()
+        if actual != expected_value:
             reasons.append(f"{key}_mismatch")
 
     for marker in ("is_stale", "is_superseded"):
@@ -186,6 +193,17 @@ def sealed_source_closed_run_from_dict(
     """
     if not isinstance(payload, Mapping):
         raise TypeError("sealed run payload must be a mapping")
+    for field in ("schema_version", "run_id", "project_id", "fingerprint"):
+        original = payload.get(field)
+        if type(original) is not str or not original or original != original.strip():
+            raise SourceClosedRunConflictError(
+                f"sealed run has noncanonical scalar {field}"
+            )
+    if (
+        len(payload["fingerprint"]) != 64
+        or any(c not in "0123456789abcdef" for c in payload["fingerprint"])
+    ):
+        raise SourceClosedRunConflictError("sealed run has noncanonical fingerprint")
     if _clean(payload.get("schema_version")) != SOURCE_CLOSED_RUN_EXPORT_SCHEMA_VERSION:
         raise SourceClosedRunConflictError("unsupported sealed run schema_version")
 
@@ -201,6 +219,10 @@ def sealed_source_closed_run_from_dict(
                 f"sealed run {envelope_field} must be an array of strings"
             )
 
+    for source_sha in payload["source_sha256s"]:
+        if len(source_sha) != 64 or any(c not in "0123456789abcdef" for c in source_sha):
+            raise SourceClosedRunConflictError("sealed run has noncanonical source_sha256s")
+
     raw_rows = payload.get("quantities")
     if not isinstance(raw_rows, (list, tuple)):
         raise SourceClosedRunConflictError("sealed run quantities must be a sequence")
@@ -210,6 +232,32 @@ def sealed_source_closed_run_from_dict(
         if not isinstance(raw, Mapping):
             raise SourceClosedRunConflictError(
                 f"sealed quantity {index} must be a mapping"
+            )
+        # Original source fields are canonical strings. Coercing 123 -> "123"
+        # during rehydration can preserve the same normalized fingerprint,
+        # hiding an altered signed wire receipt.
+        scalar_fields = (
+            "schema_version", "project_id", "quantity_id", "family",
+            "semantic_key", "unit", "status", "authority", "document_id",
+            "source_sha256", "source_page", "viewport_id", "revision_id",
+        )
+        for name in scalar_fields:
+            value = raw.get(name)
+            if type(value) is not str or not value or value != value.strip():
+                raise SourceClosedRunConflictError(
+                    f"sealed quantity {index} has noncanonical scalar {name}"
+                )
+        for sha_field in ("source_sha256", "fingerprint"):
+            receipt = raw.get(sha_field)
+            if type(receipt) is not str or len(receipt) != 64 or any(
+                c not in "0123456789abcdef" for c in receipt
+            ):
+                raise SourceClosedRunConflictError(
+                    f"sealed quantity {index} has noncanonical {sha_field}"
+                )
+        if raw["schema_version"] != SOURCE_CLOSED_RUN_EXPORT_SCHEMA_VERSION:
+            raise SourceClosedRunConflictError(
+                f"sealed quantity {index} has unsupported schema_version"
             )
         # Signed lineage arrays are canonical JSON sequences, not strings,
         # mappings or numerics with keys/characters that happen to rehydrate
@@ -431,12 +479,14 @@ def _build_sealed_run(
 
     normalized: list[SealedSourceClosedQuantity] = []
     quantity_ids: set[str] = set()
-    # Index by each producer-owned physical ID, not by an exact identity tuple.
-    # One quantity can claim A+B while another claims B+C; exact-set checks
-    # would miss the overlapping B claim and double-count source geometry.
     physical_claims: dict[
         tuple[str, str], dict[str, SealedSourceClosedQuantity]
     ] = {}
+    # A current commercial run may contain multiple different documents, but
+    # may not silently mix source snapshots or revisions for one document ID.
+    # Revision text is not an ordering authority: conflict requires a new
+    # source-supported handoff, never selection of a supposed latest value.
+    document_sources: dict[str, tuple[str, str]] = {}
     for row in rows:
         if not isinstance(row, SealedSourceClosedQuantity):
             raise TypeError(
@@ -446,6 +496,14 @@ def _build_sealed_run(
             raise SourceClosedRunConflictError(
                 f"quantity {row.quantity_id} belongs to project {row.project_id}"
             )
+        source_identity = (row.revision_id, row.source_sha256.lower())
+        prior_source = document_sources.get(row.document_id)
+        if prior_source is not None and prior_source != source_identity:
+            raise SourceClosedRunConflictError(
+                f"conflicting sealed source revisions or snapshots for "
+                f"document {row.document_id!r}"
+            )
+        document_sources[row.document_id] = source_identity
         # Production seal writers emit canonical sorted, unique source ID
         # arrays. The verifier must not accept re-signed duplicate or padded
         # identities merely because the SHA fingerprint matches their bytes.
