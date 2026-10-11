@@ -130,3 +130,65 @@ def test_opening_area_cannot_keep_host_and_figured_receipts_but_lose_physical_ob
     assert _opening_quantity(tampered) is None
     valid = _opening_quantity(opening)
     assert valid is not None and valid.value == 2.172
+
+
+def _opening_final_source_claim():
+    from tests.test_live_floor_finish_area_source_closed_export import _claim
+    opening = _opening()
+    quantity = _opening_quantity(opening)
+    assert quantity is not None
+    return replace(
+        _claim(), canonical_openings=(opening,),
+        opening_quantity_evidence=(quantity,),
+    )
+
+
+def test_real_producer_opening_area_claim_still_builds_one_source_closed_trace():
+    from pb_live_opening_source_closed_export import (
+        build_live_opening_area_claim_source_traces,
+        seal_live_opening_area_claim_run,
+    )
+
+    claim = _opening_final_source_claim()
+    qty = claim.opening_quantity_evidence[0]
+    traces = build_live_opening_area_claim_source_traces(
+        claim, workspace_id=1, project_id="source-opening-original",
+    )
+    assert set(traces) == {qty.quantity_id}
+    sealed = seal_live_opening_area_claim_run(
+        claim, workspace_id=1, project_id="source-opening-original",
+    )
+    assert len(sealed.quantities) == 1
+    assert sealed.quantities[0].value == 2.172
+
+
+@pytest.mark.parametrize("altered", [
+    {"value": 3.1},
+    {"value": 2.172001},
+    {"authority": "copied_source"},
+    {"status": "firm"},
+    {"confidence": 0.7},
+    {"formula": "replayed_m2_without_physical_source"},
+    {"semantic_key": "window_area:foreign-opening"},
+    {"metadata": {"source_sha256": "f" * 64}},
+])
+def test_replayed_opening_quantity_fails_final_seal_even_with_unchanged_id_and_receipts(altered):
+    from pb_live_opening_source_closed_export import seal_live_opening_area_claim_run
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    claim = _opening_final_source_claim()
+    genuine = claim.opening_quantity_evidence[0]
+    if "metadata" in altered:
+        altered = {
+            "metadata": {**dict(genuine.metadata), **altered["metadata"]},
+        }
+    forged = replace(genuine, **altered)
+    # This deliberately retains the original source evidence IDs and quantity
+    # ID: only full producer replay can detect the changed value/semantic claim.
+    assert forged.quantity_id == genuine.quantity_id
+    assert forged.evidence_ids == genuine.evidence_ids
+    with pytest.raises(SourceClosedRunConflictError, match="does not match current physical source"):
+        seal_live_opening_area_claim_run(
+            replace(claim, opening_quantity_evidence=(forged,)),
+            workspace_id=1, project_id="source-opening-original",
+        )
