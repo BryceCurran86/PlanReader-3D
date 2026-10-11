@@ -1149,3 +1149,81 @@ def test_gpt2_finish_result_floor_lookup_never_silently_overwrites_conflicts(
     assert authentic.quantity not in disputed.quantities
     assert authentic.canonical_floor_id not in disputed.records_by_floor_id
     assert competing.canonical_floor_id not in disputed.records_by_floor_id
+
+
+def test_gpt2_two_source_faces_cannot_mint_same_physical_room_metric_floor(monkeypatch):
+    """Even with different area/text receipts, one physical room is one floor."""
+    from pb_cross_view_floor_finish_authority import (
+        _unique_documented_area_owner_receipts,
+    )
+    _patch_material_viewports(monkeypatch)
+    _source, documented, _floors = _source_room_area_and_floor(_payload())
+    real = documented.records[0]
+    competing = replace(
+        real,
+        source_room_face_record_id="competing-original-source-face-receipt",
+        area_evidence=replace(
+            real.area_evidence, evidence_id="competing-original-dimension-evidence",
+        ),
+        source_label_observation_ids=("separate-original-native-word",),
+        source_label_receipt_ids=("separate-original-native-receipt",),
+    )
+    assert competing.physical_room_id == real.physical_room_id
+    selected, disputed = _unique_documented_area_owner_receipts(
+        (), (real, competing),
+    )
+    assert selected == {}
+    assert disputed == tuple(sorted((
+        real.source_room_face_record_id,
+        competing.source_room_face_record_id,
+    )))
+    reversed_selected, reversed_disputed = _unique_documented_area_owner_receipts(
+        (), (competing, real),
+    )
+    assert reversed_selected == selected
+    assert reversed_disputed == disputed
+
+
+def test_gpt2_independent_source_room_preserved_when_one_physical_identity_conflicts(
+    monkeypatch,
+):
+    from pb_cross_view_floor_finish_authority import (
+        _unique_documented_area_owner_receipts,
+    )
+    _patch_material_viewports(monkeypatch)
+    _source, documented, _floors = _source_room_area_and_floor(_payload())
+    a = documented.records[0]
+    b = replace(
+        a, source_room_face_record_id="second-source-face",
+        area_evidence=replace(a.area_evidence,evidence_id="second-area"),
+        source_label_observation_ids=("second-label-observation",),
+        source_label_receipt_ids=("second-label-receipt",),
+    )
+    independent = replace(
+        a, source_room_face_record_id="independent-source-face",
+        physical_room_id="other-authenticated-physical-room",
+        area_evidence=replace(a.area_evidence,evidence_id="independent-area"),
+        source_label_observation_ids=("independent-label-observation",),
+        source_label_receipt_ids=("independent-label-receipt",),
+    )
+    selected, disputed = _unique_documented_area_owner_receipts(
+        (), (a,b,independent),
+    )
+    assert set(selected)=={"independent-source-face"}
+    assert selected["independent-source-face"] is independent
+    assert disputed==tuple(sorted((a.source_room_face_record_id,"second-source-face")))
+
+
+def test_gpt2_missing_physical_room_identity_cannot_seal_finish(monkeypatch):
+    from pb_cross_view_floor_finish_authority import (
+        _unique_documented_area_owner_receipts,
+    )
+    _patch_material_viewports(monkeypatch)
+    _source, documented, _floors = _source_room_area_and_floor(_payload())
+    real = documented.records[0]
+    invalid = replace(real, physical_room_id="")
+    selected, disputed = _unique_documented_area_owner_receipts(
+        (), (invalid,),
+    )
+    assert selected == {}
+    assert disputed == (real.source_room_face_record_id,)
