@@ -18,7 +18,7 @@ from pb_migration_contracts import (
     canonical_contract_json,
     stable_contract_id,
 )
-from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
+from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace, quantity_status_not_publishable
 
 
 SOURCE_CLOSED_RUN_EXPORT_SCHEMA_VERSION = "1.0.0"
@@ -56,6 +56,23 @@ def _lineage_reasons(
         "source_sha256": trace.source_sha256,
         "revision_id": trace.revision_id,
     }
+    if not quantity.abstained and metadata.get("shadow_only") is True:
+        reasons.append("shadow_only_quantity")
+    if (
+        not quantity.abstained
+        and metadata.get("commercial_projection_allowed") is False
+        and not (
+            metadata.get("quantity_handoff_only") is True
+            and not quantity_status_not_publishable(quantity.status)
+            and metadata.get("shadow_only") is not True
+        )
+    ):
+        # Published floor/ceiling QuantityEvidence may be explicitly marked
+        # handoff-only: its producer authenticates a final quantity for sealing,
+        # then a separate customer adapter adds presentation/AI-review metadata.
+        # This flag is NOT permission to project raw shadow/provisional rows.
+        reasons.append("commercial_projection_forbidden")
+
     for key, authoritative in expected.items():
         candidate = metadata.get(key)
         if candidate is None:
@@ -84,6 +101,28 @@ def _lineage_reasons(
     status = _clean(quantity.status).lower()
     if "conflict" in status:
         reasons.append("quantity_status_conflict")
+    # Source-owned ceiling review promotion has a different contract from a
+    # final firm commercial quantity. The dedicated ceiling review exporter
+    # first proves the promoted source candidate, To review customer row, and
+    # all three commercial gates remain closed. Keep its review *lineage*
+    # seal valid without relabelling review_required as a publishable status.
+    # Arbitrary provisional/candidate, shadow, unsigned or stale identities
+    # must not receive this exception.
+    review_promotion_receipt = (
+        quantity.family == "ceiling_lining"
+        and _clean(quantity.status).lower() == "review_required"
+        and metadata.get("source_owned_ceiling_promotion") is True
+        and metadata.get("shadow_only") is False
+        and metadata.get("commercial_projection_allowed") is True
+        and not quantity.blocking_reasons
+        and not any("conflict" in _clean(code).lower() for code in quantity.reason_codes)
+    )
+    if (
+        not quantity.abstained
+        and quantity_status_not_publishable(quantity.status)
+        and not review_promotion_receipt
+    ):
+        reasons.append("quantity_status_not_publishable")
     if any("conflict" in _clean(reason).lower() for reason in quantity.reason_codes):
         reasons.append("quantity_reason_conflict")
     return tuple(dict.fromkeys(reasons))
