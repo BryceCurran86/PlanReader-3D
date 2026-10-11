@@ -250,8 +250,18 @@ def main(argv: list[str] | None = None) -> int:
     input_paths = [args.sealed_run, *args.source]
     if args.customer_rows is not None:
         input_paths.append(args.customer_rows)
-    if args.output.resolve() in {source.resolve() for source in input_paths}:
+    destination = args.output.resolve()
+    if destination in {source.resolve() for source in input_paths}:
         raise ValueError("produced-items output must not overwrite original source inputs")
+    # A misconfigured output path must never mutate the frozen reference
+    # universe, manifests, expected quantities or official evaluator. They
+    # are not necessarily listed among --source input PDFs for this run.
+    frozen_benchmark_root = (
+        Path(__file__).resolve().parent.parent
+        / "benchmarks" / "frozen_holdout" / "full_plan_v2"
+    ).resolve()
+    if destination == frozen_benchmark_root or destination.is_relative_to(frozen_benchmark_root):
+        raise ValueError("produced-items output must not overwrite frozen V2 benchmark inputs")
     # A concurrent source producer can rotate PDFs or the sealed run after
     # the initial verification. Recheck both immediately before publication.
     customer_rows = None
