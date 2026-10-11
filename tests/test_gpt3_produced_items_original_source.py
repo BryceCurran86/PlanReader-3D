@@ -119,3 +119,41 @@ def test_produced_output_never_overwrites_original_source(which,tmp_path):
         main(["--sealed-run",str(path),"--source",str(source),
               "--project-id","project-a","--output",str(target)])
     assert target.read_bytes()==before
+
+
+
+def test_source_replaced_after_initial_sha_check_never_publishes(tmp_path,monkeypatch):
+    from tools import export_gpt3_produced_items as module
+    source,path,_,_,_=_source_run(tmp_path)
+    original=module.export_verified_produced_items
+    def rotate_after_verifying(*args,**kwargs):
+        items=original(*args,**kwargs)
+        source.write_bytes(b"%PDF-changed-between-read-and-publication")
+        return items
+    monkeypatch.setattr(module,"export_verified_produced_items",rotate_after_verifying)
+    out=tmp_path/"produced_items.json"
+    with pytest.raises(SourceClosedRunConflictError,match="original source changed during"):
+        main(["--sealed-run",str(path),"--source",str(source),
+              "--project-id","project-a","--output",str(out)])
+    assert not out.exists()
+
+
+def test_sealed_run_swapped_after_verification_never_rekeys_produced_items(tmp_path,monkeypatch):
+    from tools import export_gpt3_produced_items as module
+    source,path,sha,_,_=_source_run(tmp_path)
+    original=module.export_verified_produced_items
+    def rotate_signed_receipt(*args,**kwargs):
+        items=original(*args,**kwargs)
+        q=quantity("qty-substituted","room-1",sha)
+        new=seal_source_closed_run(
+            [q],project_id="project-a",
+            traces_by_quantity_id={q.quantity_id:trace("room-1",sha)},
+        )
+        path.write_text(new.to_json(),encoding="utf-8")
+        return items
+    monkeypatch.setattr(module,"export_verified_produced_items",rotate_signed_receipt)
+    out=tmp_path/"produced_items.json"
+    with pytest.raises(SourceClosedRunConflictError,match="sealed run changed during"):
+        main(["--sealed-run",str(path),"--source",str(source),
+              "--project-id","project-a","--output",str(out)])
+    assert not out.exists()
