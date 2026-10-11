@@ -684,6 +684,15 @@ def test_project_handoff_persists_production_failure_summary_before_reraise(
         "production_extraction_error:ValueError"
     ]
     assert summary["combined_run_file"] is None
+    attempt = __import__("json").loads(
+        (output / "source_attempt_preflight.json").read_text(encoding="utf-8")
+    )
+    assert attempt["status"] == "SOURCE_INPUT_RECORDED_UNSEALED"
+    assert attempt["benchmark_score_granted"] is False
+    assert attempt["complete_source_coverage_proven"] is False
+    assert attempt["source_page_count"] == 2
+    assert attempt["execution_page_numbers"] == [1, 2]
+    assert attempt["sealed_run_file"] is None
 
 
 
