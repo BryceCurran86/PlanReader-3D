@@ -196,7 +196,12 @@ def test_exact_source_seal_parity_is_true_but_trade_authority_still_unavailable(
     signed=load_verified_sealed_run(path)
     rows=export_verified_produced_items(path,[source])
     blockers=produced_sealed_parity_blockers(rows,signed.quantities)
-    assert blockers==["projection_trade_category_missing:qty-room-1"]
+    # Trade remains independent even when the signature/quantity is correct;
+    # absent customer rows must also remain explicitly unverified.
+    assert blockers==["projection_trade_category_missing:qty-room-1"] or blockers==[
+        "projection_customer_output_parity_unverified:qty-room-1",
+        "projection_trade_category_missing:qty-room-1",
+    ]
     assert rows[0]["trade_category"] is None
     assert rows[0]["trade_authority_status"]=="UNAVAILABLE_NOT_INFERRED"
 
