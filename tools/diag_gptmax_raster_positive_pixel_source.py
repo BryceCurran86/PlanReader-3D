@@ -50,9 +50,16 @@ def _nonpublishing_w3_snap_pair_source_losses(graph, deduped, removed):
     """
     kept_by_pair = {}
     edges_by_id = {}
+    node_ids = set()
+    for node in graph["nodes"]:
+        node_id = node.get("id")
+        if type(node_id) is not int or node_id in node_ids:
+            raise ValueError("invalid or duplicate original W2 node address")
+        node_ids.add(node_id)
     def pair(edge):
         a, b = edge.get("a"), edge.get("b")
-        if (type(a) is not int or type(b) is not int or a == b):
+        if (type(a) is not int or type(b) is not int or a == b
+                or a not in node_ids or b not in node_ids):
             raise ValueError("invalid W3 snapped node ownership")
         return tuple(sorted((a, b)))
     def geometry(edge):
@@ -75,22 +82,34 @@ def _nonpublishing_w3_snap_pair_source_losses(graph, deduped, removed):
 
     for edge in graph["edges"]:
         eid = edge.get("id")
-        if not isinstance(eid, str) or not eid or eid in edges_by_id:
+        if not isinstance(eid, str) or not eid.strip() or eid in edges_by_id:
             raise ValueError("invalid original W2 edge identity")
+        pair(edge)
         geometry(edge)
         parents(edge)
         edges_by_id[eid] = edge
+    retained_ids = set()
     for edge in deduped["edges"]:
+        eid = edge.get("id")
+        if (not isinstance(eid, str) or not eid.strip() or eid in retained_ids
+                or eid not in edges_by_id or edge != edges_by_id[eid]):
+            raise ValueError("retained W3 record differs from original W2 source")
+        retained_ids.add(eid)
         key = pair(edge)
         if key in kept_by_pair:
             raise ValueError("W3 deduplication still has collided snapped edge pair")
         kept_by_pair[key] = edge
 
-    removed_ids = tuple(map(str, removed))
-    if len(removed_ids) != len(set(removed_ids)):
-        raise ValueError("duplicate W3 removed edge addresses")
+    if not isinstance(removed, (list, tuple)) or any(
+            not isinstance(eid, str) or not eid.strip() for eid in removed):
+        raise ValueError("invalid W3 removed edge addresses")
+    removed_ids = tuple(removed)
+    removed_set = set(removed_ids)
+    if (len(removed_ids) != len(removed_set) or retained_ids & removed_set
+            or retained_ids | removed_set != set(edges_by_id)):
+        raise ValueError("incomplete or overlapping W3 original edge census")
     out = []
-    for eid in removed_ids:
+    for eid in sorted(removed_ids):
         lost = edges_by_id.get(eid)
         if lost is None:
             raise ValueError("W3 removed edge not found in original W2")
@@ -106,7 +125,10 @@ def _nonpublishing_w3_snap_pair_source_losses(graph, deduped, removed):
         forward = max(dist(qa[0], qb[0]), dist(qa[1], qb[1]))
         backward = max(dist(qa[0], qb[1]), dist(qa[1], qb[0]))
         delta = min(forward, backward)
+        if not math.isfinite(delta):
+            raise ValueError("nonfinite original W2 endpoint displacement")
         removed_parents, kept_parents = parents(lost), parents(keep)
+        parent_inventory_complete = bool(removed_parents and kept_parents)
         out.append({
             "removed_edge_id": eid, "retained_edge_id": keep["id"],
             "same_actual_snapped_node_pair": True,
@@ -116,7 +138,9 @@ def _nonpublishing_w3_snap_pair_source_losses(graph, deduped, removed):
             "removed_source_observation_ids": list(removed_parents),
             "retained_source_observation_ids": list(kept_parents),
             "max_endpoint_displacement_pt": delta,
-            "source_parent_sets_disjoint": not bool(set(removed_parents) & set(kept_parents)),
+            "source_parent_inventory_complete": parent_inventory_complete,
+            "source_parent_sets_disjoint": parent_inventory_complete
+                and not bool(set(removed_parents) & set(kept_parents)),
             "physically_distinct_wall_lines_proven": False,
             "source_parent_transfer_allowed": False,
             "host_publication_allowed": False,
