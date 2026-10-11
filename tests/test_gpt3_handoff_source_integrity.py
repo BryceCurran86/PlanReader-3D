@@ -388,3 +388,19 @@ def test_combination_conflict_cannot_leave_partially_published_family_seals(tmp_
     summary=json.loads((output/"production_summary.json").read_text())
     assert summary["status"]=="sealed_project_combination_failed"
     assert "sealed_project_combination_error:RuntimeError" in summary["claim_reason_codes"]
+
+
+
+def test_corrupted_negative_source_quantity_cannot_pass_final_handoff_filter():
+    # QuantityEvidence construction rejects negative measurements, but a
+    # deserialized/corrupted frozen record may bypass its constructor. The
+    # final producer selection must independently fail closed.
+    q=_q()
+    object.__setattr__(q,"value",-2.5)
+    assert handoff._non_abstained((q,))==()
+
+
+def test_authenticated_zero_quantity_remains_distinct_from_abstention():
+    q=_q(value=0.0)
+    assert not q.abstained
+    assert handoff._non_abstained((q,))==(q,)
