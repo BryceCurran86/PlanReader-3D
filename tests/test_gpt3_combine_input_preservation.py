@@ -105,13 +105,18 @@ def test_cli_atomic_publication_leaves_no_staging_file_on_success(tmp_path):
     ("1e999","out-of-range sealed JSON float"),
     ("1"+"0"*500,"out-of-range sealed JSON integer"),
 ])
+@pytest.mark.parametrize(("field","old_number"),[
+    ("value","10.0"),
+    ("confidence","1.0"),
+])
 def test_signed_run_json_numeric_overflow_is_rejected_before_seal_rehydration(
-    tmp_path,literal,expected_error
+    tmp_path,literal,expected_error,field,old_number
 ):
     source=_original_source(tmp_path)
     original=json.dumps(json.loads(source.read_text()),sort_keys=True)
-    assert '"value": 10.0' in original
-    forged=original.replace('"value": 10.0','"value": '+literal,1)
+    target=f'"{field}": {old_number}'
+    assert target in original
+    forged=original.replace(target,f'"{field}": '+literal,1)
     source.write_text(forged,encoding="utf-8")
     with pytest.raises(ValueError,match=expected_error):
         cli.load_verified_sealed_run(source)
