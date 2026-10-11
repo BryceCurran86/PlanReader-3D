@@ -158,7 +158,7 @@ def _ancestry(report, pixel_ids):
 
 def join_flank_pixel_evidence(original_report_bytes: bytes, required_report: dict,
                               pixel_report: dict, *, expected_source_sha: str,
-                              actual_pdf_sha: str):
+                              original_pdf_bytes: bytes):
     """Join every reported flank with all qualifying pixel runs; no owner chosen."""
     if not isinstance(original_report_bytes, bytes):
         raise TypeError("original diagnostic report must be raw immutable bytes")
@@ -168,7 +168,9 @@ def join_flank_pixel_evidence(original_report_bytes: bytes, required_report: dic
         _nonpublishing(report, label)
         if report.get("source_sha256") != expected_source_sha:
             raise ValueError(f"{label} source SHA mismatch")
-    if actual_pdf_sha != expected_source_sha:
+    if not isinstance(original_pdf_bytes, bytes):
+        raise TypeError("original PDF must be immutable bytes")
+    if sha256(original_pdf_bytes).hexdigest() != expected_source_sha:
         raise ValueError("original PDF byte SHA does not match source reports")
     if required_report.get("input_report_sha256") != sha256(original_report_bytes).hexdigest():
         raise ValueError("required flank report does not match exact source report bytes")
@@ -277,7 +279,7 @@ def main():
     pixel = json.loads(args.pixel_source_report.read_bytes())
     result = join_flank_pixel_evidence(
         original, required, pixel, expected_source_sha=args.expected_source_sha,
-        actual_pdf_sha=sha256(args.pdf.read_bytes()).hexdigest())
+        original_pdf_bytes=args.pdf.read_bytes())
     args.output.write_text(json.dumps(result, sort_keys=True, indent=2, allow_nan=False)+"\n")
     print(json.dumps({"opening_rows": len(result["opening_rows"]),
                       "host_publication_allowed": False}))
