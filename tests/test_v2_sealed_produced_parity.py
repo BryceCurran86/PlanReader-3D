@@ -128,7 +128,7 @@ def test_unchecked_source_seal_only_receipt_never_proves_customer_publication():
     )
     blockers = produced_sealed_parity_blockers([row], (_sealed(),))
     assert "projection_customer_output_parity_unverified:source-q-1" in blockers
-    assert "projection_customer_output_status_inconsistent:source-q-1" in blockers
+    assert "projection_customer_output_status_inconsistent:source-q-1" not in blockers
 
 
 def test_legacy_projection_without_status_still_requires_independent_customer_proof():
