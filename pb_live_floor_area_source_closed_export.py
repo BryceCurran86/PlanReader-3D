@@ -36,6 +36,12 @@ def build_live_floor_area_source_traces(
     """Build exact floor-owned source traces for final floor-area quantities."""
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
+    # A lossy int(True), int(7.9) or int("7") must not become a
+    # source-authenticated commercial workspace at the final floor boundary.
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise SourceClosedRunConflictError(
+            "floor source workspace_id must be an original positive integer"
+        )
 
     floors_by_physical_id = {}
     for floor in claim.canonical_floors:
@@ -123,7 +129,8 @@ def build_live_floor_area_source_traces(
             if (
                 not isinstance(receipts, (tuple, list))
                 or not receipts
-                or any(type(value) is not str or not value.strip() for value in receipts)
+                or any(type(value) is not str or not value or value != value.strip()
+                       for value in receipts)
                 or len(set(receipts)) != len(receipts)
             ):
                 raise SourceClosedRunConflictError(
@@ -135,34 +142,59 @@ def build_live_floor_area_source_traces(
                 f"floor source trace does not cover quantity evidence: {quantity.quantity_id}"
             )
 
-        points = tuple(floor.polygon_pdf_pts or ())
-        if not floor.geometry_complete or len(points) < 3:
+        # Original page-point vertices are provenance, NOT measured m².
+        # Validate their exact typed geometry before persisting a source bbox.
+        # A positive bbox alone can surround a self-cancelling zero-area ring.
+        points = floor.polygon_pdf_pts
+        if (
+            not floor.geometry_complete
+            or type(points) not in (list, tuple)
+            or len(points) < 3
+        ):
             raise SourceClosedRunConflictError(
                 f"floor source geometry is missing or incomplete: {quantity.quantity_id}"
             )
-        source_bbox = None
-        if points:
+        checked: list[tuple[float, float]] = []
+        for point in points:
+            if (
+                type(point) not in (list, tuple)
+                or len(point) != 2
+                or any(type(value) not in (int, float) for value in point)
+            ):
+                raise SourceClosedRunConflictError(
+                    f"floor source polygon is invalid: {quantity.quantity_id}"
+                )
             try:
-                xs = tuple(float(point[0]) for point in points)
-                ys = tuple(float(point[1]) for point in points)
-            except (TypeError, ValueError, IndexError) as exc:
+                x, y = float(point[0]), float(point[1])
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise SourceClosedRunConflictError(
                     f"floor source polygon is invalid: {quantity.quantity_id}"
                 ) from exc
-            if xs and ys:
-                if (
-                    not all(math.isfinite(value) for value in (*xs, *ys))
-                    or max(xs) <= min(xs)
-                    or max(ys) <= min(ys)
-                ):
-                    raise SourceClosedRunConflictError(
-                        f"floor source polygon is invalid: {quantity.quantity_id}"
-                    )
-                source_bbox = (min(xs), min(ys), max(xs), max(ys))
+            if not math.isfinite(x) or not math.isfinite(y):
+                raise SourceClosedRunConflictError(
+                    f"floor source polygon is invalid: {quantity.quantity_id}"
+                )
+            checked.append((x, y))
+        xs = [point[0] for point in checked]
+        ys = [point[1] for point in checked]
+        doubled_area = math.fsum(
+            checked[i][0] * checked[(i + 1) % len(checked)][1]
+            - checked[(i + 1) % len(checked)][0] * checked[i][1]
+            for i in range(len(checked))
+        )
+        if (
+            max(xs) <= min(xs) or max(ys) <= min(ys)
+            or not math.isfinite(doubled_area)
+            or abs(doubled_area) <= 1e-12
+        ):
+            raise SourceClosedRunConflictError(
+                f"floor source polygon is invalid: {quantity.quantity_id}"
+            )
+        source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
         trace = CommercialTakeoffSourceTrace(
-            workspace_id=int(workspace_id),
-            project_id=str(project_id),
+            workspace_id=workspace_id,
+            project_id=project_id,
             document_id=floor.document_id,
             source_sha256=floor.source_sha256,
             source_page=str(floor.page_id),
