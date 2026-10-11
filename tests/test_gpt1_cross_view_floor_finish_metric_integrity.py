@@ -51,3 +51,36 @@ def test_authentic_documented_floor_area_remains_bound_to_physical_floor():
     authentic = _matching_floor(floors, areas.records[0])
     assert authentic is not None
     assert authentic.metric_area_m2 == 8.64
+
+
+
+@pytest.mark.parametrize("forged_receipts", [
+    (" ev-area",), ("ev-area ",), ("ev-area", "ev-area"),
+    ("ev-area", True), ("ev-area", ["unhashable"]),
+    None, "ev-area",
+])
+def test_cross_view_floor_finish_cannot_normalize_canonical_source_receipts(forged_receipts):
+    _source, areas, floors = _source_room_area_and_floor(_payload())
+    authentic = floors.floors[0]
+    tampered_floor = copy(authentic)
+    object.__setattr__(tampered_floor, "evidence_ids", forged_receipts)
+    assert _matching_floor(
+        replace(floors, floors=(tampered_floor,)), areas.records[0],
+    ) is None
+
+
+@pytest.mark.parametrize("altered", [True, False, " ev-area", "ev-area "])
+def test_replayed_figured_area_receipt_cannot_be_cast_to_floor_source_id(altered):
+    _source, areas, floors = _source_room_area_and_floor(_payload())
+    record = copy(areas.records[0])
+    evidence = copy(record.area_evidence)
+    object.__setattr__(evidence, "evidence_id", altered)
+    object.__setattr__(record, "area_evidence", evidence)
+    assert _matching_floor(floors, record) is None
+
+
+def test_original_source_room_area_and_finish_match_after_exact_receipt_gate():
+    _source, areas, floors = _source_room_area_and_floor(_payload())
+    source_area = areas.records[0]
+    assert _matching_floor(floors, source_area) is not None
+    assert _matching_floor(floors, source_area).metric_area_m2 == 8.64
