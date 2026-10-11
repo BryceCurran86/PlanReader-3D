@@ -45,9 +45,14 @@ def test_abstained_duplicate_same_source_quantity_blocks_firm_area(order):
 @pytest.mark.parametrize("bad_id", [True, 5, None, "", " ", " opening-area-id "])
 def test_invalid_unpublished_opening_id_also_fails_source_universe(bad_id):
     qty, opening = _origin()
-    bad = replace(qty, quantity_id=bad_id, abstained=True,
-                  value=None, status="blocked",
-                  blocking_reasons=("original_source_unavailable",))
+    # QuantityEvidence construction rejects empty IDs and stringifies some
+    # imported identity types. Reproduce the wire-replay corruption *after*
+    # constructing a valid blocked quantity, before the final trace gate.
+    from copy import copy
+    blocked = replace(qty, abstained=True, value=None, status="blocked",
+                      blocking_reasons=("original_source_unavailable",))
+    bad = copy(blocked)
+    object.__setattr__(bad, "quantity_id", bad_id)
     with pytest.raises(SourceClosedRunConflictError, match="invalid"):
         _traces((bad, qty), opening)
 
