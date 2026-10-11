@@ -282,7 +282,9 @@ def _matching_floor(
     if (
         not math.isfinite(floor_value)
         or abs(floor_value - value) > 1e-9
-        or not _clean(floor.metric_area_quantity_id)
+        or type(floor.metric_area_quantity_id) is not str
+        or not floor.metric_area_quantity_id
+        or floor.metric_area_quantity_id != floor.metric_area_quantity_id.strip()
         or _clean(floor.metric_area_authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
     ):
