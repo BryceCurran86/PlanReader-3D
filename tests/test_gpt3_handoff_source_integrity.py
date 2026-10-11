@@ -404,3 +404,42 @@ def test_authenticated_zero_quantity_remains_distinct_from_abstention():
     q=_q(value=0.0)
     assert not q.abstained
     assert handoff._non_abstained((q,))==(q,)
+
+
+
+def test_final_source_owned_ceiling_handoff_only_quantity_remains_sealable():
+    q=_q(status="firm",metadata={
+        "shadow_only":False,
+        "quantity_handoff_only":True,
+        "commercial_projection_allowed":False,
+    })
+    assert handoff._non_abstained((q,))==(q,)
+
+
+@pytest.mark.parametrize("status",["provisional","review_required","candidate","conflict"])
+def test_handoff_only_flag_cannot_promote_unfirm_ceiling_draft_to_seal(status):
+    q=_q(status=status,metadata={
+        "shadow_only":False,
+        "quantity_handoff_only":True,
+        "commercial_projection_allowed":False,
+    })
+    assert handoff._non_abstained((q,))==()
+
+
+@pytest.mark.parametrize("metadata",[
+    {"shadow_only":True, "quantity_handoff_only":True, "commercial_projection_allowed":False},
+    {"quantity_handoff_only":"true","commercial_projection_allowed":False},
+    {"quantity_handoff_only":True,"commercial_projection_allowed":"false"},
+    {"quantity_handoff_only":True,"commercial_projection_allowed":None},
+    {"quantity_handoff_only":True,"commercial_projection_allowed":0},
+])
+def test_handoff_only_exception_requires_exact_flag_and_nonshadow_source(metadata):
+    assert handoff._non_abstained((_q(metadata=metadata),))==()
+
+
+def test_stale_firm_handoff_only_source_does_not_seal():
+    q=_q(status="firm",metadata={
+        "shadow_only":False, "quantity_handoff_only":True,
+        "commercial_projection_allowed":False,"is_superseded":True,
+    })
+    assert handoff._non_abstained((q,))==()
