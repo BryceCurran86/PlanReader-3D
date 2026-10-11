@@ -39,7 +39,9 @@ and asks the existing producer to validate exact complete dimension opposition.
 ## Interpreting the report
 
 - `native_dimension_cap_opposition_proven=true` only means complete authenticated
-  **opposing candidate evidence** was found for the specified support IDs.
+  **opposing candidate evidence** was found for the specified support IDs
+  *within one original-source candidate atom*. A union of disconnected partial
+  dimension-cap candidates is never treated as complete evidence.
   It never proves physical nonexistence or automatically removes a G17 claim.
 - `false` means this particular strict producer could not authenticate
   complete dimension caps; it does not prove that the native record is a wall
