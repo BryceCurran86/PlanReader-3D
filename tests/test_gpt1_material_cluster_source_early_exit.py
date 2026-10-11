@@ -71,3 +71,45 @@ def test_two_native_candidates_still_enter_existing_authentication_path(monkeypa
     )
     assert seen == [words]
     assert blocks == blocked == ()
+
+
+
+def test_fully_source_trusted_native_material_block_never_enters_raster_path(monkeypatch):
+    from dataclasses import replace
+    words = (
+        replace(_word("FT1", 1), trusted=True, reason_codes=()),
+        replace(_word("Porcelain floor tile", 1), trusted=True, reason_codes=(),
+                word_no=1, observation_id="src-1-word-2"),
+    )
+
+    def fail_expensive(*args, **kwargs):
+        raise AssertionError("already-trusted native source must not run raster OCR")
+
+    monkeypatch.setattr(material, "_recover_admissible_viewport_words", fail_expensive)
+    monkeypatch.setattr(material, "_recover_admissible_viewport_lines", fail_expensive)
+    assert material._recover_native_material_block(
+        source=None, published=None, raster=None, block_words=words,
+    ) == words
+
+
+def test_any_untrusted_native_material_word_retains_original_recovery_path(monkeypatch):
+    from dataclasses import replace
+    trusted = replace(_word("FT1", 1), trusted=True, reason_codes=())
+    unresolved = replace(_word("floor tile", 1), word_no=1, observation_id="src-1b")
+    words = (trusted, unresolved)
+    calls = []
+
+    def recover_words(*, words, **kwargs):
+        calls.append("word")
+        return words
+
+    def recover_lines(*, words, **kwargs):
+        calls.append("line")
+        return words
+
+    monkeypatch.setattr(material, "_recover_admissible_viewport_words", recover_words)
+    monkeypatch.setattr(material, "_recover_admissible_viewport_lines", recover_lines)
+    assert material._recover_native_material_block(
+        source=None, published=None, raster=None, block_words=words,
+    ) == words
+    assert calls == ["word", "line"]
