@@ -1291,7 +1291,9 @@ def _trusted_native_material_schedule_cluster_blocks(
 
     grouped = _group_native_material_block_words(words)
 
-    trusted_titles: list[tuple[tuple[float, float, float, float], tuple[str, ...]]] = []
+    trusted_titles: list[
+        tuple[tuple[float, float, float, float], tuple[str, ...], str, str]
+    ] = []
     for block_words in grouped.values():
         raw_text = " ".join(row[0] for row in _native_block_line_rows(block_words))
         if not _is_material_schedule_title(raw_text):
@@ -1309,10 +1311,19 @@ def _trusted_native_material_schedule_cluster_blocks(
         )
         if not _is_material_schedule_title(recovered_text):
             continue
+        # A title authenticates only its own original source partition and
+        # page; nearby rows from a separate CAD/export partition may not borrow
+        # the title's proven observation IDs merely because boxes overlap.
+        source_pages = {word.page_id for word in recovered}
+        source_partitions = {word.source_partition_id for word in recovered}
+        if len(source_pages) != 1 or len(source_partitions) != 1:
+            continue
         trusted_titles.append(
             (
                 _native_block_bbox(recovered),
                 tuple(word.observation_id for word in recovered),
+                next(iter(source_pages)),
+                next(iter(source_partitions)),
             )
         )
 
@@ -1321,12 +1332,33 @@ def _trusted_native_material_schedule_cluster_blocks(
     if len(trusted_titles) != 1:
         return (), ()
 
-    title_bbox, title_ids = trusted_titles[0]
+    title_bbox, title_ids, title_page_id, title_partition_id = trusted_titles[0]
+    owned_candidates = tuple(
+        row for row in candidates
+        if row[0] == title_partition_id
+        and row[2]
+        and all(
+            word.page_id == title_page_id
+            and word.source_partition_id == title_partition_id
+            for word in row[2]
+        )
+    )
+    blocked_codes: set[str] = {
+        row[3] for row in candidates
+        if row[0] != title_partition_id or not row[2]
+        or any(
+            word.page_id != title_page_id
+            or word.source_partition_id != title_partition_id
+            for word in row[2]
+        )
+    }
+    if len(owned_candidates) < 2:
+        return (), tuple(sorted({row[3] for row in candidates}))
     row_bbox = (
-        min(_native_block_bbox(row[2])[0] for row in candidates),
-        min(_native_block_bbox(row[2])[1] for row in candidates),
-        max(_native_block_bbox(row[2])[2] for row in candidates),
-        max(_native_block_bbox(row[2])[3] for row in candidates),
+        min(_native_block_bbox(row[2])[0] for row in owned_candidates),
+        min(_native_block_bbox(row[2])[1] for row in owned_candidates),
+        max(_native_block_bbox(row[2])[2] for row in owned_candidates),
+        max(_native_block_bbox(row[2])[3] for row in owned_candidates),
     )
     overlap_x = min(title_bbox[2], row_bbox[2]) - max(title_bbox[0], row_bbox[0])
     overlap_y = min(title_bbox[3], row_bbox[3]) - max(title_bbox[1], row_bbox[1])
@@ -1334,8 +1366,7 @@ def _trusted_native_material_schedule_cluster_blocks(
         return (), tuple(sorted({row[3] for row in candidates}))
 
     blocks: list[_TrustedScheduleBlock] = []
-    blocked_codes: set[str] = set()
-    for partition_id, block_no, block_words, raw_code, _raw_item in candidates:
+    for partition_id, block_no, block_words, raw_code, _raw_item in owned_candidates:
         recovered = _recover_native_material_block(
             source=source,
             published=published,
