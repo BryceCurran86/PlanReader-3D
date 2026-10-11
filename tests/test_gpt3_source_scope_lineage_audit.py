@@ -1,3 +1,4 @@
+import pytest
 """Unsigned source-scope claims never become verified V2 sealing authority."""
 from pb_migration_contracts import QuantityEvidence
 from test_source_closed_run_export import quantity, trace
@@ -83,3 +84,23 @@ def test_unsigned_snapshot_claim_cannot_override_mismatched_revision():
     row=_audit(q,t)["quantities"][0]
     assert "REVISION_RECEIPTS_DISAGREE" in row["reason_codes"]
     assert not row["source_signed_scope_verified"]
+
+
+
+@pytest.mark.parametrize(("field","bad","reason"),[
+    ("source_sha256",123,"SOURCE_SHA_RECEIPT_MALFORMED"),
+    ("source_sha256","Z"*64,"SOURCE_SHA_RECEIPT_MALFORMED"),
+    ("revision_id",None,"REVISION_RECEIPT_MALFORMED"),
+    ("revision_id"," rev-a ","REVISION_RECEIPT_MALFORMED"),
+])
+def test_invalid_metadata_source_sha_or_revision_is_explicit_scope_blocker(
+    field,bad,reason
+):
+    q=quantity(metadata={**quantity().metadata,field:bad,
+        "source_snapshot_id":"snapshot-a","decision_scope_id":"scope-a"})
+    t=trace(metadata={"source_snapshot_id":"snapshot-a",
+                      "decision_scope_id":"scope-a"})
+    row=_audit(q,t)["quantities"][0]
+    assert reason in row["reason_codes"]
+    assert row["receipt_consistency"]=="UNBOUND"
+    assert row["source_signed_scope_verified"] is False
