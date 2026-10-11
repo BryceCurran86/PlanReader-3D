@@ -149,6 +149,7 @@ def publish_live_authenticated_opening_count_quantities(
     # this bridge never narrows the universe to the convenient members.
     binding_selectors: dict[str, ScheduleOpeningInstanceBindingSelector] = {}
     binding_results = {}
+    physical_source_receipts: dict[str, tuple[str, ...]] = {}
     seen_physical_opening_ids: set[str] = set()
     for observation_id in semantic_record.representative_observation_ids:
         opening_selector = ObservationSelector(
@@ -191,6 +192,7 @@ def publish_live_authenticated_opening_count_quantities(
         ):
             return ()
         seen_physical_opening_ids.add(opening.record_id)
+        physical_source_receipts[opening.record_id] = tuple(opening.source_observation_ids)
         selector = ScheduleOpeningInstanceBindingSelector(
             document_id=opening.document_id,
             revision_id=opening.revision_id,
@@ -300,8 +302,37 @@ def publish_live_authenticated_opening_count_quantities(
             or not _source_count_quantity_ready_for_publication(quantity)
         ):
             continue
+        # Reauthenticate the *final* quantity returned by the source-count
+        # authority, not merely its status. A replayed entity list, source
+        # receipt set, count or mark can otherwise reach customer projection.
+        physical_ids = record.physical_instance_record_ids
+        receipt_ids = quantity.evidence_ids
+        if (
+            record.document_id != published.revision.document_id
+            or record.revision_id != published.revision.revision_id
+            or record.source_sha256 != published.revision.source_sha256
+            or record.snapshot_id != published.snapshot.snapshot_id
+            or record.decision_scope_id != scope_id
+            or record.opening_mark != mark
+            or type(record.count) is not int
+            or record.count <= 0
+            or not _authentic_source_id_universe(physical_ids)
+            or len(physical_ids) != record.count
+            or not set(physical_ids).issubset(binding_selectors)
+            or quantity.value != float(record.count)
+            or tuple(quantity.input_entity_ids) != tuple(physical_ids)
+            or not _authentic_source_id_universe(receipt_ids)
+            or any(
+                not set(physical_source_receipts[opening_id]).issubset(set(receipt_ids))
+                for opening_id in physical_ids
+            )
+            or quantity.metadata.get("schedule_corroborated") is not True
+            or quantity.metadata.get("commercial_projection_allowed") is not True
+        ):
+            return ()
         if quantity.quantity_id in seen_quantity_ids:
-            continue
+            # A duplicate commercial identity is not a successful count.
+            return ()
         seen_quantity_ids.add(quantity.quantity_id)
         quantities.append(quantity)
 
