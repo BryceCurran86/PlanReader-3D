@@ -51,3 +51,51 @@ def test_real_frame_host_remains_supported_without_optional_binding():
     quantity = _opening_quantity(opening)
     assert quantity is not None
     assert quantity.metadata["host_frame_record_id"] == "host-frame-1"
+
+
+
+def _authenticated_schedule_frame():
+    return replace(
+        _opening(
+            area_m2=2.16,
+            area_basis="authenticated_frame_schedule",
+            figured_area_record_id=None,
+        ),
+        schedule_binding_record_id="schedule-binding-1",
+        schedule_declared_width_mm=1200,
+        schedule_declared_height_mm=1800,
+        schedule_row_dimension_basis="frame",
+        schedule_row_basis_source="frame width",
+        evidence_ids=(
+            "opening-1", "source-observation-1", "schedule-binding-1",
+            "schedule-row-1", "host-binding-1", "host-frame-1",
+        ),
+    )
+
+
+def test_source_proven_outer_frame_dimensions_publish_exact_2_16_m2():
+    quantity = _opening_quantity(_authenticated_schedule_frame())
+    assert quantity is not None
+    assert quantity.value == 2.16
+    assert quantity.metadata["schedule_row_dimension_basis"] == "frame"
+
+
+@pytest.mark.parametrize("bad", [2.17, 1.8, True, False, "2.16"])
+def test_replayed_schedule_frame_area_must_agree_with_original_dimensions(bad):
+    assert _opening_quantity(replace(_authenticated_schedule_frame(), area_m2=bad)) is None
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("schedule_declared_width_mm", True),
+    ("schedule_declared_width_mm", "1200"),
+    ("schedule_declared_width_mm", 0),
+    ("schedule_declared_height_mm", False),
+    ("schedule_declared_height_mm", float("nan")),
+    ("schedule_declared_height_mm", 10 ** 400),
+])
+def test_untyped_frame_source_dimensions_cannot_mint_opening_area(field, bad):
+    opening = _authenticated_schedule_frame()
+    from copy import copy
+    altered = copy(opening)
+    object.__setattr__(altered, field, bad)
+    assert _opening_quantity(altered) is None
