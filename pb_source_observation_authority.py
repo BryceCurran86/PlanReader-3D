@@ -216,7 +216,7 @@ class ProducerSnapshotRecord:
     schema_version: str = SOURCE_OBSERVATION_AUTHORITY_SCHEMA_VERSION
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceObservationRecord:
     observation_id: str
     document_id: str
@@ -251,7 +251,7 @@ class ObservationSelector:
     observation_id: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceObservationAuthorityResult:
     status: EvidenceResolutionStatus
     proposition: Optional[str]
