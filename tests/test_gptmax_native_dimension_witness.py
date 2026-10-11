@@ -3,6 +3,7 @@ from hashlib import sha256
 
 import pytest
 
+from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from tools.diag_gptmax_native_dimension_witness import (
@@ -14,12 +15,18 @@ from test_g17_visible_opening_existence_v1 import _opening_pdf_bytes
 @pytest.fixture(scope="module")
 def evidence():
     pdf = _opening_pdf_bytes()
+    # The fixture must generate receipt IDs under the exact production
+    # producer/document revision used by the original-source diagnostic.
+    # Synthetic-only producer identities are correctly rejected as foreign.
+    source_digest = sha256(pdf).hexdigest()
     source = SourceVisibilityProducer(
-        producer_method="gptmax-diagnostic-test", producer_version="1"
+        producer_method="live-physical-net-wall",
+        producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
     )
     published = source.ingest_native_pdf_bytes(
-        document_id="gptmax-diagnostic-test", source_bytes=pdf,
-        source_locator="memory://gptmax-diagnostic-test.pdf", page_ids=("1",),
+        document_id=f"live-source:{source_digest[:32]}", source_bytes=pdf,
+        source_locator="memory://live-physical-net-wall-source.pdf",
+        page_ids=("1",),
     )
     physical = source.physical_opening_authority()
     for observation_id in published.visible_observation_ids:
