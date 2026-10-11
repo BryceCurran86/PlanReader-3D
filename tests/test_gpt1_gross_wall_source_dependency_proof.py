@@ -98,3 +98,23 @@ def test_modified_original_source_receipt_whitespace_does_not_authorize_gross_ar
     result = _gross(**{which: source})
     assert result.abstained
     assert f"wall_{which}_source_receipts_invalid" in result.blocking_reasons
+
+
+
+@pytest.mark.parametrize("which", ["length", "height"])
+@pytest.mark.parametrize("invalid", [None, True, 37, "WALL-1", (), ("WALL-1", True)])
+def test_missing_or_scalar_original_wall_members_abstain_without_crashing(which, invalid):
+    source = altered_quantity(
+        _length() if which == "length" else _height(),
+        input_entity_ids=invalid,
+    )
+    result = _gross(**{which: source})
+    assert result.abstained is True
+    assert result.value is None
+    assert f"wall_{which}_source_receipts_invalid" in result.blocking_reasons
+
+
+def test_current_wall_length_height_source_identity_remains_positive_control():
+    result = _gross(length=_length(), height=_height())
+    assert result.abstained is False
+    assert result.value == 12.0
