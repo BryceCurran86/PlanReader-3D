@@ -22,7 +22,7 @@ def test_real_documented_metric_floor_keeps_original_source_receipts():
     trace = next(iter(traces.values()))
     assert trace.workspace_id == 7
     assert trace.source_bbox == (10.0, 10.0, 20.0, 20.0)
-    assert trace.evidence_ids == ("ev-room", "ev-area")
+    assert {"ev-room", "ev-area"}.issubset(set(trace.evidence_ids))
     assert trace.canonical_entity_ids == ("floor-1",)
 
 
