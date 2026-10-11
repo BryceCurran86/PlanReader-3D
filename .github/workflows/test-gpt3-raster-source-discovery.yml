@@ -10,6 +10,8 @@ on:
       - tests/test_raster_source_wall_frame_projection.py
       - tests/test_raster_visibility_receipt_registration.py
       - tools/diag_opening_wall_face_preservation.py
+      - scripts/gptmax_source_opposition_retention.py
+      - tests/test_gptmax_source_opposition_retention.py
       - .github/workflows/test-gpt3-raster-source-discovery.yml
 permissions:
   contents: read
@@ -33,12 +35,13 @@ jobs:
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: lot16-connected-frame-source-handoff
-          path: prerequisite-lot16
+      - name: Original Lot16 source replay from exact PR base
+        run: |
+          git worktree add --detach /tmp/gptmax-discovery-original-base "${{ github.event.pull_request.base.sha }}"
+          mkdir -p prerequisite-lot16
+          (cd /tmp/gptmax-discovery-original-base && PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json")
       - name: Real Lot16 source, wall and host handoff
         run: >-
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
@@ -60,21 +63,26 @@ jobs:
           assert len(ids) == len(set(ids))
           assert 'quantities' not in report
           baseline = json.loads(Path('prerequisite-lot16/lot16-connected-frame-source-handoff.json').read_text())
-          keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
-          assert baseline['source_sha256'] == report['source_sha256']
-          assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
-          assert keyed(baseline['opening_bindings']) == keyed(report['opening_bindings'])
-          old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
-          advanced = [key for key, row in old_frames.items() if 'opening_host_frame_selected_opening_not_discovered' in row['reason_codes'] and 'opening_host_frame_selected_opening_not_discovered' not in new_frames[key]['reason_codes']]
-          assert advanced, 'No previously undiscovered source frame reached its geometry gate'
-          print({'source_discovery_advanced': advanced, 'bindings_and_proved_frames_retained': True})
+          from scripts.gptmax_source_opposition_retention import compare_opposed_source_reports
+          result=compare_opposed_source_reports(baseline,report,source_bytes=Path(
+              'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf').read_bytes())
+          assert result['retention_pass'],result
+          # Discovery is already merged. Require the fixed property on every
+          # retained claim instead of requiring a new gain on unrelated PRs.
+          assert all('opening_host_frame_selected_opening_not_discovered' not in row['reason_codes']
+                     for row in report['host_frames'])
+          Path('lot16-original-opposition-retention.json').write_text(json.dumps(result,indent=2,sort_keys=True))
+          print({'all_retained_openings_discovered':True,'bindings_and_proved_frames_retained':True,
+                 'freshly_opposed_claims':len(result['source_opposed_missing_claims'])})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: lot16-connected-frame-source-handoff
-          path: lot16-connected-frame-source-handoff.json
+          path: |
+            lot16-connected-frame-source-handoff.json
+            prerequisite-lot16/lot16-connected-frame-source-handoff.json
+            lot16-original-opposition-retention.json
           retention-days: 14
   maryborough-source-proof:
     runs-on: ubuntu-latest
