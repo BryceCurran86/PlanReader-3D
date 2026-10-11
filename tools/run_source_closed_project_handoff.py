@@ -127,7 +127,10 @@ def _non_abstained(
         if type(quantity.value) not in (int, float):
             continue
         try:
-            if not math.isfinite(quantity.value):
+            if not math.isfinite(quantity.value) or quantity.value < 0:
+                # Area and count production quantities cannot be negative.
+                # Zero is not inferred from ABSTAIN; an explicitly measured
+                # zero must still pass source/lineage checks below.
                 continue
         except OverflowError:
             continue
