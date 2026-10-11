@@ -45,6 +45,8 @@ def test_live_count_rejects_replayed_final_number_and_physical_receipts():
         ("quantity", "value", 2.0),
         ("quantity", "evidence_ids", ()),
         ("quantity", "evidence_ids", ("unrelated-original-source-receipt",)),
+        ("quantity", "only_physical_receipts", None),
+        ("record", "schedule_row_ids", ("foreign-original-schedule-row",)),
         ("quantity", "unit", "m2"),
         ("quantity", "family", "floor_area"),
         ("quantity", "input_entity_ids", ("foreign-opening",)),
@@ -63,7 +65,15 @@ def test_live_count_rejects_replayed_final_number_and_physical_receipts():
             else:
                 assert genuine.record.quantity_evidence is not None
                 quantity = copy(genuine.record.quantity_evidence)
-                object.__setattr__(quantity, field, value)
+                field_name = field
+                forged_value = value
+                if field_name == "only_physical_receipts":
+                    field_name = "evidence_ids"
+                    forged_value = tuple(
+                        receipt for receipt in quantity.evidence_ids
+                        if receipt not in genuine.record.schedule_row_ids
+                    )
+                object.__setattr__(quantity, field_name, forged_value)
                 object.__setattr__(corrupted, "quantity_evidence", quantity)
             return replace(genuine, record=corrupted)
 
