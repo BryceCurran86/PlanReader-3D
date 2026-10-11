@@ -22,6 +22,42 @@ from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import SourceClosedRunConflictError
 
 
+def _unique_customer_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    received: dict[str, Any] = {}
+    for key,value in pairs:
+        if key in received:
+            raise ValueError(f"duplicate customer provenance JSON key: {key}")
+        received[key] = value
+    return received
+
+
+def _reject_customer_json_constant(token: str) -> None:
+    raise ValueError(f"non-finite customer JSON value: {token}")
+
+
+def _finite_customer_json_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("out-of-range customer JSON number")
+    return value
+
+
+def _verify_embedded_customer_notes(rows: Sequence[Mapping[str, Any]]) -> None:
+    # Commercial adapter provenance can be embedded as JSON text in notes.
+    # Outer strict parsing alone does not stop last-write-wins inside it.
+    for row in rows:
+        if not isinstance(row,Mapping):
+            raise TypeError("customer rows must contain mappings")
+        notes = row.get("notes")
+        if isinstance(notes,str) and notes.lstrip().startswith("{"):
+            json.loads(
+                notes,
+                object_pairs_hook=_unique_customer_json_keys,
+                parse_constant=_reject_customer_json_constant,
+                parse_float=_finite_customer_json_float,
+            )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -67,6 +103,7 @@ def export_verified_produced_items(
     # row. Only the existing exact source→customer bijection can assert that.
     customer_verified = customer_rows is not None
     if customer_rows is not None:
+        _verify_embedded_customer_notes(customer_rows)
         verify_sealed_customer_output(sealed,customer_rows)
 
     items: list[dict[str, Any]] = []
@@ -173,20 +210,12 @@ def main(argv: list[str] | None = None) -> int:
     customer_rows = None
     original_customer_sha = None
     if args.customer_rows is not None:
-        def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-            obj: dict[str, Any] = {}
-            for key,value in pairs:
-                if key in obj:
-                    raise ValueError(f"duplicate customer JSON key: {key}")
-                obj[key] = value
-            return obj
-        def _no_nonfinite(token: str) -> None:
-            raise ValueError(f"non-finite customer JSON value: {token}")
         original_customer_sha = _sha256(args.customer_rows)
         customer_rows = json.loads(
             args.customer_rows.read_text(encoding="utf-8"),
-            object_pairs_hook=_unique_keys,
-            parse_constant=_no_nonfinite,
+            object_pairs_hook=_unique_customer_json_keys,
+            parse_constant=_reject_customer_json_constant,
+            parse_float=_finite_customer_json_float,
         )
         if not isinstance(customer_rows,list):
             raise TypeError("customer rows must be a JSON array")
