@@ -97,6 +97,26 @@ def project_live_opening_customer_rows(
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
 
+    # Check the full original source claim inventory before filtering to
+    # commercial positives. An ABSTAIN/provisional record with a duplicate
+    # quantity ID must not disappear and leave the favourable replay eligible.
+    source_claims = tuple(
+        quantity
+        for quantity in (*claim.opening_quantity_evidence,
+                         *claim.opening_count_quantity_evidence)
+        if isinstance(quantity, QuantityEvidence)
+        and quantity.family in {"opening_area", "opening_count"}
+    )
+    source_claim_ids = tuple(quantity.quantity_id for quantity in source_claims)
+    if (
+        any(type(quantity_id) is not str or not quantity_id
+            or quantity_id != quantity_id.strip() for quantity_id in source_claim_ids)
+        or len(set(source_claim_ids)) != len(source_claim_ids)
+    ):
+        raise ValueError(
+            "opening customer source claim identities collide before commercial filtering"
+        )
+
     area_quantities = _eligible_area_quantities(claim)
     count_quantities = _eligible_count_quantities(claim)
     quantities = (*area_quantities, *count_quantities)
