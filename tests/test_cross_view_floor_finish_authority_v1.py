@@ -953,11 +953,13 @@ def test_gpt2_invalid_source_room_area_id_never_becomes_finish_owner():
     )
     authentic = SimpleNamespace(
         source_room_face_record_id="source-face-1",
+        physical_room_id="source-physical-room-1",
         area_evidence=SimpleNamespace(evidence_id="independent-source-area-1"),
     )
     invalid = tuple(
         SimpleNamespace(
             source_room_face_record_id=value,
+            physical_room_id="invalid-source-physical-room",
             area_evidence=SimpleNamespace(evidence_id="foreign-source-area"),
         )
         for value in (None, 17, "", " source-face-1", "source-face-1 ")
@@ -977,6 +979,7 @@ def test_gpt2_reused_source_area_evidence_cannot_quantify_two_room_finishes():
     def source_room(room_id, receipt):
         return Record(
             source_room_face_record_id=room_id,
+            physical_room_id=room_id,
             area_evidence=Record(evidence_id=receipt),
         )
     first=source_room("physical-source-room-one","same-figured-area-receipt")
@@ -1000,11 +1003,13 @@ def test_gpt2_invalid_figured_area_receipt_quarantines_only_its_source_room():
     )
     good=Record(
         source_room_face_record_id="room-valid",
+        physical_room_id="physical-room-valid",
         area_evidence=Record(evidence_id="real-source-figured-area"),
     )
     for invalid in (None, 79, "", "  ", " source-area-receipt"):
         untrusted=Record(
             source_room_face_record_id="room-unsupported",
+            physical_room_id="physical-room-unsupported",
             area_evidence=Record(evidence_id=invalid),
         )
         kept,disputed=_unique_documented_area_owner_receipts(
@@ -1022,6 +1027,7 @@ def test_gpt2_room_label_source_observation_cannot_own_two_floor_finishes():
     def room(face,evidence,word,label_receipt):
         return R(
             source_room_face_record_id=face,
+            physical_room_id=face,
             area_evidence=R(evidence_id=evidence),
             source_label_observation_ids=(word,),
             source_label_receipt_ids=(label_receipt,),
@@ -1051,6 +1057,7 @@ def test_gpt2_malformed_floor_room_label_receipts_preserve_unrelated_area():
     )
     good=R(
         source_room_face_record_id="room-authentic",
+        physical_room_id="physical-room-authentic",
         area_evidence=R(evidence_id="real-figured-source-area"),
         source_label_observation_ids=("observed-room-text",),
         source_label_receipt_ids=("source-room-label",),
@@ -1060,6 +1067,7 @@ def test_gpt2_malformed_floor_room_label_receipts_preserve_unrelated_area():
     ):
         false=R(
             source_room_face_record_id="room-unsupported",
+            physical_room_id="physical-room-unsupported",
             area_evidence=R(evidence_id="different-source-area"),
             source_label_observation_ids=("different-native-text",),
             source_label_receipt_ids=bad_receipts,
@@ -1133,3 +1141,36 @@ def test_gpt2_finish_result_floor_lookup_never_silently_overwrites_conflicts(
     assert authentic.quantity not in disputed.quantities
     assert authentic.canonical_floor_id not in disputed.records_by_floor_id
     assert competing.canonical_floor_id not in disputed.records_by_floor_id
+
+
+def test_gpt2_two_source_faces_cannot_publish_one_physical_room_floor_twice():
+    from types import SimpleNamespace as R
+    from pb_cross_view_floor_finish_authority import (
+        _unique_documented_area_owner_receipts,
+    )
+    first=R(
+        source_room_face_record_id="first-source-face",
+        physical_room_id="same-physical-room",
+        area_evidence=R(evidence_id="one-figured-area"),
+        source_label_observation_ids=("native-word-one",),
+        source_label_receipt_ids=("native-label-one",),
+    )
+    second=R(
+        source_room_face_record_id="second-source-face",
+        physical_room_id="same-physical-room",
+        area_evidence=R(evidence_id="other-figured-area"),
+        source_label_observation_ids=("native-word-two",),
+        source_label_receipt_ids=("native-label-two",),
+    )
+    independent=R(
+        source_room_face_record_id="unrelated-source-face",
+        physical_room_id="unrelated-physical-room",
+        area_evidence=R(evidence_id="unrelated-figured-area"),
+        source_label_observation_ids=("native-word-three",),
+        source_label_receipt_ids=("native-label-three",),
+    )
+    owners,disputed=_unique_documented_area_owner_receipts(
+        (), (first,second,independent),
+    )
+    assert owners=={"unrelated-source-face": independent}
+    assert disputed==("first-source-face", "second-source-face")
