@@ -1716,3 +1716,35 @@ def test_gpt2_original_w4_fragment_lineage_mismatch_does_not_prove_shared_wall()
     assert rows[1]["original_fragment_primitives_owned_by_shadow_identity"] is False
     assert all(r["physical_wall_equivalence_proven"] is False for r in rows)
     assert all(r["source_room_boundary_published"] is False for r in rows)
+
+
+def test_gpt2_w4_fragment_edge_must_belong_to_its_own_source_shadow():
+    from tools.diag_gpt2_grid_component_first_failure import (
+        diagnose_original_w4_address_collisions,
+    )
+    def candidate(shadow_edges):
+        return SimpleNamespace(
+            wall_candidate_id="colliding-source-w4",
+            wall_candidate=SimpleNamespace(centerline_pts=((0.,0.),(8.,0.))),
+            source_edge_fragments=(SimpleNamespace(
+                edge_id="source-edge-original",
+                source_primitive_ids=("original-primitive",),
+            ),),
+            physical_identity=SimpleNamespace(
+                candidate_identity_id="shadow-native-id",
+                source_primitive_ids=("original-primitive",),
+                edge_ids=shadow_edges,
+                status=EvidenceResolutionStatus.CORROBORATED,
+            ),
+        )
+    entries=diagnose_original_w4_address_collisions((
+        candidate(("source-edge-original",)),
+        candidate(("foreign-edge",)),
+    ))["original_collision_records_diagnostic_only"]
+    assert entries[0]["original_fragment_primitives_owned_by_shadow_identity"]
+    assert entries[1]["original_fragment_primitives_owned_by_shadow_identity"]
+    assert entries[0]["original_fragment_edges_owned_by_shadow_identity"] is True
+    assert entries[1]["original_fragment_edges_owned_by_shadow_identity"] is False
+    assert entries[0]["shadow_source_geometry_and_lineage_usable_diagnostic_only"] is True
+    assert entries[1]["shadow_source_geometry_and_lineage_usable_diagnostic_only"] is False
+    assert not any(row["physical_wall_equivalence_proven"] for row in entries)
