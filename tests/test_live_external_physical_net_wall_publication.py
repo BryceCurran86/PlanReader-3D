@@ -486,3 +486,52 @@ def test_blank_source_opening_binding_never_disappears_from_coverage(missing_ide
     assert result.physical_void_record_ids == ()
     assert result.gross_geometry_record_ids == ()
     assert result.whole_wall_role_record_ids == ()
+
+
+def test_external_wall_refuses_missing_opening_host_or_universe_receipts():
+    """A physical void must never be deducted without original host/universe receipts."""
+    from pb_physical_opening_void_authority import (
+        PhysicalOpeningVoidAuthority,
+        PhysicalOpeningVoidResult,
+        _AUTHORITY_SEAL as VOID_AUTHORITY_SEAL,
+    )
+
+    wall_opening, physical_void, gross, roles, original, _gross = _chain()
+    selector = physical_void.void_selectors[original.opening_identity_id]
+    for field, value in (
+        ("record_id", ""),
+        ("host_binding_record_id", ""),
+        ("opening_universe_record_id", ""),
+        ("host_binding_record_id", "   "),
+        ("opening_universe_record_id", "   "),
+        ("record_id", "   "),
+    ):
+        forged = replace(original, **{field: value})
+        authority = PhysicalOpeningVoidAuthority(
+            {selector.key: PhysicalOpeningVoidResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("source_void_resolved",),
+                record=forged,
+            )},
+            _seal=VOID_AUTHORITY_SEAL,
+        )
+        altered = replace(
+            physical_void,
+            physical_opening_void_authorities=MappingProxyType({
+                **physical_void.physical_opening_void_authorities,
+                selector.page_id: authority,
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=wall_opening,
+            physical_void_composition=altered,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is not EvidenceResolutionStatus.CORROBORATED
+        assert result.quantity_evidence is None
+        assert result.canonical_walls == ()
+        assert result.physical_void_record_ids == ()
+        assert result.opening_universe_record_ids == ()
+        assert result.gross_geometry_record_ids == ()
+        assert result.whole_wall_role_record_ids == ()
