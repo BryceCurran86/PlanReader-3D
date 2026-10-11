@@ -435,8 +435,60 @@ def _opening_sealing_diagnostic(claim) -> dict:
     return report
 
 
-def inspect_source(pdf: Path, page_index: int) -> dict:
+def _native_word_label_census(
+    pdf_bytes: bytes,
+    page_index: int,
+    *,
+    labels: tuple[str, ...] = (),
+) -> dict:
+    """Read-only original PDF word inventory; never grants room/metric authority.
+
+    This contrasts native word existence with later producer-owned label/room
+    face proof. Every distinct original occurrence retains its own bbox and
+    source-native block/line identity; equal label text is never one room ID.
+    """
+    if not labels:
+        return {"diagnostic_only": True, "requested_labels": [], "occurrences": [],
+                "count_by_label": {}}
+    import fitz
+
+    allowed = {value.casefold() for value in labels
+               if type(value) is str and value and value == value.strip()}
+    if not allowed:
+        return {"diagnostic_only": True, "requested_labels": [], "occurrences": [],
+                "count_by_label": {}}
+    occurrences = []
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        if page_index >= len(doc) or page_index < 0:
+            raise ValueError("native label census page index out of source bounds")
+        for word in doc[page_index].get_text("words"):
+            if len(word) < 8 or str(word[4]).casefold() not in allowed:
+                continue
+            occurrences.append({
+                "raw_native_text": str(word[4]),
+                "source_page_index_zero_based": page_index,
+                "bbox_pt": [float(value) for value in word[:4]],
+                "block_no": int(word[5]),
+                "line_no": int(word[6]),
+                "word_no": int(word[7]),
+                # Untrusted display-only native words are never substitutes
+                # for PdfTextIntegrity or source-room face ownership.
+                "room_face_or_measurement_authority_granted": False,
+            })
+    counts = Counter(row["raw_native_text"].casefold() for row in occurrences)
+    return {
+        "diagnostic_only": True,
+        "requested_labels": sorted(allowed),
+        "occurrences": occurrences,
+        "count_by_label": dict(sorted(counts.items())),
+    }
+
+
+def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, ...] = ()) -> dict:
     payload = pdf.read_bytes()
+    original_native_label_census = _native_word_label_census(
+        payload, page_index, labels=diagnostic_labels,
+    )
     observations = []
     original_derive = face_authority._derive_scope_outcome
     original_extract = face_authority.extract_planar_faces
@@ -563,6 +615,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
         return {
             "diagnostic_only": True, "pdf_sha256": hashlib.sha256(payload).hexdigest(),
             "source_page_index_zero_based": page_index,
+            "native_word_label_census_not_authority": original_native_label_census,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
             "floor_quantity_diagnostic": _floor_quantity_diagnostic(claim),
@@ -632,13 +685,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pdf", required=True, type=Path)
     parser.add_argument("--page-index", type=int, default=2)
+    parser.add_argument("--diagnostic-label", action="append", default=[],
+                        help="exact source word to locate without granting room identity")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     if args.page_index < 0:
         parser.error("--page-index must be >= 0")
     if not args.pdf.is_file():
         parser.error(f"source PDF unavailable: {args.pdf}")
-    report = inspect_source(args.pdf, args.page_index)
+    report = inspect_source(
+        args.pdf, args.page_index,
+        diagnostic_labels=tuple(args.diagnostic_label),
+    )
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
         "pdf_sha256": report["pdf_sha256"],
