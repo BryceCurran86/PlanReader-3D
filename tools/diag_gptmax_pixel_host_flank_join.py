@@ -62,6 +62,8 @@ def _opening_basis(row):
 def _pixel_inventory(report, source_sha, page_id):
     if report.get("ordinary_visibility_rejects_shadow_kind") is not True:
         raise ValueError("pixel shadow visibility exclusion unavailable")
+    if report.get("original_source_render_reauthenticated") is not True:
+        raise ValueError("original pixel render source authentication unavailable")
     if report.get("ordinary_source_snapshot_unchanged") is not True:
         raise ValueError("ordinary source snapshot retention unavailable")
     if report.get("source_universe_completeness_proven") is not False:
@@ -76,9 +78,11 @@ def _pixel_inventory(report, source_sha, page_id):
     for item in records:
         if not isinstance(item, dict) or item.get("source_pixels_authenticated") is not True:
             raise ValueError("pixel report lacks self-declared source receipt")
-        if item.get("ordinary_visible_segment_authority") is not False or (
-                item.get("host_publication_allowed") is not False):
-            raise ValueError("pixel report promotes a shadow receipt")
+        if (item.get("ordinary_visible_segment_authority") is not False
+                or item.get("physical_wall_authority") is not False
+                or item.get("host_publication_allowed") is not False
+                or item.get("proposition") != "source_observation_exists"):
+            raise ValueError("pixel report promotes or misstates a shadow receipt")
         row, proof = item.get("source_observation"), item.get("pixel_receipt")
         if not isinstance(row, dict) or not isinstance(proof, dict):
             raise ValueError("pixel source record/receipt unavailable")
@@ -99,7 +103,9 @@ def _pixel_inventory(report, source_sha, page_id):
 
 def _ancestry(report, pixel_ids):
     graph = report.get("experimental_w2_w4")
-    if not isinstance(graph, dict) or graph.get("host_publication_allowed") is not False:
+    if (not isinstance(graph, dict)
+            or graph.get("host_publication_allowed") is not False
+            or graph.get("physical_equivalence_proven") is not False):
         raise ValueError("unavailable nonpublishing experimental W2/W4 inventory")
     edges = _rows_by_id(graph.get("all_w2_edges"), "edge_id", "experimental W2 edge")
     collapsed = _rows_by_id(graph.get("all_snap_collapsed_fragments"), "fragment_id",
