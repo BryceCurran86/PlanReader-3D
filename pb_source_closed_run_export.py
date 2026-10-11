@@ -490,10 +490,10 @@ def _build_sealed_run(
 
     normalized: list[SealedSourceClosedQuantity] = []
     quantity_ids: set[str] = set()
-    physical_claims: dict[
-        tuple[str, str, tuple[str, ...]],
-        SealedSourceClosedQuantity,
-    ] = {}
+    # A+B and B+C are overlapping producer-owned physical geometry despite
+    # different exact sets. Index each identity under its family and semantic
+    # key to prevent source-sealed commercial double counting.
+    physical_claims: dict[tuple[str, str], dict[str, SealedSourceClosedQuantity]] = {}
     # A current commercial run may contain multiple different documents, but
     # may not silently mix source snapshots or revisions for one document ID.
     # Revision text is not an ordering authority: conflict requires a new
@@ -526,25 +526,27 @@ def _build_sealed_run(
             sorted({_clean(value) for value in row.object_identity_refs if _clean(value)})
         )
         if not row.abstained and identities:
-            claim_key = (
-                _clean(row.family).lower(),
-                _clean(row.semantic_key),
-                identities,
-            )
-            prior = physical_claims.get(claim_key)
-            if prior is not None:
+            claim_key = (_clean(row.family).lower(), _clean(row.semantic_key))
+            claimed_ids = physical_claims.setdefault(claim_key, {})
+            for identity in identities:
+                prior = claimed_ids.get(identity)
+                if prior is None:
+                    continue
+                prior_ids = tuple(sorted({_clean(value) for value in prior.object_identity_refs if _clean(value)}))
                 same_claim = (
-                    prior.value == row.value
+                    prior_ids == identities
+                    and prior.value == row.value
                     and _clean(prior.unit).lower() == _clean(row.unit).lower()
                 )
                 detail = "duplicate" if same_claim else "conflicting"
                 raise SourceClosedRunConflictError(
                     f"{detail} sealed physical claim for family "
                     f"{row.family!r}, semantic key {row.semantic_key!r}, "
-                    f"identities {identities!r}: "
+                    f"overlapping source identity {identity!r}: "
                     f"{prior.quantity_id!r} vs {row.quantity_id!r}"
                 )
-            physical_claims[claim_key] = row
+            for identity in identities:
+                claimed_ids[identity] = row
 
         normalized.append(row)
 
