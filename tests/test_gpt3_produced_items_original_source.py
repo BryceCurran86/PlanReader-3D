@@ -397,3 +397,29 @@ def test_duplicate_outer_customer_quantity_id_does_not_last_write_win(tmp_path):
             "--project-id","project-a","--output",str(output),
         ])
     assert not output.exists()
+
+
+
+def test_customer_provenance_changed_after_signed_verification_cannot_publish(
+    tmp_path,monkeypatch
+):
+    from tools import export_gpt3_produced_items as exporter
+    source,sealed,_,q,t=_source_run(tmp_path)
+    customer_path=tmp_path/"customer.json"
+    customer_path.write_text(
+        json.dumps([_original_projected_customer_row(q,t)]),encoding="utf-8"
+    )
+    original=exporter.export_verified_produced_items
+    def rotate_customer_after_proof(*args,**kwargs):
+        rows=original(*args,**kwargs)
+        customer_path.write_text('[]',encoding="utf-8")
+        return rows
+    monkeypatch.setattr(exporter,"export_verified_produced_items",rotate_customer_after_proof)
+    output=tmp_path/"produced_items.json"
+    with pytest.raises(SourceClosedRunConflictError,match="customer rows changed during"):
+        main([
+            "--sealed-run",str(sealed),"--source",str(source),
+            "--customer-rows",str(customer_path),
+            "--project-id","project-a","--output",str(output),
+        ])
+    assert not output.exists()
