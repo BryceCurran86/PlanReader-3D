@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
@@ -31,11 +32,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Independently retain original production host and frame receipts
+        run: |
+          git worktree add --detach /tmp/gptmax-w3-source-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/gptmax-w3-source-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/original-production-before.json"
+          )
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 --output original-production-after.json
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline original-production-before.json --candidate original-production-after.json \
+            --output original-production-retention.json
       - name: Inspect full original source and pixel provenance
         run: |
           PYTHONPATH=. python -u tools/diag_gptmax_raster_positive_pixel_source.py \
@@ -84,4 +101,8 @@ jobs:
         with:
           name: gptmax-original-w3-snapped-pair-source-losses
           retention-days: 30
-          path: original-w3-rail-losses.json
+          path: |
+            original-w3-rail-losses.json
+            original-production-before.json
+            original-production-after.json
+            original-production-retention.json
