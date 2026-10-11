@@ -194,8 +194,10 @@ def join_flank_pixel_evidence(original_report_bytes: bytes, required_report: dic
         opening = _opening_basis(openings[oid])
         requirement = requirements[oid]
         flanks = requirement.get("flanks")
-        if not isinstance(flanks, list) or len(flanks) > 2:
-            raise ValueError("invalid reported flank inventory")
+        visible_flanks = requirement.get("reported_flank_geometry_available")
+        if (type(visible_flanks) is not bool or not isinstance(flanks, list)
+                or len(flanks) != (2 if visible_flanks else 0)):
+            raise ValueError("reported flank completeness/geometry disagreement")
         output = []
         seen_roles = set()
         for flank in flanks:
@@ -235,11 +237,13 @@ def join_flank_pixel_evidence(original_report_bytes: bytes, required_report: dic
                     "ORIGINAL_VISIBLE_WALL_LINE_AUTHORITY"
                     if candidates else "PIXEL_SOURCE_FLANK_CANDIDATE_UNAVAILABLE"),
                 "physical_host_proven": False, "host_publication_allowed": False})
+        if visible_flanks and seen_roles != {"left", "right"}:
+            raise ValueError("complete reported flanks must contain both roles")
         joined.append({
             "opening_identity_id": oid,
             "reported_original_binding_reason_codes":
                 openings[oid].get("original_binding_reason_codes", []),
-            "flank_geometry_reported": bool(flanks),
+            "flank_geometry_reported": visible_flanks,
             "flanks": output,
             "source_report_is_independent_production_proof": False,
             "host_publication_allowed": False,
