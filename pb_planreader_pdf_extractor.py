@@ -3082,7 +3082,7 @@ class GenericPlanReaderExtractor:
                 )
 
                 native_insufficient = (
-                    is_scanned_or_raster
+                    (is_scanned_or_raster and not has_complete_native_openings)
                     or (self._page_has_large_raster(page) and not has_complete_native_openings)
                     or ((has_schedule_word or has_opening_keyword) and not has_complete_native_openings)
                 )
