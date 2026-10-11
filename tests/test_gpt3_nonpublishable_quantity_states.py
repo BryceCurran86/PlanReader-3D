@@ -215,3 +215,41 @@ def test_unapproved_ai_review_draft_cannot_cross_pricing_publish_or_jobhub_gates
     assert gates["pricing"][0] is False
     assert gates["jobhub"][0] is False
     assert not seal_source_closed_quantity(q,trace=trace()).lineage_ok
+
+
+
+def test_review_required_ceiling_with_real_source_owned_promotion_keeps_review_lineage_only():
+    initial=quantity()
+    q=quantity(status="review_required",family="ceiling_lining",metadata={
+        **initial.metadata,
+        "source_owned_ceiling_promotion":True,
+        "shadow_only":False,
+        "commercial_projection_allowed":True,
+    })
+    assert quantity_status_not_publishable(q.status) is True
+    signed=seal_source_closed_quantity(q,trace=trace())
+    assert signed.lineage_ok is True
+    assert signed.status=="review_required"
+    row=quantity_evidence_to_takeoff_output_row(
+        q,trace=trace(),authority=CommercialMeasurementAuthority(method="direct_evidence"),
+    )
+    assert row["origin"]=="AI"
+    assert row["quantity_status"]=="To review"
+    from pb_quantity_takeoff_adapter import existing_commercial_gate_results
+    assert all(result[0] is False for result in existing_commercial_gate_results(row).values())
+
+
+@pytest.mark.parametrize(("family","status","flags"),[
+    ("room_area","review_required",{"source_owned_ceiling_promotion":True,"shadow_only":False,"commercial_projection_allowed":True}),
+    ("ceiling_lining","provisional",{"source_owned_ceiling_promotion":True,"shadow_only":False,"commercial_projection_allowed":True}),
+    ("ceiling_lining","review_required",{"source_owned_ceiling_promotion":"true","shadow_only":False,"commercial_projection_allowed":True}),
+    ("ceiling_lining","review_required",{"source_owned_ceiling_promotion":True,"shadow_only":True,"commercial_projection_allowed":True}),
+    ("ceiling_lining","review_required",{"source_owned_ceiling_promotion":True,"shadow_only":False,"commercial_projection_allowed":False}),
+])
+def test_unproven_review_metadata_cannot_bypass_generic_signed_quantity_status(
+    family,status,flags
+):
+    q=quantity(family=family,status=status,metadata={**quantity().metadata,**flags})
+    sealed=seal_source_closed_quantity(q,trace=trace())
+    assert not sealed.lineage_ok
+    assert "quantity_status_not_publishable" in sealed.lineage_reason_codes
