@@ -101,3 +101,37 @@ def test_two_raw_candidate_bboxes_preserve_two_distinct_linen_word_locations():
         row["room_face_or_measurement_authority_granted"] is False
         for row in result["bbox_rows"]
     )
+
+
+
+def test_original_raster_tile_overlap_does_not_authenticate_a_room_face():
+    document = fitz.open()
+    try:
+        page = document.new_page(width=595.0, height=842.0)
+        tile = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 16, 16), 0)
+        tile.clear_with(255)
+        page.insert_image(fitz.Rect(50., 50., 300., 300.), pixmap=tile)
+        page.insert_text((90., 120.), "LINEN", fontsize=12)
+        source = document.tobytes()
+    finally:
+        document.close()
+
+    result = _native_word_label_census(source, 0, labels=("LINEN",))
+    assert result["original_source_image_tile_placement_count"] == 1
+    assert result["count_by_label"] == {"linen": 1}
+    occurrence = result["occurrences"][0]
+    assert occurrence["original_raster_tile_overlap_count"] == 1
+    assert occurrence["original_raster_tile_overlaps_not_geometry"] == [
+        [50.0, 50.0, 300.0, 300.0],
+    ]
+    assert occurrence["room_face_or_measurement_authority_granted"] is False
+
+
+def test_pure_original_native_words_without_raster_still_have_no_room_authority():
+    result = _native_word_label_census(
+        _two_linen_original_pdf(), 0, labels=("WC", "LINEN"),
+    )
+    assert result["original_source_image_tile_placement_count"] == 0
+    assert all(row["original_raster_tile_overlap_count"] == 0 for row in result["occurrences"])
+    assert all(row["room_face_or_measurement_authority_granted"] is False
+               for row in result["occurrences"])
