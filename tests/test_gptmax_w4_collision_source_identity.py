@@ -97,7 +97,8 @@ def test_unique_unrelated_walls_are_identity_pass_through_without_source_data():
     assert owners == {"source-edge-a": one.candidate_id, "source-edge-b": two.candidate_id}
 
 
-@pytest.mark.parametrize("bad", ["missing_edge", "missing_source", "foreign_source", "nan", "same_edge",
+@pytest.mark.parametrize("bad", ["missing_edge", "missing_source", "foreign_source", "nan",
+                                  "boolean_geometry", "numeric_text_geometry", "huge_integer_geometry", "same_edge",
                                   "same_identity", "wrong_owner"])
 def test_unprovable_collision_never_rekeys_from_ambiguous_or_corrupt_source(bad):
     a, b = wall("source-edge-a", "junction-a"), wall("source-edge-b", "junction-b")
@@ -111,6 +112,12 @@ def test_unprovable_collision_never_rekeys_from_ambiguous_or_corrupt_source(bad)
         inventory["source-edge-b"][LINEAGE_KEY]["source_primitive_ids"] = ()
     elif bad == "nan":
         inventory["source-edge-b"]["x1"] = float("nan")
+    elif bad == "boolean_geometry":
+        inventory["source-edge-b"]["x1"] = True
+    elif bad == "numeric_text_geometry":
+        inventory["source-edge-b"]["x1"] = "10.0"
+    elif bad == "huge_integer_geometry":
+        inventory["source-edge-b"]["x1"] = 10 ** 1000
     elif bad == "same_edge":
         b = replace(b, face_a_segment_ids=a.face_a_segment_ids)
     elif bad == "same_identity":
@@ -376,3 +383,16 @@ def test_w4_collided_source_addresses_do_not_normalize_invalid_positive_ancestry
              "source-edge-b": b.candidate_id},
         )
     assert (a, b, source_edges) == before
+
+def test_source_owned_w4_collision_canonicalizes_genuine_integer_coordinates_to_original_float_receipt():
+    a, b = wall("source-edge-a", "junction-a"), wall("source-edge-b", "junction-b")
+    original_edges = edges()
+    owner = {"source-edge-a": a.candidate_id, "source-edge-b": b.candidate_id}
+    baseline, _ = _source_owned_collision_candidate_addresses((a, b), original_edges, owner)
+    integer_edges = deepcopy(original_edges)
+    for edge in integer_edges.values():
+        for field in ("x1", "y1", "x2", "y2"):
+            if edge[field].is_integer():
+                edge[field] = int(edge[field])
+    same, _ = _source_owned_collision_candidate_addresses((a, b), integer_edges, owner)
+    assert [row.candidate_id for row in same] == [row.candidate_id for row in baseline]
