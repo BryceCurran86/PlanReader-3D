@@ -91,9 +91,8 @@ def test_blocked_net_wall_still_serializes_a_corrupt_nonfinite_dependency_receip
     assert result.abstained and result.value is None
     assert "gross_wall_area_value_invalid" in result.blocking_reasons
     assert "opening_deduction_value_invalid" in result.blocking_reasons
-    assert len(result.metadata["dependency_fingerprints"]) if (
-        "dependency_fingerprints" in result.metadata
-    ) else len(result.metadata["deduction_dependency_fingerprints"]) == 1
+    assert len(result.metadata["deduction_dependency_fingerprints"]) == 1
+    assert result.metadata["gross_dependency_fingerprint"]
 
 
 def test_invalid_unhashable_evidence_receipt_never_crashes_blocked_net_wall():
