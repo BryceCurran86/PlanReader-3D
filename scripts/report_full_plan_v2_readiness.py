@@ -323,7 +323,20 @@ def _sealed_projection_proof(
             and sealed.fingerprint != expected_seal_fingerprint):
         return False, ["sealed_run_changed_during_parity"]
     blockers = produced_sealed_parity_blockers(produced, sealed.quantities)
-    return not blockers, blockers
+    # Quantity projection is a separate authority gate from commercial trade
+    # classification and customer publication. The exporter deliberately
+    # leaves trade unavailable and marks customer parity unchecked until
+    # their *independent* original-source/customer-row evidence arrives.
+    # Do not relabel those expected downstream blockers as signed quantity
+    # identity failures or hide the first actual failed authority stage.
+    signed_quantity_blockers = [
+        reason for reason in blockers
+        if not reason.startswith((
+            "projection_trade_category_missing:",
+            "projection_customer_output_parity_unverified:",
+        ))
+    ]
+    return not signed_quantity_blockers, signed_quantity_blockers
 
 
 def _customer_output_bijection_proof(
