@@ -20,11 +20,7 @@ from pb_physical_opening_viewport_scope_shadow import (
     EVIDENCE_DIRECTION_AGAINST_PROMOTION, EVIDENCE_DIRECTION_SCOPE_ONLY,
     assess_opening_candidate_viewport_scope,
 )
-from pb_source_visibility_authority import (
-    SourceVisibilityProducer, NATIVE_PDF_VISIBLE_SEGMENT, RASTER_PDF_VISIBLE_SEGMENT,
-)
-from pb_source_observation_authority import ObservationSelector
-from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_visibility_authority import SourceVisibilityProducer
 
 
 def audit_native_candidate_viewports(bindings, report):
@@ -63,7 +59,8 @@ def audit_native_candidate_viewports(bindings, report):
         elif (any(c.existence_corroborated
                   and c.scope == IN_AUTHENTICATED_FLOOR_PLAN
                   and c.evidence_direction == EVIDENCE_DIRECTION_SCOPE_ONLY
-                  for c in matched)):
+                  for c in matched)
+              and all(c.scope == IN_AUTHENTICATED_FLOOR_PLAN for c in matched)):
             verdict = "FLOORPLAN_SOURCE_SCOPE_ONLY"
         else:
             verdict = "VIEWPORT_OR_SOURCE_CANDIDATE_AMBIGUOUS"
