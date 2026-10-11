@@ -628,3 +628,28 @@ def test_final_ceiling_area_does_not_use_figured_guard_to_block_scaled_source() 
     published = publish_live_ceiling_area_quantities(_result(ceiling=candidate))
     assert len(published) == 1
     assert published[0].metadata["resolved_scale_id"] == "authenticated-scale-1"
+
+
+def test_original_ceiling_scope_metadata_must_match_canonical_document_and_snapshot() -> None:
+    """A signed shadow record cannot borrow a different source room identity."""
+    original = _shadow_quantity()
+    canonical = _ceiling()
+    for field, foreign in (
+        ("document_id", "foreign-document"),
+        ("room_snapshot_id", "foreign-room-snapshot"),
+        ("document_id", True),
+        ("room_snapshot_id", "  "+canonical.snapshot_id),
+    ):
+        bad = replace(original, metadata={**dict(original.metadata), field: foreign})
+        assert publish_live_ceiling_area_quantities(
+            _result(shadow=bad)
+        ) == ()
+
+    matched = replace(original, metadata={
+        **dict(original.metadata),
+        "document_id": canonical.document_id,
+        "room_snapshot_id": canonical.snapshot_id,
+    })
+    assert len(publish_live_ceiling_area_quantities(_result(shadow=matched))) == 1
+    # Older producers omitting optional scope metadata retain source-owned proof.
+    assert len(publish_live_ceiling_area_quantities(_result())) == 1
