@@ -38,8 +38,15 @@ def _clean(value: object) -> str:
 def _opening_by_identity(claim: LivePhysicalNetWallClaim) -> Mapping[str, object]:
     by_id: dict[str, object] = {}
     for opening in claim.canonical_openings:
-        canonical_id = _clean(opening.canonical_opening_id)
-        physical_id = _clean(opening.physical_opening_id)
+        if any(
+            type(value) is not str or not value or value != value.strip()
+            for value in (opening.canonical_opening_id, opening.physical_opening_id)
+        ):
+            raise SourceClosedRunConflictError(
+                "opening-count sealing requires exact original canonical/physical identities"
+            )
+        canonical_id = opening.canonical_opening_id
+        physical_id = opening.physical_opening_id
         if not canonical_id or canonical_id != physical_id:
             raise SourceClosedRunConflictError(
                 "opening-count sealing requires canonical/physical identity equality"
@@ -64,15 +71,20 @@ def _validated_count_quantities(
             )
         if quantity.family != "opening_count":
             continue
-        if quantity.abstained or quantity.value is None:
-            continue
-        if quantity.blocking_reasons:
-            continue
-        if quantity.quantity_id in seen:
+        # A blocked duplicate with the same ID still contests the physical
+        # opening universe. Never filter it away before checking source IDs.
+        if (
+            type(quantity.quantity_id) is not str
+            or not quantity.quantity_id
+            or quantity.quantity_id != quantity.quantity_id.strip()
+            or quantity.quantity_id in seen
+        ):
             raise SourceClosedRunConflictError(
-                f"duplicate opening-count quantity id: {quantity.quantity_id}"
+                f"duplicate or invalid opening-count quantity id: {quantity.quantity_id}"
             )
         seen.add(quantity.quantity_id)
+        if quantity.abstained or quantity.value is None or quantity.blocking_reasons:
+            continue
         quantities.append(quantity)
     return tuple(sorted(quantities, key=lambda item: item.quantity_id))
 
@@ -95,7 +107,7 @@ def build_live_opening_count_source_traces(
         if (
             not isinstance(raw_members, (tuple, list))
             or not raw_members
-            or any(type(value) is not str or not value.strip() for value in raw_members)
+            or any(type(value) is not str or not value or value != value.strip() for value in raw_members)
             or len(set(raw_members)) != len(raw_members)
         ):
             raise SourceClosedRunConflictError(
@@ -152,7 +164,7 @@ def build_live_opening_count_source_traces(
         if (
             not isinstance(quantity.evidence_ids, (tuple, list))
             or not quantity.evidence_ids
-            or any(type(v) is not str or not v.strip() for v in quantity.evidence_ids)
+            or any(type(v) is not str or not v or v != v.strip() for v in quantity.evidence_ids)
             or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
         ):
             raise SourceClosedRunConflictError(
@@ -177,7 +189,7 @@ def build_live_opening_count_source_traces(
             if (
                 not isinstance(source_observations, (tuple, list))
                 or not source_observations
-                or any(type(value) is not str or not value.strip()
+                or any(type(value) is not str or not value or value != value.strip()
                        for value in source_observations)
                 or len(set(source_observations)) != len(source_observations)
             ):
