@@ -83,11 +83,7 @@ def publish_bound_wall_finish_quantity(
 
     # Producer authority is required, but the final projection must still
     # reject replayed non-finite, non-positive or boolean metric quantities.
-    if (
-        type(record.quantity_m2) not in (int, float)
-        or not math.isfinite(record.quantity_m2)
-        or record.quantity_m2 <= 0
-    ):
+    if not _positive_source_finish_area(record.quantity_m2):
         raise ValueError("resolved wall-finish quantity has invalid metric area")
 
     # The record is already source-resolved; distinct classes of source receipt
