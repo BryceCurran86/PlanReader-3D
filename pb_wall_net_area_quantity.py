@@ -48,7 +48,10 @@ def _completion_fingerprint(evidence: EvidenceAtom) -> str:
 def _opening_id_from_deduction(quantity: QuantityEvidence, wall_id: str) -> str | None:
     if len(quantity.input_entity_ids) != 2:
         return None
-    first, second = (str(v) for v in quantity.input_entity_ids)
+    if any(type(value) is not str or not value or value != value.strip()
+           for value in quantity.input_entity_ids):
+        return None
+    first, second = quantity.input_entity_ids
     if second == wall_id and first != wall_id:
         return first
     return None
@@ -208,11 +211,14 @@ def build_net_wall_area_quantity(
         if not isinstance(raw_ids, (list, tuple)):
             blockers.append("opening_set_completion_ids_missing")
         else:
-            declared_opening_ids = tuple(str(v) for v in raw_ids)
-            if any(not v for v in declared_opening_ids):
-                blockers.append("opening_set_completion_id_empty")
-            if len(set(declared_opening_ids)) != len(declared_opening_ids):
-                blockers.append("opening_set_completion_ids_duplicate")
+            if any(type(value) is not str or not value or value != value.strip()
+                   for value in raw_ids):
+                blockers.append("opening_set_completion_ids_invalid")
+                declared_opening_ids = ()
+            else:
+                declared_opening_ids = tuple(raw_ids)
+                if len(set(declared_opening_ids)) != len(declared_opening_ids):
+                    blockers.append("opening_set_completion_ids_duplicate")
 
         # Critical fail-closed boundary: an ordinary EvidenceAtom and a caller
         # declared list cannot prove that omitted physical openings do not exist.
