@@ -39,10 +39,14 @@ def _opening_map(
             raise TypeError(
                 "canonical_openings must contain LiveCanonicalOpeningObject"
             )
-        canonical_id = str(opening.canonical_opening_id or "").strip()
-        if not canonical_id:
+        canonical_id = opening.canonical_opening_id
+        if (
+            type(canonical_id) is not str
+            or not canonical_id
+            or canonical_id != canonical_id.strip()
+        ):
             raise SourceClosedRunConflictError(
-                "canonical opening identity must be non-empty"
+                "canonical opening identity must be original typed non-empty source ID"
             )
         if canonical_id in by_id:
             raise SourceClosedRunConflictError(
@@ -83,7 +87,15 @@ def _build_opening_area_source_traces(
             raise SourceClosedRunConflictError(
                 "opening area quantity must reference exactly one canonical opening"
             )
-        canonical_id = str(quantity.input_entity_ids[0])
+        canonical_id = quantity.input_entity_ids[0]
+        if (
+            type(canonical_id) is not str
+            or not canonical_id
+            or canonical_id != canonical_id.strip()
+        ):
+            raise SourceClosedRunConflictError(
+                "opening area quantity has invalid source canonical identity"
+            )
         opening = openings.get(canonical_id)
         if opening is None:
             raise SourceClosedRunConflictError(
