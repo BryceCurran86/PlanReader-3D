@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -30,11 +31,31 @@ def _reject_nonfinite_json_number(token: str) -> None:
     raise ValueError(f"non-finite source/customer JSON number: {token}")
 
 
+def _finite_evidence_json_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("out-of-range source/customer JSON float")
+    return value
+
+
+def _finite_evidence_json_int(token: str) -> int:
+    value = int(token)
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError("out-of-range source/customer JSON integer")
+    return value
+
+
 def _read_strict_evidence_json(path: Path) -> Any:
     return json.loads(
         path.read_text(encoding="utf-8"),
         object_pairs_hook=_reject_duplicate_payload_keys,
         parse_constant=_reject_nonfinite_json_number,
+        parse_float=_finite_evidence_json_float,
+        parse_int=_finite_evidence_json_int,
     )
 
 
