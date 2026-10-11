@@ -497,6 +497,7 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
     # For crowded architectural sheets prefer label-adjacent candidate faces,
     # not arbitrary first-N planarizer ordering. Still strictly bounded.
     matching_rows = []
+    matching_count = 0
     sample_unmatched = []
     labels = tuple(native_census.get("occurrences", ()) or ())
     count = 0
@@ -527,7 +528,9 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
             "room_face_or_measurement_authority_granted": False,
         }
         if hits:
-            matching_rows.append(row)
+            matching_count += 1
+            if len(matching_rows) < 150:
+                matching_rows.append(row)
         elif len(sample_unmatched) < 20:
             sample_unmatched.append(row)
     rows = matching_rows[:150]
@@ -535,7 +538,7 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
     return {
         "diagnostic_only": True,
         "raw_candidate_count": count,
-        "bbox_candidate_label_intersection_count": len(matching_rows),
+        "bbox_candidate_label_intersection_count": matching_count,
         "bbox_rows": rows,
         "truncated": count > len(rows),
         "bbox_overlap_is_not_physical_ownership": True,
