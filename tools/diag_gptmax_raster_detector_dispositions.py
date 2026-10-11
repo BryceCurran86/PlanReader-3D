@@ -114,7 +114,7 @@ class _Observer:
 
     def _components(self, frame, returned):
         local = frame.f_locals
-        if not {"mask", "orientation", "min_line_px", "stats", "_labels"} <= local.keys():
+        if not {"mask", "orientation", "min_line_px", "stats", "_labels"}.issubset(local):
             raise ValueError("unknown original component receipt structure")
         orientation = local["orientation"]
         minimum = local["min_line_px"]
