@@ -242,7 +242,12 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
         # These are optional for legacy diagnostic inputs, but an explicit
         # field is never allowed to drift under the same quantity_id.
         for produced_field, sealed_field in (
+            ("project_id", "project_id"),
             ("family", "family"),
+            ("status", "status"),
+            ("authority", "authority"),
+            ("source_page", "source_page"),
+            ("viewport_id", "viewport_id"),
             ("semantic_key", "semantic_key"),
             ("source_document_id", "document_id"),
             ("source_sha256", "source_sha256"),
@@ -259,6 +264,15 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
                     blockers.append(
                         f"projection_{produced_field}_mismatch:{quantity_id}"
                     )
+        if "confidence" in item:
+            original_confidence = getattr(row, "confidence", None)
+            candidate_confidence = item["confidence"]
+            if (
+                not _safe_finite_quantity_number(candidate_confidence)
+                or original_confidence is None
+                or candidate_confidence != original_confidence
+            ):
+                blockers.append(f"projection_confidence_mismatch:{quantity_id}")
         # Source-sealed quantities are not proof that customer output exists.
         # The new exporter records false until the existing signed-customer
         # bijection has been independently executed. A true flag is only a
