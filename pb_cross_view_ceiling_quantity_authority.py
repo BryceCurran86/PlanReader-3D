@@ -81,6 +81,16 @@ def _quantity_value(quantity: QuantityEvidence) -> Optional[float]:
     return value
 
 
+def _valid_source_area_confidence(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        probability = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(probability) and 0.0 <= probability <= 1.0
+
+
 def _source_figured_dimension_ids(metadata: Mapping) -> Optional[tuple[str, ...]]:
     """Require actual source-ID tokens; strings are NOT collections of IDs.
 
@@ -114,11 +124,10 @@ def _valid_room_area_quantity(
         or quantity.blocking_reasons
         or not quantity.evidence_ids
         or not isinstance(quantity.evidence_ids, (tuple, list))
-        or any(type(item) is not str or not item.strip() for item in quantity.evidence_ids)
+        or any(type(item) is not str or not item or item != item.strip()
+               for item in quantity.evidence_ids)
         or len(set(quantity.evidence_ids)) != len(quantity.evidence_ids)
-        or type(quantity.confidence) not in (int, float)
-        or not math.isfinite(float(quantity.confidence))
-        or not 0.0 <= float(quantity.confidence) <= 1.0
+        or not _valid_source_area_confidence(quantity.confidence)
         or _clean(quantity.authority)
         != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
         or _quantity_value(quantity) is None
