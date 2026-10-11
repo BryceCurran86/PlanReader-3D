@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -57,6 +58,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -65,7 +67,7 @@ jobs:
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Reproduce original verified Lot16 prerequisite
         run: |
-          git worktree add /tmp/gptmax-aperture-lot16-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          git worktree add --detach /tmp/gptmax-aperture-lot16-prerequisite "${{ github.event.pull_request.base.sha }}"
           DIAG_SCRIPT="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
           mkdir -p prerequisite-lot16
           (cd /tmp/gptmax-aperture-lot16-prerequisite && PYTHONPATH=. python -u "$DIAG_SCRIPT" --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json")
@@ -160,6 +162,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -168,7 +171,7 @@ jobs:
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Reproduce original verified Maryborough prerequisite
         run: |
-          git worktree add /tmp/gptmax-aperture-mary-prerequisite 7ebd011a0de6107fa8921fe2b11906068b6b38c6
+          git worktree add --detach /tmp/gptmax-aperture-mary-prerequisite "${{ github.event.pull_request.base.sha }}"
           DIAG_SCRIPT="$GITHUB_WORKSPACE/tools/diag_opening_wall_face_preservation.py"
           mkdir -p prerequisite-maryborough
           (cd /tmp/gptmax-aperture-mary-prerequisite && PYTHONPATH=. python -u "$DIAG_SCRIPT" --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output "$GITHUB_WORKSPACE/prerequisite-maryborough/maryborough-connected-frame-source-handoff.json")
