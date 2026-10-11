@@ -42,3 +42,16 @@ geometry, quantities, the 20k cap or frozen truth.
 The original W4-source CI used fixed historical existence-hypothesis counts (Lot16 23 and Maryborough 180). The live original Lot16 SHA-verified base and candidate both produced **22** after an independent merged native dimension annotation opposition; they retained all 14 authenticated hosts and nine frames, with zero changed/lost source proofs. The earlier fixed 23 assertion therefore failed even though the W4 integrity retention comparator passed. This is a stale test expectation, not new host proof.
 
 The workflow now independently re-extracts the exact original PR base and exact PR head, requires an **equal complete positive-opening hypothesis count** across them, preserves its host/frame counts (Lot16 14/9, Maryborough 3/0), exact original SHA and 20,000 cap, and still runs strict authenticated-host/frame retention and the full per-scope W4 collision ownership census. No fixed number from an older native source classifier enters the W4 test. Do not merge unless the corrected exact-head original source CI and all production regressions pass. No physical identity, source line, host, benchmark, score, wall-equivalence or quantity is promoted by this test fix.
+
+## Original W2 source-coordinate type integrity
+
+W4 candidate-address disambiguation now requires all four underlying W2 edge
+coordinates to be genuine integer/float numerical observations (never
+`True`, `False`, a numeric string or an object whose `float()` coercion
+could fabricate source geometry). The already existing canonical float
+conversion remains unchanged for legitimate numeric inputs, including integers.
+Overlarge integers that overflow conversion, NaN, infinities and zero-length
+edges fail closed with `W4SourceCandidateAddressCollision`. Adversarial
+regressions cover each negative and verify equivalent canonical IDs for
+authentic integral values. No wall role, opening host, physical equivalence,
+benchmark quantity, safety cap or tolerance is changed.
