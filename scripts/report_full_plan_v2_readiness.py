@@ -362,9 +362,10 @@ def _customer_output_bijection_proof(
         sealed = sealed_source_closed_run_from_dict(_object(sealed_path))
         if sealed.project_id != project_id or sealed.fingerprint != expected_seal_fingerprint:
             return False, ["customer_sealed_run_changed"]
-        verified = verify_sealed_customer_output(sealed, customer_rows)
-        if not verified.complete:
-            return False, ["customer_bijection_incomplete"]
+        # The verifier proves the complete bijection or raises a specific
+        # CustomerOutputVerificationError. Its return value is a summary
+        # receipt, not an object with a `.complete` attribute.
+        verify_sealed_customer_output(sealed, customer_rows)
         # Do not let a concurrent writer change either signed input after
         # this proof while still reporting that its earlier bytes passed.
         if customer_path.read_bytes() != before:
