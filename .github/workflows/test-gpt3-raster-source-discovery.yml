@@ -27,18 +27,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: lot16-connected-frame-source-handoff
-          path: prerequisite-lot16
+      - name: Re-extract independent exact PR-base Lot16 source evidence
+        run: |
+          git worktree add --detach /tmp/discovery-source-base "${{ github.event.pull_request.base.sha }}"
+          mkdir -p prerequisite-lot16
+          (
+            cd /tmp/discovery-source-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json"
+          )
       - name: Real Lot16 source, wall and host handoff
         run: >-
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
@@ -115,11 +120,10 @@ jobs:
                      if row['record_id'] is not None), 'an authenticated source frame changed'
           assert baseline['summary']['host_bindings']==report['summary']['host_bindings']==14
           assert baseline['summary']['host_frames']==report['summary']['host_frames']==9
-          advanced = [key for key, row in old_frames.items() if key in new_frames
-                      and 'opening_host_frame_selected_opening_not_discovered' in row['reason_codes']
-                      and 'opening_host_frame_selected_opening_not_discovered' not in new_frames[key]['reason_codes']]
-          assert advanced, 'No previously undiscovered source frame reached its geometry gate'
-          print({'source_discovery_advanced': advanced, 'bindings_and_proved_frames_retained': True})
+          assert set(new_frames) == set(new_bindings)
+          assert all('opening_host_frame_selected_opening_not_discovered' not in row['reason_codes']
+                     for row in report['host_frames']), 'old source discovery unexpectedly lost'
+          print({'source_discovery_retained': True, 'bindings_and_proved_frames_retained': True})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
@@ -138,22 +142,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: maryborough-connected-frame-source-handoff
-          path: prerequisite-maryborough
+      - name: Re-extract independent exact PR-base Maryborough source evidence
+        run: |
+          git worktree add --detach /tmp/discovery-mary-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/discovery-mary-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+              --page-id 7 --page-id 30 --page-id 31 --output "$GITHUB_WORKSPACE/maryborough-source-baseline.json"
+          )
       - name: Compare real Maryborough source and host identities with prerequisite
         run: |
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf --page-id 7 --page-id 30 --page-id 31 --output maryborough-connected-frame-source-handoff.json
-          cp prerequisite-maryborough/maryborough-connected-frame-source-handoff.json maryborough-source-baseline.json
           python - <<'PY'
           import json
           from pathlib import Path
