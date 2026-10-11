@@ -57,10 +57,8 @@ def _eligible_area_quantities(
         and quantity.unit in {"m2", "m²"}
         and _authentic_positive_quantity_value(quantity.value)
         and not quantity.blocking_reasons
-        and (
-            not isinstance(quantity.metadata, Mapping)
-            or quantity.metadata.get("commercial_projection_allowed") is not False
-        )
+        and isinstance(quantity.metadata, Mapping)
+        and quantity.metadata.get("commercial_projection_allowed") is True
     )
 
 
@@ -80,6 +78,7 @@ def _eligible_count_quantities(
             or quantity.unit != "ea"
             or quantity.blocking_reasons
             or metadata.get("schedule_corroborated") is not True
+            or metadata.get("commercial_projection_allowed") is not True
             or not _clean(metadata.get("opening_mark"))
         ):
             continue
