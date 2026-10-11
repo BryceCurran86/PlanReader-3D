@@ -120,6 +120,41 @@ def test_removing_explicit_identity_removes_firm_opening(tmp_path: Path) -> None
     assert "W21" not in untagged_preds
 
 
+def test_sparse_complete_native_schedule_does_not_create_redundant_ocr_claim(tmp_path):
+    pdf=_schedule_pdf(tmp_path,"short_native.pdf",[
+        ["Mark","Dimensions","Quantity","Description"],
+        ["W-21","1680 x 1110 mm","5 No.","Casement window"],
+    ])
+    with fitz.open(pdf) as source:
+        assert len(source[0].get_text().strip())<150
+    def recognize(_page,**kwargs):
+        # Other evidence collectors may request OCR independently at 120 DPI.
+        # The opening reconciliation pass at 150 DPI is the redundant claim.
+        assert kwargs.get('dpi')!=150
+        return []
+    with patch("pb_drawing_ocr_evidence_layer.DrawingOCREngine.recognize_page_rect",
+               side_effect=recognize) as ocr:
+        extractor=GenericPlanReaderExtractor()
+        rows={r.tag:r for r in extractor.extract_from_pdf(pdf)}
+    assert not [c for c in ocr.call_args_list if c.kwargs.get('dpi')==150]
+    assert rows['W21'].quantity==5.
+    assert rows['W21'].dimensions==[1680.,1110.]
+    assert not rows['W21'].metadata.get('publication_blocked',False)
+
+
+def test_sparse_page_without_complete_native_rows_still_requests_ocr(tmp_path):
+    pdf=_schedule_pdf(tmp_path,"native_missing.pdf",[
+        ["Mark","Dimensions","Quantity","Description"],
+        ["W-21","1680 x 1110 mm","","Casement window"],
+    ])
+    with patch.object(GenericScheduleTableExtractor,'extract_from_document',return_value=[]):
+        with patch("pb_drawing_ocr_evidence_layer.DrawingOCREngine.recognize_page_rect",
+                   return_value=[]) as ocr:
+            rows={r.tag:r for r in GenericPlanReaderExtractor().extract_from_pdf(pdf)}
+    assert len([c for c in ocr.call_args_list if c.kwargs.get('dpi')==150])==1
+    assert 'W21' not in rows or rows['W21'].quantity is None
+
+
 def test_untagged_dimensions_never_synthesize_benchmark_shaped_identities(tmp_path: Path) -> None:
     path = tmp_path / "untagged_callouts.pdf"
     doc = fitz.open()

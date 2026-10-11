@@ -118,6 +118,22 @@ def _publish_one(
         return None
 
     meta = source.metadata if isinstance(source.metadata, Mapping) else {}
+    # Optional original producer scope cannot be replayed onto a different
+    # canonical document or physical room snapshot.  Missing metadata is
+    # tolerated for legacy legitimate producers, never inferred from names.
+    for source_key, canonical_value in (
+        ("document_id", ceiling.document_id),
+        ("room_snapshot_id", ceiling.snapshot_id),
+    ):
+        if source_key in meta and meta[source_key] is not None:
+            actual = meta[source_key]
+            if (
+                type(actual) is not str
+                or not actual
+                or actual != actual.strip()
+                or actual != canonical_value
+            ):
+                return None
     if (
         source.abstained
         or source.value is None
