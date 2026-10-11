@@ -82,9 +82,27 @@ jobs:
           row,=audit['candidate_audits']
           assert row['live_state_unchanged'] is True
           assert row['original_uncovered_support_ids']==row['partition_uncovered_support_ids']
-          assert len(row['partition_uncovered_support_ids'])==2
-          assert row['complete_shadow_dimension_opposition'] is False
-          assert row['shadow_opposing_evidence_atoms']==[]
+          # The original producer now opposes the native look-alike using
+          # independently authenticated dimension-line/tick/text topology.
+          # A diagnostic CANDIDATE atom is never physical nonexistence proof.
+          assert row['partition_uncovered_support_ids']==[]
+          assert row['original_uncovered_support_ids']==[]
+          assert row['complete_shadow_dimension_opposition'] is True
+          atoms=row['shadow_opposing_evidence_atoms']
+          assert atoms and len({a['evidence_id'] for a in atoms})==len(atoms)
+          support=set(row['original_live_state']['candidate']['source_observation_ids'])
+          assert len(support)==6
+          assert all(
+              atom['kind']=='dimension_annotation'
+              and atom['status']=='candidate'
+              and atom['reason_codes']==['native_dimension_cap_tick_text_topology']
+              and atom['metadata']['source_sha256']==sha
+              and atom['metadata']['all_opening_support_covered'] is True
+              and set(atom['metadata']['opening_support_observation_ids'])==support
+              and atom['metadata']['text_observation_id']
+              for atom in atoms
+          )
+          assert row['original_live_state']['existence_record_id'] is None
           partition,=row['relevant_original_text_paint_partitions']
           assert partition['raw_text']=='90450'
           assert partition['text_integrity_status']=='abstained'
