@@ -113,3 +113,34 @@ gate. It never infers a room from OCR, promotes a split label to
 an area or changes frozen benchmark truth. All floor and room quantities
 continue to depend on existing production physical and metric
 authority.
+
+
+## Third diagnostic stage — withheld boundary W4 candidate intersections
+
+The source-verified original report already proves 511 abstentions in the
+authenticated page-7 floor-plan viewport, of which exactly six have
+`source_room_face_boundary_unresolved` and 505 are tiny/degenerate. The new
+`original_withheld_boundary_w4_census` field reports only the six
+boundary-unresolved producer records, with their **original** face ID,
+**original** page-space polygon vertices, and **original** W4 candidate IDs.
+
+For each withheld face, an optional relation records any W4 candidate ID
+also found on a different **directly and uniquely authenticated positive
+source-label face**, including that positive face's exact source receipt ID.
+This is a set intersection of existing source-producer candidate IDs. It is
+**not** proof that the faces are adjacent, that they describe the same room,
+that a withheld source face can be published, or that either has a complete
+host wall. The absence of an intersection does not prove nonadjacency.
+
+The report rejects foreign source-revision/snapshot/scope faces, duplicate
+positive or withheld face IDs, invalid wall candidate IDs, malformed original
+withheld polygon endpoints, and fabricated direct-label ownership.
+The SHA-verification workflow compares the count of these exact original
+withheld boundary records to the room face producer's separately published
+abstention reason count, retaining all 687 positive receipts and 511 original
+abstention decisions unchanged.
+
+The evidence is intended to narrow the first physical boundary to repair for
+source-owned Food Prep, Cold Room and Office. No client rates, scale,
+dimension, physical equivalence, W4 host, room, QuantityEvidence or Full Plan V2
+reference/scoring result is inferred.
