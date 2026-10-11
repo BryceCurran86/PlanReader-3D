@@ -67,6 +67,22 @@ def _valid_explicit_source_count(count: object) -> bool:
     return math.isfinite(number) and number > 0 and number.is_integer()
 
 
+def _source_count_quantity_ready_for_publication(quantity: object) -> bool:
+    """Final exact-source count check independent of schedule-row discovery."""
+    if type(quantity) is not QuantityEvidence:
+        return False
+    return (
+        quantity.family == "opening_count"
+        and not quantity.abstained
+        and quantity.status == "firm"
+        and quantity.unit == "ea"
+        and not quantity.blocking_reasons
+        and _valid_explicit_source_count(quantity.value)
+        and _authentic_source_id_universe(quantity.input_entity_ids)
+        and int(quantity.value) == len(quantity.input_entity_ids)
+    )
+
+
 def publish_live_authenticated_opening_count_quantities(
     *,
     source_visibility_producer: SourceVisibilityProducer,
@@ -247,14 +263,7 @@ def publish_live_authenticated_opening_count_quantities(
             result.status is not EvidenceResolutionStatus.CORROBORATED
             or record is None
             or not record.schedule_corroborated
-            or quantity is None
-            or quantity.abstained
-            or quantity.status != "firm"
-            or quantity.unit != "ea"
-            or not _valid_explicit_source_count(quantity.value)
-            or not _authentic_source_id_universe(quantity.input_entity_ids)
-            or int(quantity.value) != len(quantity.input_entity_ids)
-            or quantity.blocking_reasons
+            or not _source_count_quantity_ready_for_publication(quantity)
         ):
             continue
         if quantity.quantity_id in seen_quantity_ids:
