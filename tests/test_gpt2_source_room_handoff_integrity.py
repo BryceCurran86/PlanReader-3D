@@ -58,6 +58,11 @@ def test_complete_unique_source_chain_is_only_a_handoff_and_not_finish():
     assert result["first_unproved_authority"]=="SOURCE_ROOM_AREA_READY_FOR_GPT1_GPT3_REVIEW"
     assert result["source_proven_area_m2"]==1.5
     assert result["original_source_face_receipt_id"]=="face-receipt-1"
+    assert result["original_label_binding_record_id"]=="label-source-1"
+    assert result["original_label_evidence_ids"]==["native-observation-1"]
+    assert result["documented_area_quantity_id"]=="quantity-area-1"
+    assert result["documented_area_source_evidence_ids"]==[
+        "face-receipt-1","original-dimension-receipt"]
     assert result["canonical_floor_id"]=="canonical-floor-1"
     assert result["floor_finish_publication_allowed"] is False
     assert result["ceiling_lining_publication_allowed"] is False
@@ -145,6 +150,9 @@ def test_missing_targets_are_not_materialised_from_names():
                  if r["source_room_label"]==name)
         assert row["first_unproved_authority"]=="SOURCE_PHYSICAL_FACE_UNAVAILABLE"
         assert row["source_proven_area_m2"] is None
+        assert row["original_label_binding_record_id"] is None
+        assert row["original_label_evidence_ids"]==[]
+        assert row["documented_area_source_evidence_ids"]==[]
     assert result["dry_store_must_abstain_without_new_proof"]
     assert result["diagnostic_only"]
     assert result["benchmark_accuracy"] is None
@@ -162,3 +170,20 @@ def test_duplicate_target_names_do_not_publish_multiple_rows():
     with pytest.raises(ValueError):
         report_source_room_handoff(fixture(),original_source_sha=SHA,
                                    targets=("food prep"," FOOD  PREP "))
+
+
+def test_original_word_and_metric_evidence_only_appear_after_source_gates():
+    c=fixture()
+    c.canonical_rooms[0].room_label_binding_record_id=""
+    row=one(c)
+    assert row["original_label_binding_record_id"] is None
+    assert row["original_label_evidence_ids"]==[]
+    assert row["documented_area_source_evidence_ids"]==[]
+    assert row["documented_area_quantity_id"] is None
+    c=fixture()
+    c.room_area_quantity_evidence[0].metadata["source_sha256"]="b"*64
+    row=one(c)
+    assert row["original_label_binding_record_id"]=="label-source-1"
+    assert row["original_label_evidence_ids"]==["native-observation-1"]
+    assert row["documented_area_quantity_id"] is None
+    assert row["documented_area_source_evidence_ids"]==[]
