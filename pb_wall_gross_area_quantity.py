@@ -46,9 +46,18 @@ def _metadata(quantity: QuantityEvidence) -> Mapping[str, object]:
 
 
 def _single_wall_id(quantity: QuantityEvidence) -> str | None:
-    if len(quantity.input_entity_ids) != 1:
+    # Source evidence may be imported or replayed. Invalid membership is a
+    # provenance BLOCKER, not a Python exception in the first check.
+    members = quantity.input_entity_ids
+    if (
+        not isinstance(members, (tuple, list))
+        or len(members) != 1
+        or type(members[0]) is not str
+        or not members[0]
+        or members[0] != members[0].strip()
+    ):
         return None
-    return str(quantity.input_entity_ids[0])
+    return members[0]
 
 
 def _source_tuple(quantity: QuantityEvidence) -> tuple[object, object, object]:
