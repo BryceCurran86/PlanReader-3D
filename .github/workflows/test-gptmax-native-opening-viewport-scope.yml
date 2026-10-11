@@ -2,7 +2,7 @@ name: GPT MAX Source Native Opening Viewport Opposition
 on:
   pull_request:
     paths:
-      - tools/diag_gptmax_native_opening_viewport_scope.py
+      - scripts/diag_gptmax_native_opening_viewport_scope.py
       - tests/test_gptmax_native_opening_viewport_scope.py
       - docs/engineering/gptmax_native_opening_viewport_scope.md
       - .github/workflows/test-gptmax-native-opening-viewport-scope.yml
@@ -55,7 +55,7 @@ jobs:
           )
       - name: Source-authenticated G17 physical opening native/viewport scope
         run: |
-          PYTHONPATH=. python -u tools/diag_gptmax_native_opening_viewport_scope.py \
+          PYTHONPATH=. python -u scripts/diag_gptmax_native_opening_viewport_scope.py \
             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
             --page-id 3 \
             --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
