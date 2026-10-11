@@ -34,20 +34,31 @@ def test_valid_signed_quantity_with_trade_unavailable_and_customer_unchecked_sti
     raw = produced_sealed_parity_blockers(produced, sealed.quantities)
     assert "projection_trade_category_missing:qty-room-1" in raw
     assert "projection_customer_output_parity_unverified:qty-room-1" in raw
+    downstream = []
     assert _sealed_projection_proof(
         root, "project-a", produced, True,
         expected_seal_fingerprint=sealed.fingerprint,
+        downstream_reason_sink=downstream,
     ) == (True, [])
+    assert downstream == [
+        "projection_customer_output_parity_unverified:qty-room-1",
+        "projection_trade_category_missing:qty-room-1",
+    ]
 
 
 def test_customer_bijection_proven_but_trade_unavailable_still_has_signed_quantity_parity(tmp_path):
     root, sealed, produced = _signed_source_export(tmp_path, customer=True)
     assert produced[0]["customer_output_parity_verified"] is True
     assert produced[0]["trade_category"] is None
+    downstream = []
     assert _sealed_projection_proof(
         root, "project-a", produced, True,
         expected_seal_fingerprint=sealed.fingerprint,
+        downstream_reason_sink=downstream,
     ) == (True, [])
+    assert downstream == [
+        "projection_trade_category_missing:qty-room-1",
+    ]
 
 
 def test_original_identity_or_quantity_tampering_remains_a_quantity_parity_failure(tmp_path):
