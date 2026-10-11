@@ -463,7 +463,16 @@ def _native_word_label_census(
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         if page_index >= len(doc) or page_index < 0:
             raise ValueError("native label census page index out of source bounds")
-        source_words = tuple(word for word in doc[page_index].get_text("words") if len(word) >= 8)
+        source_page = doc[page_index]
+        # A drawing can carry true source text above rasterized wall geometry.
+        # Tile placement is useful for first-failure attribution, but NEVER
+        # authorizes a wall, closed room face or metric quantity.
+        tile_bounds = set()
+        for image in source_page.get_images(full=True):
+            for rect in source_page.get_image_rects(image[0]):
+                tile_bounds.add(tuple(round(float(v), 6) for v in (rect.x0, rect.y0, rect.x1, rect.y1)))
+        tile_bounds = tuple(sorted(tile_bounds))
+        source_words = tuple(word for word in source_page.get_text("words") if len(word) >= 8)
         native_line_words: dict[tuple[int, int], list[tuple[int, str]]] = {}
         for word in source_words:
             native_line_words.setdefault((int(word[5]), int(word[6])), []).append(
@@ -476,7 +485,17 @@ def _native_word_label_census(
             native_line_text = " ".join(
                 item[1] for item in sorted(native_line_words[native_line_key])
             )
+            word_bbox = tuple(float(v) for v in word[:4])
+            tile_matches = tuple(
+                list(tile) for tile in tile_bounds
+                if not (
+                    tile[2] <= word_bbox[0] or tile[0] >= word_bbox[2]
+                    or tile[3] <= word_bbox[1] or tile[1] >= word_bbox[3]
+                )
+            )
             occurrences.append({
+                "original_raster_tile_overlaps_not_geometry": list(tile_matches),
+                "original_raster_tile_overlap_count": len(tile_matches),
                 "raw_native_text": str(word[4]),
                 "same_original_native_line_text_not_authority": native_line_text,
                 "source_page_index_zero_based": page_index,
@@ -492,6 +511,7 @@ def _native_word_label_census(
     return {
         "diagnostic_only": True,
         "requested_labels": sorted(allowed),
+        "original_source_image_tile_placement_count": len(tile_bounds),
         "occurrences": occurrences,
         "count_by_label": dict(sorted(counts.items())),
     }
