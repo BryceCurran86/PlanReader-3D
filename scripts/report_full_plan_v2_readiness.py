@@ -286,6 +286,18 @@ def produced_sealed_parity_blockers(produced: list[dict], sealed_quantities: tup
             blockers.append(
                 f"projection_customer_output_parity_unverified:{quantity_id}"
             )
+        # A signed-customer claim consists of a flag *and* its scoped proof
+        # status. The exporter writes these together. An independently
+        # authentic-looking flag paired with an unchecked or forged status
+        # must never become the readiness receipt for this quantity.
+        if "customer_output_parity_status" in item and (
+            item.get("customer_output_parity_status")
+            != "SIGNED_CUSTOMER_BIJECTION_VERIFIED"
+            or item.get("customer_output_parity_verified") is not True
+        ):
+            blockers.append(
+                f"projection_customer_output_status_inconsistent:{quantity_id}"
+            )
         category = item.get("trade_category")
         if not isinstance(category, str) or not category.strip():
             blockers.append(f"projection_trade_category_missing:{quantity_id}")
