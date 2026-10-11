@@ -1,0 +1,87 @@
+name: GPT MAX Original W3 Snapped Pair Source Rail Audit
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_raster_positive_pixel_source.py
+      - tests/test_gptmax_w3_snap_pair_source_losses.py
+      - .github/workflows/test-gptmax-w3-snapped-rail-audit.yml
+      - docs/engineering/gptmax_w3_snapped_source_rail_audit.md
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_w3_snap_pair_source_losses.py tests/test_gptmax_raster_positive_pixel_source.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  exact-original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inspect full original source and pixel provenance
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_raster_positive_pixel_source.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --expected-render-sha 64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab \
+            --output original-w3-rail-losses.json
+      - name: Keep original source cap and snapped-rail evidence without host promotion
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          row=json.loads(Path("original-w3-rail-losses.json").read_text())
+          assert row["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert row["primitive_safety_cap"]==20000
+          assert row["authenticated_pixel_source_count"]==1952
+          assert row["ordinary_source_snapshot_unchanged"] is True
+          graph=row["experimental_w2_w4"]
+          losses=graph["w3_snap_pair_source_losses"]
+          assert len(losses)==sum(e["w3_removed"] for e in graph["all_w2_edges"])
+          assert all(r["same_actual_snapped_node_pair"] and
+              r["source_parent_transfer_allowed"] is False and
+              r["host_publication_allowed"] is False and
+              r["physically_distinct_wall_lines_proven"] is False
+              for r in losses)
+          parents={r["source_observation_id"] for r in graph["source_parent_census"]}
+          assert all(set(r["removed_source_observation_ids"])<=parents and
+              set(r["retained_source_observation_ids"])<=parents
+              for r in losses)
+          # This exact original pixel-source occurrence reaches W2 but has no W4 owner.
+          lost_from_g17_flank='source_observation_25f534ef92bfe35696461e862f9ba2c9'
+          assert any(lost_from_g17_flank in r["removed_source_observation_ids"]
+              and r["max_endpoint_displacement_pt"]>0
+              for r in losses)
+          assert graph["host_publication_allowed"] is False
+          assert all(row[k] is False for k in
+              ("host_publication_allowed","opening_count_publication_allowed",
+               "metric_quantity_publication_allowed","physical_equivalence_proven"))
+          assert row["benchmark_accuracy"] is None
+          print({"observed_w3_node_pair_losses":len(losses),
+                 "physical_host_publication_allowed":False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-w3-snapped-pair-source-losses
+          retention-days: 30
+          path: original-w3-rail-losses.json
