@@ -259,9 +259,15 @@ def _matching_floor(
     area_evidence = area_record.area_evidence
     if (
         area_evidence.status is not EvidenceResolutionStatus.CORROBORATED
-        or not _clean(area_evidence.evidence_id)
-        or _clean(area_evidence.evidence_id)
-        not in {_clean(value) for value in floor.evidence_ids}
+        or type(area_evidence.evidence_id) is not str
+        or not area_evidence.evidence_id
+        or area_evidence.evidence_id != area_evidence.evidence_id.strip()
+        or not isinstance(floor.evidence_ids, (tuple, list))
+        or not floor.evidence_ids
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in floor.evidence_ids)
+        or len(set(floor.evidence_ids)) != len(floor.evidence_ids)
+        or area_evidence.evidence_id not in floor.evidence_ids
     ):
         return None
     value = _area_value(area_record)
