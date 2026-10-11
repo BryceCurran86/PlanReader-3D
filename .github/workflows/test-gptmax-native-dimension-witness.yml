@@ -1,0 +1,74 @@
+name: GPT MAX Original Native Dimension Witness Read Only
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_native_dimension_witness.py
+      - tests/test_gptmax_native_dimension_witness.py
+      - docs/engineering/gptmax_native_dimension_witness_probe.md
+      - .github/workflows/test-gptmax-native-dimension-witness.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Fail-closed synthetic native opening and source identity regressions
+        run: |
+          PYTHONPATH=.:tests python -m pytest -q tests/test_gptmax_native_dimension_witness.py tests/test_native_dimension_cap_evidence.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16-native-witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact original PDF native G17 dimension-support proof only
+        run: |
+          PYTHONPATH=. python -u tools/diag_gptmax_native_dimension_witness.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 \
+            --representative-observation-id source_observation_50346acbb28e7a0a9e7311b4b6965f8a \
+            --expected-opening-record-id physical_opening_existence_415d34ddc0c7591b181ddadc11aefe1d \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-native-dimension-witness.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path("original-native-dimension-witness.json").read_text())
+          assert d["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert d["opening_currently_source_corroborated"] is True
+          assert d["opening_source_observation_count"]==6
+          assert len({r["observation_id"] for r in d["opening_source_observations"]})==6
+          assert all(len(r["geometry_pt"])==4 for r in d["opening_source_observations"])
+          assert d["physical_host_proven"] is False
+          assert d["physical_nonexistence_proven"] is False
+          assert d["opening_count_publication_allowed"] is False
+          assert d["metric_quantity_publication_allowed"] is False
+          assert d["benchmark_accuracy"] is None
+          print({"dimension_annotation_candidate_atoms":len(d["native_dimension_cap_opposing_atoms"]),
+                 "physical_host_proven":False,"original_observations":6})
+          PY
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-lot16-native-dimension-witness
+          path: original-native-dimension-witness.json
+          retention-days: 30
