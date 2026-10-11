@@ -17,7 +17,7 @@ Before returning assembled W4 candidates, scan *all* candidate IDs. Leave every 
 - Same centerline/endpoints with independently evidenced source edges and junction ownership produces two unique, order-stable candidate **addresses**.
 - Reversed path, arbitrary edge-list order, rotation/translation, unchanged legitimate collinear rechunking and unrelated content do not rekey unaffected candidates.
 - Duplicated/foreign/missing source ancestry and nonfinite edge coordinates must not create fallback identities.
-- Original source guard: exact SHA, 20k cap, Lot16 23 openings/14 hosts/9 frames and Maryborough 180/3/0 with strict receipt retention, Python 3.13 and 3.14 suites, provider isolation and frozen V2 integrity.
+- Original source guard: exact SHA, 20k cap, an **exact PR-base vs PR-head positive-opening universe comparison** (native source-role opposition can legitimately change the baseline across merges), with the independently established Lot16 14 hosts / 9 frames and Maryborough 3 hosts / 0 frames held fixed, and strict original opening/host/frame receipt retention, Python 3.13 and 3.14 suites, provider isolation and frozen V2 integrity.
 - Real positive diagnostics and synthetic geometry are not permission to merge if the source host/frame identities change.
 
 ## Unchanged
@@ -36,3 +36,9 @@ the typed collision for corruption and independently test misleading generic
 errors from both call sites. Preserve normal return objects and original source
 receipts. This changes failure handling only, never physical equivalence,
 geometry, quantities, the 20k cap or frozen truth.
+
+## Corrected source workflow gate — 2026-10-11
+
+The original W4-source CI used fixed historical existence-hypothesis counts (Lot16 23 and Maryborough 180). The live original Lot16 SHA-verified base and candidate both produced **22** after an independent merged native dimension annotation opposition; they retained all 14 authenticated hosts and nine frames, with zero changed/lost source proofs. The earlier fixed 23 assertion therefore failed even though the W4 integrity retention comparator passed. This is a stale test expectation, not new host proof.
+
+The workflow now independently re-extracts the exact original PR base and exact PR head, requires an **equal complete positive-opening hypothesis count** across them, preserves its host/frame counts (Lot16 14/9, Maryborough 3/0), exact original SHA and 20,000 cap, and still runs strict authenticated-host/frame retention and the full per-scope W4 collision ownership census. No fixed number from an older native source classifier enters the W4 test. Do not merge unless the corrected exact-head original source CI and all production regressions pass. No physical identity, source line, host, benchmark, score, wall-equivalence or quantity is promoted by this test fix.
