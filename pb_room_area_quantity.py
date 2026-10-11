@@ -39,19 +39,48 @@ ROOM_AREA_FAMILY = "room_area"
 ROOM_AREA_FORMULA_VERSION = "1.1.0"
 
 
+def _original_pdf_ring(points: object) -> tuple[tuple[float, float], ...] | None:
+    """Do not turn bool, string, NaN or overflowing PDF-point data into metres."""
+    if not isinstance(points, (tuple, list)):
+        return None
+    output = []
+    for point in points:
+        if (
+            not isinstance(point, (tuple, list)) or len(point) != 2
+            or any(type(value) not in (int, float) for value in point)
+        ):
+            return None
+        try:
+            x, y = float(point[0]), float(point[1])
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(x) or not math.isfinite(y):
+            return None
+        output.append((x, y))
+    return tuple(output)
+
+
 def _polygon_area(points: Sequence[tuple[float, float]]) -> float:
-    if len(points) < 3:
+    original = _original_pdf_ring(points)
+    if original is None or len(original) < 3:
         return 0.0
-    total = 0.0
-    for i, (x1, y1) in enumerate(points):
-        x2, y2 = points[(i + 1) % len(points)]
-        total += float(x1) * float(y2) - float(x2) * float(y1)
-    return abs(total) / 2.0
+    try:
+        total = math.fsum(
+            original[i][0] * original[(i + 1) % len(original)][1]
+            - original[(i + 1) % len(original)][0] * original[i][1]
+            for i in range(len(original))
+        )
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return abs(total) / 2.0 if math.isfinite(total) else 0.0
 
 
 def _canonical_ring(points: Sequence[tuple[float, float]]) -> tuple[tuple[float, float], ...]:
     """Cyclic/reversal-invariant signature used only for duplicate protection."""
-    pts = tuple((round(float(x), 8), round(float(y), 8)) for x, y in points)
+    original = _original_pdf_ring(points)
+    if original is None:
+        return ()
+    pts = tuple((round(x, 8), round(y, 8)) for x, y in original)
     if len(pts) > 1 and pts[0] == pts[-1]:
         pts = pts[:-1]
     if not pts:
