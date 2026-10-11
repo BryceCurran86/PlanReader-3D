@@ -5,6 +5,7 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus as S
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateScopeResult
+from pb_source_room_label_authority import SourceRoomLabelScopeResult
 from pb_source_room_face_authority import (
     SourceRoomFaceAbstention,
     SourceRoomFaceRecord,
@@ -12,6 +13,7 @@ from pb_source_room_face_authority import (
 )
 from tools.diag_gptmax_maryborough_room_first_owner_gate import (
     source_room_owner_first_gate,
+    source_room_label_first_gate,
 )
 
 SHA = "a" * 64
@@ -138,3 +140,55 @@ def test_foreign_or_conflicted_source_receipts_fail_closed(damage):
         wall = replace(wall, reason_codes=("",))
     with pytest.raises((ValueError, TypeError)):
         source_room_owner_first_gate(wall, room, expected_source_sha=SHA)
+
+
+def _label_scope():
+    return SourceRoomLabelScopeResult(
+        status=S.ABSTAINED, reason_codes=("source_room_label_unavailable",),
+        records=(), split_face_candidates=(), **KEY,
+    )
+
+
+def test_no_authenticated_labels_does_not_elect_physical_room_identity():
+    _, room = _scopes()
+    result = source_room_label_first_gate(
+        room, _label_scope(), expected_source_sha=SHA,
+    )
+    assert result["direct_source_label_count"] == 0
+    assert result["split_source_label_candidate_count"] == 0
+    assert result["original_label_reason_codes"] == ["source_room_label_unavailable"]
+    assert result["firm_room_area_publication_allowed"] is False
+    assert result["source_room_geometry_inferred_from_labels"] is False
+    assert result["split_label_room_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("damage", [
+    "foreign_revision", "foreign_snapshot", "foreign_page", "foreign_sha",
+    "invalid_expected_sha", "invalid_reason", "forged_record",
+    "forged_split_candidate", "duplicate_physical_face",
+])
+def test_label_source_scope_cannot_launder_foreign_room_or_text(damage):
+    _, room = _scopes()
+    labels = _label_scope()
+    if damage == "foreign_revision":
+        labels = replace(labels, revision_id="foreign")
+    elif damage == "foreign_snapshot":
+        labels = replace(labels, snapshot_id="foreign")
+    elif damage == "foreign_page":
+        labels = replace(labels, page_id="11")
+    elif damage == "foreign_sha":
+        labels = replace(labels, source_sha256="b" * 64)
+    elif damage == "invalid_expected_sha":
+        with pytest.raises(ValueError):
+            source_room_label_first_gate(room, labels, expected_source_sha="not-sha")
+        return
+    elif damage == "invalid_reason":
+        labels = replace(labels, reason_codes=("",))
+    elif damage == "forged_record":
+        labels = replace(labels, records=(object(),))
+    elif damage == "forged_split_candidate":
+        labels = replace(labels, split_face_candidates=(object(),))
+    elif damage == "duplicate_physical_face":
+        room = replace(room, records=(_face(), _face()))
+    with pytest.raises((TypeError, ValueError)):
+        source_room_label_first_gate(room, labels, expected_source_sha=SHA)
