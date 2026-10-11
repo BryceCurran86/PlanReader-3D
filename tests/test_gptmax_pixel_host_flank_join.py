@@ -7,7 +7,8 @@ import pytest
 
 from tools.diag_gptmax_pixel_host_flank_join import join_flank_pixel_evidence
 
-SOURCE = "a" * 64
+PDF = b"%PDF-1.4\n% test-only bytes; no PDF parsing is assumed in the join\n"
+SOURCE = sha256(PDF).hexdigest()
 FLAGS = dict(host_publication_allowed=False, opening_count_publication_allowed=False,
              metric_quantity_publication_allowed=False, benchmark_accuracy=None)
 
@@ -70,9 +71,9 @@ def fixture():
     return raw, required, pixel
 
 
-def join(raw, required, pixel, *, pdf_sha=SOURCE):
+def join(raw, required, pixel, *, pdf_bytes=PDF):
     return join_flank_pixel_evidence(raw, required, pixel, expected_source_sha=SOURCE,
-                                     actual_pdf_sha=pdf_sha)
+                                     original_pdf_bytes=pdf_bytes)
 
 
 def test_both_visible_flank_pixel_candidates_remain_unpublished():
@@ -126,13 +127,13 @@ def test_nearby_but_not_endpoint_anchored_pixel_is_not_an_opening_host():
 ])
 def test_corrupt_source_or_ancestry_fails_closed(mutation):
     raw, required, pixel = fixture()
-    pdf_sha = SOURCE
+    pdf_bytes = PDF
     if mutation == "foreign_source":
         pixel["source_sha256"] = "b" * 64
     elif mutation == "foreign_page":
         pixel["page_id"] = "4"
     elif mutation == "source_pdf_changed":
-        pdf_sha = "b" * 64
+        pdf_bytes = b"altered source"
     elif mutation == "forged_flank_input":
         required["input_report_sha256"] = "b" * 64
     elif mutation == "pixel_claims_host":
@@ -181,7 +182,7 @@ def test_corrupt_source_or_ancestry_fails_closed(mutation):
     elif mutation == "partial_reported_flanks":
         required["opening_rows"][0]["flanks"].pop()
     with pytest.raises((ValueError, TypeError, KeyError)):
-        join(raw, required, pixel, pdf_sha=pdf_sha)
+        join(raw, required, pixel, pdf_bytes=pdf_bytes)
 
 
 def test_empty_original_flanks_stay_unavailable_without_fabrication():
@@ -192,3 +193,10 @@ def test_empty_original_flanks_stay_unavailable_without_fabrication():
     assert result["opening_rows"][0]["flank_geometry_reported"] is False
     assert result["opening_rows"][0]["flanks"] == []
     assert result["host_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("invalid_pdf", [None, "", bytearray(b"fake"), {"sha256": SOURCE}])
+def test_caller_cannot_forge_original_pdf_byte_hash(invalid_pdf):
+    raw, required, pixel = fixture()
+    with pytest.raises(TypeError, match="immutable bytes"):
+        join(raw, required, pixel, pdf_bytes=invalid_pdf)
