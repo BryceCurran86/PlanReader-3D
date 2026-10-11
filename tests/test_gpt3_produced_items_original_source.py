@@ -34,6 +34,12 @@ def test_original_source_verified_items_preserve_exact_quantity_and_object(tmp_p
     assert len(items)==1
     row=items[0]
     assert row["quantity_id"]==q.quantity_id
+    assert row["project_id"]=="project-a"
+    assert row["source_page"]==t.source_page
+    assert row["viewport_id"]==t.viewport_id
+    assert row["status"]=="firm"
+    assert row["authority"]==q.authority
+    assert row["confidence"]==q.confidence
     assert row["value"]==10.0 and row["unit"]=="m2"
     assert row["object_refs"]==["room-1"]
     assert row["source_sha256"]==sha
