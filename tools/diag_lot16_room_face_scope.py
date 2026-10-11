@@ -1,7 +1,9 @@
 """Diagnostic-only Lot16 room-face source geometry trace (no authority changes).
 
-Run: PYTHONPATH=. python tools/diag_lot16_room_face_scope.py --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" --page-index 2 --output lot16-room-face-scope.json
+Run: PYTHONPATH=. python tools/diag_lot16_room_face_scope.py --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" --page-index 2 --diagnostic-label WC --diagnostic-label LINEN --diagnostic-label BROOM --output lot16-room-face-scope.json
 The PDF path must be an actual source file; no benchmark gold is loaded.
+Exact native word occurrence coordinates are diagnostic candidates only; they
+must not be counted as source-authenticated room faces or metric quantities.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import pb_source_room_label_authority as label_authority
 import pb_same_view_room_area_authority as same_view_authority
 from pb_geometry_takeoff_model import MeasurementAuthorityType
 from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+from pb_live_opening_area_quantity_publication import _opening_quantity
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
 
@@ -27,6 +30,11 @@ def _has_firm_metric_floor_receipt(floor) -> bool:
     LiveCanonicalFloorSurfaceObject has no metric_area_complete property.
     A geometry-complete but unscaled floor is not a metric area.
     """
+    # A canonical floor can carry printable PDF-point area with no metric
+    # authority. Never treat bool/string/replayed numeric source fields as a
+    # genuine verified m² receipt just because float() could parse them.
+    if type(getattr(floor, "metric_area_m2", None)) not in (int, float):
+        return False
     try:
         area = float(floor.metric_area_m2)
     except (TypeError, ValueError, OverflowError, AttributeError):
@@ -45,7 +53,9 @@ def _has_firm_metric_floor_receipt(floor) -> bool:
 
 
 
-def _floor_quantity_first_failure(floor, room, area_quantity_ids: set[str]) -> str:
+def _floor_quantity_first_failure(
+    floor, room, area_quantity_ids: set[str], *, duplicate_room_owner: bool = False
+) -> str:
     """Identify the earliest unresolved floor-to-measurement stage.
 
     A PDF polygon area is never a physical m² measurement. A correctly
@@ -55,6 +65,8 @@ def _floor_quantity_first_failure(floor, room, area_quantity_ids: set[str]) -> s
         return "physical_floor_identity_unresolved"
     if not floor.source_room_face_record_id or not floor.evidence_ids:
         return "source_room_face_evidence_unavailable"
+    if duplicate_room_owner:
+        return "duplicate_canonical_room_source_owner_conflict"
     if room is None:
         return "canonical_room_owner_unavailable"
     # A separately source-authenticated physical scale can close metric area
@@ -78,6 +90,9 @@ def _floor_quantity_diagnostic(claim) -> dict:
         str(room.canonical_room_id): room
         for room in claim.canonical_rooms
     }
+    # Do not let a dict's last-writer-wins normalization conceal duplicate
+    # authenticated canonical rooms in a diagnostic claiming a floor is ready.
+    room_owner_counts = Counter(str(room.canonical_room_id) for room in claim.canonical_rooms)
     # The raw room-area source universe is NOT proof of a publishable floor
     # quantity. Reuse the exact production floor publisher, which validates
     # physical face, canonical/physical floor uniqueness, area, units, source
@@ -92,6 +107,21 @@ def _floor_quantity_diagnostic(claim) -> dict:
         for quantity in approved_floor_quantities
         if quantity.metadata.get("upstream_room_area_quantity_id")
     }
+    # Report asserted source-finish evidence separately from source-trace-
+    # validated finish evidence. Raw claims are not sealed customer quantities.
+    # This diagnostic executes no side-effecting export or benchmark scoring.
+    from pb_live_floor_finish_area_source_closed_export import (
+        build_live_floor_finish_area_source_traces,
+    )
+    from pb_source_closed_run_export import SourceClosedRunExportError
+    try:
+        finish_source_traces = build_live_floor_finish_area_source_traces(
+            claim, workspace_id=1, project_id="gpt1-lot16-source-diagnostic",
+        )
+        finish_source_trace_failure = None
+    except (TypeError, ValueError, SourceClosedRunExportError) as error:
+        finish_source_traces = {}
+        finish_source_trace_failure = str(error)
     finishes: dict[str, list[str]] = {}
     for quantity in claim.floor_finish_quantity_evidence:
         for entity_id in quantity.input_entity_ids:
@@ -99,7 +129,8 @@ def _floor_quantity_diagnostic(claim) -> dict:
     rows = []
     for floor in claim.canonical_floors:
         reason = _floor_quantity_first_failure(
-            floor, rooms_by_id.get(str(floor.room_entity_id)), areas
+            floor, rooms_by_id.get(str(floor.room_entity_id)), areas,
+            duplicate_room_owner=room_owner_counts[str(floor.room_entity_id)] > 1,
         )
         rows.append({
             "canonical_floor_id": floor.canonical_floor_id,
@@ -115,6 +146,10 @@ def _floor_quantity_diagnostic(claim) -> dict:
             "published_finish_quantity_ids": sorted(
                 finishes.get(str(floor.canonical_floor_id), [])
             ),
+            "source_trace_validated_finish_quantity_ids": sorted(
+                qid for qid in finishes.get(str(floor.canonical_floor_id), [])
+                if qid in finish_source_traces
+            ),
             "first_missing_prerequisite": reason,
         })
     return {
@@ -125,6 +160,8 @@ def _floor_quantity_diagnostic(claim) -> dict:
         "area_quantity_count": len(claim.room_area_quantity_evidence),
         "source_closed_floor_quantity_count": len(approved_floor_quantities),
         "finish_quantity_count": len(claim.floor_finish_quantity_evidence),
+        "source_trace_validated_finish_quantity_count": len(finish_source_traces),
+        "finish_source_trace_failure": finish_source_trace_failure,
         "per_floor": rows,
     }
 
@@ -139,16 +176,38 @@ def _wall_metric_first_failure(wall) -> str:
         return "physical_wall_identity_unresolved"
     if not wall.evidence_ids or not wall.plan_members:
         return "canonical_wall_source_receipts_unavailable"
-    if wall.length_m is None:
-        return "metric_wall_length_unavailable"
-    if wall.height_m is None:
-        return "authenticated_wall_height_unavailable"
-    if wall.gross_area_m2 is None or not wall.gross_polygon_wkb_hex:
+    # The ledger must not call a wall metric-ready from a nonempty source
+    # field when its actual value is Boolean, nonfinite or physically invalid.
+    for attr, reason, strictly_positive in (
+        ("length_m", "metric_wall_length_unavailable", True),
+        ("height_m", "authenticated_wall_height_unavailable", True),
+        ("gross_area_m2", "gross_wall_area_unavailable", True),
+    ):
+        measurement = getattr(wall, attr, None)
+        if type(measurement) not in (int, float):
+            return reason
+        try:
+            real_measurement = float(measurement)
+        except (OverflowError, TypeError, ValueError):
+            return reason
+        if (not math.isfinite(real_measurement) or
+                (real_measurement <= 0.0 if strictly_positive else real_measurement < 0.0)):
+            return reason
+    if not wall.gross_polygon_wkb_hex:
         return "gross_wall_area_unavailable"
     if not wall.role or not wall.whole_wall_role_record_id:
         return "authenticated_whole_wall_role_unavailable"
-    if wall.net_area_m2 is None or not wall.net_polygon_wkb_hex:
+    net_value = getattr(wall, "net_area_m2", None)
+    if type(net_value) not in (int, float):
         return "net_wall_area_or_deduction_unavailable"
+    try:
+        net_number = float(net_value)
+    except (OverflowError, TypeError, ValueError):
+        return "net_wall_area_or_deduction_unavailable"
+    if not math.isfinite(net_number) or net_number < 0.0 or not wall.net_polygon_wkb_hex:
+        return "net_wall_area_or_deduction_unavailable"
+    if net_value > wall.gross_area_m2 + 1e-6:
+        return "net_wall_greater_than_authenticated_gross_area"
     return "canonical_net_wall_area_available"
 
 
@@ -218,15 +277,23 @@ def _opening_quantity_first_failure(opening) -> str:
     }
     if basis not in bases:
         return "authenticated_opening_area_basis_unavailable"
+    if type(opening.area_m2) not in (int, float):
+        return "metric_opening_area_unavailable"
     try:
         area = float(opening.area_m2)
     except (TypeError, ValueError, OverflowError):
         return "metric_opening_area_unavailable"
     if not math.isfinite(area) or area <= 0.0:
         return "metric_opening_area_unavailable"
-    evidence = {str(value).strip() for value in opening.evidence_ids if str(value).strip()}
-    if not evidence:
+    original_receipts = opening.evidence_ids
+    if (
+        not isinstance(original_receipts, (tuple, list))
+        or not original_receipts
+        or any(type(value) is not str or not value.strip() for value in original_receipts)
+        or len(set(original_receipts)) != len(original_receipts)
+    ):
         return "opening_source_evidence_unavailable"
+    evidence = set(original_receipts)
     authority_record_id = str(getattr(opening, bases[basis]) or "").strip()
     if not authority_record_id or authority_record_id not in evidence:
         return "opening_area_measurement_source_receipt_unavailable"
@@ -235,6 +302,11 @@ def _opening_quantity_first_failure(opening) -> str:
         and str(opening.schedule_row_dimension_basis or "").strip().lower() != "frame"
     ):
         return "authenticated_frame_schedule_basis_unavailable"
+    # A diagnostic heuristic is never authoritative over the actual
+    # canonical→quantity publisher. Report the exact first failed publication
+    # gate rather than falsely declaring an opening ready to improve recall.
+    if _opening_quantity(opening) is None:
+        return "production_opening_area_quantity_gate_unresolved"
     return "opening_area_quantity_prerequisites_resolved"
 
 
@@ -246,6 +318,32 @@ def _opening_quantity_diagnostic(claim) -> dict:
     ledger = []
     for opening in claim.canonical_openings:
         published = published_by_opening.get(str(opening.canonical_opening_id), ())
+        readiness = _opening_quantity_first_failure(opening)
+        authentic = _opening_quantity(opening)
+        signed_publication_matches = tuple(
+            candidate for candidate in published
+            if authentic is not None
+            and candidate.quantity_id == authentic.quantity_id
+            and type(candidate.value) in (int, float)
+            and candidate.value == authentic.value
+            and candidate.authority == authentic.authority
+            and candidate.unit == authentic.unit
+            and candidate.status == authentic.status
+            and candidate.semantic_key == authentic.semantic_key
+            and candidate.input_entity_ids == authentic.input_entity_ids
+            and candidate.evidence_ids == authentic.evidence_ids
+            and candidate.formula == authentic.formula
+            and candidate.formula_version == authentic.formula_version
+            and candidate.confidence == authentic.confidence
+            and candidate.abstained == authentic.abstained
+            and candidate.blocking_reasons == authentic.blocking_reasons
+            and candidate.reason_codes == authentic.reason_codes
+            and candidate.metadata == authentic.metadata
+        )
+        if readiness == "opening_area_quantity_prerequisites_resolved" and published and (
+            len(signed_publication_matches) != 1 or len(published) != 1
+        ):
+            readiness = "opening_area_published_claim_drift"
         ledger.append({
             "canonical_opening_id": opening.canonical_opening_id,
             "physical_opening_id": opening.physical_opening_id,
@@ -261,12 +359,22 @@ def _opening_quantity_diagnostic(claim) -> dict:
             "area_m2": opening.area_m2,
             "source_evidence_count": len(opening.evidence_ids),
             "schedule_explicit_count": bool(opening.schedule_count_explicit),
-            "first_missing_prerequisite": _opening_quantity_first_failure(opening),
+            "first_missing_prerequisite": readiness,
             "published_area_quantity_ids": [quantity.quantity_id for quantity in published],
+            "production_matched_area_quantity_ids": [
+                quantity.quantity_id for quantity in signed_publication_matches
+            ],
         })
     return {
         "canonical_opening_count": len(claim.canonical_openings),
         "published_area_quantity_count": len(claim.opening_quantity_evidence),
+        "production_matched_area_quantity_count": sum(
+            len(row["production_matched_area_quantity_ids"]) for row in ledger
+        ),
+        "published_area_claim_drift_count": sum(
+            row["first_missing_prerequisite"] == "opening_area_published_claim_drift"
+            for row in ledger
+        ),
         "published_explicit_count_quantity_count": len(
             claim.opening_count_quantity_evidence
         ),
@@ -329,8 +437,150 @@ def _opening_sealing_diagnostic(claim) -> dict:
     return report
 
 
-def inspect_source(pdf: Path, page_index: int) -> dict:
+def _native_word_label_census(
+    pdf_bytes: bytes,
+    page_index: int,
+    *,
+    labels: tuple[str, ...] = (),
+) -> dict:
+    """Read-only original PDF word inventory; never grants room/metric authority.
+
+    This contrasts native word existence with later producer-owned label/room
+    face proof. Every distinct original occurrence retains its own bbox and
+    source-native block/line identity; equal label text is never one room ID.
+    """
+    if not labels:
+        return {"diagnostic_only": True, "requested_labels": [], "occurrences": [],
+                "count_by_label": {}}
+    import fitz
+
+    allowed = {value.casefold() for value in labels
+               if type(value) is str and value and value == value.strip()}
+    if not allowed:
+        return {"diagnostic_only": True, "requested_labels": [], "occurrences": [],
+                "count_by_label": {}}
+    occurrences = []
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        if page_index >= len(doc) or page_index < 0:
+            raise ValueError("native label census page index out of source bounds")
+        source_page = doc[page_index]
+        # A drawing can carry true source text above rasterized wall geometry.
+        # Tile placement is useful for first-failure attribution, but NEVER
+        # authorizes a wall, closed room face or metric quantity.
+        tile_bounds = set()
+        for image in source_page.get_images(full=True):
+            for rect in source_page.get_image_rects(image[0]):
+                tile_bounds.add(tuple(round(float(v), 6) for v in (rect.x0, rect.y0, rect.x1, rect.y1)))
+        tile_bounds = tuple(sorted(tile_bounds))
+        source_words = tuple(word for word in source_page.get_text("words") if len(word) >= 8)
+        native_line_words: dict[tuple[int, int], list[tuple[int, str]]] = {}
+        for word in source_words:
+            native_line_words.setdefault((int(word[5]), int(word[6])), []).append(
+                (int(word[7]), str(word[4]))
+            )
+        for word in source_words:
+            if str(word[4]).casefold() not in allowed:
+                continue
+            native_line_key = (int(word[5]), int(word[6]))
+            native_line_text = " ".join(
+                item[1] for item in sorted(native_line_words[native_line_key])
+            )
+            word_bbox = tuple(float(v) for v in word[:4])
+            tile_matches = tuple(
+                list(tile) for tile in tile_bounds
+                if not (
+                    tile[2] <= word_bbox[0] or tile[0] >= word_bbox[2]
+                    or tile[3] <= word_bbox[1] or tile[1] >= word_bbox[3]
+                )
+            )
+            occurrences.append({
+                "original_raster_tile_overlaps_not_geometry": list(tile_matches),
+                "original_raster_tile_overlap_count": len(tile_matches),
+                "raw_native_text": str(word[4]),
+                "same_original_native_line_text_not_authority": native_line_text,
+                "source_page_index_zero_based": page_index,
+                "bbox_pt": [float(value) for value in word[:4]],
+                "block_no": int(word[5]),
+                "line_no": int(word[6]),
+                "word_no": int(word[7]),
+                # Untrusted display-only native words are never substitutes
+                # for PdfTextIntegrity or source-room face ownership.
+                "room_face_or_measurement_authority_granted": False,
+            })
+    counts = Counter(row["raw_native_text"].casefold() for row in occurrences)
+    return {
+        "diagnostic_only": True,
+        "requested_labels": sorted(allowed),
+        "original_source_image_tile_placement_count": len(tile_bounds),
+        "occurrences": occurrences,
+        "count_by_label": dict(sorted(counts.items())),
+    }
+
+
+def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
+    """Diagnostic bbox intersections only; never prove room face ownership.
+
+    Original native label text and independently unvalidated planarizer walks
+    remain two distinct candidate streams. In particular, a label inside a
+    face's BOUNDING RECTANGLE does not prove point-in-face or authenticated
+    wall continuity. This helper only localizes the earliest failed gate.
+    """
+    # For crowded architectural sheets prefer label-adjacent candidate faces,
+    # not arbitrary first-N planarizer ordering. Still strictly bounded.
+    matching_rows = []
+    matching_count = 0
+    sample_unmatched = []
+    labels = tuple(native_census.get("occurrences", ()) or ())
+    count = 0
+    for candidate in faces:
+        polygon = face_authority._canonical_polygon(candidate)
+        if not polygon:
+            continue
+        count += 1
+        # Every candidate contributes to total count. Candidate geometry is
+        # not a source-room face, even when text happens to be inside its bbox.
+        xs, ys = (point[0] for point in polygon), (point[1] for point in polygon)
+        x_coordinates = tuple(xs)
+        y_coordinates = tuple(ys)
+        bbox = (min(x_coordinates), min(y_coordinates), max(x_coordinates), max(y_coordinates))
+        hits = []
+        for index, label in enumerate(labels):
+            label_bbox = label.get("bbox_pt", ())
+            if len(label_bbox) != 4:
+                continue
+            cx = (label_bbox[0] + label_bbox[2]) * 0.5
+            cy = (label_bbox[1] + label_bbox[3]) * 0.5
+            if bbox[0] <= cx <= bbox[2] and bbox[1] <= cy <= bbox[3]:
+                hits.append(index)
+        row = {
+            "raw_planar_candidate_bbox_pt": list(bbox),
+            "raw_planar_candidate_area_pt2": face_authority._polygon_area(polygon),
+            "native_label_occurrence_indices_inside_bbox_only": hits,
+            "room_face_or_measurement_authority_granted": False,
+        }
+        if hits:
+            matching_count += 1
+            if len(matching_rows) < 150:
+                matching_rows.append(row)
+        elif len(sample_unmatched) < 20:
+            sample_unmatched.append(row)
+    rows = matching_rows[:150]
+    rows.extend(sample_unmatched[:max(0, 150 - len(rows))])
+    return {
+        "diagnostic_only": True,
+        "raw_candidate_count": count,
+        "bbox_candidate_label_intersection_count": matching_count,
+        "bbox_rows": rows,
+        "truncated": count > len(rows),
+        "bbox_overlap_is_not_physical_ownership": True,
+    }
+
+
+def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, ...] = ()) -> dict:
     payload = pdf.read_bytes()
+    original_native_label_census = _native_word_label_census(
+        payload, page_index, labels=diagnostic_labels,
+    )
     observations = []
     original_derive = face_authority._derive_scope_outcome
     original_extract = face_authority.extract_planar_faces
@@ -405,6 +655,11 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
             (round(face_authority._polygon_area(face_authority._canonical_polygon(face)), 6)
              for face in faces if face_authority._canonical_polygon(face))
         )
+        observations[-1]["raw_face_label_bbox_candidate_ledger"] = (
+            _raw_face_bbox_label_candidate_ledger(
+                faces, original_native_label_census,
+            )
+        )
         observations[-1]["planar_faces"] = {
             "count": len(faces),
             "canonical_count": len(areas),
@@ -457,6 +712,7 @@ def inspect_source(pdf: Path, page_index: int) -> dict:
         return {
             "diagnostic_only": True, "pdf_sha256": hashlib.sha256(payload).hexdigest(),
             "source_page_index_zero_based": page_index,
+            "native_word_label_census_not_authority": original_native_label_census,
             "scope_outcomes": observations,
             "claim_type": type(claim).__name__,
             "floor_quantity_diagnostic": _floor_quantity_diagnostic(claim),
@@ -526,13 +782,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pdf", required=True, type=Path)
     parser.add_argument("--page-index", type=int, default=2)
+    parser.add_argument("--diagnostic-label", action="append", default=[],
+                        help="exact source word to locate without granting room identity")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     if args.page_index < 0:
         parser.error("--page-index must be >= 0")
     if not args.pdf.is_file():
         parser.error(f"source PDF unavailable: {args.pdf}")
-    report = inspect_source(args.pdf, args.page_index)
+    report = inspect_source(
+        args.pdf, args.page_index,
+        diagnostic_labels=tuple(args.diagnostic_label),
+    )
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
         "pdf_sha256": report["pdf_sha256"],
