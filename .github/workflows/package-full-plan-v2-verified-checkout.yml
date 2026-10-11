@@ -1,0 +1,35 @@
+name: Full Plan V2 Public Checkout Transfer
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/package-full-plan-v2-verified-checkout.yml"
+  workflow_dispatch:
+jobs:
+  snapshot-public-repository-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked checkout without Git credentials or runtime secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output="$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" HEAD
+          git rev-parse HEAD > "$RUNNER_TEMP/checkout-head-sha.txt"
+          sha256sum "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" > "$RUNNER_TEMP/archive-sha256.txt"
+          tar -tzf "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" | grep -F "benchmarks/frozen_holdout/full_plan_v2/manifest.json"
+          tar -tzf "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz" | grep -F "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
+          test -s "$RUNNER_TEMP/planreader-v2-public-checkout.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-plan-v2-public-checkout-only
+          path: |
+            ${{ runner.temp }}/planreader-v2-public-checkout.tar.gz
+            ${{ runner.temp }}/checkout-head-sha.txt
+            ${{ runner.temp }}/archive-sha256.txt
+          retention-days: 3
+          if-no-files-found: error
