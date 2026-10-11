@@ -37,8 +37,11 @@ def fixture():
     )
     q = Obj(
         quantity_id="quantity-area-1", status="FIRM", family="ROOM_AREA",
-        input_entity_ids=("canonical-floor-1",),
-        evidence_ids=("original-dimension-receipt",),
+        input_entity_ids=("original-source-face-id-1",),
+        semantic_key="room_area:original-source-face-id-1",
+        evidence_ids=("face-receipt-1","original-dimension-receipt"),
+        metadata={"source_sha256":SHA,"revision_id":room.revision_id,
+                  "viewport_id":room.viewport_id},
         unit="m2", value=1.5, abstained=False,
     )
     return Obj(canonical_rooms=(room,), canonical_floors=(floor,),
@@ -83,6 +86,10 @@ def test_complete_unique_source_chain_is_only_a_handoff_and_not_finish():
     ("duplicate_quantity_id","FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"),
     ("quantity_input_missing_floor","FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"),
     ("nonfinite_quantity","FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"),
+    ("quantity_foreign_sha","FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"),
+    ("quantity_foreign_viewport","FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"),
+    ("quantity_wrong_face_receipt","FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"),
+    ("quantity_semantic_owner_mismatch","FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"),
     ("wrong_floor_quantity","COMMERCIAL_FLOOR_AREA_AUTHORITY_UNAVAILABLE"),
     ("untrusted_floor_measurement","COMMERCIAL_FLOOR_AREA_AUTHORITY_UNAVAILABLE"),
     ("unpublished_commercial","COMMERCIAL_FLOOR_AREA_AUTHORITY_UNAVAILABLE"),
@@ -115,6 +122,10 @@ def test_eight_authority_stages_fail_closed(damage,first_gate):
     elif damage=="duplicate_quantity_id":c.room_area_quantity_evidence=(q,deepcopy(q))
     elif damage=="quantity_input_missing_floor":q.input_entity_ids=("unrelated-object",)
     elif damage=="nonfinite_quantity":q.value=float("nan")
+    elif damage=="quantity_foreign_sha":q.metadata["source_sha256"]="b"*64
+    elif damage=="quantity_foreign_viewport":q.metadata["viewport_id"]="other"
+    elif damage=="quantity_wrong_face_receipt":q.evidence_ids=("wrong-face","original-dimension-receipt")
+    elif damage=="quantity_semantic_owner_mismatch":q.semantic_key="room_area:foreign-face"
     elif damage=="wrong_floor_quantity":f.metric_area_quantity_id="another-quantity"
     elif damage=="untrusted_floor_measurement":f.metric_geometry_complete=False
     elif damage=="unpublished_commercial":f.commercial_quantity_authority=False
