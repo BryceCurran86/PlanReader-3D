@@ -22,8 +22,15 @@ from tools.diag_gptmax_raster_host_source_membership import (
 )
 
 
-def _rows_by_id(rows, key, label):
-    if not isinstance(rows, list) or len(rows) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
+# A source-primitive limit is not a bound on derivatives: W2 may split a
+# source edge into many physical graph fragments. The original Lot16 producer
+# legitimately reports 28,968 snap-collapsed fragments from 6,035 source rows.
+# Bound diagnostic-only intermediates separately; the source cap stays 20,000.
+MAX_DERIVED_GRAPH_AUDIT_ROWS = 16 * MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
+
+
+def _rows_by_id(rows, key, label, *, max_rows=MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS):
+    if not isinstance(rows, list) or len(rows) > max_rows:
         raise ValueError(f"invalid bounded {label}")
     result = {}
     for row in rows:
@@ -126,9 +133,11 @@ def _ancestry(report, pixel_ids):
             or graph.get("host_publication_allowed") is not False
             or graph.get("physical_equivalence_proven") is not False):
         raise ValueError("unavailable nonpublishing experimental W2/W4 inventory")
-    edges = _rows_by_id(graph.get("all_w2_edges"), "edge_id", "experimental W2 edge")
+    edges = _rows_by_id(graph.get("all_w2_edges"), "edge_id", "experimental W2 edge",
+                        max_rows=MAX_DERIVED_GRAPH_AUDIT_ROWS)
     collapsed = _rows_by_id(graph.get("all_snap_collapsed_fragments"), "fragment_id",
-                            "experimental W2 collapsed fragment")
+                            "experimental W2 collapsed fragment",
+                            max_rows=MAX_DERIVED_GRAPH_AUDIT_ROWS)
     census = _rows_by_id(graph.get("source_parent_census"), "source_observation_id",
                          "experimental source parent")
     expected_count = graph.get("input_source_count")
