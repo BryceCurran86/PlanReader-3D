@@ -59,3 +59,42 @@ def test_source_out_of_bounds_is_diagnostic_error_not_claimed_empty_area():
         _native_word_label_census(
             _two_linen_original_pdf(), 999, labels=("WC",),
         )
+
+
+
+def test_raw_planar_bbox_overlap_is_diagnostic_not_source_room_face_ownership():
+    from tools.diag_lot16_room_face_scope import _raw_face_bbox_label_candidate_ledger
+
+    # The point (80,80) is OUTSIDE the triangle even though inside its bbox.
+    # Hence bbox-only matching can never grant physical room/metric authority.
+    faces = (((0., 0.), (100., 0.), (0., 100.)),)
+    words = {"occurrences": [
+        {"raw_native_text": "WC", "bbox_pt": [79., 79., 81., 81.]},
+    ]}
+    result = _raw_face_bbox_label_candidate_ledger(faces, words)
+    assert result["raw_candidate_count"] == 1
+    assert result["bbox_rows"][0]["native_label_occurrence_indices_inside_bbox_only"] == [0]
+    assert result["bbox_rows"][0]["room_face_or_measurement_authority_granted"] is False
+    assert result["bbox_overlap_is_not_physical_ownership"] is True
+
+
+def test_two_raw_candidate_bboxes_preserve_two_distinct_linen_word_locations():
+    from tools.diag_lot16_room_face_scope import _raw_face_bbox_label_candidate_ledger
+
+    faces = (
+        ((0., 0.), (20., 0.), (20., 20.), (0., 20.)),
+        ((25., 0.), (45., 0.), (45., 20.), (25., 20.)),
+    )
+    labels = {"occurrences": [
+        {"raw_native_text": "LINEN", "bbox_pt": [8., 8., 9., 9.]},
+        {"raw_native_text": "LINEN", "bbox_pt": [35., 8., 36., 9.]},
+    ]}
+    result = _raw_face_bbox_label_candidate_ledger(faces, labels)
+    assert result["raw_candidate_count"] == 2
+    assert result["bbox_rows"][0]["native_label_occurrence_indices_inside_bbox_only"] == [0]
+    assert result["bbox_rows"][1]["native_label_occurrence_indices_inside_bbox_only"] == [1]
+    assert not result["truncated"]
+    assert all(
+        row["room_face_or_measurement_authority_granted"] is False
+        for row in result["bbox_rows"]
+    )
