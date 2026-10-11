@@ -70,7 +70,7 @@ def _completion_abstention_fingerprint(evidence: EvidenceAtom) -> str:
 
 
 def _opening_id_from_deduction(quantity: QuantityEvidence, wall_id: str) -> str | None:
-    if len(quantity.input_entity_ids) != 2:
+    if not isinstance(quantity.input_entity_ids, (tuple, list)) or len(quantity.input_entity_ids) != 2:
         return None
     if any(type(value) is not str or not value or value != value.strip()
            for value in quantity.input_entity_ids):
@@ -79,6 +79,16 @@ def _opening_id_from_deduction(quantity: QuantityEvidence, wall_id: str) -> str 
     if second == wall_id and first != wall_id:
         return first
     return None
+
+
+def _valid_blocked_source_receipts(original: object) -> tuple[str, ...]:
+    # Invalid imported evidence can block net wall publication but can never
+    # become authenticated receipts. Keep ABSTAIN serializable even when a
+    # replayed evidence_ids field is None, a scalar or nested mutable values.
+    if not isinstance(original, (tuple, list)):
+        return ()
+    return tuple(value for value in original
+                 if type(value) is str and value and value == value.strip())
 
 
 def _abstain(
@@ -104,13 +114,9 @@ def _abstain(
     # Diagnostic BLOCKED records must remain serializable when an imported
     # evidence list contains unhashable or non-string data. Only exact native
     # source tokens are kept; this does not authenticate any corrupt receipt.
-    evidence_ids = [receipt for receipt in gross.evidence_ids
-                    if type(receipt) is str and receipt and receipt == receipt.strip()]
+    evidence_ids = list(_valid_blocked_source_receipts(gross.evidence_ids))
     for deduction in deductions:
-        evidence_ids.extend(
-            receipt for receipt in deduction.evidence_ids
-            if type(receipt) is str and receipt and receipt == receipt.strip()
-        )
+        evidence_ids.extend(_valid_blocked_source_receipts(deduction.evidence_ids))
     if completion_evidence is not None and type(completion_evidence.evidence_id) is str:
         evidence_ids.append(completion_evidence.evidence_id)
     return QuantityEvidence(
