@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import fitz
+import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import (
@@ -559,4 +560,24 @@ def test_gpt2_containing_wall_owner_rejects_malformed_w4_fallback_keys():
         child,edge_owner={},wall_edges={
             "W4-one":(parent,),"W4-two":(parent,),
         }
+    ) is None
+
+
+@pytest.mark.parametrize("invalid_owner", (None, 17, "", " w0", "w0 ", [], "W4-foreign"))
+def test_gpt2_publication_explicit_index_cannot_fall_back_from_invalid_w4_owner(invalid_owner):
+    """An indexed source contradiction cannot be repaired by nearest geometry."""
+    from pb_source_room_face_authority import _publication_boundary_ownership
+
+    ring = ((0., 0.), (10., 0.), (10., 10.), (0., 10.))
+    edges = tuple(_edge(ring[i], ring[(i + 1) % 4]) for i in range(4))
+    walls = {f"w{i}": (edge,) for i, edge in enumerate(edges)}
+    owners = {edge: f"w{i}" for i, edge in enumerate(edges)}
+    assert _publication_boundary_ownership(
+        ring, edge_owner=owners, wall_edges=walls,
+        ownership_grid={}, ownership_oversized=[],
+    ) is not None
+    forged = {**owners, edges[0]: invalid_owner}
+    assert _publication_boundary_ownership(
+        ring, edge_owner=forged, wall_edges=walls,
+        ownership_grid={}, ownership_oversized=[],
     ) is None
