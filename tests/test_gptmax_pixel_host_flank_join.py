@@ -286,3 +286,37 @@ def test_unmodified_twenty_thousand_source_primitive_limit_still_fail_closed():
     pixel["experimental_w2_w4"]["input_source_count"] = 20001
     with pytest.raises(ValueError, match="source census count"):
         join(raw, required, pixel)
+
+
+def test_original_snap_collapsed_fragment_without_parent_is_a_negative_receipt():
+    raw, required, pixel = fixture()
+    graph = pixel["experimental_w2_w4"]
+    graph["all_snap_collapsed_fragments"].append({
+        "fragment_id": "source-unowned-snap-loss",
+        "source_observation_ids": [],
+        "physical_host_authority": False,
+    })
+    joined = join(raw, required, pixel)
+    assert not joined["host_publication_allowed"]
+    assert all(
+        "source-unowned-snap-loss" not in
+        candidate["experimental_lineage"]["snap_collapsed_fragment_ids"]
+        for opening in joined["opening_rows"]
+        for flank in opening["flanks"]
+        for candidate in flank["pixel_run_candidates"]
+    )
+
+
+def test_unparented_snap_loss_must_not_be_borrowed_as_pixel_source_proof():
+    raw, required, pixel = fixture()
+    graph = pixel["experimental_w2_w4"]
+    graph["all_snap_collapsed_fragments"].append({
+        "fragment_id": "source-unowned-snap-loss",
+        "source_observation_ids": [],
+        "physical_host_authority": False,
+    })
+    graph["source_parent_census"][0]["snap_collapsed_fragment_ids"] = [
+        "source-unowned-snap-loss",
+    ]
+    with pytest.raises(ValueError, match="collapsed fragment does not claim"):
+        join(raw, required, pixel)
