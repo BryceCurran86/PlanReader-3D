@@ -39,7 +39,14 @@ def _valid_source_room_area_quantity(quantity: QuantityEvidence) -> bool:
             MeasurementAuthorityType.PDF_SCALED.value,
         }
         or type(quantity.confidence) not in (int, float)
+        or type(quantity.quantity_id) is not str
+        or not quantity.quantity_id
+        or quantity.quantity_id != quantity.quantity_id.strip()
+        or not isinstance(quantity.input_entity_ids, (tuple, list))
         or len(quantity.input_entity_ids) != 1
+        or type(quantity.input_entity_ids[0]) is not str
+        or not quantity.input_entity_ids[0]
+        or quantity.input_entity_ids[0] != quantity.input_entity_ids[0].strip()
         or not isinstance(quantity.evidence_ids, (list, tuple))
         or not quantity.evidence_ids
         or any(type(value) is not str or not value or value != value.strip()
