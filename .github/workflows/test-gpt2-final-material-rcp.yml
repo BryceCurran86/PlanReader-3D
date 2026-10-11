@@ -15,7 +15,7 @@ on:
       - "tests/test_cross_view_ceiling_quantity_authority.py"
       - ".github/workflows/test-gpt2-final-material-rcp.yml"
 concurrency:
-  group: test-gpt2-final-material-rcp-subset
+  group: test-gpt2-final-material-rcp-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
