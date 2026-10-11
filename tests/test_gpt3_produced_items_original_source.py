@@ -177,7 +177,9 @@ def test_historically_signed_review_quantity_is_not_a_firm_produced_item(
         traces_by_quantity_id={q.quantity_id:t},
     )
     path.write_text(sealed.to_json(),encoding="utf-8")
-    with pytest.raises(SourceClosedRunConflictError,match="nonfirm"):
+    # The stricter current-main V1 lineage gate rejects provisional sources
+    # before the exporter reaches its independent final-status guard.
+    with pytest.raises(SourceClosedRunConflictError,match="unverified lineage|nonfirm"):
         export_verified_produced_items(path,[source])
 
 
