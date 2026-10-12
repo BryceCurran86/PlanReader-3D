@@ -159,11 +159,17 @@ def _validate_page_binding(
     blockers: list[str],
 ) -> None:
     viewport_id = meta.get("viewport_id")
-    expected_page = context.page_for_viewport(str(viewport_id)) if viewport_id else None
+    # Page/viewport scope is a producer-owned physical geometry receipt.
+    # True == 1 and 1.0 == 1 in Python, but neither is an original page index.
+    if type(viewport_id) is not str or not viewport_id or viewport_id != viewport_id.strip():
+        blockers.append(f"{prefix}_viewport_source_invalid")
+        expected_page = None
+    else:
+        expected_page = context.page_for_viewport(viewport_id)
     page_no = meta.get("page_no")
-    if page_no in (None, ""):
-        blockers.append(f"{prefix}_page_missing")
-    elif expected_page is not None and page_no != expected_page:
+    if type(page_no) is not int or page_no <= 0:
+        blockers.append(f"{prefix}_page_source_invalid")
+    elif expected_page is None or page_no != expected_page:
         blockers.append(f"{prefix}_page_mismatch")
 
 
