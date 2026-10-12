@@ -22,6 +22,7 @@ from pb_live_room_area_source_closed_export import (
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
+    CommercialTakeoffConflictError,
     quantity_evidence_to_takeoff_output_row,
 )
 
@@ -124,11 +125,21 @@ def _scaled_measurement_authority(
         or type(scale_status) is not str
         or scale_status not in {"resolved", "verified"}
         or type(raw_conflicts) not in (list, tuple)
-        or raw_conflicts
     ):
-        # The final customer row cannot turn a provisional scale or
-        # silently discarded conflict into authenticated metric room area.
+        # Malformed or incomplete source authority is not a customer row.
         return None
+    if raw_conflicts:
+        # Authentic original scale conflicts are materially different from
+        # missing/invalid metadata: retain the existing commercial conflict
+        # contract rather than silently dropping a disputed FIRM candidate.
+        if any(
+            type(value) is not str or not value or value != value.strip()
+            for value in raw_conflicts
+        ):
+            return None
+        raise CommercialTakeoffConflictError(
+            "original room area scale conflicts require source resolution"
+        )
     conflicts = ()
 
     return CommercialMeasurementAuthority(
