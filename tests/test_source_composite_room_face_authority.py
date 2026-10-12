@@ -2022,3 +2022,21 @@ def test_original_w4_w2_grid_opposition_report_keeps_native_edge_receipts():
         row = inspect_original_w4_grid_opposition_first_gate(walls, invalid)
         assert row["original_w4_grid_first_gate"] == "source_w4_identity_unavailable"
         assert row["room_geometry_published"] is False
+
+    # A numeric original W2 edge must NOT become a plausible literal "42"
+    # simply because the older production helper stringifies its key.
+    import copy
+    original = walls.records[0]
+    corrupt = copy.copy(original)
+    corrupt.wall_candidate = copy.copy(original.wall_candidate)
+    corrupt.wall_candidate.face_a_segment_ids = (42,)
+    corrupted = replace(
+        walls, records=(corrupt, *walls.records[1:])
+    )
+    invalid_w2 = inspect_original_w4_grid_opposition_first_gate(
+        corrupted, "w_sep"
+    )
+    assert invalid_w2["original_w4_grid_first_gate"] == (
+        "source_w2_fragment_identity_unavailable"
+    )
+    assert invalid_w2["room_geometry_published"] is False
