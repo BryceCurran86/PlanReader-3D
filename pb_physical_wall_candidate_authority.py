@@ -2128,19 +2128,31 @@ def _producer_proven_page_opening_records(
     if cached is not None:
         return cached
     proven: dict[str, PhysicalOpeningExistenceRecord] = {}
-    for observation_id, observation in rows:
-        if str(observation.page_id) != str(page_id):
-            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-        result = physical_opening_authority.prove_existence(ObservationSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
-        opening = result.existence_record
-        if (result.status is EvidenceResolutionStatus.CORROBORATED
-                and result.proposition == PHYSICAL_OPENING_EXISTS
-                and opening is not None and str(opening.page_id) == str(page_id)):
-            proven[opening.record_id] = opening
+    # Reuse the original native dimension COMPONENT proof within only this
+    # producer-owned complete source page transaction. Its exit independently
+    # re-proves all source-visible parent/competitor and native text receipts.
+    # No opening record/page result is published or cached until exit succeeds.
+    with source_producer._native_dimension_source_proof_batch(
+        published, page_id=str(page_id)
+    ):
+        for observation_id, observation in rows:
+            if str(observation.page_id) != str(page_id):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+            result = physical_opening_authority.prove_existence(ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
+            # Individually unresolved source hypotheses remain ABSTAIN, as
+            # in the scalar source authority. The enclosing transaction has
+            # independently authenticated original native receipts on entry
+            # and re-proves every byte, text and competitor on exit. Do not
+            # upgrade a candidate reason to positive existence or count.
+            opening = result.existence_record
+            if (result.status is EvidenceResolutionStatus.CORROBORATED
+                    and result.proposition == PHYSICAL_OPENING_EXISTS
+                    and opening is not None and str(opening.page_id) == str(page_id)):
+                proven[opening.record_id] = opening
     # Preserve first authenticated source-observation witness order. The
     # previous W4 path consumed dict insertion order, which controls the
     # representative provenance of competing/adjacent physical openings.
