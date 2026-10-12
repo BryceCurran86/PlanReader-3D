@@ -195,3 +195,62 @@ def test_wall_page_failure_is_logged_without_fallback_or_mutating_exception(
     assert [e["event"] for e in events] == ["entered", "failed"]
     assert [e["source_page_id"] for e in events] == ["30", "30"]
     assert events[1]["error_type"] == "ValueError"
+
+
+def test_sampled_original_physical_dispositions_preserve_all_256_selectors(
+    tmp_path, monkeypatch,
+):
+    selectors = [object() for _ in range(256)]
+    receipts = [object() for _ in selectors]
+    calls = []
+
+    def classify_exact(self, selector):
+        calls.append(selector)
+        return receipts[len(calls) - 1]
+
+    monkeypatch.setattr(
+        diag.PhysicalOpeningAuthority, "classify_disposition", classify_exact
+    )
+    owner = object.__new__(diag.PhysicalOpeningAuthority)
+    path = tmp_path / "sampled.jsonl"
+    with diag.StageJournalContext(path) as journal:
+        with diag.journal_source_stages(journal):
+            for index, selector in enumerate(selectors):
+                assert owner.classify_disposition(selector) is receipts[index]
+        assert diag.PhysicalOpeningAuthority.classify_disposition is classify_exact
+
+    assert calls == selectors
+    events = _events(path)
+    samples = [e for e in events if e["event"] == "sample"]
+    assert len(samples) == 1
+    assert samples[0]["observation_calls"] == 256
+    assert samples[0]["stage"] == "PhysicalOpeningAuthority.classify_disposition"
+    assert samples[0]["cumulative_ms"] >= 0
+    assert samples[0]["diagnostic_only"] is True
+
+
+def test_sampled_physical_classifier_keeps_original_exception_and_restores(
+    tmp_path, monkeypatch,
+):
+    failure = RuntimeError("source-opposed-opening-not-a-door")
+
+    def authentic_classifier(self, selector):
+        raise failure
+
+    monkeypatch.setattr(
+        diag.PhysicalOpeningAuthority, "classify_disposition", authentic_classifier
+    )
+    owner = object.__new__(diag.PhysicalOpeningAuthority)
+    path = tmp_path / "sampled-failure.jsonl"
+    with diag.StageJournalContext(path) as journal:
+        with pytest.raises(RuntimeError) as caught:
+            with diag.journal_source_stages(journal):
+                owner.classify_disposition(object())
+        assert caught.value is failure
+        assert diag.PhysicalOpeningAuthority.classify_disposition is authentic_classifier
+
+    events = _events(path)
+    assert len(events) == 1
+    assert events[0]["event"] == "failed"
+    assert events[0]["observation_calls"] == 0
+    assert events[0]["error_type"] == "RuntimeError"
