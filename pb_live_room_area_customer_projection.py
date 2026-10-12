@@ -22,6 +22,7 @@ from pb_live_room_area_source_closed_export import (
 from pb_migration_contracts import QuantityEvidence
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
+    CommercialTakeoffConflictError,
     quantity_evidence_to_takeoff_output_row,
 )
 
@@ -115,18 +116,31 @@ def _scaled_measurement_authority(
         return None
 
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-    scale_id = _clean(metadata.get("resolved_scale_id"))
-    scale_status = _clean(metadata.get("scale_status"))
-    raw_conflicts = metadata.get("scale_conflicts") or ()
-    if isinstance(raw_conflicts, (str, bytes)):
-        raw_conflicts = (raw_conflicts,)
-    elif not isinstance(raw_conflicts, (list, tuple)):
-        raw_conflicts = ()
-    conflicts = tuple(
-        sorted({_clean(value) for value in raw_conflicts if _clean(value)})
-    )
-    if not scale_id or not scale_status:
+    scale_id = metadata.get("resolved_scale_id")
+    scale_status = metadata.get("scale_status")
+    raw_conflicts = metadata.get("scale_conflicts", ())
+    if (
+        type(scale_id) is not str or not scale_id
+        or scale_id != scale_id.strip()
+        or type(scale_status) is not str
+        or scale_status not in {"resolved", "verified"}
+        or type(raw_conflicts) not in (list, tuple)
+    ):
+        # Malformed or incomplete source authority is not a customer row.
         return None
+    if raw_conflicts:
+        # Authentic original scale conflicts are materially different from
+        # missing/invalid metadata: retain the existing commercial conflict
+        # contract rather than silently dropping a disputed FIRM candidate.
+        if any(
+            type(value) is not str or not value or value != value.strip()
+            for value in raw_conflicts
+        ):
+            return None
+        raise CommercialTakeoffConflictError(
+            "original room area scale conflicts require source resolution"
+        )
+    conflicts = ()
 
     return CommercialMeasurementAuthority(
         method="scaled_geometry",
