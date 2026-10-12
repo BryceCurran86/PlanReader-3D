@@ -48,7 +48,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, quantities: int = 1):
             project_id=readiness.PROJECT,
             quantity_id=f"q-{index}", family="opening_area",
             semantic_key=f"opening-semantic-{index}", value=2.16,
-            unit="m2", status="firm", authority="documented_dimension",
+            unit="m2", status="corroborated", authority="documented_dimension",
             confidence=1.0, abstained=False,
             document_id="architectural-source", source_sha256=sha,
             source_page="3", viewport_id="source_page3_plan",
