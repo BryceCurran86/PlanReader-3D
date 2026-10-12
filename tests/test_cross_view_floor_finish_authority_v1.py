@@ -1232,3 +1232,36 @@ def test_gpt2_missing_physical_room_identity_cannot_seal_finish(monkeypatch):
     )
     assert selected == {}
     assert disputed == (real.source_room_face_record_id,)
+
+
+def test_gpt2_two_source_faces_cannot_publish_one_physical_room_floor_twice():
+    from types import SimpleNamespace as R
+    from pb_cross_view_floor_finish_authority import (
+        _unique_documented_area_owner_receipts,
+    )
+    first=R(
+        source_room_face_record_id="first-source-face",
+        physical_room_id="same-physical-room",
+        area_evidence=R(evidence_id="one-figured-area"),
+        source_label_observation_ids=("native-word-one",),
+        source_label_receipt_ids=("native-label-one",),
+    )
+    second=R(
+        source_room_face_record_id="second-source-face",
+        physical_room_id="same-physical-room",
+        area_evidence=R(evidence_id="other-figured-area"),
+        source_label_observation_ids=("native-word-two",),
+        source_label_receipt_ids=("native-label-two",),
+    )
+    independent=R(
+        source_room_face_record_id="unrelated-source-face",
+        physical_room_id="unrelated-physical-room",
+        area_evidence=R(evidence_id="unrelated-figured-area"),
+        source_label_observation_ids=("native-word-three",),
+        source_label_receipt_ids=("native-label-three",),
+    )
+    owners,disputed=_unique_documented_area_owner_receipts(
+        (), (first,second,independent),
+    )
+    assert owners=={"unrelated-source-face": independent}
+    assert disputed==("first-source-face", "second-source-face")
