@@ -109,6 +109,8 @@ def _flank_stage_rows(joined, original, required, graph):
                     barrier = "W2_NO_SURVIVING_REQUIRED_FLANK_FRAGMENT"
                 elif not retained:
                     barrier = "W3_NODE_PAIR_DEDUP_REMOVED_REQUIRED_FLANK"
+                elif any(e.get('w4_candidate_membership_available') is False for e in retained):
+                    barrier = "W4_CHAIN_NODE_IDENTITY_ABSTAINED"
                 elif any(e["w4_candidate_address_ambiguous"] for e in retained):
                     barrier = "W4_CANDIDATE_ADDRESS_COLLISION"
                 elif not any(e["experimental_w4_records"] for e in retained):

@@ -60,6 +60,7 @@ a false combined wall or silently disappearing.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from pb_geometry_takeoff_model import MeasurementAuthorityType
@@ -274,6 +275,8 @@ def assemble_wall_candidates(
     relationships: Sequence[TopologyRelationship],
     *,
     viewport_id: str,
+    identity_abstention_shadow: bool = False,
+    abstained_chain_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[WallCandidate], Dict[str, str]]:
     """Assemble WallCandidates from a Stage-A graph and its W3 classification.
 
@@ -286,7 +289,19 @@ def assemble_wall_candidates(
 
     Returns ``(wall_candidates, edge_id_to_wall_candidate_id)`` -- the second
     value is the mapping ``rekey_junctions_to_wall_candidates`` needs.
+
+    Explicit shadow mode records equal-end-node attempts in a fresh output
+    list instead of constructing an invalid WallCandidate. Those edges have
+    unavailable candidate membership, not a complete empty owner universe.
+    Default callers still execute the original constructor and its guard.
     """
+    if type(identity_abstention_shadow) is not bool:
+        raise ValueError("identity abstention shadow must be explicit boolean")
+    if identity_abstention_shadow:
+        if type(abstained_chain_rows) is not list or abstained_chain_rows:
+            raise ValueError("identity abstention shadow requires a fresh empty output list")
+    elif abstained_chain_rows is not None:
+        raise ValueError("abstained chain output requires explicit shadow mode")
     # classify_junctions applies this same dedup internally before deriving
     # junctions/relationships -- applying it again here (idempotent) keeps
     # this function's own edge set consistent with what those relationships
@@ -298,14 +313,49 @@ def assemble_wall_candidates(
     edges_by_id = {str(e.get("id")): e for e in graph["edges"] if not e.get("_removed")}
     node_lookup = {n["id"]: {"x": n["x"], "y": n["y"]} for n in graph["nodes"]}
     junction_by_node_idx = _junction_by_node_idx(graph, junctions)
+    ambiguous_boundary_nodes = set()
+    blocked_relationship_edges = set()
+    if identity_abstention_shadow:
+        # The rounded position namespace is not a unique raw-node identity.
+        # Match actual incidence, retaining ambiguity instead of first/last.
+        by_position = {}
+        by_junction_id = {}
+        for junction in junctions:
+            key = tuple(round(c, 6) for c in junction.position_pt)
+            by_position.setdefault(key, []).append(junction)
+            by_junction_id.setdefault(junction.node_id, []).append(junction)
+        junction_by_node_idx = {}
+        for node in graph['nodes']:
+            key = (round(node['x'], 6), round(node['y'], 6))
+            alternatives = by_position.get(key, [])
+            if len(alternatives) > 1:
+                incident = {str(graph['edges'][i]['id']) for i in graph['adjacency'].get(node['id'], [])}
+                if node.get('merged_into_edge'):
+                    incident = {str(node['merged_into_edge'])}
+                alternatives = [j for j in alternatives
+                    if set(j.incident_wall_candidate_ids) == incident]
+            if len(alternatives) == 1:
+                junction_by_node_idx[node['id']] = alternatives[0]
+            elif by_position.get(key):
+                ambiguous_boundary_nodes.add(node['id'])
 
     uf = _UnionFind(edges_by_id.keys())
     for relationship in relationships:
         if relationship.relationship_type != TopologyRelationshipType.CONTINUES_AS:
             continue
-        via = next(
-            (j for j in junctions if j.node_id == relationship.via_junction_id), None
-        )
+        if identity_abstention_shadow:
+            via_alternatives = [j for j in by_junction_id.get(relationship.via_junction_id, [])
+                if relationship.from_edge_id in j.incident_wall_candidate_ids
+                and relationship.to_edge_id in j.incident_wall_candidate_ids]
+            if len(via_alternatives) != 1:
+                blocked_relationship_edges.update(eid for eid in (
+                    relationship.from_edge_id, relationship.to_edge_id) if eid in edges_by_id)
+                continue
+            via = via_alternatives[0]
+        else:
+            via = next(
+                (j for j in junctions if j.node_id == relationship.via_junction_id), None
+            )
         if via is not None and _junction_allows_chain_extension(via):
             if relationship.to_edge_id is not None:
                 uf.union(relationship.from_edge_id, relationship.to_edge_id)
@@ -346,6 +396,24 @@ def assemble_wall_candidates(
             start_junction.node_id if start_junction is not None else f"node_{start_idx}",
             end_junction.node_id if end_junction is not None else f"node_{end_idx}",
         )
+        endpoint_alternatives = []
+        if identity_abstention_shadow:
+            observed_ids = list(end_node_ids)
+            for endpoint_number, idx in enumerate((start_idx, end_idx)):
+                node = node_lookup[idx]
+                alternatives = by_position.get((round(node['x'], 6), round(node['y'], 6)), [])
+                endpoint_alternatives.append([{
+                    'node_id': j.node_id, 'position_pt': j.position_pt,
+                    'incident_edge_ids': tuple(sorted(j.incident_wall_candidate_ids)),
+                    'junction_type': j.junction_type.value, 'status': j.status.value,
+                } for j in sorted(alternatives, key=lambda j: (
+                    j.node_id, tuple(sorted(j.incident_wall_candidate_ids))))])
+                if idx in ambiguous_boundary_nodes:
+                    ids = {j.node_id for j in alternatives}
+                    # Retain the observed namespace alias if its value is
+                    # unique, without choosing one of the competing records.
+                    observed_ids[endpoint_number] = next(iter(ids)) if len(ids) == 1 else None
+            end_node_ids = tuple(observed_ids)
         junction_types = (
             start_junction.junction_type if start_junction is not None else JunctionType.UNRESOLVED,
             end_junction.junction_type if end_junction is not None else JunctionType.UNRESOLVED,
@@ -359,6 +427,48 @@ def assemble_wall_candidates(
                 [min(edge_ids)] if len(edge_ids) == 1 else _chain_order_edge_ids(edge_ids, edges_by_id)
             )
         )
+
+        shadow_failures = []
+        if identity_abstention_shadow:
+            if end_node_ids[0] is not None and end_node_ids[0] == end_node_ids[1]:
+                shadow_failures.append('a wall candidate cannot start and end at the same node')
+            if {start_idx, end_idx} & ambiguous_boundary_nodes:
+                shadow_failures.append('w4_boundary_junction_identity_ambiguous')
+            if edge_ids & blocked_relationship_edges:
+                shadow_failures.append('w4_relationship_junction_identity_ambiguous')
+            if (node_lookup[start_idx]['x'], node_lookup[start_idx]['y']) == (
+                    node_lookup[end_idx]['x'], node_lookup[end_idx]['y']):
+                shadow_failures.append('w4_coincident_endpoint_geometry_ambiguous')
+            if not is_simple_path:
+                shadow_failures.append('w4_non_simple_chain_topology_ambiguous')
+        if shadow_failures:
+            fragments = [
+                {"edge_id": eid,
+                 "w2_fragment_geometry_pt": [edges_by_id[eid][k] for k in ("x1", "y1", "x2", "y2")],
+                 "primitive_lineage": deepcopy(edges_by_id[eid].get("primitive_lineage")),
+                 "w3_retained": True, "physical_host_authority": False}
+                for eid in ordered_edge_ids
+            ]
+            abstained_chain_rows.append({
+                "record_id": stable_contract_id("w4_abstained_chain", {
+                    "viewport_id": viewport_id, "edge_ids": sorted(ordered_edge_ids),
+                    "attempt_candidate_id": candidate_id}),
+                "status": EvidenceResolutionStatus.ABSTAINED.value,
+                "reason_codes": shadow_failures,
+                "attempt_candidate_id": candidate_id, "viewport_id": viewport_id,
+                "centerline_pt": tuple(points), "end_node_ids": end_node_ids,
+                "raw_endpoint_node_indices": (start_idx, end_idx),
+                "raw_endpoint_positions_pt": tuple(
+                    (node_lookup[idx]["x"], node_lookup[idx]["y"]) for idx in (start_idx, end_idx)),
+                "raw_endpoint_junction_alternatives": endpoint_alternatives,
+                "graph_index_path_is_simple": is_simple_path,
+                "actual_owned_w3_fragment_rows": fragments,
+                "candidate_membership_available": False,
+                "source_parents_authenticated": False,
+                "physical_wall_authority": False, "physical_equivalence_proven": False,
+                "host_publication_allowed": False, "source_parent_transfer_allowed": False,
+            })
+            continue
 
         wall = WallCandidate(
             candidate_id=candidate_id,

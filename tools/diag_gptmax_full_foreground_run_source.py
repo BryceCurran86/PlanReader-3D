@@ -41,7 +41,8 @@ def _default_source(source_bytes, source_sha, page_id):
     return producer, published, tuple(records)
 
 
-def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index_shadow=False):
+def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index_shadow=False,
+        w4_identity_abstention_shadow=False):
     """Experimental candidates only; input receipts are checked by the caller."""
     if type(exact_endpoint_shadow) is not bool:
         raise ValueError("exact endpoint shadow mode must be explicit boolean")
@@ -49,6 +50,8 @@ def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index
         raise ValueError("exact endpoint index shadow must be explicit boolean")
     if exact_endpoint_index_shadow and not exact_endpoint_shadow:
         raise ValueError("exact endpoint index shadow requires exact endpoint mode")
+    if type(w4_identity_abstention_shadow) is not bool:
+        raise ValueError("W4 identity abstention shadow must be explicit boolean")
     records = tuple(sorted(records, key=lambda r:r.observation_id))
     source_ids = frozenset(r.observation_id for r in records)
     if len(records) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
@@ -81,8 +84,35 @@ def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index
     deduped, removed = deduplicate_coincident_edges(graph)
     junctions, relationships = classify_junctions(deduped, document_id="source-pixel-shadow",
         page_id=next(iter(pages),"1"), viewport_id="full-page-pixel-shadow")
+    abstentions = []
     walls, edge_map = assemble_wall_candidates(deduped, junctions, relationships,
-        viewport_id="full-page-pixel-shadow")
+        viewport_id="full-page-pixel-shadow", **(
+            dict(identity_abstention_shadow=True, abstained_chain_rows=abstentions)
+            if w4_identity_abstention_shadow else {}))
+    abstained_by_edge = {}
+    if w4_identity_abstention_shadow:
+        actual_edges = {str(e['id']): e for e in deduped['edges']}
+        if len({r['record_id'] for r in abstentions}) != len(abstentions):
+            raise ValueError('W4 abstention record address collision')
+        for row in abstentions:
+            for fragment in row['actual_owned_w3_fragment_rows']:
+                key = fragment['edge_id']
+                actual = actual_edges.get(key)
+                parents = (fragment.get('primitive_lineage') or {}).get('source_primitive_ids')
+                if (actual is None or key in abstained_by_edge
+                        or fragment['primitive_lineage'] != actual.get('primitive_lineage')
+                        or fragment['w2_fragment_geometry_pt'] != [actual[k] for k in ('x1','y1','x2','y2')]
+                        or not isinstance(parents, (tuple,list)) or not parents
+                        or any(not isinstance(p,str) or not p for p in parents)
+                        or len(set(parents)) != len(parents) or not set(parents) <= source_ids):
+                    raise ValueError('unowned or contradictory W4 abstained fragment')
+                fragment['source_observation_ids'] = sorted(parents)
+                abstained_by_edge[key] = row
+        candidate_edges = [eid for w in walls for eid in w.face_a_segment_ids]
+        if (len(set(candidate_edges)) != len(candidate_edges)
+                or set(candidate_edges) & abstained_by_edge.keys()
+                or set(candidate_edges) | abstained_by_edge.keys() != actual_edges.keys()):
+            raise ValueError('W4 shadow did not partition all actual retained edges')
     all_owners = defaultdict(list)
     for wall in walls:
         for edge_id in wall.face_a_segment_ids:
@@ -103,6 +133,10 @@ def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index
             "w3_retained":edge_id in retained_ids,"w3_removed":edge_id in removed_set,
             "experimental_w4_candidate_ids":sorted(all_owners.get(edge_id,())),
             "physical_host_authority":False}
+        if w4_identity_abstention_shadow:
+            row['w4_candidate_membership_available'] = edge_id not in abstained_by_edge
+            row['w4_abstained_chain_record_ids'] = ([abstained_by_edge[edge_id]['record_id']]
+                if edge_id in abstained_by_edge else [])
         edge_rows.append(row)
         for parent in parents:
             by_parent[parent].append(edge_id)
@@ -128,7 +162,7 @@ def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index
             else "w2_snap_collapsed" if collapsed_by_parent[r.observation_id]
             else "w2_parent_unmapped"),"physical_host_authority":False} for r in records]
     counts = Counter(w.candidate_id for w in walls)
-    return {"input_source_count":len(records),"all_w2_edges":edge_rows,
+    result = {"input_source_count":len(records),"all_w2_edges":edge_rows,
         "all_snap_collapsed_fragments":collapsed,"source_parent_census":census,
         "all_experimental_w4_candidates":[{"candidate_id":w.candidate_id,
             "w2_edge_ids":list(w.face_a_segment_ids), "centerline_pt":w.centerline_pts,
@@ -138,6 +172,14 @@ def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index
             and all(edge_map.get(k) in v for k,v in all_owners.items())),
         "scope_authority":"full-page diagnostic only; no authenticated floor-plan viewport",
         "physical_equivalence_proven":False,"host_publication_allowed":False}
+    if w4_identity_abstention_shadow:
+        result.update(all_w4_abstained_chain_rows=abstentions,
+            all_actual_w3_edges_have_w4_chain_disposition=True,
+            w4_candidate_universe_complete=not abstentions,
+            w4_source_parent_inventory_validated=True,
+            structural_source_universe_complete=False,
+            opening_count_publication_allowed=False,metric_quantity_publication_allowed=False)
+    return result
 
 
 def original_full_foreground_report(source_bytes: bytes, *, expected_source_sha: str,
