@@ -124,7 +124,7 @@ def finalize_split_project_handoff(
         "quantity_count": len(combined.quantities),
     }
     target_dir.mkdir(parents=True, exist_ok=True)
-    lock = target_dir / ".source_closed_finalizer.lock"
+    lock = target_dir / ".source_closed_handoff.lock"
     # Per-folder O_EXCL rejects overlapping finalizers or crash-stale locks;
     # a crash never grants permission to overwrite the previous sealed run.
     descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
