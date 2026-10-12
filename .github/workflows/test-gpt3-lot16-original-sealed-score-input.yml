@@ -97,6 +97,7 @@ jobs:
             --sealed-run "$OUT/production/source_sealed_run.json" \
             --customer-rows "$OUT/production/verified_customer_rows.json" \
             --original-pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --source-stage "$OUT/production/source_stage_diagnostic.json" \
             --output "$OUT/physical_identity_readiness_UNPUBLISHED.json"
           python - <<'PY'
           import json
@@ -106,10 +107,13 @@ jobs:
               "physical_identity_readiness_UNPUBLISHED.json"
           ).read_text())
           assert report["original_architectural_pdf_bytes_verified"] is True
+          assert report["source_stage_physical_quantity_parity_verified"] is True
           assert report["source_firm_sealed_quantity_count"] == 7
           assert report["customer_verified_quantity_count"] == 7
           assert report["frozen_denominator_item_count"] == 27
           assert len(report["source_physical_openings_requiring_independent_crosswalk"]) == 7
+          assert all(row["signed_source_stage_host_binding_group_id"].startswith("opening_host_binding_group_")
+                     for row in report["source_physical_openings_requiring_independent_crosswalk"])
           assert all(row["benchmark_item_id"] is None
                      for row in report["source_physical_openings_requiring_independent_crosswalk"])
           assert report["benchmark_status"] == "NOT_EVALUATED"
