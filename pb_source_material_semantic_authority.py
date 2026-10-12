@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import io
+import math
 import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
@@ -478,12 +479,22 @@ def _trusted_words_by_page(
             # receipt. Treat a missing receipt as a source-integrity failure
             # rather than silently dropping a word.
             raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
-        try:
-            bbox = tuple(float(value) for value in receipt.geometry)
-        except (TypeError, ValueError):
-            raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+        # Text/glyph geometry is an original producer source receipt, never
+        # a user-entered or JSON-coerced coordinate. NaN/Inf passes ordered
+        # bbox comparisons and can cross a viewport trust boundary silently.
+        original_bbox = receipt.geometry
         if (
-            len(bbox) != 4
+            type(original_bbox) not in (tuple, list)
+            or len(original_bbox) != 4
+            or any(type(value) not in (int, float) for value in original_bbox)
+        ):
+            raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+        try:
+            bbox = tuple(float(value) for value in original_bbox)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE) from exc
+        if (
+            not all(math.isfinite(value) for value in bbox)
             or bbox[2] <= bbox[0]
             or bbox[3] <= bbox[1]
         ):
