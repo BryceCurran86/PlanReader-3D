@@ -109,16 +109,32 @@ def compare_source_membership(before: dict, after: dict) -> dict:
     a, b = old_sem.get("record"), new_sem.get("record")
     if type(a) is not dict or type(b) is not dict:
         raise ValueError("missing semantic source record")
+    for label, record in (("before", a), ("after", b)):
+        for field in ("source_sha256", "revision_id", "snapshot_id"):
+            if record.get(field) != before[field]:
+                raise ValueError(f"{label} semantic source record mismatches {field}")
     for field in _SEMANTIC_MEMBERS:
         compare_ids("semantic_inventory.record." + field, a.get(field), b.get(field))
     for field in ("record_id", "decision_scope_id", "snapshot_id", "revision_id",
                   "physical_opening_universe_complete", "structural_enumeration_complete",
                   "reason_codes"):
         compare_value("semantic_inventory.record." + field, a.get(field), b.get(field))
+    for field in ("status", "reason_codes"):
+        if (field in old_sem) != (field in new_sem):
+            raise ValueError(f"missing semantic inventory field: {field}")
+        if field in old_sem:
+            compare_value("semantic_inventory." + field, old_sem[field], new_sem[field])
     for field in _PROTECTED:
         if field not in before or field not in after:
             raise ValueError(f"missing protected original source authority: {field}")
         compare_value(field, before[field], after[field])
+    for field in ("raster_candidate_closures", "source_room_face_scopes",
+                  "source_decode_coverage", "opening_void_status",
+                  "opening_void_reason_codes"):
+        if (field in before) != (field in after):
+            raise ValueError(f"one-sided original source evidence: {field}")
+        if field in before:
+            compare_value(field, before[field], after[field])
 
     return {
         "status": "IDENTICAL_DIAGNOSTIC" if not changes else "SOURCE_MEMBERSHIP_DRIFT_UNPUBLISHED",
