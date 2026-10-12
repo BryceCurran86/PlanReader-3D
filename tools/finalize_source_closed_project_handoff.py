@@ -108,6 +108,14 @@ def finalize_split_project_handoff(
         "available_groups": [group for group, _ in available],
         "missing_groups": missing,
         "complete_group_set": not missing,
+        # Signed group availability does not prove four-project frozen V2
+        # reconciliation or a benchmark accuracy numerator.
+        "publication_status": (
+            "SOURCE_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+            if not missing else "PARTIAL_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+        ),
+        "benchmark_score_granted": False,
+        "frozen_v2_reconciliation_complete": False,
         "input_files": {group: str(path) for group, path in available},
         "output_file": str(output_path),
         "run_id": combined.run_id,
