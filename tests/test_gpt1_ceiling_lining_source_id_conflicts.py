@@ -45,6 +45,11 @@ def test_blocked_replay_of_same_original_ceiling_id_quarantines_entire_seal(reve
 @pytest.mark.parametrize("invalid",[True,42," ceiling-q ",""])
 def test_original_ceiling_quantity_identity_never_string_coerced(invalid):
     original=_quantity()
+    if invalid == "":
+        # The dataclass itself must reject an empty identity before export.
+        with pytest.raises(ValueError, match="quantity_id must be a non-empty string"):
+            replace(original, quantity_id=invalid)
+        return
     tampered=replace(original,quantity_id=invalid)
     claim=replace(_claim(original),ceiling_lining_quantity_evidence=(tampered,))
     with pytest.raises(SourceClosedRunConflictError,match="duplicate or invalid"):
