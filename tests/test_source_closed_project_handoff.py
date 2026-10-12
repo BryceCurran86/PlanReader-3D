@@ -1062,3 +1062,44 @@ def test_failed_atomic_summary_replacement_preserves_prior_summary_and_no_temp(
     assert sorted(path.name for path in tmp_path.iterdir()) == [
         "production_summary.json",
     ]
+
+
+def test_signed_family_is_atomic_and_has_a_complete_source_envelope(tmp_path):
+    import json
+    run = _run(
+        project_id="source-project", source_sha256="a" * 64,
+        family="opening_area", quantity_id="q-atomic-opening",
+    )
+    path = handoff._write_run(tmp_path, "opening_area", run)
+    assert path.is_file()
+    assert json.loads(path.read_text(encoding="utf-8")) == json.loads(run.to_json())
+    assert not list(path.parent.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("artifact_kind", ["family", "combined"])
+def test_interrupted_signed_artifact_publish_never_leaves_truncated_customer_row(
+    tmp_path, monkeypatch, artifact_kind,
+):
+    output = tmp_path / "handoff"
+    destination = (
+        output / "family_runs" / "opening_area.sealed.json"
+        if artifact_kind == "family"
+        else output / "source-project.json"
+    )
+
+    def _fail_replace(*args, **kwargs):
+        raise OSError("simulated interruption while committing signed payload")
+
+    monkeypatch.setattr(handoff.os, "replace", _fail_replace)
+    with pytest.raises(OSError, match="simulated interruption"):
+        if artifact_kind == "family":
+            run = _run(
+                project_id="source-project", source_sha256="a" * 64,
+                family="opening_area", quantity_id="q-atomic-opening",
+            )
+            handoff._write_run(output, "opening_area", run)
+        else:
+            handoff._write_text_atomic(destination, '{"sealed":"not yet signed"}')
+    assert not destination.exists()
+    assert destination.parent.is_dir()
+    assert sorted(destination.parent.iterdir()) == []
