@@ -240,3 +240,24 @@ def test_source_polygon_geos_exception_abstains_before_metric_claim(monkeypatch)
     )
     assert result["documented_area_quantity_id"] is None
     assert result["floor_finish_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("original_input", [
+    (["unhashable-source-id"],),
+    ({"foreign-source-id": "not-a-source-receipt"},),
+    (None,), (7,), (True,), ("",), (" padded-source-id ",),
+])
+def test_malformed_source_quantity_input_id_abstains_without_handoff_crash(
+    original_input,
+):
+    """A malformed source quantity input can never prove a physical room."""
+    source = fixture()
+    source.room_area_quantity_evidence[0].input_entity_ids = original_input
+    row = one(source)
+    assert row["first_unproved_authority"] == (
+        "FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"
+    )
+    assert row["source_proven_area_m2"] is None
+    assert row["documented_area_quantity_id"] is None
+    assert row["floor_finish_publication_allowed"] is False
+    assert row["ceiling_lining_publication_allowed"] is False
