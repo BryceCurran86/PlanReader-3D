@@ -54,6 +54,7 @@ jobs:
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
           from tools.diag_gpt2_source_room_handoff_integrity import report_source_room_handoff
+          from tools.diag_gpt2_room_measurement_gates import inspect_room_measurement_gates
           sha='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
           claim=collect_live_physical_net_wall_claim(
               Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'),
@@ -84,6 +85,50 @@ jobs:
                      and r['ceiling_lining_publication_allowed'] is False
                      and r['benchmark_accuracy'] is None
                      for r in d['room_handoff_first_gates'])
+          # The original 31-page PDF independently proves three source
+          # FIRM room areas. Run the real GPT1 floor/room-area reissuers
+          # and GPT3 source-closed customer gate on the SAME typed claim.
+          # This must never require manually enabling the canonical-floor
+          # commercial flag, or claim a frozen V2 matched object.
+          downstream=inspect_room_measurement_gates(claim)
+          controls={'FOOD PREP':13.270425,'OFFICE':9.05352,'COLD ROOM':25.37875}
+          source_rows={r['source_room_label']:r for r in d['room_handoff_first_gates']}
+          measured_by_label={}
+          for row in downstream['rooms']:
+              measured_by_label.setdefault(row['room_label'],[]).append(row)
+          for label,expected_area in controls.items():
+              rows=measured_by_label.get(label,[])
+              assert len(rows)==1, (label,'original owner ambiguous')
+              item=rows[0]
+              source=source_rows[label]
+              assert source['source_proven_area_m2']==expected_area
+              assert item['source_room_face_record_id']==source['original_source_face_receipt_id']
+              assert item['canonical_floor_id']==source['canonical_floor_id']
+              assert item['metric_quantity_id']==source['documented_area_quantity_id']
+              assert item['firm_documented_area_receipt'] is True
+              assert item['metric_area_m2'] is not None and abs(item['metric_area_m2']-expected_area)<1e-8
+              assert item['metric_geometry_complete'] is False
+              assert item['commercial_quantity_authority_flag'] is False
+              assert item['floor_area_reissued_quantity_id']==observed_reissues[label]
+              assert item['canonical_room_area_reissued_quantity_id']
+              assert item['floor_area_source_sealed'] is True
+              assert item['floor_area_customer_row_verified'] is True
+              assert item['first_unclosed_gate']=='CUSTOMER_REVIEW_ROW_VERIFIED_UNSCORED'
+          assert downstream['reissued_floor_area_quantity_count']==3
+          assert downstream['reissued_canonical_room_area_quantity_count']==3
+          assert downstream['source_closed_floor_seal_quantity_count']==3
+          assert downstream['verified_floor_customer_row_count']==3
+          assert downstream['commercial_estimator_approved'] is False
+          assert downstream['benchmark_accuracy'] is None
+          # This proves original source-to-customer row integrity, not the
+          # frozen 24-object comparison or material-occurrence completeness.
+          Path('original-maryborough-floor-publisher-firstgate.json').write_text(
+              json.dumps(downstream,sort_keys=True,indent=2)+'\n'
+          )
+          print('G2_ORIGINAL_FLOOR_CUSTOMER_ROWS',json.dumps(
+              [(name,measured_by_label[name][0]['floor_area_reissued_quantity_id'],
+                measured_by_label[name][0]['canonical_room_area_reissued_quantity_id'])
+               for name in controls],sort_keys=True))
           Path('original-maryborough-source-room-handoff.json').write_text(
               json.dumps(d,sort_keys=True,indent=2)+'\n'
           )
@@ -96,5 +141,7 @@ jobs:
         if: always()
         with:
           name: gpt2-original-maryborough-room-metric-handoff
-          path: original-maryborough-source-room-handoff.json
+          path: |
+            original-maryborough-source-room-handoff.json
+            original-maryborough-floor-publisher-firstgate.json
           retention-days: 30
