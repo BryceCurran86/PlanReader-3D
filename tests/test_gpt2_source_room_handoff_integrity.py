@@ -6,6 +6,7 @@ import pytest
 
 from tools.diag_gpt2_source_room_handoff_integrity import (
     report_source_room_handoff,
+    _exact_floor_area_reissue_for_source_row,
 )
 
 SHA = "a" * 64
@@ -285,3 +286,78 @@ def test_unhashable_original_room_and_floor_owner_ids_abstain_safely(
     assert row["source_proven_area_m2"] is None
     assert row["floor_finish_publication_allowed"] is False
     assert row["ceiling_lining_publication_allowed"] is False
+
+
+def test_firm_room_source_handoff_does_not_pretend_synthetic_customer_seal():
+    report = report_source_room_handoff(
+        fixture(), original_source_sha=SHA, targets=("FOOD PREP",)
+    )
+    assert report["independent_floor_area_reissue_observed_count"] == 0
+    row = report["room_handoff_first_gates"][0]
+    assert row["producer_floor_area_reissue_quantity_id_observed_only"] is None
+    assert row["customer_floor_area_seal_verified_by_this_report"] is False
+
+
+def test_independent_floor_reissuer_exact_source_lineage_is_observational_only():
+    row = one(fixture())
+    synthetic_published = Obj(
+        quantity_id="separate-publisher-floor-area-id",
+        family="floor_area",
+        status="FIRM",
+        unit="m2",
+        value=1.5,
+        abstained=False,
+        metadata={
+            "upstream_room_area_quantity_id": "quantity-area-1",
+            "canonical_floor_id": "canonical-floor-1",
+            "source_room_face_record_id": "face-receipt-1",
+            "source_sha256": SHA,
+            "row_role": "floor_area",
+            "commercial_projection_allowed": True,
+        },
+    )
+    assert _exact_floor_area_reissue_for_source_row(
+        row, (synthetic_published,), SHA
+    ) == "separate-publisher-floor-area-id"
+    from copy import deepcopy
+    for field, wrong in (
+        ("upstream_room_area_quantity_id", "other-room"),
+        ("canonical_floor_id", "different-floor"),
+        ("source_room_face_record_id", "other-source-face"),
+        ("source_sha256", "b" * 64),
+        ("row_role", "floor_finish_area"),
+        ("commercial_projection_allowed", False),
+    ):
+        altered = deepcopy(synthetic_published)
+        altered.metadata[field] = wrong
+        assert _exact_floor_area_reissue_for_source_row(
+            row, (altered,), SHA
+        ) is None
+    for field, wrong in (
+        ("quantity_id", None),
+        ("family", "room_area"),
+        ("status", "PARTIAL"),
+        ("unit", "page_points2"),
+        ("value", 1.6),
+        ("abstained", True),
+    ):
+        altered = deepcopy(synthetic_published)
+        setattr(altered, field, wrong)
+        assert _exact_floor_area_reissue_for_source_row(
+            row, (altered,), SHA
+        ) is None
+    assert _exact_floor_area_reissue_for_source_row(
+        row, (synthetic_published, deepcopy(synthetic_published)), SHA
+    ) is None
+    assert _exact_floor_area_reissue_for_source_row(
+        row, (), SHA
+    ) is None
+
+
+def test_independent_source_reissue_missing_source_receipt_cannot_publish():
+    row = one(fixture())
+    row["original_source_face_receipt_id"] = None
+    assert _exact_floor_area_reissue_for_source_row(row, (), SHA) is None
+    row = one(fixture())
+    row["source_proven_area_m2"] = float("nan")
+    assert _exact_floor_area_reissue_for_source_row(row, (), SHA) is None
