@@ -678,3 +678,59 @@ def test_gpt2_independent_sealed_room_text_receipts_survive_source_filter():
         kept,_,conflict=_unique_source_label_observation_owners((a,failed),())
         assert kept==(a,)
         assert conflict is True
+
+
+@pytest.mark.parametrize("valid", ["BED 1", "BED 2", "BED 3", "BEDROOM 4", "bed 12", "BEDROOM 99"])
+def test_numbered_bedroom_is_only_an_exact_source_label_candidate(valid):
+    assert _normalized_room_line(valid) == valid.strip()
+
+
+@pytest.mark.parametrize("invalid", [
+    "BED 0", "BED 870", "BED 123", "BED -2", "BED2", "BEDROOM2",
+    "BED 2 VINYL", "BED 2 11.88 m²", "BED 2 FFL", "OFFICE 1",
+    "W 1", "D 02", "870 CSD", "2 BED", "LOT 16",
+])
+def test_numbered_bedroom_source_grammar_never_promotes_notes_or_openings(invalid):
+    assert _normalized_room_line(invalid) is None
+
+
+def test_original_style_bed_2_bed_3_bind_independent_source_faces_after_word_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "whole-line-numbered-bedrooms.pdf"
+    _write_two_room_pdf(path, left_lines=("BED 2",), right_lines=("BED 3",))
+    source, faces = _setup(path)
+    monkeypatch.setattr(SourceRoomLabelProducer, "_authorize_word", _fake_authorized)
+    producer = SourceRoomLabelProducer.from_authorities_for_tests(
+        source, faces, MockOCRBackend(), page_ids=("1",),
+    )
+    records = _records(producer)
+    assert {record.label for record in records} == {"BED 2", "BED 3"}
+    assert len({record.face_id for record in records}) == 2
+    assert all(len(record.word_evidence) == 2 for record in records)
+    assert all(record.observation_ids for record in records)
+
+
+def test_numbered_bedroom_with_untrusted_ordinal_word_abstains(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "bed-number-untrusted.pdf"
+    _write_two_room_pdf(path, left_lines=("BED 2",), right_lines=("BED 3",))
+    source, faces = _setup(path)
+
+    def denied_number(self, published, word):
+        if word.raw_text in {"2", "3"}:
+            return None
+        return _fake_authorized(self, published, word)
+
+    monkeypatch.setattr(SourceRoomLabelProducer, "_authorize_word", denied_number)
+    producer = SourceRoomLabelProducer.from_authorities_for_tests(
+        source, faces, MockOCRBackend(), page_ids=("1",),
+    )
+    assert _records(producer) == []
+    assert any(
+        SOURCE_ROOM_LABEL_REQUIRED_WORD_UNRESOLVED in item.reason_codes
+        for item in producer.published_results()
+    )
