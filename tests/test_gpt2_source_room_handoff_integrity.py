@@ -223,3 +223,20 @@ def test_valid_original_open_vertex_ring_retains_existing_source_metric_handoff(
     )
     assert row["source_proven_area_m2"] == 1.5
     assert row["metric_area_inferred_from_page_points"] is False
+
+
+def test_source_polygon_geos_exception_abstains_before_metric_claim(monkeypatch):
+    """A GEOS failure cannot turn a suspect native ring into a measured floor."""
+    import shapely.geometry
+    from shapely.errors import GEOSException
+
+    def invalid_native_ring(*_args, **_kwargs):
+        raise GEOSException("original source polygon topology unavailable")
+
+    monkeypatch.setattr(shapely.geometry, "Polygon", invalid_native_ring)
+    result = one(fixture())
+    assert result["first_unproved_authority"] == (
+        "SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE"
+    )
+    assert result["documented_area_quantity_id"] is None
+    assert result["floor_finish_publication_allowed"] is False
