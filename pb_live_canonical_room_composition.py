@@ -467,7 +467,9 @@ def _verified_source_room_label_for_face(
             or not word.authority_record_id.strip()
             or not isinstance(word.trusted_text, str) or not word.trusted_text.strip()
             or word.authority_kind not in {
-                "native_text_integrity", "raster_text_corroboration"
+                "native_text_integrity",
+                "raster_text_corroboration",
+                "raster_text_line_corroboration",
             }
             or type(word.word_no) is not int or word.word_no < 0
             or not isinstance(word.geometry, tuple)
@@ -478,12 +480,34 @@ def _verified_source_room_label_for_face(
             or word.geometry[1] >= word.geometry[3]
         ):
             return None
-    # Every original word has one independent text-integrity/OCR proof,
-    # though that word's receipt and authority IDs may be equal.
-    if (len({word.receipt_id for word in label.word_evidence})
-            != len(label.word_evidence)
-            or len({word.authority_record_id for word in label.word_evidence})
-            != len(label.word_evidence)):
+    # The native source producer has TWO distinct corroboration contracts:
+    # per-word text-integrity / raster receipts (one authority per word), and
+    # a whole-line two-render raster receipt (one shared authority for ALL
+    # words in precisely that line). The producer itself authenticates the
+    # native observations, bounded source clip and independent raster renders.
+    # Do not reject its sealed whole-line proof merely for reusing the shared
+    # authority ID, and NEVER treat a mixture as a line-level proof.
+    words = label.word_evidence
+    if len({word.receipt_id for word in words}) != len(words):
+        return None
+    kinds = {word.authority_kind for word in words}
+    if "raster_text_line_corroboration" in kinds:
+        if kinds != {"raster_text_line_corroboration"}:
+            return None
+        authorities = {word.authority_record_id for word in words}
+        if (
+            len(authorities) != 1
+            or not next(iter(authorities)).startswith(
+                "source_room_label_line_raster_corroboration_"
+            )
+            or len({word.word_no for word in words}) != len(words)
+            or tuple(word.word_no for word in words)
+            != tuple(sorted(word.word_no for word in words))
+            or label.label != " ".join(word.trusted_text.strip() for word in words)
+        ):
+            return None
+    elif len({word.authority_record_id for word in words}) != len(words):
+        # Native/per-word raster authorities cannot claim a shared line proof.
         return None
     return label
 
