@@ -56,7 +56,17 @@ def _original_pdf_ring(points: object) -> tuple[tuple[float, float], ...] | None
             return None
         if not math.isfinite(x) or not math.isfinite(y):
             return None
-        output.append((x, y))
+        # Closing the PDF ring on its first vertex is admissible; repeating
+        # any other vertex creates a zero-length edge or self-touching source
+        # topology that cannot justify a geometry-derived metric quantity.
+        point_xy = (x, y)
+        if output and point_xy == output[-1]:
+            return None
+        output.append(point_xy)
+    if len(output) > 1 and output[0] == output[-1]:
+        output.pop()
+    if len(output) < 3 or len(set(output)) != len(output):
+        return None
     return tuple(output)
 
 
