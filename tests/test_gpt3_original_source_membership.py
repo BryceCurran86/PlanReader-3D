@@ -1,9 +1,11 @@
 """Source candidate membership may change despite unchanged opening/host totals."""
 from copy import deepcopy
+import json
+import sys
 
 import pytest
 
-from tools.diag_gpt3_original_source_membership import compare_source_membership
+from tools.diag_gpt3_original_source_membership import compare_source_membership, main
 
 
 def _report():
@@ -120,3 +122,41 @@ def test_source_record_id_reissue_is_detected_even_with_same_member_sets():
     audit = compare_source_membership(old, new)
     assert not audit["parity_pass"]
     assert audit["changes"][0]["path"] == "semantic_inventory.record.record_id"
+
+
+@pytest.mark.parametrize("target", ["baseline", "candidate", "baseline_symlink"])
+def test_cli_never_overwrites_source_evidence_even_through_symlink(tmp_path, monkeypatch, target):
+    baseline = tmp_path / "before.json"
+    candidate = tmp_path / "after.json"
+    payload = json.dumps(_report(), sort_keys=True)
+    baseline.write_text(payload, encoding="utf-8")
+    candidate.write_text(payload, encoding="utf-8")
+    alias = tmp_path / "alias.json"
+    alias.symlink_to(baseline)
+    output = {"baseline": baseline, "candidate": candidate, "baseline_symlink": alias}[target]
+    monkeypatch.setattr(sys, "argv", [
+        "source-diff", "--baseline", str(baseline),
+        "--candidate", str(candidate), "--output", str(output),
+    ])
+    with pytest.raises(ValueError, match="readiness output may not overwrite"):
+        main()
+    assert baseline.read_text(encoding="utf-8") == payload
+    assert candidate.read_text(encoding="utf-8") == payload
+
+
+def test_cli_unpublished_result_written_only_to_independent_output(tmp_path, monkeypatch):
+    baseline = tmp_path / "before.json"
+    candidate = tmp_path / "after.json"
+    output = tmp_path / "diagnostic.json"
+    payload = json.dumps(_report())
+    baseline.write_text(payload, encoding="utf-8")
+    candidate.write_text(payload, encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "source-diff", "--baseline", str(baseline),
+        "--candidate", str(candidate), "--output", str(output),
+    ])
+    assert main() == 0
+    result = json.loads(output.read_text(encoding="utf-8"))
+    assert result["parity_pass"] is True
+    assert result["benchmark_score_granted"] is False
+    assert result["benchmark_accuracy"] is None
