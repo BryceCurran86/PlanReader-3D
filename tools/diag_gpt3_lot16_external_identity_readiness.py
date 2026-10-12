@@ -115,13 +115,18 @@ def _trusted_source_receipts(
 
 def _frozen_external_locations(
     object_universe: Mapping[str, Any],
-) -> dict[tuple[float, float, float, float], Mapping[str, Any]]:
+) -> tuple[
+    dict[tuple[float, float, float, float], Mapping[str, Any]],
+    tuple[str, ...],
+]:
     if object_universe.get("project_id") != PROJECT:
         raise ValueError("wrong frozen object-universe project")
     rows = object_universe.get("external_openings")
     if not isinstance(rows, list):
         raise ValueError("frozen external-opening inventory unavailable")
     locations: dict[tuple[float, float, float, float], Mapping[str, Any]] = {}
+    unlocated: list[str] = []
+    seen_refs: set[str] = set()
     for row in rows:
         if not isinstance(row, Mapping):
             raise ValueError("frozen external opening must be a mapping")
@@ -133,6 +138,14 @@ def _frozen_external_locations(
             or not isinstance(attrs, Mapping)
         ):
             raise ValueError("frozen external opening source identity malformed")
+        if object_ref in seen_refs:
+            raise ValueError("frozen external opening object refs are not unique")
+        seen_refs.add(object_ref)
+        # Without an original PDF-coordinate bbox, identity must abstain.
+        # Never substitute object names, widths, item order or nearest geometry.
+        if "source_bbox_pdf_pt" not in attrs:
+            unlocated.append(object_ref)
+            continue
         box = _bbox(
             attrs.get("source_bbox_pdf_pt"),
             name=f"frozen bbox for {object_ref}",
@@ -141,7 +154,7 @@ def _frozen_external_locations(
         if key in locations:
             raise ValueError("frozen external source locations are not unique")
         locations[key] = row
-    return locations
+    return locations, tuple(sorted(unlocated))
 
 
 def _manifest_items_by_object(
@@ -255,7 +268,7 @@ def scan_external_identity_readiness(
     active_identity_map: Mapping[str, Any],
 ) -> dict[str, Any]:
     source_rows = _trusted_source_receipts(source_report)
-    frozen_by_location = _frozen_external_locations(object_universe)
+    frozen_by_location, unlocated = _frozen_external_locations(object_universe)
     items_by_object = _manifest_items_by_object(source_manifest)
     canonical_by_physical = _canonical_by_physical(source_report)
     sealed_physical, item_to_physical, physical_to_item = _signed_state(
@@ -343,10 +356,22 @@ def scan_external_identity_readiness(
     for rows in (active, pending, newly_sealed_unmapped):
         rows.sort(key=lambda row: row["benchmark_object_ref"])
 
+    # Active signed bindings require independently verified source-location
+    # parity; absent or shifted receipts must not silently vanish from audit.
+    active_physical = {row["physical_opening_id"] for row in active}
+    if active_physical != set(physical_to_item):
+        missing = sorted(set(physical_to_item) - active_physical)
+        raise ValueError(
+            "active identity lacks independently verified exact source-location parity: "
+            + ", ".join(missing)
+        )
+
     return {
         "project_id": PROJECT,
         "source_sha256": SOURCE_SHA256,
         "frozen_location_decimal_places": FROZEN_LOCATION_DECIMAL_PLACES,
+        "frozen_unlocated_object_count": len(unlocated),
+        "frozen_unlocated_object_refs": list(unlocated),
         "active_exact_identity_count": len(active),
         "active_exact_identities": active,
         "pending_identity_count": len(pending),

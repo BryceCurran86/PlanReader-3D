@@ -193,6 +193,62 @@ def test_duplicate_frozen_external_source_location_fails_closed():
         _scan(mutate=mutate)
 
 
+def test_unlocated_frozen_opening_is_explicitly_abstained_not_inferred():
+    def mutate(source, universe, manifest, sealed, active_map):
+        universe["external_openings"].append({
+            "object_ref": "external:hinged_without_native_label_bbox",
+            "attributes": {"opening_type": "hinged_external_entry_door", "width_m": 1.2},
+        })
+
+    report = _scan(mutate=mutate)
+    assert report["frozen_unlocated_object_count"] == 1
+    assert report["frozen_unlocated_object_refs"] == [
+        "external:hinged_without_native_label_bbox"
+    ]
+    assert report["active_exact_identity_count"] == 1
+    assert report["pending_identity_count"] == 1
+    assert report["newly_sealed_unmapped_count"] == 0
+    assert report["benchmark_score_granted"] is False
+    assert report["benchmark_accuracy"] is None
+
+
+def test_present_but_malformed_frozen_bbox_remains_hard_failure():
+    def mutate(source, universe, manifest, sealed, active_map):
+        universe["external_openings"][1]["attributes"]["source_bbox_pdf_pt"] = None
+
+    with pytest.raises(ValueError, match="must contain four coordinates"):
+        _scan(mutate=mutate)
+
+
+def test_duplicate_frozen_ref_with_unlocated_entry_is_rejected():
+    def mutate(source, universe, manifest, sealed, active_map):
+        universe["external_openings"].append({
+            "object_ref": "external:active",
+            "attributes": {"opening_type": "hinged_external_entry_door"},
+        })
+
+    with pytest.raises(ValueError, match="object refs are not unique"):
+        _scan(mutate=mutate)
+
+
+def test_shifted_active_source_location_fails_audit_not_silent_omission():
+    def mutate(source, universe, manifest, sealed, active_map):
+        source["opening_identity_text_receipts"][0]["label_bbox_pdf_pt"][0] += 0.06
+
+    with pytest.raises(ValueError, match="lacks independently verified exact source-location parity"):
+        _scan(mutate=mutate)
+
+
+def test_missing_active_source_receipt_fails_audit_not_silent_omission():
+    def mutate(source, universe, manifest, sealed, active_map):
+        source["opening_identity_text_receipts"] = source[
+            "opening_identity_text_receipts"
+        ][1:]
+
+    with pytest.raises(ValueError, match="lacks independently verified exact source-location parity"):
+        _scan(mutate=mutate)
+
+
 @pytest.mark.parametrize("fault", ["untrusted", "foreign_sha", "wrong_page"])
 def test_source_text_receipts_must_remain_original_and_trusted(fault):
     def mutate(source, universe, manifest, sealed, active_map):
