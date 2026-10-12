@@ -46,6 +46,9 @@ jobs:
               [
                   sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
                   "--pdf", str(matched[0]), "--page-index", "2",
+                  "--diagnostic-label", "BED",
+                  "--diagnostic-label", "2",
+                  "--diagnostic-label", "3",
                   "--output", "lot16-room-face-scope.json",
               ],
               check=True,
