@@ -480,7 +480,18 @@ def inspect_original_w4_grid_opposition_first_gate(
         )
         return output
     record = records[0]
-    raw_edges = _wall_edge_ids(record)
+    wall = getattr(record, "wall_candidate", None)
+    # The production helper stringifies W2 keys for backward compatibility.
+    # A diagnostic claiming *original native* W2 identities must inspect the
+    # untouched typed source fields BEFORE any string coercion.
+    raw_a = getattr(wall, "face_a_segment_ids", None)
+    raw_b = getattr(wall, "face_b_segment_ids", None)
+    if not isinstance(raw_a, (tuple, list)) or (
+        raw_b is not None and not isinstance(raw_b, (tuple, list))
+    ):
+        output["original_w4_grid_first_gate"] = "source_w2_fragment_identity_unavailable"
+        return output
+    raw_edges = (*raw_a, *(raw_b or ()))
     if (
         not raw_edges
         or any(
@@ -488,11 +499,10 @@ def inspect_original_w4_grid_opposition_first_gate(
             or edge != edge.strip()
             for edge in raw_edges
         )
-        or len(set(raw_edges)) != len(raw_edges)
     ):
         output["original_w4_grid_first_gate"] = "source_w2_fragment_identity_unavailable"
         return output
-    edges = tuple(sorted(raw_edges))
+    edges = tuple(sorted(set(raw_edges)))
     output["original_w2_edge_ids_diagnostic_only"] = list(edges)
     opposition: dict[str, set[str]] = {edge: set() for edge in edges}
     for atom in tuple(getattr(wall_scope, "typed_semantic_evidence_atoms", ()) or ()):
@@ -534,7 +544,8 @@ def inspect_original_w4_grid_opposition_first_gate(
         output["original_w2_fragment_source_receipts_diagnostic_only"].append({
             "original_w2_edge_id": edge,
             "native_source_primitive_ids": parents[:32],
-            "source_parent_receipts_complete": bool(parents),
+            "source_parent_receipts_typed": bool(parents),
+            "source_parent_membership_proven": False,
             "source_physical_role_inferred": False,
         })
     if missing:
