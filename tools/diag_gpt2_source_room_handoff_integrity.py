@@ -58,6 +58,73 @@ def _polygon(source):
     except (TypeError, ValueError, OverflowError, GEOSException):
         return False
 
+def original_polygon_first_failure_receipt(source):
+    """Explain the original ring failure without repairing or measuring it.
+
+    Page-space source geometry is not metric authority. Positive polygon
+    validity is necessary for a physical-room handoff but never sufficient
+    to publish a canonical floor, floor finish, or quantity.
+    """
+    result = {
+        "first_source_polygon_gate_diagnostic_only":
+            "source_polygon_coordinates_unavailable",
+        "original_native_polygon_vertex_count": 0,
+        "original_native_polygon_geos_reason_diagnostic_only": None,
+        "original_native_polygon_valid_diagnostic_only": False,
+        "original_polygon_repaired": False,
+        "metric_area_published_by_diagnostic": False,
+    }
+    vertices = getattr(source, "polygon_pdf_pts", None)
+    if not isinstance(vertices, (tuple, list)):
+        return result
+    result["original_native_polygon_vertex_count"] = len(vertices)
+    if len(vertices) < 3 or any(
+        not isinstance(point, (tuple, list)) or len(point) != 2
+        or any(
+            type(coordinate) not in (int, float)
+            or not math.isfinite(coordinate)
+            for coordinate in point
+        )
+        for point in vertices
+    ):
+        return result
+    native_area = getattr(source, "area_page_pts2", None)
+    if (
+        type(native_area) not in (int, float)
+        or not math.isfinite(native_area) or native_area <= 0
+    ):
+        result["first_source_polygon_gate_diagnostic_only"] = (
+            "source_page_area_receipt_unavailable"
+        )
+        return result
+    from shapely.errors import GEOSException
+    from shapely.geometry import Polygon
+    from shapely.validation import explain_validity
+    try:
+        polygon = Polygon(vertices)
+        if polygon.is_empty or polygon.area <= 0:
+            gate = "source_native_polygon_empty_or_nonpositive"
+        elif not polygon.is_valid:
+            gate = "source_native_polygon_invalid"
+        elif polygon.interiors:
+            gate = "source_native_polygon_has_interiors"
+        else:
+            gate = "source_native_polygon_valid_candidate_only"
+        result["first_source_polygon_gate_diagnostic_only"] = gate
+        result["original_native_polygon_valid_diagnostic_only"] = (
+            gate == "source_native_polygon_valid_candidate_only"
+        )
+        if not result["original_native_polygon_valid_diagnostic_only"]:
+            result["original_native_polygon_geos_reason_diagnostic_only"] = (
+                str(explain_validity(polygon))[:180]
+            )
+    except (GEOSException, TypeError, ValueError, OverflowError):
+        result["first_source_polygon_gate_diagnostic_only"] = (
+            "source_native_polygon_geos_unavailable"
+        )
+    return result
+
+
 def _source(obj,sha):
     return getattr(obj,"source_sha256",None)==sha
 
@@ -190,6 +257,7 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
         original_metric_evidence_ids=()
         original_metric_authority=None
         amount=None
+        native_ring_diagnostic=None
         if len(owners)>1:
             gate="ROOM_LABEL_MULTIPLE_SOURCE_FACES"
         elif len(owners)==1:
@@ -198,6 +266,12 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
             face_id=getattr(r,"source_room_face_record_id",None)
             label_id=getattr(r,"room_label_binding_record_id",None)
             texts=getattr(r,"room_label_evidence_ids",()) or ()
+            # Inspect only uniquely named, exact-source native geometry.
+            # Never use this geometric diagnostic to bypass lineage gates.
+            if (_source(r,original_source_sha) and _owned(room_id)
+                    and _owned(face_id) and room_ids[room_id]==1
+                    and face_ids[face_id]==1):
+                native_ring_diagnostic=original_polygon_first_failure_receipt(r)
             if (not _source(r,original_source_sha)
                     or not _owned(getattr(r,"document_id",None))
                     or not _owned(getattr(r,"revision_id",None))
@@ -270,6 +344,7 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
             "first_unproved_authority":gate,
             "original_physical_room_id":room_id if _owned(room_id) else None,
             "original_source_face_receipt_id":face_id if _owned(face_id) else None,
+            "original_polygon_source_validity_diagnostic_only":native_ring_diagnostic,
             "canonical_floor_id":floor_id if _owned(floor_id) else None,
             "original_label_binding_record_id":label_binding_id,
             "original_label_evidence_ids":list(original_label_evidence_ids),
