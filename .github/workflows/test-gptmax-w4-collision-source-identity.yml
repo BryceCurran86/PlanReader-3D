@@ -5,7 +5,11 @@ on:
       - pb_wall_room_topology_wall_assembly.py
       - pb_physical_wall_identity.py
       - pb_physical_wall_candidate_authority.py
+      - pb_source_room_face_authority.py
       - tests/test_gptmax_w4_collision_source_identity.py
+      - tests/test_gptmax_exact_duplicate_edge_source_rooms.py
+      - tests/test_source_room_face_ownership_evaluation_shadow_v1.py
+      - tests/test_source_room_face_pollution_guard_v1.py
       - docs/engineering/gptmax_w4_collision_source_identity.md
       - .github/workflows/test-gptmax-w4-collision-source-identity.yml
 jobs:
@@ -27,6 +31,7 @@ jobs:
       - name: Source-collision and wall equivalence regressions
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_gptmax_w4_collision_source_identity.py tests/test_wall_room_topology_wall_assembly.py tests/test_physical_wall_equivalence_candidate_eligibility.py tests/test_gptmax_w4_identity_abstention_shadow.py tests/test_gptmax_exact_split_parent_lineage_shadow.py
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_exact_duplicate_edge_source_rooms.py tests/test_source_room_face_local_ownership_abstain_v1.py tests/test_source_room_face_ownership_evaluation_shadow_v1.py tests/test_source_room_face_authority_v1.py tests/test_source_room_face_pollution_guard_v1.py tests/test_source_room_face_candidate_local_abstain_v1.py tests/test_source_room_face_boundary_local_recovery_v1.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   exact-original-source-parity:

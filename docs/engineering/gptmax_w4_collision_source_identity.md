@@ -106,3 +106,53 @@ abstentions. Add positive coverage for two separately owned chains with identica
 parent/geometry/junction facts, and a contradictory edge-address negative. No
 SAME/DISTINCT, viewport, role, host, count or metric authority is added. Repeat
 applicable exact-head source and CI gates after this correction.
+
+### Exact duplicate-edge ownership regression — required gate remains held
+
+Observed: corrected-head Maryborough grid CI failed with zero canonical rooms
+and floors. Unchanged main locally retains 687 room/floor candidates; the changed
+head retains none. No typed W4 collision exception occurs. The source room-face
+compiler `_derive_scope_outcome` in `pb_source_room_face_authority.py` returns a
+whole-scope `source_room_face_duplicate_edge` negative when two unique candidate
+addresses own the same normalized edge. The earlier reused address hid that
+competition. Its existing collinear-overlap path already localizes ambiguity to
+faces whose boundary shares the actual competing span. The shadow ownership
+evaluator has the same early whole-scope duplicate-edge return.
+
+Inference: preserving both source owners must not elect either one. It also
+must not erase unrelated independently owned rings. Exact duplicate-edge
+competition can use the same existing competing-span taint as other collinear
+ownership ambiguity. Geometry-only planarization may collapse repeated identical
+edge coordinates while the complete source-owner alternatives remain explicit.
+
+Proposed: remove exact duplicate keys from the unique-owner lookup; retain all
+candidate owners through the existing containment lookup; planarize unique
+geometric edges using the current face extractor; seed the existing competing
+span inventory with each exact duplicated edge and all its source-owner IDs.
+Apply the unchanged positive collinear-overlap predicate to withhold every
+adjacent affected face. Keep source-universe completeness false whenever duplicate
+ownership exists, even if the span does not bound a surviving ring. Make the
+shadow ownership census use the same unique-owner lookup, rather than returning
+before it can report affected faces. No source owner, physical equivalence or
+geometric tolerance is selected or changed.
+
+Required proof: a duplicated room boundary remains withheld; unrelated owned
+rooms keep exact original rings and IDs; order/reversal/transformation/rechunking
+and no-mutation checks; complete source-owner alternatives and incomplete
+universe retained; actual original Maryborough Food Prep, Cold Room and Office
+controls and canonical floors preserved by new exact-head CI. Do not merge this
+PR or weaken the existing source metric controls if those gates still fail.
+
+The focused proof found an additional legacy exact-match ambiguity: rechunking
+an alternate source edge could make its short fragment an exact lookup winner,
+masking the other wall that contains it. The live competing-span inventory now
+also retains all source edges with multiple containing owners before face
+subdivision. This is a stricter negative, and uses the same containment predicate
+and spatial index. It neither broadens tolerances nor accepts a face formerly
+blocked by contamination. The diagnostic per-edge audit remains descriptive;
+its exact-key findings cannot override the live full-span abstention.
+
+The one pollution fixture whose specks overlap a real room boundary still
+publishes nothing; its correctly identified first reason changes from generic
+degenerate cells to source boundary competition. The half/majority pollution,
+missing ownership, component, boundary-taint and completeness guards are intact.

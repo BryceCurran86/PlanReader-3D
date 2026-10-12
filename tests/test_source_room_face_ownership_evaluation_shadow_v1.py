@@ -137,13 +137,15 @@ def test_competing_owner_face_is_listed_while_the_whole_scope_still_blocks() -> 
     assert not evaluation.is_face_ownership_clean(finding.face_id)
 
 
-def test_exact_edge_ownership_remains_authoritative_like_the_legacy_rule() -> None:
-    # The overlapping partition fragment owns its exact planarized edge, so the
-    # legacy rule accepts it; the shadow must classify it identically.
+def test_exact_edge_match_cannot_hide_an_overlapping_source_owner() -> None:
+    # A shorter exact match cannot erase the other source wall containing it.
+    # Both rooms touch this conflicting partition, so no room can publish.
     records = _two_rooms() + [_record("dup-part", (10.0, 2.0), (10.0, 8.0))]
     result = R._derive_scope(_scope(records))
 
-    assert result.status is EvidenceResolutionStatus.CORROBORATED
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert R.SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED in result.reason_codes
     assert result.ownership_evaluation.unresolved_faces == ()
 
 
@@ -208,8 +210,6 @@ def test_degenerate_owned_faces_use_the_existing_rule_and_match_legacy_abstentio
         (_scope(_two_rooms(), status=EvidenceResolutionStatus.ABSTAINED),
          "ownership_evaluation_scope_not_corroborated"),
         (_scope([]), "ownership_evaluation_no_wall_records"),
-        (_scope(_two_rooms() + [_record("twin", (0.0, 0.0), (20.0, 0.0))]),
-         "ownership_evaluation_duplicate_edge_ownership"),
     ],
 )
 def test_scopes_that_never_reach_the_face_stage_are_not_evaluated(scope, reason) -> None:
