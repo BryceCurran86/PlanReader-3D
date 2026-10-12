@@ -105,6 +105,9 @@ def compare_source_membership(before: dict, after: dict) -> dict:
             changes.append({
                 "path": path, "before_count": len(a), "after_count": len(b),
                 "added_count": len(added), "removed_count": len(removed),
+                # Retain every exact source identity for independent source-proof review.
+                # A truncated preview cannot reconcile all changed hypotheses.
+                "added_ids": added, "removed_ids": removed,
                 "added_ids_sample": added[:8], "removed_ids_sample": removed[:8],
             })
 
