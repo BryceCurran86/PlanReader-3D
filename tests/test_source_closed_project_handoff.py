@@ -969,3 +969,38 @@ def test_preflight_only_failed_attempt_may_reuse_output_without_signed_evidence(
     assert preflight["benchmark_score_granted"] is False
     assert summary["status"] == "production_failed"
     assert not (output / "project-a.json").exists()
+
+
+def test_interrupted_new_source_attempt_writes_unsealed_summary_first(tmp_path, monkeypatch):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"source-pdf-payload")
+    output = tmp_path / "handoff-output"
+    output.mkdir()
+    # An earlier incomplete run left misleading summary metadata but no
+    # actual signed files. It must not be carried into a newly killed run.
+    (output / "production_summary.json").write_text(
+        '{"status":"sealed","combined_run_file":"missing-old-run.json"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _interrupted(*args, **kwargs):
+        raise KeyboardInterrupt("external interruption during producer")
+
+    monkeypatch.setattr(
+        handoff, "collect_live_physical_net_wall_claim", _interrupted,
+    )
+    with pytest.raises(KeyboardInterrupt, match="external interruption"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    import json
+    summary = json.loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["status"] == "source_attempt_recorded_unsealed"
+    assert summary["benchmark_score_granted"] is False
+    assert summary["reconciliation_complete"] is False
+    assert summary["combined_run_file"] is None
+    assert not (output / "project-a.json").exists()
