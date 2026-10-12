@@ -112,3 +112,32 @@ def test_original_g17_transaction_rechecks_competitor_mutated_during_proof(
     finally:
         stored[key] = original_record
     assert _proof(source, published, physical)
+
+
+def test_failed_source_batch_evicts_only_affected_snapshot_negative_memos():
+    source, published, _ = _source(page_count=1)
+    physical = source.physical_opening_authority()
+    affected = published.snapshot.snapshot_id
+    unaffected = "independent-other-snapshot"
+    damaged_key = ("doc", "rev", "sha", affected, "observation")
+    intact_key = ("doc", "rev", "sha", unaffected, "observation")
+    physical._visible_source_result_cache[damaged_key] = object()
+    preserved = object()
+    physical._visible_source_result_cache[intact_key] = preserved
+    physical._visible_candidate_cache[damaged_key] = ()
+    physical._visible_snapshot_cache[("doc", "rev", "sha", affected)] = ((), ())
+    physical._visible_snapshot_cache[("doc", "rev", "sha", unaffected)] = ((), ())
+    physical._visible_existence_cache[damaged_key] = object()
+    physical._wall_source_opening_page_proof_cache[
+        ("doc", "rev", "sha", affected, "page", "scope")
+    ] = ()
+
+    physical._invalidate_snapshot_caches_after_failed_source_batch(affected)
+
+    assert damaged_key not in physical._visible_source_result_cache
+    assert damaged_key not in physical._visible_candidate_cache
+    assert damaged_key not in physical._visible_existence_cache
+    assert ("doc", "rev", "sha", affected) not in physical._visible_snapshot_cache
+    assert not physical._wall_source_opening_page_proof_cache
+    assert physical._visible_source_result_cache[intact_key] is preserved
+    assert ("doc", "rev", "sha", unaffected) in physical._visible_snapshot_cache
