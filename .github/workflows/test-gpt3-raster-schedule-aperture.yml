@@ -5,6 +5,12 @@ on:
     branches:
       - main
 
+# Cancel superseded raster evidence jobs for the same PR. Do not cancel
+# independent PRs or bypass the latest-head source test itself.
+concurrency:
+  group: gpt3-raster-schedule-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
