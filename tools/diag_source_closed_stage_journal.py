@@ -34,6 +34,7 @@ from typing import Any, Iterable, Iterator
 import pb_live_physical_net_wall_integration as integration
 import pb_physical_wall_candidate_authority as wall_candidates
 from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
+from pb_physical_opening_authority import PhysicalOpeningAuthority
 from tools.run_source_closed_project_handoff import generate_project_handoff
 
 
@@ -80,7 +81,9 @@ class StageJournal:
 
     def emit(self, *, stage: str, event: str, call_id: int,
              elapsed_ms: float | None = None, error_type: str | None = None,
-             source_page_id: str | None = None) -> None:
+             source_page_id: str | None = None,
+             observation_calls: int | None = None,
+             cumulative_ms: float | None = None) -> None:
         payload: dict[str, Any] = {
             "diagnostic_only": True,
             "stage": stage,
@@ -96,6 +99,10 @@ class StageJournal:
             payload["error_type"] = error_type
         if source_page_id is not None:
             payload["source_page_id"] = source_page_id
+        if observation_calls is not None:
+            payload["observation_calls"] = observation_calls
+        if cumulative_ms is not None:
+            payload["cumulative_ms"] = round(cumulative_ms, 3)
         self._stream.write(json.dumps(payload, sort_keys=True) + "\n")
         self._stream.flush()
         os.fsync(self._stream.fileno())
@@ -156,6 +163,46 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
 
             setattr(owner, name, wrapper_factory(original, label))
             originals.append((owner, name, original))
+
+        # Report bounded progress during the original semantic opening scan.
+        # Classification is called per source observation and a per-call fsync
+        # would itself distort performance; emit only one sample per 256 calls.
+        # This wrapper neither selects nor skips an observation, and never
+        # changes the original authority's result, selector or exception.
+        classifier = PhysicalOpeningAuthority.classify_disposition
+        classifier_calls = 0
+        classifier_elapsed_ns = 0
+
+        @wraps(classifier)
+        def sampled_classification(*args, **kwargs):
+            nonlocal classifier_calls, classifier_elapsed_ns
+            started = monotonic_ns()
+            try:
+                result = classifier(*args, **kwargs)
+            except BaseException as exc:
+                classifier_elapsed_ns += monotonic_ns() - started
+                journal.emit(
+                    stage="PhysicalOpeningAuthority.classify_disposition",
+                    event="failed", call_id=journal.next_id(),
+                    elapsed_ms=(monotonic_ns() - started) / 1_000_000,
+                    observation_calls=classifier_calls,
+                    cumulative_ms=classifier_elapsed_ns / 1_000_000,
+                    error_type=type(exc).__name__,
+                )
+                raise
+            classifier_elapsed_ns += monotonic_ns() - started
+            classifier_calls += 1
+            if classifier_calls % 256 == 0:
+                journal.emit(
+                    stage="PhysicalOpeningAuthority.classify_disposition",
+                    event="sample", call_id=journal.next_id(),
+                    observation_calls=classifier_calls,
+                    cumulative_ms=classifier_elapsed_ns / 1_000_000,
+                )
+            return result
+
+        PhysicalOpeningAuthority.classify_disposition = sampled_classification
+        originals.append((PhysicalOpeningAuthority, "classify_disposition", classifier))
         yield
     finally:
         for owner, name, original in reversed(originals):
