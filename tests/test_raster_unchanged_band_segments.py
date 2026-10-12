@@ -159,3 +159,58 @@ def test_actual_source_capture_closes_host_and_figured_area_without_default_coun
     assert quantities[0].abstained is False
     assert voids.canonical_openings[0].schedule_count_explicit is False
     assert voids.canonical_openings[0].schedule_declared_count is None
+
+
+def test_existing_raster_w2_input_order_survives_additive_terminal_observations(monkeypatch):
+    """New source-backed flanks must not reindex unrelated historical inputs."""
+    from pb_physical_wall_candidate_authority import _source_page_segments
+
+    original_bytes = _pdf()
+
+    def original_segments(*, include_terminal):
+        source = SourceVisibilityProducer(
+            producer_method="terminal-order-regression", producer_version="1",
+        )
+        initial = source.ingest_native_pdf_bytes(
+            document_id="terminal-order-regression", source_bytes=original_bytes,
+            source_locator="memory://terminal-order-regression.pdf",
+        )
+        revision_id = initial.revision.revision_id
+        source.augment_with_raster_opening_primitives(revision_id)
+        if not include_terminal:
+            with monkeypatch.context() as context:
+                context.setattr(
+                    "pb_source_visibility_authority.detect_unchanged_terminal_band_segments",
+                    lambda *args, **kwargs: (),
+                )
+                source.augment_with_raster_visible_segments(revision_id)
+        else:
+            source.augment_with_raster_visible_segments(revision_id)
+        published = source.published_snapshot_for_revision(revision_id)
+        segments, _ids, _width, _height = _source_page_segments(
+            source_producer=source,
+            published=published,
+            source_bytes=original_bytes,
+            page_id="1",
+            decision_scope_id="wall-source:page-1",
+        )
+        return tuple(
+            segment["id"]
+            for segment in segments
+            if str(segment["id"]).startswith("raster_segment:")
+        )
+
+    original = original_segments(include_terminal=False)
+    extended = original_segments(include_terminal=True)
+    ordinary = tuple(
+        sid for sid in extended
+        if f":{capture.UNCHANGED_BAND_IDENTITY_VERSION}:" not in sid
+    )
+    added = tuple(
+        sid for sid in extended
+        if f":{capture.UNCHANGED_BAND_IDENTITY_VERSION}:" in sid
+    )
+    assert original, "original raster-visible source geometry is required"
+    assert added, "new authenticated supplemental raster segments are required"
+    assert ordinary == original, "old raster observation order and W2 IDs must be retained"
+    assert extended == (*original, *added), "new source bands must follow all old sources"
