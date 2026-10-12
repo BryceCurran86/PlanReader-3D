@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_room_face_authority import (
+    SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED,
     SOURCE_ROOM_FACE_DEGENERATE,
     SOURCE_ROOM_FACE_SCOPE_RESOLVED,
     _derive_scope,
@@ -98,7 +99,13 @@ def test_heavily_polluted_scope_publishes_no_arbitrary_cells() -> None:
         _record("p1", (10.0, 0.0), (10.0, 10.0)),
         _record("p2", (20.0, 0.0), (20.0, 10.0)),
     ]
-    _assert_whole_scope_degenerate(_derive_scope(_scope(rooms + _specks(8))))
+    result = _derive_scope(_scope(rooms + _specks(8)))
+    # These specks also overlap the hall's real boundary. Retained source
+    # ownership competition now blocks before the degenerate-cell gate.
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.scope_complete is False
+    assert result.records == () and result.abstained_faces == ()
+    assert SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED in result.reason_codes
 
 
 def test_only_degenerate_faces_still_fails_closed() -> None:

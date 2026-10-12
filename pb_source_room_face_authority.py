@@ -811,12 +811,18 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     wall_ids = tuple(sorted(wall_edges))
     if not wall_ids:
         return _blocked(scope, SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE)
-    if duplicate_edges:
-        return _blocked(scope, SOURCE_ROOM_FACE_DUPLICATE_EDGE)
+    # Repeated geometry has multiple source owners. Remove it from the unique
+    # lookup, retaining every owner in wall_edges for the existing competing-
+    # span path below. A source address is never elected by iteration order.
+    for edge in duplicate_edges:
+        edge_owner.pop(edge, None)
 
     raw_segments = [
         (edge[0], edge[1]) for wall_id in wall_ids for edge in wall_edges[wall_id]
     ]
+    if duplicate_edges:
+        # Geometry-only planarization; source ownership remains plural above.
+        raw_segments = list(dict.fromkeys(raw_segments))
     raw_faces = extract_planar_faces(raw_segments, min_area=1e-6)
 
     polygons: dict[str, tuple[Point, ...]] = {}
@@ -824,10 +830,27 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     face_wall_edges: dict[str, tuple[tuple[str, Edge], ...]] = {}
     face_areas: dict[str, float] = {}
     directly_competing_face_ids: set[str] = set()
-    competing_spans: set[Edge] = set()
+    competing_spans: set[Edge] = set(duplicate_edges)
     competing_span_wall_ids: dict[Edge, set[str]] = defaultdict(set)
+    for edge in duplicate_edges:
+        competing_span_wall_ids[edge].update(
+            wall_id for wall_id, edges in wall_edges.items() if edge in edges
+        )
     missing_owner_seen = False
     ownership_grid, ownership_oversized = _ownership_edge_index(wall_edges)
+
+    # A source owner must not become unique merely because a competitor was
+    # rechunked into shorter collinear edges. Retain containment competition
+    # before the planarizer chooses the boundary's subdivision.
+    for edges in wall_edges.values():
+        for edge in edges:
+            containing = _containing_wall_ids(
+                edge, grid=ownership_grid, oversized=ownership_oversized,
+                wall_edges=wall_edges,
+            )
+            if len(containing) > 1:
+                competing_spans.add(edge)
+                competing_span_wall_ids[edge].update(containing)
 
     for raw_face in raw_faces:
         polygon = _canonical_polygon(raw_face)
@@ -929,7 +952,9 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             missing_owner_seen = True
 
     if not polygons or missing_owner_seen:
-        return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+        return _blocked(scope, SOURCE_ROOM_FACE_DUPLICATE_EDGE
+                        if duplicate_edges and not missing_owner_seen
+                        else SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
     # The planarizer is not stable about WHICH adjacent face receives a doubled
     # collinear edge. Stabilize the live decision by tainting every face whose
@@ -971,7 +996,8 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         set(polygons) - ownership_tainted_face_ids - boundary_tainted_face_ids
     )
     if not ownership_clean_face_ids:
-        return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
+        return _blocked(scope, SOURCE_ROOM_FACE_DUPLICATE_EDGE
+                        if duplicate_edges else SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
     # Tiny/degenerate classification is evaluated only over boundary- and
     # ownership-clean faces. A contaminated giant must never make an otherwise
@@ -996,6 +1022,9 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     if locally_withheld_face_ids and 2 * len(locally_withheld_face_ids) >= len(polygons):
         return _blocked(
             scope,
+            SOURCE_ROOM_FACE_DUPLICATE_EDGE
+            if duplicate_edges and ownership_tainted_face_ids
+            else
             SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED
             if ownership_tainted_face_ids or boundary_tainted_face_ids
             else SOURCE_ROOM_FACE_DEGENERATE,
@@ -1164,10 +1193,11 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         records=tuple(output),
         reason_codes=(
             SOURCE_ROOM_FACE_SCOPE_RESOLVED,
+            *((SOURCE_ROOM_FACE_DUPLICATE_EDGE,) if duplicate_edges else ()),
             *((SOURCE_ROOM_FACE_BOUNDARY_LOCAL_RECOVERY,) if boundary_local_recovery else ()),
             *(
                 (SOURCE_ROOM_FACE_UNIVERSE_PARTIAL,)
-                if abstained or boundary_local_recovery
+                if abstained or boundary_local_recovery or duplicate_edges
                 else ()
             ),
         ),
@@ -1385,10 +1415,8 @@ def _shadow_ownership_evaluation(scope: object) -> SourceRoomFaceOwnershipEvalua
             return SourceRoomFaceOwnershipEvaluation(
                 reason_code="ownership_evaluation_no_wall_edges"
             )
-        if duplicate_edges:
-            return SourceRoomFaceOwnershipEvaluation(
-                reason_code="ownership_evaluation_duplicate_edge_ownership"
-            )
+        for edge in duplicate_edges:
+            edge_owner.pop(edge, None)
         if sum(len(edges) for edges in wall_edges.values()) > _OWNERSHIP_EVALUATION_MAX_EDGES:
             return SourceRoomFaceOwnershipEvaluation(
                 reason_code="ownership_evaluation_scope_too_large"
@@ -1396,6 +1424,8 @@ def _shadow_ownership_evaluation(scope: object) -> SourceRoomFaceOwnershipEvalua
         raw_segments = [
             (edge[0], edge[1]) for wall_id in sorted(wall_edges) for edge in wall_edges[wall_id]
         ]
+        if duplicate_edges:
+            raw_segments = list(dict.fromkeys(raw_segments))
         raw_faces = extract_planar_faces(raw_segments, min_area=1e-6)
         evaluation = _evaluate_face_ownership(
             scope,
