@@ -53,6 +53,7 @@ def _physical_union_first_unclosed_gate(
         "physical_union_merged_geometry_type_observed_only": None,
         "physical_union_external_grid_edge_count": 0,
         "physical_union_external_grid_w4_ids_diagnostic_only": [],
+        "physical_union_external_grid_atomic_subedges_diagnostic_only": [],
         "physical_union_internal_separator_edge_count": 0,
         "invalid_constituent_source_face_receipts_diagnostic_only": [],
         "first_invalid_internal_wall_receipt_diagnostic_only": None,
@@ -215,6 +216,31 @@ def _physical_union_first_unclosed_gate(
     # they remain unowned/diagnostic and are not used as a geometry repair.
     result["physical_union_external_grid_w4_ids_diagnostic_only"] = external_grid_ids[:24]
     result["physical_union_external_grid_w4_id_count"] = len(external_grid_ids)
+    # Preserve the exact *original* source W4 atomic edge and producer face
+    # owner receipt behind each external GRID boundary. A W4 ID alone hides
+    # which part of a long grid wall remains unclosed. These identities are
+    # diagnostic only: no adjacency, wall equivalence or geometry is invented.
+    grid_external_edges = sorted(
+        (wall_id, edge) for wall_id, edge in external
+        if wall_id in fully_grid_wall_ids
+    )
+    result["physical_union_external_grid_atomic_subedges_diagnostic_only"] = [
+        {
+            "original_w4_wall_id": wall_id,
+            "original_atomic_wall_edge_pdf_pts": [list(pt) for pt in edge],
+            "source_component_face_ids": sorted(
+                face_id for face_id, count
+                in local.get((wall_id, edge), {}).items()
+                if face_id in component_set and count == 1
+            ),
+            "original_global_source_face_ids": list(
+                owners.get((wall_id, edge), ())
+            ),
+            "source_edge_used_to_mint_physical_room": False,
+            "new_wall_or_room_equivalence_inferred": False,
+        }
+        for wall_id, edge in grid_external_edges[:48]
+    ]
     if not internal or not external:
         result["physical_union_first_unclosed_gate"] = (
             "source_internal_or_external_boundary_not_complete"
