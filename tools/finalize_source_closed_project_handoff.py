@@ -12,8 +12,11 @@ quantities, tolerances, identity maps, or scoring logic are read here.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +24,36 @@ from pb_combine_source_closed_runs import combine_sealed_run_files
 
 
 GROUPS = ("core", "surfaces")
+
+
+def _receipt_sha256(path: Path) -> str:
+    """Read source-signed JSON bytes without parsing gold or trusting mtime."""
+    digest = hashlib.sha256()
+    with path.open("rb") as reader:
+        for chunk in iter(lambda: reader.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _atomic_write_complete(path: Path, contents: str) -> None:
+    """Write full verified output before publishing the final pathname."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as writer:
+            temporary = Path(writer.name)
+            writer.write(contents)
+            writer.flush()
+            os.fsync(writer.fileno())
+        # The caller holds a per-output-directory exclusive finalizer lock.
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(f"existing final customer artifact: {path}")
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def finalize_split_project_handoff(
@@ -50,13 +83,24 @@ def finalize_split_project_handoff(
             f"no split sealed runs found for project {clean_project_id!r}"
         )
 
+    # A producer receipt is an immutable signed source input. If it is
+    # replaced while finalizing, never publish an aggregate from mixed bytes.
+    input_hashes = {group: _receipt_sha256(path) for group, path in available}
     combined = combine_sealed_run_files(
         [path for _, path in available],
         project_id=clean_project_id,
     )
-    target_dir.mkdir(parents=True, exist_ok=True)
+    if any(_receipt_sha256(path) != input_hashes[group] for group, path in available):
+        raise ValueError("signed source group changed during finalization")
+    # Reusing a finalizer destination must never mutate an earlier sealed
+    # customer run or source group. A symlinked directory can redirect signed
+    # output to another workspace without a visible filename collision.
+    if target_dir.is_symlink():
+        raise FileExistsError("finalized customer directory cannot be a symlink")
     output_path = target_dir / f"{clean_project_id}.json"
-    output_path.write_text(combined.to_json(), encoding="utf-8")
+    summary_path = target_dir / f"{clean_project_id}.handoff-summary.json"
+    if any(path.exists() or path.is_symlink() for path in (output_path, summary_path)):
+        raise FileExistsError("existing finalized customer run: use a new output directory")
 
     summary = {
         "schema_version": "1.0.0",
@@ -64,6 +108,14 @@ def finalize_split_project_handoff(
         "available_groups": [group for group, _ in available],
         "missing_groups": missing,
         "complete_group_set": not missing,
+        # Signed group availability does not prove four-project frozen V2
+        # reconciliation or a benchmark accuracy numerator.
+        "publication_status": (
+            "SOURCE_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+            if not missing else "PARTIAL_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+        ),
+        "benchmark_score_granted": False,
+        "frozen_v2_reconciliation_complete": False,
         "input_files": {group: str(path) for group, path in available},
         "output_file": str(output_path),
         "run_id": combined.run_id,
@@ -71,11 +123,19 @@ def finalize_split_project_handoff(
         "revision_ids": list(combined.revision_ids),
         "quantity_count": len(combined.quantities),
     }
-    summary_path = target_dir / f"{clean_project_id}.handoff-summary.json"
-    summary_path.write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    lock = target_dir / ".source_closed_handoff.lock"
+    # Per-folder O_EXCL rejects overlapping finalizers or crash-stale locks;
+    # a crash never grants permission to overwrite the previous sealed run.
+    descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        if any(path.exists() or path.is_symlink() for path in (output_path, summary_path)):
+            raise FileExistsError("existing finalized customer run: use a new output directory")
+        _atomic_write_complete(output_path, combined.to_json())
+        _atomic_write_complete(summary_path, json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    finally:
+        os.close(descriptor)
+        lock.unlink(missing_ok=True)
     return summary
 
 

@@ -63,6 +63,9 @@ def test_finalizer_combines_core_and_surfaces_into_scoreboard_shape(tmp_path) ->
     assert summary["available_groups"] == ["core", "surfaces"]
     assert summary["missing_groups"] == []
     assert summary["complete_group_set"] is True
+    assert summary["publication_status"] == "SOURCE_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+    assert summary["benchmark_score_granted"] is False
+    assert summary["frozen_v2_reconciliation_complete"] is False
     assert summary["quantity_count"] == 2
     payload = json.loads((tmp_path / f"{project_id}.json").read_text(encoding="utf-8"))
     assert payload["project_id"] == project_id
@@ -83,6 +86,9 @@ def test_finalizer_reports_missing_group_without_inventing_it(tmp_path) -> None:
     assert summary["available_groups"] == ["core"]
     assert summary["missing_groups"] == ["surfaces"]
     assert summary["complete_group_set"] is False
+    assert summary["publication_status"] == "PARTIAL_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+    assert summary["benchmark_score_granted"] is False
+    assert summary["frozen_v2_reconciliation_complete"] is False
     assert summary["quantity_count"] == 1
     payload = json.loads((tmp_path / f"{project_id}.json").read_text(encoding="utf-8"))
     assert [row["quantity_id"] for row in payload["quantities"]] == ["q-core"]
@@ -108,3 +114,178 @@ def test_finalizer_requires_at_least_one_split_run(tmp_path) -> None:
             project_id="project-a",
             input_dir=tmp_path,
         )
+
+
+def test_previous_finalized_signed_run_is_immutable_on_rerun(tmp_path) -> None:
+    project = "project-a"
+    original = _run("q-core", "opening-1")
+    (tmp_path / f"{project}.core.json").write_text(original.to_json(), encoding="utf-8")
+    finalizer.finalize_split_project_handoff(project_id=project, input_dir=tmp_path)
+    signed = tmp_path / f"{project}.json"
+    summary = tmp_path / f"{project}.handoff-summary.json"
+    original_output = signed.read_bytes()
+    original_summary = summary.read_bytes()
+    with pytest.raises(FileExistsError, match="existing finalized customer run"):
+        finalizer.finalize_split_project_handoff(project_id=project, input_dir=tmp_path)
+    assert signed.read_bytes() == original_output
+    assert summary.read_bytes() == original_summary
+    assert (tmp_path / f"{project}.core.json").read_text(encoding="utf-8") == original.to_json()
+    assert not (tmp_path / ".source_closed_handoff.lock").exists()
+
+
+@pytest.mark.parametrize("name", [
+    "project-a.json", "project-a.handoff-summary.json",
+])
+def test_finalizer_rejects_existing_combined_or_summary_before_output_changes(
+    tmp_path, name,
+):
+    run = _run("q-core", "opening-1")
+    (tmp_path / "project-a.core.json").write_text(run.to_json(), encoding="utf-8")
+    output = tmp_path / "destination"
+    output.mkdir()
+    old = output / name
+    old.write_bytes(b"previous finalized customer artifact")
+    with pytest.raises(FileExistsError, match="existing finalized customer run"):
+        finalizer.finalize_split_project_handoff(
+            project_id="project-a", input_dir=tmp_path, output_dir=output,
+        )
+    assert old.read_bytes() == b"previous finalized customer artifact"
+    assert not (output / ".source_closed_handoff.lock").exists()
+
+
+def test_finalizer_rejects_dangling_finalized_output_symlink(tmp_path):
+    run = _run("q-core", "opening-1")
+    (tmp_path / "project-a.core.json").write_text(run.to_json(), encoding="utf-8")
+    output = tmp_path / "destination"
+    output.mkdir()
+    link = output / "project-a.json"
+    link.symlink_to(tmp_path / "missing-original.json")
+    with pytest.raises(FileExistsError, match="existing finalized customer run"):
+        finalizer.finalize_split_project_handoff(
+            project_id="project-a", input_dir=tmp_path, output_dir=output,
+        )
+    assert link.is_symlink()
+    assert not (tmp_path / "missing-original.json").exists()
+
+
+def test_finalizer_rejects_redirected_output_directory(tmp_path):
+    run = _run("q-core", "opening-1")
+    (tmp_path / "project-a.core.json").write_text(run.to_json(), encoding="utf-8")
+    foreign = tmp_path / "other-customer"
+    foreign.mkdir()
+    output = tmp_path / "redirect"
+    output.symlink_to(foreign, target_is_directory=True)
+    with pytest.raises(FileExistsError, match="directory cannot be a symlink"):
+        finalizer.finalize_split_project_handoff(
+            project_id="project-a", input_dir=tmp_path, output_dir=output,
+        )
+    assert list(foreign.iterdir()) == []
+
+
+def test_existing_finalizer_lock_blocks_concurrent_writer(tmp_path):
+    run = _run("q-core", "opening-1")
+    (tmp_path / "project-a.core.json").write_text(run.to_json(), encoding="utf-8")
+    output = tmp_path / "destination"
+    output.mkdir()
+    lock = output / ".source_closed_handoff.lock"
+    lock.write_bytes(b"other original source finalization running")
+    with pytest.raises(FileExistsError):
+        finalizer.finalize_split_project_handoff(
+            project_id="project-a", input_dir=tmp_path, output_dir=output,
+        )
+    assert lock.read_bytes() == b"other original source finalization running"
+    assert not (output / "project-a.json").exists()
+
+
+def test_interrupted_combined_write_does_not_leave_partially_sealed_file(
+    tmp_path, monkeypatch,
+):
+    run = _run("q-core", "opening-1")
+    source = tmp_path / "project-a.core.json"
+    source.write_text(run.to_json(), encoding="utf-8")
+    output = tmp_path / "destination"
+
+    def _abort(*args, **kwargs):
+        raise OSError("simulated atomic publication interruption")
+
+    monkeypatch.setattr(finalizer.os, "replace", _abort)
+    with pytest.raises(OSError, match="simulated atomic publication interruption"):
+        finalizer.finalize_split_project_handoff(
+            project_id="project-a", input_dir=tmp_path, output_dir=output,
+        )
+    assert source.read_text(encoding="utf-8") == run.to_json()
+    assert not (output / "project-a.json").exists()
+    assert not (output / "project-a.handoff-summary.json").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
+    assert not list(output.glob("*.tmp"))
+    assert not list(output.glob(".*.tmp"))
+
+
+@pytest.mark.parametrize("mutation", ["swap_valid_signed_run", "remove_signed_source"])
+def test_signed_source_replaced_during_combination_cannot_publish(
+    tmp_path, monkeypatch, mutation,
+):
+    original = _run("q-original", "opening-original")
+    replacement = _run("q-replacement", "opening-replacement")
+    core = tmp_path / "project-a.core.json"
+    core.write_text(original.to_json(), encoding="utf-8")
+    output = tmp_path / "never-publish"
+    actual_combine = finalizer.combine_sealed_run_files
+
+    def _malicious_midflight_swap(paths, *, project_id):
+        signed_result = actual_combine(paths, project_id=project_id)
+        if mutation == "swap_valid_signed_run":
+            core.write_text(replacement.to_json(), encoding="utf-8")
+        else:
+            core.unlink()
+        return signed_result
+
+    monkeypatch.setattr(
+        finalizer, "combine_sealed_run_files", _malicious_midflight_swap,
+    )
+    with pytest.raises(
+        (ValueError, FileNotFoundError),
+        match="signed source group changed|No such file",
+    ):
+        finalizer.finalize_split_project_handoff(
+            project_id="project-a", input_dir=tmp_path, output_dir=output,
+        )
+    assert not output.exists()
+    assert not (tmp_path / "project-a.json").exists()
+    if mutation == "swap_valid_signed_run":
+        assert core.read_text(encoding="utf-8") == replacement.to_json()
+
+
+def test_active_live_source_handoff_excludes_split_finalizer_same_customer_directory(
+    tmp_path, monkeypatch,
+):
+    """The two publication entrypoints must honour the SAME output lock."""
+    from tools import run_source_closed_project_handoff as live_handoff
+
+    signed = _run("q-core", "opening-1")
+    (tmp_path / "project-a.core.json").write_text(signed.to_json(), encoding="utf-8")
+    source_pdf = tmp_path / "source.pdf"
+    source_pdf.write_bytes(b"test source payload")
+    output = tmp_path / "shared-customer-output"
+    monkeypatch.setattr(live_handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _during_original_source_run(*args, **kwargs):
+        assert (output / ".source_closed_handoff.lock").is_file()
+        with pytest.raises(FileExistsError):
+            finalizer.finalize_split_project_handoff(
+                project_id="project-a", input_dir=tmp_path, output_dir=output,
+            )
+        raise RuntimeError("test producer halted before any signed publication")
+
+    monkeypatch.setattr(
+        live_handoff, "collect_live_physical_net_wall_claim",
+        _during_original_source_run,
+    )
+    with pytest.raises(RuntimeError, match="test producer halted"):
+        live_handoff.generate_project_handoff(
+            pdf_path=source_pdf, project_id="project-a",
+            workspace_id=1, output_dir=output, family_group="core",
+        )
+    assert source_pdf.read_bytes() == b"test source payload"
+    assert not (output / "project-a.json").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
