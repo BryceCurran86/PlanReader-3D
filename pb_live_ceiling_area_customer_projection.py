@@ -64,14 +64,18 @@ def _measurement_authority(
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
     authority = _clean(quantity.authority)
     if authority == MeasurementAuthorityType.DOCUMENTED_DIMENSION.value:
-        raw = metadata.get("figured_dimension_ids") or ()
-        if isinstance(raw, (str, bytes)):
-            raw = (raw,)
-        if not isinstance(raw, (list, tuple)):
-            raw = ()
-        figured = tuple(sorted({_clean(value) for value in raw if _clean(value)}))
-        if not figured:
+        raw = metadata.get("figured_dimension_ids")
+        if (
+            type(raw) not in (list, tuple)
+            or len(raw) != 2
+            or any(type(value) is not str or not value or value != value.strip()
+                   for value in raw)
+            or len(set(raw)) != 2
+        ):
+            # Never set()-collapse competing original figured axes in the
+            # final customer handoff, even if a replay bypassed publication.
             return None
+        figured = tuple(sorted(raw))
         return CommercialMeasurementAuthority(
             method="figured_dimension",
             figured_dimension_ids=figured,
@@ -81,13 +85,24 @@ def _measurement_authority(
             },
         )
     if authority == MeasurementAuthorityType.PDF_SCALED.value:
-        scale_id = _clean(metadata.get("resolved_scale_id"))
-        if not scale_id:
+        raw_scale_id = metadata.get("resolved_scale_id")
+        raw_status = metadata.get("scale_status", "resolved")
+        raw_conflicts = metadata.get("scale_conflicts", ())
+        if (
+            type(raw_scale_id) is not str or not raw_scale_id
+            or raw_scale_id != raw_scale_id.strip()
+            or type(raw_status) is not str
+            or raw_status not in {"resolved", "verified"}
+            or type(raw_conflicts) not in (tuple, list)
+            or raw_conflicts
+        ):
+            # A source conflict cannot be silently erased or a missing scale
+            # made "resolved" during commercial presentation.
             return None
         return CommercialMeasurementAuthority(
             method="scaled_geometry",
-            resolved_scale_id=scale_id,
-            scale_status="resolved",
+            resolved_scale_id=raw_scale_id,
+            scale_status=raw_status,
             scale_conflicts=(),
             metadata={
                 "source": "live_ceiling_area_customer_projection",
