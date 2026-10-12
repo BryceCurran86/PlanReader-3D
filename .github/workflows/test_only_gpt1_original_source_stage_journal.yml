@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "tools/diag_source_closed_stage_journal.py"
+      - "pb_physical_wall_candidate_authority.py"
+      - "pb_source_visibility_authority.py"
+      - "tests/test_gpt1_g17_source_transaction_auth_reuse.py"
       - "tests/test_gpt1_source_stage_journal.py"
       - ".github/workflows/test_only_gpt1_original_source_stage_journal.yml"
 
