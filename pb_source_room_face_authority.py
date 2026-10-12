@@ -797,7 +797,10 @@ def _source_authenticated_same_wall_aliases(
         for a, b, classification in resolution.pair_classifications
         if type(a) is str and type(b) is str and a < b
     }
-    blocked = set(resolution.ambiguous_wall_ids) | set(resolution.abstained_wall_ids)
+    # SAME-class nonrepresentatives are deliberately present in the upstream
+    # abstained set: their exact "represented_by" reason proves the representative
+    # owns publication. Only a genuinely AMBIGUOUS/foreign blocker disqualifies.
+    blocked = set(resolution.ambiguous_wall_ids)
     aliases: dict[str, str] = {}
     seen: set[str] = set()
     for raw in resolution.equivalence_groups:
@@ -854,6 +857,19 @@ def _source_authenticated_same_wall_aliases(
         if not verified:
             continue
         representative = next(iter(selected))
+        reasons_exact = all(
+            (
+                not resolution.blockers_for(wid)
+                and wid not in resolution.abstained_wall_ids
+            ) if wid == representative else (
+                resolution.blockers_for(wid)
+                == (f"equivalent_physical_wall_represented_by:{representative}",)
+                and wid in resolution.abstained_wall_ids
+            )
+            for wid in group
+        )
+        if not reasons_exact:
+            continue
         for wid in group:
             seen.add(wid)
             aliases[wid] = representative
