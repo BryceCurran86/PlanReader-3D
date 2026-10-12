@@ -429,3 +429,54 @@ def test_exact_original_room_polygon_diagnostic_keeps_metric_and_seal_closed():
     )["first_source_polygon_gate_diagnostic_only"] == (
         "source_page_area_receipt_unavailable"
     )
+
+
+def test_source_freezer_native_ring_crossing_reports_real_edges_not_walls():
+    """A source polygon crossing cannot be silently assigned to a nearby W4."""
+    from tools.diag_gpt2_source_room_handoff_integrity import (
+        original_polygon_first_failure_receipt,
+        _first_native_ring_crossing_pair_diagnostic_only,
+    )
+    source = fixture()
+    crossing = ((0., 0.), (2., 2.), (0., 2.), (2., 0.))
+    source.canonical_rooms[0].polygon_pdf_pts = crossing
+    source.canonical_rooms[0].area_page_pts2 = 2.
+    source.canonical_floors[0].polygon_pdf_pts = crossing
+    row = one(source)
+    first = row["original_polygon_source_validity_diagnostic_only"]
+    assert first["first_source_polygon_gate_diagnostic_only"] == (
+        "source_native_polygon_invalid"
+    )
+    receipt = first["original_native_source_ring_crossing_diagnostic_only"]
+    assert receipt["first_source_crossing_gate_diagnostic_only"] == (
+        "original_nonadjacent_ring_edges_intersect_role_unproven"
+    )
+    assert receipt["original_ring_crossing_edge_indices"] == [0, 2]
+    assert receipt["original_ring_crossing_edge_pdf_pts"] == [
+        [[0., 0.], [2., 2.]], [[0., 2.], [2., 0.]]
+    ]
+    assert receipt["original_ring_crossing_geometry_type"] == "Point"
+    assert receipt["source_edge_wall_owner_proven"] is False
+    assert receipt["source_room_geometry_repaired"] is False
+    assert row["first_unproved_authority"] == (
+        "SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE"
+    )
+    assert row["source_proven_area_m2"] is None
+    assert row["benchmark_accuracy"] is None
+
+    # A normal closed (or implicitly closed) ring must not manufacture a
+    # crossing with its first/last adjacent segments.
+    clean = original_polygon_first_failure_receipt(
+        fixture().canonical_rooms[0]
+    )
+    assert clean["original_native_source_ring_crossing_diagnostic_only"] is None
+
+    for input_ring in (
+        ((0., 0.), (1., float("nan")), (2., 1.), (1., 0.)),
+        ((0., 0.), (1., 1.), (0., 0.)),
+    ):
+        aborted = _first_native_ring_crossing_pair_diagnostic_only(input_ring)
+        assert aborted["first_source_crossing_gate_diagnostic_only"] == (
+            "source_crossing_unresolved"
+        )
+        assert aborted["source_edge_wall_owner_proven"] is False
