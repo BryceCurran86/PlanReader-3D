@@ -219,14 +219,10 @@ def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
             )
 
 
-def _generate_project_handoff_locked(
-    *,
-    pdf_path: Path,
-    project_id: str,
-    workspace_id: int,
-    output_dir: Path,
-    family_group: str = "all",
-) -> dict[str, Any]:
+def _validate_source_handoff_inputs(
+    pdf_path: Path, project_id: str, workspace_id: int, family_group: str,
+) -> str:
+    """Reject invalid source/identity before touching any output directory."""
     if not pdf_path.is_file():
         raise FileNotFoundError(pdf_path)
     if type(project_id) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", project_id):
@@ -241,6 +237,21 @@ def _generate_project_handoff_locked(
         raise ValueError(
             "family_group must be one of: all, core, surfaces"
         )
+
+    return clean_family_group
+
+
+def _generate_project_handoff_locked(
+    *,
+    pdf_path: Path,
+    project_id: str,
+    workspace_id: int,
+    output_dir: Path,
+    family_group: str = "all",
+) -> dict[str, Any]:
+    clean_family_group = _validate_source_handoff_inputs(
+        pdf_path, project_id, workspace_id, family_group,
+    )
 
     # Check before touching any prior attempt summary or source material.
     _reject_existing_sealed_handoff(output_dir, project_id)
@@ -745,6 +756,8 @@ def generate_project_handoff(
     A process killed without cleanup leaves a lock: use a NEW output directory
     rather than pretending a possibly partial run was completed.
     """
+    # Bad source inputs never create directories or lock files.
+    _validate_source_handoff_inputs(pdf_path, project_id, workspace_id, family_group)
     output_dir.mkdir(parents=True, exist_ok=True)
     lock_path = output_dir / ".source_closed_handoff.lock"
     # O_EXCL fails closed on concurrent writers, symlinks and stale crash locks.
