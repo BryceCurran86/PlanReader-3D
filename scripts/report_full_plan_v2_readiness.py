@@ -179,6 +179,57 @@ def _sealed_run_proof(
     return not reasons, len(sealed.quantities), reasons
 
 
+
+def _source_authenticated_family_inventory(
+    sealed_root: Path | None, project_id: str, *,
+    source_sha_verified: bool, sealed_run_verified: bool,
+    expected_seal_fingerprint: str | None,
+) -> tuple[list[dict], str]:
+    """Count only exact signed quantities on an independently SHA-proven source.
+
+    A partial original source run can legitimately contain authenticated
+    opening-area or room-area quantities without being a complete physical
+    object universe. Counts are operational handoff evidence, never benchmark
+    matches, completeness or commercial/customer approval.
+    """
+    if (
+        not source_sha_verified or not sealed_run_verified
+        or sealed_root is None or not expected_seal_fingerprint
+    ):
+        return [], "SOURCE_OR_SEAL_NOT_VERIFIED"
+
+    from pb_source_closed_run_export import (
+        SourceClosedRunExportError, sealed_source_closed_run_from_dict,
+    )
+    try:
+        sealed = sealed_source_closed_run_from_dict(
+            _object(sealed_root / project_id / "sealed_run.json")
+        )
+    except (SourceClosedRunExportError, TypeError, ValueError, KeyError,
+            UnicodeError, OSError):
+        return [], "SIGNED_RUN_CHANGED_OR_INVALID"
+    if (
+        sealed.project_id != project_id
+        or sealed.fingerprint != expected_seal_fingerprint
+        or any(not row.lineage_ok for row in sealed.quantities)
+    ):
+        return [], "SIGNED_RUN_CHANGED_OR_INVALID"
+
+    counts: dict[tuple[str, str], list[int]] = {}
+    for row in sealed.quantities:
+        item = counts.setdefault((row.family, row.unit), [0, 0])
+        item[1 if row.abstained else 0] += 1
+    return [
+        {
+            "family": family,
+            "unit": unit,
+            "non_abstained_signed_quantity_count": counts[(family, unit)][0],
+            "abstained_signed_quantity_count": counts[(family, unit)][1],
+        }
+        for family, unit in sorted(counts)
+    ], "SOURCE_SHA_AND_SIGNED_RUN_VERIFIED_UNSCORED"
+
+
 def _safe_finite_quantity_number(value: object) -> bool:
     """Avoid int-to-float overflow in parity for already-decoded quantities."""
     if type(value) not in (int, float):
