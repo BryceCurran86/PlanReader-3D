@@ -330,6 +330,9 @@ def test_source_sealed_whole_line_raster_proof_survives_canonical_without_metric
     "mixed_native_authority",
     "mismatched_line_authority",
     "unsealed_line_receipt_kind",
+    "nondigest_line_receipt",
+    "uppercase_digest_line_receipt",
+    "short_digest_line_receipt",
     "duplicate_native_word_receipt",
     "duplicate_source_word_number",
     "out_of_order_native_words",
@@ -350,6 +353,19 @@ def test_invalid_whole_line_raster_proof_cannot_label_real_face(damage):
     elif damage == "unsealed_line_receipt_kind":
         second = replace(second, authority_record_id="foreign-source-claim")
         first = replace(first, authority_record_id="foreign-source-claim")
+    elif damage in {
+        "nondigest_line_receipt",
+        "uppercase_digest_line_receipt",
+        "short_digest_line_receipt",
+    }:
+        suffix = {
+            "nondigest_line_receipt": "g" * 32,
+            "uppercase_digest_line_receipt": "A" * 32,
+            "short_digest_line_receipt": "d" * 31,
+        }[damage]
+        authority = "source_room_label_line_raster_corroboration_" + suffix
+        first = replace(first, authority_record_id=authority)
+        second = replace(second, authority_record_id=authority)
     elif damage == "duplicate_native_word_receipt":
         second = replace(second, receipt_id=first.receipt_id)
     elif damage == "duplicate_source_word_number":
