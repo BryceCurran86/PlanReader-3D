@@ -66,6 +66,7 @@ def build_live_ceiling_lining_source_traces(
         ceilings[canonical_id] = ceiling
 
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    seen_source_ids: set[str] = set()
     for quantity in claim.ceiling_lining_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -75,6 +76,18 @@ def build_live_ceiling_lining_source_traces(
             raise SourceClosedRunConflictError(
                 f"non-ceiling quantity reached ceiling exporter: {quantity.quantity_id}"
             )
+        # Source quantity identity belongs to the full producer family,
+        # including blocked/abstained items. A conflicting rejected replay
+        # cannot be filtered away to let another candidate retain FIRM status.
+        raw_id = quantity.quantity_id
+        if (
+            type(raw_id) is not str or not raw_id or raw_id != raw_id.strip()
+            or raw_id in seen_source_ids
+        ):
+            raise SourceClosedRunConflictError(
+                f"duplicate or invalid original ceiling-lining quantity id: {raw_id}"
+            )
+        seen_source_ids.add(raw_id)
         if quantity.abstained or quantity.value is None:
             continue
         if len(quantity.input_entity_ids) != 1:
