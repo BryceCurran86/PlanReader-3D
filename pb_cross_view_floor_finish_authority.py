@@ -527,98 +527,24 @@ def _unique_documented_area_owner_receipts(
         for source_ids in receipt_owners.values():
             if len(source_ids) > 1:
                 disputed.update(source_ids)
-    for source_id in disputed:
-        selected.pop(source_id, None)
-    return selected, tuple(sorted(disputed))
-
-
-def _unique_documented_area_owner_receipts(
-    same_view: Sequence[SameViewRoomAreaRecord],
-    cross_view: Sequence[CrossViewRoomAreaRecord],
-) -> tuple[
-    dict[str, CrossViewRoomAreaRecord | SameViewRoomAreaRecord],
-    tuple[str, ...],
-]:
-    """Select only unambiguous source-room areas, preserving producer priority.
-
-    One cross-view documented measurement legitimately supersedes one or more
-    supplementary same-view candidates. But two entries from the SAME
-    authority claiming one physical source-room face cannot silently overwrite
-    each other or mint a floor finish from insertion order.
-    """
-    def valid(value: object) -> bool:
-        return isinstance(value, str) and bool(value) and value == value.strip()
-
-    def grouped(rows):
-        out = {}
-        for record in rows:
-            source_id = getattr(record, "source_room_face_record_id", None)
-            if valid(source_id):
-                out.setdefault(source_id, []).append(record)
-        return out
-
-    supplementary = grouped(same_view)
-    authoritative = grouped(cross_view)
-    selected = {}
-    disputed = set()
-    for source_id in sorted(set(supplementary) | set(authoritative)):
-        high = authoritative.get(source_id, ())
-        low = supplementary.get(source_id, ())
-        if len(high) > 1:
+    # Different physical source faces must NOT claim the same original room.
+    # A duplicated physical_room_id with distinct source-room face receipts
+    # cannot be resolved by insertion order or a finish/material code. Retain
+    # unrelated physically unique room measurements unchanged.
+    physical_owners = {}
+    for source_id, record in selected.items():
+        physical_room_id = getattr(record, "physical_room_id", None)
+        if not valid(physical_room_id):
             disputed.add(source_id)
-        elif high:
-            # An independent single source-proven cross-view measurement
-            # retains priority over possibly duplicated supplements.
-            selected[source_id] = high[0]
-        elif len(low) > 1:
-            disputed.add(source_id)
-        elif low:
-            selected[source_id] = low[0]
-
-    # A producer-owned figured area receipt cannot independently authenticate
-    # the metric finish quantity of two different physical source rooms.
-    # Quarantine both owners rather than choosing first/last or copying area.
-    evidence_owners = {}
-    for source_id, record in tuple(selected.items()):
-        evidence_id = getattr(
-            getattr(record, "area_evidence", None), "evidence_id", None
-        )
-        if not valid(evidence_id):
-            disputed.add(source_id)
-            del selected[source_id]
             continue
-        evidence_owners.setdefault(evidence_id, set()).add(source_id)
-    for source_ids in evidence_owners.values():
-        if len(source_ids) > 1:
-            disputed.update(source_ids)
-            for source_id in source_ids:
-                selected.pop(source_id, None)
-
-    # Exact source room-label observation and producer receipt identities
-    # likewise cannot be owned by two independently quantified room floors.
-    # No string/name/geometry similarity is involved in this check.
-    for field in ("source_label_observation_ids", "source_label_receipt_ids"):
-        receipt_owners = {}
-        for source_id, record in tuple(selected.items()):
-            raw = getattr(record, field, ()) or ()
-            if not isinstance(raw, (tuple, list)):
-                disputed.add(source_id)
-                continue
-            ids = tuple(raw)
-            if (
-                any(not valid(receipt) for receipt in ids)
-                or len(ids) != len(set(ids))
-            ):
-                disputed.add(source_id)
-                continue
-            for receipt in ids:
-                receipt_owners.setdefault(receipt, set()).add(source_id)
-        for source_ids in receipt_owners.values():
-            if len(source_ids) > 1:
-                disputed.update(source_ids)
+        physical_owners.setdefault(physical_room_id, set()).add(source_id)
+    for owners in physical_owners.values():
+        if len(owners) > 1:
+            disputed.update(owners)
     for source_id in disputed:
         selected.pop(source_id, None)
     return selected, tuple(sorted(disputed))
+
 
 def _quarantine_reused_floor_finish_occurrences(
     records: Sequence[CrossViewFloorFinishRecord],
