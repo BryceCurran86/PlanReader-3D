@@ -4,6 +4,9 @@ on:
     paths:
       - "tools/diag_gpt2_source_room_handoff_integrity.py"
       - "tests/test_gpt2_source_room_handoff_integrity.py"
+      - "pb_live_canonical_room_composition.py"
+      - "pb_live_canonical_floor_surface.py"
+      - "tests/test_gpt2_canonical_source_polygon_geometry_gate.py"
       - ".github/workflows/test-gpt2-source-room-handoff-integrity.yml"
       - "docs/engineering/gpt2_maryborough_source_room_handoff.md"
 concurrency:
@@ -26,9 +29,9 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Eight original source floor/metric/label gate regressions
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_room_handoff_integrity.py
-          python -m compileall -q tools/diag_gpt2_source_room_handoff_integrity.py
-          ruff check --select F821,F823 tools/diag_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_integrity.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_room_handoff_integrity.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py tests/test_live_canonical_room_composition.py
+          python -m compileall -q tools/diag_gpt2_source_room_handoff_integrity.py pb_live_canonical_room_composition.py pb_live_canonical_floor_surface.py
+          ruff check --select F821,F823 tools/diag_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_integrity.py pb_live_canonical_room_composition.py pb_live_canonical_floor_surface.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   source-proof:
@@ -80,6 +83,31 @@ jobs:
           assert len(crossing['original_ring_crossing_edge_pdf_pts'])==2
           assert crossing['source_edge_wall_owner_proven'] is False
           assert crossing['source_room_geometry_repaired'] is False
+          original_freezer_rooms=[room for room in claim.canonical_rooms
+                                  if room.room_label == 'FREEZER']
+          assert len(original_freezer_rooms)==1
+          original_freezer=original_freezer_rooms[0]
+          assert original_freezer.source_room_face_record_id==freezer['original_source_face_receipt_id']
+          assert original_freezer.geometry_complete is False
+          assert original_freezer.metric_geometry_complete is False
+          original_freezer_floors=[floor for floor in claim.canonical_floors
+                                  if floor.room_entity_id==original_freezer.canonical_room_id]
+          assert len(original_freezer_floors)==1
+          original_freezer_floor=original_freezer_floors[0]
+          assert original_freezer_floor.geometry_complete is False
+          assert original_freezer_floor.physical_floor_surface_identity_resolved is False
+          assert original_freezer_floor.metric_geometry_complete is False
+          assert original_freezer_floor.metric_area_m2 is None
+          assert original_freezer_floor.commercial_quantity_authority is False
+          print('G2_ORIGINAL_FREEZER_CANONICAL_GEOMETRY_ABORT',json.dumps({
+              'source_sha256':sha,
+              'original_face_receipt':original_freezer.source_room_face_record_id,
+              'room_geometry_complete':original_freezer.geometry_complete,
+              'floor_geometry_complete':original_freezer_floor.geometry_complete,
+              'physical_floor_resolved':original_freezer_floor.physical_floor_surface_identity_resolved,
+              'metric_area':original_freezer_floor.metric_area_m2,
+              'benchmark_accuracy':None,
+          },sort_keys=True))
           print('G2_ORIGINAL_FREEZER_NATIVE_CROSSING_EDGE_FIRST_GATE',json.dumps({
               'source_sha256':sha,
               'source_room_face_record_id':freezer['original_source_face_receipt_id'],
@@ -135,6 +163,18 @@ jobs:
           for row in downstream['rooms']:
               measured_by_label.setdefault(row['room_label'],[]).append(row)
           for label,expected_area in controls.items():
+              # Generic source validity gating may not discard existing
+              # three independently measured, authentic physical rooms.
+              rooms=[r for r in claim.canonical_rooms if r.room_label==label]
+              assert len(rooms)==1, (label,'canonical source face ambiguous')
+              source_room=rooms[0]
+              assert source_room.geometry_complete is True
+              assert source_room.metric_geometry_complete is False
+              floors=[f for f in claim.canonical_floors
+                      if f.room_entity_id==source_room.canonical_room_id]
+              assert len(floors)==1, (label,'physical floor owner ambiguous')
+              assert floors[0].geometry_complete is True
+              assert floors[0].physical_floor_surface_identity_resolved is True
               rows=measured_by_label.get(label,[])
               assert len(rows)==1, (label,'original owner ambiguous')
               item=rows[0]
