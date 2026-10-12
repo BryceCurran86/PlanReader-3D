@@ -456,7 +456,6 @@ def _verified_source_room_label_for_face(
         or len(set(label.observation_ids)) != len(label.observation_ids)
     ):
         return None
-    word_receipts: list[str] = []
     for observation_id, word in zip(label.observation_ids, label.word_evidence):
         if (
             type(word) is not SourceRoomLabelWordEvidence
@@ -479,19 +478,13 @@ def _verified_source_room_label_for_face(
             or word.geometry[1] >= word.geometry[3]
         ):
             return None
-        word_receipts.extend((word.receipt_id, word.authority_record_id))
-    if len(word_receipts) != len(set(word_receipts)) and any(
-        word.receipt_id != word.authority_record_id for word in label.word_evidence
-    ):
-        # Every native word must have an independent original evidence chain.
-        # One word may legitimately use the same ID in its two receipt fields.
-        per_word_pairs = [
-            (word.receipt_id, word.authority_record_id)
-            for word in label.word_evidence
-        ]
-        if (len({pair[0] for pair in per_word_pairs}) != len(per_word_pairs)
-                or len({pair[1] for pair in per_word_pairs}) != len(per_word_pairs)):
-            return None
+    # Every original word has one independent text-integrity/OCR proof,
+    # though that word's receipt and authority IDs may be equal.
+    if (len({word.receipt_id for word in label.word_evidence})
+            != len(label.word_evidence)
+            or len({word.authority_record_id for word in label.word_evidence})
+            != len(label.word_evidence)):
+        return None
     return label
 
 
