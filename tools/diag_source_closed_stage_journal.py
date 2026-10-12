@@ -32,6 +32,8 @@ from time import monotonic_ns, time_ns
 from typing import Any, Iterable, Iterator
 
 import pb_live_physical_net_wall_integration as integration
+import pb_physical_wall_candidate_authority as wall_candidates
+from pb_semantic_opening_enumeration_authority import SemanticOpeningEnumerationProducer
 from tools.run_source_closed_project_handoff import generate_project_handoff
 
 
@@ -51,7 +53,13 @@ _STAGE_NAMES = (
     "compose_live_whole_wall_roles",
     "compose_live_external_physical_net_wall_publication",
 )
+_MODULE_STAGES = (
+    (wall_candidates, "_build_scope_result", "physical_wall_candidate_page_build"),
+)
 _METHOD_STAGES = (
+    (integration.SourceVisibilityProducer, "augment_with_raster_opening_primitives"),
+    (integration.SourceVisibilityProducer, "augment_with_raster_visible_segments"),
+    (SemanticOpeningEnumerationProducer, "publish_page_scope"),
     (integration.SourceVisibilityProducer, "ingest_native_pdf_bytes"),
     (integration.CrossViewFloorFinishProducer, "publish"),
     (integration.CrossViewCeilingFinishProducer, "publish"),
@@ -71,7 +79,8 @@ class StageJournal:
         self._next_call = 0
 
     def emit(self, *, stage: str, event: str, call_id: int,
-             elapsed_ms: float | None = None, error_type: str | None = None) -> None:
+             elapsed_ms: float | None = None, error_type: str | None = None,
+             source_page_id: str | None = None) -> None:
         payload: dict[str, Any] = {
             "diagnostic_only": True,
             "stage": stage,
@@ -85,6 +94,8 @@ class StageJournal:
             payload["elapsed_ms"] = round(elapsed_ms, 3)
         if error_type is not None:
             payload["error_type"] = error_type
+        if source_page_id is not None:
+            payload["source_page_id"] = source_page_id
         self._stream.write(json.dumps(payload, sort_keys=True) + "\n")
         self._stream.flush()
         os.fsync(self._stream.fileno())
@@ -103,6 +114,7 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
     originals: list[tuple[Any, str, Any]] = []
     targets: Iterable[tuple[Any, str, str]] = (
         *((integration, name, name) for name in _STAGE_NAMES),
+        *((owner, name, label) for owner, name, label in _MODULE_STAGES),
         *((cls, name, f"{cls.__name__}.{name}") for cls, name in _METHOD_STAGES),
     )
     try:
@@ -116,7 +128,14 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
                 def wrapper(*args, **kwargs):
                     call_id = journal.next_id()
                     started = monotonic_ns()
-                    journal.emit(stage=stage, event="entered", call_id=call_id)
+                    # Emit only a producer-supplied exact source-page address.
+                    # No injected page scope, inferred viewport or benchmark ID.
+                    source_page_id = kwargs.get("page_id")
+                    if (type(source_page_id) is not str
+                            or re.fullmatch(r"[0-9]{1,5}", source_page_id) is None):
+                        source_page_id = None
+                    journal.emit(stage=stage, event="entered", call_id=call_id,
+                                 source_page_id=source_page_id)
                     try:
                         result = fn(*args, **kwargs)
                     except BaseException as exc:
@@ -124,11 +143,13 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
                             stage=stage, event="failed", call_id=call_id,
                             elapsed_ms=(monotonic_ns() - started) / 1_000_000,
                             error_type=type(exc).__name__,
+                            source_page_id=source_page_id,
                         )
                         raise
                     journal.emit(
                         stage=stage, event="completed", call_id=call_id,
                         elapsed_ms=(monotonic_ns() - started) / 1_000_000,
+                        source_page_id=source_page_id,
                     )
                     return result
                 return wrapper
