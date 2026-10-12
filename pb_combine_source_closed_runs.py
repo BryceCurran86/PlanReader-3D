@@ -132,14 +132,23 @@ def main(argv: list[str] | None = None) -> int:
     output_identity = args.output.resolve()
     if any(output_identity == source.resolve() for source in args.inputs):
         raise ValueError("combined output must not overwrite a sealed source input")
+    frozen_root = (
+        Path(__file__).resolve().parent
+        / "benchmarks" / "frozen_holdout" / "full_plan_v2"
+    ).resolve()
+    if output_identity == frozen_root or output_identity.is_relative_to(frozen_root):
+        raise ValueError("combined output must not overwrite frozen V2 benchmark inputs")
+    if args.output.exists() or args.output.is_symlink():
+        raise FileExistsError(f"existing signed combined customer run: {args.output}")
 
     combined = combine_sealed_run_files(
         args.inputs,
         project_id=args.project_id,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    # Publish only a complete verified aggregate. A failed serialization,
-    # filesystem write or rename must not truncate a previous sealed result.
+    # Publish only a complete verified aggregate. Same-directory hard-link
+    # creation is atomic and create-only; even a racing writer cannot replace
+    # an earlier source-sealed customer receipt. Fail closed on unsupported FS.
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -150,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             temporary.write(combined.to_json())
             temporary.flush()
             os.fsync(temporary.fileno())
-        os.replace(temporary_path, args.output)
+        os.link(temporary_path, args.output)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
