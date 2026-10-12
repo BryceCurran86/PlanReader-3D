@@ -211,12 +211,13 @@ def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
         raise FileExistsError(
             f"unsafe family run directory symlink: {family_run_dir}; use a clean output directory"
         )
+    # A combined seal for another project is just as unsafe as a seal for the
+    # requested project. Only the two diagnostic-only JSONs may be rewritten
+    # after an unsealed attempt; all other JSON artifacts demand a new folder.
+    diagnostic_only = {"source_attempt_preflight.json", "production_summary.json"}
     possible_seals = (
-        output_dir / f"{project_id}.json",
-        # Protect future project family-group output without hard-coding names.
-        *output_dir.glob(f"{project_id}.*.json"),
-        # One old family receipt from *any* present/future family is enough to
-        # make the directory unsafe for a different source/revision attempt.
+        *(path for path in output_dir.glob("*.json")
+          if path.name not in diagnostic_only),
         *(output_dir / "family_runs").glob("*.sealed.json"),
     )
     for path in possible_seals:
