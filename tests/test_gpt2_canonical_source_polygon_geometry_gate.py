@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from pb_live_canonical_floor_surface import _floor_from_room
+from pb_live_canonical_coverage_registry import _physical_identity_resolved
 from pb_live_canonical_room_composition import (
     LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID,
     _room_object_from_record,
@@ -56,6 +58,12 @@ def test_real_ring_crossing_with_positive_page_area_abstains_before_canonical_ge
     assert invalid.polygon_pdf_pts == CROSSING
     assert invalid.coordinate_unit == "pdf_pt"
     assert invalid.evidence_ids == ("source-face-1",)
+    floor = _floor_from_room(invalid)
+    assert floor.geometry_complete is False
+    assert floor.physical_floor_surface_identity_resolved is False
+    assert floor.metric_geometry_complete is False
+    assert floor.metric_area_m2 is None
+    assert _physical_identity_resolved(floor) is False
 
     # Same source evidence preserves stable identity; no buffer(0) repaired
     # geometry may change it or claim a source metric value.
@@ -71,6 +79,10 @@ def test_valid_original_polygon_preserves_existing_canonical_geometry_contract()
     assert LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID not in original.room_label_reason_codes
     assert original.polygon_pdf_pts == VALID
     assert original.area_page_pts2 == 16.
+    good_floor = _floor_from_room(original)
+    assert good_floor.geometry_complete is True
+    assert good_floor.physical_floor_surface_identity_resolved is True
+    assert _physical_identity_resolved(good_floor) is True
 
 
 @pytest.mark.parametrize("polygon,area", [
