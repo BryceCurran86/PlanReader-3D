@@ -22,6 +22,7 @@ from dataclasses import dataclass
 import math
 from typing import Mapping
 
+from shapely.errors import GEOSException
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
@@ -586,7 +587,7 @@ def _candidate_record(
         if any(poly.is_empty or not poly.is_valid or poly.area <= 0.0 for poly in polygons):
             return None
         merged = unary_union(polygons)
-    except (TypeError, ValueError, OverflowError):
+    except (TypeError, ValueError, OverflowError, GEOSException):
         return None
     if (
         merged.geom_type != "Polygon"
