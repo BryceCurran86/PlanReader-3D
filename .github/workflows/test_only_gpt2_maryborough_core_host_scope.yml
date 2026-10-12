@@ -142,7 +142,7 @@ jobs:
           }
           source_report_path = root.parent / "opening_source_composition.json"
           source_report_path.write_text(
-              json.dumps(opening_source_composition, indent=2, sort_keys=True) + "\\n",
+              json.dumps(opening_source_composition, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
           from tools.diag_gpt3_maryborough_source_stage_ledger import (
@@ -152,7 +152,7 @@ jobs:
               summary, opening_source_composition,
           )
           (root.parent / "first_source_stage_ledger.json").write_text(
-              json.dumps(first_stage_report, indent=2, sort_keys=True) + "\\n",
+              json.dumps(first_stage_report, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
           print(json.dumps({
