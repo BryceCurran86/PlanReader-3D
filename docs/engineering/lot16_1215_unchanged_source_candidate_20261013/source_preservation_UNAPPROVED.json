@@ -1,0 +1,212 @@
+{
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "source_pages": [
+    "3"
+  ],
+  "prior_authenticated_host_count": 14,
+  "candidate_authenticated_host_count": 15,
+  "rekey_classification_counts": {
+    "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY": 14
+  },
+  "source_comparison_rows": [
+    {
+      "physical_opening_id": "physical_opening_existence_00d50eb9ef77840451522efdc25f2df5",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_f839bcacafa60d753907ceaafb128e9f",
+      "candidate_host_wall_id": "opening_host_binding_group_6b03c13836444bfd25df1134b558e502",
+      "old_host_receipt": "opening_host_binding_v3_2c7647f762d526e4799581fdcaec18bc",
+      "candidate_host_receipt": "opening_host_binding_v3_25e83abd4686869a0f8d121a2de04fdf",
+      "old_source_frame_receipt": "opening_host_frame_v2_81156de7fbcebad69a77ae4497db9bb6",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_10e98690c379cb37a1383ce3510b002c",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_582738c7734b1897e07e9b15cf958689",
+      "candidate_host_wall_id": "opening_host_binding_group_cadb9a69cabfec826cfaa4bf3f651351",
+      "old_host_receipt": "opening_host_binding_v3_3fe0ca9822e9d9969991226459dcf8c1",
+      "candidate_host_receipt": "opening_host_binding_v3_eba25311acf6d90856e239e9b3c70c5d",
+      "old_source_frame_receipt": null,
+      "candidate_source_frame_receipt": null,
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_38c03575cd66ed19cae7f9e4489f1609",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_faaddaeb66f701a2fd935c61967af142",
+      "candidate_host_wall_id": "opening_host_binding_group_322d765f8149d87df63588d4a69a8a5d",
+      "old_host_receipt": "opening_host_binding_v3_b489c5e6852cc92c4344f0949bc6a8d2",
+      "candidate_host_receipt": "opening_host_binding_v3_81d2922e9d8261ef17105783aab9689e",
+      "old_source_frame_receipt": "opening_host_frame_v2_ea0c5d59e721bc95c82afcf5e793357c",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_53c77ed4bf0976a9ebaece0e4983b50f",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_455e7e1ad4f05193a1d53e4e506c5d97",
+      "candidate_host_wall_id": "opening_host_binding_group_d73584e02fc14e5809896ba6d8a675b3",
+      "old_host_receipt": "opening_host_binding_v3_36142f340597f5ad0ae7c6ddaff58c18",
+      "candidate_host_receipt": "opening_host_binding_v3_1e0aa0c0444d9a4b395f21d0c1b8baf2",
+      "old_source_frame_receipt": null,
+      "candidate_source_frame_receipt": null,
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_661fc5e6f0c5975d5e9bdd5d759bd180",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_4459bd70620d8707e92d6937eab1e1ff",
+      "candidate_host_wall_id": "opening_host_binding_group_4508691fc4ce43efa5fa51dadca46e58",
+      "old_host_receipt": "opening_host_binding_v3_6cbf85df0fe83ee9a3d36e88e9e50807",
+      "candidate_host_receipt": "opening_host_binding_v3_690c06f7822683563a9611fb63ead34d",
+      "old_source_frame_receipt": "opening_host_frame_v2_3e91719c1caacb07a523c3ad3ab82447",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_ad79624ab28c4fb55e72e1ac5a4a4e7d",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_86236fe338e5f5efb4cddf273a5013ff",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_ec2db4aaaba9476c5374109bca1c1616",
+      "candidate_host_wall_id": "opening_host_binding_group_d2b57eedaa6a69e120c692c60e6ceeff",
+      "old_host_receipt": "opening_host_binding_v3_f225e62401261204182460bd2bc33af3",
+      "candidate_host_receipt": "opening_host_binding_v3_b75304bb1dcb6d9440905403ad26ad7b",
+      "old_source_frame_receipt": "opening_host_frame_v2_e8cd24997450bc425602873361d538fb",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_b2f84f30ee074d8472876e5e8594a0ef",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_8ecb81b6524804c80710ec323050be6b",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_8da649324312490cc251047eece82a7e",
+      "candidate_host_wall_id": "opening_host_binding_group_60a0a342dbd5bbbd534e362ea5049dbd",
+      "old_host_receipt": "opening_host_binding_v3_e76bedb0b6705540e51141ac62af5c72",
+      "candidate_host_receipt": "opening_host_binding_v3_4196e13c47ef146c219dad04a0a2f836",
+      "old_source_frame_receipt": "opening_host_frame_v2_f1c66f461180129ab92b207a96b2ee42",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_75ec0e095870bd574f886b94ff2c5112",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_91ae06327d4fcc8004a557b116a77820",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_cf7528cf80711987249edc2672316330",
+      "candidate_host_wall_id": "opening_host_binding_group_520f4934ecbb562fb11d65119b3c273e",
+      "old_host_receipt": "opening_host_binding_v3_82eaccffe6ca37cdc40815185ed8cd1c",
+      "candidate_host_receipt": "opening_host_binding_v3_6904ce1a31b12b24830c72c79bd5527e",
+      "old_source_frame_receipt": "opening_host_frame_v2_cff1ed8b652e1ee3c807a9656e88b154",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_a1ade6aed9348cf6f1681af9d2acfe31",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_73e5cfe33dd8b76a2c422ea3b5a990f1",
+      "candidate_host_wall_id": "opening_host_binding_group_fea15a030c2031476eb218645ab46a22",
+      "old_host_receipt": "opening_host_binding_v3_2aa85d5c540649a60510ae70ac8e427e",
+      "candidate_host_receipt": "opening_host_binding_v3_c1d528f50d00dbec0fc70446ea0a9d5b",
+      "old_source_frame_receipt": null,
+      "candidate_source_frame_receipt": null,
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_bd108c2c1bfd88752311aab5901737bb",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_39c889e39ccd653d5b186f32b35742e2",
+      "candidate_host_wall_id": "opening_host_binding_group_d86f88b4139c8f9569098999fe6d6a16",
+      "old_host_receipt": "opening_host_binding_v3_5906940bfe858a1b09ed525f6cb7753a",
+      "candidate_host_receipt": "opening_host_binding_v3_48cef033fc078e7ad24c1c683b8172fa",
+      "old_source_frame_receipt": "opening_host_frame_v2_b49bdefec73eadba458cfbc49b69314b",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_3afc5301b52eab7e09356d4ba7424b74",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_dfbd6f2c6fff0aa68df9c8a2c3f1d007",
+      "candidate_host_wall_id": "opening_host_binding_group_4da15f09fa564422d26cc29a93718b49",
+      "old_host_receipt": "opening_host_binding_v3_21ea9530895f71553791c00773fb604a",
+      "candidate_host_receipt": "opening_host_binding_v3_a8a5b2d1b86aeb8068da209d84564c6a",
+      "old_source_frame_receipt": null,
+      "candidate_source_frame_receipt": null,
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_c4d87543028146e1cff0b5e2ca480c55",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_73e8c97607d7e0d2fdd8f36763b07157",
+      "candidate_host_wall_id": "opening_host_binding_group_f7269b9958de0dde3400afdab769f166",
+      "old_host_receipt": "opening_host_binding_v3_0b9901dc7d42a8bf250b8fbb19b14ee0",
+      "candidate_host_receipt": "opening_host_binding_v3_78182db2dc037c6483075acf4cf2c1b1",
+      "old_source_frame_receipt": "opening_host_frame_v2_aa98b5a4960a82f626af88ae04b983d4",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_6ec48367c6cc4db5ab5308bdb9797af6",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_84a71c3adf09a66c5e42d42a07d79994",
+      "candidate_host_wall_id": "opening_host_binding_group_1f3c8a2e2a88f368817bd1bb148cc510",
+      "old_host_receipt": "opening_host_binding_v3_b9f37cdc08b5337586d7e66560a8acee",
+      "candidate_host_receipt": "opening_host_binding_v3_42a88a61c8d1090277729d812ece36ca",
+      "old_source_frame_receipt": null,
+      "candidate_source_frame_receipt": null,
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    },
+    {
+      "physical_opening_id": "physical_opening_existence_f5adf8438fb6f48cc03b03d8ca2125f5",
+      "source_comparison_status": "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY",
+      "reason_codes": [
+        "PRIOR_RECEIPT_IDENTITY_REKEY_UNAPPROVED"
+      ],
+      "old_host_wall_id": "opening_host_binding_group_f09642c0a8284b843d28674267edf24b",
+      "candidate_host_wall_id": "opening_host_binding_group_2d5c3cdef129ae90f784a169b374b2ce",
+      "old_host_receipt": "opening_host_binding_v3_0251cc618a072701d36f72d3f5404798",
+      "candidate_host_receipt": "opening_host_binding_v3_396b73babeb49f117ed79acc69fbfbeb",
+      "old_source_frame_receipt": "opening_host_frame_v2_d9cf5d330f0c1a6d7cbee32528d9e55f",
+      "candidate_source_frame_receipt": "opening_host_frame_v2_eac604db9871103dec3147af2dfd037f",
+      "commercial_publication_permission": "NOT_ESTABLISHED"
+    }
+  ],
+  "official_host_receipt_identity_acceptance": false,
+  "opening_count_or_metric_publication_allowed": false,
+  "benchmark_accuracy": null
+}

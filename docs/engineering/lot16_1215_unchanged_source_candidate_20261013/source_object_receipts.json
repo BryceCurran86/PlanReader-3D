@@ -1,0 +1,540 @@
+{
+  "canonical_openings": [
+    {
+      "area_basis": "figured_opening_label",
+      "area_m2": 1.8,
+      "canonical_opening_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "coordinate_unit": null,
+      "document_id": "live-source:10109b4b6e85e6e27af81f6399ce4b92",
+      "evidence_ids": [
+        "opening_host_binding_v3_f3cae9aba65018e6fd97b10f80dcd069",
+        "opening_label_dimension_9a8b024361c67d7febe8fdf6e2af7a1a",
+        "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+        "source_observation_092c03370dfd96dd57b4fb644f1309bb",
+        "source_observation_0b7acf455f770ac0cdfb3257e10f34c1",
+        "source_observation_0dbd89197c09dc2f158f8f9dd8806c4b",
+        "source_observation_15735bd3a7ad026b29365530427ddf93",
+        "source_observation_15f357db5f11a4f7179b43548fec7109",
+        "source_observation_1f2b7f0df8fbdc7ccff769144112d21a",
+        "source_observation_392426bbc3706937918ccb0d2aa11d43",
+        "source_observation_4e5f256b41eb81011e62ea03b4c08ead",
+        "source_observation_56260fd4fce1430de447c31882cb8125",
+        "source_observation_7be3c47f1c4c7721e745c846eb1917b8",
+        "source_observation_8b6ab03c152a350f441635951b381434",
+        "source_observation_8e874da1ed92f102a253e94dbd734b25",
+        "source_observation_96431b0239652820e2f10cd55e06792e",
+        "source_observation_abd83a04f70d71a2be963d7c03ae0e56",
+        "source_observation_c77e6a2b1e8b2f29a230a8710046e5b4",
+        "source_observation_cc3ca3e9f7b0398da0027fea85ecf5de",
+        "source_observation_ccd85deb80d0ebd6821a83ab6eccbc75",
+        "source_observation_d0ff55855911297045b41fc267821f5b",
+        "source_observation_d872c46d5d648ad5be5453a1f9444a55",
+        "source_observation_e46b7c5ec4d6873538e899b36022ec37",
+        "source_observation_ec5bf71878c00a8b1703ed05a37a5625",
+        "source_observation_f466b9e47b03b6b9a42f6bc78faecf45",
+        "source_observation_f571029d46e43f83484b34794040bf59"
+      ],
+      "figured_area_record_id": "opening_label_dimension_9a8b024361c67d7febe8fdf6e2af7a1a",
+      "geometry_complete": false,
+      "height_m": null,
+      "height_record_id": null,
+      "host_binding_record_id": "opening_host_binding_v3_f3cae9aba65018e6fd97b10f80dcd069",
+      "host_frame_record_id": null,
+      "host_wall_id": "opening_host_binding_group_cc4f60436662ee872fe1d3e7dc3468a4",
+      "opening_kind": "window",
+      "opening_universe_record_id": null,
+      "opening_void_record_id": null,
+      "page_id": "3",
+      "physical_opening_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "profile_kind": null,
+      "representative_observation_id": "source_observation_15735bd3a7ad026b29365530427ddf93",
+      "revision_id": "source_revision_31b112fa62447a99d83fe3d10044d2bb",
+      "scale_record_id": null,
+      "schedule_binding_record_id": null,
+      "schedule_count_explicit": false,
+      "schedule_declared_count": null,
+      "schedule_declared_height_mm": null,
+      "schedule_declared_width_mm": null,
+      "schedule_page_id": null,
+      "schedule_row_basis_source": "",
+      "schedule_row_description": "",
+      "schedule_row_dimension_basis": "",
+      "schedule_row_observation_ids": [],
+      "schema_version": "1.2.0",
+      "semantic_class": "opening",
+      "snapshot_id": "source_snapshot_7ad8bf09e3ebbec9797df89842574683",
+      "source_geometries": [
+        [
+          619.68,
+          426.48,
+          661.44,
+          426.48
+        ]
+      ],
+      "source_lineage_root_ids": [
+        "source_observation_092c03370dfd96dd57b4fb644f1309bb",
+        "source_observation_0b7acf455f770ac0cdfb3257e10f34c1",
+        "source_observation_0dbd89197c09dc2f158f8f9dd8806c4b",
+        "source_observation_1f2b7f0df8fbdc7ccff769144112d21a",
+        "source_observation_4e5f256b41eb81011e62ea03b4c08ead",
+        "source_observation_8b6ab03c152a350f441635951b381434",
+        "source_observation_8e874da1ed92f102a253e94dbd734b25",
+        "source_observation_d0ff55855911297045b41fc267821f5b",
+        "source_observation_f466b9e47b03b6b9a42f6bc78faecf45",
+        "source_observation_f571029d46e43f83484b34794040bf59"
+      ],
+      "source_observation_ids": [
+        "source_observation_15735bd3a7ad026b29365530427ddf93",
+        "source_observation_392426bbc3706937918ccb0d2aa11d43",
+        "source_observation_56260fd4fce1430de447c31882cb8125",
+        "source_observation_7be3c47f1c4c7721e745c846eb1917b8",
+        "source_observation_96431b0239652820e2f10cd55e06792e",
+        "source_observation_c77e6a2b1e8b2f29a230a8710046e5b4",
+        "source_observation_ccd85deb80d0ebd6821a83ab6eccbc75",
+        "source_observation_d872c46d5d648ad5be5453a1f9444a55",
+        "source_observation_e46b7c5ec4d6873538e899b36022ec37",
+        "source_observation_ec5bf71878c00a8b1703ed05a37a5625"
+      ],
+      "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+      "structural_pattern": "raster_framed_wall_band_interruption",
+      "tag_observation_id": null,
+      "type_mark": null,
+      "u0": null,
+      "u1": null,
+      "vertical_placement_record_id": null,
+      "viewport_id": "page:3",
+      "wall_local_frame_id": null,
+      "width_m": null,
+      "width_record_id": null,
+      "z0": null,
+      "z1": null
+    }
+  ],
+  "host_frame_traces": [
+    {
+      "host_wall_id": null,
+      "opening_identity_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "reason_codes": [
+        "opening_host_frame_whole_wall_unproven",
+        "opening_host_frame_wall_unavailable",
+        "opening_host_frame_aligned_opening_binding_unavailable"
+      ],
+      "record_id": null,
+      "status": "abstained",
+      "whole_wall_candidate_ids": []
+    }
+  ],
+  "metric_aperture_geometry_complete": false,
+  "opening_bindings": [
+    {
+      "host_wall_id": "opening_host_binding_group_cc4f60436662ee872fe1d3e7dc3468a4",
+      "member_wall_candidate_ids": [
+        "wall_3d7ce4885a35a98d27d0",
+        "wall_ebd7d961e7eff8241f06"
+      ],
+      "opening_identity_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "page_id": "3",
+      "reason_codes": [
+        "opening_host_binding_resolved",
+        "raster_source_band_host_resolved"
+      ],
+      "record_id": "opening_host_binding_v3_f3cae9aba65018e6fd97b10f80dcd069",
+      "representative_observation_id": "source_observation_15735bd3a7ad026b29365530427ddf93",
+      "status": "corroborated"
+    }
+  ],
+  "opening_figured_label_traces": [
+    {
+      "opening_identity_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "result": {
+        "evidence": {
+          "area_m2": 1.8,
+          "axis_order_resolved": false,
+          "basis": "figured_opening_label",
+          "dimension_values_mm": [
+            1200.0,
+            1500.0
+          ],
+          "evidence_id": "opening_label_dimension_9a8b024361c67d7febe8fdf6e2af7a1a",
+          "opening_record_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+          "page_id": "3",
+          "raw_text": "1215 SGW obs",
+          "schema_version": "1.0.0",
+          "semantic_kind": "window",
+          "source_text_observation_ids": [
+            "source_observation_15f357db5f11a4f7179b43548fec7109",
+            "source_observation_abd83a04f70d71a2be963d7c03ae0e56",
+            "source_observation_cc3ca3e9f7b0398da0027fea85ecf5de"
+          ],
+          "viewport_id": null
+        },
+        "reason_codes": [
+          "opening_label_dimension_resolved"
+        ],
+        "schema_version": "1.0.0",
+        "status": "corroborated"
+      }
+    }
+  ],
+  "opening_identity_text_receipts": [
+    {
+      "figured_label_evidence_id": "opening_label_dimension_9a8b024361c67d7febe8fdf6e2af7a1a",
+      "label_bbox_pdf_pt": [
+        622.440673828125,
+        430.66064453125,
+        661.0096435546875,
+        438.4881286621094
+      ],
+      "location_is_reauthenticated_source_receipt": true,
+      "opening_identity_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "snapshot_id": "source_snapshot_7ad8bf09e3ebbec9797df89842574683",
+      "source_text_integrity_receipts": [
+        {
+          "block_no": 26,
+          "decode_status": "validated_tounicode",
+          "document_id": "live-source:10109b4b6e85e6e27af81f6399ce4b92",
+          "font_name": "CIDFont+F4",
+          "font_subtype": "Type0",
+          "font_xref": 44,
+          "geometry": [
+            651.8167114257812,
+            430.66064453125,
+            661.0096435546875,
+            438.4881286621094
+          ],
+          "line_no": 0,
+          "page_id": "3",
+          "parent_observation_id": "source_observation_15f357db5f11a4f7179b43548fec7109",
+          "raw_text": "obs",
+          "reason_codes": [],
+          "receipt_id": "pdf_text_integrity_94d0760f0d4f8e34bd0288d651a4ca18",
+          "revision_id": "source_revision_31b112fa62447a99d83fe3d10044d2bb",
+          "schema_version": "1.2.0",
+          "sequence_number": 184,
+          "source_partition_id": "page:3",
+          "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+          "trace_sequence_numbers": [],
+          "trusted": true,
+          "visibility_status": "proven_visible",
+          "word_no": 2
+        },
+        {
+          "block_no": 26,
+          "decode_status": "validated_tounicode",
+          "document_id": "live-source:10109b4b6e85e6e27af81f6399ce4b92",
+          "font_name": "CIDFont+F4",
+          "font_subtype": "Type0",
+          "font_xref": 44,
+          "geometry": [
+            622.440673828125,
+            430.66064453125,
+            635.2001953125,
+            438.4881286621094
+          ],
+          "line_no": 0,
+          "page_id": "3",
+          "parent_observation_id": "source_observation_abd83a04f70d71a2be963d7c03ae0e56",
+          "raw_text": "1215",
+          "reason_codes": [],
+          "receipt_id": "pdf_text_integrity_7f369c9561cdf9b1dc8f7e9d3a82aafd",
+          "revision_id": "source_revision_31b112fa62447a99d83fe3d10044d2bb",
+          "schema_version": "1.2.0",
+          "sequence_number": 184,
+          "source_partition_id": "page:3",
+          "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+          "trace_sequence_numbers": [],
+          "trusted": true,
+          "visibility_status": "proven_visible",
+          "word_no": 0
+        },
+        {
+          "block_no": 26,
+          "decode_status": "validated_tounicode",
+          "document_id": "live-source:10109b4b6e85e6e27af81f6399ce4b92",
+          "font_name": "CIDFont+F4",
+          "font_subtype": "Type0",
+          "font_xref": 44,
+          "geometry": [
+            636.7484741210938,
+            430.66064453125,
+            650.2476806640625,
+            438.4881286621094
+          ],
+          "line_no": 0,
+          "page_id": "3",
+          "parent_observation_id": "source_observation_cc3ca3e9f7b0398da0027fea85ecf5de",
+          "raw_text": "SGW",
+          "reason_codes": [],
+          "receipt_id": "pdf_text_integrity_dfe27a17b38d1d9ee38f1b65fc5005f3",
+          "revision_id": "source_revision_31b112fa62447a99d83fe3d10044d2bb",
+          "schema_version": "1.2.0",
+          "sequence_number": 184,
+          "source_partition_id": "page:3",
+          "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+          "trace_sequence_numbers": [],
+          "trusted": true,
+          "visibility_status": "proven_visible",
+          "word_no": 1
+        }
+      ],
+      "source_text_observation_ids": [
+        "source_observation_15f357db5f11a4f7179b43548fec7109",
+        "source_observation_abd83a04f70d71a2be963d7c03ae0e56",
+        "source_observation_cc3ca3e9f7b0398da0027fea85ecf5de"
+      ]
+    }
+  ],
+  "primitive_safety_cap": 20000,
+  "revision_id": "source_revision_31b112fa62447a99d83fe3d10044d2bb",
+  "snapshot_id": "source_snapshot_7ad8bf09e3ebbec9797df89842574683",
+  "source_owned_host_members": [
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_70558c52ba515f96bdfe",
+        "comparison_mode": "v2_path",
+        "edge_ids": [
+          "split_3097",
+          "split_3098",
+          "split_3099"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            661.44,
+            427.8
+          ],
+          [
+            692.4,
+            427.8
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:unchanged_terminal_band_v1:78323a89d8c2132a8e67a673c65b114cc66423d7fecdeebd2887b9b125483023:2"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_3d7ce4885a35a98d27d0"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_3097",
+          "geometry": [
+            661.44,
+            427.8,
+            669.0,
+            427.8
+          ],
+          "source_primitive_ids": [
+            "raster_segment:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:unchanged_terminal_band_v1:78323a89d8c2132a8e67a673c65b114cc66423d7fecdeebd2887b9b125483023:2"
+          ]
+        },
+        {
+          "edge_id": "split_3098",
+          "geometry": [
+            669.0,
+            427.8,
+            682.25,
+            427.8
+          ],
+          "source_primitive_ids": [
+            "raster_segment:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:unchanged_terminal_band_v1:78323a89d8c2132a8e67a673c65b114cc66423d7fecdeebd2887b9b125483023:2"
+          ]
+        },
+        {
+          "edge_id": "split_3099",
+          "geometry": [
+            682.25,
+            427.8,
+            692.4,
+            427.8
+          ],
+          "source_primitive_ids": [
+            "raster_segment:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:unchanged_terminal_band_v1:78323a89d8c2132a8e67a673c65b114cc66423d7fecdeebd2887b9b125483023:2"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [],
+      "wall_candidate": {
+        "candidate_id": "wall_3d7ce4885a35a98d27d0",
+        "centerline_pts": [
+          [
+            661.44,
+            427.8
+          ],
+          [
+            669.0,
+            428.14
+          ],
+          [
+            682.25,
+            428.14
+          ],
+          [
+            692.4,
+            427.8
+          ]
+        ],
+        "confidence": 0.95,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_09566ac8e4226b0d8145",
+          "junc_46397e3ccf76a7c79dec"
+        ],
+        "face_a_segment_ids": [
+          "split_3097",
+          "split_3098",
+          "split_3099"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "endpoint",
+          "endpoint"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_3_stage_a_edges"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_3d7ce4885a35a98d27d0"
+    },
+    {
+      "physical_identity": {
+        "blocking_reasons": [],
+        "candidate_identity_id": "wall2_548926a82a8f4d497c8b",
+        "comparison_mode": "v2_path",
+        "edge_ids": [
+          "split_2826"
+        ],
+        "level_id": null,
+        "path_fingerprint": [
+          [
+            612.650683,
+            427.8
+          ],
+          [
+            619.68,
+            427.8
+          ]
+        ],
+        "schema_version": "1.0.0",
+        "source_primitive_ids": [
+          "raster_segment:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:unchanged_terminal_band_v1:78323a89d8c2132a8e67a673c65b114cc66423d7fecdeebd2887b9b125483023:1"
+        ],
+        "status": "corroborated",
+        "viewport_id": "wall-source:page-3",
+        "wall_candidate_id": "wall_ebd7d961e7eff8241f06"
+      },
+      "schema_version": "1.2.0",
+      "source_edge_fragments": [
+        {
+          "edge_id": "split_2826",
+          "geometry": [
+            612.65068263,
+            427.8,
+            619.68,
+            427.8
+          ],
+          "source_primitive_ids": [
+            "raster_segment:59c0a519dfce190cb2637292b8f9891985e937020271b6de9965e5546d178cfe:unchanged_terminal_band_v1:78323a89d8c2132a8e67a673c65b114cc66423d7fecdeebd2887b9b125483023:1"
+          ]
+        }
+      ],
+      "source_snap_collapsed_fragments": [],
+      "wall_candidate": {
+        "candidate_id": "wall_ebd7d961e7eff8241f06",
+        "centerline_pts": [
+          [
+            612.65068263,
+            427.8
+          ],
+          [
+            619.68,
+            427.8
+          ]
+        ],
+        "confidence": 0.3,
+        "conflicting_evidence_ids": [],
+        "curve_control_pts": null,
+        "embedded_columns": [],
+        "end_node_ids": [
+          "junc_98b75612cb51cbddff8b",
+          "junc_9695e0b8ddbfc2a8f88d"
+        ],
+        "face_a_segment_ids": [
+          "split_2826"
+        ],
+        "face_b_segment_ids": null,
+        "interior_exterior": "unresolved",
+        "is_curved": false,
+        "junction_types": [
+          "ambiguous",
+          "near_junction_review"
+        ],
+        "length_m": null,
+        "level_id": null,
+        "metadata": {},
+        "reason_codes": [
+          "assembled_from_1_stage_a_edges",
+          "chain_extension_blocked_by:ambiguous_at_start",
+          "chain_extension_blocked_by:near_junction_review_at_end"
+        ],
+        "representation": "single_line",
+        "schema_version": "1.0.0",
+        "status": "candidate",
+        "supporting_evidence_ids": [],
+        "thickness_authority": "provisional",
+        "thickness_m": null,
+        "viewport_id": "wall-source:page-3"
+      },
+      "wall_candidate_id": "wall_ebd7d961e7eff8241f06"
+    }
+  ],
+  "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+  "summary": {
+    "authenticated_hosts": 15,
+    "canonical_opening_area_records": 8,
+    "canonical_opening_records": 21,
+    "complete_opening_geometry_records": 0,
+    "height_reason_counts": {
+      "schedule_opening_instance_binding_no_contained_tag": 21
+    },
+    "label_dimension_reason_counts": {
+      "opening_label_dimension_ambiguous": 1,
+      "opening_label_dimension_resolved": 16,
+      "opening_label_dimension_text_unavailable": 4
+    },
+    "label_semantic_reason_counts": {
+      "opening_label_semantic_resolved": 8,
+      "opening_label_semantic_unavailable": 13
+    },
+    "physical_existence_claims": 21,
+    "resolved_source_frames": 9,
+    "room_scope_reason_counts": {
+      "source_room_face_scope_resolved": 1,
+      "source_room_face_universe_partial": 1
+    },
+    "schedule_reason_counts": {
+      "schedule_opening_instance_binding_no_contained_tag": 21
+    },
+    "width_reason_counts": {
+      "opening_dimension_witness_topology_required": 21
+    }
+  },
+  "whole_wall_frame_complete": false
+}

@@ -1,0 +1,29 @@
+{
+  "activated": [
+    {
+      "benchmark_item_id": "lot16-1215-sgw-obs-01-area",
+      "benchmark_object_ref": "lot16:opening:p3:1215_sgw_obs:01",
+      "physical_opening_id": "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9",
+      "production_family": "opening_area",
+      "quantity_id": "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+      "sealed_quantity_fingerprint": "6414735c024cd78f0adf6a06b5ee09fcb62d96286fdf0e872ef5cef1f7146159"
+    }
+  ],
+  "activated_count": 1,
+  "benchmark_accuracy": null,
+  "benchmark_score_granted": false,
+  "customer_verified_quantity_ids": [
+    "opening_area_0b6477e219f9117d29b2803c181af665",
+    "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+    "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+    "opening_area_1a755970ebeca773650f41e73eb0f113",
+    "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+    "opening_area_6809b61112132ffd701e6eae02076876",
+    "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+    "opening_area_a2c85322d97e20ba087f6d74574fa7eb"
+  ],
+  "evaluator_invoked": false,
+  "project_id": "au_qld_lot16_power",
+  "sealed_run_fingerprint": "febae9f4437bd5109319e74faeb436b69dad41b3673ea6fd0aaa5fc69cbea40a",
+  "sealed_run_id": "source_closed_run_2317b393f56f0116517b7bd038bd0769"
+}
