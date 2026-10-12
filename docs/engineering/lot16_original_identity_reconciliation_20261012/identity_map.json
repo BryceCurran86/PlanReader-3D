@@ -1,0 +1,58 @@
+{
+  "bindings": [
+    {
+      "benchmark_item_id": "lot16-1218-sgw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_c4d87543028146e1cff0b5e2ca480c55"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-1218-sgw-02-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_91ae06327d4fcc8004a557b116a77820"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0615-sgw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_661fc5e6f0c5975d5e9bdd5d759bd180"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-2148-panel-lift-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_2c31ccb074d8eae86cac281c0fde1176"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0621-sgw-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_dbcec9c3cfa8e22b332479d09a601985"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0906-sgw-obs-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_bd108c2c1bfd88752311aab5901737bb"
+      ]
+    },
+    {
+      "benchmark_item_id": "lot16-0630-fg-01-area",
+      "production_family": "opening_area",
+      "production_object_identity_refs": [
+        "physical_opening_existence_f5adf8438fb6f48cc03b03d8ca2125f5"
+      ]
+    }
+  ],
+  "project_id": "au_qld_lot16_power",
+  "schema_version": "1.0.0",
+  "source_sha256s": [
+    "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+  ]
+}
