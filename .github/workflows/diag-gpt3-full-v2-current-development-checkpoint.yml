@@ -1,0 +1,131 @@
+name: DIAG GPT3 Full V2 Current Development Checkpoint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/diag-gpt3-full-v2-current-development-checkpoint.yml"
+      - "docs/engineering/gpt3_full_v2_current_development_checkpoint_20261013.md"
+      - "benchmarks/frozen_holdout/full_plan_v2/run_development_scoreboard.py"
+      - "benchmarks/frozen_holdout/full_plan_v2/development_scoreboard.py"
+      - "benchmarks/frozen_holdout/full_plan_v2/sealed_reconciliation.py"
+      - "docs/engineering/lot16_original_identity_reconciliation_20261012/**"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-full-v2-current-development-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  current-development:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Replay current committed exact evidence through full four-project scoreboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=artifacts/gpt3-full-v2-current-development
+          SEALED="$ROOT/sealed"
+          MAPS="$ROOT/identity-maps"
+          mkdir -p "$SEALED" "$MAPS"
+
+          cp docs/engineering/lot16_original_identity_reconciliation_20261012/source_sealed_run.json \
+            "$SEALED/au_qld_lot16_power.json"
+          cp docs/engineering/lot16_original_identity_reconciliation_20261012/identity_map.json \
+            "$MAPS/au_qld_lot16_power.identity_map.json"
+
+          set +e
+          PYTHONPATH=. python benchmarks/frozen_holdout/full_plan_v2/run_development_scoreboard.py \
+            --sealed-dir "$SEALED" \
+            --identity-map-dir "$MAPS" \
+            --output "$ROOT/score.json" \
+            --failure-ledger-output "$ROOT/failure-ledger.json" \
+            > "$ROOT/console.json"
+          status=$?
+          set -e
+
+          # Partial suite is expected to remain unpublished/blocked.
+          test "$status" -eq 2
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root=Path("artifacts/gpt3-full-v2-current-development")
+          score=json.loads((root/"score.json").read_text())
+          ledger=json.loads((root/"failure-ledger.json").read_text())
+
+          assert score["status"]=="PARTIAL_OR_BLOCKED"
+          assert score["configured_projects"]==4
+          assert score["executed_projects"]==1
+          assert score["source_closed_truth_items"]==120
+          assert score["executed_denominator"]==27
+          assert score["execution_coverage"]==27/120
+          assert score["matched_within_tolerance"]==7
+          assert score["matched_outside_tolerance"]==0
+          assert score["missed"]==20
+          assert score["partial"]==0
+          assert score["unresolved"]==0
+          assert score["hallucinations"]==0
+          assert score["lineage_conflicts"]==0
+          assert score["observed_accuracy"]==7/27
+          assert score["development_accuracy"] is None
+          assert score["precision_adjusted_accuracy"] is None
+
+          projects={row["project_id"]:row for row in score["project_results"]}
+          lot16=projects["au_qld_lot16_power"]
+          assert lot16["execution_present"] is True
+          assert lot16["truth_denominator"]==27
+          assert lot16["matched_within_tolerance"]==7
+          assert lot16["missed"]==20
+          assert lot16["observed_accuracy"]==7/27
+
+          missing={
+              "au_qld_3laurel",
+              "au_qld_maryborough_service_station",
+              "au_qld_q5446_armstrong32_harlequin",
+          }
+          assert {
+              project_id
+              for project_id,row in projects.items()
+              if not row["execution_present"]
+          } == missing
+          assert set(ledger["missing_execution_project_ids"])==missing
+          assert len(ledger["failure_items"])==20
+          assert ledger["unsupported_outputs"]==[]
+          assert all(item["project_id"]=="au_qld_lot16_power" for item in ledger["failure_items"])
+          assert all(item["state"]=="MISSED" for item in ledger["failure_items"])
+
+          expected_reasons={f"{project_id}:production_output_missing" for project_id in missing}
+          assert set(score["reason_codes"])==expected_reasons
+
+          print(json.dumps({
+              "status": score["status"],
+              "configured_projects": score["configured_projects"],
+              "executed_projects": score["executed_projects"],
+              "executed_denominator": score["executed_denominator"],
+              "full_denominator": score["source_closed_truth_items"],
+              "execution_coverage": score["execution_coverage"],
+              "matched_within_tolerance": score["matched_within_tolerance"],
+              "observed_accuracy_on_executed_projects": score["observed_accuracy"],
+              "development_accuracy": score["development_accuracy"],
+              "precision_adjusted_accuracy": score["precision_adjusted_accuracy"],
+              "missing_execution_project_ids": sorted(missing),
+          },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-full-v2-current-development-checkpoint
+          path: artifacts/gpt3-full-v2-current-development
+          retention-days: 30
