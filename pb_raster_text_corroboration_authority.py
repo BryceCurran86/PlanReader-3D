@@ -307,7 +307,11 @@ def _producer_owned_ocr_target(
 
             run_len = len(native_chars)
             if run_len <= 0 or len(trace_chars) < run_len:
-                return word_bbox, 0
+                # The independent native line-direction receipt is still
+                # source-owned even when glyph-trace refinement is unavailable.
+                # Keep the original native word crop; OCR still has to prove
+                # the exact same reading at both registered DPIs.
+                return word_bbox, rotation_degrees
             hits: list[
                 tuple[
                     tuple[
@@ -331,7 +335,9 @@ def _producer_owned_ocr_target(
                 if matched:
                     hits.append(window)
             if len(hits) != 1:
-                return word_bbox, 0
+                # A missing/competing trace must never choose a glyph bbox,
+                # but it also cannot erase independently proven orientation.
+                return word_bbox, rotation_degrees
 
             boxes = tuple(item[2] for item in hits[0])
             trace_bbox = (
