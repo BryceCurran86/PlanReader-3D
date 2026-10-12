@@ -2143,6 +2143,13 @@ def _producer_proven_page_opening_records(
                 revision_id=published.revision.revision_id,
                 source_sha256=published.revision.source_sha256,
                 snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
+            # A scalar opening treats invalid original native text as ABSTAIN.
+            # A complete-page proof must fail the entire transaction, not
+            # retain other positive openings from that damaged source batch.
+            if "opening_annotation_source_integrity_unproven" in getattr(
+                result, "reason_codes", ()
+            ):
+                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
             opening = result.existence_record
             if (result.status is EvidenceResolutionStatus.CORROBORATED
                     and result.proposition == PHYSICAL_OPENING_EXISTS
