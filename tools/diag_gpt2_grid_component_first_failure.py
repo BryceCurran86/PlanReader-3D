@@ -441,6 +441,111 @@ def _competing_original_label_receipts(component, candidate, label_scope):
 
 
 
+def _original_w2_shadow_and_native_source_crosscheck(
+    wall_scope: PhysicalWallCandidateScopeResult,
+    record: Any,
+    fragment: Any,
+) -> dict[str, Any]:
+    """Cross-check exact existing W2/W4/native receipts, never physical GRID role.
+
+    An observed common source primitive ID is NOT an original source-parent
+    membership proof. W4's identity and source-metadata descriptor are shadow
+    artifacts, so even agreement across both is merely a diagnostic receipt,
+    never KIND_GRID opposition, wall equivalence or a source-room boundary.
+    """
+    result = {
+        "original_w2_w4_native_lineage_first_gate_diagnostic_only":
+            "source_fragment_receipt_unavailable",
+        "original_w2_w4_native_lineage_crosschecked_diagnostic_only": False,
+        "source_grid_or_wall_role_authenticated_by_crosscheck": False,
+    }
+
+    def ids(value: Any) -> tuple[str, ...] | None:
+        if not isinstance(value, (tuple, list)) or not value:
+            return None
+        if any(
+            not isinstance(item, str) or not item or item != item.strip()
+            for item in value
+        ):
+            return None
+        return tuple(value)
+
+    edge_id = getattr(fragment, "edge_id", None)
+    source_ids = ids(getattr(fragment, "source_primitive_ids", None))
+    if (
+        not isinstance(edge_id, str) or not edge_id
+        or edge_id != edge_id.strip() or source_ids is None
+    ):
+        return result
+
+    identity = getattr(record, "physical_identity", None)
+    native_edges = ids(getattr(identity, "edge_ids", None))
+    native_sources = ids(getattr(identity, "source_primitive_ids", None))
+    if (
+        getattr(getattr(identity, "status", None), "value", None)
+        != "corroborated"
+        or native_edges is None or native_sources is None
+    ):
+        result["original_w2_w4_native_lineage_first_gate_diagnostic_only"] = (
+            "w4_shadow_identity_unavailable"
+        )
+        return result
+    if edge_id not in native_edges:
+        result["original_w2_w4_native_lineage_first_gate_diagnostic_only"] = (
+            "w2_edge_absent_from_w4_shadow_identity"
+        )
+        return result
+    if not set(source_ids).issubset(native_sources):
+        result["original_w2_w4_native_lineage_first_gate_diagnostic_only"] = (
+            "source_primitive_absent_from_w4_shadow_identity"
+        )
+        return result
+
+    table = getattr(wall_scope, "source_metadata_table", None)
+    if (
+        getattr(table, "status", None) != "described"
+        or getattr(table, "page_id", None) != wall_scope.page_id
+        or getattr(table, "decision_scope_id", None)
+            != wall_scope.decision_scope_id
+        or not isinstance(getattr(table, "descriptors", None), (tuple, list))
+    ):
+        result["original_w2_w4_native_lineage_first_gate_diagnostic_only"] = (
+            "original_native_scope_metadata_unavailable"
+        )
+        return result
+    original_id = getattr(record, "wall_candidate_id", None)
+    descriptors = [
+        row for row in table.descriptors
+        if getattr(row, "wall_candidate_id", None) == original_id
+    ]
+    if len(descriptors) != 1:
+        result["original_w2_w4_native_lineage_first_gate_diagnostic_only"] = (
+            "original_native_w4_descriptor_not_unique"
+        )
+        return result
+    descriptor = descriptors[0]
+    matched = ids(getattr(descriptor, "matched_source_primitive_ids", None))
+    declared = ids(getattr(descriptor, "source_primitive_ids", None))
+    missing = getattr(descriptor, "missing_source_primitive_ids", None)
+    if (
+        matched is None or declared is None
+        or not isinstance(missing, (tuple, list))
+        or any(not isinstance(item, str) for item in missing)
+        or tuple(sorted(set(declared))) != tuple(sorted(set(native_sources)))
+        or not set(source_ids).issubset(matched)
+        or any(item in missing for item in source_ids)
+    ):
+        result["original_w2_w4_native_lineage_first_gate_diagnostic_only"] = (
+            "original_native_source_receipt_unavailable_or_conflicting"
+        )
+        return result
+    result["original_w2_w4_native_lineage_first_gate_diagnostic_only"] = (
+        "w2_w4_shadow_and_native_receipts_agree_role_still_unproven"
+    )
+    result["original_w2_w4_native_lineage_crosschecked_diagnostic_only"] = True
+    return result
+
+
 def inspect_original_w4_grid_opposition_first_gate(
     wall_scope: PhysicalWallCandidateScopeResult,
     original_w4_wall_id: str,
@@ -547,6 +652,9 @@ def inspect_original_w4_grid_opposition_first_gate(
             "source_parent_receipts_typed": bool(parents),
             "source_parent_membership_proven": False,
             "source_physical_role_inferred": False,
+            **_original_w2_shadow_and_native_source_crosscheck(
+                wall_scope, record, frag
+            ),
         })
     if missing:
         output["original_w4_grid_first_gate"] = "source_w2_grid_opposition_missing"
