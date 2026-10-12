@@ -397,7 +397,6 @@ def build_activation(
         source_manifest,
         project_id=sealed.project_id,
         source_sha256s=sealed.source_sha256s,
-        sealed_by_physical=sealed_by_physical,
     )
     if sealed.project_id != active.project_id:
         raise ValueError(
@@ -456,6 +455,7 @@ def build_activation(
         object_universe,
         project_id=sealed.project_id,
         source_sha256s=sealed.source_sha256s,
+        sealed_by_physical=sealed_by_physical,
     )
 
     additions = []
