@@ -219,7 +219,7 @@ def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
             )
 
 
-def generate_project_handoff(
+def _generate_project_handoff_locked(
     *,
     pdf_path: Path,
     project_id: str,
@@ -728,6 +728,40 @@ def generate_project_handoff(
 
     _write_json(output_dir / "production_summary.json", summary)
     return summary
+
+
+
+def generate_project_handoff(
+    *,
+    pdf_path: Path,
+    project_id: str,
+    workspace_id: int,
+    output_dir: Path,
+    family_group: str = "all",
+) -> dict[str, Any]:
+    """Serialize one source run per output directory without trusting stale seals.
+
+    The exclusive lock is an execution guard, not source authenticity proof.
+    A process killed without cleanup leaves a lock: use a NEW output directory
+    rather than pretending a possibly partial run was completed.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = output_dir / ".source_closed_handoff.lock"
+    # O_EXCL fails closed on concurrent writers, symlinks and stale crash locks.
+    descriptor = os.open(
+        lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600,
+    )
+    try:
+        return _generate_project_handoff_locked(
+            pdf_path=pdf_path,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            output_dir=output_dir,
+            family_group=family_group,
+        )
+    finally:
+        os.close(descriptor)
+        lock_path.unlink(missing_ok=True)
 
 
 def _parser() -> argparse.ArgumentParser:
