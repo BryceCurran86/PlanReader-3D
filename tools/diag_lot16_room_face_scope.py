@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 
 import pb_source_room_face_authority as face_authority
@@ -443,7 +444,8 @@ def _ceiling_quantity_diagnostic(claim) -> dict:
     by_ceiling = {}
     for quantity in quantities:
         if isinstance(quantity, QuantityEvidence):
-            for cid in quantity.input_entity_ids:
+            for cid in (quantity.input_entity_ids
+                        if type(quantity.input_entity_ids) in (tuple, list) else ()):
                 by_ceiling.setdefault(cid, []).append(quantity)
 
     def first_failure(ceiling):
@@ -465,7 +467,9 @@ def _ceiling_quantity_diagnostic(claim) -> dict:
                 or type(ceiling.source_page) is not int or ceiling.source_page <= 0
                 or not ceiling.viewport_id):
             return "authenticated_ceiling_source_view_unavailable"
-        if not ceiling.geometry_complete or len(ceiling.polygon_pdf_pts) < 3:
+        if (not ceiling.geometry_complete
+                or type(ceiling.polygon_pdf_pts) not in (tuple, list)
+                or len(ceiling.polygon_pdf_pts) < 3):
             return "source_ceiling_geometry_incomplete"
         if (not ceiling.metric_area_complete
                 or type(ceiling.area_m2) not in (int, float)
@@ -497,7 +501,7 @@ def _ceiling_quantity_diagnostic(claim) -> dict:
                 or quantity.value != ceiling.area_m2):
             return "firm_ceiling_lining_quantity_unavailable"
         metadata = quantity.metadata
-        if (not isinstance(metadata, dict)
+        if (not isinstance(metadata, Mapping)
                 or not metadata.get("support_page_id")
                 or not metadata.get("support_viewport_id")
                 or not metadata.get("support_snapshot_id")):
