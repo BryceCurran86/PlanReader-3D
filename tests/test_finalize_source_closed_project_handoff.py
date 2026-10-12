@@ -213,3 +213,38 @@ def test_interrupted_combined_write_does_not_leave_partially_sealed_file(
     assert not (output / ".source_closed_finalizer.lock").exists()
     assert not list(output.glob("*.tmp"))
     assert not list(output.glob(".*.tmp"))
+
+
+@pytest.mark.parametrize("mutation", ["swap_valid_signed_run", "remove_signed_source"])
+def test_signed_source_replaced_during_combination_cannot_publish(
+    tmp_path, monkeypatch, mutation,
+):
+    original = _run("q-original", "opening-original")
+    replacement = _run("q-replacement", "opening-replacement")
+    core = tmp_path / "project-a.core.json"
+    core.write_text(original.to_json(), encoding="utf-8")
+    output = tmp_path / "never-publish"
+    actual_combine = finalizer.combine_sealed_run_files
+
+    def _malicious_midflight_swap(paths, *, project_id):
+        signed_result = actual_combine(paths, project_id=project_id)
+        if mutation == "swap_valid_signed_run":
+            core.write_text(replacement.to_json(), encoding="utf-8")
+        else:
+            core.unlink()
+        return signed_result
+
+    monkeypatch.setattr(
+        finalizer, "combine_sealed_run_files", _malicious_midflight_swap,
+    )
+    with pytest.raises(
+        (ValueError, FileNotFoundError),
+        match="signed source group changed|No such file",
+    ):
+        finalizer.finalize_split_project_handoff(
+            project_id="project-a", input_dir=tmp_path, output_dir=output,
+        )
+    assert not output.exists()
+    assert not (tmp_path / "project-a.json").exists()
+    if mutation == "swap_valid_signed_run":
+        assert core.read_text(encoding="utf-8") == replacement.to_json()
