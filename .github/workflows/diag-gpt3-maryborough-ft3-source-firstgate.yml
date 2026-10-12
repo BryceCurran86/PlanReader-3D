@@ -1,0 +1,97 @@
+name: DIAG GPT3 Maryborough FT3 Source First Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt3_maryborough_ft3_source_firstgate.py"
+      - "tests/test_gpt3_maryborough_ft3_source_firstgate.py"
+      - ".github/workflows/diag-gpt3-maryborough-ft3-source-firstgate.yml"
+      - "pb_source_material_semantic_authority.py"
+      - "pb_source_visibility_authority.py"
+      - "pb_viewport_segmentation.py"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-maryborough-ft3-firstgate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_maryborough_ft3_source_firstgate.py
+      - run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact current-main original FT3 first gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-maryborough-ft3-firstgate
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/producer_head_sha.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          /usr/bin/time -v timeout 2400s python -u -m tools.diag_gpt3_maryborough_ft3_source_firstgate \
+            --pdf "$PDF" \
+            --output "$OUT/report.json" 2>&1 | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report=json.loads(Path(
+              "artifacts/gpt3-maryborough-ft3-firstgate/report.json"
+          ).read_text())
+          assert report["source_sha256"] == (
+              "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          )
+          assert report["decoded_source_pages"] == ["7","9","11"]
+          assert report["diagnostic_only"] is True
+          assert report["floor_finish_quantity_published"] is False
+          assert report["customer_quantity_published"] is False
+          assert report["benchmark_identity_assigned"] is False
+          assert report["benchmark_accuracy"] is None
+          ft3=report["definitions"]["FT3"]
+          if ft3["record_id"] is not None:
+              assert ft3["semantic_finish"] == "tile"
+              assert ft3["source_definition_ids"]
+          for row in report["floor_occurrence_scope"]["ft2_ft3_occurrences"]:
+              assert row["record_id"]
+              assert row["definition_record_id"]
+              assert row["source_evidence_id"]
+              assert row["source_text_observation_ids"]
+          print("CURRENT_FIRST_UNCLOSED_GATE", report["first_unclosed_gate"])
+          print("FT3_DEFINITION", json.dumps(ft3, sort_keys=True))
+          print("FT3_OCCURRENCES", json.dumps([
+              row for row in report["floor_occurrence_scope"]["ft2_ft3_occurrences"]
+              if row["code"] == "FT3"
+          ], sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-ft3-source-firstgate
+          path: artifacts/gpt3-maryborough-ft3-firstgate
+          retention-days: 30
