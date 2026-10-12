@@ -261,3 +261,27 @@ def test_malformed_source_quantity_input_id_abstains_without_handoff_crash(
     assert row["documented_area_quantity_id"] is None
     assert row["floor_finish_publication_allowed"] is False
     assert row["ceiling_lining_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("where,attr,invalid,first_gate", [
+    ("room", "physical_room_id", ["unhashable"], "SOURCE_ROOM_FACE_IDENTITY_CONFLICT"),
+    ("room", "source_room_face_record_id", {"bad": "id"}, "SOURCE_ROOM_FACE_IDENTITY_CONFLICT"),
+    ("room", "canonical_room_id", ["unhashable"], "SOURCE_ROOM_FACE_IDENTITY_CONFLICT"),
+    ("floor", "canonical_floor_id", ["unhashable"], "FLOOR_ORIGINAL_PHYSICAL_FACE_LINEAGE_CONFLICT"),
+    ("floor", "room_entity_id", {"bad": "owner"}, "CANONICAL_FLOOR_OWNER_UNAVAILABLE"),
+])
+def test_unhashable_original_room_and_floor_owner_ids_abstain_safely(
+    where, attr, invalid, first_gate,
+):
+    """Malformed native identity objects must never crash source room audit."""
+    source = fixture()
+    object_ = (
+        source.canonical_rooms[0] if where == "room"
+        else source.canonical_floors[0]
+    )
+    setattr(object_, attr, invalid)
+    row = one(source)
+    assert row["first_unproved_authority"] == first_gate
+    assert row["source_proven_area_m2"] is None
+    assert row["floor_finish_publication_allowed"] is False
+    assert row["ceiling_lining_publication_allowed"] is False
