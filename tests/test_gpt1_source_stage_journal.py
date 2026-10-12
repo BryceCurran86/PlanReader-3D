@@ -316,3 +316,103 @@ def test_source_wall_page_internal_stages_observed_without_changing_algorithm(
         "7", "7", None, None, None, None
     ]
     assert all(event["diagnostic_only"] for event in events)
+
+
+def test_sampled_original_opening_proof_keeps_all_512_selectors_and_results(
+    tmp_path, monkeypatch,
+):
+    selectors = [object() for _ in range(512)]
+    receipts = [object() for _ in selectors]
+    calls = []
+
+    def prove(self, selector):
+        calls.append(selector)
+        return receipts[len(calls) - 1]
+
+    monkeypatch.setattr(diag.PhysicalOpeningAuthority, "prove_existence", prove)
+    authority = object.__new__(diag.PhysicalOpeningAuthority)
+    path = tmp_path / "original-opening-proof-sampled.jsonl"
+    with diag.StageJournalContext(path) as journal:
+        with diag.journal_source_stages(journal):
+            for index, selector in enumerate(selectors):
+                assert authority.prove_existence(selector) is receipts[index]
+        assert diag.PhysicalOpeningAuthority.prove_existence is prove
+
+    assert calls == selectors
+    events = _events(path)
+    samples = [row for row in events if row["event"] == "sample"
+               and row["stage"] == "PhysicalOpeningAuthority.prove_existence"]
+    assert len(samples) == 1
+    assert samples[0]["observation_calls"] == 512
+    assert samples[0]["cumulative_ms"] >= 0
+    assert all(row["diagnostic_only"] for row in samples)
+
+
+def test_sampled_original_opening_proof_preserves_exception_identity(
+    tmp_path, monkeypatch,
+):
+    failure = RuntimeError("original-opening-source-conflict")
+
+    def prove(self, selector):
+        raise failure
+
+    monkeypatch.setattr(diag.PhysicalOpeningAuthority, "prove_existence", prove)
+    authority = object.__new__(diag.PhysicalOpeningAuthority)
+    path = tmp_path / "original-opening-proof-failed.jsonl"
+    with diag.StageJournalContext(path) as journal:
+        with pytest.raises(RuntimeError) as caught:
+            with diag.journal_source_stages(journal):
+                authority.prove_existence(object())
+        assert caught.value is failure
+        assert diag.PhysicalOpeningAuthority.prove_existence is prove
+
+    events = _events(path)
+    failed = [row for row in events if row["event"] == "failed"
+              and row["stage"] == "PhysicalOpeningAuthority.prove_existence"]
+    assert len(failed) == 1
+    assert failed[0]["error_type"] == "RuntimeError"
+    assert failed[0]["observation_calls"] == 0
+
+
+def test_sampled_original_classmethod_keeps_descriptor_and_exact_class_binding(
+    tmp_path, monkeypatch,
+):
+    source = object()
+    records = object()
+    accepted = object()
+    seen = []
+
+    def native_discovery(cls, seed, raw_records):
+        seen.append((cls, seed, raw_records))
+        return accepted
+
+    original_descriptor = classmethod(native_discovery)
+    monkeypatch.setattr(
+        diag.PhysicalOpeningAuthority,
+        "_visible_all_structural_candidates",
+        original_descriptor,
+    )
+    path = tmp_path / "original-discovery-descriptor.jsonl"
+    with diag.StageJournalContext(path) as journal:
+        with diag.journal_source_stages(journal):
+            assert diag.PhysicalOpeningAuthority._visible_all_structural_candidates(
+                source, records
+            ) is accepted
+            instance = object.__new__(diag.PhysicalOpeningAuthority)
+            assert instance._visible_all_structural_candidates(
+                source, records
+            ) is accepted
+        assert (
+            diag.PhysicalOpeningAuthority.__dict__["_visible_all_structural_candidates"]
+            is original_descriptor
+        )
+
+    assert seen == [
+        (diag.PhysicalOpeningAuthority, source, records),
+        (diag.PhysicalOpeningAuthority, source, records),
+    ]
+    events = _events(path)
+    assert [row["event"] for row in events
+            if row["stage"] == "PhysicalOpeningAuthority._visible_all_structural_candidates"] == [
+        "entered", "completed", "entered", "completed"
+    ]
