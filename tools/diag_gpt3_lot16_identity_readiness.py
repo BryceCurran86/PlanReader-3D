@@ -119,7 +119,7 @@ def build_unpublished_lot16_identity_readiness(
     work_order: list[dict] = []
     for row in sealed.quantities:
         if (row.family != "opening_area"
-                or row.abstained or row.status.lower() != "firm"
+                or row.abstained or row.status.lower() not in {"corroborated", "firm"}
                 or row.value is None or not row.lineage_ok
                 or row.blocking_reasons or row.lineage_reason_codes
                 or row.source_sha256 != original_sha
