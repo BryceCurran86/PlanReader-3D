@@ -98,6 +98,12 @@ def build_live_opening_count_source_traces(
     """Build exact aggregate source traces for live authenticated counts."""
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
+    # Never authenticate a Boolean, fractional, or digit-string workspace in
+    # the opening COUNT source exporter, including an empty candidate universe.
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise SourceClosedRunConflictError(
+            "opening count workspace_id must be original positive integer"
+        )
 
     openings = _opening_by_identity(claim)
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
