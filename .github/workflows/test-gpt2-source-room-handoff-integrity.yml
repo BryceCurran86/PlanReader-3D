@@ -63,6 +63,29 @@ jobs:
           d=report_source_room_handoff(claim,original_source_sha=sha)
           assert d['source_sha256']==sha
           assert d['reported_source_room_count']==15
+          # Original FREEZER can possess a source face and native label but
+          # still fail a SIMPLE physical-ring gate. Observe the actual
+          # Shapely source validity without repairing vertices or minting m².
+          freezer=next(row for row in d['room_handoff_first_gates']
+                       if row['source_room_label']=='FREEZER')
+          assert freezer['first_unproved_authority']=='SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE'
+          native=freezer['original_polygon_source_validity_diagnostic_only']
+          assert native is not None and native['original_polygon_repaired'] is False
+          assert native['metric_area_published_by_diagnostic'] is False
+          assert native['original_native_polygon_valid_diagnostic_only'] is False
+          print('G2_ORIGINAL_FREEZER_SOURCE_RING_FIRST_GATE',json.dumps({
+              'source_sha256':sha,
+              'source_room_face_record_id':freezer['original_source_face_receipt_id'],
+              'native_polygon':native,
+              'metric_area_published':False,
+              'benchmark_accuracy':None,
+          },sort_keys=True))
+          assert all(
+              row['original_polygon_source_validity_diagnostic_only'] is None
+              or (row['original_polygon_source_validity_diagnostic_only']['original_polygon_repaired'] is False
+                  and row['original_polygon_source_validity_diagnostic_only']['metric_area_published_by_diagnostic'] is False)
+              for row in d['room_handoff_first_gates']
+          )
           # Original producer separately reissued three source-proven
           # floor-area quantities; no customer sealing is proven here.
           observed_reissues = {
