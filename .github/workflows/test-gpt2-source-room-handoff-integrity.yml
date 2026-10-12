@@ -163,6 +163,18 @@ jobs:
           for row in downstream['rooms']:
               measured_by_label.setdefault(row['room_label'],[]).append(row)
           for label,expected_area in controls.items():
+              # Generic source validity gating may not discard existing
+              # three independently measured, authentic physical rooms.
+              rooms=[r for r in claim.canonical_rooms if r.room_label==label]
+              assert len(rooms)==1, (label,'canonical source face ambiguous')
+              source_room=rooms[0]
+              assert source_room.geometry_complete is True
+              assert source_room.metric_geometry_complete is False
+              floors=[f for f in claim.canonical_floors
+                      if f.room_entity_id==source_room.canonical_room_id]
+              assert len(floors)==1, (label,'physical floor owner ambiguous')
+              assert floors[0].geometry_complete is True
+              assert floors[0].physical_floor_surface_identity_resolved is True
               rows=measured_by_label.get(label,[])
               assert len(rows)==1, (label,'original owner ambiguous')
               item=rows[0]
