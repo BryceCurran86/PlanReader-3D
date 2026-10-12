@@ -169,6 +169,7 @@ def build_original_byte_gated_project_report(
     ]
     if any(
         type(value) is not list or len(value) != len(required_hashes)
+        or any(type(sha) is not str or len(sha) != 64 for sha in value)
         or len(set(value)) != len(value) or set(value) != required_hashes
         for value in claimed_envelopes
     ):
