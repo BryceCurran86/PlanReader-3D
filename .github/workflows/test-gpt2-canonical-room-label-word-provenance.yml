@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - "pb_live_canonical_room_composition.py"
+      - "pb_source_room_face_authority.py"
+      - "tests/test_gpt2_authenticated_same_wall_source_face_recovery.py"
       - "tests/test_gpt2_canonical_room_label_lineage.py"
       - ".github/workflows/test-gpt2-canonical-room-label-word-provenance.yml"
 concurrency:
@@ -25,7 +27,7 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Producer-authenticated room labels and exact source receipts
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gpt2_canonical_room_label_lineage.py tests/test_gpt2_source_room_identity_eight_fixes.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_canonical_room_label_lineage.py tests/test_gpt2_source_room_identity_eight_fixes.py tests/test_gpt2_authenticated_same_wall_source_face_recovery.py
           ruff check --select F821,F823 pb_live_canonical_room_composition.py tests/test_gpt2_canonical_room_label_lineage.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
