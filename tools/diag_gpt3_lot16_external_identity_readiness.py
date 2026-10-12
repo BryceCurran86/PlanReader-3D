@@ -239,8 +239,10 @@ def _signed_state(
             raise ValueError("active identity map contains duplicate ownership")
         item_to_physical[item] = physical
         physical_to_item[physical] = item
-    if set(physical_to_item) != sealed_physical:
-        raise ValueError("signed sealed identities and active identity map diverged")
+    if not set(physical_to_item).issubset(sealed_physical):
+        raise ValueError(
+            "active identity map contains a physical identity absent from signed run"
+        )
     return sealed_physical, item_to_physical, physical_to_item
 
 
