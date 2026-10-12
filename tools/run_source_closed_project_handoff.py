@@ -301,7 +301,12 @@ def generate_project_handoff(
         "semantic_execution_pages": [
             page + 1 for page in semantic_execution_pages
         ],
-        "status": "unavailable",
+        # A new run is never a sealed publication until every source/quantity
+        # gate completes. Publish an unsealed summary before expensive source
+        # processing so a killed runner cannot leave an old sealed status.
+        "status": "source_attempt_recorded_unsealed",
+        "benchmark_score_granted": False,
+        "reconciliation_complete": False,
         "family_counts": {},
         "family_run_ids": {},
         "family_run_files": {},
@@ -328,6 +333,8 @@ def generate_project_handoff(
         "complete_source_coverage_proven": False,
         "sealed_run_file": None,
     })
+
+    _write_json(output_dir / "production_summary.json", summary)
 
     try:
         claim = collect_live_physical_net_wall_claim(
