@@ -58,6 +58,68 @@ def _polygon(source):
     except (TypeError, ValueError, OverflowError, GEOSException):
         return False
 
+def _first_native_ring_crossing_pair_diagnostic_only(vertices):
+    """Preserve two original intersecting non-neighbour source edges.
+
+    Does not repair the source, bind edges to W4 walls, or certify a room.
+    A canonical room may carry a *set* of bounding W4 IDs but not the exact
+    producer edge/owner proof needed to identify a wall at this intersection.
+    """
+    result = {
+        "first_source_crossing_gate_diagnostic_only": "source_crossing_unresolved",
+        "original_ring_crossing_edge_indices": [],
+        "original_ring_crossing_edge_pdf_pts": [],
+        "original_ring_crossing_geometry_type": None,
+        "source_edge_wall_owner_proven": False,
+        "source_room_geometry_repaired": False,
+    }
+    if not isinstance(vertices, (tuple, list)) or not 4 <= len(vertices) <= 256:
+        return result
+    if any(
+        not isinstance(point, (tuple, list)) or len(point) != 2
+        or any(type(x) not in (float, int) or not math.isfinite(x) for x in point)
+        for point in vertices
+    ):
+        return result
+    from shapely.geometry import LineString
+    from shapely.errors import GEOSException
+
+    count = len(vertices)
+    for i in range(count):
+        start = vertices[i]
+        end = vertices[(i + 1) % count]
+        if start == end:
+            continue
+        for j in range(i + 2, count):
+            # First/last share the original ring closure by construction.
+            if i == 0 and j == count - 1:
+                continue
+            other_start = vertices[j]
+            other_end = vertices[(j + 1) % count]
+            if other_start == other_end:
+                continue
+            try:
+                crossing = LineString((start, end)).intersection(
+                    LineString((other_start, other_end))
+                )
+            except (GEOSException, TypeError, ValueError, OverflowError):
+                continue
+            if crossing.is_empty:
+                continue
+            result.update({
+                "first_source_crossing_gate_diagnostic_only":
+                    "original_nonadjacent_ring_edges_intersect_role_unproven",
+                "original_ring_crossing_edge_indices": [i, j],
+                "original_ring_crossing_edge_pdf_pts": [
+                    [list(start), list(end)],
+                    [list(other_start), list(other_end)],
+                ],
+                "original_ring_crossing_geometry_type": crossing.geom_type,
+            })
+            return result
+    return result
+
+
 def original_polygon_first_failure_receipt(source):
     """Explain the original ring failure without repairing or measuring it.
 
@@ -73,6 +135,7 @@ def original_polygon_first_failure_receipt(source):
         "original_native_polygon_valid_diagnostic_only": False,
         "original_polygon_repaired": False,
         "metric_area_published_by_diagnostic": False,
+        "original_native_source_ring_crossing_diagnostic_only": None,
     }
     vertices = getattr(source, "polygon_pdf_pts", None)
     if not isinstance(vertices, (tuple, list)):
@@ -119,6 +182,10 @@ def original_polygon_first_failure_receipt(source):
         if not result["original_native_polygon_valid_diagnostic_only"]:
             result["original_native_polygon_geos_reason_diagnostic_only"] = (
                 str(explain_validity(polygon))[:180]
+            )
+        if gate == "source_native_polygon_invalid":
+            result["original_native_source_ring_crossing_diagnostic_only"] = (
+                _first_native_ring_crossing_pair_diagnostic_only(vertices)
             )
     except (GEOSException, TypeError, ValueError, OverflowError):
         result["first_source_polygon_gate_diagnostic_only"] = (
