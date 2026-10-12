@@ -62,6 +62,18 @@ jobs:
           d=report_source_room_handoff(claim,original_source_sha=sha)
           assert d['source_sha256']==sha
           assert d['reported_source_room_count']==15
+          # Original producer has already reissued three separately sealed
+          # SOURCE-only floor-area quantities, not customer-sealed output.
+          observed_reissues = {
+              row['source_room_label']:
+              row['producer_floor_area_reissue_quantity_id_observed_only']
+              for row in d['room_handoff_first_gates']
+              if row['producer_floor_area_reissue_quantity_id_observed_only']
+          }
+          assert set(observed_reissues) == {'FOOD PREP', 'COLD ROOM', 'OFFICE'}
+          assert d['independent_floor_area_reissue_observed_count'] == 3
+          assert all(row['customer_floor_area_seal_verified_by_this_report'] is False
+                     for row in d['room_handoff_first_gates'])
           assert d['benchmark_accuracy'] is None
           assert d['diagnostic_only'] is True
           assert d['dry_store_must_abstain_without_new_proof'] is True
