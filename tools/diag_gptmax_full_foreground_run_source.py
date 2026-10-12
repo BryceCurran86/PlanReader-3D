@@ -42,7 +42,7 @@ def _default_source(source_bytes, source_sha, page_id):
 
 
 def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index_shadow=False,
-        w4_identity_abstention_shadow=False):
+        w4_identity_abstention_shadow=False, exact_split_parent_lineage_shadow=False):
     """Experimental candidates only; input receipts are checked by the caller."""
     if type(exact_endpoint_shadow) is not bool:
         raise ValueError("exact endpoint shadow mode must be explicit boolean")
@@ -52,6 +52,8 @@ def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index
         raise ValueError("exact endpoint index shadow requires exact endpoint mode")
     if type(w4_identity_abstention_shadow) is not bool:
         raise ValueError("W4 identity abstention shadow must be explicit boolean")
+    if type(exact_split_parent_lineage_shadow) is not bool:
+        raise ValueError("exact split parent lineage shadow must be explicit boolean")
     records = tuple(sorted(records, key=lambda r:r.observation_id))
     source_ids = frozenset(r.observation_id for r in records)
     if len(records) > MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS:
@@ -74,13 +76,16 @@ def _trace_sources(records, *, exact_endpoint_shadow=False, exact_endpoint_index
             source_observation_id=record.observation_id))
     # Diagnostic-only control: reuse the existing W2 stack with exact endpoint
     # joins. The ordinary source report continues using its unchanged default.
+    lineage_options = ({"exact_split_parent_lineage_shadow": True}
+                       if exact_split_parent_lineage_shadow else {})
     if exact_endpoint_index_shadow:
         graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=0.0,
-            exact_endpoint_index_shadow=True)
+            exact_endpoint_index_shadow=True, **lineage_options)
     elif exact_endpoint_shadow:
-        graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=0.0)
+        graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=0.0,
+            **lineage_options)
     else:
-        graph = build_wall_graph_for_viewport(segments)
+        graph = build_wall_graph_for_viewport(segments, **lineage_options)
     deduped, removed = deduplicate_coincident_edges(graph)
     junctions, relationships = classify_junctions(deduped, document_id="source-pixel-shadow",
         page_id=next(iter(pages),"1"), viewport_id="full-page-pixel-shadow")

@@ -183,6 +183,7 @@ def _point_pairs_to_segment_dicts(
     *,
     id_prefix: str = "split",
     source_segments: Sequence[Dict[str, Any]] | None = None,
+    source_parent_indexes: Sequence[int] | None = None,
 ) -> List[Dict[str, Any]]:
     """Rebuild historical split dicts, plus additive plural lineage when sources exist.
 
@@ -191,6 +192,8 @@ def _point_pairs_to_segment_dicts(
     graphic state as supplied. Source evidence is in ``primitive_lineage``.
     """
     if source_segments is None:
+        if source_parent_indexes is not None:
+            raise ValueError("exact split source parents require original source segments")
         live = fabricated_live_fields()
         return [
             {
@@ -204,7 +207,10 @@ def _point_pairs_to_segment_dicts(
             }
             for idx, (p1, p2) in enumerate(pairs)
         ]
-    return attach_lineage_to_split_fragments(pairs, source_segments, id_prefix=id_prefix)
+    return attach_lineage_to_split_fragments(
+        pairs, source_segments, id_prefix=id_prefix,
+        source_parent_indexes=source_parent_indexes,
+    )
 
 
 def _snap_geometry_indexed(
@@ -627,6 +633,7 @@ def build_wall_graph_for_viewport(
     gap_snap_tolerance_pt: float = DEFAULT_GAP_SNAP_TOLERANCE_PT,
     collinear_angle_tolerance_deg: float = DEFAULT_COLLINEAR_ANGLE_TOLERANCE_DEG,
     exact_endpoint_index_shadow: bool = False,
+    exact_split_parent_lineage_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -638,16 +645,26 @@ def build_wall_graph_for_viewport(
     endpoint-snapping, and collinear-merge have all been applied, plus an
     ``"excluded_segments"`` key recording what Section 6.11's pre-filter
     removed and why (never silently dropped from observability).
+
+    ``exact_split_parent_lineage_shadow`` is explicit shadow-only provenance:
+    retain the actual splitter emitter alongside existing plural containment
+    parents. It does not alter topology or authorize structural wall roles.
     """
     if type(exact_endpoint_index_shadow) is not bool:
         raise ValueError("exact endpoint index shadow must be explicit boolean")
     if exact_endpoint_index_shadow and gap_snap_tolerance_pt != 0:
         raise ValueError("exact endpoint index shadow requires zero tolerance")
+    if type(exact_split_parent_lineage_shadow) is not bool:
+        raise ValueError("exact split parent lineage shadow must be explicit boolean")
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
-    split_pairs = split_segments_at_intersections(point_pairs)
+    parent_indexes: List[int] | None = [] if exact_split_parent_lineage_shadow else None
+    split_pairs = split_segments_at_intersections(point_pairs, **(
+        {"source_parent_indexes": parent_indexes} if parent_indexes is not None else {}
+    ))
     split_segment_dicts = _point_pairs_to_segment_dicts(
-        split_pairs, source_segments=structural_segments
+        split_pairs, source_segments=structural_segments,
+        source_parent_indexes=parent_indexes,
     )
     audit_short_source = os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1"
     snapped_graph = _snap_geometry_indexed(

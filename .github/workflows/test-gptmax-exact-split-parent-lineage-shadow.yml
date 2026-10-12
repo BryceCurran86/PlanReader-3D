@@ -1,0 +1,67 @@
+name: GPT MAX Exact Split Parent Lineage Shadow
+on:
+  pull_request:
+    paths:
+      - pb_accuracy_v13_engines_v145.py
+      - pb_wall_room_topology_primitive_lineage.py
+      - pb_wall_room_topology_stage_a.py
+      - tools/diag_gptmax_full_foreground_run_source.py
+      - scripts/gptmax_exact_split_parent_lineage_shadow.py
+      - tests/test_gptmax_exact_split_parent_lineage_shadow.py
+      - docs/engineering/gptmax_exact_split_parent_lineage_shadow.md
+      - .github/workflows/test-gptmax-exact-split-parent-lineage-shadow.yml
+concurrency:
+  group: gptmax-split-parent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused actual parent and unchanged W2 regressions
+        run: PYTHONPATH=.:tests python -m pytest -q tests/test_gptmax_exact_split_parent_lineage_shadow.py tests/test_wall_topology_primitive_lineage.py tests/test_wall_room_topology_stage_a.py
+      - name: Original source lineage and exact default production retention
+        env:
+          PYTHONPATH: .
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum --check
+          mkdir -p artifacts/exact-split-parent
+          git worktree add --detach /tmp/gptmax-split-parent-base "$BASE_SHA"
+          ( cd /tmp/gptmax-split-parent-base && PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py --pdf "$PDF" --page-id 3 --output /tmp/gptmax-split-parent-original-before.json )
+          python -u scripts/gptmax_exact_split_parent_lineage_shadow.py --pdf "$PDF" --page-id 3 --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 --output artifacts/exact-split-parent/original-split-parent-report.json
+          python -u tools/diag_opening_wall_face_preservation.py --pdf "$PDF" --page-id 3 --output artifacts/exact-split-parent/original-production-after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('/tmp/gptmax-split-parent-original-before.json').read_text())
+          after=json.loads(Path('artifacts/exact-split-parent/original-production-after.json').read_text())
+          assert before==after, 'default original source host/frame/topology receipts changed'
+          r=json.loads(Path('artifacts/exact-split-parent/original-split-parent-report.json').read_text())
+          assert r['original_source_reauthenticated'] and r['default_production_receipts_unchanged']
+          assert r['actual_topology_and_w4_dispositions_unchanged']
+          assert r['exact_candidate_abstention_partition_verified']
+          assert r['source_primitive_safety_cap']==20000 and 0<r['input_source_count']<=20000
+          assert r['after_parentless_retained_fragment_count']<=r['before_parentless_retained_fragment_count']
+          assert r['original_production_summary']==before['summary']
+          assert r['recovered_split_fragment_rows']
+          for key in ('physical_equivalence_proven','structural_wall_role_proven','host_publication_allowed','opening_count_publication_allowed','metric_quantity_publication_allowed'):
+              assert r[key] is False
+          assert r['benchmark_accuracy'] is None
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-exact-split-parent-lineage-shadow
+          path: artifacts/exact-split-parent
+          retention-days: 30
