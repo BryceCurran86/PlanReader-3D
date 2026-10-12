@@ -71,11 +71,15 @@ _MODULE_STAGES = (
     (wall_candidates, "_source_snap_collapsed_fragment_inventory", "physical_wall_collapsed_source_inventory"),
     (wall_candidates, "resolve_physical_wall_equivalence", "physical_wall_equivalence"),
     (wall_candidates, "_producer_opening_relation_overrides", "physical_wall_opening_relations"),
+    (wall_candidates, "_producer_proven_page_opening_records", "physical_wall_full_original_opening_proof"),
 )
 _METHOD_STAGES = (
     (integration.SourceVisibilityProducer, "augment_with_raster_opening_primitives"),
     (integration.SourceVisibilityProducer, "augment_with_raster_visible_segments"),
     (SemanticOpeningEnumerationProducer, "publish_page_scope"),
+    (PhysicalOpeningAuthority, "_visible_all_structural_candidates"),
+    (PhysicalOpeningAuthority, "_visible_snapshot_records"),
+    (PhysicalOpeningAuthority, "_visible_candidates_for"),
     (integration.SourceVisibilityProducer, "ingest_native_pdf_bytes"),
     (integration.CrossViewFloorFinishProducer, "publish"),
     (integration.CrossViewCeilingFinishProducer, "publish"),
@@ -218,6 +222,45 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
 
         PhysicalOpeningAuthority.classify_disposition = sampled_classification
         originals.append((PhysicalOpeningAuthority, "classify_disposition", classifier))
+
+        # The W4 original-page proof replays EVERY source observation. A sample
+        # after every 512 existence proofs measures true cost without O(n)
+        # fsync overhead and without removing or reordering a source selector.
+        # The measured count is diagnostic only, never opening completeness.
+        original_prove = PhysicalOpeningAuthority.prove_existence
+        proof_calls = 0
+        proof_elapsed_ns = 0
+
+        @wraps(original_prove)
+        def sampled_original_existence(*args, **kwargs):
+            nonlocal proof_calls, proof_elapsed_ns
+            started = monotonic_ns()
+            try:
+                result = original_prove(*args, **kwargs)
+            except BaseException as exc:
+                proof_elapsed_ns += monotonic_ns() - started
+                journal.emit(
+                    stage="PhysicalOpeningAuthority.prove_existence",
+                    event="failed", call_id=journal.next_id(),
+                    elapsed_ms=(monotonic_ns() - started) / 1_000_000,
+                    observation_calls=proof_calls,
+                    cumulative_ms=proof_elapsed_ns / 1_000_000,
+                    error_type=type(exc).__name__,
+                )
+                raise
+            proof_elapsed_ns += monotonic_ns() - started
+            proof_calls += 1
+            if proof_calls % 512 == 0:
+                journal.emit(
+                    stage="PhysicalOpeningAuthority.prove_existence",
+                    event="sample", call_id=journal.next_id(),
+                    observation_calls=proof_calls,
+                    cumulative_ms=proof_elapsed_ns / 1_000_000,
+                )
+            return result
+
+        PhysicalOpeningAuthority.prove_existence = sampled_original_existence
+        originals.append((PhysicalOpeningAuthority, "prove_existence", original_prove))
         yield
     finally:
         for owner, name, original in reversed(originals):
