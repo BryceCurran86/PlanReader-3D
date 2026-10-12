@@ -15,7 +15,9 @@ from dataclasses import replace
 import hashlib
 import json
 import math
+import os
 import re
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Iterable
@@ -161,11 +163,27 @@ def _non_abstained(
 
 
 def _write_json(path: Path, payload: Any) -> None:
+    """Atomically replace only the summary path, never a symlink target.
+
+    A torn or redirectable preflight could make an interrupted production run
+    appear sealed, or damage original source bytes before the final SHA gate.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as writer:
+            temporary_path = Path(writer.name)
+            writer.write(encoded)
+            writer.flush()
+            os.fsync(writer.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _write_run(
