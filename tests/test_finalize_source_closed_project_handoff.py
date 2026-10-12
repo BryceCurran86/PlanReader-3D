@@ -63,6 +63,9 @@ def test_finalizer_combines_core_and_surfaces_into_scoreboard_shape(tmp_path) ->
     assert summary["available_groups"] == ["core", "surfaces"]
     assert summary["missing_groups"] == []
     assert summary["complete_group_set"] is True
+    assert summary["publication_status"] == "SOURCE_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+    assert summary["benchmark_score_granted"] is False
+    assert summary["frozen_v2_reconciliation_complete"] is False
     assert summary["quantity_count"] == 2
     payload = json.loads((tmp_path / f"{project_id}.json").read_text(encoding="utf-8"))
     assert payload["project_id"] == project_id
@@ -83,6 +86,9 @@ def test_finalizer_reports_missing_group_without_inventing_it(tmp_path) -> None:
     assert summary["available_groups"] == ["core"]
     assert summary["missing_groups"] == ["surfaces"]
     assert summary["complete_group_set"] is False
+    assert summary["publication_status"] == "PARTIAL_GROUPS_SEALED_BENCHMARK_UNPUBLISHED"
+    assert summary["benchmark_score_granted"] is False
+    assert summary["frozen_v2_reconciliation_complete"] is False
     assert summary["quantity_count"] == 1
     payload = json.loads((tmp_path / f"{project_id}.json").read_text(encoding="utf-8"))
     assert [row["quantity_id"] for row in payload["quantities"]] == ["q-core"]
