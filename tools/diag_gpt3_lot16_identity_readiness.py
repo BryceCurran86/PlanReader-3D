@@ -82,9 +82,69 @@ def _reference_inventory(manifest: dict) -> tuple[list[str], list[str]]:
     return sorted(item_ids), sorted(set(refs))
 
 
+def _source_stage_parity(stage: dict, *, source_sha: str, quantities: tuple) -> dict[str, str]:
+    """Compare SOURCE producer's physical quantity IDs, never frozen item IDs."""
+    if (stage.get("pdf_sha256") != source_sha
+            or stage.get("diagnostic_only") is not True
+            or stage.get("source_page_index_zero_based") != 2):
+        raise ValueError("original source-stage SHA/page/diagnostic provenance mismatch")
+    opening = stage.get("opening_quantity_diagnostic")
+    observed = opening.get("per_opening") if isinstance(opening, dict) else None
+    if type(observed) is not list:
+        raise ValueError("original opening source-stage inventory unavailable")
+    seen: dict[str, dict] = {}
+    matched_ids: list[str] = []
+    published_ids: list[str] = []
+    for item in observed:
+        if not isinstance(item, dict):
+            raise ValueError("malformed original source opening")
+        physical = item.get("physical_opening_id")
+        if type(physical) is not str or not physical or physical in seen:
+            raise ValueError("duplicate/noncanonical source-stage physical opening")
+        seen[physical] = item
+        for field, sink in (
+            ("production_matched_area_quantity_ids", matched_ids),
+            ("published_area_quantity_ids", published_ids),
+        ):
+            claimed = item.get(field)
+            if (type(claimed) is not list or any(type(v) is not str or not v for v in claimed)
+                    or len(claimed) != len(set(claimed))):
+                raise ValueError("malformed original source-stage published quantity IDs")
+            sink.extend(claimed)
+
+    expected_ids = {quantity.quantity_id for quantity in quantities}
+    if (len(matched_ids) != len(expected_ids)
+            or len(published_ids) != len(expected_ids)
+            or set(matched_ids) != expected_ids
+            or set(published_ids) != expected_ids):
+        raise ValueError("original source-stage and signed opening quantity sets differ")
+
+    host_receipts: dict[str, str] = {}
+    for row in quantities:
+        physical = row.object_identity_refs[0]
+        item = seen.get(physical)
+        if item is None:
+            raise ValueError("signed opening missing from original source stage")
+        host = item.get("host_wall_id")
+        if (item.get("canonical_opening_id") != physical
+                or item.get("page_id") != row.source_page
+                or item.get("viewport_id") != row.viewport_id
+                or item.get("production_matched_area_quantity_ids") != [row.quantity_id]
+                or item.get("published_area_quantity_ids") != [row.quantity_id]
+                or item.get("first_missing_prerequisite")
+                    != "opening_area_quantity_prerequisites_resolved"
+                or item.get("host_receipt_available") is not True
+                or type(host) is not str
+                or not host.startswith("opening_host_binding_group_")):
+            raise ValueError("source-stage physical host and sealed quantity parity unproven")
+        host_receipts[physical] = host
+    return host_receipts
+
+
 def build_unpublished_lot16_identity_readiness(
     *, sealed_run_path: Path, customer_rows_path: Path,
-    original_pdf: Path | None = None, manifest_path: Path = MANIFEST,
+    original_pdf: Path | None = None, source_stage_path: Path | None = None,
+    manifest_path: Path = MANIFEST,
 ) -> dict:
     """Create a non-scoring, exact-identity work order from authenticated bytes."""
     # The expected manifest is always the immutable repository path, not an
@@ -92,6 +152,8 @@ def build_unpublished_lot16_identity_readiness(
     if manifest_path.resolve() != MANIFEST.resolve():
         raise ValueError("must use exact frozen Lot16 source manifest")
     immutable_inputs = [manifest_path, sealed_run_path, customer_rows_path]
+    if source_stage_path is not None:
+        immutable_inputs.append(source_stage_path)
     before = tuple(_sha256(path) for path in immutable_inputs)
     manifest = _object(manifest_path)
     original = _original_architectural_document(manifest)
@@ -147,6 +209,19 @@ def build_unpublished_lot16_identity_readiness(
             ],
             "benchmark_item_id": None,
         })
+    source_stage_host_receipts: dict[str, str] = {}
+    source_stage_parity_verified = False
+    if source_stage_path is not None:
+        source_stage_host_receipts = _source_stage_parity(
+            _object(source_stage_path),
+            source_sha=original_sha,
+            quantities=sealed.quantities,
+        )
+        source_stage_parity_verified = True
+        for item in work_order:
+            item["signed_source_stage_host_binding_group_id"] = (
+                source_stage_host_receipts[item["physical_opening_id"]]
+            )
     item_ids, object_refs = _reference_inventory(manifest)
     source_bytes_verified = False
     if original_pdf is not None:
@@ -171,6 +246,7 @@ def build_unpublished_lot16_identity_readiness(
         "source_package_document_count": len(manifest["source_documents"]),
         "sealed_source_document_count": len(sealed.source_sha256s),
         "full_source_package_verified": False,
+        "source_stage_physical_quantity_parity_verified": source_stage_parity_verified,
         "frozen_manifest_status_unchanged": manifest.get("status"),
         "frozen_denominator_item_count": len(item_ids),
         "frozen_item_ids_not_yet_physically_bound": item_ids,
@@ -206,18 +282,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sealed-run", required=True, type=Path)
     parser.add_argument("--customer-rows", required=True, type=Path)
     parser.add_argument("--original-pdf", type=Path)
+    parser.add_argument("--source-stage", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
     receipt = build_unpublished_lot16_identity_readiness(
         sealed_run_path=args.sealed_run,
         customer_rows_path=args.customer_rows,
         original_pdf=args.original_pdf,
+        source_stage_path=args.source_stage,
     )
     _write_readiness_report(
         args.output,
         json.dumps(receipt, indent=2, sort_keys=True, allow_nan=False) + "\n",
         protected_roots=(
             FROZEN_ROOT, args.sealed_run, args.customer_rows,
+            *((args.source_stage,) if args.source_stage else ()),
             *((args.original_pdf,) if args.original_pdf else ()),
         ),
     )
