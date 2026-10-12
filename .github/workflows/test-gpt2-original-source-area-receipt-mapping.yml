@@ -1,0 +1,83 @@
+name: GPT2 Original Maryborough Source Area Receipt Mapping
+on:
+  pull_request:
+    paths:
+      - "pb_source_room_area_receipt_index.py"
+      - "pb_cross_view_room_area_authority.py"
+      - "pb_same_view_room_area_authority.py"
+      - "tests/test_gpt2_source_room_area_result_index.py"
+      - ".github/workflows/test-gpt2-original-source-area-receipt-mapping.yml"
+      - "docs/engineering/gpt2_original_source_area_mapping.md"
+concurrency:
+  group: gpt2-source-area-mapping-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Exact producer record uniqueness and frozen truth
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_room_area_result_index.py
+          python -m compileall -q pb_source_room_area_receipt_index.py
+          ruff check --select F821,F823 pb_source_room_area_receipt_index.py tests/test_gpt2_source_room_area_result_index.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+  original-maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Preserve original source PDF bytes and three existing firm source area receipts
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u - <<'PY'
+          import json,math
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from pb_cross_view_room_area_authority import CrossViewRoomAreaProducer
+          from pb_same_view_room_area_authority import SameViewRoomAreaProducer
+          sha='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          claim=collect_live_physical_net_wall_claim(
+              Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'),
+              pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
+          )
+          expected={
+             'qty_be2a3b3108220d48f6f5':13.270425,
+             'qty_9795d69439e85c35b01c':25.37875,
+             'qty_29e71bd466a9e5fa1783':9.05352,
+          }
+          found={q.quantity_id:q for q in claim.room_area_quantity_evidence}
+          for ident,value in expected.items():
+              assert ident in found,ident
+              q=found[ident]
+              assert not q.abstained and str(q.status).lower()=='firm'
+              assert q.value is not None and math.isclose(q.value,value,abs_tol=1e-8)
+              assert q.metadata.get('source_sha256')==sha
+              assert q.evidence_ids and q.input_entity_ids
+          print('GPT2_ORIGINAL_SHA_AREA_RECEIPTS',
+                json.dumps({k:found[k].value for k in expected},sort_keys=True))
+          print('GPT2_ORIGINAL_ROOM_COUNTS',len(claim.canonical_rooms),
+                len(claim.canonical_floors),
+                len(claim.floor_finish_quantity_evidence))
+          PY
