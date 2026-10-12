@@ -120,3 +120,32 @@ def replace_on_namespace(obj, **changes):
     values = dict(vars(obj))
     values.update(changes)
     return O(**values)
+
+
+def test_incomplete_original_word_inventory_is_not_misreported_as_label_competition():
+    original = replace(
+        label(), observation_ids=("native-word-one", "missing-native-word-two"),
+    )
+    (row,) = gate(labels=(original,))
+    assert row["source_word_receipt_count"] == 2
+    assert row["source_word_evidence_count"] == 1
+    assert row["unique_original_label_index_retains"] is False
+    assert row["first_unproved_source_canonical_guard"] == (
+        "ORIGINAL_WORD_WITNESS_INVENTORY_INCOMPLETE"
+    )
+    assert row["canonical_guard_accepts_original_label"] is False
+
+
+def test_competing_face_labels_remain_first_gate_even_if_one_has_missing_word():
+    original = replace(
+        label(), observation_ids=("native-word-one", "missing-native-word-two"),
+    )
+    competing = replace(original, record_id="competing-source-label")
+    rows = gate(labels=(original, competing))
+    assert len(rows) == 2
+    assert all(
+        row["first_unproved_source_canonical_guard"]
+        == "SOURCE_LABEL_UNIQUE_FACE_INDEX_WITHHELD"
+        for row in rows
+    )
+    assert all(not row["canonical_guard_accepts_original_label"] for row in rows)
