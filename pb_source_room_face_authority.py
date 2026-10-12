@@ -44,6 +44,10 @@ from typing import Iterable, Mapping, Optional
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
+    PhysicalWallEquivalenceResolution,
+)
 from pb_physical_wall_candidate_authority import (
     BOUNDARY_EVALUATION_EVALUATED,
     PhysicalWallCandidateAuthority,
@@ -761,6 +765,119 @@ class SourceRoomFaceAuthority:
         )
 
 
+def _source_authenticated_same_wall_aliases(
+    scope: object, records: tuple[object, ...]
+) -> dict[str, str]:
+    """Collapse ONLY overlapping source addresses with authenticated SAME proof.
+
+    Two coincident W4 candidate addresses do not alone identify one wall.
+    The upstream exact-scope physical equivalence must positively classify
+    every member pair as SAME, choose one representative, and independently
+    retain shared native U1 primitive ancestry. Otherwise all competing W4
+    addresses remain independent and the existing room-face abstention wins.
+
+    This does not classify physical walls or infer geometry from room labels.
+    """
+    resolution = getattr(scope, "equivalence", None)
+    scope_id = getattr(scope, "decision_scope_id", None)
+    if (
+        type(resolution) is not PhysicalWallEquivalenceResolution
+        or type(scope_id) is not str
+        or resolution.scope_viewport_id != scope_id
+    ):
+        return {}
+    rows: dict[str, object] = {}
+    for record in records:
+        cid = getattr(record, "wall_candidate_id", None)
+        if type(cid) is not str or not cid or cid in rows:
+            return {}
+        rows[cid] = record
+    pairs = {
+        (a, b): classification
+        for a, b, classification in resolution.pair_classifications
+        if type(a) is str and type(b) is str and a < b
+    }
+    blocked = set(resolution.ambiguous_wall_ids) | set(resolution.abstained_wall_ids)
+    aliases: dict[str, str] = {}
+    seen: set[str] = set()
+    for raw in resolution.equivalence_groups:
+        if not isinstance(raw, tuple) or len(raw) < 2:
+            continue
+        group = tuple(raw)
+        if (
+            len(group) != len(set(group))
+            or any(type(wid) is not str or wid not in rows for wid in group)
+            or set(group) & (seen | blocked)
+        ):
+            continue
+        selected = set(group) & set(resolution.representative_wall_ids)
+        if len(selected) != 1:
+            continue
+        original_edges = {}
+        original_primitives = {}
+        verified = True
+        for wid in group:
+            identity = getattr(rows[wid], "physical_identity", None)
+            ancestors = getattr(identity, "source_primitive_ids", ())
+            if (
+                not getattr(identity, "usable", False)
+                or getattr(identity, "wall_candidate_id", None) != wid
+                or not isinstance(ancestors, tuple)
+                or not ancestors
+                or any(type(v) is not str or not v for v in ancestors)
+            ):
+                verified = False
+                break
+            original_edges[wid] = _wall_edges(rows[wid])
+            original_primitives[wid] = set(ancestors)
+            if not original_edges[wid]:
+                verified = False
+                break
+        if not verified:
+            continue
+        for i, first in enumerate(group):
+            for second in group[i + 1:]:
+                pair = tuple(sorted((first, second)))
+                if (
+                    pairs.get(pair) != PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value
+                    or not (original_primitives[first] & original_primitives[second])
+                    or not any(
+                        _edges_share_positive_collinear_span(a, b)
+                        for a in original_edges[first]
+                        for b in original_edges[second]
+                    )
+                ):
+                    verified = False
+                    break
+            if not verified:
+                break
+        if not verified:
+            continue
+        representative = next(iter(selected))
+        for wid in group:
+            seen.add(wid)
+            aliases[wid] = representative
+    return aliases
+
+
+def _owned_source_wall_edges(
+    records: tuple[object, ...], aliases: Mapping[str, str]
+) -> dict[str, tuple[Edge, ...]]:
+    """Retain every original W4 edge, reducing only proven SAME owner keys."""
+    collected: dict[str, list[Edge]] = {}
+    for record in records:
+        cid = _clean(getattr(record, "wall_candidate_id", ""))
+        edges = _wall_edges(record)
+        if not cid or not edges:
+            continue
+        owner = aliases.get(cid, cid)
+        collected.setdefault(owner, []).extend(edges)
+    return {
+        owner: tuple(dict.fromkeys(edges))
+        for owner, edges in collected.items()
+    }
+
+
 def _blocked(scope: object, reason: str) -> SourceRoomFaceScopeResult:
     return SourceRoomFaceScopeResult(
         status=EvidenceResolutionStatus.ABSTAINED,
@@ -789,18 +906,18 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     if boundary_inputs is None:
         return _blocked(scope, SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE)
     boundary_tainted_wall_ids, excluded_boundary_primitives = boundary_inputs
-    wall_edges: dict[str, tuple[Edge, ...]] = {}
+    # Source-positive SAME equivalence may name one real wall using several
+    # source-address aliases. The generic geometry/label path cannot choose.
+    aliases = _source_authenticated_same_wall_aliases(scope, records)
+    wall_edges = _owned_source_wall_edges(records, aliases)
     edge_owner: dict[Edge, str] = {}
     duplicate_edges: set[Edge] = set()
-    endpoints_by_wall: dict[str, set[Point]] = {}
+    endpoints_by_wall = {
+        wall_id: {point for edge in edges for point in edge}
+        for wall_id, edges in wall_edges.items()
+    }
 
-    for record in records:
-        wall_id = _clean(getattr(record, "wall_candidate_id", ""))
-        edges = _wall_edges(record)
-        if not wall_id or not edges:
-            continue
-        wall_edges[wall_id] = edges
-        endpoints_by_wall[wall_id] = {point for edge in edges for point in edge}
+    for wall_id, edges in wall_edges.items():
         for edge in edges:
             prior = edge_owner.get(edge)
             if prior is not None and prior != wall_id:
@@ -1396,15 +1513,11 @@ def _shadow_ownership_evaluation(scope: object) -> SourceRoomFaceOwnershipEvalua
             return SourceRoomFaceOwnershipEvaluation(
                 reason_code="ownership_evaluation_no_wall_records"
             )
-        wall_edges: dict[str, tuple[Edge, ...]] = {}
+        aliases = _source_authenticated_same_wall_aliases(scope, records)
+        wall_edges = _owned_source_wall_edges(records, aliases)
         edge_owner: dict[Edge, str] = {}
         duplicate_edges: set[Edge] = set()
-        for record in records:
-            wall_id = _clean(getattr(record, "wall_candidate_id", ""))
-            edges = _wall_edges(record)
-            if not wall_id or not edges:
-                continue
-            wall_edges[wall_id] = edges
+        for wall_id, edges in wall_edges.items():
             for edge in edges:
                 prior = edge_owner.get(edge)
                 if prior is not None and prior != wall_id:
