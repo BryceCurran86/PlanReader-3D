@@ -8,6 +8,7 @@ on:
       - "tests/test_gpt3_pending_identity_activation.py"
       - ".github/workflows/test-gpt3-pending-identity-activation.yml"
       - "docs/engineering/lot16_original_identity_reconciliation_20261012/**"
+      - "benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/**"
   workflow_dispatch:
 
 concurrency:
