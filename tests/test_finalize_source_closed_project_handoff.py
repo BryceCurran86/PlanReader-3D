@@ -130,7 +130,7 @@ def test_previous_finalized_signed_run_is_immutable_on_rerun(tmp_path) -> None:
     assert signed.read_bytes() == original_output
     assert summary.read_bytes() == original_summary
     assert (tmp_path / f"{project}.core.json").read_text(encoding="utf-8") == original.to_json()
-    assert not (tmp_path / ".source_closed_finalizer.lock").exists()
+    assert not (tmp_path / ".source_closed_handoff.lock").exists()
 
 
 @pytest.mark.parametrize("name", [
@@ -150,7 +150,7 @@ def test_finalizer_rejects_existing_combined_or_summary_before_output_changes(
             project_id="project-a", input_dir=tmp_path, output_dir=output,
         )
     assert old.read_bytes() == b"previous finalized customer artifact"
-    assert not (output / ".source_closed_finalizer.lock").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
 
 
 def test_finalizer_rejects_dangling_finalized_output_symlink(tmp_path):
@@ -187,7 +187,7 @@ def test_existing_finalizer_lock_blocks_concurrent_writer(tmp_path):
     (tmp_path / "project-a.core.json").write_text(run.to_json(), encoding="utf-8")
     output = tmp_path / "destination"
     output.mkdir()
-    lock = output / ".source_closed_finalizer.lock"
+    lock = output / ".source_closed_handoff.lock"
     lock.write_bytes(b"other original source finalization running")
     with pytest.raises(FileExistsError):
         finalizer.finalize_split_project_handoff(
@@ -216,7 +216,7 @@ def test_interrupted_combined_write_does_not_leave_partially_sealed_file(
     assert source.read_text(encoding="utf-8") == run.to_json()
     assert not (output / "project-a.json").exists()
     assert not (output / "project-a.handoff-summary.json").exists()
-    assert not (output / ".source_closed_finalizer.lock").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
     assert not list(output.glob("*.tmp"))
     assert not list(output.glob(".*.tmp"))
 
