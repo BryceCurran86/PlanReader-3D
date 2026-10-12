@@ -109,8 +109,8 @@ def test_unproven_source_wall_equivalence_never_launders_duplicate_ownership(gua
 
 
 def test_missing_or_foreign_physical_identity_does_not_publish_duplicate_edge():
-    source = _same_source_scope()
     for version in (None, "foreign-id"):
+        source = _same_source_scope()
         rows = list(source.records)
         for row in rows:
             if row.wall_candidate_id == "alias":
