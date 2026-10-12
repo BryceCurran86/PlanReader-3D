@@ -208,3 +208,32 @@ def test_invalid_original_measurement_universe_fails_closed(mutation):
         del new["opening_measurement_traces"]
     with pytest.raises(ValueError):
         compare_source_membership(old, new)
+
+
+@pytest.mark.parametrize("field,new_value", [
+    ("document_id", "foreign-document"),
+    ("decision_scope_kind", "untrusted-other-scope"),
+    ("schema_version", "unsupported-next-schema"),
+    ("page_ids", ["4"]),
+])
+def test_original_semantic_document_scope_and_schema_changes_never_silent(field, new_value):
+    old, new = _report(), _report()
+    new["semantic_inventory"]["record"][field] = new_value
+    audit = compare_source_membership(old, new)
+    assert not audit["parity_pass"]
+    assert any(
+        row["path"] == "semantic_inventory.record." + field
+        for row in audit["changes"]
+    )
+
+
+def test_full_change_ledger_is_not_truncated_after_eight_source_identities():
+    old, new = _report(), _report()
+    new_ids = [f"candidate-extra-{index:02d}" for index in range(12)]
+    new["native_candidate_closures"][0]["unresolved_candidate_ids"].extend(new_ids)
+    result = compare_source_membership(old, new)
+    delta = next(row for row in result["changes"]
+                 if row["path"] == "native_candidate_closures[3].unresolved_candidate_ids")
+    assert delta["added_ids"] == new_ids
+    assert len(delta["added_ids_sample"]) == 8
+    assert result["parity_pass"] is False
