@@ -115,18 +115,21 @@ def _scaled_measurement_authority(
         return None
 
     metadata = quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
-    scale_id = _clean(metadata.get("resolved_scale_id"))
-    scale_status = _clean(metadata.get("scale_status"))
-    raw_conflicts = metadata.get("scale_conflicts") or ()
-    if isinstance(raw_conflicts, (str, bytes)):
-        raw_conflicts = (raw_conflicts,)
-    elif not isinstance(raw_conflicts, (list, tuple)):
-        raw_conflicts = ()
-    conflicts = tuple(
-        sorted({_clean(value) for value in raw_conflicts if _clean(value)})
-    )
-    if not scale_id or not scale_status:
+    scale_id = metadata.get("resolved_scale_id")
+    scale_status = metadata.get("scale_status")
+    raw_conflicts = metadata.get("scale_conflicts", ())
+    if (
+        type(scale_id) is not str or not scale_id
+        or scale_id != scale_id.strip()
+        or type(scale_status) is not str
+        or scale_status not in {"resolved", "verified"}
+        or type(raw_conflicts) not in (list, tuple)
+        or raw_conflicts
+    ):
+        # The final customer row cannot turn a provisional scale or
+        # silently discarded conflict into authenticated metric room area.
         return None
+    conflicts = ()
 
     return CommercialMeasurementAuthority(
         method="scaled_geometry",
