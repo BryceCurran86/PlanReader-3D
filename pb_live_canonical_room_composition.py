@@ -518,11 +518,17 @@ def _verified_source_room_label_for_face(
         if kinds != {"raster_text_line_corroboration"}:
             return None
         authorities = {word.authority_record_id for word in words}
+        authority_prefix = "source_room_label_line_raster_corroboration_"
+        line_authority = next(iter(authorities)) if len(authorities) == 1 else ""
+        digest = (
+            line_authority[len(authority_prefix):]
+            if line_authority.startswith(authority_prefix)
+            else ""
+        )
         if (
             len(authorities) != 1
-            or not next(iter(authorities)).startswith(
-                "source_room_label_line_raster_corroboration_"
-            )
+            or len(digest) != 32
+            or any(character not in "0123456789abcdef" for character in digest)
             or len({word.word_no for word in words}) != len(words)
             or tuple(word.word_no for word in words)
             != tuple(sorted(word.word_no for word in words))
