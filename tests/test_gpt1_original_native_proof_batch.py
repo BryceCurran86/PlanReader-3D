@@ -104,3 +104,12 @@ def test_full_page_competitor_mutated_midbatch_rejects_all_opening_proofs(monkey
     source._producer._store.observations[key]=record
     monkeypatch.setattr(authority,"prove_existence",original)
     assert _proof(source,published,authority,page_id="1")
+
+
+def test_native_source_text_integrity_unavailable_aborts_full_page_batch():
+    source, published, selector, support = _native_source()
+    physical = source.physical_opening_authority()
+    source._text_integrity_receipts.clear()
+    with pytest.raises(RuntimeError):
+        _proof(source, published, physical, page_id="1")
+    assert source._native_dimension_proof_batch is None
