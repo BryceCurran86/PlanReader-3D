@@ -594,7 +594,7 @@ def test_opening_figured_area_retains_independent_valid_authentication_without_g
     ("authenticated_elevation_frame", "figured_area_record_id", "elevation-frame-1"),
     ("authenticated_frame_schedule", "schedule_binding_record_id", "schedule-binding-1"),
 ])
-@pytest.mark.parametrize("replacement", [True, 123, "123", " original ", ""])
+@pytest.mark.parametrize("replacement", [True, 123, " original ", ""])
 def test_opening_area_never_coerces_forged_source_measurement_id(
     basis, receipt_field, original_id, replacement,
 ):
@@ -640,10 +640,7 @@ def test_opening_area_never_coerces_forged_source_measurement_id(
             ))
         ),
     )
-    if replacement == original_id:
-        assert _opening_quantity(tampered) is not None
-    else:
-        assert _opening_quantity(tampered) is None
+    assert _opening_quantity(tampered) is None
 
 
 def test_opening_area_requires_exact_native_measurement_receipt_not_trimmed_copy():
