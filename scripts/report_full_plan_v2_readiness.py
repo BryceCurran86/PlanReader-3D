@@ -649,6 +649,21 @@ def diagnostic_report(
             blockers.append("produced_items_invalid_json_or_shape")
         elif not produced and exists:
             blockers.append("empty_produced_items_unverified")
+        family_inventory, family_inventory_status = _source_authenticated_family_inventory(
+            sealed_root, project_id,
+            source_sha_verified=source_verified,
+            sealed_run_verified=seal_verified,
+            expected_seal_fingerprint=(
+                seal_fingerprints[0] if len(seal_fingerprints) == 1 else None
+            ),
+        )
+        if family_inventory_status == "SIGNED_RUN_CHANGED_OR_INVALID":
+            # The last independent read must not turn a concurrent source
+            # writer's different signed run into accepted GPT3 output.
+            seal_verified = False
+            parity_verified = False
+            seal_reasons.append("sealed_run_changed_during_family_inventory")
+            blockers.append("sealed_run_changed_during_family_inventory")
         first_stage, first_reason = _first_failing_authority_stage(
             source_verified=source_verified,
             source_reasons=source_reasons,
@@ -682,6 +697,8 @@ def diagnostic_report(
             "source_sha_verified": source_verified,
             "sealed_run_verified": seal_verified,
             "sealed_quantity_count": sealed_count,
+            "source_authenticated_family_inventory": family_inventory,
+            "source_authenticated_family_inventory_status": family_inventory_status,
             "produced_sealed_parity_verified": parity_verified,
             "customer_output_bijection_verified": customer_verified,
             "customer_output_bijection_reason_codes": customer_reasons,
