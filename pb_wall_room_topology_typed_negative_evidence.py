@@ -1017,33 +1017,52 @@ def _generic_family_grid_nominations(
     for target in selected:
         families[_line_family_key(target)].append(target)
 
+    # Native orientations are modulo 180 degrees. Build a one-time index
+    # instead of rescanning every source segment for every recovered line family.
+    # The original angular/length predicates remain the final decisions.
+    angle_bins: Dict[int, List[Mapping[str, Any]]] = defaultdict(list)
+    for item in context:
+        angle = item["angle"]
+        if math.isfinite(angle):
+            angle_bins[math.floor(angle) % 180].append(item)
+
     out: Dict[str, Dict[str, Any]] = {}
     for members in families.values():
         host = _family_host(members)
         host_len = host["length"]
-        if host_len <= 1e-6:
+        if host_len <= 1e-6 or not math.isfinite(host["angle"]):
             continue
         member_ids = set(host.get("member_ids") or [host["id"]])
-        others = [item for item in context if item["id"] not in member_ids]
-        grid = [
-            item
-            for item in others
-            if item["length"] / host_len >= 0.5
-            and _angle_delta(item["angle"], host["angle"]) <= _PARALLEL_DEG
-        ]
-        grid_offsets = [
-            (item["mid"][0] - host["mid"][0]) * math.sin(math.radians(host["angle"]))
-            - (item["mid"][1] - host["mid"][1]) * math.cos(math.radians(host["angle"]))
-            for item in grid
-        ]
-        if len(grid) < 3 or not _gaps_regular(grid_offsets):
+        grid_offsets = []
+        theta = math.radians(host["angle"])
+        sin_theta, cos_theta = math.sin(theta), math.cos(theta)
+        for angle_bin in range(
+            math.floor(host["angle"] - _PARALLEL_DEG),
+            math.floor(host["angle"] + _PARALLEL_DEG) + 1,
+        ):
+            for item in angle_bins.get(angle_bin % 180, ()):
+                if (
+                    item["id"] in member_ids
+                    or not (
+                        item["length"] / host_len >= 0.5
+                        and _angle_delta(item["angle"], host["angle"]) <= _PARALLEL_DEG
+                    )
+                ):
+                    continue
+                grid_offsets.append(
+                    (item["mid"][0] - host["mid"][0]) * sin_theta
+                    - (item["mid"][1] - host["mid"][1]) * cos_theta
+                )
+        # _gaps_regular sorts the offsets; candidate order does not change
+        # original KIND_GRID polarity, opposition or source membership.
+        if len(grid_offsets) < 3 or not _gaps_regular(grid_offsets):
             continue
         nomination = {
             "kind": KIND_GRID,
             "polarity": POLARITY_OPPOSING,
             "confidence": 0.5,
             "reason_codes": ("regular_long_parallels",),
-            "feature_basis": {"parallel_count": len(grid)},
+            "feature_basis": {"parallel_count": len(grid_offsets)},
         }
         for member in members:
             out[member["id"]] = nomination
