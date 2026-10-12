@@ -4,6 +4,8 @@ on:
     paths:
       - "tools/diag_gpt2_source_room_handoff_integrity.py"
       - "tests/test_gpt2_source_room_handoff_integrity.py"
+      - "pb_live_canonical_room_composition.py"
+      - "tests/test_gpt2_canonical_source_polygon_geometry_gate.py"
       - ".github/workflows/test-gpt2-source-room-handoff-integrity.yml"
       - "docs/engineering/gpt2_maryborough_source_room_handoff.md"
 concurrency:
@@ -26,9 +28,9 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Eight original source floor/metric/label gate regressions
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_room_handoff_integrity.py
-          python -m compileall -q tools/diag_gpt2_source_room_handoff_integrity.py
-          ruff check --select F821,F823 tools/diag_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_integrity.py
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_room_handoff_integrity.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py tests/test_live_canonical_room_composition.py
+          python -m compileall -q tools/diag_gpt2_source_room_handoff_integrity.py pb_live_canonical_room_composition.py
+          ruff check --select F821,F823 tools/diag_gpt2_source_room_handoff_integrity.py tests/test_gpt2_source_room_handoff_integrity.py pb_live_canonical_room_composition.py tests/test_gpt2_canonical_source_polygon_geometry_gate.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   source-proof:
