@@ -56,6 +56,21 @@ _STAGE_NAMES = (
 )
 _MODULE_STAGES = (
     (wall_candidates, "_build_scope_result", "physical_wall_candidate_page_build"),
+    # Read-only original W4 page-local cost decomposition. The producer's
+    # own _build_scope_result still selects original page and source receipts;
+    # these are imported internal callables, not replacement algorithms.
+    (wall_candidates, "_source_page_segments", "physical_wall_source_page_segments"),
+    (wall_candidates, "_producer_owned_points_per_mm", "physical_wall_source_scale"),
+    (wall_candidates, "_assemble_scope_result", "physical_wall_scope_assembly"),
+    (wall_candidates, "_filter_repeated_non_physical_drafting_primitives", "physical_wall_motif_filter"),
+    (wall_candidates, "_proven_filled_wall_strips", "physical_wall_source_filled_strips"),
+    (wall_candidates, "build_wall_graph_for_viewport", "physical_wall_W2_graph"),
+    (wall_candidates, "classify_junctions", "physical_wall_W3_junctions"),
+    (wall_candidates, "assemble_wall_topology", "physical_wall_W4_assembly"),
+    (wall_candidates, "collect_physical_wall_identities", "physical_wall_identity_collection"),
+    (wall_candidates, "_source_snap_collapsed_fragment_inventory", "physical_wall_collapsed_source_inventory"),
+    (wall_candidates, "resolve_physical_wall_equivalence", "physical_wall_equivalence"),
+    (wall_candidates, "_producer_opening_relation_overrides", "physical_wall_opening_relations"),
 )
 _METHOD_STAGES = (
     (integration.SourceVisibilityProducer, "augment_with_raster_opening_primitives"),
