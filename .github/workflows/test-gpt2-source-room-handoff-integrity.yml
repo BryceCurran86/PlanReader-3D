@@ -83,6 +83,31 @@ jobs:
           assert len(crossing['original_ring_crossing_edge_pdf_pts'])==2
           assert crossing['source_edge_wall_owner_proven'] is False
           assert crossing['source_room_geometry_repaired'] is False
+          original_freezer_rooms=[room for room in claim.canonical_rooms
+                                  if room.room_label == 'FREEZER']
+          assert len(original_freezer_rooms)==1
+          original_freezer=original_freezer_rooms[0]
+          assert original_freezer.source_room_face_record_id==freezer['original_source_face_receipt_id']
+          assert original_freezer.geometry_complete is False
+          assert original_freezer.metric_geometry_complete is False
+          original_freezer_floors=[floor for floor in claim.canonical_floors
+                                  if floor.room_entity_id==original_freezer.canonical_room_id]
+          assert len(original_freezer_floors)==1
+          original_freezer_floor=original_freezer_floors[0]
+          assert original_freezer_floor.geometry_complete is False
+          assert original_freezer_floor.physical_floor_surface_identity_resolved is False
+          assert original_freezer_floor.metric_geometry_complete is False
+          assert original_freezer_floor.metric_area_m2 is None
+          assert original_freezer_floor.commercial_quantity_authority is False
+          print('G2_ORIGINAL_FREEZER_CANONICAL_GEOMETRY_ABORT',json.dumps({
+              'source_sha256':sha,
+              'original_face_receipt':original_freezer.source_room_face_record_id,
+              'room_geometry_complete':original_freezer.geometry_complete,
+              'floor_geometry_complete':original_freezer_floor.geometry_complete,
+              'physical_floor_resolved':original_freezer_floor.physical_floor_surface_identity_resolved,
+              'metric_area':original_freezer_floor.metric_area_m2,
+              'benchmark_accuracy':None,
+          },sort_keys=True))
           print('G2_ORIGINAL_FREEZER_NATIVE_CROSSING_EDGE_FIRST_GATE',json.dumps({
               'source_sha256':sha,
               'source_room_face_record_id':freezer['original_source_face_receipt_id'],
