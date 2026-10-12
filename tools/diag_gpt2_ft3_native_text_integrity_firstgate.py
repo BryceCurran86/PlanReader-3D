@@ -52,11 +52,11 @@ def native_finish_schedule_text_first_gates(
         if not is_title and not present:
             continue
         source_reasons = Counter(
-            str(reason) for word in block_words if word.trusted is not True
+            str(reason) for word in block_words if getattr(word, "trusted", None) is not True
             for reason in (getattr(word, "reason_codes", ()) or ())
             if isinstance(reason, str) and reason
         )
-        trusted_count = sum(word.trusted is True for word in block_words)
+        trusted_count = sum(getattr(word, "trusted", None) is True for word in block_words)
         row = {
             "native_page_id": page,
             "original_source_partition_id": partition,
