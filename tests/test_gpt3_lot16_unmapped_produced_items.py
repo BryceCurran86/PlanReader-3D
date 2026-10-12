@@ -36,7 +36,8 @@ def _inputs():
     verified = N(verified_quantity_ids=(QID,), valid_quantity_count=1)
     receipt = {
         "source_sha256": SHA, "sealed_run_fingerprint": seal.fingerprint,
-        "sealed_run_id": seal.run_id, "sealed_quantity_ids": [QID],
+        "sealed_run_id": seal.run_id, "quantity_count": 1,
+        "sealed_quantity_ids": [QID],
         "customer_verified_quantity_ids": [QID],
         "identity_map_status": "INDEPENDENT_ORIGINAL_SOURCE_BINDINGS_REQUIRED",
         "benchmark_accuracy": None, "benchmark_score_granted": False,
@@ -66,7 +67,8 @@ def test_producer_source_rows_stay_unmapped_with_one_exact_original_owner():
     "unverified_readiness", "published_without_identity",
     "duplicate_quantity", "duplicate_physical_object", "duplicate_row",
     "wrong_row_owner", "other_family", "negative_area", "wrong_page",
-    "bad_object_ref", "extra_object_ref", "invalid_evidence",
+    "bad_object_ref", "missing_object_ref", "extra_object_ref", "invalid_evidence",
+    "unhashable_customer_quantity_id", "receipt_count_mismatch",
     "tampered_quantity_fingerprint", "abstained", "unproven_lineage",
 ])
 def test_source_binding_damage_never_turns_into_a_benchmark_match(damage):
@@ -104,6 +106,12 @@ def test_source_binding_damage_never_turns_into_a_benchmark_match(damage):
         seal.quantities[0].source_page = "4"
     elif damage == "bad_object_ref":
         seal.quantities[0].object_identity_refs = (None,)
+    elif damage == "missing_object_ref":
+        seal.quantities[0].object_identity_refs = None
+    elif damage == "unhashable_customer_quantity_id":
+        rows[0]["quantity_id"] = ["untrusted", "source"]
+    elif damage == "receipt_count_mismatch":
+        receipt["quantity_count"] = 7
     elif damage == "extra_object_ref":
         seal.quantities[0].object_identity_refs = (PHYSICAL, PHYSICAL)
     elif damage == "invalid_evidence":
