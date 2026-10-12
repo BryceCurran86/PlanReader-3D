@@ -166,3 +166,27 @@ def test_cli_writes_independent_unpublished_stage_diagnostic(tmp_path, monkeypat
     assert actual["benchmark_score_granted"] is False
     assert actual["physical_candidate_universe_comparable"] is True
     assert actual["advanced_count"] == 0
+
+
+def test_source_negative_reason_changes_are_visible_without_stage_promotion():
+    before, after = _baseline(), _baseline()
+    row = next(x for x in after["opening_first_stage_rows"]
+               if x["opening_identity_id"] == "opening-A")
+    row["first_stage_reason_codes"] = ["different_original_wall_opposition"]
+    report = compare_maryborough_source_stages(before, after)
+    assert report["advanced_count"] == 0
+    assert report["regressed_count"] == 0
+    assert report["changed_negative_reason_ids"] == ["opening-A"]
+    assert report["negative_source_evidence_drift_observed"] is True
+    assert report["physical_candidate_universe_comparable"] is True
+    assert report["source_stage_improvement_comparable"] is False
+    assert report["benchmark_score_granted"] is False
+
+
+def test_unchanged_source_receipts_do_not_mint_improvement():
+    report = compare_maryborough_source_stages(_baseline(), _baseline())
+    assert report["changed_negative_reason_ids"] == []
+    assert report["negative_source_evidence_drift_observed"] is False
+    assert report["changed_positive_receipt_ids"] == []
+    assert report["advanced_count"] == 0
+    assert report["benchmark_accuracy"] is None
