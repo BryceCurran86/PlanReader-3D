@@ -9,6 +9,11 @@ import argparse
 import json
 from pathlib import Path
 
+from scripts.report_full_plan_v2_readiness import _write_readiness_report
+
+
+FROZEN_V2_ROOT = Path(__file__).resolve().parents[1] / "benchmarks" / "frozen_holdout" / "full_plan_v2"
+
 
 _NATIVE_MEMBERS = ("unresolved_candidate_ids", "unresolved_observation_ids")
 _SEMANTIC_MEMBERS = (
@@ -140,7 +145,10 @@ def main() -> int:
         )
     except (ValueError, TypeError, KeyError) as exc:
         parser.error(str(exc))
-    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_readiness_report(
+        args.output, json.dumps(report, indent=2, sort_keys=True) + "\n",
+        protected_roots=(args.baseline, args.candidate, FROZEN_V2_ROOT),
+    )
     print(json.dumps({"parity_pass": report["parity_pass"],
                       "changed_paths": [row["path"] for row in report["changes"]]},
                      sort_keys=True))
