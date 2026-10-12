@@ -742,6 +742,7 @@ class SourceVisibilityProducer:
         ] = {}
         self._native_paint_page_cache: OrderedDict = OrderedDict()
         self._native_dimension_component_page_cache: OrderedDict = OrderedDict()
+        self._native_dimension_page_text_dirs_cache: OrderedDict = OrderedDict()
         self._published_by_revision: dict[str, PublishedVisibleSourceSnapshot] = {}
 
     def authority(self) -> "SourceVisibilityAuthority":
@@ -978,14 +979,24 @@ class SourceVisibilityProducer:
         source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
         if source_bytes is None or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
-        try:
-            with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
-                page = pdf[int(page_id) - 1]
-                directions = {(bi, li): tuple(line.get('dir', (0., 0.)))
-                    for bi, block in enumerate(page.get_text('dict', flags=fitz.TEXTFLAGS_WORDS)['blocks'])
-                    for li, line in enumerate(block.get('lines', []))}
-        except (ValueError, IndexError, RuntimeError):
-            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        # Re-authenticate the exact original PDF bytes on EVERY call above.
+        # Only source-native immutable text directions, not decisions or atoms,
+        # may be cached against that cryptographic byte hash and page.
+        directions_key = (selector.source_sha256, page_id)
+        directions = self._native_dimension_page_text_dirs_cache.get(directions_key)
+        if directions is None:
+            try:
+                with fitz.open(stream=source_bytes, filetype='pdf') as pdf:
+                    page = pdf[int(page_id) - 1]
+                    directions = {(bi, li): tuple(line.get('dir', (0., 0.)))
+                        for bi, block in enumerate(page.get_text('dict', flags=fitz.TEXTFLAGS_WORDS)['blocks'])
+                        for li, line in enumerate(block.get('lines', []))}
+            except (ValueError, IndexError, RuntimeError):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            self._native_dimension_page_text_dirs_cache[directions_key] = directions
+            while len(self._native_dimension_page_text_dirs_cache) > 2:
+                self._native_dimension_page_text_dirs_cache.popitem(last=False)
+        self._native_dimension_page_text_dirs_cache.move_to_end(directions_key)
         text_authority = self.text_integrity_authority()
         source_authority = self._producer.authority()
         words = []
