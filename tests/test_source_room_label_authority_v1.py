@@ -352,6 +352,38 @@ def test_whole_line_two_render_fallback_can_authenticate_closed_room(
         "raster_text_line_corroboration"
     )
 
+    # Source producer minted this WHOLE-LINE authority from real PDF primitives
+    # and two independent isolated mock-raster readings. The canonical consumer
+    # must use the same record without fabricating a different face or witness.
+    from pb_live_canonical_room_composition import (
+        _room_object_from_record,
+        _unique_source_room_labels_by_face,
+    )
+
+    original_label = records[0]
+    original_faces = tuple(
+        face
+        for result in room_faces._results.values()
+        for face in result.records
+        if face.record_id == original_label.source_room_face_record_id
+    )
+    assert len(original_faces) == 1
+    canonical_index = _unique_source_room_labels_by_face((original_label,))
+    assert canonical_index == {original_faces[0].face_id: original_label}
+    canonical = _room_object_from_record(
+        original_faces[0],
+        viewport_id=None,
+        canonical_wall_ids_by_candidate=None,
+        unresolved_wall_candidate_ids=None,
+        room_label_record=canonical_index[original_faces[0].face_id],
+    )
+    assert canonical.room_label == "SALES"
+    assert canonical.room_label_binding_record_id == original_label.record_id
+    assert canonical.source_room_face_record_id == original_faces[0].record_id
+    assert canonical.polygon_pdf_pts == original_faces[0].polygon_pdf_pts
+    assert canonical.geometry_complete is True
+    assert canonical.metric_geometry_complete is False
+
 
 def test_whole_line_fallback_requires_both_renders_to_match_exact_claim(
     tmp_path: Path,
