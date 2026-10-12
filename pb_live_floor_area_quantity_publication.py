@@ -159,8 +159,21 @@ def publish_live_floor_area_quantities(
             if physical_id:
                 physical_floor_claim_ids.setdefault(physical_id, set()).add(source_id)
 
+    # A room-area source owner cannot be used to mint two separate whole-
+    # room floor areas by changing only the source quantity ID and giving
+    # each copy a different canonical floor. Consider only source claims
+    # that actually bind one floor; independently measured alternatives
+    # without a floor owner must not poison the legitimate physical room.
+    mapped_source_owner_counts: Counter[str] = Counter(
+        quantity.input_entity_ids[0]
+        for source_id, quantity in source_quantities.items()
+        if len(floors_by_quantity.get(source_id, ())) == 1
+    )
+
     out: list[QuantityEvidence] = []
     for source_id, quantity in sorted(source_quantities.items()):
+        if mapped_source_owner_counts[quantity.input_entity_ids[0]] != 1:
+            continue
         floors = floors_by_quantity.get(source_id, ())
         if len(floors) != 1:
             continue
