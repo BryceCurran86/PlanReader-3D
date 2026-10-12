@@ -35,6 +35,9 @@ jobs:
       - name: Verify floor finish receipt publication invariants
         run: PYTHONPATH=. python -m pytest -q tests/test_cross_view_floor_finish_authority_v1.py
       - name: Run exact Maryborough room-component proof
+        env:
+          SOURCE_GATE_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_GATE_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -o pipefail
           OUT=artifacts/gpt2-maryborough-grid-component
@@ -42,7 +45,7 @@ jobs:
           git rev-parse HEAD > "$OUT/head_sha.txt"
           sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
           PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
-          import hashlib,json,time
+          import hashlib,json,os,subprocess,time
           from pathlib import Path
           from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 
@@ -75,6 +78,44 @@ jobs:
               for room in claim.canonical_rooms if norm(room.room_label)
           ]
           labels=sorted({row["label"] for row in labelled})
+          # Preserve original observations BEFORE any acceptance assertion.
+          # A failure must not erase the evidence needed to locate its stage.
+          observed={
+              "tested_checkout_sha":subprocess.check_output(
+                  ["git","rev-parse","HEAD"],text=True
+              ).strip(),
+              "event_pr_head_sha":os.environ.get("SOURCE_GATE_PR_HEAD_SHA"),
+              "event_pr_base_sha":os.environ.get("SOURCE_GATE_PR_BASE_SHA"),
+              "original_source_sha256_verified":source_sha,
+              "elapsed_seconds":elapsed,
+              "canonical_room_count":len(claim.canonical_rooms),
+              "canonical_floor_count":len(claim.canonical_floors),
+              "labelled_rooms":labelled,
+              "room_area_quantity_receipts":[
+                  {
+                      "quantity_id":q.quantity_id,
+                      "room_label":norm(dict(q.metadata or {}).get("room_label")),
+                      "value":q.value,
+                      "unit":q.unit,
+                      "family":q.family,
+                      "abstained":q.abstained,
+                      "status":q.status,
+                      "authority":q.authority,
+                      "blocking_reasons":list(q.blocking_reasons),
+                      "input_entity_ids":list(q.input_entity_ids),
+                      "evidence_ids":list(q.evidence_ids),
+                      "reason_codes":list(q.reason_codes),
+                      "source_sha256":dict(q.metadata or {}).get("source_sha256"),
+                  }
+                  for q in claim.room_area_quantity_evidence
+              ],
+              "status":getattr(claim.status,"value",str(claim.status)),
+              "reason_codes":list(claim.reason_codes),
+          }
+          Path("artifacts/gpt2-maryborough-grid-component/observed_claim.json").write_text(
+              json.dumps(observed,indent=2,sort_keys=True,allow_nan=False)+"\n",
+              encoding="utf-8",
+          )
           from tools.diag_gpt2_named_room_metric_first_gates import (
               summarize_named_room_metric_first_gates,
           )
