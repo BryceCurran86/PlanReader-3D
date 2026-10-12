@@ -41,6 +41,31 @@ def build_live_ceiling_area_source_traces(
             "canonical ceiling source workspace_id must be an original positive integer"
         )
 
+    # The canonical ceiling publisher deliberately accepts *identical* raw
+    # source replay as provisional/idempotent. The final signed commercial
+    # boundary has a stronger contract: one producer source receipt ID cannot
+    # appear twice, even as ABSTAIN or an equality-identical replay. Inspect
+    # the entire original typed family before any published FIRM filtering.
+    seen_original_source_ids: set[str] = set()
+    for original in result.quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
+            raise TypeError("quantity_evidence must contain QuantityEvidence")
+        if original.family != "ceiling_lining":
+            raise SourceClosedRunConflictError(
+                "non-ceiling original quantity reached ceiling-area source seal"
+            )
+        original_id = original.quantity_id
+        if (
+            type(original_id) is not str
+            or not original_id
+            or original_id != original_id.strip()
+            or original_id in seen_original_source_ids
+        ):
+            raise SourceClosedRunConflictError(
+                f"duplicate or invalid original ceiling source quantity id: {original_id}"
+            )
+        seen_original_source_ids.add(original_id)
+
     ceilings = {}
     for ceiling in result.canonical_ceilings:
         canonical_id = _clean(ceiling.canonical_ceiling_id)
@@ -226,15 +251,17 @@ def seal_live_ceiling_area_run(
     project_id: str,
 ) -> SealedSourceClosedRun:
     """Seal final canonical ceiling-area quantities on canonical identity."""
-    quantities = tuple(
-        quantity
-        for quantity in publish_live_ceiling_area_quantities(result)
-        if not quantity.abstained and quantity.value is not None
-    )
+    # Audit original source IDs before consuming canonical FIRM projections.
+    # A provisional producer replay may not reach a signed ceiling/customer row.
     traces = build_live_ceiling_area_source_traces(
         result,
         workspace_id=workspace_id,
         project_id=project_id,
+    )
+    quantities = tuple(
+        quantity
+        for quantity in publish_live_ceiling_area_quantities(result)
+        if not quantity.abstained and quantity.value is not None
     )
     return seal_source_closed_run(
         quantities,
