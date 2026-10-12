@@ -1,4 +1,5 @@
 name: TEST GPT3 Additive Snapshot Host Retention
+# Exact rebased production-head verification.
 
 on:
   pull_request:
