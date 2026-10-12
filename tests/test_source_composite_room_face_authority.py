@@ -1915,3 +1915,28 @@ def test_corrupt_native_constituent_polygon_abstains_without_source_room_repair(
         assert result.records == ()
         assert result.status is EvidenceResolutionStatus.ABSTAINED
         assert result.unresolved_label_candidate_ids == ("split_label_1",)
+
+
+def test_native_source_geos_exception_cannot_abort_room_handoff(monkeypatch):
+    """A GEOS topology failure is an unresolved source face, never a repair."""
+    import pb_source_composite_room_face_authority as module
+    from shapely.errors import GEOSException
+
+    wall_scope = _wall_scope((_grid_atom("e_sep"),))
+    room_scope = _room_scope()
+    label_scope = _label_scope()
+
+    def bad_geos(*_args, **_kwargs):
+        raise GEOSException("synthetic GEOS source ring/topology failure")
+
+    for target in ("Polygon", "unary_union"):
+        with monkeypatch.context() as patch:
+            patch.setattr(module, target, bad_geos)
+            result = module.compose_grid_separated_room_faces(
+                wall_scope=wall_scope,
+                room_scope=room_scope,
+                label_scope=label_scope,
+            )
+            assert result.status is EvidenceResolutionStatus.ABSTAINED
+            assert result.records == ()
+            assert result.unresolved_label_candidate_ids == ("split_label_1",)
