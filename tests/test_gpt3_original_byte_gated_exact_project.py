@@ -29,9 +29,9 @@ def _fixtures(tmp_path, monkeypatch, *, status="INCOMPLETE"):
     }
     manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
     sealed = tmp_path / "sealed.json"
-    sealed.write_bytes(b"test signed run bytes")
+    sealed.write_text(json.dumps({"source_sha256s": [receipt]}), encoding="utf-8")
     identity = tmp_path / "identity_map.json"
-    identity.write_bytes(b"test signed map bytes")
+    identity.write_text(json.dumps({"source_sha256s": [receipt]}), encoding="utf-8")
     monkeypatch.setattr(module, "FROZEN_ROOT", frozen)
     return manifest_file, original, sealed, identity, receipt
 
@@ -154,3 +154,29 @@ def test_project_gate_output_never_overwrites_frozen_reference(tmp_path, monkeyp
             "--output", str(frozen_reference),
         ])
     assert frozen_reference.read_bytes() == b"unchanged gold"
+
+
+@pytest.mark.parametrize("side", ["sealed", "identity"])
+def test_partial_signed_source_envelope_cannot_pass_original_byte_gate(tmp_path, monkeypatch, side):
+    manifest, original, sealed, identity, _sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    artifact = sealed if side == "sealed" else identity
+    artifact.write_text(json.dumps({"source_sha256s": []}), encoding="utf-8")
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("frozen evaluator must never see incomplete signed source package")
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", forbidden)
+    report = _report(manifest, original, sealed, identity)
+    assert report["original_source_sha_verified"] is True
+    assert report["project_evaluation"] is None
+    assert report["reason_codes"] == ["signed_production_source_package_incomplete"]
+
+
+def test_malformed_unhashable_signed_source_sha_array_fails_closed(tmp_path, monkeypatch):
+    manifest, original, sealed, identity, _sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    identity.write_text(json.dumps({"source_sha256s": [{"sha256": "fake"}]}), encoding="utf-8")
+    report = _report(manifest, original, sealed, identity)
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["reason_codes"] == ["signed_production_source_package_incomplete"]
