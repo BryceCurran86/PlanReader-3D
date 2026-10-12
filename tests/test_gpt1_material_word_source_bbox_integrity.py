@@ -11,7 +11,7 @@ from pb_source_material_semantic_authority import (
 )
 
 
-def _read(geometry, *, trusted=True):
+def _read(geometry, *, trusted=True, observation_ids=("source-word-observation-1",)):
     receipt = SimpleNamespace(
         geometry=geometry, page_id="1", source_partition_id="native-p1",
         raw_text="FPB PLASTERBOARD", block_no=1, line_no=0, word_no=0,
@@ -30,7 +30,7 @@ def _read(geometry, *, trusted=True):
             document_id="doc-1", revision_id="rev-1", source_sha256="a" * 64,
         ),
         snapshot=SimpleNamespace(snapshot_id="snap-1"),
-        text_observation_ids=("source-word-observation-1",),
+        text_observation_ids=observation_ids,
     )
     return _trusted_words_by_page(source, published)
 
@@ -61,3 +61,21 @@ def test_invalid_original_material_source_geometry_never_enters_text_authority(
 ):
     with pytest.raises(RuntimeError, match=SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE):
         _read(bbox, trusted=trusted)
+
+
+@pytest.mark.parametrize("ids", [
+    "source-word-observation-1",
+    (True,), (3,), (None,),
+    ("source-word-observation-1", "source-word-observation-1"),
+    ("source-word-observation-1 ",),
+    (" source-word-observation-1",),
+    ("source-word-observation-1", True),
+    (["nested-id"],),
+])
+def test_original_material_text_inventory_must_have_unique_typed_ids(ids):
+    with pytest.raises(RuntimeError, match=SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE):
+        _read((10.0, 20.0, 40.0, 34.0), observation_ids=ids)
+
+
+def test_empty_original_source_text_inventory_is_unavailable_not_invented():
+    assert _read((10.0, 20.0, 40.0, 34.0), observation_ids=()) == {}
