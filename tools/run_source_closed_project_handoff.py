@@ -15,7 +15,9 @@ from dataclasses import replace
 import hashlib
 import json
 import math
+import os
 import re
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Iterable
@@ -160,12 +162,28 @@ def _non_abstained(
     return tuple(retained)
 
 
-def _write_json(path: Path, payload: Any) -> None:
+def _write_text_atomic(path: Path, encoded: str) -> None:
+    """Atomically publish one complete artifact without following final symlinks."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as writer:
+            temporary_path = Path(writer.name)
+            writer.write(encoded)
+            writer.flush()
+            os.fsync(writer.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    """Persist an unsealed source-attempt summary without a torn replacement."""
+    _write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _write_run(
@@ -174,19 +192,45 @@ def _write_run(
     run: SealedSourceClosedRun,
 ) -> Path:
     path = directory / "family_runs" / f"{family}.sealed.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(run.to_json(), encoding="utf-8")
+    _write_text_atomic(path, run.to_json())
     return path
 
 
-def generate_project_handoff(
-    *,
-    pdf_path: Path,
-    project_id: str,
-    workspace_id: int,
-    output_dir: Path,
-    family_group: str = "all",
-) -> dict[str, Any]:
+def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
+    """Do not allow a failed rerun to expose a previous sealed customer output.
+
+    This command writes fixed family filenames inside one output directory.
+    Retrying a failed/unsealed attempt is valid, but reusing a directory with
+    any existing final seal can silently mix revisions or source SHA values.
+    Preserve existing evidence rather than deleting or overwriting it.
+    """
+    family_run_dir = output_dir / "family_runs"
+    # A directory symlink could redirect a future signed family into an
+    # unrelated workspace even when no previous *.sealed.json is present.
+    if family_run_dir.is_symlink():
+        raise FileExistsError(
+            f"unsafe family run directory symlink: {family_run_dir}; use a clean output directory"
+        )
+    # A combined seal for another project is just as unsafe as a seal for the
+    # requested project. Only the two diagnostic-only JSONs may be rewritten
+    # after an unsealed attempt; all other JSON artifacts demand a new folder.
+    diagnostic_only = {"source_attempt_preflight.json", "production_summary.json"}
+    possible_seals = (
+        *(path for path in output_dir.glob("*.json")
+          if path.name not in diagnostic_only),
+        *(output_dir / "family_runs").glob("*.sealed.json"),
+    )
+    for path in possible_seals:
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(
+                f"existing sealed handoff artifact: {path}; use a new output directory"
+            )
+
+
+def _validate_source_handoff_inputs(
+    pdf_path: Path, project_id: str, workspace_id: int, family_group: str,
+) -> str:
+    """Reject invalid source/identity before touching any output directory."""
     if not pdf_path.is_file():
         raise FileNotFoundError(pdf_path)
     if type(project_id) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", project_id):
@@ -201,6 +245,24 @@ def generate_project_handoff(
         raise ValueError(
             "family_group must be one of: all, core, surfaces"
         )
+
+    return clean_family_group
+
+
+def _generate_project_handoff_locked(
+    *,
+    pdf_path: Path,
+    project_id: str,
+    workspace_id: int,
+    output_dir: Path,
+    family_group: str = "all",
+) -> dict[str, Any]:
+    clean_family_group = _validate_source_handoff_inputs(
+        pdf_path, project_id, workspace_id, family_group,
+    )
+
+    # Check before touching any prior attempt summary or source material.
+    _reject_existing_sealed_handoff(output_dir, project_id)
 
     source_sha256 = _sha256(pdf_path)
     topology_pages, room_area_support_pages, page_count = _source_page_scopes(
@@ -273,7 +335,12 @@ def generate_project_handoff(
         "semantic_execution_pages": [
             page + 1 for page in semantic_execution_pages
         ],
-        "status": "unavailable",
+        # A new run is never a sealed publication until every source/quantity
+        # gate completes. Publish an unsealed summary before expensive source
+        # processing so a killed runner cannot leave an old sealed status.
+        "status": "source_attempt_recorded_unsealed",
+        "benchmark_score_granted": False,
+        "frozen_v2_reconciliation_complete": False,
         "family_counts": {},
         "family_run_ids": {},
         "family_run_files": {},
@@ -300,6 +367,8 @@ def generate_project_handoff(
         "complete_source_coverage_proven": False,
         "sealed_run_file": None,
     })
+
+    _write_json(output_dir / "production_summary.json", summary)
 
     try:
         claim = collect_live_physical_net_wall_claim(
@@ -667,7 +736,7 @@ def generate_project_handoff(
             else f"{project_id}.{clean_family_group}.json"
         )
         combined_path = output_dir / combined_filename
-        combined_path.write_text(combined.to_json(), encoding="utf-8")
+        _write_text_atomic(combined_path, combined.to_json())
         summary["combined_run_file"] = str(combined_path)
         summary["combined_run_id"] = combined.run_id
         summary["combined_quantity_count"] = len(combined.quantities)
@@ -678,6 +747,44 @@ def generate_project_handoff(
 
     _write_json(output_dir / "production_summary.json", summary)
     return summary
+
+
+
+def generate_project_handoff(
+    *,
+    pdf_path: Path,
+    project_id: str,
+    workspace_id: int,
+    output_dir: Path,
+    family_group: str = "all",
+) -> dict[str, Any]:
+    """Serialize one source run per output directory without trusting stale seals.
+
+    The exclusive lock is an execution guard, not source authenticity proof.
+    A process killed without cleanup leaves a lock: use a NEW output directory
+    rather than pretending a possibly partial run was completed.
+    """
+    # Bad source inputs never create directories or lock files.
+    _validate_source_handoff_inputs(pdf_path, project_id, workspace_id, family_group)
+    if output_dir.is_symlink():
+        raise FileExistsError("output directory cannot be a symlink")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = output_dir / ".source_closed_handoff.lock"
+    # O_EXCL fails closed on concurrent writers, symlinks and stale crash locks.
+    descriptor = os.open(
+        lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600,
+    )
+    try:
+        return _generate_project_handoff_locked(
+            pdf_path=pdf_path,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            output_dir=output_dir,
+            family_group=family_group,
+        )
+    finally:
+        os.close(descriptor)
+        lock_path.unlink(missing_ok=True)
 
 
 def _parser() -> argparse.ArgumentParser:
