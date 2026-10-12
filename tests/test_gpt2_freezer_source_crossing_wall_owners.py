@@ -86,6 +86,10 @@ def test_foreign_malformed_and_missing_source_receipts_abstain():
         replace(original, boundary_wall_edges=(("", (RING[0], RING[1])),)),
         replace(original, boundary_wall_edges=(("w-a",
                   ((0., 0.), (float("nan"), 1.))),)),
+        replace(original, boundary_wall_edges=(("w-a",
+                  ((0., 0.), (10**1000, 1.))),)),
+        replace(original, boundary_wall_edges=(("w-a",
+                  ((0., 0.), (True, 1.))),)),
         replace(original, boundary_wall_edges=()),
     ):
         result = source_room_ring_crossing_wall_owner_census(bad)
