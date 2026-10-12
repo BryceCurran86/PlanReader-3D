@@ -83,10 +83,15 @@ def original_label_canonical_guard_preflight(
         indexed_unique = (
             label_face_counts[label.face_id] == 1 and indexed_label == label
         )
-        canonical_guard_accepts = (
-            indexed_unique and exact_face and same_scope
-            and _verified_source_room_label_for_face(face, indexed_label) is not None
-        )
+        canonical_guard_accepts = False
+        if indexed_unique and exact_face and same_scope and source_word_inventory:
+            try:
+                canonical_guard_accepts = (
+                    _verified_source_room_label_for_face(face, indexed_label) is not None
+                )
+            except (TypeError, ValueError, AttributeError):
+                # Keep malformed original producer evidence diagnostic-only.
+                canonical_guard_accepts = False
         if not exact_face:
             first = "ORIGINAL_FACE_RECEIPT_DOES_NOT_MATCH"
         elif not same_scope:
