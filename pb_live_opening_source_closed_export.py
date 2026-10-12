@@ -71,6 +71,7 @@ def _build_opening_area_source_traces(
 ) -> Mapping[str, CommercialTakeoffSourceTrace]:
     openings = _opening_map(canonical_openings)
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    seen_original_quantity_ids: set[str] = set()
 
     for quantity in quantities:
         if not isinstance(quantity, QuantityEvidence):
@@ -81,6 +82,21 @@ def _build_opening_area_source_traces(
             raise SourceClosedRunConflictError(
                 "opening-area export received a non-opening-area quantity"
             )
+        # A disputed ABSTAIN replay is still an original claim of the same
+        # source-owned quantity ID. Check the *entire* producer universe before
+        # dropping blocked rows, or a FIRM sibling can be sealed despite
+        # contradictory physical evidence under the same identity.
+        source_quantity_id = quantity.quantity_id
+        if (
+            type(source_quantity_id) is not str
+            or not source_quantity_id
+            or source_quantity_id != source_quantity_id.strip()
+            or source_quantity_id in seen_original_quantity_ids
+        ):
+            raise SourceClosedRunConflictError(
+                f"duplicate or invalid opening area quantity id: {source_quantity_id}"
+            )
+        seen_original_quantity_ids.add(source_quantity_id)
         if quantity.abstained:
             continue
         if len(quantity.input_entity_ids) != 1:
