@@ -1001,6 +1001,6 @@ def test_interrupted_new_source_attempt_writes_unsealed_summary_first(tmp_path, 
     )
     assert summary["status"] == "source_attempt_recorded_unsealed"
     assert summary["benchmark_score_granted"] is False
-    assert summary["reconciliation_complete"] is False
+    assert summary["frozen_v2_reconciliation_complete"] is False
     assert summary["combined_run_file"] is None
     assert not (output / "project-a.json").exists()
