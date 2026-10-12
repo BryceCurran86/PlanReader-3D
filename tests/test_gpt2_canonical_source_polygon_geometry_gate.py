@@ -6,7 +6,6 @@ import pytest
 from pb_live_canonical_floor_surface import _floor_from_room
 from pb_live_canonical_coverage_registry import _physical_identity_resolved
 from pb_live_canonical_room_composition import (
-    LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID,
     _room_object_from_record,
     _room_object_from_composite_record,
     _source_room_geometry_complete_diagnostic_only,
@@ -54,7 +53,7 @@ def test_real_ring_crossing_with_positive_page_area_abstains_before_canonical_ge
     assert invalid.area_page_pts2 == 12.0
     assert invalid.geometry_complete is False
     assert invalid.metric_geometry_complete is False
-    assert LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID in invalid.room_label_reason_codes
+    assert invalid.room_label_reason_codes == ()
     assert invalid.polygon_pdf_pts == CROSSING
     assert invalid.coordinate_unit == "pdf_pt"
     assert invalid.evidence_ids == ("source-face-1",)
@@ -76,7 +75,7 @@ def test_valid_original_polygon_preserves_existing_canonical_geometry_contract()
     original = original_room(native_room())
     assert original.geometry_complete is True
     assert original.metric_geometry_complete is False
-    assert LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID not in original.room_label_reason_codes
+    assert original.room_label_reason_codes == ()
     assert original.polygon_pdf_pts == VALID
     assert original.area_page_pts2 == 16.
     good_floor = _floor_from_room(original)
@@ -106,6 +105,6 @@ def test_composite_uses_same_original_polygon_validity_gate():
     assert valid.geometry_complete is True
     invalid = composite_room(native_room(CROSSING, area=12.0))
     assert invalid.geometry_complete is False
-    assert LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID in invalid.room_label_reason_codes
+    assert invalid.room_label_reason_codes == ("source_composite_room_face_resolved",)
     assert invalid.metric_geometry_complete is False
     assert invalid.source_room_face_record_id == "source-face-1"
