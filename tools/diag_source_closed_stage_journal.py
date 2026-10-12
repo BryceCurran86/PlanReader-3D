@@ -143,7 +143,16 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
     )
     try:
         for owner, name, label in targets:
-            original = getattr(owner, name)
+            # Preserve the original Python descriptor type. In particular
+            # _visible_all_structural_candidates is a classmethod: replacing a
+            # classmethod with a normal function would inject cls into an
+            # already-bound method and abort the real source producer.
+            original_descriptor = owner.__dict__.get(name)
+            class_bound = isinstance(original_descriptor, classmethod)
+            original = (
+                original_descriptor.__func__
+                if class_bound else getattr(owner, name)
+            )
             if not callable(original):
                 raise TypeError(f"stage is not callable: {label}")
 
@@ -178,8 +187,12 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
                     return result
                 return wrapper
 
-            setattr(owner, name, wrapper_factory(original, label))
-            originals.append((owner, name, original))
+            wrapper = wrapper_factory(original, label)
+            setattr(owner, name, classmethod(wrapper) if class_bound else wrapper)
+            originals.append((
+                owner, name,
+                original_descriptor if class_bound else original,
+            ))
 
         # Report bounded progress during the original semantic opening scan.
         # Classification is called per source observation and a per-call fsync
