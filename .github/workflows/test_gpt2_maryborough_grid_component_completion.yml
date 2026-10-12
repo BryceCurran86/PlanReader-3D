@@ -34,6 +34,8 @@ jobs:
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Verify floor finish receipt publication invariants
         run: PYTHONPATH=. python -m pytest -q tests/test_cross_view_floor_finish_authority_v1.py
+      - name: Original source edge aliases retain all owners and fail closed on incomplete ancestry
+        run: PYTHONPATH=. python -m pytest -q tests/test_source_room_face_same_source_aliases.py
       - name: Run exact Maryborough room-component proof
         env:
           SOURCE_GATE_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -115,6 +117,18 @@ jobs:
           Path("artifacts/gpt2-maryborough-grid-component/observed_claim.json").write_text(
               json.dumps(observed,indent=2,sort_keys=True,allow_nan=False)+"\n",
               encoding="utf-8",
+          )
+          # The W4 source-address repair must preserve the original eight
+          # independently source-owned labels, including the real PWD ring.
+          for source_label in (
+              "AIRLOCK", "COLD ROOM", "FOOD PREP", "FREEZER",
+              "LAUNDRY", "OFFICE", "PWD", "SALES",
+          ):
+              source_rows=[row for row in labelled if row["label"]==source_label]
+              assert len(source_rows)==1, (source_label,source_rows)
+          pwd_rows=[row for row in labelled if row["label"]=="PWD"]
+          assert pwd_rows[0]["source_room_face_record_id"] == (
+              "source_room_face_record_6722d55c0ce8c8a8706cdcc6094860f9"
           )
           from tools.diag_gpt2_named_room_metric_first_gates import (
               summarize_named_room_metric_first_gates,

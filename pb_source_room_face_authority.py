@@ -40,14 +40,21 @@ from collections import defaultdict
 from dataclasses import dataclass, field, replace
 import math
 from types import MappingProxyType
-from typing import Iterable, Mapping, Optional
+from typing import Callable, Iterable, Mapping, Optional
 
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import (
     BOUNDARY_EVALUATION_EVALUATED,
     PhysicalWallCandidateAuthority,
+    PhysicalWallSourceEdgeFragment,
 )
+from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
+    PhysicalWallEquivalenceResolution,
+    PhysicalWallIdentity,
+)
+from pb_wall_room_topology_wall_identity_v2 import canonical_path_fingerprint
 
 
 SOURCE_ROOM_FACE_SCHEMA_VERSION = "1.0.0"
@@ -200,6 +207,8 @@ def _publication_boundary_ownership(
     ownership_grid: Mapping[tuple[int, int], list[tuple[str, Edge]]],
     ownership_oversized: list[tuple[str, Edge]],
     wall_edges: Mapping[str, tuple[Edge, ...]],
+    same_source_owner_groups: frozenset[frozenset[str]] = frozenset(),
+    source_interval_owner_check: Optional[Callable[[Edge, tuple[str, ...]], bool]] = None,
 ) -> Optional[
     tuple[
         tuple[Point, ...],
@@ -249,6 +258,12 @@ def _publication_boundary_ownership(
                 oversized=ownership_oversized,
                 wall_edges=wall_edges,
             )
+            if (frozenset(containing) in same_source_owner_groups
+                    or (source_interval_owner_check is not None
+                        and source_interval_owner_check(face_edge, containing))):
+                owners.extend(containing)
+                owned_edges.extend((alias, face_edge) for alias in containing)
+                continue
             if len(containing) != 1:
                 return None
             owner = containing[0]
@@ -776,6 +791,133 @@ def _blocked(scope: object, reason: str) -> SourceRoomFaceScopeResult:
     )
 
 
+def _same_source_owner_groups(
+    scope: object,
+    records: tuple[object, ...],
+    wall_edges: Mapping[str, tuple[Edge, ...]],
+) -> frozenset[frozenset[str]]:
+    """Recognize complete exact source aliases without electing a wall.
+
+    Candidate addresses remain plural. Only the existing physical identity
+    and pairwise SAME authority can discharge that address plurality for a
+    room edge; no global wall representative or quantity authority is issued.
+    """
+    equivalence = getattr(scope, "equivalence", None)
+    if (type(equivalence) is not PhysicalWallEquivalenceResolution
+            or equivalence.scope_viewport_id != scope.decision_scope_id):
+        return frozenset()
+    by_id = {_clean(getattr(r, "wall_candidate_id", "")): r for r in records}
+    if len(by_id) != len(records):
+        return frozenset()
+    pairs: dict[tuple[str, str], set[object]] = defaultdict(set)
+    for left, right, classification in equivalence.pair_classifications:
+        pairs[tuple(sorted((left, right)))].add(classification)
+    by_geometry: dict[frozenset[Edge], set[str]] = defaultdict(set)
+    for wall_id, edges in wall_edges.items():
+        by_geometry[frozenset(edges)].add(wall_id)
+    groups = set()
+    for geometry, owners in by_geometry.items():
+        if len(owners) < 2 or not geometry or any(not _finite_source_edge(e) for e in geometry):
+            continue
+        identities = []
+        for wall_id in owners:
+            record = by_id[wall_id]
+            identity = getattr(record, "physical_identity", None)
+            wall = getattr(record, "wall_candidate", None)
+            if (type(identity) is not PhysicalWallIdentity or not identity.usable
+                    or type(identity.candidate_identity_id) is not str
+                    or not identity.candidate_identity_id
+                    or identity.candidate_identity_id != identity.candidate_identity_id.strip()
+                    or identity.wall_candidate_id != wall_id
+                    or identity.viewport_id != scope.decision_scope_id
+                    or getattr(wall, "candidate_id", None) != wall_id
+                    or getattr(wall, "viewport_id", None) != scope.decision_scope_id
+                    or not identity.source_primitive_ids
+                    or any(type(p) is not str or not p or p != p.strip()
+                           for p in identity.source_primitive_ids)
+                    or len(set(identity.source_primitive_ids)) != len(identity.source_primitive_ids)):
+                break
+            if identity.path_fingerprint != canonical_path_fingerprint(wall.centerline_pts):
+                break
+            identities.append(identity)
+        if len(identities) != len(owners):
+            continue
+        if (len({i.candidate_identity_id for i in identities}) != 1
+                or len({i.path_fingerprint for i in identities}) != 1
+                or len({frozenset(i.source_primitive_ids) for i in identities}) != 1):
+            continue
+        ordered = sorted(owners)
+        if any(pairs.get((left, right)) != {PhysicalEquivalenceClass.SAME_PHYSICAL_WALL}
+               for index, left in enumerate(ordered) for right in ordered[index + 1:]):
+            continue
+        groups.add(frozenset(owners))
+    return frozenset(groups)
+
+
+def _source_interval_owner_check(scope: object, records: tuple[object, ...]):
+    """Prove local retained source overlap; never reclassify whole W4 walls."""
+    equivalence = getattr(scope, "equivalence", None)
+    by_id = {_clean(getattr(r, "wall_candidate_id", "")): r for r in records}
+    if (type(equivalence) is not PhysicalWallEquivalenceResolution
+            or equivalence.scope_viewport_id != scope.decision_scope_id
+            or len(by_id) != len(records)):
+        return lambda _edge, _owners: False
+    pairs: dict[tuple[str, str], set[object]] = defaultdict(set)
+    for left, right, classification in equivalence.pair_classifications:
+        pairs[tuple(sorted((left, right)))].add(classification)
+    admissible_pairs = ({PhysicalEquivalenceClass.SAME_PHYSICAL_WALL},
+                        {PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE})
+
+    def prove(edge: Edge, owners: tuple[str, ...]) -> bool:
+        if len(owners) < 2 or not _finite_source_edge(edge):
+            return False
+        ordered = sorted(owners)
+        if any(pairs.get((left, right)) not in admissible_pairs
+               for index, left in enumerate(ordered) for right in ordered[index + 1:]):
+            return False
+        common = None
+        for wall_id in owners:
+            record = by_id.get(wall_id)
+            identity = getattr(record, "physical_identity", None)
+            wall = getattr(record, "wall_candidate", None)
+            if (type(identity) is not PhysicalWallIdentity or not identity.usable
+                    or type(identity.candidate_identity_id) is not str
+                    or not identity.candidate_identity_id
+                    or identity.candidate_identity_id != identity.candidate_identity_id.strip()
+                    or identity.wall_candidate_id != wall_id
+                    or identity.viewport_id != scope.decision_scope_id
+                    or getattr(wall, "candidate_id", None) != wall_id
+                    or getattr(wall, "viewport_id", None) != scope.decision_scope_id):
+                return False
+            parents = set()
+            for fragment in getattr(record, "source_edge_fragments", ()):
+                if (type(fragment) is not PhysicalWallSourceEdgeFragment
+                        or type(fragment.edge_id) is not str or not fragment.edge_id
+                        or fragment.edge_id != fragment.edge_id.strip()
+                        or fragment.edge_id not in identity.edge_ids
+                        or not fragment.source_primitive_ids
+                        or any(type(p) is not str or not p or p != p.strip()
+                               for p in fragment.source_primitive_ids)
+                        or len(set(fragment.source_primitive_ids)) != len(fragment.source_primitive_ids)
+                        or not set(fragment.source_primitive_ids) <= set(identity.source_primitive_ids)):
+                    return False
+                line = fragment.geometry
+                if (len(line) != 4 or any(type(c) not in (int, float) for c in line)
+                        or not all(math.isfinite(float(c)) for c in line)):
+                    return False
+                original_edge = _edge(line[:2], line[2:])
+                if _edge_contains_edge(original_edge, edge):
+                    parents.update(fragment.source_primitive_ids)
+            if not parents:
+                return False
+            common = parents if common is None else common & parents
+            if not common:
+                return False
+        return bool(common)
+
+    return prove
+
+
 def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     records = tuple(getattr(scope, "records", ()) or ())
     if (
@@ -788,6 +930,9 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     boundary_inputs = _boundary_local_recovery_inputs(scope, records)
     if boundary_inputs is None:
         return _blocked(scope, SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE)
+    record_addresses = [_clean(getattr(r, "wall_candidate_id", "")) for r in records]
+    if len(set(record_addresses)) != len(record_addresses):
+        return _blocked(scope, SOURCE_ROOM_FACE_DUPLICATE_EDGE)
     boundary_tainted_wall_ids, excluded_boundary_primitives = boundary_inputs
     wall_edges: dict[str, tuple[Edge, ...]] = {}
     edge_owner: dict[Edge, str] = {}
@@ -811,6 +956,8 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     wall_ids = tuple(sorted(wall_edges))
     if not wall_ids:
         return _blocked(scope, SOURCE_ROOM_FACE_SCOPE_UNAVAILABLE)
+    same_source_owner_groups = _same_source_owner_groups(scope, records, wall_edges)
+    source_interval_owner_check = _source_interval_owner_check(scope, records)
     # Repeated geometry has multiple source owners. Remove it from the unique
     # lookup, retaining every owner in wall_edges for the existing competing-
     # span path below. A source address is never elected by iteration order.
@@ -830,7 +977,15 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     face_wall_edges: dict[str, tuple[tuple[str, Edge], ...]] = {}
     face_areas: dict[str, float] = {}
     directly_competing_face_ids: set[str] = set()
-    competing_spans: set[Edge] = set(duplicate_edges)
+    exact_owners: dict[Edge, set[str]] = defaultdict(set)
+    for wall_id, edges in wall_edges.items():
+        for edge in edges:
+            exact_owners[edge].add(wall_id)
+    competing_spans: set[Edge] = {
+        edge for edge in duplicate_edges
+        if (frozenset(exact_owners[edge]) not in same_source_owner_groups
+            and not source_interval_owner_check(edge, tuple(sorted(exact_owners[edge]))))
+    }
     competing_span_wall_ids: dict[Edge, set[str]] = defaultdict(set)
     for edge in duplicate_edges:
         competing_span_wall_ids[edge].update(
@@ -848,7 +1003,8 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                 edge, grid=ownership_grid, oversized=ownership_oversized,
                 wall_edges=wall_edges,
             )
-            if len(containing) > 1:
+            if (len(containing) > 1 and frozenset(containing) not in same_source_owner_groups
+                    and not source_interval_owner_check(edge, containing)):
                 competing_spans.add(edge)
                 competing_span_wall_ids[edge].update(containing)
 
@@ -881,6 +1037,11 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             if len(containing) == 1:
                 owners.append(containing[0])
                 owned_edges.append((containing[0], face_edge))
+                continue
+            if (frozenset(containing) in same_source_owner_groups
+                    or source_interval_owner_check(face_edge, containing)):
+                owners.extend(containing)
+                owned_edges.extend((alias, face_edge) for alias in containing)
                 continue
             if not containing:
                 face_missing = True
@@ -1116,6 +1277,8 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             ownership_grid=ownership_grid,
             ownership_oversized=ownership_oversized,
             wall_edges=wall_edges,
+            same_source_owner_groups=same_source_owner_groups,
+            source_interval_owner_check=source_interval_owner_check,
         )
         if publication is None:
             return _blocked(scope, SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
