@@ -567,3 +567,51 @@ def test_occurrence_line_replays_preserved_source_text_receipts() -> None:
     assert line.block_no == int(receipt.block_no)
     assert line.line_no == int(receipt.line_no)
     assert line.source_partition_id == str(receipt.source_partition_id)
+
+
+def test_source_authenticated_ceiling_tile_definition_is_not_erased_by_grid_code():
+    """A producer-authenticated tile definition differs from a bare GRID note.
+
+    This tests only the semantic definition gate. It does NOT authenticate
+    an RCP occurrence, a page-9 viewport or a commercial ceiling quantity.
+    """
+    definition = SourceMaterialDefinitionRecord(
+        record_id="source-ceiling-grid-tile-definition",
+        document_id="doc",
+        revision_id="rev",
+        source_sha256="a" * 64,
+        snapshot_id="snap",
+        code="GRID",
+        description="Vinyl faced plaster tile 600x1200",
+        substrate="",
+        finish="",
+        semantic_finish="tile",
+        source_definition_ids=("independent-source-definition",),
+        source_page_ids=("1",),
+        source_viewport_ids=("schedule-vp",),
+    )
+    assert ceiling._definition_is_ceiling_finish(definition) is True
+
+
+def test_bare_grid_without_authenticated_material_meaning_cannot_mint_ceiling():
+    """Page titles and isolated codes have no ceiling definition authority."""
+    same = SourceMaterialDefinitionRecord(
+        record_id="unproved-grid-code",
+        document_id="doc",
+        revision_id="rev",
+        source_sha256="a" * 64,
+        snapshot_id="snap",
+        code="GRID",
+        description="",
+        substrate="",
+        finish="",
+        semantic_finish="tile",
+        source_definition_ids=(),
+        source_page_ids=("1",),
+        source_viewport_ids=("drafting-vp",),
+    )
+    assert ceiling._definition_is_ceiling_finish(same) is False
+    from dataclasses import replace as dc_replace
+    assert ceiling._definition_is_ceiling_finish(
+        dc_replace(same, description="Vinyl faced plaster tile", semantic_finish="")
+    ) is False
