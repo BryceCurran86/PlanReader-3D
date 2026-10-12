@@ -1,0 +1,101 @@
+name: TEST GPT3 Lot16 Original Sealed Score Input
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/run_gpt3_lot16_original_sealed_score_input.py"
+      - "tools/diag_lot16_room_face_scope.py"
+      - "tests/test_gpt3_lot16_original_sealed_score_input.py"
+      - ".github/workflows/test-gpt3-lot16-original-sealed-score-input.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-lot16-original-sealed-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-lot16-real-seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install pinned original production dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run focused signed-source and source-integrity regressions
+        run: python -m pytest -q tests/test_gpt3_lot16_original_sealed_score_input.py
+        env:
+          PYTHONPATH: .
+      - name: Exact ORIGINAL Lot16 PDF and real sealed customer rows
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-lot16-original-source-score-input
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/producer_head_sha.txt"
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          manifest=json.loads(Path(
+              "benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json"
+          ).read_text())
+          architects=[d for d in manifest["source_documents"] if d["role"]=="architectural_drawings"]
+          assert len(architects)==1
+          data=architects[0]
+          pdf=Path("documents/sources") / data["name"]
+          assert pdf.is_file() and pdf.stat().st_size==data["size_bytes"]
+          sha=hashlib.sha256(pdf.read_bytes()).hexdigest()
+          assert sha==data["sha256"], "frozen original architectural SHA mismatch"
+          Path("artifacts/gpt3-lot16-original-source-score-input/source_sha256.txt").write_text(
+              sha + "\n", encoding="utf-8",
+          )
+          print("SOURCE SHA VERIFIED",sha,flush=True)
+          PY
+          /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_lot16_original_sealed_score_input \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --output-dir "$OUT/production" 2>&1 | tee "$OUT/producer_console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_customer_output_verification import verify_sealed_customer_output
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+          root=Path("artifacts/gpt3-lot16-original-source-score-input")
+          original_sha=(root/"source_sha256.txt").read_text().strip()
+          prod=root/"production"
+          sealed=sealed_source_closed_run_from_dict(json.loads(
+              (prod/"source_sealed_run.json").read_text()
+          ))
+          rows=json.loads((prod/"verified_customer_rows.json").read_text())
+          verified=verify_sealed_customer_output(sealed, rows)
+          receipt=json.loads((prod/"source_score_readiness_UNPUBLISHED.json").read_text())
+          assert sealed.project_id=="au_qld_lot16_power"
+          assert set(sealed.source_sha256s)=={original_sha}
+          assert set(verified.verified_quantity_ids)=={
+              r.quantity_id for r in sealed.quantities
+          }
+          assert verified.valid_quantity_count==len(sealed.quantities)
+          assert receipt["benchmark_score_granted"] is False
+          assert receipt["benchmark_accuracy"] is None
+          assert receipt["frozen_v2_reconciliation_complete"] is False
+          print(json.dumps({
+              "source_sha_verified": True,
+              "sealed_run_fingerprint":sealed.fingerprint,
+              "signed_quantity_count":len(sealed.quantities),
+              "customer_verified_count":verified.valid_quantity_count,
+              "benchmark_status":"IDENTITY_MAP_REQUIRED_UNPUBLISHED",
+          },sort_keys=True),flush=True)
+          PY
+        env:
+          PYTHONPATH: .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-lot16-original-sealed-score-input
+          path: artifacts/gpt3-lot16-original-source-score-input
+          retention-days: 4
