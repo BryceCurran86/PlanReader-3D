@@ -2149,3 +2149,85 @@ def test_original_w2_native_lineage_crosscheck_is_only_diagnostic():
     assert first_gate(fragments=(
         SimpleNamespace(edge_id="e_sep", source_primitive_ids=(42,)),
     )) == "source_fragment_receipt_unavailable"
+
+
+def test_original_w4_native_graphic_state_census_never_promotes_grid_or_rooms():
+    """Original PDF graphic metadata is a W4 aggregate, never W2 wall role."""
+    from dataclasses import replace
+    from tools.diag_gpt2_grid_component_first_failure import (
+        inspect_original_w4_grid_opposition_first_gate,
+    )
+    import copy
+    walls = _wall_scope(())
+    original = copy.copy(walls.records[0])
+    original.physical_identity = SimpleNamespace(
+        source_primitive_ids=("real-native-line",),
+    )
+    descriptor = SimpleNamespace(
+        wall_candidate_id="w_sep",
+        matched_source_primitive_ids=("real-native-line",),
+        width_values_pt=(0.5,),
+        drawing_relative_width_ranks=(SimpleNamespace(rank_ascending=1),),
+        stroke_values=((0., 0., 0.),),
+        layer_values=("A-Interior",),
+        wall_named_layer_values=(),
+        fill_values=(),
+        dashes_values=("[] 0",),
+        source_record_count=1,
+    )
+    original.source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="e_sep", source_primitive_ids=("real-native-line",)
+        ),
+    )
+    table = SimpleNamespace(
+        status="described",
+        page_id=LINEAGE["page_id"],
+        decision_scope_id=LINEAGE["decision_scope_id"],
+        descriptors=(descriptor,),
+    )
+    scope = replace(
+        walls,
+        records=(original, *walls.records[1:]),
+        source_metadata_table=table,
+    )
+    output = inspect_original_w4_grid_opposition_first_gate(scope, "w_sep")
+    native = output["original_w4_native_graphic_state_diagnostic_only"]
+    assert native["first_native_graphic_state_gate_diagnostic_only"] == (
+        "original_w4_native_graphic_state_observed_role_unproven"
+    )
+    assert native["original_w4_native_widths_pt"] == [0.5]
+    assert native["original_w4_native_width_rank_ascending"] == [1]
+    assert native["original_w4_native_layer_values"] == ["A-Interior"]
+    assert native["graphic_state_applies_to_w4_source_set_not_individual_w2"]
+    assert native["original_w4_graphic_state_proves_grid_role"] is False
+    assert output["original_w4_grid_first_gate"] == "source_w2_grid_opposition_missing"
+    assert output["physical_wall_equivalence_proven"] is False
+    assert output["room_geometry_published"] is False
+
+    # Collision, source mismatch, and incomplete metadata remain unavailable.
+    bad = replace(
+        scope, source_metadata_table=SimpleNamespace(
+            status="described",
+            page_id=LINEAGE["page_id"],
+            decision_scope_id=LINEAGE["decision_scope_id"],
+            descriptors=(descriptor, descriptor),
+        )
+    )
+    result = inspect_original_w4_grid_opposition_first_gate(bad, "w_sep")
+    assert result["original_w4_native_graphic_state_diagnostic_only"][
+        "first_native_graphic_state_gate_diagnostic_only"
+    ] == "original_w4_native_descriptor_not_unique"
+
+    foreign = replace(
+        scope, source_metadata_table=SimpleNamespace(
+            status="described",
+            page_id="foreign-page",
+            decision_scope_id=LINEAGE["decision_scope_id"],
+            descriptors=(descriptor,),
+        )
+    )
+    result = inspect_original_w4_grid_opposition_first_gate(foreign, "w_sep")
+    assert result["original_w4_native_graphic_state_diagnostic_only"][
+        "first_native_graphic_state_gate_diagnostic_only"
+    ] == "original_w4_native_metadata_unavailable"
