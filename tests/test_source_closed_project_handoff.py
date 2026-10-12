@@ -1233,3 +1233,26 @@ def test_signed_output_directory_symlink_cannot_redirect_customer_rows(
     assert not (output / "source_attempt_preflight.json").exists()
     assert not (output / "production_summary.json").exists()
     assert not (output / ".source_closed_handoff.lock").exists()
+
+
+def test_other_project_combined_seal_prevents_mixed_project_output(tmp_path, monkeypatch):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"unchanged source")
+    output = tmp_path / "shared-output"
+    output.mkdir()
+    earlier = output / "other-customer.json"
+    earlier.write_bytes(b"old independently source-signed combined run")
+
+    def _should_not_run(*args, **kwargs):
+        pytest.fail("an unrelated customer's signed output may not share this folder")
+    monkeypatch.setattr(handoff, "_source_page_scopes", _should_not_run)
+    with pytest.raises(FileExistsError, match="existing sealed handoff artifact"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="new-customer",
+            workspace_id=1, output_dir=output,
+        )
+    assert earlier.read_bytes() == b"old independently source-signed combined run"
+    assert source.read_bytes() == b"unchanged source"
+    assert not (output / "source_attempt_preflight.json").exists()
+    assert not (output / "production_summary.json").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
