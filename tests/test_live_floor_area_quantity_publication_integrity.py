@@ -483,6 +483,7 @@ def _independent_second_floor_and_area(*, same_room=False, same_face=False):
         _source_area(),
         quantity_id="room-area-2",
         semantic_key="room_area:source-room-2",
+        input_entity_ids=("source-room-2",),
     )
     return second, second_area
 
