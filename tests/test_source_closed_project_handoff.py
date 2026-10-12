@@ -1103,3 +1103,64 @@ def test_interrupted_signed_artifact_publish_never_leaves_truncated_customer_row
     assert not destination.exists()
     assert destination.parent.is_dir()
     assert sorted(destination.parent.iterdir()) == []
+
+
+def test_parallel_source_handoff_is_rejected_before_touching_running_artifacts(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"real source bytes unchanged")
+    output = tmp_path / "handoff-output"
+    output.mkdir()
+    marker = output / ".source_closed_handoff.lock"
+    marker.write_bytes(b"original active writer owns this directory")
+    monkeypatch.setattr(
+        handoff, "_source_page_scopes",
+        lambda *_: pytest.fail("second writer must not launch source collector"),
+    )
+    with pytest.raises(FileExistsError):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a",
+            workspace_id=1, output_dir=output,
+        )
+    assert marker.read_bytes() == b"original active writer owns this directory"
+    assert source.read_bytes() == b"real source bytes unchanged"
+    assert not (output / "production_summary.json").exists()
+    assert not (output / "source_attempt_preflight.json").exists()
+
+
+def test_exclusive_handoff_lock_is_cleaned_after_interrupted_source_collect(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"original source")
+    output = tmp_path / "out"
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+    def _interrupt(*args, **kwargs):
+        assert (output / ".source_closed_handoff.lock").is_file()
+        raise KeyboardInterrupt("source task interrupted")
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", _interrupt)
+    with pytest.raises(KeyboardInterrupt, match="source task interrupted"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a",
+            workspace_id=1, output_dir=output,
+        )
+    assert not (output / ".source_closed_handoff.lock").exists()
+    assert not (output / "project-a.json").exists()
+
+
+def test_stale_crash_lock_cannot_be_automatically_assumed_complete(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"original source")
+    output = tmp_path / "out"
+    output.mkdir()
+    stale = output / ".source_closed_handoff.lock"
+    stale.write_bytes(b"interrupted source run: do not trust prior seals")
+    with pytest.raises(FileExistsError):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a",
+            workspace_id=1, output_dir=output,
+        )
+    assert stale.read_bytes() == b"interrupted source run: do not trust prior seals"
