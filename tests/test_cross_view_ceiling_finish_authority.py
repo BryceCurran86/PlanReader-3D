@@ -585,7 +585,7 @@ def test_source_authenticated_ceiling_tile_definition_is_not_erased_by_grid_code
         description="Vinyl faced plaster tile 600x1200",
         substrate="",
         finish="",
-        semantic_finish="tile",
+        semantic_finish="ceiling_grid",
         source_definition_ids=("independent-source-definition",),
         source_page_ids=("1",),
         source_viewport_ids=("schedule-vp",),
@@ -605,7 +605,7 @@ def test_bare_grid_without_authenticated_material_meaning_cannot_mint_ceiling():
         description="",
         substrate="",
         finish="",
-        semantic_finish="tile",
+        semantic_finish="ceiling_grid",
         source_definition_ids=(),
         source_page_ids=("1",),
         source_viewport_ids=("drafting-vp",),
@@ -613,4 +613,13 @@ def test_bare_grid_without_authenticated_material_meaning_cannot_mint_ceiling():
     assert ceiling._definition_is_ceiling_finish(same) is False
     assert ceiling._definition_is_ceiling_finish(
         replace(same, description="Vinyl faced plaster tile", semantic_finish="")
+    ) is False
+    # A producer's generic "tile" semantic does not authenticate ceiling
+    # role. The source-specific family must say ceiling_grid (and be paired
+    # with a separately authenticated original RCP occurrence downstream).
+    assert ceiling._definition_is_ceiling_finish(
+        replace(
+            same, description="Vinyl faced plaster tile", semantic_finish="tile",
+            source_definition_ids=("independent-source-definition",),
+        )
     ) is False
