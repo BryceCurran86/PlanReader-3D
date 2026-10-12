@@ -1212,3 +1212,55 @@ def test_native_vertical_sheet_title_length_cannot_inflate_glyph_frame_threshold
         )
     finally:
         doc.close()
+
+
+def test_native_vertical_title_cannot_own_unproved_extreme_aspect_table() -> None:
+    """A vertical semantic title cannot turn a narrow frame into a schedule."""
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=1000)
+    page.draw_rect(fitz.Rect(120.0, 40.0, 220.0, 940.0))
+    for index in range(8):
+        page.insert_text(
+            (400.0, 100.0 + index * 40.0),
+            f"NOTE {index}",
+            fontsize=8.0,
+        )
+    page.insert_text(
+        (245.0, 700.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=10.0,
+        rotate=90,
+    )
+    doc = _reopen(doc)
+    try:
+        schedules = [
+            viewport for viewport in segment_page_viewports(doc[0], page_number=1)
+            if viewport.view_type == DrawingViewType.SCHEDULE.value
+        ]
+        assert len(schedules) == 1
+        assert schedules[0].status == ViewportSegmentationStatus.UNSUPPORTED.value
+        assert schedules[0].bounding_box is None
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 270])
+def test_native_rotated_viewport_bbox_roundtrip_never_infers_nan_source_geometry(
+    rotation: int,
+) -> None:
+    """Source native geometry survives /Rotate without an inferred location."""
+    from pb_viewport_segmentation import _to_native_bbox, _to_visual_bbox
+
+    doc = fitz.open()
+    page = doc.new_page(width=720, height=420)
+    page.set_rotation(rotation)
+    native = (64.0, 52.0, 300.0, 280.0)
+    try:
+        visual = _to_visual_bbox(page, native)
+        restored = _to_native_bbox(page, visual)
+        assert restored == pytest.approx(native)
+        assert _to_native_bbox(
+            page, (float("nan"), 0.0, 10.0, 20.0)
+        ) is None
+    finally:
+        doc.close()
