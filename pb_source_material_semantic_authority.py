@@ -462,15 +462,23 @@ def _trusted_words_by_page(
 
     authority = source.text_integrity_authority()
     rows: dict[str, list[_TrustedTextWord]] = {}
-    for observation_id in tuple(
-        getattr(published, "text_observation_ids", ()) or ()
+    # The source receipt universe is not a collection to stringify/deduplicate.
+    # Two replays of one PDF word cannot become two finish occurrences.
+    original_observations = getattr(published, "text_observation_ids", ()) or ()
+    if (
+        type(original_observations) not in (tuple, list)
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in original_observations)
+        or len(set(original_observations)) != len(original_observations)
     ):
+        raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+    for observation_id in original_observations:
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256,
             snapshot_id=published.snapshot.snapshot_id,
-            observation_id=str(observation_id),
+            observation_id=observation_id,
         )
         result = authority.resolve_text(selector)
         receipt = result.receipt
@@ -513,7 +521,7 @@ def _trusted_words_by_page(
 
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
-                observation_id=str(observation_id),
+                observation_id=observation_id,
                 page_id=page_id,
                 source_partition_id=str(receipt.source_partition_id or ""),
                 text=str(trusted_text or receipt.raw_text or ""),
