@@ -1,0 +1,123 @@
+name: DIAG GPT3 Lot16 External Identity Readiness
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt3_lot16_external_identity_readiness.py"
+      - "tests/test_gpt3_lot16_external_identity_readiness.py"
+      - ".github/workflows/diag-gpt3-lot16-external-identity-readiness.yml"
+      - "tools/diag_gptmax_source_authority_stages.py"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-lot16-external-identity-readiness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: External identity readiness fail-closed regressions
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_lot16_external_identity_readiness.py
+          python -m compileall -q tools/diag_gpt3_lot16_external_identity_readiness.py
+          ruff check --select F821,F823 tools/diag_gpt3_lot16_external_identity_readiness.py tests/test_gpt3_lot16_external_identity_readiness.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reauthenticate all exact external opening label locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=artifacts/gpt3-lot16-external-identity-readiness
+          mkdir -p "$ROOT"
+          git rev-parse HEAD > "$ROOT/producer_head_sha.txt"
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" \
+            --page-id 3 \
+            --source-all-pages \
+            --include-identity-text-receipts \
+            --output "$ROOT/source-report.json"
+
+          PYTHONPATH=. python -u -m tools.diag_gpt3_lot16_external_identity_readiness \
+            --source-report "$ROOT/source-report.json" \
+            --object-universe benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/object_universe.json \
+            --source-manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json \
+            --sealed-run docs/engineering/lot16_original_identity_reconciliation_20261012/source_sealed_run.json \
+            --active-identity-map docs/engineering/lot16_original_identity_reconciliation_20261012/identity_map.json \
+            --output "$ROOT/readiness.json"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root=Path("artifacts/gpt3-lot16-external-identity-readiness")
+          d=json.loads((root/"readiness.json").read_text())
+          active=json.loads(Path(
+              "docs/engineering/lot16_original_identity_reconciliation_20261012/identity_map.json"
+          ).read_text())
+          assert d["status"]=="EXTERNAL_IDENTITY_READINESS_AUDIT_COMPLETE"
+          assert d["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert d["active_exact_identity_count"]==len(active["bindings"])==7
+          assert d["active_identity_map_modified"] is False
+          assert d["benchmark_score_granted"] is False
+          assert d["benchmark_accuracy"] is None
+          assert d["evaluator_invoked"] is False
+          assert d["numeric_quantity_similarity_used"] is False
+          assert d["name_or_description_similarity_used"] is False
+          assert d["ordinal_or_nearest_matching_used"] is False
+          assert all(
+              row["status"]=="ACTIVE_SIGNED_IDENTITY"
+              for row in d["active_exact_identities"]
+          )
+          assert all(
+              row["status"]=="IDENTITY_READY_QUANTITY_UNSEALED"
+              for row in d["pending_identities"]
+          )
+          assert all(
+              row["status"]=="SEALED_UNMAPPED_IDENTITY_READY"
+              for row in d["newly_sealed_unmapped_identities"]
+          )
+          print("GPT3_EXTERNAL_IDENTITY_READINESS",json.dumps({
+              "active":d["active_exact_identity_count"],
+              "pending":d["pending_identity_count"],
+              "newly_sealed_unmapped":d["newly_sealed_unmapped_count"],
+              "pending_rows":d["pending_identities"],
+              "newly_sealed_rows":d["newly_sealed_unmapped_identities"],
+              "benchmark_accuracy":None,
+          },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-lot16-external-identity-readiness
+          path: artifacts/gpt3-lot16-external-identity-readiness
+          retention-days: 30
