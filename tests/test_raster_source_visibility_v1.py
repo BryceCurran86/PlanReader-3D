@@ -5,6 +5,7 @@ from io import BytesIO
 import inspect
 
 import fitz
+import pytest
 from PIL import Image, ImageDraw
 
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -276,3 +277,41 @@ def test_hybrid_page_augments_only_source_owned_embedded_image_region() -> None:
         midpoint_y = (y0 + y1) / 2.0
         assert 20.0 <= midpoint_x <= 320.0
         assert 20.0 <= midpoint_y <= 220.0
+
+
+def test_raster_attempt_is_not_memoized_before_snapshot_commit(monkeypatch) -> None:
+    """A failed source writer must not turn future retries into empty success."""
+    source = SourceVisibilityProducer(
+        producer_method="raster-retry-test",
+        producer_version="1.0",
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id="raster-retry",
+        source_bytes=_image_only_pdf(),
+        source_locator="memory://raster-retry.pdf",
+    )
+    revision = published.revision.revision_id
+    writer = source._producer.publish_derived_observations
+    failures = {"remaining": 1}
+
+    def transient_failure(**kwargs):
+        if failures["remaining"]:
+            failures["remaining"] -= 1
+            raise RuntimeError("uncommitted source publication")
+        return writer(**kwargs)
+
+    monkeypatch.setattr(source._producer, "publish_derived_observations", transient_failure)
+    with pytest.raises(RuntimeError, match="uncommitted source publication"):
+        source.augment_with_raster_visible_segments(revision)
+    assert (revision, "1") not in source._raster_visibility_attempted_pages
+    assert source._published_by_revision[revision].snapshot.snapshot_id == published.snapshot.snapshot_id
+
+    recovered = source.augment_with_raster_visible_segments(revision)
+    assert recovered.visible_observation_ids
+    assert recovered.snapshot.snapshot_id != published.snapshot.snapshot_id
+    assert (revision, "1") in source._raster_visibility_attempted_pages
+    assert source.augment_with_raster_visible_segments(revision).snapshot.snapshot_id == recovered.snapshot.snapshot_id
+    authority = source.authority()
+    assert all(authority.resolve_visible(_selector(recovered, oid)).status
+               is EvidenceResolutionStatus.CORROBORATED
+               for oid in recovered.visible_observation_ids)
