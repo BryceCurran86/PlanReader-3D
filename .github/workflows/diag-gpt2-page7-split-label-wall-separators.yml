@@ -264,11 +264,21 @@ jobs:
           from tools.diag_gpt2_freezer_source_crossing_wall_owners import (
               source_room_ring_crossing_wall_owner_census,
           )
-          freezer_source=[
-              rec for rec in face_records
-              if rec.record_id=="source_room_face_record_e6faa5d761bcc11de70f4d3a21e94571"
+          # A different valid producer-method/snapshot can mint different
+          # source record IDs for the same immutable PDF. Bind to the EXACT
+          # native word-owned original Freezer face in THIS source run.
+          freezer_labels=[
+              row for scope in scoped_labels for row in scope["records"]
+              if row["room_label"]=="FREEZER"
           ]
-          assert len(freezer_source)==1, "original Freezer source face missing/ambiguous"
+          assert len(freezer_labels)==1, "original Freezer native word owner not unique"
+          exact_face_id=freezer_labels[0]["source_room_face_record_id"]
+          freezer_source=[
+              rec for rec in face_records if rec.record_id==exact_face_id
+          ]
+          assert len(freezer_source)==1, "original Freezer producer face missing/ambiguous"
+          assert freezer_source[0].source_sha256==sha
+          assert freezer_source[0].page_id=="7"
           w4_first_gate=source_room_ring_crossing_wall_owner_census(freezer_source[0])
           assert len(w4_first_gate["original_polygon_crossing_edges_diagnostic_only"])==2
           assert w4_first_gate["source_room_polygon_repaired"] is False
