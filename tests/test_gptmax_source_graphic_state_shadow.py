@@ -133,3 +133,11 @@ def test_ordinary_raster_descriptor_is_not_a_claim_of_available_vector_paint():
     assert row['all_fragment_parents_have_graphic_state'] is False
     assert row['graphic_values_unavailable_source_ids']==['pixel']
     assert row['structural_wall_role_proven'] is False
+
+
+def test_mutating_sidecar_cannot_change_actual_graph_or_owned_source_metadata():
+    args=fixture();before=deepcopy(args)
+    rows=shadow.join_graphic_state(*args)
+    rows[0]['w2_fragment_geometry_pt'][0]+=100.
+    rows[0]['literal_source_graphic_state']['source_records'][0]['width']=999.
+    assert args==before

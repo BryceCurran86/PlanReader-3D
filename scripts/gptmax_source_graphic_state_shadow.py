@@ -51,7 +51,7 @@ def join_graphic_state(graph,records,source_segments):
             r.get(f+'_present') for f in ('width','stroke','fill','layer','dashes','clip'))}
         unavailable_values=sorted(set(parents)-known_values)
         rows.append(dict(edge_id=key,source_observation_ids=sorted(parents),
-            w2_fragment_geometry_pt=edge['w2_fragment_geometry_pt'],w3_retained=edge['w3_retained'],
+            w2_fragment_geometry_pt=list(edge['w2_fragment_geometry_pt']),w3_retained=edge['w3_retained'],
             matched_graphic_state_source_ids=matched,missing_graphic_state_source_ids=missing,
             source_parent_ownership_available=bool(parents),
             status=(EvidenceResolutionStatus.CANDIDATE.value if parents else EvidenceResolutionStatus.ABSTAINED.value),
