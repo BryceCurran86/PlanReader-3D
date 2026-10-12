@@ -6,6 +6,7 @@ never creates room geometry, changes candidate truth, or issues quantities.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 import math
 from typing import Any
 from shapely.geometry import Polygon
@@ -20,6 +21,11 @@ from pb_source_composite_room_face_authority import (
     _candidate_record,
     _atomic_source_wall_edge_counts,
     _edge_key,
+    _wall_edge_ids,
+    SOURCE_LINEAGE_GRID_REASON,
+)
+from pb_wall_room_topology_typed_negative_evidence import (
+    KIND_GRID, POLARITY_OPPOSING,
 )
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateScopeResult
 from pb_source_room_face_authority import SourceRoomFaceScopeResult
@@ -53,6 +59,7 @@ def _physical_union_first_unclosed_gate(
         "physical_union_merged_geometry_type_observed_only": None,
         "physical_union_external_grid_edge_count": 0,
         "physical_union_external_grid_w4_ids_diagnostic_only": [],
+        "physical_union_external_grid_atomic_subedges_diagnostic_only": [],
         "physical_union_internal_separator_edge_count": 0,
         "invalid_constituent_source_face_receipts_diagnostic_only": [],
         "first_invalid_internal_wall_receipt_diagnostic_only": None,
@@ -215,6 +222,31 @@ def _physical_union_first_unclosed_gate(
     # they remain unowned/diagnostic and are not used as a geometry repair.
     result["physical_union_external_grid_w4_ids_diagnostic_only"] = external_grid_ids[:24]
     result["physical_union_external_grid_w4_id_count"] = len(external_grid_ids)
+    # Preserve the exact *original* source W4 atomic edge and producer face
+    # owner receipt behind each external GRID boundary. A W4 ID alone hides
+    # which part of a long grid wall remains unclosed. These identities are
+    # diagnostic only: no adjacency, wall equivalence or geometry is invented.
+    grid_external_edges = sorted(
+        (wall_id, edge) for wall_id, edge in external
+        if wall_id in fully_grid_wall_ids
+    )
+    result["physical_union_external_grid_atomic_subedges_diagnostic_only"] = [
+        {
+            "original_w4_wall_id": wall_id,
+            "original_atomic_wall_edge_pdf_pts": [list(pt) for pt in edge],
+            "source_component_face_ids": sorted(
+                face_id for face_id, count
+                in local.get((wall_id, edge), {}).items()
+                if face_id in component_set and count == 1
+            ),
+            "original_global_source_face_ids": list(
+                owners.get((wall_id, edge), ())
+            ),
+            "source_edge_used_to_mint_physical_room": False,
+            "new_wall_or_room_equivalence_inferred": False,
+        }
+        for wall_id, edge in grid_external_edges[:48]
+    ]
     if not internal or not external:
         result["physical_union_first_unclosed_gate"] = (
             "source_internal_or_external_boundary_not_complete"
@@ -408,6 +440,123 @@ def _competing_original_label_receipts(component, candidate, label_scope):
     ))
 
 
+
+def inspect_original_w4_grid_opposition_first_gate(
+    wall_scope: PhysicalWallCandidateScopeResult,
+    original_w4_wall_id: str,
+) -> dict[str, Any]:
+    """Read actual original W2 opposing receipts for one W4; never mint a wall.
+
+    A source W4 may have one positive W2 GRID semantic receipt for some edge
+    fragments yet remain a physical separator where ANY original W2 edge is
+    missing that authority. Never assume all edges from one textual GRID note.
+    """
+    output = {
+        "original_w4_wall_id": original_w4_wall_id,
+        "original_w4_source_candidate_count": 0,
+        "original_w2_edge_ids_diagnostic_only": [],
+        "source_grid_opposed_w2_edge_ids_diagnostic_only": [],
+        "missing_original_grid_opposed_w2_edge_ids_diagnostic_only": [],
+        "original_w2_fragment_source_receipts_diagnostic_only": [],
+        "original_w4_grid_first_gate": "source_w4_identity_unavailable",
+        "original_w4_grid_opposition_published": False,
+        "physical_wall_equivalence_proven": False,
+        "room_geometry_published": False,
+    }
+    if (
+        not isinstance(original_w4_wall_id, str)
+        or not original_w4_wall_id
+        or original_w4_wall_id != original_w4_wall_id.strip()
+    ):
+        return output
+    records = [
+        rec for rec in tuple(getattr(wall_scope, "records", ()) or ())
+        if getattr(rec, "wall_candidate_id", None) == original_w4_wall_id
+    ]
+    output["original_w4_source_candidate_count"] = len(records)
+    if len(records) != 1:
+        output["original_w4_grid_first_gate"] = (
+            "source_w4_identity_collision" if records else "source_w4_identity_unavailable"
+        )
+        return output
+    record = records[0]
+    wall = getattr(record, "wall_candidate", None)
+    # The production helper stringifies W2 keys for backward compatibility.
+    # A diagnostic claiming *original native* W2 identities must inspect the
+    # untouched typed source fields BEFORE any string coercion.
+    raw_a = getattr(wall, "face_a_segment_ids", None)
+    raw_b = getattr(wall, "face_b_segment_ids", None)
+    if not isinstance(raw_a, (tuple, list)) or (
+        raw_b is not None and not isinstance(raw_b, (tuple, list))
+    ):
+        output["original_w4_grid_first_gate"] = "source_w2_fragment_identity_unavailable"
+        return output
+    raw_edges = (*raw_a, *(raw_b or ()))
+    if (
+        not raw_edges
+        or any(
+            not isinstance(edge, str) or not edge
+            or edge != edge.strip()
+            for edge in raw_edges
+        )
+    ):
+        output["original_w4_grid_first_gate"] = "source_w2_fragment_identity_unavailable"
+        return output
+    edges = tuple(sorted(set(raw_edges)))
+    output["original_w2_edge_ids_diagnostic_only"] = list(edges)
+    opposition: dict[str, set[str]] = {edge: set() for edge in edges}
+    for atom in tuple(getattr(wall_scope, "typed_semantic_evidence_atoms", ()) or ()):
+        meta = getattr(atom, "metadata", None)
+        if not isinstance(meta, Mapping):
+            continue
+        edge = meta.get("target_edge_id")
+        atom_id = getattr(atom, "evidence_id", None)
+        if (
+            getattr(atom, "kind", None) != KIND_GRID
+            or getattr(atom, "status", None) is not EvidenceResolutionStatus.CANDIDATE
+            or meta.get("polarity") != POLARITY_OPPOSING
+            or SOURCE_LINEAGE_GRID_REASON
+                not in tuple(getattr(atom, "reason_codes", ()) or ())
+            or not isinstance(edge, str) or edge not in opposition
+            or not isinstance(atom_id, str) or not atom_id
+            or atom_id != atom_id.strip()
+        ):
+            continue
+        opposition[edge].add(atom_id)
+    supported = [edge for edge in edges if opposition[edge]]
+    missing = [edge for edge in edges if not opposition[edge]]
+    output["source_grid_opposed_w2_edge_ids_diagnostic_only"] = supported
+    output["missing_original_grid_opposed_w2_edge_ids_diagnostic_only"] = missing
+    output["original_w2_grid_opposition_evidence_receipts_diagnostic_only"] = {
+        edge: sorted(ids) for edge, ids in opposition.items() if ids
+    }
+    for frag in tuple(getattr(record, "source_edge_fragments", ()) or ()):
+        edge = getattr(frag, "edge_id", None)
+        if edge not in edges:
+            continue
+        raw_sources = getattr(frag, "source_primitive_ids", ()) or ()
+        parents = (
+            list(raw_sources)
+            if isinstance(raw_sources, (tuple, list))
+            and all(isinstance(v, str) and v and v == v.strip() for v in raw_sources)
+            else []
+        )
+        output["original_w2_fragment_source_receipts_diagnostic_only"].append({
+            "original_w2_edge_id": edge,
+            "native_source_primitive_ids": parents[:32],
+            "source_parent_receipts_typed": bool(parents),
+            "source_parent_membership_proven": False,
+            "source_physical_role_inferred": False,
+        })
+    if missing:
+        output["original_w4_grid_first_gate"] = "source_w2_grid_opposition_missing"
+    else:
+        output["original_w4_grid_first_gate"] = (
+            "source_w2_grid_opposition_observed_not_physical_equivalence"
+        )
+    return output
+
+
 def inspect_split_grid_component_first_failure(
     candidate: Any,
     *,
@@ -534,6 +683,16 @@ def inspect_split_grid_component_first_failure(
                 local_counts=local_counts,
             )
         )
+        original_union = output["physical_union_source_first_failure_diagnostic_only"]
+        invalid_wall = original_union.get(
+            "first_invalid_internal_wall_receipt_diagnostic_only"
+        )
+        if invalid_wall and isinstance(invalid_wall.get("original_w4_wall_id"), str):
+            output["original_w4_grid_opposition_first_gate_diagnostic_only"] = (
+                inspect_original_w4_grid_opposition_first_gate(
+                    wall_scope, invalid_wall["original_w4_wall_id"]
+                )
+            )
         output["first_unclosed_gate"] = (
             "grid_connected_component_physical_boundary_or_union_unproven"
         )
