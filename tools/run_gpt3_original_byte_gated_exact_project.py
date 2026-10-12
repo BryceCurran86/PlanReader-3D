@@ -98,6 +98,7 @@ def build_original_byte_gated_project_report(
     *, manifest_path: Path, sealed_run_path: Path,
     identity_map_path: Path, original_files: Sequence[Path],
 ) -> dict:
+    manifest_sha_before = _sha256(manifest_path)
     manifest = _object(manifest_path)
     project_id = manifest.get("project_id")
     if not isinstance(project_id, str) or not project_id:
@@ -192,6 +193,7 @@ def build_original_byte_gated_project_report(
         artifacts_unchanged = (
             _sha256(sealed_run_path) == sealed_before
             and _sha256(identity_map_path) == identity_before
+            and _sha256(manifest_path) == manifest_sha_before
         )
     except OSError:
         artifacts_unchanged = False
