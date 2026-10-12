@@ -31,6 +31,7 @@ def _report():
             "physical_opening_record_ids": ["opening-1"],
             "representative_observation_ids": ["obs-1"],
             "record_id": "semantic-record-1", "decision_scope_id": "scope-a",
+            "source_sha256": "a" * 64,
             "snapshot_id": "snapshot-a", "revision_id": "revision-a",
             "physical_opening_universe_complete": False,
             "structural_enumeration_complete": False, "reason_codes": [],
@@ -88,7 +89,8 @@ def test_host_proof_change_is_not_masked_by_same_membership():
 @pytest.mark.parametrize("tamper", [
     "sha", "revision", "snapshot", "page", "safety_cap",
     "duplicate_native", "duplicate_semantic", "missing_semantic",
-    "missing_protected", "foreign_native_page",
+    "missing_protected", "foreign_native_page", "foreign_semantic_source",
+    "foreign_semantic_snapshot", "one_sided_source_scope",
 ])
 def test_incompatible_or_malformed_source_evidence_fails_closed(tamper):
     old, new = _report(), _report()
@@ -110,6 +112,12 @@ def test_incompatible_or_malformed_source_evidence_fails_closed(tamper):
         new.pop("semantic_inventory")
     elif tamper == "missing_protected":
         new.pop("canonical_openings")
+    elif tamper == "foreign_semantic_source":
+        new["semantic_inventory"]["record"]["source_sha256"] = "b" * 64
+    elif tamper == "foreign_semantic_snapshot":
+        new["semantic_inventory"]["record"]["snapshot_id"] = "other-snapshot"
+    elif tamper == "one_sided_source_scope":
+        new["source_room_face_scopes"] = [{"foreign": "scope"}]
     else:
         new["native_candidate_closures"].append(deepcopy(new["native_candidate_closures"][0]))
     with pytest.raises(ValueError):
