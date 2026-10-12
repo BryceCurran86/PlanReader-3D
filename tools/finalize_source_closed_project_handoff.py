@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,27 @@ from pb_combine_source_closed_runs import combine_sealed_run_files
 
 
 GROUPS = ("core", "surfaces")
+
+
+def _atomic_write_complete(path: Path, contents: str) -> None:
+    """Write full verified output before publishing the final pathname."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as writer:
+            temporary = Path(writer.name)
+            writer.write(contents)
+            writer.flush()
+            os.fsync(writer.fileno())
+        # The caller holds a per-output-directory exclusive finalizer lock.
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(f"existing final customer artifact: {path}")
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def finalize_split_project_handoff(
@@ -54,9 +77,15 @@ def finalize_split_project_handoff(
         [path for _, path in available],
         project_id=clean_project_id,
     )
-    target_dir.mkdir(parents=True, exist_ok=True)
+    # Reusing a finalizer destination must never mutate an earlier sealed
+    # customer run or source group. A symlinked directory can redirect signed
+    # output to another workspace without a visible filename collision.
+    if target_dir.is_symlink():
+        raise FileExistsError("finalized customer directory cannot be a symlink")
     output_path = target_dir / f"{clean_project_id}.json"
-    output_path.write_text(combined.to_json(), encoding="utf-8")
+    summary_path = target_dir / f"{clean_project_id}.handoff-summary.json"
+    if any(path.exists() or path.is_symlink() for path in (output_path, summary_path)):
+        raise FileExistsError("existing finalized customer run: use a new output directory")
 
     summary = {
         "schema_version": "1.0.0",
@@ -71,11 +100,19 @@ def finalize_split_project_handoff(
         "revision_ids": list(combined.revision_ids),
         "quantity_count": len(combined.quantities),
     }
-    summary_path = target_dir / f"{clean_project_id}.handoff-summary.json"
-    summary_path.write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    lock = target_dir / ".source_closed_finalizer.lock"
+    # Per-folder O_EXCL rejects overlapping finalizers or crash-stale locks;
+    # a crash never grants permission to overwrite the previous sealed run.
+    descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        if any(path.exists() or path.is_symlink() for path in (output_path, summary_path)):
+            raise FileExistsError("existing finalized customer run: use a new output directory")
+        _atomic_write_complete(output_path, combined.to_json())
+        _atomic_write_complete(summary_path, json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    finally:
+        os.close(descriptor)
+        lock.unlink(missing_ok=True)
     return summary
 
 
