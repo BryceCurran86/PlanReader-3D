@@ -112,3 +112,86 @@ def test_original_source_changed_during_handoff_fails_diagnostic_after_run(tmp_p
     events = _events(journal)
     assert events[0]["event"] == "sha_verified"
     assert all(event["diagnostic_only"] for event in events)
+
+
+def test_original_wall_page_and_raster_substage_observation_changes_no_producer_result(
+    tmp_path, monkeypatch,
+):
+    wall_result = object()
+    raster_result = object()
+    calls = []
+
+    def original_wall_build(*args, **kwargs):
+        calls.append(("wall", args, kwargs))
+        return wall_result
+
+    def original_raster_augment(self, *args, **kwargs):
+        calls.append(("raster", args, kwargs))
+        return raster_result
+
+    monkeypatch.setattr(diag.wall_candidates, "_build_scope_result", original_wall_build)
+    monkeypatch.setattr(
+        diag.integration.SourceVisibilityProducer,
+        "augment_with_raster_visible_segments",
+        original_raster_augment,
+    )
+    source = object.__new__(diag.integration.SourceVisibilityProducer)
+    journal_path = tmp_path / "source-substages.jsonl"
+
+    with diag.StageJournalContext(journal_path) as journal:
+        with diag.journal_source_stages(journal):
+            assert source.augment_with_raster_visible_segments(
+                "rev", page_ids=("7", "30")
+            ) is raster_result
+            assert diag.wall_candidates._build_scope_result(
+                page_id="7", source_bytes=b"unchanged-original-source"
+            ) is wall_result
+        assert diag.wall_candidates._build_scope_result is original_wall_build
+        assert (
+            diag.integration.SourceVisibilityProducer.augment_with_raster_visible_segments
+            is original_raster_augment
+        )
+
+    assert calls == [
+        ("raster", ("rev",), {"page_ids": ("7", "30")}),
+        ("wall", (), {"page_id": "7", "source_bytes": b"unchanged-original-source"}),
+    ]
+    entries = _events(journal_path)
+    assert [row["event"] for row in entries] == [
+        "entered", "completed", "entered", "completed"
+    ]
+    assert [row["stage"] for row in entries] == [
+        "SourceVisibilityProducer.augment_with_raster_visible_segments",
+        "SourceVisibilityProducer.augment_with_raster_visible_segments",
+        "physical_wall_candidate_page_build",
+        "physical_wall_candidate_page_build",
+    ]
+    assert [row.get("source_page_id") for row in entries] == [
+        None, None, "7", "7"
+    ]
+    assert all(row["diagnostic_only"] is True for row in entries)
+
+
+def test_wall_page_failure_is_logged_without_fallback_or_mutating_exception(
+    tmp_path, monkeypatch,
+):
+    failure = ValueError("original-wall-source-opposition-unavailable")
+
+    def denied_page_build(**kwargs):
+        raise failure
+
+    monkeypatch.setattr(
+        diag.wall_candidates, "_build_scope_result", denied_page_build
+    )
+    journal_path = tmp_path / "failed-wall-page.jsonl"
+    with diag.StageJournalContext(journal_path) as journal:
+        with pytest.raises(ValueError) as caught:
+            with diag.journal_source_stages(journal):
+                diag.wall_candidates._build_scope_result(page_id="30")
+        assert caught.value is failure
+        assert diag.wall_candidates._build_scope_result is denied_page_build
+
+    events = _events(journal_path)
+    assert [e["event"] for e in events] == ["entered", "failed"]
+    assert [e["source_page_id"] for e in events] == ["30", "30"]
+    assert events[1]["error_type"] == "ValueError"
