@@ -21,6 +21,7 @@ Raw native observations remain preserved by ``SourceObservationProducer``.
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import hashlib
 import math
@@ -708,6 +709,8 @@ class SourceVisibilityProducer:
         # producer's store/receipt maps, so later producer-owned augmentation is
         # visible without rebuilding opening candidate caches.
         self._physical_opening_authority_cache = None
+        # Scoped to one wall-page proof; never a persistent permission cache.
+        self._native_dimension_proof_batch = None
         # Physical scale is likewise source-owned and selector-keyed. Reuse one
         # producer so wall, opening-void, and gross-wall compositions share the
         # same immutable page/viewport analysis instead of rescanning it.
@@ -944,6 +947,65 @@ class SourceVisibilityProducer:
                            else 'native_unstroked_pale_neutral_fill_boundary'),),
             metadata=metadata),)
 
+    @contextmanager
+    def _native_dimension_source_proof_batch(self, published, *, page_id: str):
+        """Authenticate original page opposition before and after a producer batch.
+
+        The scope is internal to the complete W4 source-page proof, not an
+        independently reusable permission. An original source/parent/receipt
+        mutation, revision switch, or changed authenticated native text aborts
+        before any caller may publish a batch result.
+        """
+        if self._native_dimension_proof_batch is not None:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        if self.published_snapshot_for_revision(published.revision.revision_id) != published:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        rows = self.authority().authenticated_visible_observations(published)
+        batch = dict(published=published, page_id=str(page_id), rows=rows,
+                     first_selector=None, first_support=(), cache_key=None,
+                     components=(), source_segment_ids=frozenset())
+        self._native_dimension_proof_batch = batch
+        try:
+            yield
+            # Revalidate the FULL original visible source, including original
+            # parent lineage and the complete competitor inventory.
+            self._native_dimension_proof_batch = None
+            fresh = self.authority().authenticated_visible_observations(published)
+            if fresh != rows or self.published_snapshot_for_revision(
+                published.revision.revision_id
+            ) != published:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            if batch['first_selector'] is not None:
+                # This non-batch path independently re-proves ALL original text
+                # word receipts, source bytes, and exact full-page geometry.
+                # Reusing the old component SHA after a changed text/segment
+                # input is explicitly forbidden, even when atoms look alike.
+                self.native_dimension_cap_evidence(
+                    batch['first_selector'],
+                    opening_support_ids=batch['first_support'],
+                )
+                if (not self._native_dimension_component_page_cache
+                    or next(reversed(self._native_dimension_component_page_cache))
+                        != batch['cache_key']):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        except BaseException:
+            # A failed transaction cannot leave stale positive opening/page
+            # proofs available to a later caller after damaged source evidence.
+            physical = self._physical_opening_authority_cache
+            if physical is not None:
+                snapshot_id = published.snapshot.snapshot_id
+                physical._visible_existence_cache = {
+                    key: value for key, value in physical._visible_existence_cache.items()
+                    if len(key) < 4 or key[3] != snapshot_id
+                }
+                physical._wall_source_opening_page_proof_cache = {
+                    key: value for key, value in physical._wall_source_opening_page_proof_cache.items()
+                    if len(key) < 4 or key[3] != snapshot_id
+                }
+            raise
+        finally:
+            self._native_dimension_proof_batch = None
+
     def native_dimension_cap_evidence(
         self, selector: ObservationSelector, *, opening_support_ids: Sequence[str]
     ):
@@ -967,6 +1029,23 @@ class SourceVisibilityProducer:
         selected = frozenset(opening_support_ids)
         if selector.observation_id not in selected:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        batch = self._native_dimension_proof_batch
+        if batch is not None and batch['cache_key'] is not None:
+            if batch['published'] != published:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            # Source-authenticated membership only. Every selected fragment
+            # must belong to the original native page's entire validated set.
+            selected = frozenset(opening_support_ids)
+            if (not selected or selector.observation_id not in selected
+                or not selected <= batch['source_segment_ids']):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            return native_dimension_cap_evidence_from_components(
+                components=batch['components'], selected_ids=tuple(selected),
+                document_id=selector.document_id, page_id=batch['page_id'],
+                revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256,
+                snapshot_id=selector.snapshot_id,
+            )
         rows = visibility.authenticated_visible_observations(published)
         records = {i: r for i, r in rows if r.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT}
         if not selected or not selected <= records.keys():
@@ -1023,6 +1102,17 @@ class SourceVisibilityProducer:
             while len(self._native_dimension_component_page_cache) > 2:
                 self._native_dimension_component_page_cache.popitem(last=False)
         self._native_dimension_component_page_cache.move_to_end(cache_key)
+        if batch is not None:
+            if (batch['published'] != published
+                or batch['page_id'] != str(page_id)):
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+            batch['first_selector'] = selector
+            batch['first_support'] = tuple(selected)
+            batch['cache_key'] = cache_key
+            batch['components'] = components
+            batch['source_segment_ids'] = frozenset(
+                i for i, r in records.items() if str(r.page_id) == str(page_id)
+            )
         return native_dimension_cap_evidence_from_components(components=components,
             selected_ids=tuple(selected), document_id=selector.document_id, page_id=page_id,
             revision_id=selector.revision_id, source_sha256=selector.source_sha256,
