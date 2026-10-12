@@ -760,7 +760,10 @@ def inspect_external_atomic_grid_w2_source_fragments(
     containment contract. A source fragment says NOTHING about second-side
     physical face ownership, true GRID role or completed room geometry.
     """
-    from pb_source_room_face_authority import _edge_contains_edge
+    from pb_source_room_face_authority import (
+        _edge_contains_edge,
+        _collinear_overlap_edge,
+    )
 
     original_rows = physical_union_first_gate.get(
         "physical_union_external_grid_atomic_subedges_diagnostic_only", ()
@@ -795,6 +798,8 @@ def inspect_external_atomic_grid_w2_source_fragments(
             ),
             "original_w4_candidate_record_count": counts[wall_id],
             "source_w2_fragment_candidates_diagnostic_only": [],
+            "source_w2_partial_overlap_candidates_diagnostic_only": [],
+            "source_w2_partial_overlap_proves_second_face": False,
             "source_first_unclosed_gate":
                 "original_w4_source_identity_unavailable",
             "source_second_face_owner_authenticated": False,
@@ -810,6 +815,7 @@ def inspect_external_atomic_grid_w2_source_fragments(
             continue
         record = records_by_id[wall_id]
         candidates: list[dict[str, Any]] = []
+        overlapping: list[dict[str, Any]] = []
         invalid_receipts = False
         for fragment in tuple(
             getattr(record, "source_edge_fragments", ()) or ()
@@ -837,10 +843,37 @@ def inspect_external_atomic_grid_w2_source_fragments(
                     "exact_source_quantized_collinearity_only": True,
                     "second_face_owner_proven": False,
                 })
+            else:
+                # Exact positive source overlap is weaker than FULL original
+                # fragment containment and proves no extra face or wall role.
+                # This diagnoses upstream W2 atom noding/locality failures
+                # without changing physical union or first admissibility gates.
+                try:
+                    overlap = _collinear_overlap_edge(native_geom, atomic)
+                except (TypeError, ValueError, OverflowError, IndexError):
+                    overlap = None
+                if overlap is not None:
+                    overlapping.append({
+                        "original_w2_edge_id": native_edge_id,
+                        "native_source_primitive_ids": sorted(set(source_ids))[:24],
+                        "original_source_overlap_edge_pdf_pts": [
+                            list(point) for point in overlap
+                        ],
+                        "full_original_atomic_wall_edge_contained": False,
+                        "source_second_face_owner_authenticated": False,
+                        "source_grid_or_wall_role_authenticated": False,
+                    })
         candidates.sort(key=lambda item: (
             item["original_w2_edge_id"], item["native_source_primitive_ids"]
         ))
+        overlapping.sort(key=lambda item: (
+            item["original_w2_edge_id"],
+            item["original_source_overlap_edge_pdf_pts"],
+        ))
         row["source_w2_fragment_candidates_diagnostic_only"] = candidates[:24]
+        row["source_w2_partial_overlap_candidates_diagnostic_only"] = (
+            overlapping[:24]
+        )
         if invalid_receipts:
             row["source_first_unclosed_gate"] = (
                 "original_w2_fragment_source_receipt_invalid"
