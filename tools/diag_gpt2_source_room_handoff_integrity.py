@@ -5,6 +5,7 @@ Do not confuse an authenticated word/face receipt with a commercial floor.
 """
 from __future__ import annotations
 from collections import Counter
+from collections.abc import Mapping
 import math
 import re
 
@@ -76,6 +77,48 @@ def _metric_quantity(q):
             and bool(q.evidence_ids)
             and all(_owned(x) for x in q.evidence_ids)
             and len(q.evidence_ids)==len(set(q.evidence_ids)))
+
+
+def _exact_floor_area_reissue_for_source_row(row, published, original_source_sha):
+    """Observe an existing publisher result; never create or seal a quantity.
+
+    The canonical floor commercial flag stays independent. This is useful
+    when its upstream FIRM room area was reissued by the actual producer but
+    the diagnostic's stricter eight-gate customer handoff still abstains.
+    """
+    quantity_id = row.get("documented_area_quantity_id")
+    floor_id = row.get("canonical_floor_id")
+    face_receipt = row.get("original_source_face_receipt_id")
+    amount = row.get("source_proven_area_m2")
+    if not all(_owned(value) for value in (quantity_id, floor_id, face_receipt)):
+        return None
+    if type(amount) not in (int, float) or not math.isfinite(amount) or amount <= 0:
+        return None
+    candidates = []
+    for quantity in published:
+        metadata = getattr(quantity, "metadata", None)
+        if not isinstance(metadata, Mapping):
+            continue
+        if not (
+            _owned(getattr(quantity, "quantity_id", None))
+            and getattr(quantity, "family", None) == "floor_area"
+            and str(getattr(quantity, "status", "")).lower() == "firm"
+            and getattr(quantity, "abstained", True) is False
+            and getattr(quantity, "unit", None) in ("m2", "m²")
+            and metadata.get("upstream_room_area_quantity_id") == quantity_id
+            and metadata.get("canonical_floor_id") == floor_id
+            and metadata.get("source_room_face_record_id") == face_receipt
+            and metadata.get("source_sha256") == original_source_sha
+            and metadata.get("row_role") == "floor_area"
+            and metadata.get("commercial_projection_allowed") is True
+            and type(getattr(quantity, "value", None)) in (int, float)
+            and math.isfinite(quantity.value)
+            and math.isclose(quantity.value, amount, abs_tol=1e-9)
+        ):
+            continue
+        candidates.append(quantity.quantity_id)
+    # A duplicate producer reissue is not a uniquely attributed floor.
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
@@ -240,6 +283,24 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
             "metric_area_inferred_from_page_points":False,
             "benchmark_accuracy":None,
         })
+    # The real source publisher may independently reissue a firm room area
+    # despite the canonical floor's stricter commercial flag being False.
+    # Report that separate observation without upgrading the eight source
+    # gates or claiming a sealed customer quantity. Synthetic claims are
+    # never used to call a production publisher.
+    production_reissues = ()
+    from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
+    if type(claim) is LivePhysicalNetWallClaim:
+        from pb_live_floor_area_quantity_publication import (
+            publish_live_floor_area_quantities,
+        )
+        production_reissues = publish_live_floor_area_quantities(claim)
+    for row in rows:
+        receipt = _exact_floor_area_reissue_for_source_row(
+            row, production_reissues, original_source_sha
+        )
+        row["producer_floor_area_reissue_quantity_id_observed_only"] = receipt
+        row["customer_floor_area_seal_verified_by_this_report"] = False
     # Raw quantity inventories are never enough to infer source room ownership.
     return {
         "source_sha256":original_source_sha,
@@ -248,6 +309,10 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
         "original_source_room_candidate_count":len(eligible),
         "original_canonical_floor_candidate_count":len(floors),
         "source_room_area_quantity_candidate_count":len(quantities),
+        "independent_floor_area_reissue_observed_count":sum(
+            row["producer_floor_area_reissue_quantity_id_observed_only"] is not None
+            for row in rows
+        ),
         "source_finish_quantity_candidate_count":len(finishes),
         "source_ceiling_lining_quantity_candidate_count":len(ceilings),
         "floor_finish_publication_allowed":False,
