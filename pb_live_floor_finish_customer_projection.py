@@ -55,17 +55,27 @@ def _measurement_authority(quantity: QuantityEvidence) -> CommercialMeasurementA
             },
         )
     if quantity.authority == MeasurementAuthorityType.PDF_SCALED.value:
-        scale_id = _clean(metadata.get("resolved_scale_id"))
-        scale_status = _clean(metadata.get("scale_status"))
-        if not scale_id or scale_status not in ("resolved", "verified"):
+        scale_id = metadata.get("resolved_scale_id")
+        scale_status = metadata.get("scale_status")
+        raw_conflicts = metadata.get("scale_conflicts", ())
+        if (
+            type(scale_id) is not str or not scale_id
+            or scale_id != scale_id.strip()
+            or type(scale_status) is not str
+            or scale_status not in ("resolved", "verified")
+            or type(raw_conflicts) not in (tuple, list)
+            or raw_conflicts
+        ):
+            # Never rewrite foreign, ambiguous or coerced source scale
+            # conflicts into a publishable physical floor-finish area.
             raise MissingCommercialAuthorityError(
-                "floor-finish scaled measurement requires original resolved physical scale"
+                "floor-finish scaled measurement requires original resolved physical scale without conflict"
             )
         return CommercialMeasurementAuthority(
             method="scaled_geometry",
             resolved_scale_id=scale_id,
             scale_status=scale_status,
-            scale_conflicts=tuple(metadata.get("scale_conflicts") or ()),
+            scale_conflicts=(),
         )
     raise MissingCommercialAuthorityError(
         "floor-finish measurement is not source-authenticated"
