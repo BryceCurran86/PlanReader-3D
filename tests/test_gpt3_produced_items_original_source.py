@@ -274,20 +274,20 @@ def test_same_physical_object_may_have_distinct_floor_and_ceiling_families(tmp_p
 
 
 
-def test_failed_produced_items_atomic_rename_preserves_existing_report_and_inputs(
-    tmp_path,monkeypatch
+def test_existing_produced_items_receipt_is_rejected_before_atomic_publication(
+    tmp_path,
 ):
-    from tools import export_gpt3_produced_items as exporter
     source,sealed,_,_,_=_source_run(tmp_path)
     output=tmp_path/"produced_items.json"
     output.write_bytes(b'["existing independently verified output"]')
     previous_output=output.read_bytes()
     previous_inputs=(source.read_bytes(),sealed.read_bytes())
 
-    def deny_publication(*_args):
-        raise OSError("simulated produced-items publication failure")
-    monkeypatch.setattr(exporter.os,"replace",deny_publication)
-    with pytest.raises(OSError,match="simulated produced-items publication failure"):
+    # Earlier code expected a simulated os.replace failure; create-only
+    # publication now rejects existing signed output BEFORE touching it.
+    # Missing hard-link publication is covered by separate interruption tests.
+    with pytest.raises(FileExistsError,match="existing produced-items receipt"):
+        from tools import export_gpt3_produced_items as exporter
         exporter.main([
             "--sealed-run",str(sealed),"--source",str(source),
             "--project-id","project-a","--output",str(output),
