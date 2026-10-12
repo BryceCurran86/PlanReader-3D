@@ -212,3 +212,30 @@ def test_actual_unchanged_maryborough_original_pdf_sha_is_real_but_still_unscore
     assert report["publication_status"] == "UNPUBLISHED"
     assert report["project_evaluation"] is None
     assert report["reconciliation_complete"] is False
+
+
+def test_changed_pdf_same_byte_count_is_rejected_by_actual_sha(tmp_path, monkeypatch):
+    manifest, original, sealed, identity, _sha = _fixtures(tmp_path, monkeypatch)
+    original.write_bytes(b"Z" * original.stat().st_size)
+    result = _report(manifest, original, sealed, identity)
+    assert result["original_source_sha_verified"] is False
+    assert result["reason_codes"] == ["original_source_sha_mismatch:original.pdf"]
+
+
+def test_frozen_manifest_mutation_during_scoring_demotes_source_receipt(tmp_path, monkeypatch):
+    manifest, original, sealed, identity, _sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    def rotate_manifest(_manifest, _seal, _identity):
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["reason_codes"] = ["mutated_during_evaluation"]
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        return {
+            "project_id": "source-project", "source_sha_verified": True,
+            "reconciliation_complete": True,
+        }
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", rotate_manifest)
+    result = _report(manifest, original, sealed, identity)
+    assert result["publication_status"] == "UNPUBLISHED"
+    assert result["project_evaluation"] is None
+    assert result["reason_codes"] == ["source_or_signed_artifact_changed_during_reconciliation"]
