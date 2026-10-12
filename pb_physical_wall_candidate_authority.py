@@ -2137,28 +2137,37 @@ def _producer_proven_page_opening_records(
     # geometry/parents/competitors/text/bytes on exit. Read the transaction's
     # already proven rows instead of performing a redundant full prepass.
     # No opening record/page result is published before exit succeeds.
-    with source_producer._native_dimension_source_proof_batch(
-        published, page_id=str(page_id)
-    ) as authenticated:
-        rows = _authenticated_page_rows(authenticated)
-        for observation_id, observation in rows:
-            if str(observation.page_id) != str(page_id):
-                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-            result = physical_opening_authority.prove_existence(ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
-            # Individually unresolved source hypotheses remain ABSTAIN, as
-            # in the scalar source authority. The enclosing transaction has
-            # independently authenticated original native receipts on entry
-            # and re-proves every byte, text and competitor on exit. Do not
-            # upgrade a candidate reason to positive existence or count.
-            opening = result.existence_record
-            if (result.status is EvidenceResolutionStatus.CORROBORATED
-                    and result.proposition == PHYSICAL_OPENING_EXISTS
-                    and opening is not None and str(opening.page_id) == str(page_id)):
-                proven[opening.record_id] = opening
+    try:
+        with source_producer._native_dimension_source_proof_batch(
+            published, page_id=str(page_id)
+        ) as authenticated:
+            rows = _authenticated_page_rows(authenticated)
+            for observation_id, observation in rows:
+                if str(observation.page_id) != str(page_id):
+                    raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+                result = physical_opening_authority.prove_existence(ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
+                # Individually unresolved source hypotheses remain ABSTAIN, as
+                # in the scalar source authority. The enclosing transaction has
+                # independently authenticated original native receipts on entry
+                # and re-proves every byte, text and competitor on exit. Do not
+                # upgrade a candidate reason to positive existence or count.
+                opening = result.existence_record
+                if (result.status is EvidenceResolutionStatus.CORROBORATED
+                        and result.proposition == PHYSICAL_OPENING_EXISTS
+                        and opening is not None and str(opening.page_id) == str(page_id)):
+                    proven[opening.record_id] = opening
+    except BaseException:
+        # Handle explicitly supplied opening authorities as well as the
+        # source producer's cached authority. Failed exit proofs must never
+        # leave a stale negative/candidate memo in either consumer.
+        physical_opening_authority._invalidate_snapshot_caches_after_failed_source_batch(
+            published.snapshot.snapshot_id
+        )
+        raise
     # Preserve first authenticated source-observation witness order. The
     # previous W4 path consumed dict insertion order, which controls the
     # representative provenance of competing/adjacent physical openings.
