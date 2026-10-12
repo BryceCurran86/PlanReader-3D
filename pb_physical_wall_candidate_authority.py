@@ -2149,7 +2149,19 @@ def _producer_proven_page_opening_records(
             if "opening_annotation_source_integrity_unproven" in getattr(
                 result, "reason_codes", ()
             ):
-                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+                # The original drawing may contain an untrusted annotation
+                # hypothesis. This hard stop must remain fail-closed; report
+                # the *first exact source identity* to distinguish a corrupt
+                # source receipt from an unsupported candidate in source CI.
+                # These are existing opaque source IDs, never guessed geometry,
+                # benchmark identities, quantities or source text.
+                candidate_id = getattr(getattr(result, "candidate", None), "candidate_id", None)
+                raise RuntimeError(
+                    f"{PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE}:"
+                    "opening_annotation_source_integrity_unproven:"
+                    f"page_id={page_id}:source_observation_id={observation_id}:"
+                    f"candidate_id={candidate_id or 'unavailable'}"
+                )
             opening = result.existence_record
             if (result.status is EvidenceResolutionStatus.CORROBORATED
                     and result.proposition == PHYSICAL_OPENING_EXISTS
