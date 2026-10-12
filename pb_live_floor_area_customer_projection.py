@@ -73,18 +73,22 @@ def _measurement_authority(
         )
 
     if "scale" in authority or "geometry" in authority:
-        scale_id = _clean(metadata.get("resolved_scale_id"))
-        scale_status = _clean(metadata.get("scale_status"))
-        raw_conflicts = metadata.get("scale_conflicts") or ()
-        if isinstance(raw_conflicts, (str, bytes)):
-            raw_conflicts = (raw_conflicts,)
-        if not isinstance(raw_conflicts, (list, tuple)):
-            raw_conflicts = ()
-        conflicts = tuple(
-            sorted({_clean(value) for value in raw_conflicts if _clean(value)})
-        )
-        if not scale_id or not scale_status:
+        scale_id = metadata.get("resolved_scale_id")
+        scale_status = metadata.get("scale_status")
+        raw_conflicts = metadata.get("scale_conflicts", ())
+        if (
+            type(scale_id) is not str or not scale_id
+            or scale_id != scale_id.strip()
+            or type(scale_status) is not str
+            or scale_status not in {"resolved", "verified"}
+            or type(raw_conflicts) not in (list, tuple)
+            or raw_conflicts
+        ):
+            # A canonical floor may be measured only by a source-resolved
+            # physical scale. Do not reclassify an unresolved source scope or
+            # silently erase original conflicts in its customer metadata.
             return None
+        conflicts = ()
         return CommercialMeasurementAuthority(
             method="scaled_geometry",
             resolved_scale_id=scale_id,
