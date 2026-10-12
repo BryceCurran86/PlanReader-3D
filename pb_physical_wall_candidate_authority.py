@@ -36,6 +36,7 @@ from pb_pdf_text_integrity_authority import (
     PDF_TEXT_MAJORITY_OVERLAP_RATIO,
 )
 from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
+from pb_raster_unchanged_band_segments import UNCHANGED_BAND_IDENTITY_VERSION
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_physical_opening_authority import (
     JAMB_BOUNDED_TWO_FACE_INTERRUPTION, PHYSICAL_OPENING_EXISTS,
@@ -1228,7 +1229,21 @@ def _source_page_segments(
     # geometry into the same W2-W5 topology pipeline as native segments while
     # leaving graphic attributes explicitly unknown.  No caller-supplied
     # pixels, segments, transforms or wall classifications enter this path.
-    for observation_id, raster_ref, geometry in sorted(raster_visible):
+    # W2 split-edge IDs are historically enumeration-based.  Authenticated
+    # supplemental terminal bands are genuinely new source geometry, but their
+    # random observation IDs must not insert ahead of original raster sources
+    # and rename unrelated retained W2 edge/source receipts.  Keep the exact
+    # original ordering of ordinary source observations; append only the
+    # separately source-authenticated terminal-band namespace afterwards.
+    # This changes ordering only, not candidate membership, topology geometry,
+    # source proof, the 20_000 source-primitive cap or physical equivalence.
+    raster_source_order = lambda item: (
+        f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in item[1],
+        item[0],
+    )
+    for observation_id, raster_ref, geometry in sorted(
+        raster_visible, key=raster_source_order,
+    ):
         x1, y1, x2, y2 = geometry
         segments.append(
             {
