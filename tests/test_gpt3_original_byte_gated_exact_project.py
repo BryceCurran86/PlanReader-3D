@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -180,3 +181,34 @@ def test_malformed_unhashable_signed_source_sha_array_fails_closed(tmp_path, mon
     report = _report(manifest, original, sealed, identity)
     assert report["publication_status"] == "UNPUBLISHED"
     assert report["reason_codes"] == ["signed_production_source_package_incomplete"]
+
+
+def test_actual_unchanged_maryborough_original_pdf_sha_is_real_but_still_unscored(monkeypatch):
+    # This is the actual committed Maryborough source, not a benchmark-gold
+    # fixture or a synthetic 10m² quantity.
+    root = Path(__file__).resolve().parents[1]
+    original = root / "documents" / "sources" / "Arch_Combined_Maryborough_Service_Station.pdf"
+    manifest = (
+        root / "benchmarks" / "frozen_holdout" / "full_plan_v2"
+        / "projects" / "au_qld_maryborough_service_station" / "source_manifest.json"
+    )
+    assert original.is_file(), "real original Maryborough PDF source is unavailable in CI"
+    assert manifest.is_file(), "frozen V2 Maryborough source manifest is missing"
+    expected_source_sha = "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == expected_source_sha
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("incomplete Maryborough source universe must never be scored")
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", forbidden)
+    # The real source exists, but production signed run/identity-map is not
+    # supplied here and the manifest remains INCOMPLETE. Never invent one.
+    report = module.build_original_byte_gated_project_report(
+        manifest_path=manifest,
+        sealed_run_path=root / "nonexistent-maryborough-sealed-run.json",
+        identity_map_path=root / "nonexistent-maryborough-identity-map.json",
+        original_files=[original],
+    )
+    assert report["source_sha256s"] == [expected_source_sha]
+    assert report["original_source_sha_verified"] is True
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["project_evaluation"] is None
+    assert report["reconciliation_complete"] is False
