@@ -4,6 +4,8 @@ on:
     paths:
       - "tools/diag_gpt2_source_room_handoff_integrity.py"
       - "tests/test_gpt2_source_room_handoff_integrity.py"
+      - "pb_live_floor_area_quantity_publication.py"
+      - "tests/test_gpt1_firm_floor_area_source_integrity.py"
       - ".github/workflows/test-gpt2-source-room-handoff-integrity.yml"
       - "docs/engineering/gpt2_maryborough_source_room_handoff.md"
 concurrency:
@@ -114,6 +116,22 @@ jobs:
           # This must never require manually enabling the canonical-floor
           # commercial flag, or claim a frozen V2 matched object.
           downstream=inspect_room_measurement_gates(claim)
+          # Exact positive original-source semantic/physical ownership check
+          # for the three FIRM receipts on the unchanged architectural PDF.
+          # This protects the newly hardened GPT1 canonical reissuer from
+          # quietly dropping authentic source areas while rejecting replays.
+          original_firm=[
+              qty for qty in claim.room_area_quantity_evidence
+              if qty.status=='firm' and not qty.abstained
+          ]
+          assert len(original_firm)==3
+          assert all(
+              isinstance(qty.input_entity_ids,(tuple,list))
+              and len(qty.input_entity_ids)==1
+              and type(qty.input_entity_ids[0]) is str
+              and qty.semantic_key==f'room_area:{qty.input_entity_ids[0]}'
+              for qty in original_firm
+          )
           controls={'FOOD PREP':13.270425,'OFFICE':9.05352,'COLD ROOM':25.37875}
           source_rows={r['source_room_label']:r for r in d['room_handoff_first_gates']}
           measured_by_label={}
