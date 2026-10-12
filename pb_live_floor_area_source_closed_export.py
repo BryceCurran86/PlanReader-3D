@@ -43,6 +43,30 @@ def build_live_floor_area_source_traces(
             "floor source workspace_id must be an original positive integer"
         )
 
+    # Canonical floor publication deliberately tolerates provisional replay
+    # of a room measurement. A commercial floor-area seal cannot: two
+    # producer-owned receipts using one original room-area source ID must
+    # remain a conflict even when one has ABSTAINED before publication.
+    original_room_area_ids: set[str] = set()
+    for original in claim.room_area_quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
+            raise TypeError("room_area_quantity_evidence must contain QuantityEvidence")
+        if original.family != "room_area":
+            raise SourceClosedRunConflictError(
+                "floor area source inventory contains a non-room-area quantity"
+            )
+        source_id = original.quantity_id
+        if (type(source_id) is not str or not source_id
+                or source_id != source_id.strip()):
+            raise SourceClosedRunConflictError(
+                "invalid original room-area source ID in floor seal"
+            )
+        if source_id in original_room_area_ids:
+            raise SourceClosedRunConflictError(
+                f"duplicate original room-area source ID in floor seal: {source_id}"
+            )
+        original_room_area_ids.add(source_id)
+
     floors_by_physical_id = {}
     for floor in claim.canonical_floors:
         physical_id = _clean(floor.physical_floor_surface_id)
