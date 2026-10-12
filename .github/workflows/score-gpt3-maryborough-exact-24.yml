@@ -1,0 +1,130 @@
+name: SCORE GPT3 Maryborough Exact 24 Baseline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/score-gpt3-maryborough-exact-24.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  exact-maryborough-24:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Verify frozen V2 integrity
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+      - name: Download exact merged Maryborough source-sealed artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/maryborough-exact-24/source
+          curl -fsSL             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             -H "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/11754145628/zip"             -o artifacts/maryborough-exact-24/source.zip
+          printf '%s  %s\n'             '3766aa3677ba25db98dca12d6ef7610f0c1cb4c9dd285c3e62bfd85b8bc600c7'             artifacts/maryborough-exact-24/source.zip | sha256sum --check
+          unzip -q artifacts/maryborough-exact-24/source.zip             -d artifacts/maryborough-exact-24/source
+          test "$(cat artifacts/maryborough-exact-24/source/producer_head_sha.txt)" =             '2eccc537d2ce04987bdcc70761ca56e4ad2ded0f'
+
+      - name: Reverify sealed run and customer-row parity
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_customer_output_verification import verify_sealed_customer_output
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+          root=Path("artifacts/maryborough-exact-24/source/production")
+          sealed=sealed_source_closed_run_from_dict(json.loads(
+              (root/"source_sealed_run.json").read_text()
+          ))
+          rows=json.loads((root/"verified_customer_rows.json").read_text())
+          verified=verify_sealed_customer_output(sealed, rows)
+
+          expected_sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          expected_ids={
+              "floor_area_quantity_6b28b3abaedf519631ed",
+              "floor_area_quantity_8bcdc01455538a6a105a",
+              "floor_area_quantity_d62c2f382a0c773ec36f",
+          }
+          assert sealed.project_id=="au_qld_maryborough_service_station"
+          assert tuple(sealed.source_sha256s)==(expected_sha,)
+          assert sealed.fingerprint=="9f3ab9ac1497cae5c29f8873af9287a5d6e3b3a386937fdeb37f8b5989fd780d"
+          assert len(sealed.quantities)==3
+          assert {q.quantity_id for q in sealed.quantities}==expected_ids
+          assert all(q.family=="floor_area" and q.lineage_ok and not q.abstained
+                     for q in sealed.quantities)
+          assert set(verified.verified_quantity_ids)==expected_ids
+          assert verified.valid_quantity_count==3
+          assert verified.customer_row_count==3
+          print(json.dumps({
+              "source_sha_verified": True,
+              "sealed_quantity_count": 3,
+              "customer_row_count": 3,
+              "customer_row_parity": True,
+              "sealed_run_id": sealed.run_id,
+              "sealed_run_fingerprint": sealed.fingerprint,
+          },sort_keys=True))
+          PY
+
+      - name: Write zero-binding exact-source identity map
+        run: |
+          cat > artifacts/maryborough-exact-24/identity_map.json <<'JSON'
+          {
+            "schema_version": "1.0.0",
+            "project_id": "au_qld_maryborough_service_station",
+            "source_sha256s": [
+              "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+            ],
+            "bindings": []
+          }
+          JSON
+
+      - name: Run unchanged exact frozen 24-object reconciler
+        env:
+          PYTHONPATH: .
+        run: |
+          python benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py             --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json             --sealed-run artifacts/maryborough-exact-24/source/production/source_sealed_run.json             --identity-map artifacts/maryborough-exact-24/identity_map.json             --output artifacts/maryborough-exact-24/exact_project_report.json
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path(
+              "artifacts/maryborough-exact-24/exact_project_report.json"
+          ).read_text())
+          assert d["project_id"]=="au_qld_maryborough_service_station"
+          assert d["source_sha_verified"] is True
+          assert d["reconciliation_complete"] is True
+          assert d["denominator"]==24
+          assert d["matched_within_tolerance"]==0
+          assert len(d["produced_items"])==3
+          assert all(
+              all(str(ref).startswith("production-unmapped:")
+                  for ref in item["object_refs"])
+              for item in d["produced_items"]
+          )
+          print("MARYBOROUGH_EXACT_24",json.dumps(d,sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-exact-24-baseline
+          path: artifacts/maryborough-exact-24
+          retention-days: 30
