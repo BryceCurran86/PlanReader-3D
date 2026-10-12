@@ -743,7 +743,8 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
     }
 
 
-def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, ...] = ()) -> dict:
+def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, ...] = (),
+                   on_original_claim=None) -> dict:
     payload = pdf.read_bytes()
     original_native_label_census = _native_word_label_census(
         payload, page_index, labels=diagnostic_labels,
@@ -876,6 +877,10 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
             pdf, pages=(page_index,), topology_pages=(page_index,),
             room_area_support_pages=None,
         )
+        # Exact source-owned claim is handed once to a trusted read-only
+        # source-sealed export caller; no benchmark/truth/identity map input.
+        if on_original_claim is not None:
+            on_original_claim(claim)
         return {
             "diagnostic_only": True, "pdf_sha256": hashlib.sha256(payload).hexdigest(),
             "source_page_index_zero_based": page_index,
