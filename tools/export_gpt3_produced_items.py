@@ -222,6 +222,15 @@ def export_verified_produced_items(
 
 
 def _atomic_write(path: Path, items: list[dict[str, Any]]) -> None:
+    """Create one immutable produced-items receipt; never replace earlier output.
+
+    Same-directory temporary file plus an atomic hard link ensures an existing
+    source-verified customer receipt cannot be overwritten, even by a
+    competing process which ignores this producer's ordinary run discipline.
+    An unsupported filesystem must fail closed rather than use os.replace.
+    """
+    if path.exists() or path.is_symlink():
+        raise FileExistsError(f"existing produced-items receipt: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
@@ -233,7 +242,9 @@ def _atomic_write(path: Path, items: list[dict[str, Any]]) -> None:
             stream.write(json.dumps(items, sort_keys=True, indent=2, allow_nan=False) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        # Same-FS link is atomically create-only: an existing target (including
+        # a dangling symlink) fails EEXIST, rather than replacing signed proof.
+        os.link(temporary, path)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
