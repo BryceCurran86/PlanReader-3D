@@ -40,6 +40,9 @@ from pb_source_room_label_authority import (
     SourceRoomSplitLabelCandidate,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+from tools.diag_gpt2_original_label_canonical_guard_preflight import (
+    original_label_canonical_guard_preflight,
+)
 
 
 _SCOPE_KEYS = (
@@ -456,6 +459,12 @@ def replay_original_maryborough_room_gate(
         ))
         report["original_source_label_gate"] = source_room_label_first_gate(
             r, label_scope, expected_source_sha=digest,
+        )
+        report["original_canonical_source_label_word_guard_preflight"] = (
+            original_label_canonical_guard_preflight(
+                tuple(r.records), tuple(label_scope.records),
+                expected_source_sha=digest,
+            )
         )
         report["original_withheld_boundary_w4_census"] = (
             source_withheld_boundary_w4_census(
