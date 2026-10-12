@@ -207,13 +207,11 @@ def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
     """
     possible_seals = (
         output_dir / f"{project_id}.json",
-        output_dir / f"{project_id}.core.json",
-        output_dir / f"{project_id}.surfaces.json",
-        *(output_dir / "family_runs" / f"{family}.sealed.json"
-          for family in (
-              "floor_area", "floor_finish_area", "opening_area",
-              "opening_count", "ceiling_area",
-          )),
+        # Protect future project family-group output without hard-coding names.
+        *output_dir.glob(f"{project_id}.*.json"),
+        # One old family receipt from *any* present/future family is enough to
+        # make the directory unsafe for a different source/revision attempt.
+        *(output_dir / "family_runs").glob("*.sealed.json"),
     )
     for path in possible_seals:
         if path.exists() or path.is_symlink():
