@@ -96,10 +96,14 @@ def original_label_canonical_guard_preflight(
             first = "ORIGINAL_FACE_RECEIPT_DOES_NOT_MATCH"
         elif not same_scope:
             first = "SOURCE_LABEL_CANONICAL_SCOPE_MISMATCH"
-        elif not indexed_unique:
+        elif label_face_counts[label.face_id] != 1:
+            # A genuinely competing face claim is distinct from quarantine of
+            # one malformed native-word record by the canonical unique index.
             first = "SOURCE_LABEL_UNIQUE_FACE_INDEX_WITHHELD"
         elif not source_word_inventory:
             first = "ORIGINAL_WORD_WITNESS_INVENTORY_INCOMPLETE"
+        elif not indexed_unique:
+            first = "SOURCE_LABEL_UNIQUE_FACE_INDEX_WITHHELD"
         elif not canonical_guard_accepts:
             first = "CANONICAL_LABEL_NATIVE_WORD_WITNESS_REJECTED"
         else:
