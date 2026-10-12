@@ -42,6 +42,12 @@ def _report():
         "resolved_host_frame_evidence": [{"frame": "frame-1"}],
         "opening_label_semantic_traces": [],
         "opening_figured_label_traces": [],
+        "opening_measurement_traces": [{
+            "opening_identity_id": "opening-1", "page_id": "3",
+            "width_status": "abstained", "width_record_id": None,
+            "void_reason_codes": ["source_universe_incomplete", "physical_opening_undecided"],
+        }],
+        "opening_void_reason_codes": ["physical_opening_undecided", "source_universe_incomplete"],
         "source_owned_wall_scopes": [],
     }
 
@@ -168,3 +174,35 @@ def test_cli_unpublished_result_written_only_to_independent_output(tmp_path, mon
     assert result["parity_pass"] is True
     assert result["benchmark_score_granted"] is False
     assert result["benchmark_accuracy"] is None
+
+
+def test_opening_measurement_receipt_cannot_change_when_host_totals_match():
+    old, new = _report(), _report()
+    new["opening_measurement_traces"][0].update(
+        width_status="corroborated", width_record_id="forged-original-width",
+    )
+    audit = compare_source_membership(old, new)
+    assert not audit["parity_pass"]
+    assert any(row["path"] == "opening_measurement_traces" for row in audit["changes"])
+
+
+def test_unordered_void_reason_witness_order_does_not_fake_source_drift():
+    old, new = _report(), _report()
+    new["opening_measurement_traces"][0]["void_reason_codes"].reverse()
+    new["opening_void_reason_codes"].reverse()
+    assert compare_source_membership(old, new)["parity_pass"] is True
+
+
+@pytest.mark.parametrize("mutation", ["duplicate_measurement", "invalid_void_reason", "missing_measurement"])
+def test_invalid_original_measurement_universe_fails_closed(mutation):
+    old, new = _report(), _report()
+    if mutation == "duplicate_measurement":
+        new["opening_measurement_traces"].append(
+            deepcopy(new["opening_measurement_traces"][0])
+        )
+    elif mutation == "invalid_void_reason":
+        new["opening_measurement_traces"][0]["void_reason_codes"] = ["valid", "valid"]
+    else:
+        del new["opening_measurement_traces"]
+    with pytest.raises(ValueError):
+        compare_source_membership(old, new)
