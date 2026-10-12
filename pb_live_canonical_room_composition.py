@@ -540,6 +540,44 @@ def _verified_source_room_label_for_face(
     return label
 
 
+
+def _source_room_geometry_complete_diagnostic_only(record) -> bool:
+    """Reject incomplete original source rings before canonical completeness.
+
+    A positive planar source area or producer-issued face identity does not
+    imply a valid, non-self-intersecting physical ring. This only restricts
+    the existing canonical completeness flag: it never repairs vertices,
+    applies PDF-point scale, or changes source identity and evidence.
+    """
+    vertices = getattr(record, "polygon_pdf_pts", None)
+    area = getattr(record, "area_page_pts2", None)
+    if (
+        not isinstance(vertices, (tuple, list)) or len(vertices) < 3
+        or type(area) not in (int, float)
+        or not math.isfinite(area) or area <= 0
+    ):
+        return False
+    if any(
+        not isinstance(point, (tuple, list)) or len(point) != 2
+        or any(type(v) not in (int, float) or not math.isfinite(v)
+               for v in point)
+        for point in vertices
+    ):
+        return False
+    from shapely.geometry import Polygon
+    from shapely.errors import GEOSException
+    try:
+        original = Polygon(vertices)
+        return (
+            not original.is_empty
+            and original.is_valid
+            and original.area > 0
+            and len(original.interiors) == 0
+        )
+    except (GEOSException, TypeError, ValueError, OverflowError):
+        return False
+
+
 def _room_object_from_record(
     record,
     *,
@@ -567,6 +605,7 @@ def _room_object_from_record(
             )
 
     physical_room_id = _physical_room_id(record, viewport_id=viewport_id)
+    source_geometry_complete = _source_room_geometry_complete_diagnostic_only(record)
     room_label_record = _verified_source_room_label_for_face(record, room_label_record)
     label_evidence_ids: tuple[str, ...] = ()
     label_reason_codes: tuple[str, ...] = ()
@@ -599,7 +638,7 @@ def _room_object_from_record(
         area_page_pts2=float(record.area_page_pts2),
         source_room_face_record_id=record.record_id,
         evidence_ids=(record.record_id,),
-        geometry_complete=True,
+        geometry_complete=source_geometry_complete,
         metric_geometry_complete=False,
         room_label=(
             str(room_label_record.label)
@@ -744,6 +783,7 @@ def _room_object_from_composite_record(
             )
 
     physical_room_id = _physical_room_id(record, viewport_id=viewport_id)
+    source_geometry_complete = _source_room_geometry_complete_diagnostic_only(record)
     return LiveCanonicalRoomObject(
         canonical_room_id=physical_room_id,
         physical_room_id=physical_room_id,
@@ -761,7 +801,7 @@ def _room_object_from_composite_record(
         area_page_pts2=float(record.area_page_pts2),
         source_room_face_record_id=record.record_id,
         evidence_ids=tuple(record.evidence_ids),
-        geometry_complete=True,
+        geometry_complete=source_geometry_complete,
         metric_geometry_complete=False,
         room_label=str(record.label),
         room_label_binding_record_id=str(record.label_candidate_record_id),
