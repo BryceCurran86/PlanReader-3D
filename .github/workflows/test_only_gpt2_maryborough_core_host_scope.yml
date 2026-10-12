@@ -116,7 +116,8 @@ jobs:
               for trace in composition.host_frames
           ]
           from collections import Counter as _Counter
-          print(json.dumps({
+          opening_source_composition = {
+              "source_sha256":published.revision.source_sha256,
               "per_opening_composition_status":status(composition.status),
               "per_opening_composition_reasons":
                   list(composition.reason_codes),
@@ -138,7 +139,29 @@ jobs:
                   for reason in row["reason_codes"]
               ).items())),
               "frames":frame_rows,
-          },indent=2,sort_keys=True))
+          }
+          source_report_path = root.parent / "opening_source_composition.json"
+          source_report_path.write_text(
+              json.dumps(opening_source_composition, indent=2, sort_keys=True) + "\\n",
+              encoding="utf-8",
+          )
+          from tools.diag_gpt3_maryborough_source_stage_ledger import (
+              build_maryborough_source_stage_ledger,
+          )
+          first_stage_report = build_maryborough_source_stage_ledger(
+              summary, opening_source_composition,
+          )
+          (root.parent / "first_source_stage_ledger.json").write_text(
+              json.dumps(first_stage_report, indent=2, sort_keys=True) + "\\n",
+              encoding="utf-8",
+          )
+          print(json.dumps({
+              "source_sha256":first_stage_report["source_sha256"],
+              "opening_universe_size":first_stage_report["opening_universe_size"],
+              "first_unproved_stage_counts":
+                  first_stage_report["first_unproved_stage_counts"],
+              "benchmark_score_granted":False,
+          },sort_keys=True))
 
           for family in ("opening_area","opening_count"):
               path=root/"family_runs"/f"{family}.sealed.json"
