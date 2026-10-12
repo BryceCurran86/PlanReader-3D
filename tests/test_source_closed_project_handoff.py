@@ -1164,3 +1164,41 @@ def test_stale_crash_lock_cannot_be_automatically_assumed_complete(
             workspace_id=1, output_dir=output,
         )
     assert stale.read_bytes() == b"interrupted source run: do not trust prior seals"
+
+
+@pytest.mark.parametrize("invalid", [
+    {"project_id": "../foreign"},
+    {"project_id": "subdir/customer"},
+    {"workspace_id": True},
+    {"workspace_id": "2"},
+    {"workspace_id": 0},
+    {"family_group": "unknown-family"},
+])
+def test_invalid_handoff_arguments_never_create_output_directory_or_lock(
+    tmp_path, monkeypatch, invalid,
+):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"source-bytes")
+    output = tmp_path / "never-create"
+    def _should_not_execute(*args, **kwargs):
+        pytest.fail("source-page classification must not run on invalid input")
+    monkeypatch.setattr(handoff, "_source_page_scopes", _should_not_execute)
+    inputs = dict(
+        pdf_path=source, project_id="project-a", workspace_id=1,
+        output_dir=output, family_group="all",
+    )
+    inputs.update(invalid)
+    with pytest.raises(ValueError):
+        handoff.generate_project_handoff(**inputs)
+    assert not output.exists()
+    assert not (tmp_path / "foreign").exists()
+
+
+def test_missing_original_pdf_does_not_create_output_directory(tmp_path):
+    output = tmp_path / "never-create"
+    with pytest.raises(FileNotFoundError):
+        handoff.generate_project_handoff(
+            pdf_path=tmp_path / "missing.pdf",
+            project_id="project-a", workspace_id=1, output_dir=output,
+        )
+    assert not output.exists()
