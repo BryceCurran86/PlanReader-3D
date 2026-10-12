@@ -229,3 +229,136 @@ def test_duplicate_customer_json_field_cannot_shadow_quantity_id(
     )
     with pytest.raises(ValueError, match="duplicate JSON key"):
         _report(fixture)
+
+
+def _source_stage_receipt(tmp_path, fixture):
+    """Synthetic independently collected physical producer journal, not benchmark gold."""
+    _manifest, original, _sealed_file, _customers, run = fixture
+    sha = hashlib.sha256(original.read_bytes()).hexdigest()
+    rows = []
+    for index, q in enumerate(run.quantities):
+        physical = q.object_identity_refs[0]
+        rows.append({
+            "physical_opening_id": physical,
+            "canonical_opening_id": physical,
+            "page_id": q.source_page,
+            "viewport_id": q.viewport_id,
+            "production_matched_area_quantity_ids": [q.quantity_id],
+            "published_area_quantity_ids": [q.quantity_id],
+            "host_receipt_available": True,
+            "host_wall_id": "opening_host_binding_group_" + ("%032x" % (index + 1)),
+            "first_missing_prerequisite": "opening_area_quantity_prerequisites_resolved",
+        })
+    stage = {
+        "pdf_sha256": sha,
+        "diagnostic_only": True,
+        "source_page_index_zero_based": 2,
+        "opening_quantity_diagnostic": {"per_opening": rows},
+    }
+    path = tmp_path / "source_stage_diagnostic.json"
+    path.write_text(json.dumps(stage), encoding="utf-8")
+    return path
+
+
+def _source_stage_report(fixture, stage_path):
+    manifest, original, sealed_file, customers, _run = fixture
+    return readiness.build_unpublished_lot16_identity_readiness(
+        manifest_path=manifest,
+        sealed_run_path=sealed_file,
+        customer_rows_path=customers,
+        original_pdf=original,
+        source_stage_path=stage_path,
+    )
+
+
+def test_original_source_stage_parity_requires_exact_host_and_quantity_receipts(
+    tmp_path, monkeypatch,
+):
+    fixture = _fixture(tmp_path, monkeypatch, quantities=2)
+    stage_path = _source_stage_receipt(tmp_path, fixture)
+    report = _source_stage_report(fixture, stage_path)
+    assert report["source_stage_physical_quantity_parity_verified"] is True
+    assert all(
+        row["signed_source_stage_host_binding_group_id"].startswith(
+            "opening_host_binding_group_"
+        )
+        and row["benchmark_item_id"] is None
+        and row["crosswalk_status"] == "UNPROVEN"
+        for row in report["source_physical_openings_requiring_independent_crosswalk"]
+    )
+    assert report["matched_within_tolerance"] is None
+    assert report["benchmark_score_granted"] is False
+
+
+@pytest.mark.parametrize("tamper", [
+    "source_sha", "wrong_page", "foreign_quantity_id",
+    "misowned_published_quantity", "duplicate_physical",
+    "no_host", "other_canonical", "wrong_viewport",
+    "incorrect_gate", "missing_stage_row", "stray_unsealed_quantity_id",
+])
+def test_original_source_stage_does_not_launder_false_signed_parity(
+    tmp_path, monkeypatch, tamper,
+):
+    fixture = _fixture(tmp_path, monkeypatch, quantities=2)
+    stage_path = _source_stage_receipt(tmp_path, fixture)
+    data = json.loads(stage_path.read_text())
+    rows = data["opening_quantity_diagnostic"]["per_opening"]
+    if tamper == "source_sha":
+        data["pdf_sha256"] = "f" * 64
+    elif tamper == "wrong_page":
+        data["source_page_index_zero_based"] = 3
+    elif tamper == "foreign_quantity_id":
+        rows[0]["production_matched_area_quantity_ids"] = ["q-foreign"]
+    elif tamper == "misowned_published_quantity":
+        rows[0]["published_area_quantity_ids"] = ["q-1"]
+        rows[1]["published_area_quantity_ids"] = ["q-0"]
+    elif tamper == "duplicate_physical":
+        rows[1]["physical_opening_id"] = rows[0]["physical_opening_id"]
+    elif tamper == "no_host":
+        rows[0]["host_receipt_available"] = False
+    elif tamper == "other_canonical":
+        rows[0]["canonical_opening_id"] = "unrelated_canonical"
+    elif tamper == "wrong_viewport":
+        rows[0]["viewport_id"] = "nonoriginal"
+    elif tamper == "incorrect_gate":
+        rows[0]["first_missing_prerequisite"] = "host_wall_unresolved"
+    elif tamper == "missing_stage_row":
+        rows.pop()
+    elif tamper == "stray_unsealed_quantity_id":
+        rows.append({
+            "physical_opening_id": "physical_opening_existence_unsealed",
+            "production_matched_area_quantity_ids": ["q-stray"],
+            "published_area_quantity_ids": ["q-stray"],
+        })
+    stage_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="source-stage|original opening|quantity sets|noncanonical"):
+        _source_stage_report(fixture, stage_path)
+
+
+def test_original_source_stage_accepts_extra_unpublished_physical_candidates(
+    tmp_path, monkeypatch,
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    stage_path = _source_stage_receipt(tmp_path, fixture)
+    data = json.loads(stage_path.read_text())
+    data["opening_quantity_diagnostic"]["per_opening"].append({
+        "physical_opening_id": "physical_opening_existence_no_signed_area",
+        "canonical_opening_id": "physical_opening_existence_no_signed_area",
+        "page_id": "3",
+        "viewport_id": "page:3",
+        "production_matched_area_quantity_ids": [],
+        "published_area_quantity_ids": [],
+        "host_receipt_available": False,
+    })
+    stage_path.write_text(json.dumps(data), encoding="utf-8")
+    report = _source_stage_report(fixture, stage_path)
+    assert report["source_stage_physical_quantity_parity_verified"] is True
+    assert len(report["source_physical_openings_requiring_independent_crosswalk"]) == 1
+
+
+def test_source_stage_rejects_duplicate_json_keys(tmp_path, monkeypatch):
+    fixture = _fixture(tmp_path, monkeypatch)
+    stage_path = _source_stage_receipt(tmp_path, fixture)
+    stage_path.write_text('{"pdf_sha256":"abc","pdf_sha256":"def"}')
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        _source_stage_report(fixture, stage_path)
