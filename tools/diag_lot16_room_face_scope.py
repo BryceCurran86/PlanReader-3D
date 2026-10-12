@@ -395,6 +395,165 @@ def _opening_quantity_diagnostic(claim) -> dict:
 
 
 
+
+def _ceiling_quantity_diagnostic(claim) -> dict:
+    """Shadow-only canonical ceiling -> typed quantity -> source-trace ledger.
+
+    This is not a ceiling/finish detector, measurement publisher, seal or
+    benchmark adapter. A missing RCP/room/receipt remains UNAVAILABLE.
+    """
+    from pb_geometry_takeoff_model import AuthorityStatus
+    from pb_live_ceiling_lining_source_closed_export import (
+        build_live_ceiling_lining_source_traces,
+    )
+    from pb_migration_contracts import QuantityEvidence
+
+    ceilings = tuple(claim.canonical_ceilings)
+    quantities = tuple(claim.ceiling_lining_quantity_evidence)
+    ceiling_ids = Counter(
+        ceiling.canonical_ceiling_id
+        for ceiling in ceilings
+        if type(ceiling.canonical_ceiling_id) is str
+        and ceiling.canonical_ceiling_id
+    )
+    quantity_ids = Counter(
+        quantity.quantity_id for quantity in quantities
+        if isinstance(quantity, QuantityEvidence)
+        and type(quantity.quantity_id) is str and quantity.quantity_id
+    )
+    room_ids = Counter(
+        room.canonical_room_id for room in claim.canonical_rooms
+        if type(room.canonical_room_id) is str and room.canonical_room_id
+    )
+    rooms = {
+        room.canonical_room_id: room for room in claim.canonical_rooms
+        if type(room.canonical_room_id) is str and room.canonical_room_id
+    }
+    # This is the actual production source trace gate, never a claim of a
+    # source-authenticated quantity made by this diagnostic.
+    traced = {}
+    trace_error = None
+    if quantities:
+        try:
+            traced = build_live_ceiling_lining_source_traces(
+                claim, workspace_id=1, project_id="source-diagnostic:lot16"
+            )
+        except Exception as error:
+            trace_error = type(error).__name__
+    by_ceiling = {}
+    for quantity in quantities:
+        if isinstance(quantity, QuantityEvidence):
+            for cid in quantity.input_entity_ids:
+                by_ceiling.setdefault(cid, []).append(quantity)
+
+    def first_failure(ceiling):
+        cid = ceiling.canonical_ceiling_id
+        if (type(cid) is not str or not cid or cid != cid.strip()
+                or ceiling_ids[cid] != 1):
+            return "canonical_ceiling_identity_unresolved"
+        rid = ceiling.room_entity_id
+        room = rooms.get(rid) if type(rid) is str else None
+        if (room is None or room_ids[rid] != 1
+                or not room.physical_room_id
+                or not room.source_room_face_record_id
+                or room.source_sha256 != ceiling.source_sha256
+                or room.revision_id != ceiling.revision_id
+                or room.snapshot_id != ceiling.snapshot_id):
+            return "physical_ceiling_room_source_ownership_unavailable"
+        if (not ceiling.document_id or not ceiling.source_sha256
+                or not ceiling.revision_id or not ceiling.snapshot_id
+                or type(ceiling.source_page) is not int or ceiling.source_page <= 0
+                or not ceiling.viewport_id):
+            return "authenticated_ceiling_source_view_unavailable"
+        if not ceiling.geometry_complete or len(ceiling.polygon_pdf_pts) < 3:
+            return "source_ceiling_geometry_incomplete"
+        if (not ceiling.metric_area_complete
+                or type(ceiling.area_m2) not in (int, float)
+                or not math.isfinite(ceiling.area_m2)
+                or ceiling.area_m2 <= 0.0):
+            return "firm_ceiling_metric_area_unavailable"
+        if (ceiling.measurement_authority
+                != MeasurementAuthorityType.DOCUMENTED_DIMENSION.value
+                or len(ceiling.figured_dimension_ids) != 2
+                or any(type(v) is not str or not v or v != v.strip()
+                       for v in ceiling.figured_dimension_ids)
+                or len(set(ceiling.figured_dimension_ids)) != 2):
+            return "source_documented_ceiling_dimension_pair_unavailable"
+        if not ceiling.finish_descriptor:
+            return "authenticated_ceiling_finish_semantic_unavailable"
+        owned = by_ceiling.get(cid, ())
+        if len(owned) != 1:
+            return "ceiling_lining_quantity_evidence_unavailable_or_ambiguous"
+        quantity = owned[0]
+        qid = quantity.quantity_id
+        if (type(qid) is not str or not qid or quantity_ids[qid] != 1):
+            return "duplicate_or_invalid_ceiling_quantity_identity"
+        if (qid != ceiling.ceiling_quantity_id
+                or quantity.family != "ceiling_lining"
+                or quantity.status != AuthorityStatus.FIRM.value
+                or quantity.abstained
+                or type(quantity.value) not in (int, float)
+                or quantity.unit not in ("m2", "m²")
+                or quantity.value != ceiling.area_m2):
+            return "firm_ceiling_lining_quantity_unavailable"
+        metadata = quantity.metadata
+        if (not isinstance(metadata, dict)
+                or not metadata.get("support_page_id")
+                or not metadata.get("support_viewport_id")
+                or not metadata.get("support_snapshot_id")):
+            return "authenticated_ceiling_rcp_support_unavailable"
+        if (not metadata.get("finish_occurrence_record_id")
+                or not metadata.get("finish_definition_record_id")):
+            return "authenticated_ceiling_finish_occurrence_unavailable"
+        if qid not in traced:
+            return "source_closed_ceiling_lineage_unresolved"
+        return "ceiling_lining_source_trace_resolved"
+
+    ledger = []
+    for ceiling in ceilings:
+        first = first_failure(ceiling)
+        owned_ids = [
+            quantity.quantity_id for quantity in
+            by_ceiling.get(ceiling.canonical_ceiling_id, ())
+        ]
+        ledger.append({
+            "canonical_ceiling_id": ceiling.canonical_ceiling_id,
+            "canonical_room_id": ceiling.room_entity_id,
+            "source_page": ceiling.source_page,
+            "viewport_id": ceiling.viewport_id,
+            "source_sha256": ceiling.source_sha256,
+            "area_m2_source_record": (
+                ceiling.area_m2 if type(ceiling.area_m2) in (int, float)
+                and math.isfinite(ceiling.area_m2) else None
+            ),
+            "measurement_authority": ceiling.measurement_authority,
+            "figured_dimension_receipt_count": len(ceiling.figured_dimension_ids),
+            "finish_semantic": ceiling.finish_descriptor,
+            "published_quantity_ids": owned_ids,
+            "source_trace_quantity_ids": [
+                qid for qid in owned_ids if qid in traced
+            ],
+            "first_missing_prerequisite": first,
+        })
+    return {
+        "diagnostic_only": True,
+        "canonical_ceiling_count": len(ceilings),
+        "source_ceiling_quantity_count": len(quantities),
+        "source_closed_trace_count": len(traced),
+        "source_closed_trace_error_type": trace_error,
+        "unresolved_universe_reason": (
+            "canonical_ceiling_unavailable" if not ceilings else None
+        ),
+        "duplicate_source_ceiling_quantity_ids": sorted(
+            qid for qid, count in quantity_ids.items() if count > 1
+        ),
+        "first_failure_frequency": dict(Counter(
+            row["first_missing_prerequisite"] for row in ledger
+        )),
+        "per_ceiling": ledger,
+    }
+
+
 def _opening_sealing_diagnostic(claim) -> dict:
     """Exercise existing source-closed sealing and draft customer verification.
 
@@ -722,6 +881,7 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
             "floor_quantity_diagnostic": _floor_quantity_diagnostic(claim),
             "wall_metric_diagnostic": _wall_metric_diagnostic(claim),
             "opening_quantity_diagnostic": _opening_quantity_diagnostic(claim),
+            "ceiling_quantity_diagnostic": _ceiling_quantity_diagnostic(claim),
             "opening_sealing_diagnostic": _opening_sealing_diagnostic(claim),
             "source_label_scope_diagnostic": label_scopes,
             "same_view_witness_intersection_audit": witness_audit,
