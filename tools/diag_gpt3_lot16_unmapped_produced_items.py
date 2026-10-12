@@ -41,14 +41,21 @@ def build_unmapped_inventory(sealed, rows, verified, receipt: dict) -> dict:
     if not quantities:
         raise ValueError("empty original source quantity inventory")
     quantity_ids = [q.quantity_id for q in quantities]
+    if not isinstance(rows, (tuple, list)) or any(
+        not isinstance(row, dict) for row in rows
+    ):
+        raise ValueError("original customer row inventory malformed")
     row_ids = [row.get("quantity_id") for row in rows]
     if (
-        len(set(quantity_ids)) != len(quantity_ids)
+        any(not isinstance(x, str) or not x or x != x.strip()
+            for x in (*quantity_ids, *row_ids))
+        or len(set(quantity_ids)) != len(quantity_ids)
         or len(set(row_ids)) != len(row_ids)
         or set(row_ids) != set(quantity_ids)
         or set(verified.verified_quantity_ids) != set(quantity_ids)
         or verified.valid_quantity_count != len(quantity_ids)
         or len(verified.verified_quantity_ids) != len(quantity_ids)
+        or receipt.get("quantity_count") != len(quantity_ids)
         or sorted(receipt.get("sealed_quantity_ids", [])) != sorted(quantity_ids)
         or sorted(receipt.get("customer_verified_quantity_ids", []))
         != sorted(quantity_ids)
@@ -58,9 +65,13 @@ def build_unmapped_inventory(sealed, rows, verified, receipt: dict) -> dict:
     produced = []
     used_physical_ids = set()
     for q in sorted(quantities, key=lambda item: item.quantity_id):
-        object_refs = getattr(q, "object_identity_refs", ())
+        object_refs = getattr(q, "object_identity_refs", None)
         evidence_ids = getattr(q, "evidence_ids", ())
-        physical = object_refs[0] if len(object_refs) == 1 else None
+        physical = (
+            object_refs[0]
+            if isinstance(object_refs, (tuple, list)) and len(object_refs) == 1
+            else None
+        )
         status = getattr(q.status, "value", q.status)
         if (
             q.project_id != PROJECT or q.source_sha256 != source_sha
