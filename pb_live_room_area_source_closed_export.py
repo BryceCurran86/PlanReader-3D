@@ -55,18 +55,23 @@ def _firm_room_area_quantities(
             raise SourceClosedRunConflictError(
                 "room-area claim contains a non-room-area quantity"
             )
-        if quantity.abstained:
-            continue
-        quantity_id = _clean(quantity.quantity_id)
-        if not quantity_id:
+        # Source identity belongs to the full producer inventory, even when
+        # one receipt is ABSTAIN. Filtering first could conceal a conflicting
+        # source identity and let its favourable FIRM replay reach a seal.
+        # This is deliberately stricter than the diagnostic floor publisher.
+        quantity_id = quantity.quantity_id
+        if (type(quantity_id) is not str or not quantity_id
+                or quantity_id != quantity_id.strip()):
             raise SourceClosedRunConflictError(
-                "firm room-area quantity id must be non-empty"
+                "invalid original room-area quantity id"
             )
         if quantity_id in seen_ids:
             raise SourceClosedRunConflictError(
                 f"duplicate room-area quantity id: {quantity_id}"
             )
         seen_ids.add(quantity_id)
+        if quantity.abstained:
+            continue
         if _clean(quantity.status).lower() != "firm":
             raise SourceClosedRunConflictError(
                 f"non-abstained room-area quantity is not firm: {quantity_id}"
