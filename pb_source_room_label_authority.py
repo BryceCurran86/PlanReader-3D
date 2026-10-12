@@ -263,6 +263,14 @@ def _normalized_room_line(text: str) -> Optional[str]:
     if not 1 <= len(words) <= _MAX_ROOM_LABEL_WORDS:
         return None
     normalized = compact.lower()
+    # Native plan bedroom labels commonly contain a room ordinal (BED 2,
+    # BEDROOM 3), unlike free-form numbered schedule items or door tags.
+    # Admit only this tightly defined WHOLE-LINE grammar as a candidate:
+    # original per-word text integrity, exact unique source-face ownership
+    # and conflict quarantine are still independently mandatory downstream.
+    # No numeric text is used as dimension, count, area or room coordinate.
+    if re.fullmatch(r"(?:bed|bedroom) [1-9][0-9]?", normalized):
+        return compact
     if any(any(ch.isdigit() for ch in word) for word in words):
         return None
     if len(words) == 1:
