@@ -107,6 +107,10 @@ def build_live_opening_count_source_traces(
 
     openings = _opening_by_identity(claim)
     traces: dict[str, CommercialTakeoffSourceTrace] = {}
+    # Two independently named firm count rows cannot each charge the same
+    # source-owned physical opening. Preserve member ownership across the
+    # entire sealed count run, not just within an individual schedule mark.
+    counted_physical_members: set[str] = set()
 
     for quantity in _validated_count_quantities(claim):
         raw_members = quantity.input_entity_ids
@@ -124,6 +128,13 @@ def build_live_opening_count_source_traces(
             raise SourceClosedRunConflictError(
                 "opening-count quantity requires unique physical member identities"
             )
+        repeated = counted_physical_members.intersection(identities)
+        if repeated:
+            raise SourceClosedRunConflictError(
+                "opening-count source member counted across multiple quantity rows: "
+                + ", ".join(sorted(repeated))
+            )
+        counted_physical_members.update(identities)
         if type(quantity.value) not in (int, float):
             raise SourceClosedRunConflictError(
                 "opening-count quantity value must be a numeric physical count"
