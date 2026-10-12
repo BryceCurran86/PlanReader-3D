@@ -225,6 +225,75 @@ def _snap_intersections(
     return _dedupe(final_h), _dedupe(snapped_v)
 
 
+
+def raster_segment_centerline_remains_foreground(
+    png_bytes: bytes,
+    segment: RasterDetectedSegment,
+) -> bool:
+    """Return true only when the complete original segment is still visible.
+
+    The segment geometry is producer-derived from a separate source raster
+    render. This check never discovers or extends geometry: it only asks whether
+    every along-axis sample on that already-proven centerline remains foreground
+    in another render of the same immutable page. Non-erasing overpaint may
+    change RGB values while preserving foreground; any whiteout, broken run,
+    out-of-frame geometry or polarity failure abstains.
+    """
+    if not isinstance(png_bytes, (bytes, bytearray, memoryview)):
+        raise TypeError("png_bytes must be bytes-like")
+    if type(segment) is not RasterDetectedSegment:
+        raise TypeError("segment must be RasterDetectedSegment")
+
+    encoded = np.frombuffer(bytes(png_bytes), dtype=np.uint8)
+    gray = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+    if gray is None or gray.ndim != 2 or gray.size == 0:
+        return False
+    foreground = _foreground_mask(gray)
+    if foreground is None:
+        return False
+
+    x0, y0, x1, y1 = (float(value) for value in segment.pixel_geometry)
+    horizontal = segment.orientation == "horizontal"
+    if horizontal:
+        if abs(y1 - y0) > 1e-6:
+            return False
+        start, end, fixed = sorted((x0, x1))[0], sorted((x0, x1))[1], (y0 + y1) / 2.0
+        along_limit = foreground.shape[1]
+        cross_limit = foreground.shape[0]
+    else:
+        if abs(x1 - x0) > 1e-6:
+            return False
+        start, end, fixed = sorted((y0, y1))[0], sorted((y0, y1))[1], (x0 + x1) / 2.0
+        along_limit = foreground.shape[0]
+        cross_limit = foreground.shape[1]
+
+    first = int(math.ceil(start - 1e-9))
+    last = int(math.floor(end + 1e-9))
+    if first < 0 or last >= along_limit or first > last:
+        return False
+
+    # Detector center coordinates may fall on a half pixel. The two pixels
+    # directly bracketing that centerline are the complete quantization
+    # allowance; there is no neighborhood search or nearest-line selection.
+    cross_pixels = sorted({
+        int(math.floor(fixed)),
+        int(math.ceil(fixed)),
+    })
+    cross_pixels = [
+        value for value in cross_pixels if 0 <= value < cross_limit
+    ]
+    if not cross_pixels:
+        return False
+
+    for along in range(first, last + 1):
+        if horizontal:
+            visible = any(bool(foreground[cross, along]) for cross in cross_pixels)
+        else:
+            visible = any(bool(foreground[along, cross]) for cross in cross_pixels)
+        if not visible:
+            return False
+    return True
+
 def detect_axis_aligned_raster_segments(
     png_bytes: bytes,
     *,
