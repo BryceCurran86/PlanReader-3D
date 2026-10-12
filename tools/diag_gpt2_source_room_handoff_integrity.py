@@ -22,15 +22,40 @@ def _name(v):
 
 
 def _polygon(source):
-    vertices=getattr(source,"polygon_pdf_pts",None)
-    return (isinstance(vertices,(tuple,list)) and len(vertices)>=3
-            and all(isinstance(pt,(tuple,list)) and len(pt)==2
-                    and all(type(x) in (int,float) and math.isfinite(x)
-                            for x in pt) for pt in vertices)
-            and isinstance(getattr(source,"area_page_pts2",None),(int,float))
-            and math.isfinite(source.area_page_pts2)
-            and source.area_page_pts2>0)
+    """Require valid original native geometry before reporting a floor owner.
 
+    A positive upstream area field does not authenticate a self-intersecting
+    native polygon. This diagnostic neither repairs nor measures such a face.
+    """
+    vertices = getattr(source, "polygon_pdf_pts", None)
+    area = getattr(source, "area_page_pts2", None)
+    if not (
+        isinstance(vertices, (tuple, list)) and len(vertices) >= 3
+        and all(
+            isinstance(pt, (tuple, list)) and len(pt) == 2
+            and all(type(value) in (int, float) and math.isfinite(value)
+                    for value in pt)
+            for pt in vertices
+        )
+        and type(area) in (int, float)
+        and math.isfinite(area) and area > 0
+    ):
+        return False
+    # Original-source room polygons may be open vertex rings (no repeated
+    # final point); Shapely validates closure, crossings and zero area without
+    # changing the vertices. Never use buffer(0) or polygon repair here.
+    from shapely.errors import GEOSException
+    from shapely.geometry import Polygon
+    try:
+        native_face = Polygon(vertices)
+        return (
+            not native_face.is_empty
+            and native_face.is_valid
+            and native_face.area > 0
+            and len(native_face.interiors) == 0
+        )
+    except (TypeError, ValueError, OverflowError, GEOSException):
+        return False
 
 def _source(obj,sha):
     return getattr(obj,"source_sha256",None)==sha
@@ -45,6 +70,7 @@ def _metric_quantity(q):
             and _owned(getattr(q,"quantity_id",None))
             and isinstance(getattr(q,"input_entity_ids",None),tuple)
             and bool(q.input_entity_ids)
+            and all(_owned(identity) for identity in q.input_entity_ids)
             and len(set(q.input_entity_ids))==len(q.input_entity_ids)
             and isinstance(getattr(q,"evidence_ids",None),tuple)
             and bool(q.evidence_ids)
@@ -78,17 +104,34 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
     grouped={}
     for room in eligible:
         grouped.setdefault(_name(room.room_label),[]).append(room)
-    floor_ids=Counter(getattr(f,"canonical_floor_id",None) for f in floors)
+    # Index only exact source-owned typed receipt IDs. An upstream malformed
+    # (possibly unhashable) ID is an unavailable owner, never a dictionary
+    # address, and must not abort the diagnostic before fail-closed gates run.
+    floor_ids=Counter(
+        identity for f in floors
+        for identity in (getattr(f,"canonical_floor_id",None),)
+        if _owned(identity)
+    )
     floor_by_room={}
     for floor in floors:
-        floor_by_room.setdefault(getattr(floor,"room_entity_id",None),[]).append(floor)
+        owner=getattr(floor,"room_entity_id",None)
+        if _owned(owner):
+            floor_by_room.setdefault(owner,[]).append(floor)
     q_ids=Counter(getattr(q,"quantity_id",None) for q in quantities)
     # Room-area producer QuantityEvidence is explicitly keyed to original
     # room.face_id, NOT to a canonical floor ID. Its source receipt/evidence
     # and SHA/revision/viewport must be authenticated before the later
     # floor metric projection can be checked.
-    room_ids=Counter(getattr(r,"physical_room_id",None) for r in eligible)
-    face_ids=Counter(getattr(r,"source_room_face_record_id",None) for r in eligible)
+    room_ids=Counter(
+        identity for r in eligible
+        for identity in (getattr(r,"physical_room_id",None),)
+        if _owned(identity)
+    )
+    face_ids=Counter(
+        identity for r in eligible
+        for identity in (getattr(r,"source_room_face_record_id",None),)
+        if _owned(identity)
+    )
     direct_labels=Counter(getattr(r,"room_label_binding_record_id",None)
                           for r in eligible if _owned(getattr(r,"room_label_binding_record_id",None)))
     text_observations=Counter(id for r in eligible
@@ -118,6 +161,7 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
                     or not _owned(getattr(r,"snapshot_id",None))
                     or not _owned(getattr(r,"decision_scope_id",None))
                     or not _owned(getattr(r,"viewport_id",None))
+                    or not _owned(getattr(r,"canonical_room_id",None))
                     or not _owned(room_id) or not _owned(face_id)
                     or room_ids[room_id]!=1 or face_ids[face_id]!=1):
                 gate="SOURCE_ROOM_FACE_IDENTITY_CONFLICT"

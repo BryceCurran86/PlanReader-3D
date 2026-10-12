@@ -187,3 +187,101 @@ def test_original_word_and_metric_evidence_only_appear_after_source_gates():
     assert row["original_label_evidence_ids"]==["native-observation-1"]
     assert row["documented_area_quantity_id"] is None
     assert row["documented_area_source_evidence_ids"]==[]
+
+
+@pytest.mark.parametrize("ring", [
+    ((0.0, 0.0), (2.0, 2.0), (0.0, 2.0), (2.0, 0.0)),
+    ((0.0, 0.0), (2.0, 0.0), (1.0, 0.0), (0.0, 0.0)),
+])
+def test_original_source_self_intersecting_or_collapsed_face_cannot_handoff_area(ring):
+    """A claimed positive area must not launder invalid source geometry."""
+    source = fixture()
+    physical = source.canonical_rooms[0]
+    physical.polygon_pdf_pts = ring
+    # Keep a plausible forged area and an allegedly complete original face.
+    physical.area_page_pts2 = 2.0
+    physical.geometry_complete = True
+    # Match the supposed floor polygon so ancestry mismatch cannot hide
+    # the original physical face's first failed authority.
+    source.canonical_floors[0].polygon_pdf_pts = ring
+    row = one(source)
+    assert row["first_unproved_authority"] == (
+        "SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE"
+    )
+    assert row["source_proven_area_m2"] is None
+    assert row["documented_area_quantity_id"] is None
+    assert row["floor_finish_publication_allowed"] is False
+    assert row["ceiling_lining_publication_allowed"] is False
+
+
+def test_valid_original_open_vertex_ring_retains_existing_source_metric_handoff():
+    """A legitimate source ring need not repeat its initial closing vertex."""
+    source = fixture()
+    row = one(source)
+    assert row["first_unproved_authority"] == (
+        "SOURCE_ROOM_AREA_READY_FOR_GPT1_GPT3_REVIEW"
+    )
+    assert row["source_proven_area_m2"] == 1.5
+    assert row["metric_area_inferred_from_page_points"] is False
+
+
+def test_source_polygon_geos_exception_abstains_before_metric_claim(monkeypatch):
+    """A GEOS failure cannot turn a suspect native ring into a measured floor."""
+    import shapely.geometry
+    from shapely.errors import GEOSException
+
+    def invalid_native_ring(*_args, **_kwargs):
+        raise GEOSException("original source polygon topology unavailable")
+
+    monkeypatch.setattr(shapely.geometry, "Polygon", invalid_native_ring)
+    result = one(fixture())
+    assert result["first_unproved_authority"] == (
+        "SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE"
+    )
+    assert result["documented_area_quantity_id"] is None
+    assert result["floor_finish_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("original_input", [
+    (["unhashable-source-id"],),
+    ({"foreign-source-id": "not-a-source-receipt"},),
+    (None,), (7,), (True,), ("",), (" padded-source-id ",),
+])
+def test_malformed_source_quantity_input_id_abstains_without_handoff_crash(
+    original_input,
+):
+    """A malformed source quantity input can never prove a physical room."""
+    source = fixture()
+    source.room_area_quantity_evidence[0].input_entity_ids = original_input
+    row = one(source)
+    assert row["first_unproved_authority"] == (
+        "FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE"
+    )
+    assert row["source_proven_area_m2"] is None
+    assert row["documented_area_quantity_id"] is None
+    assert row["floor_finish_publication_allowed"] is False
+    assert row["ceiling_lining_publication_allowed"] is False
+
+
+@pytest.mark.parametrize("where,attr,invalid,first_gate", [
+    ("room", "physical_room_id", ["unhashable"], "SOURCE_ROOM_FACE_IDENTITY_CONFLICT"),
+    ("room", "source_room_face_record_id", {"bad": "id"}, "SOURCE_ROOM_FACE_IDENTITY_CONFLICT"),
+    ("room", "canonical_room_id", ["unhashable"], "SOURCE_ROOM_FACE_IDENTITY_CONFLICT"),
+    ("floor", "canonical_floor_id", ["unhashable"], "FLOOR_ORIGINAL_PHYSICAL_FACE_LINEAGE_CONFLICT"),
+    ("floor", "room_entity_id", {"bad": "owner"}, "CANONICAL_FLOOR_OWNER_UNAVAILABLE"),
+])
+def test_unhashable_original_room_and_floor_owner_ids_abstain_safely(
+    where, attr, invalid, first_gate,
+):
+    """Malformed native identity objects must never crash source room audit."""
+    source = fixture()
+    object_ = (
+        source.canonical_rooms[0] if where == "room"
+        else source.canonical_floors[0]
+    )
+    setattr(object_, attr, invalid)
+    row = one(source)
+    assert row["first_unproved_authority"] == first_gate
+    assert row["source_proven_area_m2"] is None
+    assert row["floor_finish_publication_allowed"] is False
+    assert row["ceiling_lining_publication_allowed"] is False
