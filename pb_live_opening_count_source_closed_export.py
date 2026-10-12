@@ -187,9 +187,18 @@ def build_live_opening_count_source_traces(
                 raise SourceClosedRunConflictError(
                     f"opening-count member {identity} does not match authenticated mark"
                 )
-            if not _clean(opening.viewport_id):
+            if (
+                type(opening.viewport_id) is not str
+                or not opening.viewport_id
+                or opening.viewport_id != opening.viewport_id.strip()
+                or type(opening.page_id) is not str
+                or not opening.page_id
+                or opening.page_id != opening.page_id.strip()
+            ):
+                # The aggregate trace must not stringify Boolean/numeric
+                # page or viewport owners into plausible source scope IDs.
                 raise SourceClosedRunConflictError(
-                    f"opening-count member {identity} lacks owned viewport"
+                    f"opening-count member {identity} lacks exact original page/viewport"
                 )
             source_observations = opening.source_observation_ids
             if (
