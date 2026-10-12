@@ -885,3 +885,70 @@ def test_invalid_family_group_fails_before_source_scope_resolution(
             output_dir=tmp_path / "out",
             family_group="not-a-group",
         )
+
+def test_project_handoff_forwards_only_source_classified_room_support(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"source-bytes")
+    monkeypatch.setattr(
+        handoff,
+        "_source_page_scopes",
+        lambda path: ((0,), (2,), 5),
+    )
+
+    claim = SimpleNamespace(
+        status=SimpleNamespace(value="abstained"),
+        reason_codes=("resolved-scope",),
+        canonical_walls=(),
+        canonical_openings=(),
+        canonical_rooms=(),
+        canonical_floors=(),
+        canonical_spaces=(),
+        room_area_quantity_evidence=(),
+        opening_quantity_evidence=(),
+        opening_count_quantity_evidence=(),
+    )
+    seen = {}
+
+    def _collect(*args, **kwargs):
+        seen.update(kwargs)
+        return claim
+
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        _collect,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-a",
+        workspace_id=1,
+        output_dir=tmp_path / "out",
+    )
+
+    assert seen["pages"] == (0, 1, 2, 3, 4)
+    assert seen["topology_pages"] == (0,)
+    assert seen["room_area_support_pages"] == (2,)
+    assert seen["surface_semantic_pages"] == (0, 1, 2, 3, 4)
+    assert summary["topology_pages"] == [1]
+    assert summary["room_area_support_pages"] == [3]
+    assert summary["execution_pages"] == [1, 2, 3, 4, 5]
+    assert summary["topology_mode"] == "source_classified_scope"
