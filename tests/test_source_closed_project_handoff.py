@@ -896,6 +896,8 @@ def test_invalid_family_group_fails_before_source_scope_resolution(
     "family_runs/opening_area.sealed.json",
     "family_runs/opening_count.sealed.json",
     "family_runs/ceiling_area.sealed.json",
+    "family_runs/wall_finish_area.sealed.json",
+    "project-a.future-family.json",
 ])
 def test_old_signed_customer_handoff_cannot_survive_failed_rerun(
     tmp_path, monkeypatch, existing_artifact,
