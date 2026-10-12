@@ -1,0 +1,96 @@
+name: GPT MAX Original Raster Flank Paint Audit
+on:
+  pull_request:
+    paths:
+      - scripts/gptmax_raster_flank_paint_audit.py
+      - tests/test_gptmax_raster_flank_paint_audit.py
+      - docs/engineering/gptmax_raster_flank_paint_audit.md
+      - .github/workflows/test-gptmax-raster-flank-paint-audit.yml
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_raster_flank_paint_audit.py tests/test_gptmax_required_flank_source.py tests/test_gptmax_raster_host_source_membership.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Independent exact-base original source receipts
+        run: |
+          git worktree add --detach /tmp/flank-paint-original-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/flank-paint-original-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/source-before.json"
+          )
+      - name: Fresh original paint / G17 source ownership and exact proof retention
+        run: |
+          PYTHONPATH=. python -u scripts/gptmax_raster_flank_paint_audit.py \
+            --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+            --page-id 3 \
+            --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
+            --output original-flank-paint.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          b=json.loads(Path('source-before.json').read_text())
+          a=json.loads(Path('original-flank-paint.json').read_text())
+          assert a['source_sha256']==b['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert a['opening_bindings']==b['opening_bindings']
+          assert a['host_frames']==b['host_frames']
+          assert b['summary']==dict(physical_existence_claims=21,host_bindings=14,host_frames=9)
+          assert a['primitive_safety_cap']==20000 and a['producer_snapshot_unchanged']
+          assert a['original_pdf_reauthenticated']
+          assert len(a['rows'])==14 and len({r['opening_identity_id'] for r in a['rows']})==7
+          for key in ('host_publication_allowed','opening_count_publication_allowed',
+                      'metric_quantity_publication_allowed','physical_equivalence_proven',
+                      'native_paint_role_authenticated','source_universe_completeness_proven'):
+              assert a[key] is False
+          assert a['benchmark_accuracy'] is None
+          for row in a['rows']:
+              assert row['host_publication_allowed'] is False
+              assert row['candidate_nomination_controlled_by_query'] is False
+              assert all(not c['paint_causality_proven'] and not c['native_paint_role_authenticated']
+                         for c in row['intersecting_original_paint_commands'])
+          # Immutable-source negative controls, never detector inputs.
+          priority=next(r for r in a['rows'] if r['opening_identity_id']=='physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9' and r['role']=='left')
+          assert priority['paint_profile']['inset_core']['source_mass_solid']
+          assert priority['paint_profile']['inset_core']['full_render_mass_solid']
+          assert not priority['paint_profile']['inset_core']['rgb_equal']
+          assert any(c['seqno']==1169 and c['original_paint_kind']=='stroke-path'
+                     and c['literal_native_path']['rect'][0]==c['literal_native_path']['rect'][2]
+                     for c in priority['intersecting_original_paint_commands'])
+          assert any(not r['paint_profile']['inset_core']['source_mass_solid'] for r in a['rows'])
+          print({'original_host_frame_receipts_exact_equal':True,'queried_original_flanks':len(a['rows'])})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-raster-flank-paint
+          path: |
+            source-before.json
+            original-flank-paint.json
+          retention-days: 30
