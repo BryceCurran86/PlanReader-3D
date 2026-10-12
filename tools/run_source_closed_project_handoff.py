@@ -204,6 +204,13 @@ def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
     any existing final seal can silently mix revisions or source SHA values.
     Preserve existing evidence rather than deleting or overwriting it.
     """
+    family_run_dir = output_dir / "family_runs"
+    # A directory symlink could redirect a future signed family into an
+    # unrelated workspace even when no previous *.sealed.json is present.
+    if family_run_dir.is_symlink():
+        raise FileExistsError(
+            f"unsafe family run directory symlink: {family_run_dir}; use a clean output directory"
+        )
     possible_seals = (
         output_dir / f"{project_id}.json",
         # Protect future project family-group output without hard-coding names.
@@ -758,6 +765,8 @@ def generate_project_handoff(
     """
     # Bad source inputs never create directories or lock files.
     _validate_source_handoff_inputs(pdf_path, project_id, workspace_id, family_group)
+    if output_dir.is_symlink():
+        raise FileExistsError("output directory cannot be a symlink")
     output_dir.mkdir(parents=True, exist_ok=True)
     lock_path = output_dir / ".source_closed_handoff.lock"
     # O_EXCL fails closed on concurrent writers, symlinks and stale crash locks.
