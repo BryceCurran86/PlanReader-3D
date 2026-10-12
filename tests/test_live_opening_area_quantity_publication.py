@@ -205,11 +205,16 @@ def test_figured_area_requires_its_measurement_record_in_canonical_provenance() 
 
 
 def test_resolved_geometry_area_requires_physical_void_evidence() -> None:
-    opening = _opening(
-        area_m2=1.827,
-        area_basis="resolved_opening_geometry",
-        figured_area_record_id=None,
-        opening_void_record_id="void-1",
+    opening = replace(
+        _opening(
+            area_m2=1.827,
+            area_basis="resolved_opening_geometry",
+            figured_area_record_id=None,
+            opening_void_record_id="void-1",
+        ),
+        geometry_complete=True,
+        width_m=2.03,
+        height_m=0.9,
     )
     quantity = _opening_quantity(opening)
     assert quantity is not None
@@ -539,3 +544,45 @@ def test_foreign_revision_unsupported_opening_cannot_hide_conflict() -> None:
     )
     with pytest.raises(ValueError, match="revision conflicts"):
         publish_live_opening_area_quantities(_composition(proven, stale))
+
+
+@pytest.mark.parametrize("corrupt_axes", [
+    {"geometry_complete": False},
+    {"width_m": None},
+    {"height_m": None},
+    {"width_m": True},
+    {"height_m": "0.9"},
+    {"width_m": 0.0},
+    {"height_m": -0.9},
+    {"width_m": float("nan")},
+    {"height_m": float("inf")},
+    {"area_m2": 2.1},
+])
+def test_resolved_opening_geometry_must_equal_owned_metric_axis_product(corrupt_axes):
+    opening = replace(
+        _opening(
+            area_m2=1.827,
+            area_basis="resolved_opening_geometry",
+            figured_area_record_id=None,
+            opening_void_record_id="void-1",
+        ),
+        geometry_complete=True,
+        width_m=2.03,
+        height_m=0.9,
+    )
+    valid = _opening_quantity(opening)
+    assert valid is not None and valid.value == pytest.approx(1.827)
+    assert _opening_quantity(replace(opening, **corrupt_axes)) is None
+
+
+def test_opening_figured_area_retains_independent_valid_authentication_without_geometry():
+    # Original seven Lot16 opening areas are justified by distinct figured
+    # source-label authorities, not by inventing their unresolved metric axes.
+    opening = _opening(
+        area_m2=2.172,
+        area_basis="figured_opening_label",
+        figured_area_record_id="figured-1",
+    )
+    assert opening.width_m is None and opening.height_m is None
+    assert opening.geometry_complete is False
+    assert _opening_quantity(opening) is not None
