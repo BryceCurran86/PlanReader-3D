@@ -1180,3 +1180,100 @@ def test_rotated_band_coordinate_roundtrip_preserves_native_source_bbox() -> Non
         ) is None
     finally:
         doc.close()
+
+
+@pytest.mark.parametrize("title,rotation", [
+    ("RCP", 90),
+    ("CEILING FINISHES SCHEDULE", 90),
+    ("RCP", 270),
+    ("CEILING FINISHES SCHEDULE", 270),
+])
+def test_native_vertical_sheet_title_length_cannot_inflate_glyph_frame_threshold(
+    title: str, rotation: int,
+) -> None:
+    """Native CAD text Y-advance is text LENGTH, never frame glyph HEIGHT.
+
+    Keep the original rotated-source behavior from #2025 without importing
+    its stale geometry reconstruction or authenticating an unresolved RCP.
+    """
+    from pb_viewport_segmentation import calibrate_viewport_layout
+    from pb_native_page_frame import NativePageFrameUnresolved
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=800)
+    page.set_rotation(rotation)
+    page.insert_text((430, 480), title, fontsize=9, rotate=90)
+    doc = _reopen(doc)
+    try:
+        if rotation == 270:
+            # /Rotate 270 is intentionally NOT supported by native_page_frame.
+            # A synthetic roundtrip cannot authorize real source ownership.
+            with pytest.raises(NativePageFrameUnresolved):
+                calibrate_viewport_layout(doc[0])
+        else:
+            calibration = calibrate_viewport_layout(doc[0])
+            assert 0.0 < calibration.median_word_height_pt < 20.0
+            assert 0.0 < calibration.minimum_frame_span_pt < 200.0
+            assert calibration.minimum_frame_span_pt >= (
+                8.0 * calibration.median_word_height_pt
+            )
+    finally:
+        doc.close()
+
+
+def test_native_vertical_title_cannot_own_unproved_extreme_aspect_table() -> None:
+    """A vertical semantic title cannot turn a narrow frame into a schedule."""
+    doc = fitz.open()
+    page = doc.new_page(width=1200, height=1000)
+    page.draw_rect(fitz.Rect(120.0, 40.0, 220.0, 940.0))
+    for index in range(8):
+        page.insert_text(
+            (400.0, 100.0 + index * 40.0),
+            f"NOTE {index}",
+            fontsize=8.0,
+        )
+    page.insert_text(
+        (245.0, 700.0),
+        "CEILING FINISHES SCHEDULE",
+        fontsize=10.0,
+        rotate=90,
+    )
+    doc = _reopen(doc)
+    try:
+        schedules = [
+            viewport for viewport in segment_page_viewports(doc[0], page_number=1)
+            if viewport.view_type == DrawingViewType.SCHEDULE.value
+        ]
+        assert len(schedules) == 1
+        assert schedules[0].status == ViewportSegmentationStatus.UNSUPPORTED.value
+        assert schedules[0].bounding_box is None
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 270])
+def test_native_rotated_viewport_bbox_roundtrip_never_infers_nan_source_geometry(
+    rotation: int,
+) -> None:
+    """Math-only bbox roundtrip cannot bypass separate native page-frame gate."""
+    from pb_viewport_segmentation import _to_native_bbox, _to_visual_bbox
+    from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
+
+    doc = fitz.open()
+    page = doc.new_page(width=720, height=420)
+    page.set_rotation(rotation)
+    native = (64.0, 52.0, 300.0, 280.0)
+    try:
+        if rotation == 270:
+            with pytest.raises(NativePageFrameUnresolved):
+                native_page_frame(page)
+        else:
+            assert native_page_frame(page).rotation == rotation
+        visual = _to_visual_bbox(page, native)
+        restored = _to_native_bbox(page, visual)
+        assert restored == pytest.approx(native)
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            assert _to_native_bbox(page, (bad, 0.0, 10.0, 20.0)) is None
+        assert _to_native_bbox(page, (1.0, 2.0, 1.0, 4.0)) is None
+    finally:
+        doc.close()

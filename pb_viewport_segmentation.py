@@ -1463,10 +1463,22 @@ def _to_native_bbox(
     page: Any,
     bbox: tuple[float, float, float, float],
 ) -> Optional[tuple[float, float, float, float]]:
-    """Map one visual/display bbox back into native page user space."""
+    """Map a finite, positive visual bbox into native page user space.
 
+    An unrotated page is not exempt from finite-source geometry checks.
+    A NaN/Inf must never become a published native candidate rectangle.
+    """
+    try:
+        if len(bbox) != 4:
+            return None
+        coordinates = tuple(float(value) for value in bbox)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(value) for value in coordinates):
+        return None
     if not int(getattr(page, "rotation", 0) or 0):
-        return _normalized_bbox(*bbox)
+        result = _normalized_bbox(*coordinates)
+        return result if result[2] > result[0] and result[3] > result[1] else None
     try:
         import fitz
 

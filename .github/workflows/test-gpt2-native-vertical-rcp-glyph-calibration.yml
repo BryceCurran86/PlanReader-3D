@@ -1,0 +1,31 @@
+name: GPT2 Native Vertical RCP Glyph Calibration
+on:
+  pull_request:
+    paths:
+      - "pb_viewport_segmentation.py"
+      - "tests/benchmarks/test_mutation_viewport_segmentation.py"
+      - ".github/workflows/test-gpt2-native-vertical-rcp-glyph-calibration.yml"
+concurrency:
+  group: gpt2-native-vertical-glyph-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  native-rotation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Short and long native vertical titles, sheet rotation 90 and 270
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/benchmarks/test_mutation_viewport_segmentation.py -k 'native_vertical_sheet_title_length_cannot_inflate_glyph_frame_threshold or native_vertical_title_cannot_own_unproved_extreme_aspect_table or native_rotated_viewport_bbox_roundtrip_never_infers_nan_source_geometry'
+          ruff check --select F821,F823 tests/benchmarks/test_mutation_viewport_segmentation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
