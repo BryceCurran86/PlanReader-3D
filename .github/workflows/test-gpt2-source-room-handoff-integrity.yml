@@ -75,6 +75,21 @@ jobs:
           assert native is not None and native['original_polygon_repaired'] is False
           assert native['metric_area_published_by_diagnostic'] is False
           assert native['original_native_polygon_valid_diagnostic_only'] is False
+          crossing=native['original_native_source_ring_crossing_diagnostic_only']
+          assert crossing is not None
+          assert crossing['first_source_crossing_gate_diagnostic_only']=='original_nonadjacent_ring_edges_intersect_role_unproven'
+          assert len(crossing['original_ring_crossing_edge_indices'])==2
+          assert len(crossing['original_ring_crossing_edge_pdf_pts'])==2
+          assert crossing['source_edge_wall_owner_proven'] is False
+          assert crossing['source_room_geometry_repaired'] is False
+          print('G2_ORIGINAL_FREEZER_NATIVE_CROSSING_EDGE_FIRST_GATE',json.dumps({
+              'source_sha256':sha,
+              'source_room_face_record_id':freezer['original_source_face_receipt_id'],
+              'original_source_ring_crossing':crossing,
+              'physical_wall_owner_authenticated':False,
+              'metric_area_published':False,
+              'benchmark_accuracy':None,
+          },sort_keys=True))
           print('G2_ORIGINAL_FREEZER_SOURCE_RING_FIRST_GATE',json.dumps({
               'source_sha256':sha,
               'source_room_face_record_id':freezer['original_source_face_receipt_id'],
@@ -116,10 +131,6 @@ jobs:
           # This must never require manually enabling the canonical-floor
           # commercial flag, or claim a frozen V2 matched object.
           downstream=inspect_room_measurement_gates(claim)
-          # Exact positive original-source semantic/physical ownership check
-          # for the three FIRM receipts on the unchanged architectural PDF.
-          # This protects the newly hardened GPT1 canonical reissuer from
-          # quietly dropping authentic source areas while rejecting replays.
           original_firm=[
               qty for qty in claim.room_area_quantity_evidence
               if qty.status=='firm' and not qty.abstained

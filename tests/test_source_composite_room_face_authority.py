@@ -2151,6 +2151,101 @@ def test_original_w2_native_lineage_crosscheck_is_only_diagnostic():
     )) == "source_fragment_receipt_unavailable"
 
 
+def test_pos_external_grid_atomic_source_fragment_cannot_mint_second_face():
+    """Exact source W2 fragment receipts never equal physical two-sided closure."""
+    import copy
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts, _fully_grid_opposed_wall_evidence,
+    )
+    from tools.diag_gpt2_grid_component_first_failure import (
+        _physical_union_first_unclosed_gate,
+        inspect_external_atomic_grid_w2_source_fragments,
+    )
+    faces = _room_scope()
+    walls = _wall_scope((_grid_atom("e_sep"), _grid_atom("e_left")))
+    grid, evidence = _fully_grid_opposed_wall_evidence(walls)
+    union = _physical_union_first_unclosed_gate(
+        ("face_left", "face_right"),
+        room_scope=faces, fully_grid_wall_ids=grid,
+        grid_evidence=evidence,
+        local_counts=_atomic_source_wall_edge_counts(faces, grid),
+    )
+    assert union["physical_union_first_unclosed_gate"] == (
+        "source_external_grid_owned_subedge_room_incomplete"
+    )
+    original_left = copy.copy(walls.records[1])
+    original_left.source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="original-W2-left",
+            geometry=((0., 0.), (0., 10.)),
+            source_primitive_ids=("original-source-primitive-1",),
+        ),
+    )
+    w2_scope = replace(
+        walls, records=(walls.records[0], original_left, walls.records[2])
+    )
+    result = inspect_external_atomic_grid_w2_source_fragments(w2_scope, union)
+    assert len(result) == 1
+    assert result[0]["original_w4_wall_id"] == "w_left"
+    assert result[0]["original_global_source_face_ids_diagnostic_only"] == [
+        "face_left"
+    ]
+    assert result[0]["original_w4_candidate_record_count"] == 1
+    assert result[0]["source_first_unclosed_gate"] == (
+        "original_w2_fragment_observed_second_face_missing"
+    )
+    assert result[0]["source_w2_fragment_candidates_diagnostic_only"] == [{
+        "original_w2_edge_id": "original-W2-left",
+        "native_source_primitive_ids": ["original-source-primitive-1"],
+        "exact_source_quantized_collinearity_only": True,
+        "second_face_owner_proven": False,
+    }]
+    assert result[0]["source_second_face_owner_authenticated"] is False
+    assert result[0]["source_w2_grid_role_authenticated_by_this_diagnostic"] is False
+    assert result[0]["source_room_geometry_or_area_published"] is False
+
+    # Nearby/parallel native geometry may NEVER stand in for the actual source
+    # fragment, even though a different source face is geometrically nearby.
+    misplaced = copy.copy(original_left)
+    misplaced.source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="wrong-native-W2",
+            geometry=((1., 0.), (1., 10.)),
+            source_primitive_ids=("native-other",),
+        ),
+    )
+    no_fragment = replace(
+        walls, records=(walls.records[0], misplaced, walls.records[2])
+    )
+    assert inspect_external_atomic_grid_w2_source_fragments(
+        no_fragment, union
+    )[0]["source_first_unclosed_gate"] == (
+        "original_atomic_wall_subedge_w2_fragment_unavailable"
+    )
+
+    # Competing physical W4 producer records cannot be silently collapsed.
+    duplicated = replace(w2_scope, records=(*w2_scope.records, original_left))
+    assert inspect_external_atomic_grid_w2_source_fragments(
+        duplicated, union
+    )[0]["source_first_unclosed_gate"] == "original_w4_identity_collision"
+
+    corrupt = copy.copy(original_left)
+    corrupt.source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="bad-w2", geometry=((0., 0.), (0., 10.)),
+            source_primitive_ids=("",),
+        ),
+    )
+    corrupt_scope = replace(
+        walls, records=(walls.records[0], corrupt, walls.records[2])
+    )
+    assert inspect_external_atomic_grid_w2_source_fragments(
+        corrupt_scope, union
+    )[0]["source_first_unclosed_gate"] == (
+        "original_w2_fragment_source_receipt_invalid"
+    )
+
 def test_original_w4_native_graphic_state_census_never_promotes_grid_or_rooms():
     """Original PDF graphic metadata is a W4 aggregate, never W2 wall role."""
     from dataclasses import replace

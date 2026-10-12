@@ -750,6 +750,117 @@ def inspect_original_w4_grid_opposition_first_gate(
     return output
 
 
+def inspect_external_atomic_grid_w2_source_fragments(
+    wall_scope: PhysicalWallCandidateScopeResult,
+    physical_union_first_gate: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Audit original W2 source fragments beneath singly owned GRID subedges.
+
+    Geometry is checked only with the source-face producer's quantized exact
+    containment contract. A source fragment says NOTHING about second-side
+    physical face ownership, true GRID role or completed room geometry.
+    """
+    from pb_source_room_face_authority import _edge_contains_edge
+
+    original_rows = physical_union_first_gate.get(
+        "physical_union_external_grid_atomic_subedges_diagnostic_only", ()
+    )
+    if not isinstance(original_rows, (tuple, list)):
+        return []
+    counts: Counter[str] = Counter()
+    records_by_id: dict[str, Any] = {}
+    for record in tuple(getattr(wall_scope, "records", ()) or ()):
+        wall_id = getattr(record, "wall_candidate_id", None)
+        if isinstance(wall_id, str) and wall_id and wall_id == wall_id.strip():
+            counts[wall_id] += 1
+            records_by_id[wall_id] = record
+
+    output: list[dict[str, Any]] = []
+    for source in original_rows[:48]:
+        if not isinstance(source, Mapping):
+            continue
+        wall_id = source.get("original_w4_wall_id")
+        raw = source.get("original_atomic_wall_edge_pdf_pts")
+        atomic = _edge_key(raw)
+        if (
+            not isinstance(wall_id, str) or not wall_id
+            or wall_id != wall_id.strip() or atomic is None
+        ):
+            continue
+        row = {
+            "original_w4_wall_id": wall_id,
+            "original_atomic_wall_edge_pdf_pts": [list(pt) for pt in atomic],
+            "original_global_source_face_ids_diagnostic_only": list(
+                source.get("original_global_source_face_ids") or ()
+            ),
+            "original_w4_candidate_record_count": counts[wall_id],
+            "source_w2_fragment_candidates_diagnostic_only": [],
+            "source_first_unclosed_gate":
+                "original_w4_source_identity_unavailable",
+            "source_second_face_owner_authenticated": False,
+            "source_w2_grid_role_authenticated_by_this_diagnostic": False,
+            "source_room_geometry_or_area_published": False,
+        }
+        if counts[wall_id] != 1:
+            row["source_first_unclosed_gate"] = (
+                "original_w4_identity_collision" if counts[wall_id]
+                else "original_w4_source_identity_unavailable"
+            )
+            output.append(row)
+            continue
+        record = records_by_id[wall_id]
+        candidates: list[dict[str, Any]] = []
+        invalid_receipts = False
+        for fragment in tuple(
+            getattr(record, "source_edge_fragments", ()) or ()
+        ):
+            native_edge_id = getattr(fragment, "edge_id", None)
+            source_ids = getattr(fragment, "source_primitive_ids", None)
+            if (
+                not isinstance(native_edge_id, str) or not native_edge_id
+                or native_edge_id != native_edge_id.strip()
+                or not isinstance(source_ids, (tuple, list)) or not source_ids
+                or any(not isinstance(v, str) or not v or v != v.strip()
+                        for v in source_ids)
+            ):
+                invalid_receipts = True
+                continue
+            native_geom = getattr(fragment, "geometry", None)
+            try:
+                contains = _edge_contains_edge(native_geom, atomic)
+            except (TypeError, ValueError, OverflowError, IndexError):
+                contains = False
+            if contains:
+                candidates.append({
+                    "original_w2_edge_id": native_edge_id,
+                    "native_source_primitive_ids": sorted(set(source_ids))[:24],
+                    "exact_source_quantized_collinearity_only": True,
+                    "second_face_owner_proven": False,
+                })
+        candidates.sort(key=lambda item: (
+            item["original_w2_edge_id"], item["native_source_primitive_ids"]
+        ))
+        row["source_w2_fragment_candidates_diagnostic_only"] = candidates[:24]
+        if invalid_receipts:
+            row["source_first_unclosed_gate"] = (
+                "original_w2_fragment_source_receipt_invalid"
+            )
+        elif len(candidates) == 1:
+            row["source_first_unclosed_gate"] = (
+                "original_w2_fragment_observed_second_face_missing"
+            )
+        elif not candidates:
+            row["source_first_unclosed_gate"] = (
+                "original_atomic_wall_subedge_w2_fragment_unavailable"
+            )
+        else:
+            row["source_first_unclosed_gate"] = (
+                "original_atomic_wall_subedge_multiple_w2_fragments"
+            )
+        output.append(row)
+    return output
+
+
 def inspect_split_grid_component_first_failure(
     candidate: Any,
     *,
@@ -877,6 +988,14 @@ def inspect_split_grid_component_first_failure(
             )
         )
         original_union = output["physical_union_source_first_failure_diagnostic_only"]
+        if original_union.get(
+            "physical_union_external_grid_atomic_subedges_diagnostic_only"
+        ):
+            output["original_external_grid_atomic_w2_first_gates_diagnostic_only"] = (
+                inspect_external_atomic_grid_w2_source_fragments(
+                    wall_scope, original_union
+                )
+            )
         invalid_wall = original_union.get(
             "first_invalid_internal_wall_receipt_diagnostic_only"
         )
