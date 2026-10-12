@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 import hashlib
+import json
 import math
 from typing import Any, Mapping, Optional, Sequence
 
@@ -681,6 +682,31 @@ def _raster_opening_visible_primitive_id(
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
+def _native_dimension_component_inputs_fingerprint(*, segments, words) -> str:
+    """Exact original-source canonical SHA cache key without cloning JSON trees.
+
+    The producer has already authenticated the native scalar geometry/text
+    receipts before reaching this internal cache. For primitive dictionaries
+    and tuples, direct strict JSON encoding is byte-identical to the original
+    canonical_contract_json(_plain(payload)) computation. Every source input
+    value still participates in SHA-256; no observational proof is cached.
+    """
+    payload = {
+        'segments': tuple(sorted(segments.items())),
+        'words': tuple(sorted(
+            (w['id'], w['text'], tuple(w['bbox']), tuple(w['axis']))
+            for w in words
+        )),
+    }
+    canonical_bytes = json.dumps(
+        payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+        allow_nan=False,
+    ).encode('utf-8')
+    return 'native_dimension_component_inputs_' + hashlib.sha256(
+        canonical_bytes
+    ).hexdigest()[:20]
+
+
 class SourceVisibilityProducer:
     """Trusted producer wrapper that mints visibility receipts from PDF bytes.
 
@@ -1021,11 +1047,9 @@ class SourceVisibilityProducer:
         # and text receipt above is reauthenticated before even a cache hit.
         # The full authenticated inputs key the cache, not a caller's role or
         # a source address alone. Fresh EvidenceAtoms are built for each query.
-        fingerprint = stable_contract_id('native_dimension_component_inputs', {
-            'segments': tuple(sorted(segments.items())),
-            'words': tuple(sorted((w['id'], w['text'], tuple(w['bbox']), tuple(w['axis']))
-                for w in words)),
-        })
+        fingerprint = _native_dimension_component_inputs_fingerprint(
+            segments=segments, words=words,
+        )
         cache_key = (selector.source_sha256, selector.snapshot_id, page_id, fingerprint)
         components = self._native_dimension_component_page_cache.get(cache_key)
         if components is None:
