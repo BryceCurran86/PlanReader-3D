@@ -121,3 +121,34 @@ def test_missing_or_foreign_physical_identity_does_not_publish_duplicate_edge():
         assert R._source_authenticated_same_wall_aliases(
             source, tuple(rows)
         ) == {}
+
+
+def test_same_group_without_exact_nonrepresentative_source_publication_abstains():
+    original = _same_source_scope()
+    for bad in (
+        replace(original.equivalence, abstained_wall_ids=()),
+        replace(original.equivalence, blocking_reasons_by_wall_id={}),
+        replace(original.equivalence, blocking_reasons_by_wall_id={
+            "alias": ("ambiguous_physical_wall_equivalence",)
+        }),
+        replace(original.equivalence, representative_wall_ids=("alias", "room-top")),
+    ):
+        scope = _same_source_scope()
+        scope.equivalence = bad
+        assert R._source_authenticated_same_wall_aliases(
+            scope, tuple(scope.records)
+        ) == {}
+        out = R._derive_scope(scope)
+        assert len(out.abstained_faces) == 1
+        assert len(out.records) == 4
+
+
+def test_source_already_owned_group_must_not_change_unrelated_rooms():
+    scope = _same_source_scope()
+    source_original = _scope(_rooms(5))
+    a, b = R._derive_scope(scope), R._derive_scope(source_original)
+    assert a.records == b.records
+    assert a.ownership_evaluation.owned_face_ids == b.ownership_evaluation.owned_face_ids
+    assert tuple(sorted(r.face_id for r in a.records)) == tuple(
+        sorted(r.face_id for r in b.records)
+    )
