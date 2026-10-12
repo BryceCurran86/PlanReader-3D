@@ -34,6 +34,7 @@ from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_raster_visible_segment_detector import (
     RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
     detect_axis_aligned_raster_segments,
+    raster_segment_centerline_remains_foreground,
 )
 from pb_raster_opening_source_primitives import (
     RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
@@ -219,6 +220,8 @@ class RasterSegmentVisibilityReceipt:
     pixel_geometry: tuple[float, float, float, float]
     geometry: tuple[float, float, float, float]
     detector_version: str = RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
+    visibility_render_sha256: str | None = None
+    visibility_basis: str = "direct_full_render_detection"
 
 
 @dataclass(frozen=True)
@@ -542,6 +545,29 @@ def _raster_segment_receipt_matches_parent(
     render identity or DPI while borrowing an already verified source record.
     """
     if receipt.dpi != RASTER_RENDER_DPI:
+        return False
+    if receipt.visibility_basis not in {
+        "direct_full_render_detection",
+        "source_image_centerline_survives_full_render",
+    }:
+        return False
+    visibility_sha = receipt.visibility_render_sha256
+    if visibility_sha is not None and (
+        type(visibility_sha) is not str
+        or len(visibility_sha) != 64
+        or any(char not in "0123456789abcdef" for char in visibility_sha)
+    ):
+        return False
+    if (
+        receipt.visibility_basis == "direct_full_render_detection"
+        and visibility_sha is not None
+        and visibility_sha != receipt.image_sha256
+    ):
+        return False
+    if (
+        receipt.visibility_basis == "source_image_centerline_survives_full_render"
+        and visibility_sha is None
+    ):
         return False
     try:
         prefix, render_sha, identity_version, index = str(parent.source_primitive_ref).split(":")
@@ -1873,41 +1899,110 @@ class SourceVisibilityProducer:
                 page_id=page_id,
                 dpi=float(RASTER_RENDER_DPI),
             )
-            image_sha256 = hashlib.sha256(png_bytes).hexdigest()
-            segments = detect_axis_aligned_raster_segments(
+            full_render_sha256 = hashlib.sha256(png_bytes).hexdigest()
+            full_segments = detect_axis_aligned_raster_segments(
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
             )
-            # Once render + detection complete successfully, repeating the same
-            # immutable revision/page cannot produce new source evidence.
-            self._raster_visibility_attempted_pages.add(raster_attempt_key)
 
             if page_id in pages_with_visible and image_regions:
-                segments = tuple(
+                full_segments = tuple(
                     segment
-                    for segment in segments
+                    for segment in full_segments
                     if _axis_aligned_geometry_fully_covered_by_rect_union(
                         segment.geometry_pt, image_regions
                     )
                 )
-            if not segments:
-                continue
 
-            # Visibility publishes each proven source-owned primitive regardless
-            # of whether enough neighbouring primitives exist to prove a wall or
-            # opening. Object-completeness gates belong downstream. Re-sort using
-            # the detector's historical v1 canonical ordering so detector output
-            # iteration order cannot affect the frozen raster identity index.
-            segments = tuple(
-                sorted(
-                    segments,
-                    key=lambda segment: (
+            # Preserve historical full-render source identities exactly. A
+            # separate images-only render may add a source segment only when its
+            # complete original centerline is still foreground in the full PDF
+            # render. This recovers non-erasing native overpaint without letting
+            # vector-only linework or an erased raster run become raster source.
+            def _segment_key(segment):
+                return (
+                    str(segment.orientation),
+                    tuple(float(value) for value in segment.geometry_pt),
+                    tuple(float(value) for value in segment.pixel_geometry),
+                )
+
+            full_segments = tuple(sorted(full_segments, key=_segment_key))
+            entries: list[tuple[object, str, int, str, str]] = [
+                (
+                    segment,
+                    full_render_sha256,
+                    index,
+                    full_render_sha256,
+                    "direct_full_render_detection",
+                )
+                for index, segment in enumerate(full_segments)
+            ]
+            full_geometry = {
+                (
+                    str(segment.orientation),
+                    tuple(float(value) for value in segment.geometry_pt),
+                )
+                for segment in full_segments
+            }
+
+            if image_regions:
+                source_png, source_page_parent = (
+                    self._producer.render_native_page_png(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=snapshot.snapshot_id,
+                        page_id=page_id,
+                        dpi=float(RASTER_RENDER_DPI),
+                        images_only=True,
+                    )
+                )
+                if (
+                    source_page_parent.observation_id != page_parent.observation_id
+                    or source_page_parent.source_partition_id
+                    != page_parent.source_partition_id
+                ):
+                    raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+                source_render_sha256 = hashlib.sha256(source_png).hexdigest()
+                source_segments = tuple(sorted(
+                    (
+                        segment
+                        for segment in detect_axis_aligned_raster_segments(
+                            source_png,
+                            dpi=RASTER_RENDER_DPI,
+                        )
+                        if _axis_aligned_geometry_fully_covered_by_rect_union(
+                            segment.geometry_pt, image_regions
+                        )
+                    ),
+                    key=_segment_key,
+                ))
+                for source_index, segment in enumerate(source_segments):
+                    geometry_key = (
                         str(segment.orientation),
                         tuple(float(value) for value in segment.geometry_pt),
-                        tuple(float(value) for value in segment.pixel_geometry),
-                    ),
-                )
-            )
+                    )
+                    if geometry_key in full_geometry:
+                        continue
+                    if not raster_segment_centerline_remains_foreground(
+                        png_bytes, segment
+                    ):
+                        continue
+                    entries.append(
+                        (
+                            segment,
+                            source_render_sha256,
+                            source_index,
+                            full_render_sha256,
+                            "source_image_centerline_survives_full_render",
+                        )
+                    )
+
+            # Once both producer-owned renders and all visibility checks finish,
+            # repeating the immutable revision/page cannot create new evidence.
+            self._raster_visibility_attempted_pages.add(raster_attempt_key)
+            if not entries:
+                continue
 
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
@@ -1915,7 +2010,13 @@ class SourceVisibilityProducer:
                 tuple[str, RasterSegmentVisibilityReceipt]
             ] = []
 
-            for index, segment in enumerate(segments):
+            for (
+                segment,
+                image_sha256,
+                index,
+                visibility_render_sha256,
+                visibility_basis,
+            ) in entries:
                 segment_id = _raster_segment_observation_id(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
@@ -1987,6 +2088,8 @@ class SourceVisibilityProducer:
                             pixel_geometry=tuple(segment.pixel_geometry),
                             geometry=tuple(segment.geometry_pt),
                             detector_version=RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
+                            visibility_render_sha256=visibility_render_sha256,
+                            visibility_basis=visibility_basis,
                         ),
                     )
                 )
