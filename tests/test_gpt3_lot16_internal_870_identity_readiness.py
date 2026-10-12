@@ -238,7 +238,8 @@ def test_diagnostic_never_uses_values_names_or_evaluator():
         "reconcile_sealed_run_v2",
         "matched_within_tolerance",
         "precision_adjusted_accuracy",
-        "description_similarity",
+        "SequenceMatcher",
+        "difflib",
         "nearest(",
     )
     for token in forbidden:
