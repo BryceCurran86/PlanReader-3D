@@ -1,0 +1,90 @@
+name: GPT2 Original Maryborough Native Label Canonical Publisher First Gates
+on:
+  pull_request:
+    paths:
+      - "tools/diag_gpt2_original_label_canonical_guard_preflight.py"
+      - "tools/diag_gptmax_maryborough_room_first_owner_gate.py"
+      - "tests/test_gpt2_original_source_canonical_word_guard_preflight.py"
+      - ".github/workflows/diag-gpt2-maryborough-label-publisher-first-gates.yml"
+concurrency:
+  group: gpt2-original-native-label-publisher-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source-native canonical binding read-only adversarial tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_original_source_canonical_word_guard_preflight.py
+          ruff check --select F821,F823 tools/diag_gpt2_original_label_canonical_guard_preflight.py tests/test_gpt2_original_source_canonical_word_guard_preflight.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+  original-maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: SHA-verify original 31-page Maryborough source and inspect real label publisher gate
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.diag_gptmax_maryborough_room_first_owner_gate import replay_original_maryborough_room_gate
+          sha='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          pdf=Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf')
+          report=replay_original_maryborough_room_gate(
+              pdf.read_bytes(),expected_source_sha=sha,
+          )
+          gates=[]
+          for scope in report['source_scope_first_failures']:
+              raw=scope.get('original_canonical_source_label_word_guard_preflight')
+              if raw is None:continue
+              assert raw['original_source_sha256']==sha
+              assert raw['read_only'] is True
+              assert raw['benchmark_accuracy'] is None
+              assert raw['commercial_floor_or_finish_published'] is False
+              gates.extend(raw['source_canonical_label_guard_preflights'])
+          assert len(gates)>=8
+          names=[x['original_direct_label'] for x in gates]
+          assert names.count('SALES')==1
+          assert all(x['source_room_face_record_id'] for x in gates)
+          assert all(x['new_room_polygon_or_metric_inferred'] is False for x in gates)
+          Path('gpt2-original-source-canonical-word-first-gates.json').write_text(
+              json.dumps(dict(original_source_sha256=sha,original_gates=gates,
+                              diagnostic_only=True,benchmark_accuracy=None),
+                         sort_keys=True,indent=2)+'\n'
+          )
+          print('GPT2_ORIGINAL_LABEL_CANONICAL_PUBLISHER_FIRST_GATES',
+                json.dumps([(x['original_direct_label'],
+                             x['first_unproved_source_canonical_guard'],
+                             x['source_room_face_record_id']) for x in gates],
+                           sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-maryborough-native-label-publisher-first-gates
+          path: gpt2-original-source-canonical-word-first-gates.json
+          retention-days: 30
