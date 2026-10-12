@@ -138,11 +138,12 @@ def compare_source_membership(before: dict, after: dict) -> dict:
                 raise ValueError(f"{label} semantic source record mismatches {field}")
     for field in _SEMANTIC_MEMBERS:
         compare_ids("semantic_inventory.record." + field, a.get(field), b.get(field))
-    for field in ("record_id", "decision_scope_id", "snapshot_id", "revision_id",
+    for field in ("record_id", "document_id", "schema_version", "page_ids",
+                  "decision_scope_id", "decision_scope_kind", "snapshot_id", "revision_id",
                   "physical_opening_universe_complete", "structural_enumeration_complete",
                   "reason_codes"):
         compare_value("semantic_inventory.record." + field, a.get(field), b.get(field))
-    for field in ("status", "reason_codes"):
+    for field in ("status", "reason_codes", "schema_version"):
         if (field in old_sem) != (field in new_sem):
             raise ValueError(f"missing semantic inventory field: {field}")
         if field in old_sem:
