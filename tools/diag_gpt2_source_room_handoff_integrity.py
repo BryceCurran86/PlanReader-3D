@@ -104,17 +104,34 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
     grouped={}
     for room in eligible:
         grouped.setdefault(_name(room.room_label),[]).append(room)
-    floor_ids=Counter(getattr(f,"canonical_floor_id",None) for f in floors)
+    # Index only exact source-owned typed receipt IDs. An upstream malformed
+    # (possibly unhashable) ID is an unavailable owner, never a dictionary
+    # address, and must not abort the diagnostic before fail-closed gates run.
+    floor_ids=Counter(
+        identity for f in floors
+        for identity in (getattr(f,"canonical_floor_id",None),)
+        if _owned(identity)
+    )
     floor_by_room={}
     for floor in floors:
-        floor_by_room.setdefault(getattr(floor,"room_entity_id",None),[]).append(floor)
+        owner=getattr(floor,"room_entity_id",None)
+        if _owned(owner):
+            floor_by_room.setdefault(owner,[]).append(floor)
     q_ids=Counter(getattr(q,"quantity_id",None) for q in quantities)
     # Room-area producer QuantityEvidence is explicitly keyed to original
     # room.face_id, NOT to a canonical floor ID. Its source receipt/evidence
     # and SHA/revision/viewport must be authenticated before the later
     # floor metric projection can be checked.
-    room_ids=Counter(getattr(r,"physical_room_id",None) for r in eligible)
-    face_ids=Counter(getattr(r,"source_room_face_record_id",None) for r in eligible)
+    room_ids=Counter(
+        identity for r in eligible
+        for identity in (getattr(r,"physical_room_id",None),)
+        if _owned(identity)
+    )
+    face_ids=Counter(
+        identity for r in eligible
+        for identity in (getattr(r,"source_room_face_record_id",None),)
+        if _owned(identity)
+    )
     direct_labels=Counter(getattr(r,"room_label_binding_record_id",None)
                           for r in eligible if _owned(getattr(r,"room_label_binding_record_id",None)))
     text_observations=Counter(id for r in eligible
@@ -144,6 +161,7 @@ def report_source_room_handoff(claim, *, original_source_sha, targets=NAMES):
                     or not _owned(getattr(r,"snapshot_id",None))
                     or not _owned(getattr(r,"decision_scope_id",None))
                     or not _owned(getattr(r,"viewport_id",None))
+                    or not _owned(getattr(r,"canonical_room_id",None))
                     or not _owned(room_id) or not _owned(face_id)
                     or room_ids[room_id]!=1 or face_ids[face_id]!=1):
                 gate="SOURCE_ROOM_FACE_IDENTITY_CONFLICT"
