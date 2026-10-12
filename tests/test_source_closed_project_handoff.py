@@ -1202,3 +1202,34 @@ def test_missing_original_pdf_does_not_create_output_directory(tmp_path):
             project_id="project-a", workspace_id=1, output_dir=output,
         )
     assert not output.exists()
+
+
+@pytest.mark.parametrize("unsafe_path", ["output_dir", "family_runs"])
+def test_signed_output_directory_symlink_cannot_redirect_customer_rows(
+    tmp_path, monkeypatch, unsafe_path,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"authenticated-original-bytes")
+    other_workspace = tmp_path / "foreign-workspace"
+    other_workspace.mkdir()
+    output = tmp_path / "intended-output"
+    if unsafe_path == "output_dir":
+        output.symlink_to(other_workspace, target_is_directory=True)
+    else:
+        output.mkdir()
+        (output / "family_runs").symlink_to(
+            other_workspace, target_is_directory=True,
+        )
+    def _do_not_run(*args, **kwargs):
+        pytest.fail("symlinked customer seal output must be rejected before source read")
+    monkeypatch.setattr(handoff, "_source_page_scopes", _do_not_run)
+    with pytest.raises(FileExistsError, match="symlink"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    assert source.read_bytes() == b"authenticated-original-bytes"
+    assert list(other_workspace.iterdir()) == []
+    assert not (output / "source_attempt_preflight.json").exists()
+    assert not (output / "production_summary.json").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
