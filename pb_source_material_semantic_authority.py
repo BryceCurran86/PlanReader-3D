@@ -487,6 +487,29 @@ def _trusted_words_by_page(
             # receipt. Treat a missing receipt as a source-integrity failure
             # rather than silently dropping a word.
             raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+        # The source material text authority is a consumer, not an owner of
+        # document identity or native word ordinals. Never str()/int()-cast a
+        # forged parent, foreign revision or fractional PDF block index into
+        # a new source-owned finish occurrence.
+        if (
+            type(receipt.parent_observation_id) is not str
+            or receipt.parent_observation_id != observation_id
+            or type(receipt.document_id) is not str
+            or receipt.document_id != published.revision.document_id
+            or type(receipt.revision_id) is not str
+            or receipt.revision_id != published.revision.revision_id
+            or type(receipt.source_sha256) is not str
+            or receipt.source_sha256 != published.revision.source_sha256
+            or type(receipt.page_id) is not str
+            or not receipt.page_id or receipt.page_id != receipt.page_id.strip()
+            or type(receipt.source_partition_id) is not str
+            or type(receipt.raw_text) is not str
+            or any(
+                v is not None and (type(v) is not int or v < 0)
+                for v in (receipt.block_no, receipt.line_no, receipt.word_no)
+            )
+        ):
+            raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
         # Text/glyph geometry is an original producer source receipt, never
         # a user-entered or JSON-coerced coordinate. NaN/Inf passes ordered
         # bbox comparisons and can cross a viewport trust boundary silently.
@@ -507,7 +530,7 @@ def _trusted_words_by_page(
             or bbox[3] <= bbox[1]
         ):
             raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
-        page_id = str(receipt.page_id)
+        page_id = receipt.page_id
         trusted_text = (
             str(result.trusted_text)
             if (
@@ -523,12 +546,12 @@ def _trusted_words_by_page(
             _TrustedTextWord(
                 observation_id=observation_id,
                 page_id=page_id,
-                source_partition_id=str(receipt.source_partition_id or ""),
-                text=str(trusted_text or receipt.raw_text or ""),
+                source_partition_id=receipt.source_partition_id,
+                text=str(trusted_text or receipt.raw_text),
                 bbox=bbox,
-                block_no=int(receipt.block_no or 0),
-                line_no=int(receipt.line_no or 0),
-                word_no=int(receipt.word_no or 0),
+                block_no=receipt.block_no if receipt.block_no is not None else 0,
+                line_no=receipt.line_no if receipt.line_no is not None else 0,
+                word_no=receipt.word_no if receipt.word_no is not None else 0,
                 trusted=trusted,
                 reason_codes=reason_codes,
             )
