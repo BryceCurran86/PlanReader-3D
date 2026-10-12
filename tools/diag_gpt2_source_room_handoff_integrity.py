@@ -22,15 +22,39 @@ def _name(v):
 
 
 def _polygon(source):
-    vertices=getattr(source,"polygon_pdf_pts",None)
-    return (isinstance(vertices,(tuple,list)) and len(vertices)>=3
-            and all(isinstance(pt,(tuple,list)) and len(pt)==2
-                    and all(type(x) in (int,float) and math.isfinite(x)
-                            for x in pt) for pt in vertices)
-            and isinstance(getattr(source,"area_page_pts2",None),(int,float))
-            and math.isfinite(source.area_page_pts2)
-            and source.area_page_pts2>0)
+    """Require valid original native geometry before reporting a floor owner.
 
+    A positive upstream area field does not authenticate a self-intersecting
+    native polygon. This diagnostic neither repairs nor measures such a face.
+    """
+    vertices = getattr(source, "polygon_pdf_pts", None)
+    area = getattr(source, "area_page_pts2", None)
+    if not (
+        isinstance(vertices, (tuple, list)) and len(vertices) >= 3
+        and all(
+            isinstance(pt, (tuple, list)) and len(pt) == 2
+            and all(type(value) in (int, float) and math.isfinite(value)
+                    for value in pt)
+            for pt in vertices
+        )
+        and type(area) in (int, float)
+        and math.isfinite(area) and area > 0
+    ):
+        return False
+    # Original-source room polygons may be open vertex rings (no repeated
+    # final point); Shapely validates closure, crossings and zero area without
+    # changing the vertices. Never use buffer(0) or polygon repair here.
+    from shapely.geometry import Polygon
+    try:
+        native_face = Polygon(vertices)
+        return (
+            not native_face.is_empty
+            and native_face.is_valid
+            and native_face.area > 0
+            and len(native_face.interiors) == 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 def _source(obj,sha):
     return getattr(obj,"source_sha256",None)==sha
