@@ -885,3 +885,87 @@ def test_invalid_family_group_fails_before_source_scope_resolution(
             output_dir=tmp_path / "out",
             family_group="not-a-group",
         )
+
+
+@pytest.mark.parametrize("existing_artifact", [
+    "project-a.json",
+    "project-a.core.json",
+    "project-a.surfaces.json",
+    "family_runs/floor_area.sealed.json",
+    "family_runs/floor_finish_area.sealed.json",
+    "family_runs/opening_area.sealed.json",
+    "family_runs/opening_count.sealed.json",
+    "family_runs/ceiling_area.sealed.json",
+])
+def test_old_signed_customer_handoff_cannot_survive_failed_rerun(
+    tmp_path, monkeypatch, existing_artifact,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"one original source")
+    output = tmp_path / "shared-output"
+    signed = output / existing_artifact
+    signed.parent.mkdir(parents=True, exist_ok=True)
+    signed.write_bytes(b"prior authentic sealed output")
+    monkeypatch.setattr(
+        handoff, "_source_page_scopes",
+        lambda *_: pytest.fail("old seal must be rejected before source production"),
+    )
+    with pytest.raises(FileExistsError, match="existing sealed handoff artifact"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    assert signed.read_bytes() == b"prior authentic sealed output"
+    assert not (output / "source_attempt_preflight.json").exists()
+    assert not (output / "production_summary.json").exists()
+
+
+def test_broken_symlink_seal_is_not_treated_as_safe_empty_output(tmp_path, monkeypatch):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"one original source")
+    output = tmp_path / "shared-output"
+    output.mkdir()
+    (output / "project-a.json").symlink_to(tmp_path / "missing-signed-receipt.json")
+    monkeypatch.setattr(
+        handoff, "_source_page_scopes",
+        lambda *_: pytest.fail("symlink is not clean output"),
+    )
+    with pytest.raises(FileExistsError, match="existing sealed handoff artifact"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+
+
+def test_preflight_only_failed_attempt_may_reuse_output_without_signed_evidence(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"unsealed input")
+    output = tmp_path / "shared-output"
+    output.mkdir()
+    (output / "source_attempt_preflight.json").write_text(
+        '{"status":"OLD_UNSEALED_ATTEMPT"}', encoding="utf-8",
+    )
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _fail(*args, **kwargs):
+        raise RuntimeError("source producer unavailable")
+
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", _fail)
+    with pytest.raises(RuntimeError, match="source producer unavailable"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    import json
+    preflight = json.loads(
+        (output / "source_attempt_preflight.json").read_text(encoding="utf-8")
+    )
+    summary = json.loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )
+    assert preflight["status"] == "SOURCE_INPUT_RECORDED_UNSEALED"
+    assert preflight["benchmark_score_granted"] is False
+    assert summary["status"] == "production_failed"
+    assert not (output / "project-a.json").exists()
