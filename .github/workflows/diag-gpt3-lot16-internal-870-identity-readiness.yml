@@ -1,0 +1,129 @@
+name: DIAG GPT3 Lot16 Internal 870 Identity Readiness
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt3_lot16_internal_870_identity_readiness.py"
+      - "tests/test_gpt3_lot16_internal_870_identity_readiness.py"
+      - ".github/workflows/diag-gpt3-lot16-internal-870-identity-readiness.yml"
+      - "docs/engineering/gpt3_lot16_internal_870_identity_readiness_20261013.md"
+      - "tools/diag_gptmax_source_authority_stages.py"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-lot16-internal-870-readiness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Pending identity fail-closed regressions
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_lot16_internal_870_identity_readiness.py
+          python -m compileall -q tools/diag_gpt3_lot16_internal_870_identity_readiness.py
+          ruff check --select F821,F823 tools/diag_gpt3_lot16_internal_870_identity_readiness.py tests/test_gpt3_lot16_internal_870_identity_readiness.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reauthenticate exact internal 870 source locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=artifacts/gpt3-lot16-internal-870-identity-readiness
+          mkdir -p "$ROOT"
+          git rev-parse HEAD > "$ROOT/producer_head_sha.txt"
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" \
+            --page-id 3 \
+            --source-all-pages \
+            --include-identity-text-receipts \
+            --output "$ROOT/source-report.json"
+
+          PYTHONPATH=. python -u -m tools.diag_gpt3_lot16_internal_870_identity_readiness \
+            --source-report "$ROOT/source-report.json" \
+            --object-universe benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/object_universe.json \
+            --source-manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_lot16_power/source_manifest.json \
+            --sealed-run docs/engineering/lot16_original_identity_reconciliation_20261012/source_sealed_run.json \
+            --active-identity-map docs/engineering/lot16_original_identity_reconciliation_20261012/identity_map.json \
+            --output "$ROOT/readiness.json"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          d=json.loads(Path(
+              "artifacts/gpt3-lot16-internal-870-identity-readiness/readiness.json"
+          ).read_text())
+          assert d["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert d["pending_identity_count"]==6
+          assert d["benchmark_score_granted"] is False
+          assert d["benchmark_accuracy"] is None
+          assert d["active_identity_map_modified"] is False
+          assert d["numeric_quantity_similarity_used"] is False
+          assert d["name_or_description_similarity_used"] is False
+          assert d["ordinal_or_nearest_matching_used"] is False
+
+          expected={
+            "lot16:opening:p3:internal_access:0870_bath":
+              ("physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8","lot16-internal-access-0870-bath-area",False,False),
+            "lot16:opening:p3:internal_access:0870_bed1":
+              ("physical_opening_existence_c3c1e04acd78419e4f707dfcd89c7096","lot16-internal-access-0870-bed1-area",True,False),
+            "lot16:opening:p3:internal_access:0870_bed2":
+              ("physical_opening_existence_ab431bf4eca30b24da97e2fe3b0f424b","lot16-internal-access-0870-bed2-area",True,False),
+            "lot16:opening:p3:internal_access:0870_bed3":
+              ("physical_opening_existence_4b8c096b603c87f06f2692aa00494ab8","lot16-internal-access-0870-bed3-area",True,False),
+            "lot16:opening:p3:internal_access:0870_ensuite":
+              ("physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d","lot16-internal-access-0870-ensuite-area",False,False),
+            "lot16:opening:p3:internal_access:0870_laundry":
+              ("physical_opening_existence_8ecb81b6524804c80710ec323050be6b","lot16-internal-access-0870-laundry-area",True,True),
+          }
+          got={
+            row["benchmark_object_ref"]:(
+              row["physical_opening_id"],
+              row["benchmark_item_id"],
+              row["host_binding_present"],
+              row["host_frame_present"],
+            )
+            for row in d["pending_identities"]
+          }
+          assert got==expected
+          assert all(row["width_authority_present"] is False for row in d["pending_identities"])
+          assert all(row["height_authority_present"] is False for row in d["pending_identities"])
+          assert all(row["status"]=="IDENTITY_READY_QUANTITY_UNSEALED" for row in d["pending_identities"])
+          print(json.dumps(d,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-lot16-internal-870-identity-readiness
+          path: artifacts/gpt3-lot16-internal-870-identity-readiness
+          retention-days: 30
