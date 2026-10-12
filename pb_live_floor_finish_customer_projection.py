@@ -38,7 +38,10 @@ def _measurement_authority(quantity: QuantityEvidence) -> CommercialMeasurementA
         if (
             not isinstance(raw, (tuple, list))
             or len(raw) != 2
-            or any(type(value) is not str or not value.strip() for value in raw)
+            or any(
+                type(value) is not str or not value or value != value.strip()
+                for value in raw
+            )
             or len(set(raw)) != 2
         ):
             raise MissingCommercialAuthorityError(
