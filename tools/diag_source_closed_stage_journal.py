@@ -78,8 +78,6 @@ _METHOD_STAGES = (
     (integration.SourceVisibilityProducer, "augment_with_raster_visible_segments"),
     (SemanticOpeningEnumerationProducer, "publish_page_scope"),
     (PhysicalOpeningAuthority, "_visible_all_structural_candidates"),
-    (PhysicalOpeningAuthority, "_visible_snapshot_records"),
-    (PhysicalOpeningAuthority, "_visible_candidates_for"),
     (integration.SourceVisibilityProducer, "ingest_native_pdf_bytes"),
     (integration.CrossViewFloorFinishProducer, "publish"),
     (integration.CrossViewCeilingFinishProducer, "publish"),
