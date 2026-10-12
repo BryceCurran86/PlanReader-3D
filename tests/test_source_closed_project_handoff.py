@@ -1004,3 +1004,59 @@ def test_interrupted_new_source_attempt_writes_unsealed_summary_first(tmp_path, 
     assert summary["frozen_v2_reconciliation_complete"] is False
     assert summary["combined_run_file"] is None
     assert not (output / "project-a.json").exists()
+
+
+@pytest.mark.parametrize("linked_name", [
+    "source_attempt_preflight.json",
+    "production_summary.json",
+])
+def test_unsealed_preflight_and_summary_symlinks_cannot_modify_original_pdf(
+    tmp_path, monkeypatch, linked_name,
+):
+    source = tmp_path / "original.pdf"
+    original_bytes = b"original immutable source bytes"
+    source.write_bytes(original_bytes)
+    output = tmp_path / "handoff-output"
+    output.mkdir()
+    poisoned = output / linked_name
+    poisoned.symlink_to(source)
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _failed_source(*args, **kwargs):
+        raise RuntimeError("source production did not complete")
+
+    monkeypatch.setattr(
+        handoff, "collect_live_physical_net_wall_claim", _failed_source,
+    )
+    with pytest.raises(RuntimeError, match="source production did not complete"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    import json
+    assert source.read_bytes() == original_bytes
+    assert not poisoned.is_symlink()
+    assert json.loads(
+        (output / "source_attempt_preflight.json").read_text(encoding="utf-8")
+    )["benchmark_score_granted"] is False
+    assert json.loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )["status"] == "production_failed"
+
+
+def test_failed_atomic_summary_replacement_preserves_prior_summary_and_no_temp(
+    tmp_path, monkeypatch,
+):
+    destination = tmp_path / "production_summary.json"
+    destination.write_text('{"status":"old-unsealed"}', encoding="utf-8")
+
+    def _cannot_replace(*args, **kwargs):
+        raise OSError("simulated filesystem interruption")
+
+    monkeypatch.setattr(handoff.os, "replace", _cannot_replace)
+    with pytest.raises(OSError, match="simulated filesystem interruption"):
+        handoff._write_json(destination, {"status": "new-unsealed"})
+    assert destination.read_text(encoding="utf-8") == '{"status":"old-unsealed"}'
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "production_summary.json",
+    ]
