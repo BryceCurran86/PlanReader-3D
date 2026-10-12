@@ -2040,3 +2040,112 @@ def test_original_w4_w2_grid_opposition_report_keeps_native_edge_receipts():
         "source_w2_fragment_identity_unavailable"
     )
     assert invalid_w2["room_geometry_published"] is False
+
+
+def test_original_w2_native_lineage_crosscheck_is_only_diagnostic():
+    """Actual W2 edge + original source metadata still cannot classify a GRID."""
+    import copy
+    from dataclasses import replace
+    from tools.diag_gpt2_grid_component_first_failure import (
+        inspect_original_w4_grid_opposition_first_gate,
+    )
+
+    original = _wall_scope(())
+    record = copy.copy(original.records[0])
+    record.physical_identity = SimpleNamespace(
+        status=SimpleNamespace(value="corroborated"),
+        edge_ids=("e_sep",),
+        source_primitive_ids=("source-line-a",),
+    )
+    record.source_edge_fragments = (
+        SimpleNamespace(edge_id="e_sep", source_primitive_ids=("source-line-a",)),
+    )
+    descriptor = SimpleNamespace(
+        wall_candidate_id="w_sep",
+        source_primitive_ids=("source-line-a",),
+        matched_source_primitive_ids=("source-line-a",),
+        missing_source_primitive_ids=(),
+    )
+    metadata = SimpleNamespace(
+        status="described",
+        page_id=LINEAGE["page_id"],
+        decision_scope_id=LINEAGE["decision_scope_id"],
+        descriptors=(descriptor,),
+    )
+    source = replace(
+        original, records=(record, *original.records[1:]),
+        source_metadata_table=metadata,
+    )
+    output = inspect_original_w4_grid_opposition_first_gate(source, "w_sep")
+    assert output["original_w4_grid_first_gate"] == "source_w2_grid_opposition_missing"
+    assert output["missing_original_grid_opposed_w2_edge_ids_diagnostic_only"] == [
+        "e_sep"
+    ]
+    witness = output["original_w2_fragment_source_receipts_diagnostic_only"][0]
+    assert witness["native_source_primitive_ids"] == ["source-line-a"]
+    assert witness["original_w2_w4_native_lineage_crosschecked_diagnostic_only"] is True
+    assert witness["original_w2_w4_native_lineage_first_gate_diagnostic_only"] == (
+        "w2_w4_shadow_and_native_receipts_agree_role_still_unproven"
+    )
+    assert witness["source_parent_membership_proven"] is False
+    assert witness["source_grid_or_wall_role_authenticated_by_crosscheck"] is False
+    assert output["physical_wall_equivalence_proven"] is False
+    assert output["room_geometry_published"] is False
+
+    # An exact native ID must be cross-checked against BOTH the W4 shadow
+    # identity and the actual source metadata. Shared names alone cannot pass.
+    def first_gate(*, identity=None, table=None, fragments=None):
+        altered = copy.copy(record)
+        altered.physical_identity = identity if identity is not None else (
+            record.physical_identity
+        )
+        altered.source_edge_fragments = fragments if fragments is not None else (
+            record.source_edge_fragments
+        )
+        scoped = replace(
+            source, records=(altered, *source.records[1:]),
+            source_metadata_table=table if table is not None else metadata,
+        )
+        row = inspect_original_w4_grid_opposition_first_gate(scoped, "w_sep")
+        witness = row["original_w2_fragment_source_receipts_diagnostic_only"][0]
+        assert witness["original_w2_w4_native_lineage_crosschecked_diagnostic_only"] is False
+        assert witness["source_grid_or_wall_role_authenticated_by_crosscheck"] is False
+        assert row["original_w4_grid_first_gate"] == "source_w2_grid_opposition_missing"
+        return witness["original_w2_w4_native_lineage_first_gate_diagnostic_only"]
+
+    assert first_gate(identity=SimpleNamespace(
+        status=SimpleNamespace(value="corroborated"),
+        edge_ids=("different-edge",),
+        source_primitive_ids=("source-line-a",),
+    )) == "w2_edge_absent_from_w4_shadow_identity"
+    assert first_gate(identity=SimpleNamespace(
+        status=SimpleNamespace(value="corroborated"),
+        edge_ids=("e_sep",),
+        source_primitive_ids=("foreign-source",),
+    )) == "source_primitive_absent_from_w4_shadow_identity"
+    assert first_gate(table=SimpleNamespace(
+        status="described",
+        page_id="different-source-page",
+        decision_scope_id=LINEAGE["decision_scope_id"],
+        descriptors=(descriptor,),
+    )) == "original_native_scope_metadata_unavailable"
+    assert first_gate(table=SimpleNamespace(
+        status="described",
+        page_id=LINEAGE["page_id"],
+        decision_scope_id=LINEAGE["decision_scope_id"],
+        descriptors=(descriptor, descriptor),
+    )) == "original_native_w4_descriptor_not_unique"
+    assert first_gate(table=SimpleNamespace(
+        status="described",
+        page_id=LINEAGE["page_id"],
+        decision_scope_id=LINEAGE["decision_scope_id"],
+        descriptors=(SimpleNamespace(
+            wall_candidate_id="w_sep",
+            source_primitive_ids=("source-line-a",),
+            matched_source_primitive_ids=(),
+            missing_source_primitive_ids=("source-line-a",),
+        ),),
+    )) == "original_native_source_receipt_unavailable_or_conflicting"
+    assert first_gate(fragments=(
+        SimpleNamespace(edge_id="e_sep", source_primitive_ids=(42,)),
+    )) == "source_fragment_receipt_unavailable"
