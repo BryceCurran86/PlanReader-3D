@@ -2,6 +2,7 @@
 from copy import deepcopy
 from dataclasses import replace
 from hashlib import sha256
+import math
 
 import pytest
 
@@ -30,7 +31,9 @@ def test_real_default_guard_still_raises_and_explicit_shadow_retains_actual_chai
     out=trace(records,w4_identity_abstention_shadow=True)
     row,=out['all_w4_abstained_chain_rows']
     assert row['status']=='abstained'
-    assert row['end_node_ids'][0]==row['end_node_ids'][1]
+    assert row['end_node_ids']==(None,None)
+    assert row['reason_codes']==['w4_boundary_junction_identity_ambiguous']
+    assert all(len(alternatives)==2 for alternatives in row['raw_endpoint_junction_alternatives'])
     assert row['raw_endpoint_node_indices'][0]!=row['raw_endpoint_node_indices'][1]
     assert row['raw_endpoint_positions_pt'][0]!=row['raw_endpoint_positions_pt'][1]
     assert row['candidate_membership_available'] is False
@@ -168,3 +171,70 @@ def test_flank_reader_distinguishes_abstained_membership_from_known_empty_owner_
     assert row['host_publication_allowed'] is False
     kept,=(e for e in row['actual_w2_edge_rows'] if e['edge_id']=='kept')
     assert kept['w4_candidate_membership_available'] is False
+
+
+def two_t_graph():
+    points=[(-10.,0.),(0.,0.),(10.,0.),(0.,10.),
+        (-10.,4e-8),(0.,4e-8),(10.,4e-8),(0.,.1+4e-8)]
+    nodes=[dict(id=i,x=x,y=y) for i,(x,y) in enumerate(points)]
+    edges=[]; adjacency={i:[] for i in range(8)}
+    for key,a,b in [('left',0,1),('right',1,2),('stem',1,3),
+            ('other-left',4,5),('other-right',5,6),('other-stem',5,7)]:
+        x1,y1=points[a];x2,y2=points[b]
+        edges.append(dict(id=key,a=a,b=b,x1=x1,y1=y1,x2=x2,y2=y2,
+            angle_deg=math.degrees(math.atan2(y2-y1,x2-x1)),length_pt=math.hypot(x2-x1,y2-y1)))
+        adjacency[a].append(len(edges)-1);adjacency[b].append(len(edges)-1)
+    for n in nodes: n['degree']=len(adjacency[n['id']])
+    return dict(nodes=nodes,edges=edges,adjacency=adjacency)
+
+
+def test_colliding_real_junction_ids_bind_only_unique_actual_incidence_in_any_order():
+    graph=two_t_graph(); before=deepcopy(graph)
+    junctions,relations=classify_junctions(graph,document_id='d',page_id='1',viewport_id='vp')
+    central=[j for j in junctions if set(j.incident_wall_candidate_ids) in (
+        {'left','right','stem'},{'other-left','other-right','other-stem'})]
+    assert len(central)==2 and central[0].node_id!=central[1].node_id
+    assert tuple(round(v,6) for v in central[0].position_pt)==tuple(round(v,6) for v in central[1].position_pt)
+    def run(j):
+        sink=[]
+        result=assemble_wall_candidates(graph,j,relations,viewport_id='vp',
+            identity_abstention_shadow=True,abstained_chain_rows=sink)
+        return result,sink
+    (walls,mapping),sink=run(junctions)
+    assert run(list(reversed(junctions)))==((walls,mapping),sink)
+    assert mapping['left']==mapping['right']
+    assert mapping['other-left']!=mapping['other-right']
+    assert sink==[] and graph==before
+
+
+def test_competing_identical_incidence_abstains_instead_of_electing_junction():
+    graph=two_t_graph()
+    junctions,relations=classify_junctions(graph,document_id='d',page_id='1',viewport_id='vp')
+    duplicate,=(j for j in junctions if set(j.incident_wall_candidate_ids)=={'left','right','stem'})
+    sink=[]
+    walls,mapping=assemble_wall_candidates(graph,[duplicate,*junctions],relations,viewport_id='vp',
+        identity_abstention_shadow=True,abstained_chain_rows=sink)
+    assert not {'left','right','stem'}&mapping.keys()
+    assert {e['edge_id'] for r in sink for e in r['actual_owned_w3_fragment_rows']}=={'left','right','stem'}
+    assert any('w4_relationship_junction_identity_ambiguous' in r['reason_codes'] for r in sink)
+    assert all(r['status']=='abstained' and r['host_publication_allowed'] is False for r in sink)
+    assert walls
+
+
+def test_distinct_owned_junction_ids_do_not_disguise_coincident_endpoint_geometry():
+    graph=two_t_graph()
+    graph['nodes']=graph['nodes'][:3]
+    graph['nodes'][2].update(x=-10.,y=0.)
+    graph['edges']=graph['edges'][:2]
+    graph['edges'][1].update(x2=-10.,y2=0.,angle_deg=180.)
+    graph['adjacency']={0:[0],1:[0,1],2:[1]}
+    for n in graph['nodes']: n['degree']=len(graph['adjacency'][n['id']])
+    junctions,relations=classify_junctions(graph,document_id='d',page_id='1',viewport_id='vp')
+    sink=[]
+    walls,mapping=assemble_wall_candidates(graph,junctions,relations,viewport_id='vp',
+        identity_abstention_shadow=True,abstained_chain_rows=sink)
+    row,=sink
+    assert walls==[] and mapping=={}
+    assert row['end_node_ids'][0]!=row['end_node_ids'][1]
+    assert row['raw_endpoint_positions_pt'][0]==row['raw_endpoint_positions_pt'][1]
+    assert row['reason_codes']==['w4_coincident_endpoint_geometry_ambiguous']

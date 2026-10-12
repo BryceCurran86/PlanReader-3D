@@ -10,8 +10,9 @@ classify_junctions -> W4 assemble_wall_candidates -> WallCandidate guard.
 No commercial measurement or publication boundary is crossed.
 
 Observed: exact endpoint running means can leave distinct graph node indices
-at identical final coordinates. W3 node identities and W4's junction lookup
-round positions to six decimals. An otherwise simple graph-index chain can
+at identical final coordinates. W3 identities include raw node indices as well
+as six-decimal positions, so those junction records remain distinct. W4's
+position-only lookup overwrites them at the same rounded address. An otherwise simple graph-index chain can
 therefore start/end at the same junction identity; the existing constructor
 correctly refuses it. The authenticated bounded original control reproduces
 this failure identically under legacy/indexed zero snapping. Renaming the
@@ -29,6 +30,20 @@ lineage as an ABSTAINED diagnostic row. Continue the same existing assembly
 loop for other chains. Do not create a substitute wall, merge duplicate nodes,
 change snap/rounding thresholds, elect a junction or bypass the constructor.
 Default callers still execute their exact prior path and raise at the guard.
+
+Related observed ambiguity: relationship lookup elects the first matching
+junction ID if a caller supplies competing records; actual W3 already uses
+node indices to avoid that ID alias. Endpoint lookup overwrites by rounded
+position on the real source. Shadow mode
+must instead retain all matching junctions and require unique actual incident
+edge ownership. Unavailable or competing matches abstain the affected chain;
+do not use a fallback node name to disguise ambiguity. Exact raw node indices
+remain diagnostic addresses, never physical-wall equivalence proof. Index
+these existing records once for lookup; do not build another topology graph.
+Distinct source-owned junction IDs must not disguise identical endpoint
+geometry. A coincident endpoint or non-simple fallback chain also stays
+ABSTAINED, preserving its complete fragment inventory without manufacturing
+a closed wall or a best-effort physical path.
 
 The existing original-source diagnostic will opt in only in a separate third
 mode. Retain the default and original indexed-zero failure controls. Require

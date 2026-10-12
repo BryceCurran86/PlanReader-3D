@@ -150,7 +150,15 @@ jobs:
           for attempt in graph['all_w4_abstained_chain_rows']:
               assert attempt['status']=='abstained' and attempt['candidate_membership_available'] is False
               assert attempt['source_parents_authenticated'] is False
-              assert attempt['end_node_ids'][0]==attempt['end_node_ids'][1]
+              assert attempt['reason_codes']
+              assert set(attempt['reason_codes']) <= {
+                  'a wall candidate cannot start and end at the same node',
+                  'w4_boundary_junction_identity_ambiguous',
+                  'w4_relationship_junction_identity_ambiguous',
+                  'w4_coincident_endpoint_geometry_ambiguous',
+                  'w4_non_simple_chain_topology_ambiguous'}
+              if 'a wall candidate cannot start and end at the same node' in attempt['reason_codes']:
+                  assert attempt['end_node_ids'][0]==attempt['end_node_ids'][1]
               assert attempt['host_publication_allowed'] is False and attempt['physical_wall_authority'] is False
               for fragment in attempt['actual_owned_w3_fragment_rows']:
                   key=fragment['edge_id']; abstained.append(key)
