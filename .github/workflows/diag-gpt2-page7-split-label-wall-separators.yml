@@ -11,6 +11,8 @@ on:
       - "tests/test_gpt2_split_label_wall_separators.py"
       - "tools/diag_gpt2_split_face_collinear_first_gates.py"
       - "tools/diag_gpt2_grid_component_first_failure.py"
+      - "tools/diag_gpt2_freezer_source_crossing_wall_owners.py"
+      - "tests/test_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_split_face_collinear_first_gates.py"
       - ".github/workflows/diag-gpt2-page7-split-label-wall-separators.yml"
   workflow_dispatch:
@@ -37,6 +39,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_split_label_wall_separators.py
           PYTHONPATH=. pytest -q tests/test_gpt2_split_face_collinear_first_gates.py
           PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_freezer_source_crossing_wall_owners.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
         run: |
@@ -256,6 +259,39 @@ jobs:
                   decision_scope_id=selector.decision_scope_id,
               ))
               face_records.extend(face_scope.records)
+          # Original FREEZER W4 index receipts from this SAME producer-owned
+          # source face universe. No spatial wall selection or polygon repair.
+          from tools.diag_gpt2_freezer_source_crossing_wall_owners import (
+              source_room_ring_crossing_wall_owner_census,
+          )
+          # A different valid producer-method/snapshot can mint different
+          # source record IDs for the same immutable PDF. Bind to the EXACT
+          # native word-owned original Freezer face in THIS source run.
+          freezer_labels=[
+              row for scope in scoped_labels for row in scope["records"]
+              if row["room_label"]=="FREEZER"
+          ]
+          assert len(freezer_labels)==1, "original Freezer native word owner not unique"
+          exact_face_id=freezer_labels[0]["source_room_face_record_id"]
+          freezer_source=[
+              rec for rec in face_records if rec.record_id==exact_face_id
+          ]
+          assert len(freezer_source)==1, "original Freezer producer face missing/ambiguous"
+          assert freezer_source[0].source_sha256==sha
+          assert freezer_source[0].page_id=="7"
+          w4_first_gate=source_room_ring_crossing_wall_owner_census(freezer_source[0])
+          assert len(w4_first_gate["original_polygon_crossing_edges_diagnostic_only"])==2
+          assert w4_first_gate["source_room_polygon_repaired"] is False
+          assert w4_first_gate["source_room_metric_area_published"] is False
+          assert w4_first_gate["source_crossing_wall_roles_authenticated"] is False
+          assert w4_first_gate["source_crossing_physical_wall_equivalence_authenticated"] is False
+          print("GPT2_ORIGINAL_FREEZER_CROSSING_EDGE_W4_SOURCE_OWNERS",json.dumps({
+              "original_source_sha256":sha,
+              "source_room_face_record_id":freezer_source[0].record_id,
+              "original_ring_crossing_edge_source_census":w4_first_gate,
+              "new_metric_quantity_claim":False,
+              "benchmark_accuracy":None,
+          },sort_keys=True))
           report_rows={}
           for target, candidates in native_rows.items():
               report_rows[target]=[]
