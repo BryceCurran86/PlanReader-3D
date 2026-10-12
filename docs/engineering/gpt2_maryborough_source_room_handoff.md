@@ -41,3 +41,37 @@ The current canonical floor object may deliberately retain `commercial_quantity_
 The read-only GPT2 handoff therefore reports `producer_floor_area_reissue_quantity_id_observed_only` separately from `first_unproved_authority`, and always publishes `customer_floor_area_seal_verified_by_this_report=False`. It calls the actual publisher only for an exact production `LivePhysicalNetWallClaim`, never a synthetic or name-matched claim, and accepts a reissue only with a unique exact upstream quantity ID, canonical floor ID, original physical room-face receipt, source SHA, FIRM `floor_area` status, exact amount, and producer `row_role` and `commercial_projection_allowed` metadata. Duplicates or contradictory ownership remain unavailable.
 
 The SHA-pinned original 31-page Maryborough source run independently witnessed existing floor-area reissues for **FOOD PREP 13.270425 m², COLD ROOM 25.37875 m² and OFFICE 9.05352 m²**. Its new regression requires exactly those three originals and does not alter 24-object frozen benchmark truth, the downstream customer sealing gate or the independent RCP/floor material occurrence contracts. FREEZER, PWD, AIRLOCK, LAUNDRY, SALES and the remaining unclosed physical rooms still lack admissible metric evidence; DRY STORE remains ABSTAIN. GPT1/GPT3 should validate sealed customer output separately from this diagnostic before claiming any benchmark improvement.
+
+### Original-source customer row verification, separate from official V2 (2026-10-12)
+
+An independently run SHA-pinned production source handoff in [original
+artifact 11750297601](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38253592536/artifacts/11750297601)
+called the actual GPT1 floor-area and canonical-room reissuers and the
+separate GPT3 source-closed customer gate against the *same original
+Maryborough claim*. Its precise evidence counts are **3 FIRM floor-area
+reissues, 3 canonical-room-area reissues, 3 source-closed floor seals and
+3 customer rows verified**, without modifying production commercial flags.
+
+| Room | Original source area quantity | FIRM floor-area reissue | Canonical-room area reissue | FIRM area m² |
+| --- | --- | --- | --- | ---: |
+| FOOD PREP | `qty_be2a3b3108220d48f6f5` | `floor_area_quantity_d62c2f382a0c773ec36f` | `canonical_room_area_quantity_a691af59bcb8a78c474d` | 13.270425 |
+| OFFICE | `qty_29e71bd466a9e5fa1783` | `floor_area_quantity_8bcdc01455538a6a105a` | `canonical_room_area_quantity_3b2be6bc2f91a42ee569` | 9.05352 |
+| COLD ROOM | `qty_9795d69439e85c35b01c` | `floor_area_quantity_6b28b3abaedf519631ed` | `canonical_room_area_quantity_409cc3811baafced5beb` | 25.37875 |
+
+The three records each report
+`CUSTOMER_REVIEW_ROW_VERIFIED_UNSCORED`. Their original physical-room face,
+literal source label, independent documented-dimension evidence and exact
+canonical floor have been cross-checked. Their canonical floors correctly
+retain `metric_geometry_complete=False` and
+`commercial_quantity_authority=False`: a documented FIRM area is not a
+metrically scaled polygon or source-authenticated floor finish. The source
+proof validates *floor area only*. No actual floor-finish, ceiling-lining or
+additional named room has been authenticated.
+
+The new workflow checks all these producer and customer stages in one
+original source extraction and stores
+`original-maryborough-floor-publisher-firstgate.json` beside the existing
+room/face handoff. The **frozen 24-object Maryborough V2 evaluator has not
+run** on that artifact, and `benchmark_accuracy=null` remains required.
+A customer-row verification is not permission to count that row as matched
+within the benchmark tolerance until GPT3 reconciles it.
