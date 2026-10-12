@@ -1,0 +1,101 @@
+name: GPT2 Original Maryborough Raster Line to Canonical Room
+on:
+  pull_request:
+    paths:
+      - "pb_live_canonical_room_composition.py"
+      - "tests/test_gpt2_canonical_room_label_lineage.py"
+      - ".github/workflows/test-gpt2-original-raster-line-canonical-room.yml"
+concurrency:
+  group: gpt2-raster-line-canonical-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Producer-sealed line receipts, cross-face opposition and benchmark isolation
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_canonical_room_label_lineage.py
+          ruff check --select F821,F823 pb_live_canonical_room_composition.py tests/test_gpt2_canonical_room_label_lineage.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+  original-maryborough:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: SHA-verified original source exact face/label lineage (not material quantities)
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          source=Path('documents/sources/Arch_Combined_Maryborough_Service_Station.pdf')
+          result=collect_live_physical_net_wall_claim(
+              source,pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
+          )
+          expected={
+              'AIRLOCK': 'source_room_face_record_a0f786d8997e532c332b1a1c28980d14',
+              'COLD ROOM': 'source_room_face_record_17f0cb15ba5c2f25ff17b12b2ccc5129',
+              'FOOD PREP': 'source_room_face_record_a163b3690c0b2db83f89fcf7465bd831',
+              'FREEZER': 'source_room_face_record_e6faa5d761bcc11de70f4d3a21e94571',
+              'LAUNDRY': 'source_room_face_record_dde9e143bdd9627f96b7d5aaaea51f7f',
+              'OFFICE': 'source_room_face_record_735f9b309cca70f513c9fcd9390e3e10',
+              'PWD': 'source_room_face_record_6722d55c0ce8c8a8706cdcc6094860f9',
+              'SALES': 'source_room_face_record_42bef3e350b3cc042f17107fe610f0d8',
+          }
+          rooms={r.room_label:r for r in result.canonical_rooms if r.room_label}
+          diagnostic={
+              'original_source_sha256':'b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007',
+              'source_owned_expected_faces':expected,
+              'canonical_source_label_faces':{
+                  name:room.source_room_face_record_id
+                  for name,room in sorted(rooms.items())
+              },
+              'canonical_unlabelled_sales_face_count':sum(
+                  r.source_room_face_record_id==expected['SALES'] and not r.room_label
+                  for r in result.canonical_rooms
+              ),
+              'metric_area_or_finish_published_by_this_test':False,
+              'benchmark_accuracy':None,
+          }
+          Path('gpt2-original-raster-line-canonical-sales-proof.json').write_text(
+              json.dumps(diagnostic,sort_keys=True,indent=2)+'\n'
+          )
+          print('GPT2_ORIGINAL_RASTER_LINE_CANONICAL',json.dumps(diagnostic,sort_keys=True))
+          assert len({r.source_room_face_record_id for r in result.canonical_rooms}) == len(result.canonical_rooms)
+          for name,face_receipt in expected.items():
+              assert name in rooms,(name,sorted(rooms),diagnostic)
+              room=rooms[name]
+              assert room.source_room_face_record_id==face_receipt,(name,diagnostic)
+              assert room.room_label_binding_record_id and room.room_label_evidence_ids
+              assert room.source_sha256==diagnostic['original_source_sha256']
+              assert room.metric_geometry_complete is False
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-raster-line-canonical-sales-proof
+          path: gpt2-original-raster-line-canonical-sales-proof.json
+          retention-days: 30
