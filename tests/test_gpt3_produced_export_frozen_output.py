@@ -83,3 +83,74 @@ def test_legitimate_source_owned_output_outside_frozen_root_still_publishes(tmp_
     assert rows[0]["quantity_id"] == "qty-room-1"
     assert rows[0]["trade_category"] is None
     assert rows[0]["customer_output_parity_verified"] is False
+
+
+def test_exported_signed_produced_receipt_can_never_be_overwritten_on_rerun(tmp_path, monkeypatch):
+    _fake_repo(tmp_path, monkeypatch)
+    source, seal, _, _, _ = _source_run(tmp_path)
+    output = tmp_path / "customer" / "produced_items.json"
+    args = _cli_args(source, seal, output)
+    assert exporter.main(args) == 0
+    old = output.read_bytes()
+    with pytest.raises(FileExistsError, match="existing produced-items receipt"):
+        exporter.main(args)
+    assert output.read_bytes() == old
+    assert not list(output.parent.glob(".produced_items.json.*.tmp"))
+
+
+def test_existing_customer_receipt_is_never_replaced_even_by_different_project(tmp_path, monkeypatch):
+    _fake_repo(tmp_path, monkeypatch)
+    source, seal, _, _, _ = _source_run(tmp_path)
+    output = tmp_path / "produced_items.json"
+    original = b"previous independently signed customer result"
+    output.write_bytes(original)
+    with pytest.raises(FileExistsError, match="existing produced-items receipt"):
+        exporter.main(_cli_args(source, seal, output))
+    assert output.read_bytes() == original
+
+
+def test_dangling_customer_output_symlink_cannot_be_replaced(tmp_path, monkeypatch):
+    _fake_repo(tmp_path, monkeypatch)
+    source, seal, _, _, _ = _source_run(tmp_path)
+    destination = tmp_path / "produced_items.json"
+    missing = tmp_path / "other-customer.json"
+    destination.symlink_to(missing)
+    with pytest.raises(FileExistsError, match="existing produced-items receipt"):
+        exporter.main(_cli_args(source, seal, destination))
+    assert destination.is_symlink()
+    assert not missing.exists()
+
+
+def test_unsupported_atomic_create_operation_fails_closed_and_cleans_temporary(
+    tmp_path, monkeypatch,
+):
+    _fake_repo(tmp_path, monkeypatch)
+    source, seal, _, _, _ = _source_run(tmp_path)
+    destination = tmp_path / "customer" / "produced_items.json"
+
+    def _no_hardlinks(*args, **kwargs):
+        raise OSError("filesystem does not support atomic hard links")
+
+    monkeypatch.setattr(exporter.os, "link", _no_hardlinks)
+    with pytest.raises(OSError, match="does not support"):
+        exporter.main(_cli_args(source, seal, destination))
+    assert not destination.exists()
+    assert not list(destination.parent.glob(".*.tmp"))
+
+
+def test_competing_output_writer_race_cannot_be_overwritten(tmp_path, monkeypatch):
+    _fake_repo(tmp_path, monkeypatch)
+    source, seal, _, _, _ = _source_run(tmp_path)
+    destination = tmp_path / "customer" / "produced_items.json"
+    original_link = exporter.os.link
+    competitor_receipt = b"other publisher has already claimed this exact output"
+
+    def _race(*args, **kwargs):
+        destination.write_bytes(competitor_receipt)
+        return original_link(*args, **kwargs)
+
+    monkeypatch.setattr(exporter.os, "link", _race)
+    with pytest.raises(FileExistsError):
+        exporter.main(_cli_args(source, seal, destination))
+    assert destination.read_bytes() == competitor_receipt
+    assert not list(destination.parent.glob(".produced_items.json.*.tmp"))
