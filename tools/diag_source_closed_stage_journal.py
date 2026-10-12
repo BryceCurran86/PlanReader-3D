@@ -55,6 +55,8 @@ _METHOD_STAGES = (
     (integration.SourceVisibilityProducer, "ingest_native_pdf_bytes"),
     (integration.CrossViewFloorFinishProducer, "publish"),
     (integration.CrossViewCeilingFinishProducer, "publish"),
+    (integration.SameViewRoomAreaProducer, "publish"),
+    (integration.CrossViewRoomAreaProducer, "publish"),
 )
 
 
@@ -170,6 +172,9 @@ def main() -> int:
                 output_dir=args.output_dir,
                 family_group=args.family_group,
             )
+    if (summary.get("source_sha256") != source_sha
+            or hashlib.sha256(args.pdf.read_bytes()).hexdigest() != source_sha):
+        raise RuntimeError("original source identity changed during diagnostic run")
     print(json.dumps({
         "original_pdf_sha256": source_sha,
         "journal": str(args.journal),
