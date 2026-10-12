@@ -162,14 +162,9 @@ def _non_abstained(
     return tuple(retained)
 
 
-def _write_json(path: Path, payload: Any) -> None:
-    """Atomically replace only the summary path, never a symlink target.
-
-    A torn or redirectable preflight could make an interrupted production run
-    appear sealed, or damage original source bytes before the final SHA gate.
-    """
+def _write_text_atomic(path: Path, encoded: str) -> None:
+    """Atomically publish one complete artifact without following final symlinks."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -186,14 +181,18 @@ def _write_json(path: Path, payload: Any) -> None:
             temporary_path.unlink(missing_ok=True)
 
 
+def _write_json(path: Path, payload: Any) -> None:
+    """Persist an unsealed source-attempt summary without a torn replacement."""
+    _write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
 def _write_run(
     directory: Path,
     family: str,
     run: SealedSourceClosedRun,
 ) -> Path:
     path = directory / "family_runs" / f"{family}.sealed.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(run.to_json(), encoding="utf-8")
+    _write_text_atomic(path, run.to_json())
     return path
 
 
@@ -718,7 +717,7 @@ def generate_project_handoff(
             else f"{project_id}.{clean_family_group}.json"
         )
         combined_path = output_dir / combined_filename
-        combined_path.write_text(combined.to_json(), encoding="utf-8")
+        _write_text_atomic(combined_path, combined.to_json())
         summary["combined_run_file"] = str(combined_path)
         summary["combined_run_id"] = combined.run_id
         summary["combined_quantity_count"] = len(combined.quantities)
