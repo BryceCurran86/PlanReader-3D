@@ -27,6 +27,13 @@ def _line_png(*, color: str = "black") -> bytes:
     return out.getvalue()
 
 
+def _blank_png() -> bytes:
+    image = Image.new("RGB", (400, 240), "white")
+    out = BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
 def _segment() -> RasterDetectedSegment:
     return RasterDetectedSegment(
         pixel_geometry=(40.0, 120.0, 360.0, 120.0),
@@ -84,8 +91,8 @@ def test_complete_dark_overpaint_remains_foreground_but_erasure_does_not():
         _line_png(color="black"), segment
     )
     assert not raster_segment_centerline_remains_foreground(
-        Image.new("RGB", (400, 240), "white").tobytes(), segment
-    ) if False else True
+        _blank_png(), segment
+    )
 
 
 def test_source_image_segment_is_recovered_when_non_erasing_overlay_breaks_full_detection(
