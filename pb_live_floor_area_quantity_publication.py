@@ -47,6 +47,12 @@ def _valid_source_room_area_quantity(quantity: QuantityEvidence) -> bool:
         or type(quantity.input_entity_ids[0]) is not str
         or not quantity.input_entity_ids[0]
         or quantity.input_entity_ids[0] != quantity.input_entity_ids[0].strip()
+        # The FIRM source identity has both a semantic owner and a typed
+        # entity owner. A copied quantity ID with a different source room
+        # must not be reissued against the originally bound canonical floor.
+        # Check the original source pair before any canonical remapping.
+        or type(quantity.semantic_key) is not str
+        or quantity.semantic_key != f"room_area:{quantity.input_entity_ids[0]}"
         or not isinstance(quantity.evidence_ids, (list, tuple))
         or not quantity.evidence_ids
         or any(type(value) is not str or not value or value != value.strip()
