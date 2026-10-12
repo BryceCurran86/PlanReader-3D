@@ -85,7 +85,10 @@ def _figured_measurement_authority(
     if (
         not isinstance(raw_ids, (tuple, list))
         or len(raw_ids) != 2
-        or any(type(value) is not str or not value.strip() for value in raw_ids)
+        or any(
+                type(value) is not str or not value or value != value.strip()
+                for value in raw_ids
+            )
         or len(set(raw_ids)) != 2
     ):
         return None
