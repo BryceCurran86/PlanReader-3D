@@ -1,0 +1,135 @@
+name: TEST ONLY GPT3 Maryborough Original Surfaces Source
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "tools/run_source_closed_project_handoff.py"
+      - "pb_*floor*.py"
+      - "pb_*ceiling*.py"
+      - "pb_*surface*.py"
+      - "pb_source_room_face_authority.py"
+      - ".github/workflows/test_only_gpt3_maryborough_surfaces_source.yml"
+
+concurrency:
+  group: gpt3-maryborough-surfaces-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-maryborough-surfaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - name: Install source production dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify exact original source SHA against frozen manifest
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-maryborough-original-surfaces
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head_sha.txt"
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path(
+              "benchmarks/frozen_holdout/full_plan_v2/projects/"
+              "au_qld_maryborough_service_station/source_manifest.json"
+          ).read_text(encoding="utf-8"))
+          documents = manifest["source_documents"]
+          assert len(documents) == 1, "unexpected source document universe"
+          document = documents[0]
+          source = Path("documents/sources") / document["name"]
+          assert source.is_file(), "required original architectural PDF missing"
+          assert source.stat().st_size == document["size_bytes"], "original PDF byte size mismatch"
+          digest = hashlib.sha256(source.read_bytes()).hexdigest()
+          assert digest == document["sha256"], "original PDF SHA-256 mismatch"
+          target = Path("artifacts/gpt3-maryborough-original-surfaces/source_sha256.txt")
+          target.write_text(digest + "\n", encoding="utf-8")
+          print("SOURCE SHA VERIFIED:", digest)
+          print("FROZEN MANIFEST STATUS (not changed):", manifest["status"])
+          PY
+      - name: Original Maryborough surfaces source-to-seal handoff (bounded)
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-maryborough-original-surfaces
+          /usr/bin/time -v timeout 3000s python -u tools/run_source_closed_project_handoff.py \
+            --pdf "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" \
+            --project-id au_qld_maryborough_service_station \
+            --family-group surfaces \
+            --workspace-id 1 \
+            --output-dir "$OUT/run" 2>&1 | tee "$OUT/source_run_console.log"
+        env:
+          PYTHONPATH: .
+      - name: Verify published sealed surface families or explain ABSTAIN
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_combine_source_closed_runs import load_verified_sealed_run
+
+          root = Path("artifacts/gpt3-maryborough-original-surfaces")
+          expected_sha = (root / "source_sha256.txt").read_text().strip()
+          summary = json.loads((root / "run" / "production_summary.json").read_text())
+          assert summary["project_id"] == "au_qld_maryborough_service_station"
+          assert summary["source_sha256"] == expected_sha
+          assert summary["family_group"] == "surfaces"
+          assert summary["benchmark_score_granted"] is False
+          assert summary["frozen_v2_reconciliation_complete"] is False
+
+          signed_rows = []
+          for family, path in sorted(summary.get("family_run_files", {}).items()):
+              sealed = load_verified_sealed_run(Path(path))
+              assert sealed.project_id == summary["project_id"]
+              assert set(sealed.source_sha256s) == {expected_sha}
+              signed_rows.append({
+                  "family": family, "quantity_count": len(sealed.quantities),
+                  "quantity_ids": sorted(row.quantity_id for row in sealed.quantities),
+                  "source_sha256s": list(sealed.source_sha256s),
+              })
+          combined_path = summary.get("combined_run_file")
+          if combined_path:
+              combined = load_verified_sealed_run(Path(combined_path))
+              assert combined.project_id == summary["project_id"]
+              assert set(combined.source_sha256s) == {expected_sha}
+              assert len(combined.quantities) == sum(row["quantity_count"] for row in signed_rows)
+          else:
+              assert not signed_rows, "family signed rows without combined source receipt"
+          report = {
+              "source_sha_verified": True,
+              "source_sha256": expected_sha,
+              "project_id": summary["project_id"],
+              "producer_status": summary["status"],
+              "claim_status": summary.get("claim_status"),
+              "claim_reason_codes": summary.get("claim_reason_codes", []),
+              "canonical_counts_diagnostic_not_quantities": summary.get("canonical_counts", {}),
+              "family_counts": summary.get("family_counts", {}),
+              "signed_family_receipts": signed_rows,
+              "source_owned_combined_present": bool(combined_path),
+              "publication_status": "ORIGINAL_SURFACES_SOURCE_ONLY_BENCHMARK_UNPUBLISHED",
+              "benchmark_score_granted": False,
+              "benchmark_accuracy": None,
+              "frozen_v2_reconciliation_complete": False,
+          }
+          (root / "original_surfaces_receipt.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+        env:
+          PYTHONPATH: .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-original-surfaces
+          path: artifacts/gpt3-maryborough-original-surfaces
+          retention-days: 2
