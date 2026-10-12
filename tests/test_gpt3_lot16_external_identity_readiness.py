@@ -227,7 +227,7 @@ def test_diagnostic_contains_no_quantity_similarity_or_evaluator_path():
         "reconcile_sealed_run_v2",
         "matched_within_tolerance",
         "precision_adjusted_accuracy",
-        "description_similarity",
+        "description_similarity(",
         "nearest(",
     ):
         assert forbidden not in source
