@@ -84,3 +84,31 @@ def test_wrong_pdf_sha_is_rejected_before_starting_stage_or_sealed_output(tmp_pa
         diag.main()
     assert not out.exists()
     assert not journal.exists()
+
+
+def test_original_source_changed_during_handoff_fails_diagnostic_after_run(tmp_path, monkeypatch):
+    original = b"exact-original-pdf-bytes"
+    source = tmp_path / "source.pdf"
+    source.write_bytes(original)
+    expected = hashlib.sha256(original).hexdigest()
+    journal = tmp_path / "stage.jsonl"
+    out = tmp_path / "run"
+
+    def fake_original_handoff(**kwargs):
+        assert kwargs["pdf_path"] == source
+        source.write_bytes(b"tampered-source-after-snapshot")
+        return {"status": "sealed", "source_sha256": expected}
+
+    monkeypatch.setattr(diag, "generate_project_handoff", fake_original_handoff)
+    monkeypatch.setattr("sys.argv", [
+        "stage-profile", "--pdf", str(source),
+        "--expected-sha256", expected,
+        "--project-id", "source-project", "--output-dir", str(out),
+        "--journal", str(journal),
+    ])
+    with pytest.raises(RuntimeError, match="source identity changed"):
+        diag.main()
+    assert journal.exists()
+    events = _events(journal)
+    assert events[0]["event"] == "sha_verified"
+    assert all(event["diagnostic_only"] for event in events)
