@@ -1180,3 +1180,35 @@ def test_rotated_band_coordinate_roundtrip_preserves_native_source_bbox() -> Non
         ) is None
     finally:
         doc.close()
+
+
+@pytest.mark.parametrize("title,rotation", [
+    ("RCP", 90),
+    ("CEILING FINISHES SCHEDULE", 90),
+    ("RCP", 270),
+    ("CEILING FINISHES SCHEDULE", 270),
+])
+def test_native_vertical_sheet_title_length_cannot_inflate_glyph_frame_threshold(
+    title: str, rotation: int,
+) -> None:
+    """Native CAD text Y-advance is text LENGTH, never frame glyph HEIGHT.
+
+    Keep the original rotated-source behavior from #2025 without importing
+    its stale geometry reconstruction or authenticating an unresolved RCP.
+    """
+    from pb_viewport_segmentation import calibrate_viewport_layout
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=800)
+    page.set_rotation(rotation)
+    page.insert_text((430, 480), title, fontsize=9, rotate=90)
+    doc = _reopen(doc)
+    try:
+        calibration = calibrate_viewport_layout(doc[0])
+        assert 0.0 < calibration.median_word_height_pt < 20.0
+        assert 0.0 < calibration.minimum_frame_span_pt < 200.0
+        assert calibration.minimum_frame_span_pt >= (
+            8.0 * calibration.median_word_height_pt
+        )
+    finally:
+        doc.close()
