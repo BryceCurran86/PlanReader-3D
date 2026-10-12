@@ -21,13 +21,14 @@ import math
 from collections.abc import Mapping
 
 from pb_generic_opening_count_authority import (
+    GENERIC_OPENING_COUNT_SCHEMA_VERSION,
     GenericOpeningCountProducer,
     GenericOpeningCountSelector,
 )
 from pb_live_wall_opening_authority_composition import (
     LiveWallOpeningAuthorityComposition,
 )
-from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
+from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence, stable_contract_id
 from pb_opening_tag_normalization import normalize_opening_tag
 from pb_page_view_class_source_adapter import (
     build_source_page_view_class_authority,
@@ -68,12 +69,28 @@ def _valid_explicit_source_count(count: object) -> bool:
     return math.isfinite(number) and number > 0 and number.is_integer()
 
 
-def _source_count_quantity_ready_for_publication(quantity: object) -> bool:
+def _source_count_quantity_ready_for_publication(
+    quantity: object, *, opening_mark: str,
+) -> bool:
     """Final exact-source count check independent of schedule-row discovery."""
     if type(quantity) is not QuantityEvidence:
         return False
+    metadata = quantity.metadata
     return (
-        quantity.family == "opening_count"
+        type(opening_mark) is str
+        and bool(opening_mark)
+        and opening_mark == opening_mark.strip()
+        and quantity.family == "opening_count"
+        # The complete physical source universe is grouped by an EXACT
+        # authenticated schedule mark; a copied FIRM count may not borrow
+        # another mark's identity or change it only at the customer row.
+        and type(quantity.semantic_key) is str
+        and quantity.semantic_key == f"opening_count:{opening_mark}"
+        and isinstance(metadata, Mapping)
+        and metadata.get("opening_mark") == opening_mark
+        and quantity.formula == "sum_of_authenticated_physical_opening_instances"
+        and quantity.formula_version == GENERIC_OPENING_COUNT_SCHEMA_VERSION
+        and quantity.authority == "pdf_scaled"
         and not quantity.abstained
         and quantity.status == "firm"
         and quantity.unit == "ea"
@@ -300,7 +317,9 @@ def publish_live_authenticated_opening_count_quantities(
             result.status is not EvidenceResolutionStatus.CORROBORATED
             or record is None
             or not record.schedule_corroborated
-            or not _source_count_quantity_ready_for_publication(quantity)
+            or not _source_count_quantity_ready_for_publication(
+                quantity, opening_mark=mark,
+            )
         ):
             continue
         # Reauthenticate the *final* quantity returned by the source-count
@@ -322,6 +341,23 @@ def publish_live_authenticated_opening_count_quantities(
             or not set(physical_ids).issubset(binding_selectors)
             or quantity.value != float(record.count)
             or tuple(quantity.input_entity_ids) != tuple(physical_ids)
+            # Reconstruct the original producer's exact count quantity ID
+            # from authenticated full-universe source lineage. A replayed
+            # quantity-id string cannot stand in for this physical/count
+            # and mark binding, even if all displayed numeric fields agree.
+            or quantity.quantity_id != stable_contract_id(
+                "qty_opening_count",
+                {
+                    "family": "opening_count",
+                    "semantic_key": f"opening_count:{mark}",
+                    "document_id": record.document_id,
+                    "revision_id": record.revision_id,
+                    "source_sha256": record.source_sha256,
+                    "snapshot_id": record.snapshot_id,
+                    "count": record.count,
+                    "matched_ids": tuple(physical_ids),
+                },
+            )
             or not _authentic_source_id_universe(receipt_ids)
             or not _authentic_source_id_universe(record.schedule_row_ids)
             or not set(record.schedule_row_ids).issubset(set(receipt_ids))
