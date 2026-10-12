@@ -64,10 +64,13 @@ def test_two_abstained_receipts_cannot_reuse_one_source_identity():
 def test_invalid_unpublished_source_identity_cannot_be_filtered_away(wrong):
     source = _source_area()
     blocked = replace(
-        source, quantity_id=wrong, value=None,
-        abstained=True, status="provisional",
+        source, value=None, abstained=True, status="provisional",
         blocking_reasons=("unavailable",),
     )
+    # A constructor already blocks blank IDs. A deserialised/replayed object
+    # can still carry a mutated original source ID at the sealing boundary;
+    # exercise the exporter rather than failing fixture construction.
+    object.__setattr__(blocked, "quantity_id", wrong)
     with pytest.raises(SourceClosedRunConflictError, match="invalid original room-area"):
         _traces(source, blocked)
 
