@@ -540,11 +540,6 @@ def _verified_source_room_label_for_face(
     return label
 
 
-LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID = (
-    "live_canonical_room_source_polygon_invalid"
-)
-
-
 def _source_room_geometry_complete_diagnostic_only(record) -> bool:
     """Reject incomplete original source rings before canonical completeness.
 
@@ -624,11 +619,6 @@ def _room_object_from_record(
             ]
         )
         label_reason_codes = tuple(room_label_record.reason_codes)
-    if not source_geometry_complete:
-        label_reason_codes = (
-            *label_reason_codes, LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID
-        )
-
     return LiveCanonicalRoomObject(
         canonical_room_id=physical_room_id,
         physical_room_id=physical_room_id,
@@ -814,12 +804,7 @@ def _room_object_from_composite_record(
         room_label=str(record.label),
         room_label_binding_record_id=str(record.label_candidate_record_id),
         room_label_evidence_ids=tuple(record.label_evidence_ids),
-        room_label_reason_codes=(
-            (SOURCE_COMPOSITE_ROOM_FACE_RESOLVED,)
-            if source_geometry_complete else
-            (SOURCE_COMPOSITE_ROOM_FACE_RESOLVED,
-             LIVE_CANONICAL_ROOM_SOURCE_POLYGON_INVALID)
-        ),
+        room_label_reason_codes=(SOURCE_COMPOSITE_ROOM_FACE_RESOLVED,),
     )
 
 
