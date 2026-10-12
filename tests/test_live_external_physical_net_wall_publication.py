@@ -535,3 +535,270 @@ def test_external_wall_refuses_missing_opening_host_or_universe_receipts():
         assert result.opening_universe_record_ids == ()
         assert result.gross_geometry_record_ids == ()
         assert result.whole_wall_role_record_ids == ()
+
+
+def test_external_wall_rejects_foreign_opening_universe_provenance():
+    """Complete means complete for this exact source and wall decision scope."""
+    from dataclasses import replace
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
+    )
+
+    wall_opening, physical_void, gross, roles, _void, _gross = _chain()
+    page_id = gross.traces[0].page_id
+    original = wall_opening.opening_universe_results[page_id]
+    assert original.record is not None
+
+    for changes in (
+        {"document_id": "foreign-document"},
+        {"source_sha256": "f" * 64},
+        {"snapshot_id": "foreign-snapshot"},
+        {"revision_id": "foreign-revision"},
+        {"decision_scope_id": "foreign-decision"},
+        {"page_ids": ("unrelated-page",)},
+    ):
+        forged = replace(original, record=replace(original.record, **changes))
+        altered = replace(
+            wall_opening,
+            opening_universe_results=MappingProxyType({
+                **wall_opening.opening_universe_results, page_id: forged
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=altered,
+            physical_void_composition=physical_void,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH in result.reason_codes
+        assert result.quantity_evidence is None
+        assert result.canonical_walls == ()
+
+
+def test_external_wall_requires_full_universe_result_completeness():
+    """A complete-looking record cannot override unresolved producer verdicts."""
+    from dataclasses import replace
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE,
+    )
+
+    wall_opening, physical_void, gross, roles, _void, _gross = _chain()
+    page_id = gross.traces[0].page_id
+    original = wall_opening.opening_universe_results[page_id]
+    assert original.record is not None
+    for field in (
+        "decision_scope_complete",
+        "source_decode_complete",
+        "semantic_enumeration_complete",
+    ):
+        altered_result = replace(original, **{field: False})
+        altered_composition = replace(
+            wall_opening,
+            opening_universe_results=MappingProxyType({
+                **wall_opening.opening_universe_results,
+                page_id: altered_result,
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=altered_composition,
+            physical_void_composition=physical_void,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_UPSTREAM_INCOMPLETE in result.reason_codes
+        assert result.quantity_evidence is None
+        assert result.opening_universe_record_ids == ()
+        assert result.physical_void_record_ids == ()
+
+
+def test_external_wall_rejects_void_from_different_source_document_or_snapshot():
+    """An opening cannot deduct area from an unrelated gross-wall source."""
+    from dataclasses import replace
+    from pb_physical_opening_void_authority import (
+        PhysicalOpeningVoidAuthority, PhysicalOpeningVoidResult,
+        _AUTHORITY_SEAL as VOID_AUTHORITY_SEAL,
+    )
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_LINEAGE_MISMATCH,
+    )
+
+    wall_opening, physical_void, gross, roles, original, _wall = _chain()
+    selector = physical_void.void_selectors[original.opening_identity_id]
+    for field, value in (
+        ("document_id", "other-document"),
+        ("source_sha256", "f" * 64),
+        ("snapshot_id", "other-snapshot"),
+        ("revision_id", "foreign-revision"),
+        ("page_id", "foreign-page"),
+        ("decision_scope_id", "foreign-scope"),
+    ):
+        forged = replace(original, **{field: value})
+        authority = PhysicalOpeningVoidAuthority(
+            {selector.key: PhysicalOpeningVoidResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("source_void_resolved",),
+                record=forged,
+            )},
+            _seal=VOID_AUTHORITY_SEAL,
+        )
+        altered = replace(
+            physical_void,
+            physical_opening_void_authorities=MappingProxyType({
+                **physical_void.physical_opening_void_authorities,
+                selector.page_id: authority,
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=wall_opening,
+            physical_void_composition=altered,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is not EvidenceResolutionStatus.CORROBORATED
+        assert result.quantity_evidence is None
+        assert result.canonical_walls == ()
+        assert result.physical_void_record_ids == ()
+        assert result.opening_universe_record_ids == ()
+        assert result.external_wall_ids == ()
+        assert result.gross_geometry_record_ids == ()
+        assert result.whole_wall_role_record_ids == ()
+
+
+def test_duplicate_physical_opening_trace_cannot_hide_behind_set_equality() -> None:
+    """One source opening must have exactly one physical void trace."""
+    from dataclasses import replace
+
+    wall_opening, physical_void, gross, roles, _void, _gross = _chain()
+    assert len(physical_void.traces) == 1
+    duplicated = replace(
+        physical_void,
+        traces=(physical_void.traces[0], physical_void.traces[0]),
+    )
+    result = compose_live_external_physical_net_wall_publication(
+        wall_opening_composition=wall_opening,
+        physical_void_composition=duplicated,
+        gross_wall_composition=gross,
+        whole_wall_role_composition=roles,
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED in result.reason_codes
+    assert result.quantity_evidence is None
+
+
+@pytest.mark.parametrize("missing_identity", ("", "   "))
+def test_blank_physical_opening_trace_cannot_hide_behind_set_equality(missing_identity) -> None:
+    """A blank additional trace must not be discarded before coverage proof."""
+    from dataclasses import replace
+
+    wall_opening, physical_void, gross, roles, _void, _gross = _chain()
+    forged = replace(
+        physical_void.traces[0],
+        opening_identity_id=missing_identity,
+    )
+    altered = replace(physical_void, traces=(*physical_void.traces, forged))
+    result = compose_live_external_physical_net_wall_publication(
+        wall_opening_composition=wall_opening,
+        physical_void_composition=altered,
+        gross_wall_composition=gross,
+        whole_wall_role_composition=roles,
+    )
+    assert result.status is EvidenceResolutionStatus.CONFLICT
+    assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_VOID_UNRESOLVED in result.reason_codes
+    assert result.quantity_evidence is None
+
+
+def test_external_net_wall_rejects_sub_tolerance_right_or_top_void_overhang():
+    """An opening outside the source wall cannot become an accepted deduction."""
+    from dataclasses import replace
+    import pytest
+    from pb_physical_opening_void_authority import (
+        PhysicalOpeningVoidAuthority,
+        PhysicalOpeningVoidResult,
+        _AUTHORITY_SEAL as VOID_AUTHORITY_SEAL,
+    )
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+    )
+
+    wall_opening, physical_void, gross, roles, original, wall = _chain()
+    opening_id = original.opening_identity_id
+    selector = physical_void.void_selectors[opening_id]
+    for coordinate, boundary in (
+        ("u1", float(wall.length_m)),
+        ("z1", float(wall.height_m)),
+    ):
+        # Smaller than the former 1e-9 m tolerance, but physically outside.
+        forged = replace(original, **{coordinate: boundary + 5e-10})
+        source_result = PhysicalOpeningVoidResult(
+            status=EvidenceResolutionStatus.CORROBORATED,
+            reason_codes=("source_void_resolved",),
+            record=forged,
+        )
+        source_authority = PhysicalOpeningVoidAuthority(
+            {selector.key: source_result}, _seal=VOID_AUTHORITY_SEAL
+        )
+        altered = replace(
+            physical_void,
+            physical_opening_void_authorities=MappingProxyType(
+                {**physical_void.physical_opening_void_authorities,
+                 selector.page_id: source_authority}
+            ),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=wall_opening,
+            physical_void_composition=altered,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID in result.reason_codes
+        assert result.quantity_evidence is None
+        assert result.physical_void_record_ids == ()
+        assert result.opening_universe_record_ids == ()
+        assert result.gross_geometry_record_ids == ()
+        assert result.whole_wall_role_record_ids == ()
+        assert result.canonical_walls == ()
+
+
+def test_external_net_wall_rejects_sub_tolerance_left_or_bottom_void_overhang():
+    """A void fractionally outside u=0 or z=0 must not be deducted."""
+    from dataclasses import replace
+    from pb_physical_opening_void_authority import (
+        PhysicalOpeningVoidAuthority,
+        PhysicalOpeningVoidResult,
+        _AUTHORITY_SEAL as VOID_AUTHORITY_SEAL,
+    )
+    from pb_live_external_physical_net_wall_publication import (
+        LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID,
+    )
+
+    wall_opening, physical_void, gross, roles, original, _wall = _chain()
+    selector = physical_void.void_selectors[original.opening_identity_id]
+    for coordinate in ("u0", "z0"):
+        forged = replace(original, **{coordinate: -5e-10})
+        source_authority = PhysicalOpeningVoidAuthority(
+            {selector.key: PhysicalOpeningVoidResult(
+                status=EvidenceResolutionStatus.CORROBORATED,
+                reason_codes=("source_void_resolved",),
+                record=forged,
+            )},
+            _seal=VOID_AUTHORITY_SEAL,
+        )
+        altered = replace(
+            physical_void,
+            physical_opening_void_authorities=MappingProxyType({
+                **physical_void.physical_opening_void_authorities,
+                selector.page_id: source_authority,
+            }),
+        )
+        result = compose_live_external_physical_net_wall_publication(
+            wall_opening_composition=wall_opening,
+            physical_void_composition=altered,
+            gross_wall_composition=gross,
+            whole_wall_role_composition=roles,
+        )
+        assert result.status is EvidenceResolutionStatus.CONFLICT
+        assert LIVE_EXTERNAL_PHYSICAL_NET_WALL_GEOMETRY_INVALID in result.reason_codes
+        assert result.quantity_evidence is None

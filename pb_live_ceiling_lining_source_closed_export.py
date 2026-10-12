@@ -33,6 +33,8 @@ def build_live_ceiling_lining_source_traces(
 ) -> Mapping[str, CommercialTakeoffSourceTrace]:
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
+    if type(workspace_id) is not int or workspace_id <= 0:
+        raise SourceClosedRunConflictError("ceiling workspace_id requires exact positive integer")
 
     rooms_by_canonical_id = {}
     rooms_by_physical_id = {}
@@ -93,20 +95,20 @@ def build_live_ceiling_lining_source_traces(
         metadata = (
             quantity.metadata if isinstance(quantity.metadata, Mapping) else {}
         )
-        figured_ids = tuple(
-            sorted(
-                {
-                    _clean(value)
-                    for value in (metadata.get("figured_dimension_ids") or ())
-                    if _clean(value)
-                }
-            )
-        )
-        if len(figured_ids) != 2:
+        # Native figured dimensions are source-owned IDs. Trimming/deduping
+        # a forged imported pair can fabricate two admissible measuring axes.
+        original_figured_ids = metadata.get("figured_dimension_ids")
+        if (
+            type(original_figured_ids) not in (tuple, list)
+            or len(original_figured_ids) != 2
+            or any(type(value) is not str or not value or value != value.strip()
+                   for value in original_figured_ids)
+            or len(set(original_figured_ids)) != 2
+        ):
             raise SourceClosedRunConflictError(
-                f"documented ceiling quantity lacks figured dimension pair: "
-                f"{quantity.quantity_id}"
+                f"documented ceiling quantity lacks exact figured dimension pair: {quantity.quantity_id}"
             )
+        figured_ids = tuple(sorted(original_figured_ids))
 
         canonical_ceiling_id = _clean(quantity.input_entity_ids[0])
         ceiling = ceilings.get(canonical_ceiling_id)
@@ -141,6 +143,10 @@ def build_live_ceiling_lining_source_traces(
                 f"{quantity.quantity_id}"
             )
 
+        if type(quantity.value) not in (int, float) or type(ceiling.area_m2) not in (int, float):
+            raise SourceClosedRunConflictError(
+                f"ceiling quantity is not typed metric: {quantity.quantity_id}"
+            )
         try:
             value = float(quantity.value)
             ceiling_value = float(ceiling.area_m2)
@@ -197,38 +203,62 @@ def build_live_ceiling_lining_source_traces(
                 f"ceiling quantity row role mismatch: {quantity.quantity_id}"
             )
 
-        evidence_ids = tuple(
-            dict.fromkeys(
-                _clean(value)
-                for value in ceiling.evidence_ids
-                if _clean(value)
-            )
-        )
-        if not evidence_ids or not set(quantity.evidence_ids).issubset(
-            set(evidence_ids)
-        ):
+        # Reject malformed original producer receipts without trimming
+        # source IDs or silently deduplicating a disputed observation.
+        for receipts in (ceiling.evidence_ids, quantity.evidence_ids):
+            if (
+                type(receipts) not in (tuple, list) or not receipts
+                or any(type(v) is not str or not v or v != v.strip() for v in receipts)
+                or len(set(receipts)) != len(receipts)
+            ):
+                raise SourceClosedRunConflictError(
+                    f"canonical ceiling trace receipts are invalid: {quantity.quantity_id}"
+                )
+        evidence_ids = tuple(ceiling.evidence_ids)
+        if not set(quantity.evidence_ids).issubset(set(evidence_ids)):
             raise SourceClosedRunConflictError(
-                f"canonical ceiling trace does not cover quantity evidence: "
-                f"{quantity.quantity_id}"
+                f"canonical ceiling trace does not cover quantity evidence: {quantity.quantity_id}"
             )
 
-        points = tuple(ceiling.polygon_pdf_pts or ())
-        source_bbox = None
-        if points:
-            try:
-                xs = tuple(float(point[0]) for point in points)
-                ys = tuple(float(point[1]) for point in points)
-            except (TypeError, ValueError, IndexError) as exc:
+        points = ceiling.polygon_pdf_pts
+        if type(points) not in (tuple, list) or len(points) < 3:
+            raise SourceClosedRunConflictError(
+                f"canonical ceiling polygon is invalid: {quantity.quantity_id}"
+            )
+        checked = []
+        for point in points:
+            if (type(point) not in (tuple, list) or len(point) != 2
+                    or any(type(v) not in (int, float) for v in point)):
                 raise SourceClosedRunConflictError(
-                    f"canonical ceiling polygon is invalid: "
-                    f"{quantity.quantity_id}"
+                    f"canonical ceiling polygon is invalid: {quantity.quantity_id}"
+                )
+            try:
+                x, y = float(point[0]), float(point[1])
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise SourceClosedRunConflictError(
+                    f"canonical ceiling polygon is invalid: {quantity.quantity_id}"
                 ) from exc
-            if xs and ys:
-                source_bbox = (min(xs), min(ys), max(xs), max(ys))
+            if not math.isfinite(x) or not math.isfinite(y):
+                raise SourceClosedRunConflictError(
+                    f"canonical ceiling polygon is invalid: {quantity.quantity_id}"
+                )
+            checked.append((x, y))
+        xs, ys = [p[0] for p in checked], [p[1] for p in checked]
+        doubled_area = math.fsum(
+            checked[i][0] * checked[(i + 1) % len(checked)][1]
+            - checked[(i + 1) % len(checked)][0] * checked[i][1]
+            for i in range(len(checked))
+        )
+        if (max(xs) <= min(xs) or max(ys) <= min(ys)
+                or not math.isfinite(doubled_area) or abs(doubled_area) <= 2e-9):
+            raise SourceClosedRunConflictError(
+                f"canonical ceiling polygon is invalid: {quantity.quantity_id}"
+            )
+        source_bbox = (min(xs), min(ys), max(xs), max(ys))
 
         trace = CommercialTakeoffSourceTrace(
-            workspace_id=int(workspace_id),
-            project_id=str(project_id),
+            workspace_id=workspace_id,
+            project_id=project_id,
             document_id=ceiling.document_id,
             source_sha256=ceiling.source_sha256,
             source_page=str(ceiling.source_page),

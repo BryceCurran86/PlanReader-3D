@@ -47,13 +47,18 @@ def join_graphic_state(graph,records,source_segments):
         seen.add(key)
         matched=sorted(set(parents)&styles.keys());missing=sorted(set(parents)-styles.keys())
         lineage=lineage_from_source_segments([s for p in matched for s in styles[p]])
+        known_values={r['id'] for r in lineage['source_records'] if any(
+            r.get(f+'_present') for f in ('width','stroke','fill','layer','dashes','clip'))}
+        unavailable_values=sorted(set(parents)-known_values)
         rows.append(dict(edge_id=key,source_observation_ids=sorted(parents),
             w2_fragment_geometry_pt=edge['w2_fragment_geometry_pt'],w3_retained=edge['w3_retained'],
             matched_graphic_state_source_ids=matched,missing_graphic_state_source_ids=missing,
             source_parent_ownership_available=bool(parents),
             status=(EvidenceResolutionStatus.CANDIDATE.value if parents else EvidenceResolutionStatus.ABSTAINED.value),
             reason_codes=([] if parents else ['derived_fragment_source_parent_unavailable']),
-            all_fragment_parents_have_graphic_state=bool(parents) and not missing,
+            all_fragment_parent_descriptors_available=bool(parents) and not missing,
+            graphic_values_unavailable_source_ids=unavailable_values,
+            all_fragment_parents_have_graphic_state=bool(parents) and not unavailable_values,
             literal_source_graphic_state=lineage,graphic_state_authentication_from_join_alone=False,
             structural_wall_role_proven=False,physical_equivalence_proven=False,
             host_publication_allowed=False))

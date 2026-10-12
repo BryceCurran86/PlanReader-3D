@@ -135,6 +135,12 @@ def build_live_ceiling_area_source_traces(
             )
 
         points = tuple(ceiling.polygon_pdf_pts or ())
+        # A canonical "geometry_complete" flag alone cannot authenticate
+        # an absent physical ceiling source face at the final signed seal.
+        if len(points) < 3:
+            raise SourceClosedRunConflictError(
+                f"ceiling source polygon is invalid or incomplete: {quantity.quantity_id}"
+            )
         source_bbox = None
         if points:
             try:

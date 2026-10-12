@@ -179,6 +179,57 @@ def _sealed_run_proof(
     return not reasons, len(sealed.quantities), reasons
 
 
+
+def _source_authenticated_family_inventory(
+    sealed_root: Path | None, project_id: str, *,
+    source_sha_verified: bool, sealed_run_verified: bool,
+    expected_seal_fingerprint: str | None,
+) -> tuple[list[dict], str]:
+    """Count only exact signed quantities on an independently SHA-proven source.
+
+    A partial original source run can legitimately contain authenticated
+    opening-area or room-area quantities without being a complete physical
+    object universe. Counts are operational handoff evidence, never benchmark
+    matches, completeness or commercial/customer approval.
+    """
+    if (
+        not source_sha_verified or not sealed_run_verified
+        or sealed_root is None or not expected_seal_fingerprint
+    ):
+        return [], "SOURCE_OR_SEAL_NOT_VERIFIED"
+
+    from pb_source_closed_run_export import (
+        SourceClosedRunExportError, sealed_source_closed_run_from_dict,
+    )
+    try:
+        sealed = sealed_source_closed_run_from_dict(
+            _object(sealed_root / project_id / "sealed_run.json")
+        )
+    except (SourceClosedRunExportError, TypeError, ValueError, KeyError,
+            UnicodeError, OSError):
+        return [], "SIGNED_RUN_CHANGED_OR_INVALID"
+    if (
+        sealed.project_id != project_id
+        or sealed.fingerprint != expected_seal_fingerprint
+        or any(not row.lineage_ok for row in sealed.quantities)
+    ):
+        return [], "SIGNED_RUN_CHANGED_OR_INVALID"
+
+    counts: dict[tuple[str, str], list[int]] = {}
+    for row in sealed.quantities:
+        item = counts.setdefault((row.family, row.unit), [0, 0])
+        item[1 if row.abstained else 0] += 1
+    return [
+        {
+            "family": family,
+            "unit": unit,
+            "non_abstained_signed_quantity_count": counts[(family, unit)][0],
+            "abstained_signed_quantity_count": counts[(family, unit)][1],
+        }
+        for family, unit in sorted(counts)
+    ], "SOURCE_SHA_AND_SIGNED_RUN_VERIFIED_UNSCORED"
+
+
 def _safe_finite_quantity_number(value: object) -> bool:
     """Avoid int-to-float overflow in parity for already-decoded quantities."""
     if type(value) not in (int, float):
@@ -598,6 +649,21 @@ def diagnostic_report(
             blockers.append("produced_items_invalid_json_or_shape")
         elif not produced and exists:
             blockers.append("empty_produced_items_unverified")
+        family_inventory, family_inventory_status = _source_authenticated_family_inventory(
+            sealed_root, project_id,
+            source_sha_verified=source_verified,
+            sealed_run_verified=seal_verified,
+            expected_seal_fingerprint=(
+                seal_fingerprints[0] if len(seal_fingerprints) == 1 else None
+            ),
+        )
+        if family_inventory_status == "SIGNED_RUN_CHANGED_OR_INVALID":
+            # The last independent read must not turn a concurrent source
+            # writer's different signed run into accepted GPT3 output.
+            seal_verified = False
+            parity_verified = False
+            seal_reasons.append("sealed_run_changed_during_family_inventory")
+            blockers.append("sealed_run_changed_during_family_inventory")
         first_stage, first_reason = _first_failing_authority_stage(
             source_verified=source_verified,
             source_reasons=source_reasons,
@@ -631,6 +697,8 @@ def diagnostic_report(
             "source_sha_verified": source_verified,
             "sealed_run_verified": seal_verified,
             "sealed_quantity_count": sealed_count,
+            "source_authenticated_family_inventory": family_inventory,
+            "source_authenticated_family_inventory_status": family_inventory_status,
             "produced_sealed_parity_verified": parity_verified,
             "customer_output_bijection_verified": customer_verified,
             "customer_output_bijection_reason_codes": customer_reasons,

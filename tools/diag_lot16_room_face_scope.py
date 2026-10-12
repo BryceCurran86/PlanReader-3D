@@ -25,32 +25,36 @@ from pb_live_physical_net_wall_integration import collect_live_physical_net_wall
 
 
 def _has_firm_metric_floor_receipt(floor) -> bool:
-    """Count only source-measured canonical floors with complete metric receipts.
+    """Count only unchanged typed source area receipts; never infer m².
 
-    LiveCanonicalFloorSurfaceObject has no metric_area_complete property.
-    A geometry-complete but unscaled floor is not a metric area.
+    This is a diagnostic eligibility counter, not an independent metric
+    measuring authority. The source quantity producer still governs FIRM.
     """
-    # A canonical floor can carry printable PDF-point area with no metric
-    # authority. Never treat bool/string/replayed numeric source fields as a
-    # genuine verified m² receipt just because float() could parse them.
-    if type(getattr(floor, "metric_area_m2", None)) not in (int, float):
+    area_value = getattr(floor, "metric_area_m2", None)
+    if type(area_value) not in (int, float):
         return False
     try:
-        area = float(floor.metric_area_m2)
-    except (TypeError, ValueError, OverflowError, AttributeError):
+        area = float(area_value)
+    except (TypeError, ValueError, OverflowError):
         return False
+    source_id = getattr(floor, "metric_area_quantity_id", None)
+    face_id = getattr(floor, "source_room_face_record_id", None)
+    authority = getattr(floor, "metric_area_authority", None)
+    receipts = getattr(floor, "evidence_ids", None)
     return (
-        math.isfinite(area)
-        and area > 0.0
-        and bool(str(floor.metric_area_quantity_id or "").strip())
-        and str(floor.metric_area_authority or "").strip() in {
+        math.isfinite(area) and area > 0.0
+        and type(source_id) is str and bool(source_id)
+        and source_id == source_id.strip()
+        and type(face_id) is str and bool(face_id)
+        and face_id == face_id.strip()
+        and type(authority) is str and authority in {
             MeasurementAuthorityType.DOCUMENTED_DIMENSION.value,
             MeasurementAuthorityType.PDF_SCALED.value,
         }
-        and bool(str(floor.source_room_face_record_id or "").strip())
-        and bool(floor.evidence_ids)
+        and type(receipts) in (tuple, list) and bool(receipts)
+        and all(type(r) is str and r and r == r.strip() for r in receipts)
+        and len(set(receipts)) == len(receipts)
     )
-
 
 
 def _floor_quantity_first_failure(

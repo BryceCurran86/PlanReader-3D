@@ -120,3 +120,16 @@ def test_real_parentless_fragment_is_retained_as_unknown_without_borrowing_graph
     assert row['literal_source_graphic_state']['source_records']==[]
     assert set(row['literal_source_graphic_state']['attribute_status'].values())=={'unknown'}
     assert row['reason_codes']==['derived_fragment_source_parent_unavailable']
+
+
+def test_ordinary_raster_descriptor_is_not_a_claim_of_available_vector_paint():
+    graph,records,segments=fixture()
+    unknown=dict(id='ordinary-raster',source_observation_id='pixel',document_id='original',page_id='1',
+        x1=10.,y1=0.,x2=20.,y2=0.,width=0.,width_present=False,stroke=None,stroke_present=False,
+        fill=None,fill_present=False,layer='',layer_present=False,dashes='',dashes_present=False,
+        clip=None,clip_present=False)
+    row,=shadow.join_graphic_state(graph,records,[*segments,unknown])
+    assert row['all_fragment_parent_descriptors_available'] is True
+    assert row['all_fragment_parents_have_graphic_state'] is False
+    assert row['graphic_values_unavailable_source_ids']==['pixel']
+    assert row['structural_wall_role_proven'] is False

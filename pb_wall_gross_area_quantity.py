@@ -69,6 +69,20 @@ def _source_tuple(quantity: QuantityEvidence) -> tuple[object, object, object]:
     )
 
 
+def _blocked_source_evidence_ids(receipts: object) -> tuple[str, ...]:
+    """Retain only unchanged native source tokens in an ABSTAIN diagnostic.
+
+    Invalid imported receipts must not crash the blocked gross-wall path or
+    appear as authenticated evidence after str()/set() coercion.
+    """
+    if type(receipts) not in (tuple, list):
+        return ()
+    return tuple(
+        value for value in receipts
+        if type(value) is str and value and value == value.strip()
+    )
+
+
 def _abstain(
     *,
     wall_id: str,
@@ -87,7 +101,10 @@ def _abstain(
         "height_fingerprint": height_fp,
         "blockers": list(blockers),
     }
-    evidence_ids = tuple(dict.fromkeys((*length.evidence_ids, *height.evidence_ids)))
+    evidence_ids = tuple(dict.fromkeys(
+        (*_blocked_source_evidence_ids(length.evidence_ids),
+         *_blocked_source_evidence_ids(height.evidence_ids))
+    ))
     return QuantityEvidence(
         quantity_id=stable_contract_id("qty", payload),
         family=GROSS_WALL_AREA_FAMILY,
