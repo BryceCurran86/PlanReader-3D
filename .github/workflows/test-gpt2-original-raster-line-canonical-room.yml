@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - "pb_live_canonical_room_composition.py"
+      - "pb_source_room_face_authority.py"
+      - "tests/test_gpt2_authenticated_same_wall_source_face_recovery.py"
       - "tests/test_gpt2_canonical_room_label_lineage.py"
       - "tests/test_source_room_label_authority_v1.py"
       - ".github/workflows/test-gpt2-original-raster-line-canonical-room.yml"
