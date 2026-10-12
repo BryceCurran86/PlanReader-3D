@@ -128,13 +128,19 @@ def _opening_quantity(
     measurement_record_id = None
     quantity_authority = None
     if basis == "figured_opening_label":
-        measurement_record_id = str(opening.figured_area_record_id or "").strip()
-        if not measurement_record_id or measurement_record_id not in evidence_ids:
+        measurement_record_id = opening.figured_area_record_id
+        if (type(measurement_record_id) is not str
+                or not measurement_record_id
+                or measurement_record_id != measurement_record_id.strip()
+                or measurement_record_id not in evidence_ids):
             return None
         quantity_authority = LIVE_OPENING_FIGURED_AREA_QUANTITY_AUTHORITY
     elif basis == "resolved_opening_geometry":
-        measurement_record_id = str(opening.opening_void_record_id or "").strip()
-        if not measurement_record_id or measurement_record_id not in evidence_ids:
+        measurement_record_id = opening.opening_void_record_id
+        if (type(measurement_record_id) is not str
+                or not measurement_record_id
+                or measurement_record_id != measurement_record_id.strip()
+                or measurement_record_id not in evidence_ids):
             return None
         # Producer-authenticated geometry area is *defined* by complete,
         # metrically resolved orthogonal width and height. Do not let a
@@ -169,13 +175,18 @@ def _opening_quantity(
         quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
     elif basis == "authenticated_elevation_frame":
         measurement_record_id = str(opening.figured_area_record_id or "").strip()
-        if not measurement_record_id or measurement_record_id not in evidence_ids:
+        if (type(measurement_record_id) is not str
+                or not measurement_record_id
+                or measurement_record_id != measurement_record_id.strip()
+                or measurement_record_id not in evidence_ids):
             return None
         quantity_authority = LIVE_OPENING_ELEVATION_FRAME_AREA_QUANTITY_AUTHORITY
     elif basis == "authenticated_frame_schedule":
-        measurement_record_id = str(opening.schedule_binding_record_id or "").strip()
+        measurement_record_id = opening.schedule_binding_record_id
         if (
-            not measurement_record_id
+            type(measurement_record_id) is not str
+            or not measurement_record_id
+            or measurement_record_id != measurement_record_id.strip()
             or measurement_record_id not in evidence_ids
             or str(opening.schedule_row_dimension_basis or "").strip().lower()
             != "frame"
