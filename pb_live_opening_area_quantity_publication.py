@@ -174,7 +174,9 @@ def _opening_quantity(
             return None
         quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
     elif basis == "authenticated_elevation_frame":
-        measurement_record_id = str(opening.figured_area_record_id or "").strip()
+        # Preserve the producer-owned source receipt exactly.  Coercing a
+        # malformed value here would make the later str check meaningless.
+        measurement_record_id = opening.figured_area_record_id
         if (type(measurement_record_id) is not str
                 or not measurement_record_id
                 or measurement_record_id != measurement_record_id.strip()
