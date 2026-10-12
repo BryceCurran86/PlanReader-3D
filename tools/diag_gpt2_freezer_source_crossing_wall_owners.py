@@ -20,13 +20,16 @@ def _source_edge_key(value):
         return None
     points = []
     for point in value:
-        if (
-            not isinstance(point, (tuple, list)) or len(point) != 2
-            or any(type(v) not in (int, float) or not math.isfinite(v)
-                   for v in point)
-        ):
+        if not isinstance(point, (tuple, list)) or len(point) != 2:
             return None
-        points.append(tuple(round(v, 6) for v in point))
+        if any(type(v) not in (int, float) for v in point):
+            return None
+        try:
+            if any(not math.isfinite(v) for v in point):
+                return None
+            points.append(tuple(round(float(v), 6) for v in point))
+        except (ValueError, TypeError, OverflowError):
+            return None
     if points[0] == points[1]:
         return None
     return tuple(sorted(points))
