@@ -98,6 +98,10 @@ def compile_native_dimension_cap_components(
         for i, line in segments.items() if len(line) == 4 and all(math.isfinite(v) for v in line)
         for (x, y), (ox, oy) in ((line[:2], line[2:]), (line[2:], line[:2])))
     components = []
+    # Native text was already authenticated by SourceVisibilityProducer.
+    # Defer until the first admissible original source axis, then classify
+    # each unchanged source word once rather than once per split axis.
+    dimension_words = None
     for line_ids, line in _source_lines(segments):
         if len(line) != 4 or not all(math.isfinite(v) for v in line):
             continue
@@ -107,10 +111,13 @@ def compile_native_dimension_cap_components(
             continue
         length = math.hypot(*_sub(end, start))
         normal = (-axis[1], axis[0])
-        for word in words:
-            if not classify_dimension_token(str(word['text'])).is_linear_dimension:
-                continue
-            text_axis = _unit(tuple(word['axis']))
+        if dimension_words is None:
+            dimension_words = tuple(
+                (word, _unit(tuple(word['axis'])))
+                for word in words
+                if classify_dimension_token(str(word['text'])).is_linear_dimension
+            )
+        for word, text_axis in dimension_words:
             if text_axis is None or abs(_cross(axis, text_axis)) > 1e-4:
                 continue
             x0, y0, x1, y1 = word['bbox']
