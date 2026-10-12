@@ -1197,6 +1197,7 @@ def test_native_vertical_sheet_title_length_cannot_inflate_glyph_frame_threshold
     its stale geometry reconstruction or authenticating an unresolved RCP.
     """
     from pb_viewport_segmentation import calibrate_viewport_layout
+    from pb_native_page_frame import NativePageFrameUnresolved
 
     doc = fitz.open()
     page = doc.new_page(width=600, height=800)
@@ -1204,12 +1205,18 @@ def test_native_vertical_sheet_title_length_cannot_inflate_glyph_frame_threshold
     page.insert_text((430, 480), title, fontsize=9, rotate=90)
     doc = _reopen(doc)
     try:
-        calibration = calibrate_viewport_layout(doc[0])
-        assert 0.0 < calibration.median_word_height_pt < 20.0
-        assert 0.0 < calibration.minimum_frame_span_pt < 200.0
-        assert calibration.minimum_frame_span_pt >= (
-            8.0 * calibration.median_word_height_pt
-        )
+        if rotation == 270:
+            # /Rotate 270 is intentionally NOT supported by native_page_frame.
+            # A synthetic roundtrip cannot authorize real source ownership.
+            with pytest.raises(NativePageFrameUnresolved):
+                calibrate_viewport_layout(doc[0])
+        else:
+            calibration = calibrate_viewport_layout(doc[0])
+            assert 0.0 < calibration.median_word_height_pt < 20.0
+            assert 0.0 < calibration.minimum_frame_span_pt < 200.0
+            assert calibration.minimum_frame_span_pt >= (
+                8.0 * calibration.median_word_height_pt
+            )
     finally:
         doc.close()
 
@@ -1248,19 +1255,25 @@ def test_native_vertical_title_cannot_own_unproved_extreme_aspect_table() -> Non
 def test_native_rotated_viewport_bbox_roundtrip_never_infers_nan_source_geometry(
     rotation: int,
 ) -> None:
-    """Source native geometry survives /Rotate without an inferred location."""
+    """Math-only bbox roundtrip cannot bypass separate native page-frame gate."""
     from pb_viewport_segmentation import _to_native_bbox, _to_visual_bbox
+    from pb_native_page_frame import NativePageFrameUnresolved, native_page_frame
 
     doc = fitz.open()
     page = doc.new_page(width=720, height=420)
     page.set_rotation(rotation)
     native = (64.0, 52.0, 300.0, 280.0)
     try:
+        if rotation == 270:
+            with pytest.raises(NativePageFrameUnresolved):
+                native_page_frame(page)
+        else:
+            assert native_page_frame(page).rotation == rotation
         visual = _to_visual_bbox(page, native)
         restored = _to_native_bbox(page, visual)
         assert restored == pytest.approx(native)
-        assert _to_native_bbox(
-            page, (float("nan"), 0.0, 10.0, 20.0)
-        ) is None
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            assert _to_native_bbox(page, (bad, 0.0, 10.0, 20.0)) is None
+        assert _to_native_bbox(page, (1.0, 2.0, 1.0, 4.0)) is None
     finally:
         doc.close()
