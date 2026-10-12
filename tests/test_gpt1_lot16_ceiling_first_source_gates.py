@@ -89,7 +89,10 @@ def test_missing_rcp_support_cannot_prove_finish_occurrence():
 
 def test_duplicate_source_identity_even_with_abstain_is_disclosed_and_not_traced():
     quantity = _quantity()
-    rejected = replace(quantity, abstained=True, value=None, status="provisional")
+    rejected = replace(
+        quantity, abstained=True, value=None, status="provisional",
+        blocking_reasons=("source_unavailable",),
+    )
     claim = replace(
         _claim(quantity), ceiling_lining_quantity_evidence=(rejected, quantity),
     )
