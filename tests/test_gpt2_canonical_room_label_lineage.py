@@ -236,3 +236,46 @@ def test_original_label_text_proofs_must_be_typed_unique_and_physically_bounded(
     assert canonical.room_label is None
     assert canonical.source_room_face_record_id == face.record_id
     assert canonical.metric_geometry_complete is False
+
+
+@pytest.mark.parametrize("damage", [
+    "missing_observations", "nested_observations", "list_observations",
+    "duplicate_observations", "count_mismatch", "list_word_evidence",
+    "foreign_word_object",
+])
+def test_malformed_source_label_inventory_abstains_before_unique_face_index(damage):
+    source = _face()
+    first = _label(source)
+    good = replace(
+        first,
+        face_id="unrelated-face", source_room_face_record_id="unrelated-face-receipt",
+        record_id="unrelated-label-receipt", observation_ids=("independent-word",),
+        word_evidence=(replace(
+            first.word_evidence[0], observation_id="independent-word",
+            receipt_id="independent-receipt",
+            authority_record_id="independent-authority",
+        ),),
+    )
+    if damage == "missing_observations":
+        damaged = replace(first, observation_ids=None)
+    elif damage == "nested_observations":
+        damaged = replace(first, observation_ids=(["native-word-7"],))
+    elif damage == "list_observations":
+        damaged = replace(first, observation_ids=["native-word-7"])
+    elif damage == "duplicate_observations":
+        damaged = replace(first, observation_ids=("native-word-7", "native-word-7"))
+    elif damage == "count_mismatch":
+        damaged = replace(first, observation_ids=("native-word-7", "other-word"))
+    elif damage == "list_word_evidence":
+        damaged = replace(first, word_evidence=[first.word_evidence[0]])
+    else:
+        damaged = replace(first, word_evidence=(object(),))
+    for records in ((damaged, good), (good, damaged)):
+        assert _unique_source_room_labels_by_face(records) == {
+            "unrelated-face": good
+        }
+        # Even a malformed sibling for the same face cannot be silently
+        # replaced by a separately valid competing original label.
+        assert _unique_source_room_labels_by_face(
+            (first, damaged, good)
+        ) == {"unrelated-face": good}
