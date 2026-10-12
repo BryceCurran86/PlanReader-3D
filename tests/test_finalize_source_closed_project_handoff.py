@@ -254,3 +254,38 @@ def test_signed_source_replaced_during_combination_cannot_publish(
     assert not (tmp_path / "project-a.json").exists()
     if mutation == "swap_valid_signed_run":
         assert core.read_text(encoding="utf-8") == replacement.to_json()
+
+
+def test_active_live_source_handoff_excludes_split_finalizer_same_customer_directory(
+    tmp_path, monkeypatch,
+):
+    """The two publication entrypoints must honour the SAME output lock."""
+    from tools import run_source_closed_project_handoff as live_handoff
+
+    signed = _run("q-core", "opening-1")
+    (tmp_path / "project-a.core.json").write_text(signed.to_json(), encoding="utf-8")
+    source_pdf = tmp_path / "source.pdf"
+    source_pdf.write_bytes(b"test source payload")
+    output = tmp_path / "shared-customer-output"
+    monkeypatch.setattr(live_handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _during_original_source_run(*args, **kwargs):
+        assert (output / ".source_closed_handoff.lock").is_file()
+        with pytest.raises(FileExistsError):
+            finalizer.finalize_split_project_handoff(
+                project_id="project-a", input_dir=tmp_path, output_dir=output,
+            )
+        raise RuntimeError("test producer halted before any signed publication")
+
+    monkeypatch.setattr(
+        live_handoff, "collect_live_physical_net_wall_claim",
+        _during_original_source_run,
+    )
+    with pytest.raises(RuntimeError, match="test producer halted"):
+        live_handoff.generate_project_handoff(
+            pdf_path=source_pdf, project_id="project-a",
+            workspace_id=1, output_dir=output, family_group="core",
+        )
+    assert source_pdf.read_bytes() == b"test source payload"
+    assert not (output / "project-a.json").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
