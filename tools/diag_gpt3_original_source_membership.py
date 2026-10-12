@@ -56,6 +56,26 @@ def _pages(report: dict) -> dict[str, dict]:
     return result
 
 
+def _opening_measurements(report: dict) -> dict[str, dict]:
+    """Compare physical measurement receipts by identity, not unstable row order."""
+    rows = report.get("opening_measurement_traces")
+    if type(rows) is not list:
+        raise ValueError("missing original opening measurement traces")
+    by_id: dict[str, dict] = {}
+    for row in rows:
+        if type(row) is not dict:
+            raise ValueError("malformed opening measurement trace")
+        opening = row.get("opening_identity_id")
+        if type(opening) is not str or not opening or opening != opening.strip() or opening in by_id:
+            raise ValueError("duplicate or invalid physical opening measurement identity")
+        normalized = dict(row)
+        # Only the two unordered original void-reason witnesses may reorder.
+        reasons = row.get("void_reason_codes")
+        normalized["void_reason_codes"] = tuple(sorted(_unique_ids(reasons, opening + ".void_reason_codes")))
+        by_id[opening] = normalized
+    return by_id
+
+
 def compare_source_membership(before: dict, after: dict) -> dict:
     """Report exact original source evidence changes; never grant a score."""
     if type(before) is not dict or type(after) is not dict:
@@ -128,13 +148,21 @@ def compare_source_membership(before: dict, after: dict) -> dict:
         if field not in before or field not in after:
             raise ValueError(f"missing protected original source authority: {field}")
         compare_value(field, before[field], after[field])
-    for field in ("raster_candidate_closures", "source_room_face_scopes",
+    compare_value("opening_measurement_traces",
+                  _opening_measurements(before), _opening_measurements(after))
+    for field in ("composition_status", "composition_reason_codes",
+                  "raster_candidate_audit_available", "summary",
+                  "raster_candidate_closures", "source_room_face_scopes",
                   "source_decode_coverage", "opening_void_status",
                   "opening_void_reason_codes"):
         if (field in before) != (field in after):
             raise ValueError(f"one-sided original source evidence: {field}")
         if field in before:
-            compare_value(field, before[field], after[field])
+            if field == "opening_void_reason_codes":
+                compare_value(field, sorted(_unique_ids(before[field], field + ".before")),
+                              sorted(_unique_ids(after[field], field + ".after")))
+            else:
+                compare_value(field, before[field], after[field])
 
     return {
         "status": "IDENTICAL_DIAGNOSTIC" if not changes else "SOURCE_MEMBERSHIP_DRIFT_UNPUBLISHED",
