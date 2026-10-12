@@ -179,6 +179,31 @@ def _write_run(
     return path
 
 
+def _reject_existing_sealed_handoff(output_dir: Path, project_id: str) -> None:
+    """Do not allow a failed rerun to expose a previous sealed customer output.
+
+    This command writes fixed family filenames inside one output directory.
+    Retrying a failed/unsealed attempt is valid, but reusing a directory with
+    any existing final seal can silently mix revisions or source SHA values.
+    Preserve existing evidence rather than deleting or overwriting it.
+    """
+    possible_seals = (
+        output_dir / f"{project_id}.json",
+        output_dir / f"{project_id}.core.json",
+        output_dir / f"{project_id}.surfaces.json",
+        *(output_dir / "family_runs" / f"{family}.sealed.json"
+          for family in (
+              "floor_area", "floor_finish_area", "opening_area",
+              "opening_count", "ceiling_area",
+          )),
+    )
+    for path in possible_seals:
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(
+                f"existing sealed handoff artifact: {path}; use a new output directory"
+            )
+
+
 def generate_project_handoff(
     *,
     pdf_path: Path,
@@ -201,6 +226,9 @@ def generate_project_handoff(
         raise ValueError(
             "family_group must be one of: all, core, surfaces"
         )
+
+    # Check before touching any prior attempt summary or source material.
+    _reject_existing_sealed_handoff(output_dir, project_id)
 
     source_sha256 = _sha256(pdf_path)
     topology_pages, room_area_support_pages, page_count = _source_page_scopes(
