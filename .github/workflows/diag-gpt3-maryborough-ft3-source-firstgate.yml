@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "tools/diag_gpt3_maryborough_ft3_source_firstgate.py"
+      - "tools/diag_gpt2_ft3_native_text_integrity_firstgate.py"
+      - "tests/test_gpt2_ft3_native_text_integrity_firstgate.py"
       - "tests/test_gpt3_maryborough_ft3_source_firstgate.py"
       - ".github/workflows/diag-gpt3-maryborough-ft3-source-firstgate.yml"
       - "pb_source_material_semantic_authority.py"
@@ -28,7 +30,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_maryborough_ft3_source_firstgate.py
+      - run: PYTHONPATH=. python -m pytest -q tests/test_gpt3_maryborough_ft3_source_firstgate.py tests/test_gpt2_ft3_native_text_integrity_firstgate.py
       - run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
 
   original-source:
@@ -73,6 +75,11 @@ jobs:
           assert report["customer_quantity_published"] is False
           assert report["benchmark_identity_assigned"] is False
           assert report["benchmark_accuracy"] is None
+          text_gate=report["original_page11_native_schedule_word_first_gates_diagnostic_only"]
+          assert text_gate["native_schedule_definition_authenticated_by_this_report"] is False
+          assert text_gate["new_material_occurrences_published"] is False
+          assert text_gate["diagnostic_only"] is True
+          print("FT3_NATIVE_TEXT_INTEGRITY_FIRST_GATE",json.dumps(text_gate,sort_keys=True))
           ft3=report["definitions"]["FT3"]
           if ft3["record_id"] is not None:
               assert ft3["semantic_finish"] == "tile"

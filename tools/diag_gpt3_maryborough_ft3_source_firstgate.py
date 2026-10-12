@@ -17,11 +17,15 @@ import fitz
 
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_source_material_semantic_authority import (
+    _trusted_words_by_page,
     SourceMaterialDefinitionSelector,
     SourceMaterialOccurrenceSelector,
     SourceMaterialSemanticProducer,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+from tools.diag_gpt2_ft3_native_text_integrity_firstgate import (
+    native_finish_schedule_text_first_gates,
+)
 from pb_viewport_segmentation import (
     segment_page_viewports,
     validate_non_overlapping_viewports,
@@ -89,6 +93,20 @@ def inspect_ft3_firstgate(pdf: Path) -> dict[str, Any]:
 
     producer = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
     authority = producer.publish(published.revision.revision_id)
+    # The material producer has already performed its own trusted-text check.
+    # Inspect those same original receipts independently as a diagnostic:
+    # raw FT3 schedule text is NOT a semantic definition or material occurrence.
+    try:
+        native_schedule = native_finish_schedule_text_first_gates(
+            _trusted_words_by_page(source, published).get("11", ())
+        )
+    except RuntimeError as exc:
+        native_schedule = {
+            "original_source_text_integrity_error_diagnostic_only": str(exc),
+            "native_schedule_definition_authenticated_by_this_report": False,
+            "new_material_occurrences_published": False,
+            "diagnostic_only": True,
+        }
     lineage = dict(
         document_id=published.revision.document_id,
         revision_id=published.revision.revision_id,
@@ -166,6 +184,7 @@ def inspect_ft3_firstgate(pdf: Path) -> dict[str, Any]:
         "floor_viewport_id": floor_view.view_id,
         "floor_viewport_bbox": list(floor_view.bounding_box),
         "definitions": definitions,
+        "original_page11_native_schedule_word_first_gates_diagnostic_only": native_schedule,
         "floor_occurrence_scope": {
             "status": _status(scope.status),
             "reason_codes": list(scope.reason_codes),
