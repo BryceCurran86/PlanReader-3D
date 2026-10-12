@@ -306,7 +306,7 @@ def generate_project_handoff(
         # processing so a killed runner cannot leave an old sealed status.
         "status": "source_attempt_recorded_unsealed",
         "benchmark_score_granted": False,
-        "reconciliation_complete": False,
+        "frozen_v2_reconciliation_complete": False,
         "family_counts": {},
         "family_run_ids": {},
         "family_run_files": {},
