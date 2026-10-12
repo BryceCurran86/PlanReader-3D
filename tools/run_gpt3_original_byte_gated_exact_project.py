@@ -147,13 +147,37 @@ def build_original_byte_gated_project_report(
     try:
         sealed_before = _sha256(sealed_run_path)
         identity_before = _sha256(identity_map_path)
-    except OSError:
+        sealed_claim = _object(sealed_run_path)
+        identity_claim = _object(identity_map_path)
+    except (OSError, ValueError, TypeError, UnicodeError):
         return {
             "project_id": project_id, "publication_status": "UNPUBLISHED",
             "score_claim": False, "reconciliation_complete": False,
             "original_source_sha_verified": True,
             "source_sha256s": hashes,
             "reason_codes": ["sealed_or_identity_source_artifact_unavailable"],
+            "project_evaluation": None,
+        }
+    # The unchanged frozen per-project reporter accepts SHA *subsets* for a
+    # diagnostic. The project-only external source-publication gate must
+    # require EVERY original source document in both signed production
+    # envelopes. A partially ingested six-PDF source package cannot publish.
+    required_hashes = set(hashes)
+    claimed_envelopes = [
+        sealed_claim.get("source_sha256s"),
+        identity_claim.get("source_sha256s"),
+    ]
+    if any(
+        type(value) is not list or len(value) != len(required_hashes)
+        or len(set(value)) != len(value) or set(value) != required_hashes
+        for value in claimed_envelopes
+    ):
+        return {
+            "project_id": project_id, "publication_status": "UNPUBLISHED",
+            "score_claim": False, "reconciliation_complete": False,
+            "original_source_sha_verified": True,
+            "source_sha256s": hashes,
+            "reason_codes": ["signed_production_source_package_incomplete"],
             "project_evaluation": None,
         }
 
@@ -163,11 +187,14 @@ def build_original_byte_gated_project_report(
         manifest_path, sealed_run_path, identity_map_path,
     )
     after_ok, after_reasons, after_hashes = _original_sha_gate(manifest, original_files)
-    if (
-        not after_ok or after_hashes != hashes
-        or _sha256(sealed_run_path) != sealed_before
-        or _sha256(identity_map_path) != identity_before
-    ):
+    try:
+        artifacts_unchanged = (
+            _sha256(sealed_run_path) == sealed_before
+            and _sha256(identity_map_path) == identity_before
+        )
+    except OSError:
+        artifacts_unchanged = False
+    if not after_ok or after_hashes != hashes or not artifacts_unchanged:
         return {
             "project_id": project_id, "publication_status": "UNPUBLISHED",
             "score_claim": False, "reconciliation_complete": False,
