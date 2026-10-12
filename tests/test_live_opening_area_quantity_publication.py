@@ -586,3 +586,71 @@ def test_opening_figured_area_retains_independent_valid_authentication_without_g
     assert opening.width_m is None and opening.height_m is None
     assert opening.geometry_complete is False
     assert _opening_quantity(opening) is not None
+
+
+@pytest.mark.parametrize("basis,receipt_field,original_id", [
+    ("figured_opening_label", "figured_area_record_id", "figured-1"),
+    ("resolved_opening_geometry", "opening_void_record_id", "void-1"),
+    ("authenticated_elevation_frame", "figured_area_record_id", "elevation-frame-1"),
+    ("authenticated_frame_schedule", "schedule_binding_record_id", "schedule-binding-1"),
+])
+@pytest.mark.parametrize("replacement", [True, 123, "123", " original ", ""])
+def test_opening_area_never_coerces_forged_source_measurement_id(
+    basis, receipt_field, original_id, replacement,
+):
+    # The original source receipt is owned by the composer, not a user
+    # supplied conversion of bool/int/whitespace to the matching text ID.
+    if basis == "resolved_opening_geometry":
+        opening = replace(
+            _opening(
+                area_m2=1.8, area_basis=basis,
+                figured_area_record_id=None, opening_void_record_id=original_id,
+            ),
+            geometry_complete=True, width_m=2.0, height_m=0.9,
+        )
+    elif basis == "authenticated_frame_schedule":
+        opening = replace(
+            _opening(
+                area_m2=2.16, area_basis=basis,
+                figured_area_record_id=None,
+            ),
+            schedule_binding_record_id=original_id,
+            schedule_declared_width_mm=1200,
+            schedule_declared_height_mm=1800,
+            schedule_row_dimension_basis="frame",
+            evidence_ids=(
+                "opening-1", "source-observation-1", "host-binding-1",
+                "host-frame-1", original_id,
+            ),
+        )
+    else:
+        opening = _opening(
+            area_m2=7.2 if basis == "authenticated_elevation_frame" else 2.172,
+            area_basis=basis, figured_area_record_id=original_id,
+        )
+    assert _opening_quantity(opening) is not None
+    tampered = replace(
+        opening,
+        **{receipt_field: replacement},
+        evidence_ids=tuple(
+            dict.fromkeys((
+                *opening.evidence_ids,
+                str(replacement).strip(),
+                original_id,
+            ))
+        ),
+    )
+    if replacement == original_id:
+        assert _opening_quantity(tampered) is not None
+    else:
+        assert _opening_quantity(tampered) is None
+
+
+def test_opening_area_requires_exact_native_measurement_receipt_not_trimmed_copy():
+    opening = _opening()
+    assert _opening_quantity(opening) is not None
+    assert _opening_quantity(replace(
+        opening,
+        figured_area_record_id=" figured-1 ",
+        evidence_ids=(*opening.evidence_ids, " figured-1 "),
+    )) is None
