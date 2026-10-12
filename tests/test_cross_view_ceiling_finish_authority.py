@@ -611,7 +611,6 @@ def test_bare_grid_without_authenticated_material_meaning_cannot_mint_ceiling():
         source_viewport_ids=("drafting-vp",),
     )
     assert ceiling._definition_is_ceiling_finish(same) is False
-    from dataclasses import replace as dc_replace
     assert ceiling._definition_is_ceiling_finish(
-        dc_replace(same, description="Vinyl faced plaster tile", semantic_finish="")
+        replace(same, description="Vinyl faced plaster tile", semantic_finish="")
     ) is False
