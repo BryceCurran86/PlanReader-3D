@@ -102,10 +102,12 @@ def original_polygon_first_failure_receipt(source):
     from shapely.validation import explain_validity
     try:
         polygon = Polygon(vertices)
-        if polygon.is_empty or polygon.area <= 0:
+        if polygon.is_empty:
             gate = "source_native_polygon_empty_or_nonpositive"
         elif not polygon.is_valid:
             gate = "source_native_polygon_invalid"
+        elif polygon.area <= 0:
+            gate = "source_native_polygon_empty_or_nonpositive"
         elif polygon.interiors:
             gate = "source_native_polygon_has_interiors"
         else:
