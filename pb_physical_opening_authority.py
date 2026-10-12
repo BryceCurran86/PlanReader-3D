@@ -1198,6 +1198,48 @@ class PhysicalOpeningAuthority:
             PhysicalOpeningExistenceResult,
         ] = {}
 
+    def _invalidate_snapshot_caches_after_failed_source_batch(
+        self, snapshot_id: str
+    ) -> None:
+        """Do not preserve poisoned negative proofs after an integrity failure.
+
+        A native dimension batch can fail on EXIT, after scalar G17 candidate
+        discovery has cached ABSTAIN and snapshot records. Clearing only
+        positive existence/page records leaves stale negative cached witnesses
+        even if the original immutable source is subsequently restored.
+        Invalidate *all* source-dependent caches for this exact snapshot.
+        No result is promoted by this cleanup; the next reader must re-prove.
+        """
+        keys_at_snapshot = (
+            "_visible_viewport_scope_cache",
+            "_visible_candidate_cache",
+            "_visible_candidate_membership_cache",
+            "_visible_viewport_candidate_membership_cache",
+            "_visible_existence_cache",
+            "_visible_disposition_cache",
+            "_wall_source_opening_page_proof_cache",
+            "_visible_source_result_cache",
+            "_visible_snapshot_cache",
+            "_raster_primitive_snapshot_cache",
+            "_raster_framed_candidate_cache",
+            "_raster_gap_candidate_audit_cache",
+            "_raster_swing_ambiguous_support_cache",
+            "_raster_existence_cache",
+        )
+        for name in keys_at_snapshot:
+            cache = getattr(self, name)
+            for key in tuple(cache):
+                if isinstance(key, tuple) and len(key) > 3 and key[3] == snapshot_id:
+                    cache.pop(key, None)
+        self._raster_gap_audit_incomplete = {
+            key for key in self._raster_gap_audit_incomplete
+            if len(key) <= 3 or key[3] != snapshot_id
+        }
+        # This auxiliary memo is keyed by opaque candidate id, not snapshot:
+        # clearing it is safer than retaining boxes derived from corrupted
+        # source. It cannot create physical opening evidence.
+        self._raster_candidate_gap_box_cache.clear()
+
     @classmethod
     def from_source_visibility_producer(cls, source_visibility_producer):
         """Build the live viewport-scoped authority from its producer-owned source root."""

@@ -2101,58 +2101,73 @@ def _producer_proven_page_opening_records(
                 and physical_opening_authority._source_visibility_producer is not source_producer)):
         raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
     visibility = source_producer.authority()
-    # A damaged competitor can invalidate a cached uniqueness proof even when
-    # the opening's own six source observations are unchanged.
-    authenticated = visibility.authenticated_visible_observations(published)
-    authenticated_by_id = {
-        observation_id: observation for observation_id, observation in authenticated
-    }
-    # Source-visible IDs are the authority's original observation traversal.
-    # The old W4/G17 loop proved this order directly from the published
-    # snapshot; an authenticated page index may return an equivalent set in
-    # a different order and silently change representative host ownership.
-    rows = tuple(
-        (observation_id, authenticated_by_id[observation_id])
-        for observation_id in published.visible_observation_ids
-        if observation_id in authenticated_by_id
-        and str(authenticated_by_id[observation_id].page_id) == str(page_id)
-    )
-    if (resolved_visible_observations is not None
-            and (len(resolved_visible_observations) != len(rows)
-                 or dict(resolved_visible_observations) != dict(rows))):
-        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+
+    def _authenticated_page_rows(authenticated):
+        # Reassemble in the original published observation order, not the
+        # authenticated batch index's ordering. Do not narrow or skip any
+        # original visible source observation before authenticity is proven.
+        authenticated_by_id = {
+            observation_id: observation for observation_id, observation in authenticated
+        }
+        rows = tuple(
+            (observation_id, authenticated_by_id[observation_id])
+            for observation_id in published.visible_observation_ids
+            if observation_id in authenticated_by_id
+            and str(authenticated_by_id[observation_id].page_id) == str(page_id)
+        )
+        if (resolved_visible_observations is not None
+                and (len(resolved_visible_observations) != len(rows)
+                     or dict(resolved_visible_observations) != dict(rows))):
+            raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+        return rows
+
     key = (published.revision.document_id, published.revision.revision_id,
            published.revision.source_sha256, published.snapshot.snapshot_id,
            str(page_id), str(proof_scope_fingerprint))
     cached = physical_opening_authority._wall_source_opening_page_proof_cache.get(key)
     if cached is not None:
+        # Cached positive proofs must still reauthenticate the *full* original
+        # source, including competitors outside the page and any supplied
+        # producer-owned page index, before reuse.
+        _authenticated_page_rows(visibility.authenticated_visible_observations(published))
         return cached
     proven: dict[str, PhysicalOpeningExistenceRecord] = {}
-    # Reuse the original native dimension COMPONENT proof within only this
-    # producer-owned complete source page transaction. Its exit independently
-    # re-proves all source-visible parent/competitor and native text receipts.
-    # No opening record/page result is published or cached until exit succeeds.
-    with source_producer._native_dimension_source_proof_batch(
-        published, page_id=str(page_id)
-    ):
-        for observation_id, observation in rows:
-            if str(observation.page_id) != str(page_id):
-                raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-            result = physical_opening_authority.prove_existence(ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
-            # Individually unresolved source hypotheses remain ABSTAIN, as
-            # in the scalar source authority. The enclosing transaction has
-            # independently authenticated original native receipts on entry
-            # and re-proves every byte, text and competitor on exit. Do not
-            # upgrade a candidate reason to positive existence or count.
-            opening = result.existence_record
-            if (result.status is EvidenceResolutionStatus.CORROBORATED
-                    and result.proposition == PHYSICAL_OPENING_EXISTS
-                    and opening is not None and str(opening.page_id) == str(page_id)):
-                proven[opening.record_id] = opening
+    # The original source-native dimension transaction fully authenticates
+    # every visible source record on entry, then reauthenticates complete
+    # geometry/parents/competitors/text/bytes on exit. Read the transaction's
+    # already proven rows instead of performing a redundant full prepass.
+    # No opening record/page result is published before exit succeeds.
+    try:
+        with source_producer._native_dimension_source_proof_batch(
+            published, page_id=str(page_id)
+        ) as authenticated:
+            rows = _authenticated_page_rows(authenticated)
+            for observation_id, observation in rows:
+                if str(observation.page_id) != str(page_id):
+                    raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+                result = physical_opening_authority.prove_existence(ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id, observation_id=observation_id))
+                # Individually unresolved source hypotheses remain ABSTAIN, as
+                # in the scalar source authority. The enclosing transaction has
+                # independently authenticated original native receipts on entry
+                # and re-proves every byte, text and competitor on exit. Do not
+                # upgrade a candidate reason to positive existence or count.
+                opening = result.existence_record
+                if (result.status is EvidenceResolutionStatus.CORROBORATED
+                        and result.proposition == PHYSICAL_OPENING_EXISTS
+                        and opening is not None and str(opening.page_id) == str(page_id)):
+                    proven[opening.record_id] = opening
+    except BaseException:
+        # Handle explicitly supplied opening authorities as well as the
+        # source producer's cached authority. Failed exit proofs must never
+        # leave a stale negative/candidate memo in either consumer.
+        physical_opening_authority._invalidate_snapshot_caches_after_failed_source_batch(
+            published.snapshot.snapshot_id
+        )
+        raise
     # Preserve first authenticated source-observation witness order. The
     # previous W4 path consumed dict insertion order, which controls the
     # representative provenance of competing/adjacent physical openings.

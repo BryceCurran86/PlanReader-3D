@@ -1019,7 +1019,12 @@ class SourceVisibilityProducer:
                 self.native_dimension_cap_evidence(
                     selector, opening_support_ids=(first_native,)
                 )
-            yield
+            # Expose the same already fully authenticated source rows to the
+            # internal W4 G17 caller. The enclosing transaction still performs
+            # its independent full snapshot+text validation on exit. This
+            # replaces a redundant pre-entry authentication, not either
+            # mandatory before/after source proof.
+            yield rows
             # Revalidate the FULL original visible source, including original
             # parent lineage and the complete competitor inventory.
             self._native_dimension_proof_batch = None
@@ -1046,15 +1051,12 @@ class SourceVisibilityProducer:
             # proofs available to a later caller after damaged source evidence.
             physical = self._physical_opening_authority_cache
             if physical is not None:
-                snapshot_id = published.snapshot.snapshot_id
-                physical._visible_existence_cache = {
-                    key: value for key, value in physical._visible_existence_cache.items()
-                    if len(key) < 4 or key[3] != snapshot_id
-                }
-                physical._wall_source_opening_page_proof_cache = {
-                    key: value for key, value in physical._wall_source_opening_page_proof_cache.items()
-                    if len(key) < 4 or key[3] != snapshot_id
-                }
+                # The failure can occur after candidate and negative
+                # snapshot evidence have been cached. Evict every affected
+                # source-dependent memo, not just positive page proofs.
+                physical._invalidate_snapshot_caches_after_failed_source_batch(
+                    published.snapshot.snapshot_id
+                )
             raise
         finally:
             self._native_dimension_proof_batch = None
