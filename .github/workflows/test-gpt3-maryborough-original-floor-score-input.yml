@@ -1,0 +1,122 @@
+name: TEST GPT3 Maryborough Original Floor Score Input
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/run_gpt3_maryborough_original_floor_score_input.py"
+      - "tests/test_gpt3_maryborough_original_floor_score_input.py"
+      - ".github/workflows/test-gpt3-maryborough-original-floor-score-input.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-maryborough-floor-score-input-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source-seal score-input regressions
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_maryborough_original_floor_score_input.py
+          python -m compileall -q tools/run_gpt3_maryborough_original_floor_score_input.py
+          ruff check --select F821,F823 tools/run_gpt3_maryborough_original_floor_score_input.py tests/test_gpt3_maryborough_original_floor_score_input.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact ORIGINAL Maryborough source -> sealed floor rows
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-maryborough-original-floor-score-input
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/producer_head_sha.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          /usr/bin/time -v timeout 3000s python -u -m tools.run_gpt3_maryborough_original_floor_score_input \
+            --pdf "$PDF" \
+            --output-dir "$OUT/production" 2>&1 | tee "$OUT/producer_console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_customer_output_verification import verify_sealed_customer_output
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+          root=Path("artifacts/gpt3-maryborough-original-floor-score-input")
+          prod=root/"production"
+          sealed=sealed_source_closed_run_from_dict(json.loads(
+              (prod/"source_sealed_run.json").read_text()
+          ))
+          rows=json.loads((prod/"verified_customer_rows.json").read_text())
+          verified=verify_sealed_customer_output(sealed, rows)
+          receipt=json.loads((prod/"source_score_readiness_UNPUBLISHED.json").read_text())
+          stage=json.loads((prod/"source_stage_diagnostic.json").read_text())
+          expected_sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          expected={
+              "floor_area_quantity_d62c2f382a0c773ec36f":
+                  ("physical_room_floor_surface_10d0d5ddf8103483397512c5a74584f7",13.270425),
+              "floor_area_quantity_8bcdc01455538a6a105a":
+                  ("physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e",9.05352),
+              "floor_area_quantity_6b28b3abaedf519631ed":
+                  ("physical_room_floor_surface_4bca8579c101670bbfa0853cbbfc6f87",25.37875),
+          }
+          assert sealed.project_id=="au_qld_maryborough_service_station"
+          assert tuple(sealed.source_sha256s)==(expected_sha,)
+          assert len(sealed.quantities)==3
+          assert set(verified.verified_quantity_ids)==set(expected)
+          assert verified.valid_quantity_count==3 and verified.customer_row_count==3
+          got={
+              q.quantity_id:(q.object_identity_refs[0],q.value)
+              for q in sealed.quantities
+          }
+          assert got==expected
+          assert receipt["source_sha256"]==expected_sha
+          assert receipt["quantity_count"]==3
+          assert receipt["benchmark_score_granted"] is False
+          assert receipt["benchmark_accuracy"] is None
+          assert receipt["frozen_v2_reconciliation_complete"] is False
+          assert receipt["identity_map_status"]=="INDEPENDENT_ORIGINAL_SOURCE_BINDINGS_REQUIRED"
+          assert stage["source_closed_floor_seal_quantity_count"]==3
+          assert stage["verified_floor_customer_row_count"]==3
+          assert stage["benchmark_accuracy"] is None
+          print(json.dumps({
+              "source_sha_verified": True,
+              "signed_quantity_count": 3,
+              "customer_verified_count": 3,
+              "sealed_run_fingerprint": sealed.fingerprint,
+              "benchmark_status": "IDENTITY_MAP_REQUIRED_UNPUBLISHED",
+          },sort_keys=True))
+          PY
+        env:
+          PYTHONPATH: .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-original-floor-score-input
+          path: artifacts/gpt3-maryborough-original-floor-score-input
+          retention-days: 30
