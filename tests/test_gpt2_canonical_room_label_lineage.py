@@ -138,3 +138,155 @@ def test_distinct_faces_keep_independent_receipts_on_competition():
     assert _unique_source_room_labels_by_face((first, second, competitor)) == {
         "face-8": second
     }
+
+
+@pytest.mark.parametrize("reuse", ["source_receipt", "text_authority"])
+def test_one_original_text_proof_must_not_label_two_physical_faces(reuse):
+    first = _label()
+    native = first.word_evidence[0]
+    second_word = replace(
+        native,
+        observation_id="native-word-8",
+        receipt_id=(
+            native.receipt_id if reuse == "source_receipt" else "receipt-word-8"
+        ),
+        authority_record_id=(
+            native.authority_record_id
+            if reuse == "text_authority" else "authority-word-8"
+        ),
+    )
+    other = replace(
+        first,
+        face_id="face-8",
+        source_room_face_record_id="source-face-record-8",
+        record_id="source-room-label-8",
+        observation_ids=("native-word-8",),
+        word_evidence=(second_word,),
+    )
+    for labels in ((first, other), (other, first)):
+        assert _unique_source_room_labels_by_face(labels) == {}
+    # An unrelated room with independent receipt ancestry survives.
+    independent = replace(
+        other,
+        face_id="face-9",
+        source_room_face_record_id="source-face-record-9",
+        record_id="source-room-label-9",
+        observation_ids=("native-word-9",),
+        word_evidence=(replace(
+            native, observation_id="native-word-9", receipt_id="receipt-word-9",
+            authority_record_id="authority-word-9",
+        ),),
+    )
+    assert _unique_source_room_labels_by_face((first, other, independent)) == {
+        "face-9": independent
+    }
+
+
+@pytest.mark.parametrize("malformed", [
+    "nested_observation", "nonfinite_bbox", "boolean_bbox",
+    "degenerate_bbox", "reversed_bbox", "list_bbox",
+    "boolean_word_number", "negative_word_number",
+    "shared_word_receipt", "shared_word_authority",
+])
+def test_original_label_text_proofs_must_be_typed_unique_and_physically_bounded(malformed):
+    face = _face()
+    first = _label(face)
+    native = first.word_evidence[0]
+    if malformed == "nested_observation":
+        damaged = replace(first, observation_ids=(["native-word-7"],))
+    elif malformed == "nonfinite_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(20.0, 20.0, float("nan"), 28.0)),))
+    elif malformed == "boolean_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(False, 20.0, 55.0, 28.0)),))
+    elif malformed == "degenerate_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(20.0, 20.0, 20.0, 28.0)),))
+    elif malformed == "reversed_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(55.0, 20.0, 20.0, 28.0)),))
+    elif malformed == "list_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=[20.0, 20.0, 55.0, 28.0]),))
+    elif malformed == "boolean_word_number":
+        damaged = replace(first, word_evidence=(replace(native, word_no=True),))
+    elif malformed == "negative_word_number":
+        damaged = replace(first, word_evidence=(replace(native, word_no=-1),))
+    else:
+        next_word = replace(
+            native, observation_id="native-word-8",
+            receipt_id=(
+                native.receipt_id if malformed == "shared_word_receipt"
+                else "receipt-8"
+            ),
+            authority_record_id=(
+                native.authority_record_id
+                if malformed == "shared_word_authority" else "authority-8"
+            ),
+            word_no=1,
+        )
+        damaged = replace(
+            first, observation_ids=("native-word-7", "native-word-8"),
+            word_evidence=(native, next_word),
+        )
+    assert _verified_source_room_label_for_face(face, damaged) is None
+    canonical = _canonical(face, damaged)
+    assert canonical.room_label is None
+    assert canonical.source_room_face_record_id == face.record_id
+    assert canonical.metric_geometry_complete is False
+
+
+@pytest.mark.parametrize("malformed", [
+    "nested_observation", "nonfinite_bbox", "boolean_bbox",
+    "degenerate_bbox", "reversed_bbox", "list_bbox",
+    "boolean_word_number", "negative_word_number",
+    "shared_word_receipt", "shared_word_authority",
+])
+def test_original_label_text_proofs_must_be_typed_unique_and_physically_bounded(malformed):
+    face = _face()
+    first = _label(face)
+    native = first.word_evidence[0]
+    if malformed == "nested_observation":
+        damaged = replace(first, observation_ids=(["native-word-7"],))
+    elif malformed == "nonfinite_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(20.0, 20.0, float("nan"), 28.0)),))
+    elif malformed == "boolean_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(False, 20.0, 55.0, 28.0)),))
+    elif malformed == "degenerate_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(20.0, 20.0, 20.0, 28.0)),))
+    elif malformed == "reversed_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=(55.0, 20.0, 20.0, 28.0)),))
+    elif malformed == "list_bbox":
+        damaged = replace(first, word_evidence=(
+            replace(native, geometry=[20.0, 20.0, 55.0, 28.0]),))
+    elif malformed == "boolean_word_number":
+        damaged = replace(first, word_evidence=(replace(native, word_no=True),))
+    elif malformed == "negative_word_number":
+        damaged = replace(first, word_evidence=(replace(native, word_no=-1),))
+    else:
+        next_word = replace(
+            native, observation_id="native-word-8",
+            receipt_id=(
+                native.receipt_id if malformed == "shared_word_receipt"
+                else "receipt-8"
+            ),
+            authority_record_id=(
+                native.authority_record_id
+                if malformed == "shared_word_authority" else "authority-8"
+            ),
+            word_no=1,
+        )
+        damaged = replace(
+            first, observation_ids=("native-word-7", "native-word-8"),
+            word_evidence=(native, next_word),
+        )
+    assert _verified_source_room_label_for_face(face, damaged) is None
+    canonical = _canonical(face, damaged)
+    assert canonical.room_label is None
+    assert canonical.source_room_face_record_id == face.record_id
+    assert canonical.metric_geometry_complete is False
