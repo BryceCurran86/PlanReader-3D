@@ -1940,3 +1940,85 @@ def test_native_source_geos_exception_cannot_abort_room_handoff(monkeypatch):
             assert result.status is EvidenceResolutionStatus.ABSTAINED
             assert result.records == ()
             assert result.unresolved_label_candidate_ids == ("split_label_1",)
+
+
+def test_original_external_grid_w4_diagnostic_preserves_exact_atomic_edge_and_face():
+    """The source wall's unclosed physical subedge is not an inferred room."""
+    from tools.diag_gpt2_grid_component_first_failure import (
+        _physical_union_first_unclosed_gate,
+    )
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts, _fully_grid_opposed_wall_evidence,
+    )
+    faces = _room_scope()
+    walls = _wall_scope((_grid_atom("e_sep"), _grid_atom("e_left")))
+    grid, evidence = _fully_grid_opposed_wall_evidence(walls)
+    result = _physical_union_first_unclosed_gate(
+        ("face_left", "face_right"), room_scope=faces,
+        fully_grid_wall_ids=grid, grid_evidence=evidence,
+        local_counts=_atomic_source_wall_edge_counts(faces, grid),
+    )
+    assert result["physical_union_first_unclosed_gate"] == (
+        "source_external_grid_owned_subedge_room_incomplete"
+    )
+    rows = result["physical_union_external_grid_atomic_subedges_diagnostic_only"]
+    assert rows
+    rows = [r for r in rows if r["original_w4_wall_id"] == "w_left"]
+    assert len(rows) == 1
+    assert rows[0]["original_atomic_wall_edge_pdf_pts"] == [
+        [0.0, 0.0], [0.0, 10.0]
+    ]
+    assert rows[0]["source_component_face_ids"] == ["face_left"]
+    assert rows[0]["original_global_source_face_ids"] == ["face_left"]
+    assert rows[0]["new_wall_or_room_equivalence_inferred"] is False
+    assert rows[0]["source_edge_used_to_mint_physical_room"] is False
+    assert result["new_room_geometry_published"] is False
+
+
+def test_original_w4_w2_grid_opposition_report_keeps_native_edge_receipts():
+    """One W4 address needs every W2 edge's own original source opposition."""
+    from types import SimpleNamespace
+    from dataclasses import replace
+    from tools.diag_gpt2_grid_component_first_failure import (
+        inspect_original_w4_grid_opposition_first_gate,
+    )
+    walls = _wall_scope((_grid_atom("e_sep", "opposed-source-evidence"),))
+    positive = inspect_original_w4_grid_opposition_first_gate(walls, "w_sep")
+    assert positive["original_w4_source_candidate_count"] == 1
+    assert positive["original_w2_edge_ids_diagnostic_only"] == ["e_sep"]
+    assert positive["source_grid_opposed_w2_edge_ids_diagnostic_only"] == ["e_sep"]
+    assert positive["missing_original_grid_opposed_w2_edge_ids_diagnostic_only"] == []
+    assert positive["original_w4_grid_first_gate"] == (
+        "source_w2_grid_opposition_observed_not_physical_equivalence"
+    )
+    assert positive["physical_wall_equivalence_proven"] is False
+    assert positive["original_w4_grid_opposition_published"] is False
+
+    missing = inspect_original_w4_grid_opposition_first_gate(
+        _wall_scope(()), "w_sep"
+    )
+    assert missing["missing_original_grid_opposed_w2_edge_ids_diagnostic_only"] == [
+        "e_sep"
+    ]
+    assert missing["original_w4_grid_first_gate"] == (
+        "source_w2_grid_opposition_missing"
+    )
+    assert missing["room_geometry_published"] is False
+
+    unrelated = inspect_original_w4_grid_opposition_first_gate(
+        walls, "nonexistent-wall"
+    )
+    assert unrelated["original_w4_grid_first_gate"] == "source_w4_identity_unavailable"
+    duplicate_scope = replace(
+        walls, records=(*walls.records, walls.records[0])
+    )
+    duplicate = inspect_original_w4_grid_opposition_first_gate(
+        duplicate_scope, "w_sep"
+    )
+    assert duplicate["original_w4_grid_first_gate"] == "source_w4_identity_collision"
+    assert duplicate["physical_wall_equivalence_proven"] is False
+
+    for invalid in (None, 42, " w_sep", "", "w_sep "):
+        row = inspect_original_w4_grid_opposition_first_gate(walls, invalid)
+        assert row["original_w4_grid_first_gate"] == "source_w4_identity_unavailable"
+        assert row["room_geometry_published"] is False
