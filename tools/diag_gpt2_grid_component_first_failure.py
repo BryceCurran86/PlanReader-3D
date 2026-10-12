@@ -546,6 +546,88 @@ def _original_w2_shadow_and_native_source_crosscheck(
     return result
 
 
+def _original_w4_native_graphic_state_first_gate(
+    wall_scope: PhysicalWallCandidateScopeResult,
+    record: Any,
+) -> dict[str, Any]:
+    """Read W4-aggregate original producer graphic-state, no per-line role.
+
+    A joined W4 descriptor can contain multiple source primitives. Its graphic
+    state is NOT per-W2 GRID opposition, exact source role or room authority.
+    """
+    out = {
+        "first_native_graphic_state_gate_diagnostic_only":
+            "original_w4_native_metadata_unavailable",
+        "graphic_state_applies_to_w4_source_set_not_individual_w2": True,
+        "original_w4_native_widths_pt": [],
+        "original_w4_native_width_rank_ascending": [],
+        "original_w4_native_stroke_values": [],
+        "original_w4_native_layer_values": [],
+        "original_w4_native_wall_named_layer_values": [],
+        "original_w4_native_fill_values": [],
+        "original_w4_native_dash_values": [],
+        "original_w4_native_source_record_count": 0,
+        "original_w4_graphic_state_proves_grid_role": False,
+    }
+    table = getattr(wall_scope, "source_metadata_table", None)
+    if (
+        getattr(table, "status", None) != "described"
+        or getattr(table, "page_id", None) != wall_scope.page_id
+        or getattr(table, "decision_scope_id", None)
+            != wall_scope.decision_scope_id
+        or not isinstance(getattr(table, "descriptors", None), (tuple, list))
+    ):
+        return out
+    wall_id = getattr(record, "wall_candidate_id", None)
+    matching = tuple(
+        desc for desc in table.descriptors
+        if getattr(desc, "wall_candidate_id", None) == wall_id
+    )
+    if len(matching) != 1:
+        out["first_native_graphic_state_gate_diagnostic_only"] = (
+            "original_w4_native_descriptor_not_unique"
+        )
+        return out
+    native = matching[0]
+    candidate_ids = getattr(native, "matched_source_primitive_ids", None)
+    shadow_ids = getattr(
+        getattr(record, "physical_identity", None),
+        "source_primitive_ids", None
+    )
+    if (
+        not isinstance(candidate_ids, (tuple, list)) or not candidate_ids
+        or not isinstance(shadow_ids, (tuple, list)) or not shadow_ids
+        or not all(isinstance(v, str) and v for v in (*candidate_ids, *shadow_ids))
+        or not set(shadow_ids).issubset(candidate_ids)
+    ):
+        out["first_native_graphic_state_gate_diagnostic_only"] = (
+            "original_w4_native_primitive_membership_unavailable"
+        )
+        return out
+    def values(name: str) -> list[Any]:
+        raw = getattr(native, name, ()) or ()
+        if not isinstance(raw, (tuple, list)):
+            return []
+        return [item for item in raw][:24]
+    out.update({
+        "first_native_graphic_state_gate_diagnostic_only":
+            "original_w4_native_graphic_state_observed_role_unproven",
+        "original_w4_native_widths_pt": values("width_values_pt"),
+        "original_w4_native_width_rank_ascending": [
+            getattr(item, "rank_ascending", None)
+            for item in values("drawing_relative_width_ranks")
+        ],
+        "original_w4_native_stroke_values": values("stroke_values"),
+        "original_w4_native_layer_values": values("layer_values"),
+        "original_w4_native_wall_named_layer_values": values("wall_named_layer_values"),
+        "original_w4_native_fill_values": values("fill_values"),
+        "original_w4_native_dash_values": values("dashes_values"),
+        "original_w4_native_source_record_count":
+            getattr(native, "source_record_count", 0),
+    })
+    return out
+
+
 def inspect_original_w4_grid_opposition_first_gate(
     wall_scope: PhysicalWallCandidateScopeResult,
     original_w4_wall_id: str,
@@ -585,6 +667,9 @@ def inspect_original_w4_grid_opposition_first_gate(
         )
         return output
     record = records[0]
+    output["original_w4_native_graphic_state_diagnostic_only"] = (
+        _original_w4_native_graphic_state_first_gate(wall_scope, record)
+    )
     wall = getattr(record, "wall_candidate", None)
     # The production helper stringifies W2 keys for backward compatibility.
     # A diagnostic claiming *original native* W2 identities must inspect the
