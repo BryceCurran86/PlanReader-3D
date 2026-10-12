@@ -101,6 +101,14 @@ def test_full_page_competitor_mutated_midbatch_rejects_all_opening_proofs(monkey
     with pytest.raises(RuntimeError):
         _proof(source,published,authority,page_id="1")
     assert source._native_dimension_proof_batch is None
+    assert not any(
+        key[3] == published.snapshot.snapshot_id
+        for key in authority._visible_existence_cache
+    )
+    assert not any(
+        key[3] == published.snapshot.snapshot_id
+        for key in authority._wall_source_opening_page_proof_cache
+    )
     source._producer._store.observations[key]=record
     monkeypatch.setattr(authority,"prove_existence",original)
     assert _proof(source,published,authority,page_id="1")
