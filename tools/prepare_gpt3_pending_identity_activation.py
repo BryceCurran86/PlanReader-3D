@@ -12,6 +12,7 @@ import argparse
 import importlib
 import importlib.util
 import json
+import math
 from pathlib import Path
 import sys
 from typing import Any, Mapping
@@ -177,6 +178,8 @@ def build_activation(
     customer_rows: list[Mapping[str, Any]],
     active_identity_map_payload: Mapping[str, Any],
     source_manifest: Mapping[str, Any],
+    source_identity_proof: Mapping[str, Any],
+    object_universe: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     pending = _pending_rows(pending_ledger)
     sealed = sealed_source_closed_run_from_dict(sealed_run_payload)
@@ -185,6 +188,13 @@ def build_activation(
     authorized_items = _validate_pending_manifest(
         pending,
         source_manifest,
+        project_id=sealed.project_id,
+        source_sha256s=sealed.source_sha256s,
+    )
+    _validate_pending_source_identity(
+        pending,
+        source_identity_proof,
+        object_universe,
         project_id=sealed.project_id,
         source_sha256s=sealed.source_sha256s,
     )
@@ -337,6 +347,16 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
     )
     parser.add_argument(
+        "--source-identity-proof",
+        type=Path,
+        required=True,
+    )
+    parser.add_argument(
+        "--object-universe",
+        type=Path,
+        required=True,
+    )
+    parser.add_argument(
         "--output-map",
         type=Path,
         required=True,
@@ -356,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
             args.active_identity_map
         ),
         source_manifest=_object(args.source_manifest),
+        source_identity_proof=_object(args.source_identity_proof),
+        object_universe=_object(args.object_universe),
     )
 
     args.output_map.parent.mkdir(
