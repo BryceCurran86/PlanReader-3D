@@ -1,0 +1,100 @@
+{
+  "abstained_outputs": 0,
+  "coverage_accuracy": 0.25925925925925924,
+  "denominator": 27,
+  "lineage_conflicts": 0,
+  "matched_outside_tolerance": 0,
+  "matched_within_tolerance": 7,
+  "missed": 20,
+  "partial": 0,
+  "precision_adjusted_accuracy": 0.25925925925925924,
+  "produced_items": [
+    {
+      "abstained": false,
+      "lineage_ok": true,
+      "object_refs": [
+        "lot16:opening:p3:1218_sgw:01"
+      ],
+      "quantity_id": "opening_area_0b6477e219f9117d29b2803c181af665",
+      "trade_category": "windows",
+      "unit": "m2",
+      "value": 2.16
+    },
+    {
+      "abstained": false,
+      "lineage_ok": true,
+      "object_refs": [
+        "lot16:opening:p3:1218_sgw:02"
+      ],
+      "quantity_id": "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+      "trade_category": "windows",
+      "unit": "m2",
+      "value": 2.16
+    },
+    {
+      "abstained": false,
+      "lineage_ok": true,
+      "object_refs": [
+        "lot16:opening:p3:0615_sgw:01"
+      ],
+      "quantity_id": "opening_area_1a755970ebeca773650f41e73eb0f113",
+      "trade_category": "windows",
+      "unit": "m2",
+      "value": 0.9
+    },
+    {
+      "abstained": false,
+      "lineage_ok": true,
+      "object_refs": [
+        "lot16:opening:p3:2148_panel_lift:01"
+      ],
+      "quantity_id": "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+      "trade_category": "doors",
+      "unit": "m2",
+      "value": 10.08
+    },
+    {
+      "abstained": false,
+      "lineage_ok": true,
+      "object_refs": [
+        "lot16:opening:p3:0621_sgw:01"
+      ],
+      "quantity_id": "opening_area_6809b61112132ffd701e6eae02076876",
+      "trade_category": "windows",
+      "unit": "m2",
+      "value": 1.26
+    },
+    {
+      "abstained": false,
+      "lineage_ok": true,
+      "object_refs": [
+        "lot16:opening:p3:0906_sgw_obs:01"
+      ],
+      "quantity_id": "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+      "trade_category": "windows",
+      "unit": "m2",
+      "value": 0.54
+    },
+    {
+      "abstained": false,
+      "lineage_ok": true,
+      "object_refs": [
+        "lot16:opening:p3:0630_fg:01"
+      ],
+      "quantity_id": "opening_area_a2c85322d97e20ba087f6d74574fa7eb",
+      "trade_category": "windows",
+      "unit": "m2",
+      "value": 1.8
+    }
+  ],
+  "project_id": "au_qld_lot16_power",
+  "reconciliation_complete": true,
+  "sealed_run_fingerprint": "1aa3020eccf785894b3e7aa2f44258e277d0dd5eb4f4c27f140278d8855b81a9",
+  "sealed_run_id": "source_closed_run_acc2b741e86bb0dbc0178cc45050af44",
+  "source_sha256s": [
+    "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+  ],
+  "source_sha_verified": true,
+  "unresolved": 0,
+  "unsupported_extra": 0
+}
