@@ -1,5 +1,6 @@
 """Source-only Q02 ceiling first-failure diagnostics cannot authorize m²."""
 from dataclasses import replace
+from types import MappingProxyType
 
 from tools.diag_lot16_room_face_scope import _ceiling_quantity_diagnostic
 from tests.test_live_ceiling_lining_source_closed_export import (
@@ -111,4 +112,24 @@ def test_missing_ceiling_material_occurrence_remains_unavailable():
     assert result["source_closed_trace_count"] == 1 or result["source_closed_trace_error_type"] is not None
     assert result["per_ceiling"][0]["first_missing_prerequisite"] == (
         "authenticated_ceiling_finish_occurrence_unavailable"
+    )
+
+
+def test_actual_immutable_original_quantity_metadata_keeps_source_trace():
+    source = _quantity()
+    immutable = replace(source, metadata=MappingProxyType(dict(source.metadata)))
+    result = _report(_claim(immutable))
+    assert result["source_closed_trace_count"] == 1
+    assert result["per_ceiling"][0]["first_missing_prerequisite"] == (
+        "ceiling_lining_source_trace_resolved"
+    )
+
+
+def test_malformed_observation_identity_is_not_an_implicit_ceiling_source():
+    source = _quantity()
+    malformed = replace(source, input_entity_ids=None)
+    result = _report(_claim(malformed))
+    assert result["source_closed_trace_count"] == 0
+    assert result["per_ceiling"][0]["first_missing_prerequisite"] == (
+        "ceiling_lining_quantity_evidence_unavailable_or_ambiguous"
     )
