@@ -953,3 +953,374 @@ def test_project_handoff_forwards_only_source_classified_room_support(
     assert summary["room_area_support_pages"] == [3]
     assert summary["execution_pages"] == [1, 2, 3, 4, 5]
     assert summary["topology_mode"] == "source_classified_scope"
+
+
+@pytest.mark.parametrize("existing_artifact", [
+    "project-a.json",
+    "project-a.core.json",
+    "project-a.surfaces.json",
+    "family_runs/floor_area.sealed.json",
+    "family_runs/floor_finish_area.sealed.json",
+    "family_runs/opening_area.sealed.json",
+    "family_runs/opening_count.sealed.json",
+    "family_runs/ceiling_area.sealed.json",
+    "family_runs/wall_finish_area.sealed.json",
+    "project-a.future-family.json",
+])
+def test_old_signed_customer_handoff_cannot_survive_failed_rerun(
+    tmp_path, monkeypatch, existing_artifact,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"one original source")
+    output = tmp_path / "shared-output"
+    signed = output / existing_artifact
+    signed.parent.mkdir(parents=True, exist_ok=True)
+    signed.write_bytes(b"prior authentic sealed output")
+    monkeypatch.setattr(
+        handoff, "_source_page_scopes",
+        lambda *_: pytest.fail("old seal must be rejected before source production"),
+    )
+    with pytest.raises(FileExistsError, match="existing sealed handoff artifact"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    assert signed.read_bytes() == b"prior authentic sealed output"
+    assert not (output / "source_attempt_preflight.json").exists()
+    assert not (output / "production_summary.json").exists()
+
+
+def test_broken_symlink_seal_is_not_treated_as_safe_empty_output(tmp_path, monkeypatch):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"one original source")
+    output = tmp_path / "shared-output"
+    output.mkdir()
+    (output / "project-a.json").symlink_to(tmp_path / "missing-signed-receipt.json")
+    monkeypatch.setattr(
+        handoff, "_source_page_scopes",
+        lambda *_: pytest.fail("symlink is not clean output"),
+    )
+    with pytest.raises(FileExistsError, match="existing sealed handoff artifact"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+
+
+def test_preflight_only_failed_attempt_may_reuse_output_without_signed_evidence(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"unsealed input")
+    output = tmp_path / "shared-output"
+    output.mkdir()
+    (output / "source_attempt_preflight.json").write_text(
+        '{"status":"OLD_UNSEALED_ATTEMPT"}', encoding="utf-8",
+    )
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _fail(*args, **kwargs):
+        raise RuntimeError("source producer unavailable")
+
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", _fail)
+    with pytest.raises(RuntimeError, match="source producer unavailable"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    import json
+    preflight = json.loads(
+        (output / "source_attempt_preflight.json").read_text(encoding="utf-8")
+    )
+    summary = json.loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )
+    assert preflight["status"] == "SOURCE_INPUT_RECORDED_UNSEALED"
+    assert preflight["benchmark_score_granted"] is False
+    assert summary["status"] == "production_failed"
+    assert not (output / "project-a.json").exists()
+
+
+def test_interrupted_new_source_attempt_writes_unsealed_summary_first(tmp_path, monkeypatch):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"source-pdf-payload")
+    output = tmp_path / "handoff-output"
+    output.mkdir()
+    # An earlier incomplete run left misleading summary metadata but no
+    # actual signed files. It must not be carried into a newly killed run.
+    (output / "production_summary.json").write_text(
+        '{"status":"sealed","combined_run_file":"missing-old-run.json"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _interrupted(*args, **kwargs):
+        raise KeyboardInterrupt("external interruption during producer")
+
+    monkeypatch.setattr(
+        handoff, "collect_live_physical_net_wall_claim", _interrupted,
+    )
+    with pytest.raises(KeyboardInterrupt, match="external interruption"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    import json
+    summary = json.loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["status"] == "source_attempt_recorded_unsealed"
+    assert summary["benchmark_score_granted"] is False
+    assert summary["frozen_v2_reconciliation_complete"] is False
+    assert summary["combined_run_file"] is None
+    assert not (output / "project-a.json").exists()
+
+
+@pytest.mark.parametrize("linked_name", [
+    "source_attempt_preflight.json",
+    "production_summary.json",
+])
+def test_unsealed_preflight_and_summary_symlinks_cannot_modify_original_pdf(
+    tmp_path, monkeypatch, linked_name,
+):
+    source = tmp_path / "original.pdf"
+    original_bytes = b"original immutable source bytes"
+    source.write_bytes(original_bytes)
+    output = tmp_path / "handoff-output"
+    output.mkdir()
+    poisoned = output / linked_name
+    poisoned.symlink_to(source)
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+
+    def _failed_source(*args, **kwargs):
+        raise RuntimeError("source production did not complete")
+
+    monkeypatch.setattr(
+        handoff, "collect_live_physical_net_wall_claim", _failed_source,
+    )
+    with pytest.raises(RuntimeError, match="source production did not complete"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    import json
+    assert source.read_bytes() == original_bytes
+    assert not poisoned.is_symlink()
+    assert json.loads(
+        (output / "source_attempt_preflight.json").read_text(encoding="utf-8")
+    )["benchmark_score_granted"] is False
+    assert json.loads(
+        (output / "production_summary.json").read_text(encoding="utf-8")
+    )["status"] == "production_failed"
+
+
+def test_failed_atomic_summary_replacement_preserves_prior_summary_and_no_temp(
+    tmp_path, monkeypatch,
+):
+    destination = tmp_path / "production_summary.json"
+    destination.write_text('{"status":"old-unsealed"}', encoding="utf-8")
+
+    def _cannot_replace(*args, **kwargs):
+        raise OSError("simulated filesystem interruption")
+
+    monkeypatch.setattr(handoff.os, "replace", _cannot_replace)
+    with pytest.raises(OSError, match="simulated filesystem interruption"):
+        handoff._write_json(destination, {"status": "new-unsealed"})
+    assert destination.read_text(encoding="utf-8") == '{"status":"old-unsealed"}'
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "production_summary.json",
+    ]
+
+
+def test_signed_family_is_atomic_and_has_a_complete_source_envelope(tmp_path):
+    import json
+    run = _run(
+        project_id="source-project", source_sha256="a" * 64,
+        family="opening_area", quantity_id="q-atomic-opening",
+    )
+    path = handoff._write_run(tmp_path, "opening_area", run)
+    assert path.is_file()
+    assert json.loads(path.read_text(encoding="utf-8")) == json.loads(run.to_json())
+    assert not list(path.parent.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("artifact_kind", ["family", "combined"])
+def test_interrupted_signed_artifact_publish_never_leaves_truncated_customer_row(
+    tmp_path, monkeypatch, artifact_kind,
+):
+    output = tmp_path / "handoff"
+    destination = (
+        output / "family_runs" / "opening_area.sealed.json"
+        if artifact_kind == "family"
+        else output / "source-project.json"
+    )
+
+    def _fail_replace(*args, **kwargs):
+        raise OSError("simulated interruption while committing signed payload")
+
+    monkeypatch.setattr(handoff.os, "replace", _fail_replace)
+    with pytest.raises(OSError, match="simulated interruption"):
+        if artifact_kind == "family":
+            run = _run(
+                project_id="source-project", source_sha256="a" * 64,
+                family="opening_area", quantity_id="q-atomic-opening",
+            )
+            handoff._write_run(output, "opening_area", run)
+        else:
+            handoff._write_text_atomic(destination, '{"sealed":"not yet signed"}')
+    assert not destination.exists()
+    assert destination.parent.is_dir()
+    assert sorted(destination.parent.iterdir()) == []
+
+
+def test_parallel_source_handoff_is_rejected_before_touching_running_artifacts(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"real source bytes unchanged")
+    output = tmp_path / "handoff-output"
+    output.mkdir()
+    marker = output / ".source_closed_handoff.lock"
+    marker.write_bytes(b"original active writer owns this directory")
+    monkeypatch.setattr(
+        handoff, "_source_page_scopes",
+        lambda *_: pytest.fail("second writer must not launch source collector"),
+    )
+    with pytest.raises(FileExistsError):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a",
+            workspace_id=1, output_dir=output,
+        )
+    assert marker.read_bytes() == b"original active writer owns this directory"
+    assert source.read_bytes() == b"real source bytes unchanged"
+    assert not (output / "production_summary.json").exists()
+    assert not (output / "source_attempt_preflight.json").exists()
+
+
+def test_exclusive_handoff_lock_is_cleaned_after_interrupted_source_collect(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"original source")
+    output = tmp_path / "out"
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,), (), 1))
+    def _interrupt(*args, **kwargs):
+        assert (output / ".source_closed_handoff.lock").is_file()
+        raise KeyboardInterrupt("source task interrupted")
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", _interrupt)
+    with pytest.raises(KeyboardInterrupt, match="source task interrupted"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a",
+            workspace_id=1, output_dir=output,
+        )
+    assert not (output / ".source_closed_handoff.lock").exists()
+    assert not (output / "project-a.json").exists()
+
+
+def test_stale_crash_lock_cannot_be_automatically_assumed_complete(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"original source")
+    output = tmp_path / "out"
+    output.mkdir()
+    stale = output / ".source_closed_handoff.lock"
+    stale.write_bytes(b"interrupted source run: do not trust prior seals")
+    with pytest.raises(FileExistsError):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a",
+            workspace_id=1, output_dir=output,
+        )
+    assert stale.read_bytes() == b"interrupted source run: do not trust prior seals"
+
+
+@pytest.mark.parametrize("invalid", [
+    {"project_id": "../foreign"},
+    {"project_id": "subdir/customer"},
+    {"workspace_id": True},
+    {"workspace_id": "2"},
+    {"workspace_id": 0},
+    {"family_group": "unknown-family"},
+])
+def test_invalid_handoff_arguments_never_create_output_directory_or_lock(
+    tmp_path, monkeypatch, invalid,
+):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"source-bytes")
+    output = tmp_path / "never-create"
+    def _should_not_execute(*args, **kwargs):
+        pytest.fail("source-page classification must not run on invalid input")
+    monkeypatch.setattr(handoff, "_source_page_scopes", _should_not_execute)
+    inputs = dict(
+        pdf_path=source, project_id="project-a", workspace_id=1,
+        output_dir=output, family_group="all",
+    )
+    inputs.update(invalid)
+    with pytest.raises(ValueError):
+        handoff.generate_project_handoff(**inputs)
+    assert not output.exists()
+    assert not (tmp_path / "foreign").exists()
+
+
+def test_missing_original_pdf_does_not_create_output_directory(tmp_path):
+    output = tmp_path / "never-create"
+    with pytest.raises(FileNotFoundError):
+        handoff.generate_project_handoff(
+            pdf_path=tmp_path / "missing.pdf",
+            project_id="project-a", workspace_id=1, output_dir=output,
+        )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("unsafe_path", ["output_dir", "family_runs"])
+def test_signed_output_directory_symlink_cannot_redirect_customer_rows(
+    tmp_path, monkeypatch, unsafe_path,
+):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"authenticated-original-bytes")
+    other_workspace = tmp_path / "foreign-workspace"
+    other_workspace.mkdir()
+    output = tmp_path / "intended-output"
+    if unsafe_path == "output_dir":
+        output.symlink_to(other_workspace, target_is_directory=True)
+    else:
+        output.mkdir()
+        (output / "family_runs").symlink_to(
+            other_workspace, target_is_directory=True,
+        )
+    def _do_not_run(*args, **kwargs):
+        pytest.fail("symlinked customer seal output must be rejected before source read")
+    monkeypatch.setattr(handoff, "_source_page_scopes", _do_not_run)
+    with pytest.raises(FileExistsError, match="symlink"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="project-a", workspace_id=1,
+            output_dir=output,
+        )
+    assert source.read_bytes() == b"authenticated-original-bytes"
+    assert list(other_workspace.iterdir()) == []
+    assert not (output / "source_attempt_preflight.json").exists()
+    assert not (output / "production_summary.json").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
+
+
+def test_other_project_combined_seal_prevents_mixed_project_output(tmp_path, monkeypatch):
+    source = tmp_path / "original.pdf"
+    source.write_bytes(b"unchanged source")
+    output = tmp_path / "shared-output"
+    output.mkdir()
+    earlier = output / "other-customer.json"
+    earlier.write_bytes(b"old independently source-signed combined run")
+
+    def _should_not_run(*args, **kwargs):
+        pytest.fail("an unrelated customer's signed output may not share this folder")
+    monkeypatch.setattr(handoff, "_source_page_scopes", _should_not_run)
+    with pytest.raises(FileExistsError, match="existing sealed handoff artifact"):
+        handoff.generate_project_handoff(
+            pdf_path=source, project_id="new-customer",
+            workspace_id=1, output_dir=output,
+        )
+    assert earlier.read_bytes() == b"old independently source-signed combined run"
+    assert source.read_bytes() == b"unchanged source"
+    assert not (output / "source_attempt_preflight.json").exists()
+    assert not (output / "production_summary.json").exists()
+    assert not (output / ".source_closed_handoff.lock").exists()
