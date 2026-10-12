@@ -2326,3 +2326,69 @@ def test_original_w4_native_graphic_state_census_never_promotes_grid_or_rooms():
     assert result["original_w4_native_graphic_state_diagnostic_only"][
         "first_native_graphic_state_gate_diagnostic_only"
     ] == "original_w4_native_metadata_unavailable"
+
+
+def test_original_grid_atomic_partial_w2_overlap_is_not_second_face_authority():
+    """Source W2 positive overlap is weaker than a full containing fragment."""
+    from copy import copy
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import (
+        _atomic_source_wall_edge_counts, _fully_grid_opposed_wall_evidence,
+    )
+    from tools.diag_gpt2_grid_component_first_failure import (
+        _physical_union_first_unclosed_gate,
+        inspect_external_atomic_grid_w2_source_fragments,
+    )
+    faces = _room_scope()
+    walls = _wall_scope((_grid_atom("e_sep"), _grid_atom("e_left")))
+    grid, evidence = _fully_grid_opposed_wall_evidence(walls)
+    union = _physical_union_first_unclosed_gate(
+        ("face_left", "face_right"),
+        room_scope=faces,
+        fully_grid_wall_ids=grid,
+        grid_evidence=evidence,
+        local_counts=_atomic_source_wall_edge_counts(faces, grid),
+    )
+    original = copy(walls.records[1])
+    original.source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="w2-source-segment-short",
+            geometry=((0., 2.), (0., 7.)),
+            source_primitive_ids=("native-source-line",),
+        ),
+    )
+    scope = replace(walls, records=(walls.records[0], original, walls.records[2]))
+    receipts = inspect_external_atomic_grid_w2_source_fragments(scope, union)
+    assert len(receipts) == 1
+    row = receipts[0]
+    assert row["source_first_unclosed_gate"] == (
+        "original_atomic_wall_subedge_w2_fragment_unavailable"
+    )
+    assert row["source_w2_fragment_candidates_diagnostic_only"] == []
+    assert row["source_w2_partial_overlap_candidates_diagnostic_only"] == [{
+        "original_w2_edge_id": "w2-source-segment-short",
+        "native_source_primitive_ids": ["native-source-line"],
+        "original_source_overlap_edge_pdf_pts": [[0., 2.], [0., 7.]],
+        "full_original_atomic_wall_edge_contained": False,
+        "source_second_face_owner_authenticated": False,
+        "source_grid_or_wall_role_authenticated": False,
+    }]
+    assert row["source_w2_partial_overlap_proves_second_face"] is False
+    assert row["source_second_face_owner_authenticated"] is False
+    assert row["source_room_geometry_or_area_published"] is False
+
+    # A nearby parallel fragment still never counts as positive original
+    # W2 overlap, a wall equivalence, or a reason to publish a room.
+    parallel = copy(original)
+    parallel.source_edge_fragments = (
+        SimpleNamespace(
+            edge_id="parallel-source-line",
+            geometry=((0.5, 2.), (0.5, 7.)),
+            source_primitive_ids=("source-other",),
+        ),
+    )
+    other = replace(walls, records=(walls.records[0], parallel, walls.records[2]))
+    rejected = inspect_external_atomic_grid_w2_source_fragments(other, union)[0]
+    assert rejected["source_w2_fragment_candidates_diagnostic_only"] == []
+    assert rejected["source_w2_partial_overlap_candidates_diagnostic_only"] == []
+    assert rejected["source_second_face_owner_authenticated"] is False
