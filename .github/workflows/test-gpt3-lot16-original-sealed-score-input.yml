@@ -7,6 +7,8 @@ on:
       - "tools/run_gpt3_lot16_original_sealed_score_input.py"
       - "tools/diag_lot16_room_face_scope.py"
       - "tests/test_gpt3_lot16_original_sealed_score_input.py"
+      - "tests/test_gpt3_lot16_unmapped_produced_items.py"
+      - "tools/diag_gpt3_lot16_unmapped_produced_items.py"
       - ".github/workflows/test-gpt3-lot16-original-sealed-score-input.yml"
   workflow_dispatch:
 
@@ -27,7 +29,7 @@ jobs:
       - name: Install pinned original production dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Run focused signed-source and source-integrity regressions
-        run: python -m pytest -q tests/test_gpt3_lot16_original_sealed_score_input.py
+        run: python -m pytest -q tests/test_gpt3_lot16_original_sealed_score_input.py tests/test_gpt3_lot16_unmapped_produced_items.py
         env:
           PYTHONPATH: .
       - name: Exact ORIGINAL Lot16 PDF and real sealed customer rows
@@ -90,6 +92,27 @@ jobs:
               "customer_verified_count":verified.valid_quantity_count,
               "benchmark_status":"IDENTITY_MAP_REQUIRED_UNPUBLISHED",
           },sort_keys=True),flush=True)
+          PY
+        env:
+          PYTHONPATH: .
+      - name: Verify exact original signed physical-object inventory without benchmark mapping
+        run: |
+          set -euo pipefail
+          python -m tools.diag_gpt3_lot16_unmapped_produced_items \
+            --production-dir artifacts/gpt3-lot16-original-source-score-input/production
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-lot16-original-source-score-input/production")
+          report=json.loads((root/"produced_items_UNMAPPED.json").read_text())
+          readiness=json.loads((root/"source_score_readiness_UNPUBLISHED.json").read_text())
+          assert report["verified_quantity_count"]==readiness["quantity_count"]
+          assert len(report["unmapped_produced_items"])==readiness["quantity_count"]
+          assert report["benchmark_accuracy"] is None
+          assert report["benchmark_score_granted"] is False
+          assert report["object_identity_map_supplied"] is False
+          assert all(x["frozen_benchmark_object_ref"] is None for x in report["unmapped_produced_items"])
+          print("Original sealed physical inventory VERIFIED; frozen match UNRESOLVED")
           PY
         env:
           PYTHONPATH: .
