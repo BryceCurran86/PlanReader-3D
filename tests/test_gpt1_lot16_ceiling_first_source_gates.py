@@ -127,7 +127,10 @@ def test_actual_immutable_original_quantity_metadata_keeps_source_trace():
 
 def test_malformed_observation_identity_is_not_an_implicit_ceiling_source():
     source = _quantity()
-    malformed = replace(source, input_entity_ids=None)
+    malformed = replace(source)
+    # QuantityEvidence's constructor already rejects malformed ID containers.
+    # Exercise the diagnostic's boundary against an externally replayed record.
+    object.__setattr__(malformed, "input_entity_ids", None)
     result = _report(_claim(malformed))
     assert result["source_closed_trace_count"] == 0
     assert result["per_ceiling"][0]["first_missing_prerequisite"] == (
