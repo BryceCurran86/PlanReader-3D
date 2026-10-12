@@ -254,3 +254,65 @@ def test_sampled_physical_classifier_keeps_original_exception_and_restores(
     assert events[0]["event"] == "failed"
     assert events[0]["observation_calls"] == 0
     assert events[0]["error_type"] == "RuntimeError"
+
+
+def test_source_wall_page_internal_stages_observed_without_changing_algorithm(
+    tmp_path, monkeypatch,
+):
+    original_geometry = object()
+    graph = object()
+    equivalence = object()
+    calls = []
+
+    def source_segments(*args, **kwargs):
+        calls.append(("segments", args, kwargs))
+        return original_geometry
+
+    def graph_assembly(*args, **kwargs):
+        calls.append(("graph", args, kwargs))
+        return graph
+
+    def physical_equivalence(*args, **kwargs):
+        calls.append(("equivalence", args, kwargs))
+        return equivalence
+
+    stages = (
+        ("_source_page_segments", source_segments),
+        ("build_wall_graph_for_viewport", graph_assembly),
+        ("resolve_physical_wall_equivalence", physical_equivalence),
+    )
+    for method_name, original in stages:
+        monkeypatch.setattr(diag.wall_candidates, method_name, original)
+    path = tmp_path / "original-wall-source-step.jsonl"
+    with diag.StageJournalContext(path) as journal:
+        with diag.journal_source_stages(journal):
+            assert diag.wall_candidates._source_page_segments(
+                page_id="7", source_bytes=b"original-source"
+            ) is original_geometry
+            assert diag.wall_candidates.build_wall_graph_for_viewport(
+                original_geometry
+            ) is graph
+            assert diag.wall_candidates.resolve_physical_wall_equivalence(
+                graph, points_per_mm=None
+            ) is equivalence
+        for name, original in stages:
+            assert getattr(diag.wall_candidates, name) is original
+
+    assert calls == [
+        ("segments", (), {"page_id": "7", "source_bytes": b"original-source"}),
+        ("graph", (original_geometry,), {}),
+        ("equivalence", (graph,), {"points_per_mm": None}),
+    ]
+    events = _events(path)
+    assert [(event["stage"], event["event"]) for event in events] == [
+        ("physical_wall_source_page_segments", "entered"),
+        ("physical_wall_source_page_segments", "completed"),
+        ("physical_wall_W2_graph", "entered"),
+        ("physical_wall_W2_graph", "completed"),
+        ("physical_wall_equivalence", "entered"),
+        ("physical_wall_equivalence", "completed"),
+    ]
+    assert [event.get("source_page_id") for event in events] == [
+        "7", "7", None, None, None, None
+    ]
+    assert all(event["diagnostic_only"] for event in events)
