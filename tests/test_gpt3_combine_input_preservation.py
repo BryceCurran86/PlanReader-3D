@@ -74,18 +74,17 @@ def test_cli_still_writes_separate_verified_aggregate(tmp_path):
     assert cli.load_verified_sealed_run(output).fingerprint == payload["fingerprint"]
 
 
-def test_cli_atomic_publication_keeps_previous_receipt_if_rename_fails(tmp_path, monkeypatch):
+def test_cli_create_only_publication_keeps_previous_signed_receipt_and_inputs(tmp_path):
     source = _original_source(tmp_path)
     output = tmp_path / "combined.json"
     output.write_bytes(source.read_bytes())
     previous = output.read_bytes()
     signed_source = source.read_bytes()
 
-    def fail_rename(_source, _destination):
-        raise OSError("simulated publication failure")
-
-    monkeypatch.setattr(cli.os, "replace", fail_rename)
-    with pytest.raises(OSError, match="simulated publication failure"):
+    # Atomic create-only must refuse existing output BEFORE any replace/link.
+    # Actual new-file hard-link failure is independently covered in combiner
+    # CLI regressions, so this preserves the historical source immutability test.
+    with pytest.raises(FileExistsError, match="existing signed combined customer run"):
         cli.main(["--input", str(source), "--output", str(output)])
     assert output.read_bytes() == previous
     assert source.read_bytes() == signed_source
