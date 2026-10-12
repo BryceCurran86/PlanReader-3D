@@ -136,6 +136,36 @@ def _opening_quantity(
         measurement_record_id = str(opening.opening_void_record_id or "").strip()
         if not measurement_record_id or measurement_record_id not in evidence_ids:
             return None
+        # Producer-authenticated geometry area is *defined* by complete,
+        # metrically resolved orthogonal width and height. Do not let a
+        # replayed positive area ride the physical-void receipt alone when
+        # the supporting metric axes are missing, conflicted or different.
+        # Figured label/elevation/schedule bases retain their independent
+        # authority paths and are not silently changed to geometry.
+        width_m = opening.width_m
+        height_m = opening.height_m
+        if (
+            opening.geometry_complete is not True
+            or type(width_m) not in (int, float)
+            or type(height_m) not in (int, float)
+        ):
+            return None
+        try:
+            width_value = float(width_m)
+            height_value = float(height_m)
+        except (ValueError, TypeError, OverflowError):
+            return None
+        if (
+            not math.isfinite(width_value)
+            or not math.isfinite(height_value)
+            or width_value <= 0.0
+            or height_value <= 0.0
+            or not math.isclose(
+                value, width_value * height_value,
+                rel_tol=0.0, abs_tol=1e-6,
+            )
+        ):
+            return None
         quantity_authority = LIVE_OPENING_GEOMETRY_AREA_QUANTITY_AUTHORITY
     elif basis == "authenticated_elevation_frame":
         measurement_record_id = str(opening.figured_area_record_id or "").strip()
