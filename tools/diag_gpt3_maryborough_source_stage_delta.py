@@ -99,7 +99,7 @@ def compare_maryborough_source_stages(baseline: dict, candidate: dict) -> dict:
     gained = sorted(new.keys() - old.keys())
     lost = sorted(old.keys() - new.keys())
     universe_unchanged = not (gained or lost)
-    advanced, regressed, unchanged, changed_receipts = [], [], [], []
+    advanced, regressed, unchanged, changed_receipts, changed_reasons = [], [], [], [], []
     for identity in shared:
         a, b = old[identity], new[identity]
         old_level, new_level = _STAGE_ORDER[a["stage"]], _STAGE_ORDER[b["stage"]]
@@ -115,6 +115,8 @@ def compare_maryborough_source_stages(baseline: dict, candidate: dict) -> dict:
             regressed.append(record)
         else:
             unchanged.append(identity)
+        if a["first_stage_reason_codes"] != b["first_stage_reason_codes"]:
+            changed_reasons.append(identity)
         if (
             a["host_binding_record_id"] != b["host_binding_record_id"]
             or a["frame_record_id"] != b["frame_record_id"]
@@ -146,6 +148,8 @@ def compare_maryborough_source_stages(baseline: dict, candidate: dict) -> dict:
         "stage_advanced": advanced,
         "stage_regressed": regressed,
         "changed_positive_receipt_ids": changed_receipts,
+        "changed_negative_reason_ids": changed_reasons,
+        "negative_source_evidence_drift_observed": bool(changed_reasons),
     }
 
 
