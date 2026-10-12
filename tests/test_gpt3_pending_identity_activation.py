@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -317,6 +318,52 @@ def test_pending_item_must_retain_exact_frozen_object_relationship():
     ):
         _activate(pending=pending)
 
+
+
+def test_sealed_opening_identity_rejects_wrong_quantity_family(monkeypatch):
+    payload = _json("source_sealed_run.json")
+    rows = _json("verified_customer_rows.json")
+    real = module.sealed_source_closed_run_from_dict(payload)
+    verified = module.verify_sealed_customer_output(real, rows)
+
+    quantities = []
+    for quantity in real.quantities:
+        if quantity.object_identity_refs == (PHYSICAL,):
+            quantity = replace(quantity, family="floor_area")
+        quantities.append(quantity)
+    malformed = replace(real, quantities=tuple(quantities))
+
+    monkeypatch.setattr(
+        module,
+        "sealed_source_closed_run_from_dict",
+        lambda _payload: malformed,
+    )
+    monkeypatch.setattr(
+        module,
+        "verify_sealed_customer_output",
+        lambda *_args, **_kwargs: verified,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="family does not match source-proven opening family",
+    ):
+        _activate(sealed=payload, rows=rows)
+
+
+def test_source_proof_must_authenticate_pending_object_as_opening():
+    proof = _json(SOURCE_IDENTITY_PROOF)
+    target = next(
+        row
+        for row in proof["bindings"]
+        if row["physical_opening_id"] == PHYSICAL
+    )
+    target["canonical_opening"]["semantic_class"] = "room"
+    with pytest.raises(
+        ValueError,
+        match="does not authenticate pending object as an opening",
+    ):
+        _activate(source_proof=proof)
 
 
 def test_sealed_quantity_unit_must_match_frozen_item_unit():
