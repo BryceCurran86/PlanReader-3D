@@ -80,6 +80,8 @@ def test_unresolved_and_conflict_membership_drift_is_not_hidden_by_same_host_tot
     assert native["added_count"] == native["removed_count"] == 1
     assert native["added_ids_sample"] == ["candidate-3"]
     assert native["removed_ids_sample"] == ["candidate-1"]
+    assert native["added_ids"] == ["candidate-3"]
+    assert native["removed_ids"] == ["candidate-1"]
     assert changes["semantic_inventory.record.conflict_observation_ids"]["removed_ids_sample"] == ["obs-1"]
     assert not any(row["path"] == "opening_bindings" for row in report["changes"])
 
