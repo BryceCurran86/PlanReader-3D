@@ -70,6 +70,7 @@ def _metric_quantity(q):
             and _owned(getattr(q,"quantity_id",None))
             and isinstance(getattr(q,"input_entity_ids",None),tuple)
             and bool(q.input_entity_ids)
+            and all(_owned(identity) for identity in q.input_entity_ids)
             and len(set(q.input_entity_ids))==len(q.input_entity_ids)
             and isinstance(getattr(q,"evidence_ids",None),tuple)
             and bool(q.evidence_ids)
