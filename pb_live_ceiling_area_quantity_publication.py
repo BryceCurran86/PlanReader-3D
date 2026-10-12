@@ -72,7 +72,14 @@ def _publish_one(
         or not _clean(ceiling.room_entity_id)
         or not _clean(ceiling.room_area_quantity_id)
         or not _clean(ceiling.ceiling_quantity_id)
+        or type(ceiling.source_page) is not int
+        or ceiling.source_page <= 0
+        or type(ceiling.viewport_id) is not str
+        or not ceiling.viewport_id
+        or ceiling.viewport_id != ceiling.viewport_id.strip()
     ):
+        # A bool/float or padded viewport is not producer-owned physical page
+        # authority, even when another replayed field can be made to agree.
         return None
 
     if (
@@ -150,6 +157,18 @@ def _publish_one(
     ):
         return None
 
+    raw_page = meta.get("page_no")
+    if (
+        type(raw_page) not in (int, str)
+        or (type(raw_page) is int and raw_page <= 0)
+        or (type(raw_page) is str and (
+            not raw_page or raw_page != raw_page.strip()
+        ))
+        or str(raw_page) != str(ceiling.source_page)
+        or type(meta.get("viewport_id")) is not str
+        or meta.get("viewport_id") != ceiling.viewport_id
+    ):
+        return None
     if (
         _clean(meta.get("upstream_area_quantity_id"))
         != _clean(ceiling.room_area_quantity_id)
