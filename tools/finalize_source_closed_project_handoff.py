@@ -12,6 +12,7 @@ quantities, tolerances, identity maps, or scoring logic are read here.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -23,6 +24,15 @@ from pb_combine_source_closed_runs import combine_sealed_run_files
 
 
 GROUPS = ("core", "surfaces")
+
+
+def _receipt_sha256(path: Path) -> str:
+    """Read source-signed JSON bytes without parsing gold or trusting mtime."""
+    digest = hashlib.sha256()
+    with path.open("rb") as reader:
+        for chunk in iter(lambda: reader.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _atomic_write_complete(path: Path, contents: str) -> None:
@@ -73,10 +83,15 @@ def finalize_split_project_handoff(
             f"no split sealed runs found for project {clean_project_id!r}"
         )
 
+    # A producer receipt is an immutable signed source input. If it is
+    # replaced while finalizing, never publish an aggregate from mixed bytes.
+    input_hashes = {group: _receipt_sha256(path) for group, path in available}
     combined = combine_sealed_run_files(
         [path for _, path in available],
         project_id=clean_project_id,
     )
+    if any(_receipt_sha256(path) != input_hashes[group] for group, path in available):
+        raise ValueError("signed source group changed during finalization")
     # Reusing a finalizer destination must never mutate an earlier sealed
     # customer run or source group. A symlinked directory can redirect signed
     # output to another workspace without a visible filename collision.
