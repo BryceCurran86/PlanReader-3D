@@ -62,6 +62,10 @@ def build_live_floor_finish_area_source_traces(
     quantity_owner_by_floor: dict[str, str] = {}
     quantity_owner_by_physical_floor: dict[str, tuple[str, str]] = {}
     floor_owner_by_occurrence: dict[str, str] = {}
+    # Original quantity identity is a producer-owned family invariant, not
+    # only a FIRM-survivor invariant. Filtering blocked evidence before this
+    # check would conceal a disputed source identity from commercial sealing.
+    seen_original_quantity_ids: set[str] = set()
     for quantity in claim.floor_finish_quantity_evidence:
         if not isinstance(quantity, QuantityEvidence):
             raise TypeError(
@@ -71,6 +75,17 @@ def build_live_floor_finish_area_source_traces(
             raise SourceClosedRunConflictError(
                 f"non-floor-finish quantity reached exporter: {quantity.quantity_id}"
             )
+        original_id = quantity.quantity_id
+        if (type(original_id) is not str or not original_id
+                or original_id != original_id.strip()):
+            raise SourceClosedRunConflictError(
+                "invalid original floor-finish quantity id"
+            )
+        if original_id in seen_original_quantity_ids:
+            raise SourceClosedRunConflictError(
+                f"duplicate original floor-finish quantity id: {original_id}"
+            )
+        seen_original_quantity_ids.add(original_id)
         if quantity.abstained or quantity.value is None:
             continue
         if quantity.unit != "m2" or quantity.status != AuthorityStatus.FIRM.value:
