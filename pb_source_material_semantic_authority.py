@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import io
+import math
 import re
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
@@ -461,15 +462,23 @@ def _trusted_words_by_page(
 
     authority = source.text_integrity_authority()
     rows: dict[str, list[_TrustedTextWord]] = {}
-    for observation_id in tuple(
-        getattr(published, "text_observation_ids", ()) or ()
+    # The source receipt universe is not a collection to stringify/deduplicate.
+    # Two replays of one PDF word cannot become two finish occurrences.
+    original_observations = getattr(published, "text_observation_ids", ()) or ()
+    if (
+        type(original_observations) not in (tuple, list)
+        or any(type(value) is not str or not value or value != value.strip()
+               for value in original_observations)
+        or len(set(original_observations)) != len(original_observations)
     ):
+        raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+    for observation_id in original_observations:
         selector = ObservationSelector(
             document_id=published.revision.document_id,
             revision_id=published.revision.revision_id,
             source_sha256=published.revision.source_sha256,
             snapshot_id=published.snapshot.snapshot_id,
-            observation_id=str(observation_id),
+            observation_id=observation_id,
         )
         result = authority.resolve_text(selector)
         receipt = result.receipt
@@ -478,12 +487,22 @@ def _trusted_words_by_page(
             # receipt. Treat a missing receipt as a source-integrity failure
             # rather than silently dropping a word.
             raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
-        try:
-            bbox = tuple(float(value) for value in receipt.geometry)
-        except (TypeError, ValueError):
-            raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+        # Text/glyph geometry is an original producer source receipt, never
+        # a user-entered or JSON-coerced coordinate. NaN/Inf passes ordered
+        # bbox comparisons and can cross a viewport trust boundary silently.
+        original_bbox = receipt.geometry
         if (
-            len(bbox) != 4
+            type(original_bbox) not in (tuple, list)
+            or len(original_bbox) != 4
+            or any(type(value) not in (int, float) for value in original_bbox)
+        ):
+            raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE)
+        try:
+            bbox = tuple(float(value) for value in original_bbox)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE) from exc
+        if (
+            not all(math.isfinite(value) for value in bbox)
             or bbox[2] <= bbox[0]
             or bbox[3] <= bbox[1]
         ):
@@ -502,7 +521,7 @@ def _trusted_words_by_page(
 
         rows.setdefault(page_id, []).append(
             _TrustedTextWord(
-                observation_id=str(observation_id),
+                observation_id=observation_id,
                 page_id=page_id,
                 source_partition_id=str(receipt.source_partition_id or ""),
                 text=str(trusted_text or receipt.raw_text or ""),
