@@ -361,3 +361,71 @@ def test_independent_source_reissue_missing_source_receipt_cannot_publish():
     row = one(fixture())
     row["source_proven_area_m2"] = float("nan")
     assert _exact_floor_area_reissue_for_source_row(row, (), SHA) is None
+
+
+def test_exact_original_room_polygon_diagnostic_keeps_metric_and_seal_closed():
+    """A native polygon explanation cannot produce a room or m²."""
+    from tools.diag_gpt2_source_room_handoff_integrity import (
+        original_polygon_first_failure_receipt,
+    )
+
+    source = fixture()
+    valid = one(source)
+    receipt = valid["original_polygon_source_validity_diagnostic_only"]
+    assert receipt["first_source_polygon_gate_diagnostic_only"] == (
+        "source_native_polygon_valid_candidate_only"
+    )
+    assert receipt["original_native_polygon_vertex_count"] == 4
+    assert receipt["original_native_polygon_valid_diagnostic_only"] is True
+    assert receipt["original_polygon_repaired"] is False
+    assert receipt["metric_area_published_by_diagnostic"] is False
+    assert valid["first_unproved_authority"] == (
+        "SOURCE_ROOM_AREA_READY_FOR_GPT1_GPT3_REVIEW"
+    )
+
+    for ring in (
+        ((0., 0.), (2., 2.), (0., 2.), (2., 0.)),
+        ((0., 0.), (2., 0.), (1., 0.), (0., 0.)),
+    ):
+        damaged = fixture()
+        damaged.canonical_rooms[0].polygon_pdf_pts = ring
+        damaged.canonical_floors[0].polygon_pdf_pts = ring
+        report = one(damaged)
+        first = report["original_polygon_source_validity_diagnostic_only"]
+        assert first["first_source_polygon_gate_diagnostic_only"] in {
+            "source_native_polygon_invalid",
+            "source_native_polygon_empty_or_nonpositive",
+        }
+        assert first["original_native_polygon_valid_diagnostic_only"] is False
+        assert first["original_polygon_repaired"] is False
+        assert first["metric_area_published_by_diagnostic"] is False
+        assert report["first_unproved_authority"] == (
+            "SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE"
+        )
+        assert report["documented_area_quantity_id"] is None
+        assert report["source_proven_area_m2"] is None
+
+    malformed = fixture()
+    malformed.canonical_rooms[0].polygon_pdf_pts = (
+        (0., 0.), (2., float("nan")), (2., 0.)
+    )
+    assert one(malformed)[
+        "original_polygon_source_validity_diagnostic_only"
+    ]["first_source_polygon_gate_diagnostic_only"] == (
+        "source_polygon_coordinates_unavailable"
+    )
+
+    foreign = fixture()
+    foreign.canonical_rooms[0].source_sha256 = "b" * 64
+    assert one(foreign)["original_polygon_source_validity_diagnostic_only"] is None
+    missing = fixture()
+    missing.canonical_rooms = ()
+    assert one(missing)["original_polygon_source_validity_diagnostic_only"] is None
+
+    no_area = fixture()
+    no_area.canonical_rooms[0].area_page_pts2 = float("nan")
+    assert original_polygon_first_failure_receipt(
+        no_area.canonical_rooms[0]
+    )["first_source_polygon_gate_diagnostic_only"] == (
+        "source_page_area_receipt_unavailable"
+    )
