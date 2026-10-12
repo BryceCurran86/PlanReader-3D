@@ -4,6 +4,7 @@ on:
     paths:
       - "pb_live_canonical_room_composition.py"
       - "tests/test_gpt2_canonical_room_label_lineage.py"
+      - "tests/test_source_room_label_authority_v1.py"
       - ".github/workflows/test-gpt2-original-raster-line-canonical-room.yml"
 concurrency:
   group: gpt2-raster-line-canonical-${{ github.event.pull_request.number }}
@@ -26,7 +27,8 @@ jobs:
       - name: Producer-sealed line receipts, cross-face opposition and benchmark isolation
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_gpt2_canonical_room_label_lineage.py
-          ruff check --select F821,F823 pb_live_canonical_room_composition.py tests/test_gpt2_canonical_room_label_lineage.py
+          PYTHONPATH=. python -m pytest -q tests/test_source_room_label_authority_v1.py -k test_whole_line_two_render_fallback_can_authenticate_closed_room
+          ruff check --select F821,F823 pb_live_canonical_room_composition.py tests/test_gpt2_canonical_room_label_lineage.py tests/test_source_room_label_authority_v1.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
   original-maryborough:
