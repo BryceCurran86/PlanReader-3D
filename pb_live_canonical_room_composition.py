@@ -366,10 +366,29 @@ def _unique_source_room_labels_by_face(
                 source_word_faces.setdefault(observation_id, set()).add(
                     str(label.face_id or "").strip()
                 )
+    # Distinct native word IDs alone do not make receipt provenance unique.
+    # Two face labels may not reuse the same original trusted-text / OCR
+    # authority receipt under different observation IDs.
+    source_proof_faces: dict[str, set[str]] = {}
+    for label in candidates:
+        face_id = label.face_id
+        if type(face_id) is not str or not face_id or face_id != face_id.strip():
+            continue
+        for word in label.word_evidence:
+            if type(word) is not SourceRoomLabelWordEvidence:
+                continue
+            for proof_id in (word.receipt_id, word.authority_record_id):
+                if type(proof_id) is str and proof_id and proof_id == proof_id.strip():
+                    source_proof_faces.setdefault(proof_id, set()).add(face_id)
+
     owned: dict[str, SourceRoomLabelRecord] = {}
     conflicted: set[str] = {
         face
-        for faces in (*source_receipt_faces.values(), *source_word_faces.values())
+        for faces in (
+            *source_receipt_faces.values(),
+            *source_word_faces.values(),
+            *source_proof_faces.values(),
+        )
         if len(faces) > 1
         for face in faces
     }
@@ -386,7 +405,6 @@ def _unique_source_room_labels_by_face(
         elif previous is None:
             owned[face_id] = label
     return owned
-
 
 def _verified_source_room_label_for_face(
     record: object,
@@ -424,8 +442,16 @@ def _verified_source_room_label_for_face(
     if (
         not isinstance(label.record_id, str) or not label.record_id
         or label.record_id != label.record_id.strip()
+        or type(label.observation_ids) is not tuple
+        or type(label.word_evidence) is not tuple
         or not label.observation_ids or not label.word_evidence
         or len(label.observation_ids) != len(label.word_evidence)
+        or any(
+            type(observation_id) is not str
+            or not observation_id
+            or observation_id != observation_id.strip()
+            for observation_id in label.observation_ids
+        )
         or len(set(label.observation_ids)) != len(label.observation_ids)
     ):
         return None
@@ -442,10 +468,23 @@ def _verified_source_room_label_for_face(
             or word.authority_kind not in {
                 "native_text_integrity", "raster_text_corroboration"
             }
+            or type(word.word_no) is not int or word.word_no < 0
+            or not isinstance(word.geometry, tuple)
+            or len(word.geometry) != 4
+            or any(type(v) not in (int, float) or not math.isfinite(v)
+                   for v in word.geometry)
+            or word.geometry[0] >= word.geometry[2]
+            or word.geometry[1] >= word.geometry[3]
         ):
             return None
+    # Every original word has one independent text-integrity/OCR proof,
+    # though that word's receipt and authority IDs may be equal.
+    if (len({word.receipt_id for word in label.word_evidence})
+            != len(label.word_evidence)
+            or len({word.authority_record_id for word in label.word_evidence})
+            != len(label.word_evidence)):
+        return None
     return label
-
 
 def _room_object_from_record(
     record,
