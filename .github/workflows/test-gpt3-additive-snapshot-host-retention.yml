@@ -1,0 +1,93 @@
+name: TEST GPT3 Additive Snapshot Host Retention
+
+on:
+  pull_request:
+    branches:
+      - main
+      - gptmax/lot16-1215-unchanged-source-20261013
+    paths:
+      - "tools/verify_gpt3_additive_snapshot_host_retention.py"
+      - "tests/test_gpt3_additive_snapshot_host_retention.py"
+      - ".github/workflows/test-gpt3-additive-snapshot-host-retention.yml"
+      - "pb_source_visibility_authority.py"
+      - "pb_raster_unchanged_band_segments.py"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-additive-snapshot-retention-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_additive_snapshot_host_retention.py tests/test_opening_host_source_candidate_witness.py
+          python -m compileall -q tools/verify_gpt3_additive_snapshot_host_retention.py
+          ruff check --select F821,F823 tools/verify_gpt3_additive_snapshot_host_retention.py tests/test_gpt3_additive_snapshot_host_retention.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+
+  original-source-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Produce exact main-baseline and candidate source reports
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt3-additive-retention
+          git fetch origin main
+          BASE="$(git merge-base origin/main HEAD)"
+          git worktree add --detach /tmp/gpt3-retention-main "$BASE"
+          (
+            cd /tmp/gpt3-retention-main
+            PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --source-all-pages \
+              --output "$GITHUB_WORKSPACE/artifacts/gpt3-additive-retention/baseline.json"
+          )
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --output artifacts/gpt3-additive-retention/candidate.json
+
+      - name: Prove physical/source retention despite snapshot receipt rekey
+        env:
+          PYTHONPATH: .
+        run: |
+          python -u tools/verify_gpt3_additive_snapshot_host_retention.py \
+            --baseline artifacts/gpt3-additive-retention/baseline.json \
+            --candidate artifacts/gpt3-additive-retention/candidate.json \
+            --expected-new-host-id physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9 \
+            --output artifacts/gpt3-additive-retention/retention.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-additive-snapshot-host-retention
+          path: artifacts/gpt3-additive-retention
+          retention-days: 30
