@@ -22,6 +22,7 @@ from dataclasses import dataclass
 import math
 from typing import Mapping
 
+from shapely.errors import GEOSException
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
@@ -449,7 +450,23 @@ def _component_has_conflicting_label(
             continue
         if getattr(other, "record_id", None) == source_id:
             return True
-        if component.intersection(str(value) for value in other.word_face_ids):
+        # A foreign split label can oppose this room only through exact
+        # producer-owned native face IDs. Never stringify missing/numeric IDs
+        # or crash the source run on a malformed competing word inventory.
+        # Unknown competing source ownership is an abstention, not permission
+        # to merge its potentially overlapping physical rooms.
+        other_faces = getattr(other, "word_face_ids", None)
+        if (
+            not isinstance(other_faces, (tuple, list))
+            or not other_faces
+            or any(
+                not isinstance(value, str) or not value
+                or value != value.strip()
+                for value in other_faces
+            )
+        ):
+            return True
+        if component.intersection(other_faces):
             return True
     return False
 
@@ -562,10 +579,16 @@ def _candidate_record(
         return None
 
     constituent = [room_by_face[face_id] for face_id in constituent_face_ids]
-    polygons = [Polygon(record.polygon_pdf_pts) for record in constituent]
-    if any(poly.is_empty or not poly.is_valid or poly.area <= 0.0 for poly in polygons):
+    # An upstream malformed source ring is unresolved physical evidence.
+    # Shapely can raise when coordinates are nonnumeric or a ring is broken;
+    # never fail the complete source handoff or repair the ring heuristically.
+    try:
+        polygons = [Polygon(record.polygon_pdf_pts) for record in constituent]
+        if any(poly.is_empty or not poly.is_valid or poly.area <= 0.0 for poly in polygons):
+            return None
+        merged = unary_union(polygons)
+    except (TypeError, ValueError, OverflowError, GEOSException):
         return None
-    merged = unary_union(polygons)
     if (
         merged.geom_type != "Polygon"
         or merged.is_empty

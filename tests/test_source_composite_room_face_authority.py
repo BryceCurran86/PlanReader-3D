@@ -1832,3 +1832,111 @@ def test_gpt2_original_w4_fragment_edge_id_must_belong_to_its_shadow_lineage():
     assert rows[0]["original_fragment_edges_owned_by_shadow_identity"] is True
     assert rows[1]["original_fragment_edges_owned_by_shadow_identity"] is False
     assert all(r["physical_wall_equivalence_proven"] is False for r in rows)
+
+
+def test_competing_split_label_malformed_native_face_inventory_abstains_not_crashes():
+    """Do not stringify foreign face IDs or raise on corrupted original words."""
+    import copy
+    from dataclasses import replace
+    from pb_source_composite_room_face_authority import (
+        _component_has_conflicting_label,
+    )
+
+    labels = _label_scope()
+    original = labels.split_face_candidates[0]
+    faces = ("face_left", "face_right")
+    walls = _wall_scope((_grid_atom("e_sep"),))
+    rooms = _room_scope()
+    assert not _component_has_conflicting_label(
+        faces, original, label_scope=labels
+    )
+    assert len(compose_grid_separated_room_faces(
+        wall_scope=walls, room_scope=rooms, label_scope=labels
+    ).records) == 1
+
+    for foreign_words in (
+        None, 7, "face_left", (), (" face_left",),
+        ("face_right ",), ("face_left", None),
+        ("face_right", 7), ("face_left", ["face_right"]),
+    ):
+        foreign = copy.copy(original)
+        foreign.record_id = "independent-original-label"
+        foreign.word_face_ids = foreign_words
+        scope = replace(
+            labels, split_face_candidates=(original, foreign)
+        )
+        assert _component_has_conflicting_label(
+            faces, original, label_scope=scope
+        )
+        output = compose_grid_separated_room_faces(
+            wall_scope=walls, room_scope=rooms, label_scope=scope
+        )
+        assert output.records == ()
+        assert output.status is EvidenceResolutionStatus.ABSTAINED
+
+    # An authenticated distinct word-face inventory must not be rewritten
+    # into a competing owner by casting IDs or proximity.
+    unrelated = copy.copy(original)
+    unrelated.record_id = "independent-original-label"
+    unrelated.word_face_ids = ("foreign_face_a", "foreign_face_b")
+    scope = replace(labels, split_face_candidates=(original, unrelated))
+    assert not _component_has_conflicting_label(
+        faces, original, label_scope=scope
+    )
+    output = compose_grid_separated_room_faces(
+        wall_scope=walls, room_scope=rooms, label_scope=scope
+    )
+    assert len(output.records) == 1
+    assert output.status is EvidenceResolutionStatus.CANDIDATE
+    assert output.unresolved_label_candidate_ids == ("independent-original-label",)
+
+
+def test_corrupt_native_constituent_polygon_abstains_without_source_room_repair():
+    """Invalid original PDF face coordinates cannot mint a composite room."""
+    from dataclasses import replace
+
+    walls = _wall_scope((_grid_atom("e_sep"),))
+    faces = _room_scope()
+    labels = _label_scope()
+    assert len(compose_grid_separated_room_faces(
+        wall_scope=walls, room_scope=faces, label_scope=labels
+    ).records) == 1
+    first, second = faces.records
+    for invalid_ring in (
+        ("not-a-source-coordinate",),
+        ((0.0, 0.0), (10.0, 0.0), (10.0, "not-numeric"), (0.0, 10.0)),
+    ):
+        damaged = replace(first, polygon_pdf_pts=invalid_ring)
+        result = compose_grid_separated_room_faces(
+            wall_scope=walls,
+            room_scope=replace(faces, records=(damaged, second)),
+            label_scope=labels,
+        )
+        assert result.records == ()
+        assert result.status is EvidenceResolutionStatus.ABSTAINED
+        assert result.unresolved_label_candidate_ids == ("split_label_1",)
+
+
+def test_native_source_geos_exception_cannot_abort_room_handoff(monkeypatch):
+    """A GEOS topology failure is an unresolved source face, never a repair."""
+    import pb_source_composite_room_face_authority as module
+    from shapely.errors import GEOSException
+
+    wall_scope = _wall_scope((_grid_atom("e_sep"),))
+    room_scope = _room_scope()
+    label_scope = _label_scope()
+
+    def bad_geos(*_args, **_kwargs):
+        raise GEOSException("synthetic GEOS source ring/topology failure")
+
+    for target in ("Polygon", "unary_union"):
+        with monkeypatch.context() as patch:
+            patch.setattr(module, target, bad_geos)
+            result = module.compose_grid_separated_room_faces(
+                wall_scope=wall_scope,
+                room_scope=room_scope,
+                label_scope=label_scope,
+            )
+            assert result.status is EvidenceResolutionStatus.ABSTAINED
+            assert result.records == ()
+            assert result.unresolved_label_candidate_ids == ("split_label_1",)
