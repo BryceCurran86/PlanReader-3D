@@ -40,7 +40,8 @@ def original_source_label_to_canonical_first_gates(
         positive=gate.get("direct_source_labels")
         if not isinstance(positive,list):
             raise ValueError("missing original positive label inventory")
-        if gate.get("direct_source_label_count")!=len(positive):
+        if (type(gate.get("direct_source_label_count")) is not int
+                or gate["direct_source_label_count"]!=len(positive)):
             raise ValueError("unproven original label count")
         for row in positive:
             if not isinstance(row,dict):
@@ -52,16 +53,19 @@ def original_source_label_to_canonical_first_gates(
             if (any(not isinstance(x,str) or not x or x!=x.strip()
                     for x in (face,label,face_id))
                     or not isinstance(words,list) or not words
-                    or len(set(words))!=len(words)
-                    or any(not isinstance(x,str) or not x or x!=x.strip()
-                           for x in words)):
+                    or any(type(x) is not str or not x or x!=x.strip()
+                           for x in words)
+                    or len(set(words))!=len(words)):
                 raise ValueError("incomplete authenticated original label source receipt")
             sources.append((scope_id,face,label,face_id,tuple(words)))
     # Producer positive original labels must not be duplicated between
     # unrelated source rooms or use one word to assert two different rooms.
     counts=Counter(face for _,face,_,_,_ in sources)
+    physical_faces=Counter(face_id for _,_,_,face_id,_ in sources)
     words=Counter(word for *_,ids in sources for word in ids)
-    if any(c!=1 for c in counts.values()) or any(c!=1 for c in words.values()):
+    if (any(c!=1 for c in counts.values())
+            or any(c!=1 for c in physical_faces.values())
+            or any(c!=1 for c in words.values())):
         raise ValueError("original physical label face and word identity conflicted")
 
     canonical_by_original_face={}
@@ -97,6 +101,8 @@ def original_source_label_to_canonical_first_gates(
             else:
                 ids=getattr(room,"room_label_evidence_ids",None)
                 if (not isinstance(ids,(tuple,list))
+                        or any(type(word) is not str or not word or word!=word.strip()
+                               for word in ids)
                         or len(set(ids))!=len(ids)
                         or not set(original_words).issubset(set(ids))
                         or not isinstance(canonical_label_binding,str)
