@@ -504,3 +504,80 @@ def test_original_complete_count_universe_must_match_exact_source_page_and_membe
         source_visibility_producer=source,
         wall_opening_composition=altered,
     ) == ()
+
+
+@pytest.mark.parametrize("tamper", [
+    {"semantic_key": "opening_count:W2"},
+    {"semantic_key": "opening_count"},
+    {"semantic_key": "opening_count:W1 "},
+    {"formula": "sum_opening_projections"},
+    {"formula_version": "foreign-version"},
+    {"authority": "model_derived"},
+    {"status": "provisional"},
+    {"unit": "m2"},
+])
+def test_source_count_final_publication_requires_exact_signed_mark_semantics(tamper):
+    from pb_live_opening_count_quantity_publication import (
+        _source_count_quantity_ready_for_publication,
+    )
+    from pb_migration_contracts import QuantityEvidence
+    from pb_generic_opening_count_authority import GENERIC_OPENING_COUNT_SCHEMA_VERSION
+
+    clean = QuantityEvidence(
+        quantity_id="original-source-count",
+        family="opening_count",
+        semantic_key="opening_count:W1",
+        value=1.0,
+        unit="ea",
+        input_entity_ids=("physical-opening-1",),
+        formula="sum_of_authenticated_physical_opening_instances",
+        formula_version=GENERIC_OPENING_COUNT_SCHEMA_VERSION,
+        evidence_ids=("original-physical-observation", "original-schedule-row"),
+        authority="pdf_scaled",
+        status="firm",
+        confidence=1.0,
+        abstained=False,
+        blocking_reasons=(),
+        metadata={"opening_mark": "W1", "schedule_corroborated": True},
+    )
+    assert _source_count_quantity_ready_for_publication(
+        clean, opening_mark="W1",
+    )
+    assert not _source_count_quantity_ready_for_publication(
+        replace(clean, **tamper), opening_mark="W1",
+    )
+    assert not _source_count_quantity_ready_for_publication(
+        clean, opening_mark="W2",
+    )
+    assert not _source_count_quantity_ready_for_publication(
+        replace(clean, metadata={"opening_mark": "W2", "schedule_corroborated": True}),
+        opening_mark="W1",
+    )
+
+
+def test_original_source_count_keeps_mark_and_signed_quantity_id_at_final_bridge(tmp_path):
+    from pb_live_opening_count_quantity_publication import (
+        _source_count_quantity_ready_for_publication,
+    )
+    from pb_migration_contracts import stable_contract_id
+
+    path = tmp_path / "count-final-signed-lineage.pdf"
+    path.write_bytes(_floor_plan_with_schedule_quantity(quantity=1, tag="W1"))
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert len(claim.opening_count_quantity_evidence) == 1
+    q = claim.opening_count_quantity_evidence[0]
+    assert _source_count_quantity_ready_for_publication(q, opening_mark="W1")
+    assert q.quantity_id == stable_contract_id(
+        "qty_opening_count",
+        {
+            "family": "opening_count",
+            "semantic_key": "opening_count:W1",
+            "document_id": claim.canonical_openings[0].document_id,
+            "revision_id": claim.canonical_openings[0].revision_id,
+            "source_sha256": claim.canonical_openings[0].source_sha256,
+            "snapshot_id": claim.canonical_openings[0].snapshot_id,
+            "count": 1,
+            "matched_ids": tuple(q.input_entity_ids),
+        },
+    )
+    assert q.input_entity_ids == (claim.canonical_openings[0].canonical_opening_id,)
