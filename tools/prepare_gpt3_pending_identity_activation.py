@@ -204,6 +204,7 @@ def _validate_pending_source_identity(
     *,
     project_id: str,
     source_sha256s: tuple[str, ...],
+    sealed_by_physical: Mapping[str, Any],
 ) -> None:
     source_hashes = set(source_sha256s)
     if source_identity_proof.get("source_sha256") not in source_hashes:
@@ -275,6 +276,25 @@ def _validate_pending_source_identity(
         if proof is None:
             raise ValueError(
                 "pending physical identity lacks original source identity proof"
+            )
+        canonical = proof.get("canonical_opening")
+        if (
+            not isinstance(canonical, Mapping)
+            or canonical.get("physical_opening_id") != physical
+            or canonical.get("semantic_class") != "opening"
+        ):
+            raise ValueError(
+                "source proof does not authenticate pending object as an opening"
+            )
+        sealed_quantity = sealed_by_physical.get(physical)
+        if sealed_quantity is None:
+            raise ValueError(
+                "pending source identity has no newly sealed quantity"
+            )
+        if sealed_quantity.family != "opening_area":
+            raise ValueError(
+                "sealed pending quantity family does not match "
+                "source-proven opening family"
             )
         original = proof.get("original_label_locations")
         if not isinstance(original, Mapping):
@@ -377,6 +397,7 @@ def build_activation(
         source_manifest,
         project_id=sealed.project_id,
         source_sha256s=sealed.source_sha256s,
+        sealed_by_physical=sealed_by_physical,
     )
     if sealed.project_id != active.project_id:
         raise ValueError(
