@@ -158,7 +158,9 @@ def _floor_from_room(room: LiveCanonicalRoomObject) -> LiveCanonicalFloorSurface
         metric_area_authority=None,
         finish_descriptor=None,
         structural_slab_id=None,
-        physical_floor_surface_identity_resolved=True,
+        # A stable proposed floor address is not a proven physical floor
+        # when its original source-room ring is invalid or self-crossing.
+        physical_floor_surface_identity_resolved=bool(room.geometry_complete),
         commercial_quantity_authority=False,
     )
 
