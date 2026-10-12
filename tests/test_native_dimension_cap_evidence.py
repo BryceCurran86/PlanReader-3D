@@ -360,3 +360,22 @@ def test_internal_dimension_chain_requires_complete_native_original_source(mutat
     elif mutation == 'floating_annotation_text':
         words[0]['bbox']=(31.,-30.,34.,-25.)
     assert _collect(segments,words,selected) == ()
+
+def test_native_page_text_direction_reuse_reauthenticates_producer_source_bytes():
+    """Page decoding is reused but damaged source bytes still fail closed."""
+    source, _published, selector, support = _source()
+    assert not source._native_dimension_page_text_dirs_cache
+    first = source.native_dimension_cap_evidence(
+        selector, opening_support_ids=support,
+    )
+    key = (selector.source_sha256, "1")
+    assert key in source._native_dimension_page_text_dirs_cache
+    directions = source._native_dimension_page_text_dirs_cache[key]
+    second = source.native_dimension_cap_evidence(
+        selector, opening_support_ids=tuple(reversed(support)),
+    )
+    assert first == second
+    assert source._native_dimension_page_text_dirs_cache[key] is directions
+    source._producer._store.source_bytes_by_revision[selector.revision_id] = b"tampered"
+    with pytest.raises(RuntimeError):
+        source.native_dimension_cap_evidence(selector, opening_support_ids=support)
