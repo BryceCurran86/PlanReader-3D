@@ -172,14 +172,17 @@ def _publish_one(
         # objects come from other producers or test/imported records.
         raw_figured_ids = ceiling.figured_dimension_ids
         if (
-            not isinstance(raw_figured_ids, (tuple, list))
+            type(raw_figured_ids) not in (tuple, list)
+            or len(raw_figured_ids) != 2
             or any(type(value) is not str or not value or value != value.strip()
                    for value in raw_figured_ids)
+            or len(set(raw_figured_ids)) != 2
         ):
+            # The complete original figured-axis system must contain exactly
+            # two distinct source owners. Never delete a conflicting third
+            # source receipt or a repeated axis to mint FIRM ceiling m².
             return None
-        figured_ids = tuple(
-            sorted({_clean(value) for value in raw_figured_ids if _clean(value)})
-        )
+        figured_ids = tuple(sorted(raw_figured_ids))
         # One observed dimension cannot define a documented two-axis area.
         # This canonical adapter does not infer the missing orthogonal axis
         # from PDF points, a nominal sheet scale, or benchmark quantities.
