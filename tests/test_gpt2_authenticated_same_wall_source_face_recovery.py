@@ -49,14 +49,18 @@ def _same_source_scope(*, classification="same_physical_wall",
             s.decision_scope_id if same_viewport else "foreign-scope"
         ),
         representative_wall_ids=("room-top",),
-        abstained_wall_ids=(() if no_ambiguity else ("alias",)),
+        # Upstream source SAME owner contracts intentionally abstain the
+        # nonrepresentative to prevent two physical walls publishing.
+        abstained_wall_ids=("alias",),
         equivalence_groups=(("alias", "room-top"),),
         ambiguous_wall_ids=(() if no_ambiguity else ("alias",)),
         same_wall_ids=("alias", "room-top"),
         pair_classifications=((
             "alias", "room-top", classification,
         ),),
-        blocking_reasons_by_wall_id={},
+        blocking_reasons_by_wall_id={
+            "alias": ("equivalent_physical_wall_represented_by:room-top",),
+        },
     )
     s.equivalence = equiv
     return s
