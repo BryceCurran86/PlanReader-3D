@@ -1945,7 +1945,7 @@ class SourceVisibilityProducer:
                 for segment in full_segments
             }
 
-            if image_regions:
+            if page_id in pages_with_visible and image_regions:
                 source_png, source_page_parent = (
                     self._producer.render_native_page_png(
                         document_id=published.revision.document_id,
