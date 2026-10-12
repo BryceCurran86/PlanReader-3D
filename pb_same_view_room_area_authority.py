@@ -87,6 +87,7 @@ class SameViewRoomAreaResult:
     def evidence_by_source_room_face_record_id(self) -> Mapping[str, EvidenceAtom]:
         return unique_source_room_area_evidence_by(
             self.records, key="source_room_face_record_id",
+            record_type=SameViewRoomAreaRecord,
         )
 
 
