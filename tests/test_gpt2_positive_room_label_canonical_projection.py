@@ -90,6 +90,8 @@ def test_canonical_label_ownership_gate_distinguishes_true_first_failure(change,
     "wrong_pdf_sha","duplicate_original_face","duplicate_original_word",
     "foreign_page","duplicate_scope","missing_label","missing_word",
     "blank_source_face","not_sealed_canonical_inventory",
+    "duplicate_original_physical_face","unhashable_original_word",
+    "boolean_source_label_count",
 ])
 def test_untrusted_original_label_replay_cannot_attach_geometry(damage):
     d=source()
@@ -102,6 +104,16 @@ def test_untrusted_original_label_replay_cannot_attach_geometry(damage):
         other=deepcopy(row);other["source_face_receipt_id"]="other-face"
         d["source_scope_first_failures"][0]["original_source_label_gate"]["direct_source_labels"].append(other)
         d["source_scope_first_failures"][0]["original_source_label_gate"]["direct_source_label_count"]=2
+    elif damage=="duplicate_original_physical_face":
+        other=deepcopy(row)
+        other["source_face_receipt_id"]="distinct-receipt-for-same-source-face"
+        other["original_text_observation_ids"]=["separate-source-word"]
+        d["source_scope_first_failures"][0]["original_source_label_gate"]["direct_source_labels"].append(other)
+        d["source_scope_first_failures"][0]["original_source_label_gate"]["direct_source_label_count"]=2
+    elif damage=="unhashable_original_word":
+        row["original_text_observation_ids"]=[["malformed-nested-word"]]
+    elif damage=="boolean_source_label_count":
+        d["source_scope_first_failures"][0]["original_source_label_gate"]["direct_source_label_count"]=True
     elif damage=="foreign_page":d["source_scope_first_failures"][0]["page_id"]="11"
     elif damage=="duplicate_scope":d["source_scope_first_failures"].append(deepcopy(d["source_scope_first_failures"][0]))
     elif damage=="missing_label":row["label"]=""
@@ -119,3 +131,11 @@ def test_original_positive_label_with_no_matching_canonical_must_remain_unpublis
     assert row["canonical_matched_source_face_count"]==0
     assert row["canonical_room_id"] is None
     assert row["metric_area_or_finish_published"] is False
+
+
+def test_malformed_canonical_word_receipt_cannot_retain_source_label():
+    r=room()
+    r.room_label_evidence_ids=(["unhashable-nested-word"],)
+    d=report(rooms=(r,))
+    assert gate(d)=="ORIGINAL_TEXT_RECEIPTS_NOT_RETAINED_IN_CANONICAL"
+    assert d["first_projection_gates"][0]["metric_area_or_finish_published"] is False
