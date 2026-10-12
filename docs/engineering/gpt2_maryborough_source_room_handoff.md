@@ -78,3 +78,36 @@ and DRY STORE have no unique authenticated closed face. The separate W4/GRID
 original source ledger in issue #2009 explains the source wall and invalid
 polygon causes. Nothing in this diagnostic publishes unsupported customer
 quantities.
+
+## Exact original wall/face blockers — no physical promotion
+
+These are from the original 31-page source SHA-pinned [grid first-failure
+artifact](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38206633778/artifacts/11729701340);
+the earlier artifact is a first-gate diagnostic, **not** a new current-main
+physical-room publication. Every identity below belongs to the source
+producer, and is not a benchmark truth constant.
+
+| Missing original room | Exact first source failure | Original W4/face receipt needed |
+| --- | --- | --- |
+| FREEZER | Exact label/face exists; the canonical room source polygon fails the stricter source handoff geometry gate; metric unsupported | `source_room_face_record_e6faa5d761bcc11de70f4d3a21e94571`; do not repair by renaming another face |
+| POS COUNTER | 13 candidate faces; 10 external GRID-owned atomic subedges still outside a closed room | `wall_057cfbc2f2a73c0d428b`, `wall_211c61e5150f7c78fa80`, `wall_61997e2ee60bdb7f6ea6`, `wall_80922f2503361c63eb3d` |
+| FOOD SERVICE | 18 candidate faces; internal W4 edge lacks authenticated two-sided source GRID opposition | `wall_e591505aee1346009306`, exact PDF segment `(566.399963,544.400024)–(566.399963,578.47998)`; original face IDs `source_room_face_00e6511afe73ed6b666598588012663f`, `source_room_face_a21827e7b24f70e01913e5b9beefb062` |
+| WASH UP | 9 candidate faces; one external GRID-owned atomic subedge remains | `wall_58889696debdcdd203b2` |
+| TRUCK DRIVER LOUNGE | 109-face candidate includes two self-intersecting original polygons; no safe union or inferred ring repair | `source_room_face_record_86eef1b416f5a9960b044b1629acccf3` at `(966.659973,1695.409958)`; `source_room_face_record_99825c7bd96b1e1628207cb9441bb2ad` at `(1015.679993,1558.880005)` |
+| M-AMB | Native label has no authenticated source physical-face owner, even by label center | Exact original floor-plan wall graph and complete native-label owner required |
+| F-AMB | Label center intersects a candidate, but the whole original native text bbox belongs to zero fully owned faces | Original closed face plus **entire** native-label bbox ownership required |
+| DRY STORE | Source-proposed GRID component competes with independently authenticated FOOD PREP | Must remain **ABSTAIN**; never replace the existing FOOD PREP face |
+
+All original-source label, face, metric and RCP/finish gates are independent.
+PWD, AIRLOCK, LAUNDRY and SALES have exact native label/face/canonical
+floor identities, but no source-authenticated metric scale or two-dimension
+wall-binding witness. Original page-9 RCP `view_p9_2` has no independent
+authenticated owner, and the derived `view_p9_5` is not proof that any
+particular floor/ceiling finish actually occurs in one of the eight rooms.
+Until occurrence+schedule material+exact cross-view room ownership close,
+**zero** new finish quantities may be granted on this evidence.
+
+The original PDF, V2 takeoff truth, object-universe, evaluator/tolerances,
+24 Maryborough and 27 Lot16 denominators, and raster primitive limit
+remain immutable. Any unclosed physical source blocker is a named first
+failure, never a zero area or an inferred quantity.
