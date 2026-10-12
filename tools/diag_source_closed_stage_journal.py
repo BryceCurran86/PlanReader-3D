@@ -8,6 +8,7 @@ Use an ORIGINAL SHA-verified PDF and a fresh output directory.
 Example:
 PYTHONPATH=. python -u tools/diag_source_closed_stage_journal.py \
   --pdf documents/sources/Arch_Combined_Maryborough_Service_Station.pdf \
+  --expected-sha256 b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007 \
   --project-id diagnostic-source-maryborough --family-group surfaces \
   --output-dir artifacts/new-source-run --journal artifacts/new-source-stage.jsonl
 The external Actions shell may bound this invocation with `timeout`; the
@@ -22,7 +23,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import resource
+import re
+try:
+    import resource
+except ImportError:  # Windows diagnostic import is never a source failure.
+    resource = None
 from time import monotonic_ns, time_ns
 from typing import Any, Iterable, Iterator
 
@@ -55,7 +60,7 @@ _METHOD_STAGES = (
 
 def _peak_rss_kb() -> int:
     """Non-authoritative Linux Actions process peak-memory observation."""
-    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) if resource is not None else 0
 
 
 class StageJournal:
@@ -137,6 +142,7 @@ def journal_source_stages(journal: StageJournal) -> Iterator[None]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pdf", type=Path, required=True)
+    parser.add_argument("--expected-sha256", required=True)
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--workspace-id", type=int, default=1)
     parser.add_argument("--family-group", choices=("all", "core", "surfaces"), default="surfaces")
@@ -146,10 +152,14 @@ def main() -> int:
 
     if not args.pdf.is_file():
         parser.error(f"source PDF unavailable: {args.pdf}")
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", args.expected_sha256):
+        parser.error("expected source SHA-256 must be exactly 64 hex digits")
+    source_sha = hashlib.sha256(args.pdf.read_bytes()).hexdigest()
+    if source_sha != args.expected_sha256.lower():
+        raise ValueError("original source SHA does not match expected evidence")
     if args.journal.exists() or args.journal.is_symlink():
         raise FileExistsError(f"refuse to overwrite stage journal: {args.journal}")
     args.journal.parent.mkdir(parents=True, exist_ok=True)
-    source_sha = hashlib.sha256(args.pdf.read_bytes()).hexdigest()
     with StageJournalContext(args.journal) as journal:
         journal.emit(stage="source_input", event="sha_verified", call_id=0)
         with journal_source_stages(journal):
