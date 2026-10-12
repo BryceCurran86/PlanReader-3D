@@ -279,3 +279,116 @@ def test_malformed_source_label_inventory_abstains_before_unique_face_index(dama
         assert _unique_source_room_labels_by_face(
             (first, damaged, good)
         ) == {"unrelated-face": good}
+
+
+def _producer_sealed_raster_line_label(face=None, *, tokens=("FOOD", "PREP")):
+    """Build a synthetic witness with the EXACT source line-producer contract."""
+    original = _label(face)
+    authority = "source_room_label_line_raster_corroboration_" + "c" * 32
+    words = tuple(
+        replace(
+            original.word_evidence[0],
+            observation_id=f"native-raster-word-{index}",
+            receipt_id=f"native-raster-receipt-{index}",
+            trusted_text=token,
+            authority_kind="raster_text_line_corroboration",
+            authority_record_id=authority,
+            geometry=(20.0 + index * 20.0, 20.0, 37.0 + index * 20.0, 28.0),
+            word_no=index,
+        )
+        for index, token in enumerate(tokens)
+    )
+    return replace(
+        original,
+        label=" ".join(tokens),
+        observation_ids=tuple(word.observation_id for word in words),
+        word_evidence=words,
+    )
+
+
+@pytest.mark.parametrize("tokens", [("FREEZER",), ("FOOD", "PREP")])
+def test_source_sealed_whole_line_raster_proof_survives_canonical_without_metric(
+    tokens,
+):
+    """Two independent source renders make ONE line receipt, not N receipts."""
+    face = _face()
+    positive = _producer_sealed_raster_line_label(face, tokens=tokens)
+    assert _unique_source_room_labels_by_face((positive,)) == {
+        face.face_id: positive
+    }
+    assert _verified_source_room_label_for_face(face, positive) is positive
+    canonical = _canonical(face, positive)
+    assert canonical.room_label == " ".join(tokens)
+    assert canonical.room_label_binding_record_id == positive.record_id
+    assert canonical.room_label_evidence_ids
+    assert canonical.source_room_face_record_id == face.record_id
+    assert canonical.polygon_pdf_pts == face.polygon_pdf_pts
+    assert canonical.metric_geometry_complete is False
+
+
+@pytest.mark.parametrize("damage", [
+    "mixed_native_authority",
+    "mismatched_line_authority",
+    "unsealed_line_receipt_kind",
+    "duplicate_native_word_receipt",
+    "duplicate_source_word_number",
+    "out_of_order_native_words",
+    "altered_literal_line",
+    "wrong_source_room_face",
+    "wrong_decision_scope",
+])
+def test_invalid_whole_line_raster_proof_cannot_label_real_face(damage):
+    face = _face()
+    original = _producer_sealed_raster_line_label(face)
+    first, second = original.word_evidence
+    if damage == "mixed_native_authority":
+        second = replace(second, authority_kind="native_text_integrity")
+    elif damage == "mismatched_line_authority":
+        second = replace(
+            second, authority_record_id="source_room_label_line_raster_corroboration_" + "d" * 32
+        )
+    elif damage == "unsealed_line_receipt_kind":
+        second = replace(second, authority_record_id="foreign-source-claim")
+        first = replace(first, authority_record_id="foreign-source-claim")
+    elif damage == "duplicate_native_word_receipt":
+        second = replace(second, receipt_id=first.receipt_id)
+    elif damage == "duplicate_source_word_number":
+        second = replace(second, word_no=first.word_no)
+    elif damage == "out_of_order_native_words":
+        first = replace(first, word_no=1)
+        second = replace(second, word_no=0)
+    elif damage == "altered_literal_line":
+        original = replace(original, label="SALES")
+    elif damage == "wrong_source_room_face":
+        original = replace(original, source_room_face_record_id="foreign-face-receipt")
+    elif damage == "wrong_decision_scope":
+        original = replace(original, decision_scope_id="unrelated-source-viewport")
+    damaged = replace(original, word_evidence=(first, second))
+    assert _verified_source_room_label_for_face(face, damaged) is None
+    canonical = _canonical(face, damaged)
+    assert canonical.room_label is None
+    assert canonical.room_label_binding_record_id is None
+    assert canonical.source_room_face_record_id == face.record_id
+    assert canonical.geometry_complete is True
+    assert canonical.metric_geometry_complete is False
+
+
+def test_line_raster_authority_cannot_be_reused_across_independent_room_faces():
+    first = _producer_sealed_raster_line_label(tokens=("FREEZER",))
+    second_word = replace(
+        first.word_evidence[0],
+        observation_id="source-word-different-face",
+        receipt_id="source-word-different-receipt",
+    )
+    other = replace(
+        first,
+        face_id="separate-physical-face",
+        source_room_face_record_id="independent-source-face-receipt",
+        record_id="independent-source-label-receipt",
+        observation_ids=(second_word.observation_id,),
+        word_evidence=(second_word,),
+    )
+    # Shared raster authority ID across different physical faces is opposed,
+    # independent of enumeration order, even though word receipts differ.
+    assert _unique_source_room_labels_by_face((first, other)) == {}
+    assert _unique_source_room_labels_by_face((other, first)) == {}
