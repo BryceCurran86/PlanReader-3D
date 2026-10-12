@@ -15,6 +15,8 @@ def _read(geometry, *, trusted=True, observation_ids=("source-word-observation-1
     receipt = SimpleNamespace(
         geometry=geometry, page_id="1", source_partition_id="native-p1",
         raw_text="FPB PLASTERBOARD", block_no=1, line_no=0, word_no=0,
+        parent_observation_id="source-word-observation-1", document_id="doc-1",
+        revision_id="rev-1", source_sha256="a" * 64,
     )
     result = SimpleNamespace(
         receipt=receipt,
