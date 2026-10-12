@@ -117,15 +117,23 @@ def _authentic_issued_count_quantity():
     from tests.test_live_opening_area_quantity_publication import _opening
     area = _opening_quantity(_opening())
     assert area is not None
+    from pb_generic_opening_count_authority import (
+        GENERIC_OPENING_COUNT_SCHEMA_VERSION,
+    )
     return replace(
         area,
         family="opening_count",
+        semantic_key="opening_count:W1",
         status="firm",
         unit="ea",
         value=1.0,
         input_entity_ids=("opening-1",),
+        formula="sum_of_authenticated_physical_opening_instances",
+        formula_version=GENERIC_OPENING_COUNT_SCHEMA_VERSION,
+        authority="pdf_scaled",
         blocking_reasons=(),
         abstained=False,
+        metadata={"opening_mark": "W1", "schedule_corroborated": True},
     )
 
 
@@ -133,7 +141,9 @@ def test_exact_positive_firm_count_reaches_final_source_publisher_gate():
     from pb_live_opening_count_quantity_publication import (
         _source_count_quantity_ready_for_publication,
     )
-    assert _source_count_quantity_ready_for_publication(_authentic_issued_count_quantity())
+    assert _source_count_quantity_ready_for_publication(
+        _authentic_issued_count_quantity(), opening_mark="W1",
+    )
 
 
 @pytest.mark.parametrize("corruption", [
@@ -159,4 +169,6 @@ def test_invalid_final_count_never_reissues_as_a_commercial_physical_count(corru
     quantity = copy(_authentic_issued_count_quantity())
     for key, value in corruption.items():
         object.__setattr__(quantity, key, value)
-    assert not _source_count_quantity_ready_for_publication(quantity)
+    assert not _source_count_quantity_ready_for_publication(
+        quantity, opening_mark="W1",
+    )
