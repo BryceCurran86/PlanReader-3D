@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import io
 import math
 from types import MappingProxyType
+from pb_source_room_area_receipt_index import unique_source_room_area_evidence_by
 from weakref import WeakKeyDictionary
 
 import fitz
@@ -185,20 +186,14 @@ class CrossViewRoomAreaResult:
 
     @property
     def evidence_by_physical_room_id(self) -> Mapping[str, EvidenceAtom]:
-        return MappingProxyType(
-            {
-                record.physical_room_id: record.area_evidence
-                for record in self.records
-            }
+        return unique_source_room_area_evidence_by(
+            self.records, key="physical_room_id",
         )
 
     @property
     def evidence_by_source_room_face_record_id(self) -> Mapping[str, EvidenceAtom]:
-        return MappingProxyType(
-            {
-                record.source_room_face_record_id: record.area_evidence
-                for record in self.records
-            }
+        return unique_source_room_area_evidence_by(
+            self.records, key="source_room_face_record_id",
         )
 
 
