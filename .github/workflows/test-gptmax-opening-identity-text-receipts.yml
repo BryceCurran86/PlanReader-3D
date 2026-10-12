@@ -1,0 +1,60 @@
+name: GPT MAX Original Opening Identity Text Receipts
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_source_authority_stages.py
+      - tests/test_gptmax_opening_identity_text_receipts.py
+      - docs/engineering/gptmax_opening_original_identity_receipts.md
+      - .github/workflows/test-gptmax-opening-identity-text-receipts.yml
+concurrency:
+  group: gptmax-opening-identity-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Focused original text ancestry rejection
+        run: PYTHONPATH=. python -m pytest -q tests/test_gptmax_opening_identity_text_receipts.py
+      - name: Original SHA source replay with exact default-report retention
+        env:
+          PYTHONPATH: .
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844' "$PDF" | sha256sum --check
+          mkdir -p artifacts/opening-identity-receipts
+          git worktree add --detach /tmp/gptmax-identity-base "$BASE_SHA"
+          ( cd /tmp/gptmax-identity-base && PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output /tmp/gptmax-identity-before.json )
+          python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --include-identity-text-receipts --output artifacts/opening-identity-receipts/original-source.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('/tmp/gptmax-identity-before.json').read_text())
+          after=json.loads(Path('artifacts/opening-identity-receipts/original-source.json').read_text())
+          rows=after.pop('opening_identity_text_receipts')
+          def normalize(v):
+              if isinstance(v,dict):
+                  return {k:(sorted(val) if k in ('void_reason_codes','opening_void_reason_codes') else normalize(val)) for k,val in v.items()}
+              if isinstance(v,list): return [normalize(x) for x in v]
+              return v
+          assert normalize(before)==normalize(after), 'original production source receipts changed'
+          assert rows and all(r['location_is_reauthenticated_source_receipt'] is True for r in rows)
+          assert after['primitive_safety_cap']==20000
+          print({'source_sha_verified':after['source_sha256'],'unchanged_default_report':True,'label_receipts':len(rows)})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-opening-original-identity-receipts
+          path: artifacts/opening-identity-receipts
+          retention-days: 30

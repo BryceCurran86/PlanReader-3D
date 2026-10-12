@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import asdict
 import hashlib
 import json
+import math
 from pathlib import Path
 
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
@@ -17,10 +18,69 @@ from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
 from pb_opening_label_semantic_authority import OpeningLabelSemanticProducer
 from pb_source_room_face_authority import build_source_room_face_authority, SourceRoomFaceSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_migration_contracts import EvidenceResolutionStatus
+
+
+def _opening_identity_text_receipts(source, published, label_traces) -> list[dict]:
+    """Reauthenticate owned label locations; no benchmark or quantity inputs."""
+    integrity = source.text_integrity_authority()
+    rows = []
+    for trace in label_traces:
+        result = trace["result"]
+        evidence = result.get("evidence")
+        if result["status"] != EvidenceResolutionStatus.CORROBORATED or evidence is None:
+            continue
+        opening_id = trace["opening_identity_id"]
+        ids = tuple(evidence["source_text_observation_ids"])
+        if (evidence["opening_record_id"] != opening_id or not ids
+                or len(ids) != len(set(ids))):
+            raise ValueError("opening identity label source ownership invalid")
+        receipts = []
+        for observation_id in ids:
+            if observation_id not in published.text_observation_ids:
+                raise ValueError("opening label observation outside original text universe")
+            selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=observation_id,
+            )
+            resolved = integrity.resolve_text(selector)
+            receipt = resolved.receipt
+            if (resolved.status is not EvidenceResolutionStatus.CORROBORATED
+                    or not resolved.trusted_text or receipt is None or not receipt.trusted):
+                raise ValueError("opening label original text integrity unavailable")
+            if (receipt.parent_observation_id != observation_id
+                    or receipt.document_id != selector.document_id
+                    or receipt.revision_id != selector.revision_id
+                    or receipt.source_sha256 != selector.source_sha256
+                    or str(receipt.page_id) != str(evidence["page_id"])):
+                raise ValueError("opening label original text lineage contradicts owner")
+            bbox = receipt.geometry
+            if (len(bbox) != 4 or not all(math.isfinite(v) for v in bbox)
+                    or bbox[0] >= bbox[2] or bbox[1] >= bbox[3]):
+                raise ValueError("opening label original text box invalid")
+            receipts.append(asdict(receipt))
+        boxes = [r["geometry"] for r in receipts]
+        rows.append({
+            "opening_identity_id": opening_id,
+            "figured_label_evidence_id": evidence["evidence_id"],
+            "source_text_observation_ids": ids,
+            "source_text_integrity_receipts": receipts,
+            "label_bbox_pdf_pt": [min(b[0] for b in boxes), min(b[1] for b in boxes),
+                                  max(b[2] for b in boxes), max(b[3] for b in boxes)],
+            "snapshot_id": published.snapshot.snapshot_id,
+            "location_is_reauthenticated_source_receipt": True,
+        })
+    if source.published_snapshot_for_revision(published.revision.revision_id) != published:
+        raise ValueError("opening label source snapshot changed during export")
+    return sorted(rows, key=lambda r: r["opening_identity_id"])
 
 
 def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
-                        source_all_pages: bool = False) -> dict:
+                        source_all_pages: bool = False,
+                        include_identity_text_receipts: bool = False) -> dict:
     sha = hashlib.sha256(source_bytes).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -101,7 +161,7 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
         )
         room_scopes.append({"selector": asdict(selector),
                             "result": asdict(room_authority.resolve_scope(selector))})
-    return {
+    report = {
         "source_sha256": sha,
         "revision_id": published.revision.revision_id,
         "snapshot_id": published.snapshot.snapshot_id,
@@ -152,6 +212,11 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
                 reason for row in room_scopes for reason in row["result"]["reason_codes"])),
         },
     }
+    if include_identity_text_receipts:
+        report["opening_identity_text_receipts"] = _opening_identity_text_receipts(
+            source, published, label_dimension_traces,
+        )
+    return report
 
 
 def main() -> None:
@@ -159,11 +224,13 @@ def main() -> None:
     parser.add_argument("--pdf", type=Path, required=True)
     parser.add_argument("--page-id", action="append", required=True)
     parser.add_argument("--source-all-pages", action="store_true")
+    parser.add_argument("--include-identity-text-receipts", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = source_stage_report(args.pdf.read_bytes(),
         page_ids=tuple(sorted(set(args.page_id), key=int)),
-        source_all_pages=args.source_all_pages)
+        source_all_pages=args.source_all_pages,
+        include_identity_text_receipts=args.include_identity_text_receipts)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True,
                                       default=lambda value: value.value) + "\n")
     print(json.dumps({"source_sha256": report["source_sha256"], **report["summary"]}))
