@@ -686,6 +686,63 @@ def test_vertical_source_word_uses_unique_trace_glyph_target_and_one_lossless_ro
     assert [view.ocr_reading for view in result.record.views] == ["1900", "1900"]
 
 
+def test_source_owned_vertical_line_orientation_survives_unmatchable_trace_refinement() -> None:
+    """Glyph bbox is unproven, but native line direction remains source-owned.
+
+    OCR still needs independent exact words at both DPIs. A vanished or
+    conflicting source texttrace is NOT a reason to rotate the native text
+    incorrectly, choose a different bbox, or grant text authority directly.
+    """
+    from pb_raster_text_corroboration_authority import _producer_owned_ocr_target
+
+    setup = _Setup(_vertical_glyph_unverified_pdf("1900"), _both("1900"))
+    source = setup._receipts[setup.oid_of("1900")]
+    assert source.block_no is not None and source.line_no is not None
+    fake_sequence = replace(
+        source, sequence_number=987654321, trace_sequence_numbers=(987654321,)
+    )
+    target, degrees = _producer_owned_ocr_target(
+        setup.svp._producer,
+        revision_id=setup.published.revision.revision_id,
+        source_sha256=setup.published.revision.source_sha256,
+        page_id="1", receipt=fake_sequence,
+        word_bbox=tuple(source.geometry), raw_text="1900",
+    )
+    assert target == tuple(source.geometry)
+    assert degrees == -90
+
+    # A contradictory raw word-to-native-character receipt cannot borrow the
+    # vertical direction, even when the same source block points to it.
+    contradictory, direction = _producer_owned_ocr_target(
+        setup.svp._producer,
+        revision_id=setup.published.revision.revision_id,
+        source_sha256=setup.published.revision.source_sha256,
+        page_id="1", receipt=fake_sequence,
+        word_bbox=tuple(source.geometry), raw_text="WRONG",
+    )
+    assert contradictory == tuple(source.geometry)
+    assert direction == 0
+
+
+def test_source_owned_horizontal_line_unmatchable_trace_never_invents_rotation() -> None:
+    from pb_raster_text_corroboration_authority import _producer_owned_ocr_target
+
+    setup = _Setup(_glyph_unverified_pdf([("150mm", 40, 120)]), _both("150mm"))
+    source = setup._receipts[setup.oid_of("150mm")]
+    fake_sequence = replace(
+        source, sequence_number=987654321, trace_sequence_numbers=(987654321,)
+    )
+    target, rotation = _producer_owned_ocr_target(
+        setup.svp._producer,
+        revision_id=setup.published.revision.revision_id,
+        source_sha256=setup.published.revision.source_sha256,
+        page_id="1", receipt=fake_sequence,
+        word_bbox=tuple(source.geometry), raw_text="150mm",
+    )
+    assert target == tuple(source.geometry)
+    assert rotation == 0
+
+
 # ---------------------------------------------------------------------------
 # What actually reaches the OCR backend
 # ---------------------------------------------------------------------------
