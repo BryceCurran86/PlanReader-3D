@@ -99,7 +99,7 @@ def test_unique_unrelated_walls_are_identity_pass_through_without_source_data():
 
 @pytest.mark.parametrize("bad", ["missing_edge", "missing_source", "foreign_source", "nan",
                                   "boolean_geometry", "numeric_text_geometry", "huge_integer_geometry", "same_edge",
-                                  "same_identity", "wrong_owner"])
+                                  "wrong_edge_address", "wrong_owner"])
 def test_unprovable_collision_never_rekeys_from_ambiguous_or_corrupt_source(bad):
     a, b = wall("source-edge-a", "junction-a"), wall("source-edge-b", "junction-b")
     inventory = edges()
@@ -120,14 +120,10 @@ def test_unprovable_collision_never_rekeys_from_ambiguous_or_corrupt_source(bad)
         inventory["source-edge-b"]["x1"] = 10 ** 1000
     elif bad == "same_edge":
         b = replace(b, face_a_segment_ids=a.face_a_segment_ids)
-    elif bad == "same_identity":
-        b = replace(b, end_node_ids=a.end_node_ids)
-        inventory["source-edge-b"][LINEAGE_KEY]["source_primitive_ids"] = ("native-a",)
+    elif bad == "wrong_edge_address":
+        inventory["source-edge-b"]["id"] = "source-edge-a"
     else:
         owners["source-edge-b"] = "foreign-owner"
-    if bad == "same_identity":
-        inventory["source-edge-b"]["x1"] = inventory["source-edge-a"]["x1"]
-        inventory["source-edge-b"]["x2"] = inventory["source-edge-a"]["x2"]
     original = deepcopy((a, b, inventory, owners))
     with pytest.raises(W4SourceCandidateAddressCollision):
         _source_owned_collision_candidate_addresses((a, b), inventory, owners)
@@ -434,3 +430,25 @@ def test_real_w4_rounded_path_collision_preserves_each_actual_source_edge(shadow
         assert wall.status is EvidenceResolutionStatus.CANDIDATE
         assert wall.length_m is None and wall.thickness_m is None
         assert "precollision_w4_candidate_id" in wall.metadata
+
+
+def test_identical_parent_geometry_and_junction_facts_retain_actual_disjoint_memberships():
+    a = wall("source-edge-a", "junction-a")
+    b = wall("source-edge-b", "junction-a")
+    source_edges = edges()
+    source_edges["source-edge-b"].update(
+        x1=0., y1=0., x2=10., y2=0.,
+        primitive_lineage={"source_primitive_ids": ("native-a",)})
+    before = deepcopy((a, b, source_edges))
+    candidates, mapping = _source_owned_collision_candidate_addresses(
+        (a, b), source_edges,
+        {"source-edge-a": a.candidate_id, "source-edge-b": b.candidate_id})
+    assert len(candidates) == len({w.candidate_id for w in candidates}) == 2
+    assert mapping["source-edge-a"] != mapping["source-edge-b"]
+    identities = collect_physical_wall_identities(candidates, {"edges": list(source_edges.values())})
+    for w in candidates:
+        assert w.status is EvidenceResolutionStatus.CANDIDATE
+        assert identities[w.candidate_id].source_primitive_ids == ("native-a",)
+        assert identities[w.candidate_id].edge_ids == w.face_a_segment_ids
+        assert w.length_m is None and w.thickness_m is None
+    assert (a, b, source_edges) == before

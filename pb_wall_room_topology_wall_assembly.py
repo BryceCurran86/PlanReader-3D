@@ -313,6 +313,9 @@ def _source_owned_collision_candidate_addresses(
                 edge = edges_by_id.get(str(eid))
                 if not isinstance(edge, dict):
                     raise W4SourceCandidateAddressCollision("W4 collision has missing original source edge")
+                if (type(eid) is not str or not eid.strip()
+                        or edge.get("id") != eid):
+                    raise W4SourceCandidateAddressCollision("W4 collision has contradictory source edge address")
                 lineage = edge.get(LINEAGE_KEY) or {}
                 raw = lineage.get("source_primitive_ids") if isinstance(lineage, dict) else None
                 if (not isinstance(raw, (list, tuple)) or not raw
@@ -345,6 +348,7 @@ def _source_owned_collision_candidate_addresses(
             new_id = stable_contract_id("wall", {
                 "geometric_candidate_id": old_id,
                 "viewport_id": wall.viewport_id,
+                "original_source_edge_ids": sorted(edges),
                 "original_source_segments": sorted(source_parts, key=lambda p: str(p)),
                 "terminal_source_junction_ids": sorted(terminals),
             })

@@ -84,3 +84,25 @@ Benchmark observations are excluded from prediction: the identity-ready 1215
 window is an engineering priority only; its label/area cannot select a wall or
 set a geometry threshold. Frozen V2 files, commercial writers, W10 flags, the
 20,000 source cap, snapping and physical-equivalence predicates stay unchanged.
+
+### Actual assembly-membership collision found in the full-source fixture
+
+Observed: the complete retained source-record fixture reaches two different W4
+chains with identical parent/geometry/rounded-junction discriminator payloads.
+The proposed address helper therefore raises its typed unavailable exception.
+This fixture check does not itself reauthenticate the original PDF. The actual
+chains own disjoint W2 edge addresses, which are already retained by the graph
+and used in the existing source-fragment bundle record identity.
+
+Inference: matching source parents, geometry and rounded junction names does
+not erase distinct assembly memberships. An evidence address can name the
+actual owned edge inventory without asserting separate physical walls.
+
+Proposed: include the original owned W2 edge addresses in the collision-only
+address payload; independently require each edge dictionary's original `id` to
+match its map address. Retain the shared original parents, geometry and terminal
+IDs in the payload. Preserve the duplicate-edge ownership and missing ancestry
+abstentions. Add positive coverage for two separately owned chains with identical
+parent/geometry/junction facts, and a contradictory edge-address negative. No
+SAME/DISTINCT, viewport, role, host, count or metric authority is added. Repeat
+applicable exact-head source and CI gates after this correction.
