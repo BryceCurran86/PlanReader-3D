@@ -483,6 +483,7 @@ def _independent_second_floor_and_area(*, same_room=False, same_face=False):
         _source_area(),
         quantity_id="room-area-2",
         semantic_key="room_area:source-room-2",
+        input_entity_ids=("source-room-2",),
     )
     return second, second_area
 
@@ -685,3 +686,39 @@ def test_sealed_floor_area_rejects_duplicate_original_floor_face_evidence():
         workspace_id=1, project_id="original-source",
     )
     assert result == {}
+
+
+def test_two_distinct_floors_cannot_double_publish_one_original_room_owner():
+    second, independent = _independent_second_floor_and_area()
+    original = _source_area()
+    # Reuse the ORIGINAL physical source-room owner while minting a new
+    # source quantity ID, new canonical floor and new source face. The two
+    # quantities are individually FIRM and carry compatible semantic keys;
+    # only their full original source owner collision must reject BOTH.
+    duplicate_owner = replace(
+        independent,
+        semantic_key=original.semantic_key,
+        input_entity_ids=original.input_entity_ids,
+    )
+    first_floor = _floor()
+    for floors in ((first_floor, second), (second, first_floor)):
+        for source_rows in ((original, duplicate_owner),
+                            (duplicate_owner, original)):
+            claim = replace(
+                _claim_with(*source_rows),
+                canonical_floors=floors,
+            )
+            assert publish_live_floor_area_quantities(claim) == ()
+            assert publish_live_canonical_room_area_quantities(claim) == ()
+
+
+def test_unmapped_source_alternative_cannot_poison_one_authentic_floor_owner():
+    source = _source_area()
+    alternative = replace(source, quantity_id="independent-alternative-no-floor")
+    # Another original measurement for the same room may be present but
+    # never associated to a canonical floor. Do not incorrectly erase the
+    # uniquely owned authentic floor quantity.
+    claim = _claim_with(source, alternative)
+    published = publish_live_floor_area_quantities(claim)
+    assert len(published) == 1
+    assert published[0].metadata["upstream_room_area_quantity_id"] == source.quantity_id

@@ -120,3 +120,30 @@ def test_final_canonical_floor_keeps_original_source_room_area_identity():
     assert len(published) == 1
     assert published[0].value == 8.64
     assert published[0].metadata["upstream_room_area_quantity_id"] == "room-area-1"
+
+
+@pytest.mark.parametrize("changes", [
+    {"semantic_key": "room_area:foreign-source-room"},
+    {"semantic_key": "room_area:source-room-1 "},
+    {"semantic_key": "room_area:SOURCE-ROOM-1"},
+    {"semantic_key": "room_area:source-room-2", "input_entity_ids": ("source-room-1",)},
+    {"input_entity_ids": ("another-source-room",)},
+    {"input_entity_ids": ("source-room-1",), "semantic_key": "room_area:source-room-1:foreign"},
+])
+def test_source_owner_semantic_must_equal_original_input_entity_for_both_reissues(changes):
+    # Even the correct quantity ID, original metric value, and copied
+    # evidence receipts cannot turn a mismatched source room owner FIRM.
+    source = replay(**changes)
+    assert publish_live_floor_area_quantities(_claim_with(source)) == ()
+    assert publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(source)
+    ) == ()
+
+
+def test_exact_source_room_owner_pair_preserves_unscaled_documented_area():
+    source = _source_area()
+    assert source.semantic_key == f"room_area:{source.input_entity_ids[0]}"
+    assert len(publish_live_floor_area_quantities(_claim_with(source))) == 1
+    assert len(publish_live_canonical_room_area_quantities(
+        _claim_with_canonical_room(source)
+    )) == 1

@@ -47,6 +47,12 @@ def _valid_source_room_area_quantity(quantity: QuantityEvidence) -> bool:
         or type(quantity.input_entity_ids[0]) is not str
         or not quantity.input_entity_ids[0]
         or quantity.input_entity_ids[0] != quantity.input_entity_ids[0].strip()
+        # The FIRM source identity has both a semantic owner and a typed
+        # entity owner. A copied quantity ID with a different source room
+        # must not be reissued against the originally bound canonical floor.
+        # Check the original source pair before any canonical remapping.
+        or type(quantity.semantic_key) is not str
+        or quantity.semantic_key != f"room_area:{quantity.input_entity_ids[0]}"
         or not isinstance(quantity.evidence_ids, (list, tuple))
         or not quantity.evidence_ids
         or any(type(value) is not str or not value or value != value.strip()
@@ -153,8 +159,21 @@ def publish_live_floor_area_quantities(
             if physical_id:
                 physical_floor_claim_ids.setdefault(physical_id, set()).add(source_id)
 
+    # A room-area source owner cannot be used to mint two separate whole-
+    # room floor areas by changing only the source quantity ID and giving
+    # each copy a different canonical floor. Consider only source claims
+    # that actually bind one floor; independently measured alternatives
+    # without a floor owner must not poison the legitimate physical room.
+    mapped_source_owner_counts: Counter[str] = Counter(
+        quantity.input_entity_ids[0]
+        for source_id, quantity in source_quantities.items()
+        if len(floors_by_quantity.get(source_id, ())) == 1
+    )
+
     out: list[QuantityEvidence] = []
     for source_id, quantity in sorted(source_quantities.items()):
+        if mapped_source_owner_counts[quantity.input_entity_ids[0]] != 1:
+            continue
         floors = floors_by_quantity.get(source_id, ())
         if len(floors) != 1:
             continue
