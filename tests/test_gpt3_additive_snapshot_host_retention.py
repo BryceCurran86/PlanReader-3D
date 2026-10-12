@@ -64,8 +64,8 @@ def _frame(opening_id, wall_id, *, receipt="old", u1=2.0):
 
 
 def _report(*, candidate=False):
-    old_wall = _wall("wall-old", "wall2-old", "source:wall-old")
-    target_wall = _wall("wall-target", "wall2-target", "source:wall-target")
+    old_wall = _wall("wall-old", "wall2_old", "source:wall-old")
+    target_wall = _wall("wall-target", "wall2_target", "source:wall-target")
     report = {
         "source_sha256": SHA,
         "revision_id": "revision-1",
@@ -142,7 +142,7 @@ def test_any_non_rekey_source_or_geometry_change_fails_closed(mutation, message)
     if mutation == "candidate_identity":
         after["source_owned_wall_scopes"][0]["records"][0]["physical_identity"][
             "candidate_identity_id"
-        ] = "wall2-different"
+        ] = "wall2_different"
     elif mutation == "source_primitive":
         after["source_owned_wall_scopes"][0]["records"][0]["physical_identity"][
             "source_primitive_ids"
