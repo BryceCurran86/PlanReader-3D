@@ -349,6 +349,28 @@ def _unique_source_room_labels_by_face(
     candidates = tuple(
         label for label in labels if type(label) is SourceRoomLabelRecord
     )
+    # A producer-sealed record with malformed native word inventory may not
+    # project a label, nor poison a correctly typed independent room. Do this
+    # before Counter or set comprehensions can raise on nested/nonhashable IDs.
+    invalid_source_faces: set[str] = set()
+    for label in candidates:
+        face = label.face_id
+        if type(face) is not str or not face or face != face.strip():
+            continue
+        observations = label.observation_ids
+        words = label.word_evidence
+        if (
+            type(observations) is not tuple or type(words) is not tuple
+            or not observations or len(observations) != len(words)
+            or any(
+                type(observation) is not str or not observation
+                or observation != observation.strip()
+                for observation in observations
+            )
+            or len(set(observations)) != len(observations)
+            or any(type(word) is not SourceRoomLabelWordEvidence for word in words)
+        ):
+            invalid_source_faces.add(face)
     # One producer source-label receipt cannot authenticate two different
     # physical room faces, regardless of iteration order.
     source_receipt_faces: dict[str, set[str]] = {}
@@ -361,8 +383,10 @@ def _unique_source_room_labels_by_face(
     # physical rooms. Detect aliasing across the entire sealed label universe.
     source_word_faces: dict[str, set[str]] = {}
     for label in candidates:
-        for observation_id in label.observation_ids:
-            if isinstance(observation_id, str) and observation_id.strip():
+        for observation_id in (
+            label.observation_ids if type(label.observation_ids) is tuple else ()
+        ):
+            if type(observation_id) is str and observation_id and observation_id == observation_id.strip():
                 source_word_faces.setdefault(observation_id, set()).add(
                     str(label.face_id or "").strip()
                 )
@@ -374,7 +398,9 @@ def _unique_source_room_labels_by_face(
         face_id = label.face_id
         if type(face_id) is not str or not face_id or face_id != face_id.strip():
             continue
-        for word in label.word_evidence:
+        for word in (
+            label.word_evidence if type(label.word_evidence) is tuple else ()
+        ):
             if type(word) is not SourceRoomLabelWordEvidence:
                 continue
             for proof_id in (word.receipt_id, word.authority_record_id):
@@ -382,7 +408,7 @@ def _unique_source_room_labels_by_face(
                     source_proof_faces.setdefault(proof_id, set()).add(face_id)
 
     owned: dict[str, SourceRoomLabelRecord] = {}
-    conflicted: set[str] = {
+    conflicted: set[str] = invalid_source_faces | {
         face
         for faces in (
             *source_receipt_faces.values(),
