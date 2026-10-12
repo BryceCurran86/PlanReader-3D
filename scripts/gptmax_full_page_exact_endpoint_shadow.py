@@ -107,7 +107,10 @@ def _source_spans_before_failed_w4(error, joined, original, required, records):
     return output
 
 
-def full_page_endpoint_source_report(source_bytes, *, page_id, expected_source_sha):
+def full_page_endpoint_source_report(source_bytes, *, page_id, expected_source_sha,
+        include_w4_identity_abstention_shadow=False):
+    if type(include_w4_identity_abstention_shadow) is not bool:
+        raise ValueError('W4 identity abstention shadow must be explicit boolean')
     if not isinstance(source_bytes, bytes) or sha256(source_bytes).hexdigest()!=expected_source_sha:
         raise ValueError('immutable original PDF SHA mismatch')
     original=original_raster_host_ancestry_census(source_bytes,page_id=page_id,
@@ -143,6 +146,18 @@ def full_page_endpoint_source_report(source_bytes, *, page_id, expected_source_s
             modes[name]=dict(source_graph=graph,opening_rows=rows,
                 w4_assembly_status=EvidenceResolutionStatus.CANDIDATE.value,
                 first_failure_receipt=None,source_span_rows_before_w4=None)
+    if include_w4_identity_abstention_shadow:
+        graph=_trace_sources(records,exact_endpoint_shadow=True,
+            exact_endpoint_index_shadow=True,w4_identity_abstention_shadow=True)
+        rows=_flank_stage_rows(joined,original,required,graph)
+        annotate_source_span_coverage(rows,original,required)
+        modes['indexed_w4_identity_abstention_full_page_shadow']=dict(
+            source_graph=graph,opening_rows=rows,
+            w4_assembly_status=(EvidenceResolutionStatus.ABSTAINED.value
+                if graph['all_w4_abstained_chain_rows'] else EvidenceResolutionStatus.CANDIDATE.value),
+            first_failure_receipt=None,source_span_rows_before_w4=None,
+            identical_original_full_page_source_inputs=True,
+            partial_candidates_are_complete_physical_wall_universe=False)
     # Bounded original-source legacy controls use exactly the same local
     # inventories as #2445. They do not claim full-page legacy-zero parity.
     controls=[]
@@ -186,9 +201,11 @@ def main():
     parser.add_argument('--page-id',required=True)
     parser.add_argument('--expected-source-sha',required=True)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--w4-identity-abstention-shadow',action='store_true')
     args=parser.parse_args()
     result=full_page_endpoint_source_report(args.pdf.read_bytes(),page_id=args.page_id,
-        expected_source_sha=args.expected_source_sha)
+        expected_source_sha=args.expected_source_sha,
+        include_w4_identity_abstention_shadow=args.w4_identity_abstention_shadow)
     args.output.write_text(json.dumps(result,sort_keys=True,indent=2,allow_nan=False)+'\n')
     print(json.dumps(dict(inputs=result['full_source_input_primitive_count'],
         default_production_state_unchanged=True,host_publication_allowed=False)))

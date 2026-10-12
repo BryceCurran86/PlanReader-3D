@@ -3,11 +3,14 @@ on:
   pull_request:
     paths:
       - pb_wall_room_topology_stage_a.py
+      - pb_wall_room_topology_wall_assembly.py
       - tools/diag_gptmax_full_foreground_run_source.py
       - scripts/gptmax_full_page_exact_endpoint_shadow.py
       - tests/test_wall_room_topology_zero_snap_index_shadow.py
       - tests/test_gptmax_full_page_exact_endpoint_shadow.py
+      - tests/test_gptmax_w4_identity_abstention_shadow.py
       - docs/engineering/gptmax_zero_endpoint_index_shadow.md
+      - docs/engineering/gptmax_w4_node_identity_abstention_shadow.md
       - .github/workflows/test-gptmax-zero-endpoint-index-shadow.yml
 concurrency:
   group: gptmax-zero-index-shadow-${{ github.event.pull_request.number }}
@@ -29,6 +32,7 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - run: |
           PYTHONPATH=. python -m pytest -q tests/test_wall_room_topology_zero_snap_index_shadow.py tests/test_gptmax_full_page_exact_endpoint_shadow.py tests/test_wall_room_topology_snap_index.py tests/test_wall_room_topology_stage_a.py tests/test_wall_room_topology_collinear_merge_index.py tests/test_gptmax_exact_endpoint_flank_shadow.py tests/test_gptmax_full_foreground_run_source.py tests/test_gptmax_full_foreground_flank_stages.py tests/test_gptmax_cross_opening_source_usage.py
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_w4_identity_abstention_shadow.py tests/test_wall_room_topology_wall_assembly.py tests/test_wall_room_topology_junction_classifier.py
           ruff check --select F821,F823 pb_wall_room_topology_stage_a.py tools/diag_gptmax_full_foreground_run_source.py scripts/gptmax_full_page_exact_endpoint_shadow.py tests/test_wall_room_topology_zero_snap_index_shadow.py tests/test_gptmax_full_page_exact_endpoint_shadow.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
@@ -59,6 +63,7 @@ jobs:
           PYTHONPATH=. python -u scripts/gptmax_full_page_exact_endpoint_shadow.py \
             --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
             --page-id 3 \
+              --w4-identity-abstention-shadow \
             --expected-source-sha 10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844 \
             --output zero-index-full-page-source.json
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
@@ -125,6 +130,43 @@ jobs:
                           c=pixel['exact_source_span_coverage']
                           assert c['combined_graph_edge_created'] is False
                           assert c['physical_wall_authority'] is False and c['host_publication_allowed'] is False
+          third=r['indexed_w4_identity_abstention_full_page_shadow']
+          assert third['identical_original_full_page_source_inputs'] is True
+          assert third['partial_candidates_are_complete_physical_wall_universe'] is False
+          assert third['w4_assembly_status']=='abstained'
+          graph=third['source_graph']
+          assert graph['input_source_count']==10099
+          assert graph['all_actual_w3_edges_have_w4_chain_disposition'] is True
+          assert graph['w4_source_parent_inventory_validated'] is True
+          assert graph['w4_candidate_universe_complete'] is False
+          assert graph['structural_source_universe_complete'] is False
+          assert graph['host_publication_allowed'] is False
+          assert graph['opening_count_publication_allowed'] is False and graph['metric_quantity_publication_allowed'] is False
+          edges={e['edge_id']:e for e in graph['all_w2_edges']}
+          retained={key for key,e in edges.items() if e['w3_retained']}
+          candidate=[key for w in graph['all_experimental_w4_candidates'] for key in w['w2_edge_ids']]
+          abstained=[]
+          assert graph['all_w4_abstained_chain_rows']
+          for attempt in graph['all_w4_abstained_chain_rows']:
+              assert attempt['status']=='abstained' and attempt['candidate_membership_available'] is False
+              assert attempt['source_parents_authenticated'] is False
+              assert attempt['end_node_ids'][0]==attempt['end_node_ids'][1]
+              assert attempt['host_publication_allowed'] is False and attempt['physical_wall_authority'] is False
+              for fragment in attempt['actual_owned_w3_fragment_rows']:
+                  key=fragment['edge_id']; abstained.append(key)
+                  assert fragment['w3_retained'] is True and fragment['physical_host_authority'] is False
+                  assert fragment['source_observation_ids']==edges[key]['source_observation_ids']
+                  assert fragment['w2_fragment_geometry_pt']==edges[key]['w2_fragment_geometry_pt']
+                  assert edges[key]['w4_candidate_membership_available'] is False
+          assert len(set(candidate))==len(candidate) and len(set(abstained))==len(abstained)
+          assert not set(candidate)&set(abstained) and set(candidate)|set(abstained)==retained
+          assert len(third['opening_rows'])==7
+          for row in third['opening_rows']:
+              for flank in row['flanks']:
+                  for pixel in flank['source_run_rows']:
+                      assert pixel['host_publication_allowed'] is False and pixel['physical_equivalence_proven'] is False
+                      coverage=pixel['exact_source_span_coverage']
+                      assert coverage['combined_graph_edge_created'] is False and coverage['physical_wall_authority'] is False
           PY
       - uses: actions/upload-artifact@v4
         if: always()

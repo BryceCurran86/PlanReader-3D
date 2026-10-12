@@ -60,6 +60,7 @@ a false combined wall or silently disappearing.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from pb_geometry_takeoff_model import MeasurementAuthorityType
@@ -274,6 +275,8 @@ def assemble_wall_candidates(
     relationships: Sequence[TopologyRelationship],
     *,
     viewport_id: str,
+    identity_abstention_shadow: bool = False,
+    abstained_chain_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[WallCandidate], Dict[str, str]]:
     """Assemble WallCandidates from a Stage-A graph and its W3 classification.
 
@@ -286,7 +289,19 @@ def assemble_wall_candidates(
 
     Returns ``(wall_candidates, edge_id_to_wall_candidate_id)`` -- the second
     value is the mapping ``rekey_junctions_to_wall_candidates`` needs.
+
+    Explicit shadow mode records equal-end-node attempts in a fresh output
+    list instead of constructing an invalid WallCandidate. Those edges have
+    unavailable candidate membership, not a complete empty owner universe.
+    Default callers still execute the original constructor and its guard.
     """
+    if type(identity_abstention_shadow) is not bool:
+        raise ValueError("identity abstention shadow must be explicit boolean")
+    if identity_abstention_shadow:
+        if type(abstained_chain_rows) is not list or abstained_chain_rows:
+            raise ValueError("identity abstention shadow requires a fresh empty output list")
+    elif abstained_chain_rows is not None:
+        raise ValueError("abstained chain output requires explicit shadow mode")
     # classify_junctions applies this same dedup internally before deriving
     # junctions/relationships -- applying it again here (idempotent) keeps
     # this function's own edge set consistent with what those relationships
@@ -359,6 +374,34 @@ def assemble_wall_candidates(
                 [min(edge_ids)] if len(edge_ids) == 1 else _chain_order_edge_ids(edge_ids, edges_by_id)
             )
         )
+
+        if identity_abstention_shadow and end_node_ids[0] == end_node_ids[1]:
+            fragments = [
+                {"edge_id": eid,
+                 "w2_fragment_geometry_pt": [edges_by_id[eid][k] for k in ("x1", "y1", "x2", "y2")],
+                 "primitive_lineage": deepcopy(edges_by_id[eid].get("primitive_lineage")),
+                 "w3_retained": True, "physical_host_authority": False}
+                for eid in ordered_edge_ids
+            ]
+            abstained_chain_rows.append({
+                "record_id": stable_contract_id("w4_abstained_chain", {
+                    "viewport_id": viewport_id, "edge_ids": sorted(ordered_edge_ids),
+                    "attempt_candidate_id": candidate_id}),
+                "status": EvidenceResolutionStatus.ABSTAINED.value,
+                "reason_codes": ["a wall candidate cannot start and end at the same node"],
+                "attempt_candidate_id": candidate_id, "viewport_id": viewport_id,
+                "centerline_pt": tuple(points), "end_node_ids": end_node_ids,
+                "raw_endpoint_node_indices": (start_idx, end_idx),
+                "raw_endpoint_positions_pt": tuple(
+                    (node_lookup[idx]["x"], node_lookup[idx]["y"]) for idx in (start_idx, end_idx)),
+                "graph_index_path_is_simple": is_simple_path,
+                "actual_owned_w3_fragment_rows": fragments,
+                "candidate_membership_available": False,
+                "source_parents_authenticated": False,
+                "physical_wall_authority": False, "physical_equivalence_proven": False,
+                "host_publication_allowed": False, "source_parent_transfer_allowed": False,
+            })
+            continue
 
         wall = WallCandidate(
             candidate_id=candidate_id,
