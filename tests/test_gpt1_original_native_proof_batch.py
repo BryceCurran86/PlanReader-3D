@@ -118,6 +118,14 @@ def test_native_source_text_integrity_unavailable_aborts_full_page_batch():
     source, published, selector, support = _native_source()
     physical = source.physical_opening_authority()
     source._text_integrity_receipts.clear()
-    with pytest.raises(RuntimeError):
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "physical_wall_candidate_source_integrity_failure:"
+            "opening_annotation_source_integrity_unproven:"
+            "page_id=1:source_observation_id="
+        ),
+    ) as failure:
         _proof(source, published, physical, page_id="1")
+    assert ":candidate_id=" in str(failure.value)
     assert source._native_dimension_proof_batch is None
