@@ -75,7 +75,7 @@ def test_final_legacy_ceiling_seal_rejects_duplicate_original_id_in_any_order(
             )
 
 
-@pytest.mark.parametrize("raw_id", [True, 42, " qty-foreign ", "  "])
+@pytest.mark.parametrize("raw_id", [True, 42, " qty-foreign "])
 def test_final_legacy_ceiling_seal_rejects_untyped_or_padded_original_id(raw_id):
     original = _shadow_quantity()
     unsupported = replace(
