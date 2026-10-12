@@ -44,6 +44,7 @@ def _polygon(source):
     # Original-source room polygons may be open vertex rings (no repeated
     # final point); Shapely validates closure, crossings and zero area without
     # changing the vertices. Never use buffer(0) or polygon repair here.
+    from shapely.errors import GEOSException
     from shapely.geometry import Polygon
     try:
         native_face = Polygon(vertices)
@@ -53,7 +54,7 @@ def _polygon(source):
             and native_face.area > 0
             and len(native_face.interiors) == 0
         )
-    except (TypeError, ValueError, OverflowError):
+    except (TypeError, ValueError, OverflowError, GEOSException):
         return False
 
 def _source(obj,sha):
