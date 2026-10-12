@@ -51,7 +51,7 @@ def _ledger_rows(ledger: dict, side: str) -> dict[str, dict]:
         if (
             type(identity) is not str or not identity or identity != identity.strip()
             or identity in indexed
-            or stage not in _STAGE_ORDER
+            or type(stage) is not str or stage not in _STAGE_ORDER
         ):
             raise ValueError(f"{side}: invalid or duplicated physical opening identity")
         reasons = row.get("first_stage_reason_codes")
