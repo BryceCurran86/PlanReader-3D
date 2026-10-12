@@ -38,7 +38,6 @@ def test_original_resolved_physical_scale_still_supports_customer_measurement(au
     {"scale_status":"conflicted"},
     {"scale_status":"unresolved"},
     {"scale_status":True},
-    {"scale_conflicts":("other physical source",)},
     {"scale_conflicts":"other physical source"},
     {"scale_conflicts":None},
     {"scale_conflicts":3},
@@ -50,3 +49,23 @@ def test_original_room_and_floor_customer_cannot_normalize_source_scale_conflict
     source=_scaled()
     tampered=replace(source,metadata={**dict(source.metadata),**updates})
     assert authority(tampered) is None
+
+
+def test_original_room_scale_conflicts_raise_explicit_commercial_conflict():
+    from pb_quantity_takeoff_adapter import CommercialTakeoffConflictError
+    source=_scaled()
+    disputed=replace(source,metadata={
+        **dict(source.metadata),
+        "scale_conflicts": ("independent_source_scale_opposition",),
+    })
+    with pytest.raises(CommercialTakeoffConflictError, match="scale conflicts"):
+        room_auth(disputed)
+
+
+def test_original_floor_scale_conflict_remains_unprojected_not_firm():
+    source=_scaled()
+    disputed=replace(source,metadata={
+        **dict(source.metadata),
+        "scale_conflicts": ("independent_source_scale_opposition",),
+    })
+    assert floor_auth(disputed) is None
