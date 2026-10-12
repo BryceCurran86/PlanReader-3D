@@ -1,0 +1,106 @@
+name: TEST ONLY GPT1 Original Maryborough Source Stage Journal
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_source_closed_stage_journal.py"
+      - "tests/test_gpt1_source_stage_journal.py"
+      - ".github/workflows/test_only_gpt1_original_source_stage_journal.yml"
+
+concurrency:
+  group: gpt1-source-stage-journal-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-source-stages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PYTHONPATH: .
+      ORIGINAL_SHA: b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+      ORIGINAL_PDF: documents/sources/Arch_Combined_Maryborough_Service_Station.pdf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install original source processing requirements
+        run: |
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original SHA and frozen source-manifest verification ONLY
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          manifest = json.loads(Path(
+              "benchmarks/frozen_holdout/full_plan_v2/projects/"
+              "au_qld_maryborough_service_station/source_manifest.json"
+          ).read_text())
+          entries = manifest["source_documents"]
+          assert len(entries) == 1
+          name = Path(os.environ["ORIGINAL_PDF"]).name
+          assert entries[0]["name"] == name
+          assert entries[0]["sha256"] == os.environ["ORIGINAL_SHA"]
+          content = Path(os.environ["ORIGINAL_PDF"]).read_bytes()
+          assert len(content) == entries[0]["size_bytes"]
+          assert hashlib.sha256(content).hexdigest() == os.environ["ORIGINAL_SHA"]
+          print("Original source SHA verified; NO benchmark truth loaded for quantities.")
+          PY
+      - name: Bounded original source-stage capture (NOT a successful seal gate)
+        run: |
+          mkdir -p artifacts/gpt1-source-stage
+          OUT=artifacts/gpt1-source-stage
+          set +e
+          timeout --signal=TERM 240s python -u tools/diag_source_closed_stage_journal.py \
+            --pdf "$ORIGINAL_PDF" \
+            --expected-sha256 "$ORIGINAL_SHA" \
+            --project-id au_qld_maryborough_service_station \
+            --family-group surfaces \
+            --workspace-id 1 \
+            --output-dir "$OUT/run" \
+            --journal "$OUT/authority_stages.jsonl" \
+            >"$OUT/console.log" 2>&1
+          STATUS=$?
+          set -e
+          echo "$STATUS" > "$OUT/diagnostic_exit_status.txt"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("artifacts/gpt1-source-stage")
+          events = [json.loads(x) for x in
+                    (root / "authority_stages.jsonl").read_text().splitlines()]
+          status = int((root / "diagnostic_exit_status.txt").read_text().strip())
+          assert events and events[0]["event"] == "sha_verified"
+          assert all(event["diagnostic_only"] is True for event in events)
+          assert status in (0, 1, 124), f"unexpected diagnostic process failure: {status}"
+          if status == 1:
+              summary_path = root / "run" / "production_summary.json"
+              assert summary_path.is_file(), "unexpected producer failure without source report"
+              summary = json.loads(summary_path.read_text())
+              assert summary["status"] == "no_sealable_quantities", "source producer failed"
+          latest = events[-1]
+          report = {
+              "diagnostic_only": True,
+              "source_closed_publication_proven": status == 0,
+              "benchmark_score_granted": False,
+              "full_plan_v2_reconciliation_complete": False,
+              "run_exit_status": status,
+              "stage_events": len(events),
+              "last_source_stage": latest["stage"],
+              "last_source_stage_event": latest["event"],
+              "peak_rss_kb_diagnostic": max(x["peak_rss_kb"] for x in events),
+              "source_universe_trimmed": False,
+          }
+          (root / "diagnostic_stage_summary.json").write_text(
+              json.dumps(report, sort_keys=True, indent=2) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-source-stages-unsealed-diagnostic
+          path: artifacts/gpt1-source-stage
+          retention-days: 3
