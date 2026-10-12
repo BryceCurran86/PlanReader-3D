@@ -470,12 +470,20 @@ def attach_lineage_to_split_fragments(
     source_segments: Sequence[Mapping[str, Any]],
     *,
     id_prefix: str = "split",
+    source_parent_indexes: Sequence[int] | None = None,
 ) -> List[Dict[str, Any]]:
     """Rebuild the historical split-dict shape plus additive plural lineage.
 
     Official split geometry is caller-supplied. Extra parents are taken only
     from the same collinear bucket so this is not a second global n² pass.
     """
+    if source_parent_indexes is not None and (
+        not isinstance(source_parent_indexes, (list, tuple))
+        or len(source_parent_indexes) != len(split_pairs)
+        or any(type(i) is not int or not 0 <= i < len(source_segments)
+               for i in source_parent_indexes)
+    ):
+        raise ValueError("exact split source parent inventory invalid")
     buckets: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
     for segment in source_segments:
         buckets.setdefault(source_line_bucket(segment), []).append(segment)
@@ -511,6 +519,20 @@ def attach_lineage_to_split_fragments(
             seen_candidates.add(marker)
             candidates.append(candidate)
         parents = sources_for_fragment(pair, candidates)
+        if source_parent_indexes is not None:
+            # Shadow only: this parent is captured inside the splitter's own
+            # source emission loop, never elected by geometry/proximity. The
+            # unchanged endpoint predicate guards the rounded derived span;
+            # other genuine plural parents remain retained above.
+            origin = source_segments[source_parent_indexes[idx]]
+            coords = (*p1, *p2)
+            if (not all(math.isfinite(float(v)) for v in coords) or p1 == p2
+                    or not all(_point_on_segment(
+                        *point, *(float(origin[k]) for k in _PAGE_COORD_FIELDS)
+                    ) for point in pair)):
+                raise ValueError("exact split origin contradicts fragment geometry")
+            if all(origin is not parent for parent in parents):
+                parents.append(origin)
         fragment = {
             "id": f"{id_prefix}_{idx}",
             "x1": p1[0],

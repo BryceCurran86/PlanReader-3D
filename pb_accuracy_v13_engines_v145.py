@@ -44,14 +44,24 @@ def _segment_intersection(a: Segment, b: Segment, tol: float = 1e-9) -> Point | 
     return None
 
 
-def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment]:
+def split_segments_at_intersections(
+    segments: Sequence[Segment], *, source_parent_indexes: List[int] | None = None,
+) -> List[Segment]:
     """Split vector linework at every true crossing before graph traversal.
 
     The exact intersection predicate and split ordering are unchanged. A
     deterministic x-axis sweep only removes segment pairs whose axis-aligned
     bounding boxes cannot intersect, avoiding the historical all-pairs scan on
     dense CAD pages.
+
+    An optional empty output list captures each emitted pair's original source
+    input index at the emission seam. This adds derivation provenance only;
+    intersection predicates, ordering and returned geometry are unchanged.
     """
+    if source_parent_indexes is not None and (
+        type(source_parent_indexes) is not list or source_parent_indexes
+    ):
+        raise ValueError("split source parent output must be an empty list")
     pts: List[List[Point]] = [[tuple(map(float,s[0])), tuple(map(float,s[1]))] for s in segments]
 
     # Broad phase only: candidate pairs still pass through the existing exact
@@ -82,7 +92,7 @@ def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment
                 pts[i].append(p); pts[j].append(p)
 
     out: List[Segment]=[]
-    for original, candidates in zip(segments,pts):
+    for source_index, (original, candidates) in enumerate(zip(segments,pts)):
         a,b=original; dx=b[0]-a[0]; dy=b[1]-a[1]
         denom=dx*dx+dy*dy or 1.0
         unique=[]
@@ -90,7 +100,10 @@ def split_segments_at_intersections(segments: Sequence[Segment]) -> List[Segment
             if not any(_same(p,q) for q in unique): unique.append(p)
         unique.sort(key=lambda p: ((p[0]-a[0])*dx+(p[1]-a[1])*dy)/denom)
         for p,q in zip(unique,unique[1:]):
-            if segment_length((p,q))>1e-7: out.append((p,q))
+            if segment_length((p,q))>1e-7:
+                out.append((p,q))
+                if source_parent_indexes is not None:
+                    source_parent_indexes.append(source_index)
     return out
 
 
