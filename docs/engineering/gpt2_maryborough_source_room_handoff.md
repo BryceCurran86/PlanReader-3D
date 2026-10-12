@@ -33,3 +33,48 @@ DRY STORE **ABSTAIN**. M-AMB/F-AMB and POS/FOOD SERVICE/WASH UP/TRUCK DRIVER LOU
 ### Auditable GPT1/GPT3 handoff receipts
 
 Positive reports include `original_source_face_receipt_id` and **only after a source-authenticated distinct original word owner** also `original_label_binding_record_id` and the exact `original_label_evidence_ids`. The first admissible independently producer-owned documented/physically-scaled room area adds `documented_area_quantity_id`, `documented_area_source_evidence_ids`, `documented_area_original_authority` and `source_proven_area_m2`. Those fields remain **null/empty** when their producer stage is unavailable or conflicted, even if the room name appears on the PDF or a historical control happens to have that number. They never imply `commercial_quantity_authority`, which requires a separate unique canonical floor with the exact quantity ID/value and explicit producer permission. No raw text names or fields are acceptable source geometry substitutes.
+
+
+## Three original FIRM rooms — publisher handoff (2026-10-12)
+
+The original-SHA-verified Maryborough source run (PDF SHA
+`b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`)
+retains the following producer-owned receipts. These identifiers are **diagnostic
+observations**, not new benchmark truth or constants used in production.
+
+| Original room label | Exact source room-face receipt | Canonical floor | Source room-area QuantityEvidence | Original FIRM m² |
+| --- | --- | --- | --- | ---: |
+| FOOD PREP | `source_room_face_record_a163b3690c0b2db83f89fcf7465bd831` | `physical_room_floor_surface_10d0d5ddf8103483397512c5a74584f7` | `qty_be2a3b3108220d48f6f5` | 13.270425 |
+| OFFICE | `source_room_face_record_735f9b309cca70f513c9fcd9390e3e10` | `physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e` | `qty_29e71bd466a9e5fa1783` | 9.05352 |
+| COLD ROOM | `source_room_face_record_17f0cb15ba5c2f25ff17b12b2ccc5129` | `physical_room_floor_surface_4bca8579c101670bbfa0853cbbfc6f87` | `qty_9795d69439e85c35b01c` | 25.37875 |
+
+The first report (`report_source_room_handoff`) reports
+`COMMERCIAL_FLOOR_AREA_AUTHORITY_UNAVAILABLE` because canonical floors
+**deliberately** leave `metric_geometry_complete=False` and
+`commercial_quantity_authority=False` for documented-only room areas.
+**Neither flag should be manually flipped.** A source-FIRM documented area is
+not a scaled physical polygon or a certified finish occurrence.
+
+The follow-on `inspect_room_measurement_gates` report runs **real**
+`publish_live_floor_area_quantities` and
+`publish_live_canonical_room_area_quantities` for the *same live claim* and
+reports exact separate `FLOOR_QUANTITY_PUBLICATION`,
+`CANONICAL_ROOM_AREA_REISSUE`, `SEALED_CUSTOMER_PROJECTION_UNVERIFIED` or
+`CUSTOMER_REVIEW_ROW_VERIFIED_UNSCORED` stages. It also reports any actual
+reissued source-owned quantity IDs, plus canonical/source-floor ownership and
+individual first-failure receipts. These are the correct actionable GPT1/GPT3
+gates. The new SHA-pinned workflow stores both
+`original-maryborough-source-room-handoff.json` and
+`original-maryborough-floor-publisher-firstgate.json` from **one** original
+PDF extraction; it asserts that all three exact source face and canonical
+floor IDs agree, that the source FIRM areas are unchanged, and that no
+commercial flag, finish, benchmark numerator or evaluator has been altered.
+
+Other observed source-positive rooms: FREEZER is withheld at
+`SOURCE_ROOM_PHYSICAL_POLYGON_INCOMPLETE` in the stricter source handoff;
+PWD, AIRLOCK, LAUNDRY and SALES are withheld at
+`FIRM_AREA_SOURCE_MEASUREMENT_UNAVAILABLE`. Six other requested named rooms
+and DRY STORE have no unique authenticated closed face. The separate W4/GRID
+original source ledger in issue #2009 explains the source wall and invalid
+polygon causes. Nothing in this diagnostic publishes unsupported customer
+quantities.
