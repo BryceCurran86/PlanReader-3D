@@ -263,6 +263,12 @@ def _normalized_room_line(text: str) -> Optional[str]:
     if not 1 <= len(words) <= _MAX_ROOM_LABEL_WORDS:
         return None
     normalized = compact.lower()
+    # Accept only a complete native BED/BEDROOM ordinal room-name line.
+    # This is a candidate, never standalone room/floor/area authority:
+    # original word receipts and unique physical face ownership still gate it.
+    # An opening tag, schedule index, or quantity must not mint a room.
+    if re.fullmatch(r"(?:bed|bedroom) [1-9][0-9]?", normalized):
+        return compact
     if any(any(ch.isdigit() for ch in word) for word in words):
         return None
     if len(words) == 1:

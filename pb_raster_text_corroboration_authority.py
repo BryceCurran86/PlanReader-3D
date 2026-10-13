@@ -166,6 +166,61 @@ def _lossless_rotate(image: Image.Image, degrees: int) -> Image.Image:
     return image
 
 
+def _exact_native_word_origin_run(
+    line: object,
+    *,
+    word_bbox: tuple[float, float, float, float],
+    raw_text: str,
+) -> bool:
+    """Prove a unique source-text run by native characters AND word origins.
+
+    Glyph *ink* may protrude outside a PyMuPDF word bbox for rotated text.
+    Native text origin is an independent original-source location. This
+    verifier neither crops the glyph nor trusts text OCR: it permits only
+    retention of the already source-owned line direction and original bbox.
+    Each character must itself have a valid finite glyph bbox and origin,
+    and the entire unique source character run must be anchored inside the
+    producer-owned native word bbox. A mere substring elsewhere is rejected.
+    """
+    if (
+        not isinstance(line, dict)
+        or _rect4(word_bbox) is None
+        or type(raw_text) is not str
+        or not raw_text
+    ):
+        return False
+    chars = []
+    for span in line.get("spans") or ():
+        if not isinstance(span, dict):
+            return False
+        for char in span.get("chars") or ():
+            if not isinstance(char, dict):
+                return False
+            token = char.get("c")
+            origin = _point2(char.get("origin"))
+            bbox = _rect4(char.get("bbox"))
+            if type(token) is not str or len(token) != 1 or origin is None or bbox is None:
+                return False
+            chars.append((token, origin))
+    length = len(raw_text)
+    if length == 0 or length > len(chars):
+        return False
+    matches = 0
+    for index in range(len(chars) - length + 1):
+        window = chars[index:index + length]
+        if "".join(char[0] for char in window) != raw_text:
+            continue
+        if all(
+            word_bbox[0] - 1e-4 <= origin[0] <= word_bbox[2] + 1e-4
+            and word_bbox[1] - 1e-4 <= origin[1] <= word_bbox[3] + 1e-4
+            for _, origin in window
+        ):
+            matches += 1
+            if matches > 1:
+                return False
+    return matches == 1
+
+
 def _producer_owned_ocr_target(
     source_producer: SourceObservationProducer,
     *,
@@ -278,6 +333,16 @@ def _producer_owned_ocr_target(
                     ):
                         native_chars.append((char_text, char_origin, char_bbox))
             if "".join(item[0] for item in native_chars) != str(raw_text):
+                # A word whose valid glyph INK protrudes beyond its original
+                # word bbox can still have source-owned glyph ORIGINS inside
+                # that bbox. Keep its original crop and proven orientation
+                # ONLY for one exact native character run at those origins.
+                # This does not bless the OCR reading, pick trace glyphs or
+                # create any trusted text/material evidence by itself.
+                if _exact_native_word_origin_run(
+                    line, word_bbox=word_bbox, raw_text=raw_text
+                ):
+                    return word_bbox, rotation_degrees
                 return word_bbox, 0
 
             trace_chars: list[
