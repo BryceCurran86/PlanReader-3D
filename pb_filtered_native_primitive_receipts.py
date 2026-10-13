@@ -29,7 +29,9 @@ def filtered_native_primitive_receipts(
 
     orig_counts = Counter(sid(row) for row in original)
     keep_counts = Counter(sid(row) for row in retained)
-    if orig_counts[None] or keep_counts[None]:
+    if (orig_counts[None] or keep_counts[None]
+            or any(count != 1 for count in orig_counts.values())):
+        # Duplicate original identities cannot safely be distinguished.
         return ()
     unique_orig = {sid(row): row for row in original if orig_counts[sid(row)] == 1}
     unique_keep = {sid(row): row for row in retained if keep_counts[sid(row)] == 1}
