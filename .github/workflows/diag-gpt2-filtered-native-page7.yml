@@ -17,7 +17,7 @@ concurrency:
 jobs:
   original-filtered-native:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,6 +42,10 @@ jobs:
           git rev-parse HEAD > artifacts/gpt2-filtered-native/producer_head_sha.txt
           sha256sum documents/sources/Arch_Combined_Maryborough_Service_Station.pdf > artifacts/gpt2-filtered-native/original_source_sha.txt
           PYTHONPATH=. python -u tools/diag_gpt2_filtered_native_page7.py | tee artifacts/gpt2-filtered-native/source_receipts.json
+      - name: Trace source-owned original native lines through actual W2 graph Stage A
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -u tools/diag_gpt2_filtered_native_page7.py --w2-graph | tee artifacts/gpt2-filtered-native/w2_original_source_lineage.json
       - if: always()
         uses: actions/upload-artifact@v4
         with:
