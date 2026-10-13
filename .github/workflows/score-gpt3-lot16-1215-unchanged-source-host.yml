@@ -183,6 +183,19 @@ jobs:
           assert old_physical <= new_physical
           assert (target,) in new_physical - old_physical
           assert len(sealed.quantities)==len(baseline["quantities"])+1
+          # Re-sealing must change prior rows ONLY by snapshot-scoped host/frame
+          # receipts (one binding + at most one frame id per row); every other field and
+          # every other evidence id of the seven original quantities stays identical.
+          from tools.declared_additive_source_retention import (
+              sealed_quantities_changed_only_by_snapshot_receipts,
+          )
+          rekey_audit=sealed_quantities_changed_only_by_snapshot_receipts(
+              baseline["quantities"],
+              json.loads((prod/"source_sealed_run.json").read_text())["quantities"],
+          )
+          assert rekey_audit["prior_rows"]==len(baseline["quantities"])
+          assert rekey_audit["new_rows"]==1
+          print("SEALED REKEY AUDIT",json.dumps(rekey_audit,sort_keys=True))
           print("NEW FIRM LOT16 QUANTITY",json.dumps({
               "quantity_id":quantity.quantity_id,
               "physical_opening_id":target,
