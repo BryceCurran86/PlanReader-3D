@@ -583,6 +583,32 @@ def test_inline_helper_and_cli_agree_with_the_approval(tmp_path, monkeypatch, ca
     assert "NO DECLARATION" in capsys.readouterr().out
 
 
+def test_unverified_declared_key_cannot_unlock_inline_gate_or_cli(tmp_path, monkeypatch, capsys):
+    from tools import declared_additive_source_retention as module
+
+    base, cand = event()
+    base["source_decode_coverage"] = {"pages": 13, "decoded": 13}
+    cand["source_decode_coverage"] = {"pages": 13, "decoded": 12}
+    declaration = declared(expected_changed_report_keys=[
+        "snapshot_id", "opening_bindings", "host_frames",
+        "resolved_host_frame_evidence", "source_owned_wall_scope_results",
+        "source_decode_coverage",
+    ])
+    approval = approve_declared_additive_rekeys(base, cand, declaration)
+    assert approval["unverified_changed_report_keys"] == ["source_decode_coverage"]
+    assert module.declared_event_approved(base, cand, declaration) is False
+    assert "not fully proven" in capsys.readouterr().err
+
+    (tmp_path / "b.json").write_text(json.dumps(base))
+    (tmp_path / "c.json").write_text(json.dumps(cand))
+    monkeypatch.setattr(module, "load_declarations", lambda path=None: declaration)
+    assert module.main([
+        "--baseline", str(tmp_path / "b.json"),
+        "--candidate", str(tmp_path / "c.json"),
+    ]) == 1
+    assert "UNVERIFIED changed report keys" in capsys.readouterr().out
+
+
 def test_declared_new_frame_must_occur_and_only_when_declared():
     base, cand = event()
     binding = {r["opening_identity_id"]: r for r in cand["opening_bindings"]}
