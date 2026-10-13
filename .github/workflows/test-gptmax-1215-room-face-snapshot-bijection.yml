@@ -1,0 +1,100 @@
+name: GPT MAX Lot16 1215 Source Room-Face Snapshot Bijection
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test-gptmax-1215-room-face-snapshot-bijection.yml
+permissions:
+  contents: read
+jobs:
+  original-1215-room-face:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+      SOURCE_SHA: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+      PRODUCER_HEAD: "0d2c064919ba65ded8c07f69cfbd0030eaa52ef0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Immutable frozen truth and shadow source negative tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_room_face_shadow_rekeys.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+      - name: Produce both exact original Lot16 pre/post 1215 source-owned shadow sets
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' "$SOURCE_SHA" "$PDF" | sha256sum --check
+          git fetch --no-tags origin "$PRODUCER_HEAD"
+          git worktree add --detach /tmp/gptmax-1215-room-shadow-after "$PRODUCER_HEAD"
+          # Only a read-only diagnostic/report script and its pure original
+          # source mapping verifier are allowed into isolated candidate tree.
+          # No 1215 host, geometry, source detector or measurement changes.
+          test -z "$(git diff --name-only \
+            c1cc7d5aea85ad46b1b48b68e5ac855fe64594a0 "$PRODUCER_HEAD" -- \
+            tools/diag_gptmax_source_authority_stages.py \
+            tools/verify_gptmax_room_face_shadow_rekeys.py \
+            pb_source_room_face_authority.py)"
+          cp tools/diag_gptmax_source_authority_stages.py \
+            /tmp/gptmax-1215-room-shadow-after/tools/diag_gptmax_source_authority_stages.py
+          cp tools/verify_gptmax_room_face_shadow_rekeys.py \
+            /tmp/gptmax-1215-room-shadow-after/tools/verify_gptmax_room_face_shadow_rekeys.py
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --include-shadow-room-face-source-polygons --output original-before-shadow.json
+          (
+            cd /tmp/gptmax-1215-room-shadow-after
+            printf '%s  %s\n' "$SOURCE_SHA" "$PDF" | sha256sum --check
+            PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+              --pdf "$PDF" --page-id 3 --source-all-pages \
+              --include-shadow-room-face-source-polygons \
+              --output "$GITHUB_WORKSPACE/original-after-1215-shadow.json"
+          )
+      - name: Prove all 107 source polygons physically identical across 1215 snapshot
+        run: |
+          PYTHONPATH=. python tools/verify_gptmax_room_face_shadow_rekeys.py \
+            --baseline original-before-shadow.json \
+            --candidate original-after-1215-shadow.json \
+            --output original-room-face-rekey-proof.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          old=json.loads(Path("original-before-shadow.json").read_text())
+          new=json.loads(Path("original-after-1215-shadow.json").read_text())
+          witness=json.loads(Path("original-room-face-rekey-proof.json").read_text())
+          assert witness["all_shadow_source_faces_preserved"] is True
+          assert witness["original_shadow_owned_faces"]==107
+          assert witness["published_original_faces"]==61
+          assert witness["abstained_original_faces"]==41
+          assert witness["shadow_unpublished_original_faces"]==5
+          assert old["source_sha256"]==new["source_sha256"]
+          assert old["primitive_safety_cap"]==new["primitive_safety_cap"]==20_000
+          assert old["source_owned_wall_scopes"][0]["records"]==new["source_owned_wall_scopes"][0]["records"]
+          assert len(old["source_owned_wall_scopes"][0]["records"])==2094
+          assert old["summary"]["authenticated_hosts"]==14
+          assert new["summary"]["authenticated_hosts"]==15
+          assert old["summary"]["resolved_source_frames"]==new["summary"]["resolved_source_frames"]==9
+          assert old["summary"]["physical_existence_claims"]==new["summary"]["physical_existence_claims"]==21
+          assert witness["benchmark_matches_claimed"]==0
+          print({"original_source_room_shadow_identity_proven":True,
+                 "original_unchanged_full_W4":2094,"owned_faces":107,
+                 "published_faces":61,"abstained_faces":41,"shadow_only":5,
+                 "new_customer_quantities_claimed":0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-lot16-1215-original-room-face-snapshot-bijection
+          path: |
+            original-before-shadow.json
+            original-after-1215-shadow.json
+            original-room-face-rekey-proof.json
+          retention-days: 14
