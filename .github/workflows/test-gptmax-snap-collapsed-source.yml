@@ -31,7 +31,7 @@ jobs:
           (cd /tmp/snap-source-baseline && PYTHONPATH=. python -u /tmp/snap-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output /tmp/snap-source-baseline.json)
           PYTHONPATH=. python -u /tmp/snap-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output snap-source-current.json
           cp /tmp/snap-source-baseline.json snap-source-baseline.json
-          python - <<'PY'
+          PYTHONPATH=. python - <<'PY'
           import json
           from pathlib import Path
           old = json.loads(Path('snap-source-baseline.json').read_text())
@@ -44,7 +44,9 @@ jobs:
               if isinstance(value, list):
                   return [remove_negative_sidecar(v) for v in value]
               return value
-          assert remove_negative_sidecar(old) == remove_negative_sidecar(new)
+          from tools.declared_additive_source_retention import assert_unchanged_or_declared
+          assert_unchanged_or_declared(old, new, normalize=remove_negative_sidecar,
+              message='snap-collapsed sidecar changed original source authority')
           assert 'quantities' not in new
           print({'source_authority_unchanged': True, 'summary': new['summary']})
           PY

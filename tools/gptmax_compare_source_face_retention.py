@@ -10,6 +10,10 @@ import argparse
 import json
 from pathlib import Path
 from tools.gptmax_compare_opening_authority import compare_reports
+from tools.declared_additive_source_retention import (
+    REKEY_FLAGS,
+    approve_declared_additive_rekeys,
+)
 
 
 def _canonicalize(report):
@@ -34,8 +38,15 @@ def _canonicalize(report):
     }
 
 
-def compare_source_face_reports(baseline, candidate):
-    """Reject loss or rekey of ANY prior source-backed identity/host/frame."""
+def compare_source_face_reports(baseline, candidate, *, declarations=None):
+    """Reject loss or rekey of ANY prior source-backed identity/host/frame.
+
+    ``declarations`` (default: the committed file, empty unless a reviewed
+    additive-source event is declared) can only turn a receipt rekey of a
+    retained host whose physical source proposition is proven unchanged into an
+    explicitly accepted record.  Losses, owner changes of other kinds and every
+    undeclared event still fail exactly as before.
+    """
     before = _canonicalize(baseline)
     after = _canonicalize(candidate)
     for original, current in ((baseline, candidate),):
@@ -46,6 +57,24 @@ def compare_source_face_reports(baseline, candidate):
         if original.get("primitive_safety_cap") != current.get("primitive_safety_cap"):
             raise ValueError("primitive cap mismatch")
     result = compare_reports(before, after)
+    approval = approve_declared_additive_rekeys(baseline, candidate, declarations)
+    if approval is not None:
+        rekeyed = set(approval["rekeyed_host_ids"])
+        accepted, remaining = [], []
+        for record in result["changed_proof_records_needing_review"]:
+            if (record["physical_opening_id"] in rekeyed
+                    and set(record["changes"]) <= REKEY_FLAGS):
+                accepted.append(record)
+            else:
+                remaining.append(record)
+        result["changed_proof_records_needing_review"] = remaining
+        result["declared_additive_source_retention"] = approval
+        result["declared_rekeys_accepted"] = accepted
+        result["retention_pass"] = not (
+            result["missing_physical_openings"]
+            or result["lost_proof_records"]
+            or remaining
+        )
     result["source_report_kind"] = "real_physical_source_wall_faces"
     result["quantity_publication_permitted"] = False
     return result

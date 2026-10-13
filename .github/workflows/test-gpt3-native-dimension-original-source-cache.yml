@@ -39,7 +39,7 @@ jobs:
           ( cd /tmp/gpt3-native-dimension-baseline &&
             PYTHONPATH=. python -u /tmp/gpt3-source-retention.py --pdf "$PDF" --page-id 3 --source-all-pages --output /tmp/gpt3-original-before.json )
           PYTHONPATH=. python -u /tmp/gpt3-source-retention.py --pdf "$PDF" --page-id 3 --source-all-pages --output /tmp/gpt3-original-after.json
-          python - <<'PY'
+          PYTHONPATH=. python - <<'PY'
           import json
           from pathlib import Path
           before=json.loads(Path('/tmp/gpt3-original-before.json').read_text())
@@ -53,7 +53,9 @@ jobs:
               if isinstance(value,list):
                   return [normalize(v) for v in value]
               return value
-          assert normalize(before)==normalize(after), 'original Lot16 opening/host/frame source authority changed'
+          from tools.declared_additive_source_retention import assert_unchanged_or_declared
+          assert_unchanged_or_declared(before, after, normalize=normalize,
+              message='original Lot16 opening/host/frame source authority changed')
           assert 'quantities' not in after
           print({'source_authentic_openings_hosts_frames_unchanged':True,'summary':after['summary']})
           PY
