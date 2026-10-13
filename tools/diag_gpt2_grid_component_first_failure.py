@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 import math
-from typing import Any
+from typing import Any, Sequence
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
@@ -750,6 +750,25 @@ def inspect_original_w4_grid_opposition_first_gate(
     return output
 
 
+
+def _physical_w4_source_fragment_edge(raw: Any):
+    """Decode the producer's 4-coordinate Line into an exact source Edge.
+
+    PhysicalWallSourceEdgeFragment.geometry is (x1, y1, x2, y2);
+    source-room face edges are ((x1, y1), (x2, y2)). Both must be
+    explicitly validated before calling _edge_contains_edge. This is
+    read-only translation of recorded source coordinates, never snapping,
+    joining, wall ownership, or geometry repair.
+    """
+    if not isinstance(raw, (tuple, list)):
+        return None
+    if len(raw) == 4:
+        return _edge_key(((raw[0], raw[1]), (raw[2], raw[3])))
+    if len(raw) == 2:
+        return _edge_key(raw)
+    return None
+
+
 def inspect_external_atomic_grid_w2_source_fragments(
     wall_scope: PhysicalWallCandidateScopeResult,
     physical_union_first_gate: Mapping[str, Any],
@@ -831,7 +850,12 @@ def inspect_external_atomic_grid_w2_source_fragments(
             ):
                 invalid_receipts = True
                 continue
-            native_geom = getattr(fragment, "geometry", None)
+            native_geom = _physical_w4_source_fragment_edge(
+                getattr(fragment, "geometry", None)
+            )
+            if native_geom is None:
+                invalid_receipts = True
+                continue
             try:
                 contains = _edge_contains_edge(native_geom, atomic)
             except (TypeError, ValueError, OverflowError, IndexError):
@@ -874,6 +898,80 @@ def inspect_external_atomic_grid_w2_source_fragments(
         row["source_w2_partial_overlap_candidates_diagnostic_only"] = (
             overlapping[:24]
         )
+        # Independent read-only W4 ancestry census: the current owner may
+        # lack the source fragment because a distinct authenticated W4 owns it,
+        # rather than because Stage A lost the original native W2 primitive.
+        # Never choose the first, nearest, or coincident alternative as owner.
+        # No positive result here changes this row's original first gate.
+        other_w4 = []
+        other_w4_ambiguity = 0
+        for alternative_id in sorted(records_by_id):
+            if alternative_id == wall_id:
+                continue
+            if counts[alternative_id] != 1:
+                # A collided W4 address cannot prove a unique alternative.
+                other_w4_ambiguity += 1
+                continue
+            alternative = records_by_id[alternative_id]
+            for fragment in tuple(
+                getattr(alternative, "source_edge_fragments", ()) or ()
+            ):
+                alt_edge_id = getattr(fragment, "edge_id", None)
+                alt_source_ids = getattr(fragment, "source_primitive_ids", None)
+                if (
+                    not isinstance(alt_edge_id, str) or not alt_edge_id
+                    or alt_edge_id != alt_edge_id.strip()
+                    or not isinstance(alt_source_ids, (tuple, list))
+                    or not alt_source_ids
+                    or any(type(value) is not str or not value
+                           or value != value.strip() for value in alt_source_ids)
+                ):
+                    other_w4_ambiguity += 1
+                    continue
+                alt_geom = _physical_w4_source_fragment_edge(
+                    getattr(fragment, "geometry", None)
+                )
+                if alt_geom is None:
+                    other_w4_ambiguity += 1
+                    continue
+                try:
+                    complete = _edge_contains_edge(alt_geom, atomic)
+                    overlap = (
+                        None if complete
+                        else _collinear_overlap_edge(alt_geom, atomic)
+                    )
+                except (TypeError, ValueError, OverflowError, IndexError):
+                    other_w4_ambiguity += 1
+                    continue
+                if not complete and overlap is None:
+                    continue
+                if len(other_w4) < 24:
+                    other_w4.append({
+                        "alternative_original_w4_wall_id": alternative_id,
+                        "alternative_source_w2_edge_id": alt_edge_id,
+                        "original_source_primitive_ids": sorted(
+                            set(alt_source_ids)
+                        )[:24],
+                        "atomic_subedge_wholly_contained": bool(complete),
+                        "partial_original_overlap_pdf_pts": (
+                            [list(pt) for pt in overlap]
+                            if overlap is not None else None
+                        ),
+                        "candidate_only_no_wall_identity_transfer": True,
+                        "second_face_owner_authenticated": False,
+                    })
+        row["other_w4_source_fragments_diagnostic_only"] = sorted(
+            other_w4,
+            key=lambda item: (
+                item["alternative_original_w4_wall_id"],
+                item["alternative_source_w2_edge_id"],
+            ),
+        )
+        row["other_w4_source_fragment_conflict_receipt_count"] = (
+            other_w4_ambiguity
+        )
+        row["other_w4_search_is_not_complete_w2_source_universe"] = True
+        row["other_w4_alternative_owner_granted"] = False
         if invalid_receipts:
             row["source_first_unclosed_gate"] = (
                 "original_w2_fragment_source_receipt_invalid"
@@ -892,6 +990,110 @@ def inspect_external_atomic_grid_w2_source_fragments(
             )
         output.append(row)
     return output
+
+
+
+def inspect_native_source_parent_w4_ancestry(
+    wall_scope: PhysicalWallCandidateScopeResult,
+    native_source_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Read-only W4 owner census for *exact* producer-native source IDs.
+
+    A surviving W2 primitive may appear in zero, one or many W4 wall chains.
+    Those alternatives are observations, not physical wall equivalence, GRID
+    roles, second-face ownership or authority to publish a room.
+    Duplicate W4 addresses and malformed source receipts remain unresolved.
+    """
+    requested = tuple(native_source_ids)
+    if (
+        not requested or len(requested) > 32
+        or any(type(value) is not str or not value
+               or value != value.strip() for value in requested)
+        or len(set(requested)) != len(requested)
+    ):
+        return {
+            "status": "original_source_parent_selection_invalid",
+            "candidate_only_no_w4_owner_assignment": True,
+            "sources": [],
+        }
+    counts: Counter[str] = Counter()
+    records = tuple(getattr(wall_scope, "records", ()) or ())
+    for record in records:
+        wall_id = getattr(record, "wall_candidate_id", None)
+        if type(wall_id) is str and wall_id and wall_id == wall_id.strip():
+            counts[wall_id] += 1
+    result: dict[str, list[dict[str, Any]]] = {key: [] for key in requested}
+    conflicts: Counter[str] = Counter()
+    for record in records:
+        wall_id = getattr(record, "wall_candidate_id", None)
+        valid_wall_id = (
+            type(wall_id) is str and bool(wall_id)
+            and wall_id == wall_id.strip() and counts[wall_id] == 1
+        )
+        for fragment in tuple(
+            getattr(record, "source_edge_fragments", ()) or ()
+        ):
+            source_ids = getattr(fragment, "source_primitive_ids", None)
+            if not isinstance(source_ids, (tuple, list)):
+                continue
+            matched = set(requested).intersection(
+                value for value in source_ids if type(value) is str
+            )
+            if not matched:
+                continue
+            edge_id = getattr(fragment, "edge_id", None)
+            geometry = _physical_w4_source_fragment_edge(
+                getattr(fragment, "geometry", None)
+            )
+            good = (
+                valid_wall_id
+                and type(edge_id) is str and bool(edge_id)
+                and edge_id == edge_id.strip()
+                and bool(source_ids)
+                and all(type(value) is str and bool(value)
+                        and value == value.strip() for value in source_ids)
+                and geometry is not None
+            )
+            for source_id in matched:
+                if not good:
+                    conflicts[source_id] += 1
+                    continue
+                result[source_id].append({
+                    "original_w4_wall_candidate_id": wall_id,
+                    "source_w2_edge_id": edge_id,
+                    "exact_w2_edge_pdf_pts": [list(p) for p in geometry],
+                    "source_primitive_ids": sorted(set(source_ids)),
+                    "physical_wall_role_proven": False,
+                    "w4_identity_transfer_authorized": False,
+                })
+    rows = []
+    for source_id in sorted(requested):
+        candidates = sorted(
+            result[source_id],
+            key=lambda item: (
+                item["original_w4_wall_candidate_id"],
+                item["source_w2_edge_id"],
+                item["exact_w2_edge_pdf_pts"],
+            ),
+        )
+        rows.append({
+            "original_source_primitive_id": source_id,
+            "matched_w4_candidate_count": len({
+                item["original_w4_wall_candidate_id"] for item in candidates
+            }),
+            "matched_source_w2_edge_count": len(candidates),
+            "malformed_or_ambiguous_w4_receipt_count": conflicts[source_id],
+            "candidate_w4_ancestry_receipts": candidates[:32],
+            "w4_receipt_listing_truncated": len(candidates) > 32,
+            "source_w4_receipt_universe_complete": False,
+            "source_wall_role_authenticated": False,
+            "unique_physical_room_face_authenticated": False,
+        })
+    return {
+        "status": "read_only_native_w4_ancestry_candidates",
+        "candidate_only_no_w4_owner_assignment": True,
+        "sources": rows,
+    }
 
 
 def inspect_split_grid_component_first_failure(
