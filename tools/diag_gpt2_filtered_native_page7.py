@@ -100,41 +100,36 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
         if not graph_input_ids <= retained_ids:
             raise RuntimeError("native_graph_input_foreign_source_identity")
 
-        # Actual W2 structural pre-filter is a DISTINCT stage from the
-        # page-wide motif filter. Keep its exact reason codes without ever
-        # promoting candidate geometry into a wall or metric area.
+        # W2 metadata is a DISTINCT, inexpensive source gate. A full W2
+        # graph is constructed ONLY for the explicit --w2-graph original
+        # proof, once; the default native-source census must not launch the
+        # full intersection/snap pipeline or silently record false zeroes.
         from pb_wall_room_topology_stage_a import filter_structural_segments
-        from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
-        from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
-        structural, stage_a_excluded = filter_structural_segments(retained)
+        structural, stage_a_excluded = filter_structural_segments(graph_inputs)
         structural_ids = {row.get("id") for row in structural}
         stage_a_excluded_ids = {
             row.get("id"): tuple(row.get("reason_codes", ()))
             for row in stage_a_excluded
         }
-        # Read-only W2 replay on the same original viewport native sources.
-        # W4 additionally applies authenticated strip proof and source-scope
-        # graph choices; this observation is not W4 physical wall ownership.
-        graph = build_wall_graph_for_viewport(retained)
         graph_lineage_counts = {}
-        for edge in graph["edges"]:
-            lineage = edge.get(LINEAGE_KEY) or {}
-            for native_id in lineage.get("source_primitive_ids", ()):
-                graph_lineage_counts[native_id] = (
-                    graph_lineage_counts.get(native_id, 0) + 1
-                )
         snap_collapse_counts = {}
-        for fragment in graph.get("snap_collapsed_fragments", ()):
-            # Diagnostic inventory only: report schema without assuming every
-            # collapsed fragment has an authenticated physical source owner.
-            lineage = (
-                fragment.get(LINEAGE_KEY, {}) if isinstance(fragment, dict)
-                else {}
-            )
-            for native_id in lineage.get("source_primitive_ids", ()):
-                snap_collapse_counts[native_id] = (
-                    snap_collapse_counts.get(native_id, 0) + 1
-                )
+        if include_w2_graph:
+            if len(graph_inputs) > 20_000:
+                raise RuntimeError("w2_source_segment_safety_bound")
+            # Original Stage A graph, no alternate topology or inferred edge.
+            w2_graph = build_wall_graph_for_viewport(graph_inputs)
+            for edge in w2_graph.get("edges", ()):
+                lineage = edge.get(LINEAGE_KEY) or {}
+                for native_id in lineage.get("source_primitive_ids", ()):
+                    graph_lineage_counts[native_id] = (
+                        graph_lineage_counts.get(native_id, 0) + 1
+                    )
+            for fragment in w2_graph.get("snap_collapsed_fragments", ()):
+                lineage = fragment.get(LINEAGE_KEY, {}) if isinstance(fragment, dict) else {}
+                for native_id in lineage.get("source_primitive_ids", ()):
+                    snap_collapse_counts[native_id] = (
+                        snap_collapse_counts.get(native_id, 0) + 1
+                    )
 
         targets = []
         for original_id in ORIGINAL_NATIVE_IDS:
@@ -169,8 +164,14 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
                 "w2_structural_prefilter_exclusion_reasons": list(
                     stage_a_excluded_ids.get(original_id, ())
                 ),
-                "w2_graph_lineage_edge_count": graph_lineage_counts.get(original_id, 0),
-                "w2_snap_collapse_lineage_count_diagnostic": snap_collapse_counts.get(original_id, 0),
+                "w2_graph_lineage_edge_count": (
+                    graph_lineage_counts.get(original_id, 0) if include_w2_graph
+                    else None
+                ),
+                "w2_snap_collapse_lineage_count_diagnostic": (
+                    snap_collapse_counts.get(original_id, 0) if include_w2_graph
+                    else None
+                ),
                 "retained_by_first_filter": original_id in retained_ids,
                 "retained_by_proven_filled_wall_strip_filter": (
                     original_id in graph_input_ids
@@ -189,9 +190,8 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
             # original SHA-verified viewport input, not a new geometry guess.
             # Missing lineage is evidence of a possible W2 handoff dropout;
             # surviving lineage alone does not prove a W4 structural wall.
-            if len(graph_inputs) > 20_000:
-                raise RuntimeError("w2_source_segment_safety_bound")
-            w2_graph = build_wall_graph_for_viewport(graph_inputs)
+            # Reuse the exact Stage A graph just built above. Re-running
+            # full source intersection splitting would double expensive work.
             source_index: dict[str, set[str]] = {
                 source_id: set() for source_id in ORIGINAL_NATIVE_IDS
             }
