@@ -1,0 +1,88 @@
+name: GPT1 Q5446 original single-page FIRM floor-area production
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/gpt1-q5446-source-positive-floor-area.yml"
+      - "tools/run_source_closed_project_handoff.py"
+      - "tests/test_gpt1_source_positive_scoped_floor_area.py"
+  workflow_dispatch:
+
+jobs:
+  source-positive-floor-area:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install original-source dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original page source authority + production run
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import fitz,hashlib,subprocess,sys
+          path=Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
+          sha="5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+          if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=sha:
+              raise SystemExit("Q5446 original architectural PDF SHA unavailable")
+          doc=fitz.open(path)
+          try:
+              if doc.page_count!=10: raise SystemExit("original Q5446 page universe differs")
+          finally: doc.close()
+          # Page zero is a request, NOT authority. The producer independently
+          # rejects it unless the original page title/F.07 proves FLOOR_PLAN.
+          subprocess.run([
+              sys.executable,"-u","tools/run_source_closed_project_handoff.py",
+              "--pdf",str(path),
+              "--project-id","au_qld_q5446_armstrong32_harlequin",
+              "--family-group","floor_area",
+              "--source-plan-page-index","0",
+              "--output-dir","q5446-source-positive-floor-output",
+          ],check=True)
+          PY
+      - name: Verify signed partial source receipts without truth lookup
+        if: success()
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          root=Path("q5446-source-positive-floor-output")
+          s=json.loads((root/"production_summary.json").read_text())
+          sha=hashlib.sha256(Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf").read_bytes()).hexdigest()
+          assert s["project_id"]=="au_qld_q5446_armstrong32_harlequin"
+          assert s["source_sha256"]==sha
+          assert s["family_group"]=="floor_area"
+          assert s["source_positive_partial_page"]==1
+          assert s["complete_project_handoff"] is False
+          assert s["execution_pages"] == [1]
+          assert s["benchmark_score_granted"] is False
+          assert s["family_counts"]["floor_finish_area"]==0
+          assert s["family_counts"]["ceiling_area"]==0
+          qty=int(s["combined_quantity_count"])
+          if qty:
+              assert s["status"]=="sealed"
+              run=sealed_source_closed_run_from_dict(json.loads(Path(s["combined_run_file"]).read_text()))
+              assert len(run.quantities)==qty and len({q.quantity_id for q in run.quantities})==qty
+              assert run.project_id==s["project_id"] and tuple(run.source_sha256s)==(sha,)
+              assert all(q.family=="floor_area" and not q.abstained for q in run.quantities)
+          else:
+              assert s["status"]=="no_sealable_quantities"
+              assert s["combined_run_file"] is None
+          print(json.dumps({"original_sha":sha,"signed_source_floor_areas":qty,
+                            "customer_rows_verified":False,
+                            "frozen_matching_unverified":True},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-q5446-page1-source-positive-floor-area-output
+          path: q5446-source-positive-floor-output/
+          retention-days: 14
