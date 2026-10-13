@@ -30,7 +30,16 @@ def fixture():
     def resolve(selector):
         return Row(status=Status.CORROBORATED,
                    observation=originals.get(selector.observation_id))
-    visibility=Row(resolve_raster_opening_primitive=resolve)
+    parent=Row(observation_id="source-parent-1",
+               observation_kind="raster_pdf_visible_line",
+               source_primitive_ref="original-visible-parent",
+               geometry=(1.,2.,3.,4.),page_id="3",
+               source_sha256=SHA,snapshot_id=SNAP)
+    def resolve_parent(selector):
+        return Row(status=Status.CORROBORATED,
+                   observation=parent if selector.observation_id=="source-parent-1" else None)
+    visibility=Row(resolve_raster_opening_primitive=resolve,
+                   resolve=resolve_parent)
     source=Row(authority=lambda:visibility)
     root=Row(status=Status.CORROBORATED,
              existence_record=Row(
@@ -77,6 +86,13 @@ def test_exact_original_primitive_join_preserves_ambiguous_W4_owners_but_no_host
     assert len(originals_out[0]["exact_source_ref_w4_candidates"])==2
     assert originals_out[1]["exact_source_ref_w4_candidates"]==[]
     assert originals_out[0]["geometry_pdf_pts"]==[1.,2.,3.,4.]
+    assert originals_out[0]["authenticated_source_parents"]==[{
+        "observation_id":"source-parent-1",
+        "observation_kind":"raster_pdf_visible_line",
+        "source_primitive_ref":"original-visible-parent",
+        "geometry_pdf_pts":[1.,2.,3.,4.],
+        "exact_source_ref_w4_candidates":[],
+    }]
     assert originals==before
 
 
@@ -89,7 +105,7 @@ def test_other_non_G17_abstention_is_not_reclassified():
 @pytest.mark.parametrize("damage",[
     "wrong_opening", "lost_original_source", "source_rekey", "missing_G17",
     "unverified_G17", "wrong_original_page", "duplicate_G17",
-    "forged_host", "bad_wall_id",
+    "forged_host", "bad_wall_id","missing_parent",
 ])
 def test_source_G17_flank_witness_fails_closed_on_unauthenticated_input(damage):
     source,pub,comp,originals,root,trace,scope=fixture()
@@ -106,5 +122,7 @@ def test_source_G17_flank_witness_fails_closed_on_unauthenticated_input(damage):
     elif damage=="forged_host":trace.host_wall_id="invented-wall"
     elif damage=="bad_wall_id":
         scope.records[0].wall_candidate_id=""
+    elif damage=="missing_parent":
+        originals["G17-left"].derivation_parent_ids=("nonexistent-original-parent",)
     with pytest.raises(RuntimeError):
         audit(source,pub,comp)
