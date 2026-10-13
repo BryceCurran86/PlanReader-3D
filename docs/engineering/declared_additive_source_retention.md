@@ -21,6 +21,7 @@ so it is single-use and every later rekey needs a new, reviewed declaration.
 {"schema": "declared_additive_source_retention.v1",
  "declarations": [{
    "source_sha256": "<64 hex>",
+   "report_shape": "stage_report | face_report",
    "baseline_snapshot_id": "...", "candidate_snapshot_id": "...",
    "expected_new_host_ids": ["physical_opening_existence_..."],
    "expected_new_frame_host_ids": [],
@@ -50,6 +51,14 @@ generated `split_N` ordinals and snapshot-scoped receipt ids are ignored):
   members, receipts and frame reasons; its host reason codes change only through
   an exact declared `before -> after` transition that actually occurs;
 * source SHA, page scope and the 20,000 primitive cap are unchanged;
+* the W4 change is **explained by the added source**: a wall id present in both
+  keeps its candidate identity, source primitive ancestry and physical path (it
+  may gain an interior split node); every wall id that disappears has exactly
+  one successor built from the same source primitives; every other new wall is
+  built from at least one source primitive no baseline wall used. A wall that
+  vanishes without a successor, a new wall made only of old source, or a
+  retained id whose path changed is refused (a wall split into several
+  successors is conservatively refused too);
 * **every top-level report key not listed in `expected_changed_report_keys` is
   equal** (after the gate's own order-insensitive normalizer, if it has one), so
   a declared event cannot hide a change to an unrelated part of the report. The
@@ -58,14 +67,26 @@ generated `split_N` ordinals and snapshot-scoped receipt ids are ignored):
 A declared event that violates any of this raises. It is never silently
 downgraded to the undeclared (strict) path.
 
+## Report shapes
+
+`stage_report` is `tools/diag_gptmax_source_authority_stages.py` (carries
+`resolved_host_frame_evidence`; every retained frame is geometry-verified).
+`face_report` is `tools/diag_opening_wall_face_preservation.py`, which never
+carries frame geometry: membership, receipts and reasons are verified but frame
+**geometry is not** (`frame_geometry_verified: False`). The declared shape must
+match the reports (an evidence array that appears or vanishes is refused), so a
+tool change cannot silently downgrade a `stage_report` verification. The two
+shapes have different snapshot ids (the stage tool ingests every page), so an
+event needs one declaration per shape that its gates use.
+
 ## What it does not do
 
 It grants no host, frame, count, quantity or score
 (`official_host_receipt_identity_acceptance`, `host_publication_allowed`,
 `opening_count_or_metric_publication_allowed` are always `False`,
-`benchmark_accuracy` is `None`). It does not judge wall topology changes on
-unhosted walls beyond the retained-host and unrelated-opening checks above, and
-it does not replace the quantity / sealing / frozen-reconciliation gates.
+`benchmark_accuracy` is `None`). It does not replace the quantity / sealing /
+frozen-reconciliation gates, and it proves nothing about *why* the added source
+is physically right (that needs the producer's own proof and a visual check).
 
 ## Wiring
 

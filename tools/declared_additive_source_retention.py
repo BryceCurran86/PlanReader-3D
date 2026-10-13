@@ -31,9 +31,10 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from tools.gptmax_source_host_rekey_parity_ledger import compare_source_host_rekeys
 
@@ -54,9 +55,11 @@ REKEY_FLAGS = frozenset(
 )
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+REPORT_SHAPES = ("stage_report", "face_report")
 _DECLARATION_KEYS = frozenset(
     {
         "source_sha256",
+        "report_shape",
         "baseline_snapshot_id",
         "candidate_snapshot_id",
         "expected_new_host_ids",
@@ -91,6 +94,7 @@ class ReasonChange:
 @dataclass(frozen=True)
 class Declaration:
     source_sha256: str
+    report_shape: str
     baseline_snapshot_id: str
     candidate_snapshot_id: str
     expected_new_host_ids: tuple[str, ...]
@@ -121,6 +125,9 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
     sha = _text(raw["source_sha256"], "source_sha256")
     if _SHA256.fullmatch(sha) is None:
         raise ValueError("declaration source_sha256 must be lowercase sha256")
+    shape = _text(raw["report_shape"], "report_shape")
+    if shape not in REPORT_SHAPES:
+        raise ValueError("declaration report_shape must be one of " + ", ".join(REPORT_SHAPES))
     hosts = _unique_texts(raw["expected_new_host_ids"], "expected_new_host_ids")
     if not hosts:
         raise ValueError("declaration must name at least one expected new host")
@@ -153,6 +160,7 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
         raise ValueError("declaration tracking_issue must be a positive integer")
     return Declaration(
         source_sha256=sha,
+        report_shape=shape,
         baseline_snapshot_id=_text(raw["baseline_snapshot_id"], "baseline_snapshot_id"),
         candidate_snapshot_id=_text(raw["candidate_snapshot_id"], "candidate_snapshot_id"),
         expected_new_host_ids=hosts,
@@ -236,6 +244,83 @@ def _matching(
     return matches[0] if matches else None
 
 
+def _wall_records(report: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    walls: dict[str, Mapping[str, Any]] = {}
+    for scope in report.get("source_owned_wall_scope_results") or ():
+        for record in scope.get("records") or ():
+            walls[record["wall_candidate_id"]] = record
+    return walls
+
+
+def _wall_physical_key(record: Mapping[str, Any]) -> tuple[str, frozenset[str], str]:
+    try:
+        identity = record["physical_identity"]
+        return (
+            str(identity["candidate_identity_id"]),
+            frozenset(identity["source_primitive_ids"]),
+            json.dumps(identity["path_fingerprint"], sort_keys=True),
+        )
+    except (KeyError, TypeError) as exc:
+        raise ValueError("declared additive retention refused: malformed W4 wall record") from exc
+
+
+def w4_delta_explained_by_source_delta(
+    baseline: Mapping[str, Any], candidate: Mapping[str, Any]
+) -> dict[str, int]:
+    """Refuse W4 changes that the added source observations do not explain.
+
+    * a wall id present in both keeps its candidate identity, source primitive
+      ancestry and physical path (it may gain an interior split node);
+    * every wall id that disappears has exactly one successor built from the
+      same source primitives (its terminal moved or it was re-addressed);
+    * every other new wall is built from at least one source primitive that no
+      baseline wall used, i.e. from genuinely new source.
+    Anything else -- a wall vanishing without a successor, an old-source-only
+    wall appearing, a retained id changing its physical path -- is refused.
+    """
+    old, new = _wall_records(baseline), _wall_records(candidate)
+    retained_changed = sorted(
+        wall_id
+        for wall_id in set(old) & set(new)
+        if _wall_physical_key(old[wall_id]) != _wall_physical_key(new[wall_id])
+    )
+    if retained_changed:
+        raise ValueError(
+            "declared additive retention refused: retained W4 wall changed identity, ancestry or path: "
+            + ", ".join(retained_changed[:5])
+        )
+    lost = sorted(set(old) - set(new))
+    gained = sorted(set(new) - set(old))
+    successors: dict[frozenset[str], list[str]] = {}
+    for wall_id in gained:
+        successors.setdefault(_wall_physical_key(new[wall_id])[1], []).append(wall_id)
+    for wall_id in lost:
+        ancestry = _wall_physical_key(old[wall_id])[1]
+        if not successors.get(ancestry):
+            raise ValueError(
+                "declared additive retention refused: W4 wall disappeared without a successor on its source primitives: "
+                + wall_id
+            )
+        successors[ancestry].pop()
+    baseline_primitives = set().union(*(_wall_physical_key(r)[1] for r in old.values())) if old else set()
+    unexplained = sorted(
+        wall_id
+        for rows in successors.values()
+        for wall_id in rows
+        if not (_wall_physical_key(new[wall_id])[1] - baseline_primitives)
+    )
+    if unexplained:
+        raise ValueError(
+            "declared additive retention refused: new W4 wall is not built from any new source primitive: "
+            + ", ".join(unexplained[:5])
+        )
+    return {
+        "retained": len(set(old) & set(new)),
+        "lost_with_successor": len(lost),
+        "gained_from_new_source": len(gained) - len(lost),
+    }
+
+
 def approve_declared_additive_rekeys(
     baseline: Mapping[str, Any],
     candidate: Mapping[str, Any],
@@ -263,7 +348,15 @@ def approve_declared_additive_rekeys(
     if declaration is None:
         return None
 
-    ledger = compare_source_host_rekeys(base, cand)
+    # ``stage_report`` carries the frame geometry array and every frame is
+    # geometry-verified.  ``face_report`` (diag_opening_wall_face_preservation)
+    # never carries it: frame membership, receipts and reasons are verified but
+    # frame *geometry* is explicitly not (``frame_geometry_verified: False``).
+    # The declared shape must match the reports, so a tool that silently drops
+    # the evidence cannot downgrade a stage_report verification.
+    ledger = compare_source_host_rekeys(
+        base, cand, frame_evidence=declaration.report_shape == "stage_report"
+    )
     rows = ledger["source_comparison_rows"]
     refused = sorted(
         row["physical_opening_id"]
@@ -369,12 +462,21 @@ def approve_declared_additive_rekeys(
             + ", ".join(unused)
         )
 
+    w4_delta = w4_delta_explained_by_source_delta(base, cand)
+
     norm = normalize if normalize is not None else (lambda value: value)
     changed_keys = set(declaration.expected_changed_report_keys)
+
+    def _differs(key: str) -> bool:
+        if (key in baseline) != (key in candidate):
+            return True
+        # Normalize the *keyed* single-entry view, exactly as a gate's own
+        # recursive normalizer sees it (it may act on the key, e.g. sort the
+        # value of ``void_reason_codes`` or drop a sidecar key).
+        return norm({key: baseline[key]}) != norm({key: candidate[key]})
+
     undeclared_keys = sorted(
-        key
-        for key in (set(baseline) | set(candidate)) - changed_keys
-        if norm(baseline.get(key)) != norm(candidate.get(key))
+        key for key in (set(baseline) | set(candidate)) - changed_keys if _differs(key)
     )
     if undeclared_keys:
         raise ValueError(
@@ -384,7 +486,7 @@ def approve_declared_additive_rekeys(
     unchanged_declared_keys = sorted(
         key
         for key in changed_keys
-        if key in baseline and key in candidate and norm(baseline[key]) == norm(candidate[key])
+        if key in baseline and key in candidate and not _differs(key)
     )
 
     rekeyed = sorted(
@@ -400,6 +502,8 @@ def approve_declared_additive_rekeys(
     return {
         "declaration_applied": True,
         "tracking_issue": declaration.tracking_issue,
+        "report_shape": declaration.report_shape,
+        "frame_geometry_verified": ledger["frame_geometry_verified"],
         "source_sha256": declaration.source_sha256,
         "baseline_snapshot_id": declaration.baseline_snapshot_id,
         "candidate_snapshot_id": declaration.candidate_snapshot_id,
@@ -409,6 +513,7 @@ def approve_declared_additive_rekeys(
         "declared_new_frame_host_ids": sorted(declared_frames),
         "accepted_unhosted_reason_change_ids": sorted(consumed),
         "declared_report_keys_without_change": unchanged_declared_keys,
+        "w4_wall_delta": w4_delta,
         # Every row whose serialized binding may differ without failing retention.
         "tolerated_binding_change_ids": sorted(set(rekeyed) | declared_hosts | consumed),
         "official_host_receipt_identity_acceptance": False,
@@ -472,6 +577,27 @@ def assert_unchanged_or_declared(
     if declared_event_approved(baseline, candidate, normalize=normalize):
         return
     raise AssertionError(message)
+
+
+@contextmanager
+def strict_or_declared(
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    *,
+    normalize: Callable[[Any], Any] | None = None,
+) -> Iterator[None]:
+    """Wrap a gate's own strict assertions.
+
+    The block runs unchanged.  If one of its ``assert`` statements fails, the
+    failure is excused only when this exact event is declared and fully proven;
+    otherwise the original ``AssertionError`` propagates.  A declared but
+    violated event raises ``ValueError`` instead of being excused.
+    """
+    try:
+        yield
+    except AssertionError:
+        if not declared_event_approved(baseline, candidate, normalize=normalize):
+            raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:

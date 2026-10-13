@@ -44,16 +44,21 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
+          from tools.declared_additive_source_retention import assert_unchanged_or_declared
           before=json.loads(Path('/tmp/gptmax-split-parent-original-before.json').read_text())
           after=json.loads(Path('artifacts/exact-split-parent/original-production-after.json').read_text())
-          assert before==after, 'default original source host/frame/topology receipts changed'
+          assert_unchanged_or_declared(before, after,
+              message='default original source host/frame/topology receipts changed')
           r=json.loads(Path('artifacts/exact-split-parent/original-split-parent-report.json').read_text())
           assert r['original_source_reauthenticated'] and r['default_production_receipts_unchanged']
           assert r['actual_topology_and_w4_dispositions_unchanged']
           assert r['exact_candidate_abstention_partition_verified']
           assert r['source_primitive_safety_cap']==20000 and 0<r['input_source_count']<=20000
           assert r['after_parentless_retained_fragment_count']<=r['before_parentless_retained_fragment_count']
-          assert r['original_production_summary']==before['summary']
+          # Equal to the baseline summary whenever the report is unchanged; after a
+          # declared additive-source event the current production summary is the
+          # one the shadow run must reproduce.
+          assert r['original_production_summary']==after['summary']
           assert r['recovered_split_fragment_rows']
           for key in ('physical_equivalence_proven','structural_wall_role_proven','host_publication_allowed','opening_count_publication_allowed','metric_quantity_publication_allowed'):
               assert r[key] is False
