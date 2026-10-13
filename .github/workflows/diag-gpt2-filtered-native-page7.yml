@@ -1,0 +1,49 @@
+name: GPT2 Original Maryborough Filtered Native Source Line Receipts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_filtered_native_primitive_receipts.py"
+      - "tests/test_filtered_native_primitive_receipts.py"
+      - "tools/diag_gpt2_filtered_native_page7.py"
+      - ".github/workflows/diag-gpt2-filtered-native-page7.yml"
+
+concurrency:
+  group: gpt2-filtered-native-original-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-filtered-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install original source analysis dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify exact PR HEAD, frozen reference and strict source receipt tests
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python -m pytest -q tests/test_filtered_native_primitive_receipts.py
+      - name: Inspect original SHA-pinned Maryborough native source filter evidence
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt2-filtered-native
+          git rev-parse HEAD > artifacts/gpt2-filtered-native/producer_head_sha.txt
+          sha256sum documents/sources/Arch_Combined_Maryborough_Service_Station.pdf > artifacts/gpt2-filtered-native/original_source_sha.txt
+          PYTHONPATH=. python -u tools/diag_gpt2_filtered_native_page7.py | tee artifacts/gpt2-filtered-native/source_receipts.json
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpt2-filtered-native-maryborough-page7
+          path: artifacts/gpt2-filtered-native/
+          retention-days: 14
