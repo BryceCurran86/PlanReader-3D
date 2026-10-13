@@ -110,8 +110,10 @@ def run_original_lot16_sealed_handoff(
         raise FileExistsError("original Lot16 sealed output directory must be fresh")
     output_dir.mkdir(parents=True, exist_ok=True)
     received: list[tuple] = []
+    claim_source_openings: list[tuple] = []
 
     def source_seal(claim):
+        claim_source_openings.append(tuple(claim.canonical_openings))
         # The production-original claim is passed directly, once, from the
         # unchanged single-page source collector. There is no benchmark input.
         sealed = seal_live_opening_area_claim_run(
@@ -125,7 +127,7 @@ def run_original_lot16_sealed_handoff(
         received.append((sealed, rows, receipt))
 
     source_diagnostic = inspect_source(pdf, 2, on_original_claim=source_seal)
-    if len(received) != 1 or source_diagnostic["pdf_sha256"] != sha:
+    if len(claim_source_openings) != 1 or len(received) != 1 or source_diagnostic["pdf_sha256"] != sha:
         raise ValueError("original source production did not return one verified seal")
     if source_diagnostic["opening_sealing_diagnostic"]["status"] != (
         "source_sealed_and_customer_rows_verified"
@@ -135,6 +137,14 @@ def run_original_lot16_sealed_handoff(
     expected_ids = sorted(source_diagnostic["opening_sealing_diagnostic"]["sealed_quantity_ids"])
     if receipt["sealed_quantity_ids"] != expected_ids:
         raise ValueError("real-project seal diverges from source diagnostic seal")
+    # Read-only source witness from the SAME original single-page collector that
+    # emitted the sealed quantities. The separate all-pages diagnostic uses
+    # different host-receipt scopes and must not stand in for this claim.
+    # This does not publish any additional quantity, count or host.
+    _publish_new(
+        output_dir / "source_production_openings.json",
+        [opening.to_dict() for opening in claim_source_openings[0]],
+    )
     _publish_new(output_dir / "source_sealed_run.json", sealed.to_dict())
     _publish_new(output_dir / "verified_customer_rows.json", list(rows))
     _publish_new(output_dir / "source_stage_diagnostic.json", source_diagnostic)
