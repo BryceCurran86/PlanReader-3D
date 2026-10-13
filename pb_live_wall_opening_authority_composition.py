@@ -198,6 +198,12 @@ def compose_live_wall_opening_authority(
         source_visibility_producer,
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
     )
+    supplemental_wall_producer = (
+        PhysicalWallCandidateProducer.from_opening_local_supplemental_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
+        )
+    )
 
     # Wall-candidate materialization may legitimately augment the producer-owned
     # source snapshot with raster-visible segments. Any selector built after
@@ -216,6 +222,7 @@ def compose_live_wall_opening_authority(
     published = refreshed
 
     wall_authority = wall_producer.authority()
+    supplemental_wall_authority = supplemental_wall_producer.authority()
 
     # Resolve producer-owned wall scopes before any semantic-opening work. If
     # exact topology has already failed closed on source complexity, no later
@@ -335,6 +342,7 @@ def compose_live_wall_opening_authority(
     binding_producer = OpeningHostBindingProducer.from_authorities(
         physical_opening_authority=physical_opening_authority,
         host_wall_universe_authority=host_universe_authority,
+        supplemental_wall_candidate_authority=supplemental_wall_authority,
     )
 
 
