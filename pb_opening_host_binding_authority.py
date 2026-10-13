@@ -83,6 +83,9 @@ MULTIPLE_RASTER_SPLIT_CENTERLINE_HOSTS = (
 )
 RASTER_SOURCE_PRIMITIVE_HOST_RESOLVED = "raster_source_primitive_host_resolved"
 RASTER_SOURCE_BAND_HOST_RESOLVED = "raster_source_band_host_resolved"
+OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED = (
+    "opening_local_supplemental_source_band_host_resolved"
+)
 MULTIPLE_RASTER_SOURCE_PRIMITIVE_HOSTS = (
     "multiple_authenticated_raster_source_primitive_hosts"
 )
@@ -425,6 +428,9 @@ class OpeningHostBindingProducer:
         physical_opening_authority: PhysicalOpeningAuthority,
         host_wall_universe_authority: OpeningHostWallUniverseAuthority,
         *,
+        supplemental_wall_candidate_authority: Optional[
+            PhysicalWallCandidateAuthority
+        ] = None,
         _seal: object = None,
     ) -> None:
         if _seal is not _BINDING_PRODUCER_SEAL:
@@ -437,8 +443,17 @@ class OpeningHostBindingProducer:
             )
         if type(host_wall_universe_authority) is not OpeningHostWallUniverseAuthority:
             raise TypeError("host_wall_universe_authority must be producer-owned")
+        if (
+            supplemental_wall_candidate_authority is not None
+            and type(supplemental_wall_candidate_authority)
+            is not PhysicalWallCandidateAuthority
+        ):
+            raise TypeError(
+                "supplemental_wall_candidate_authority must be producer-owned"
+            )
         self._opening = physical_opening_authority
         self._universe = host_wall_universe_authority
+        self._supplemental_wall_authority = supplemental_wall_candidate_authority
         self._results: dict[_BindingKey, OpeningHostBindingResult] = {}
         self._local_boundary_scope_indexes: dict[
             tuple[str, str, str, str, str, str],
@@ -451,10 +466,16 @@ class OpeningHostBindingProducer:
         *,
         physical_opening_authority: PhysicalOpeningAuthority,
         host_wall_universe_authority: OpeningHostWallUniverseAuthority,
+        supplemental_wall_candidate_authority: Optional[
+            PhysicalWallCandidateAuthority
+        ] = None,
     ) -> "OpeningHostBindingProducer":
         return cls(
             physical_opening_authority,
             host_wall_universe_authority,
+            supplemental_wall_candidate_authority=(
+                supplemental_wall_candidate_authority
+            ),
             _seal=_BINDING_PRODUCER_SEAL,
         )
 
@@ -656,6 +677,68 @@ class OpeningHostBindingProducer:
                                 self._opening, opening, host_records, geometry,
                                 host_equivalence, host_source_observation_ids,
                             )
+                            if (
+                                band_resolution.status
+                                is EvidenceResolutionStatus.CORROBORATED
+                                and not band_resolution.bands
+                                and self._supplemental_wall_authority is not None
+                            ):
+                                supplemental = self._supplemental_wall_authority.resolve_scope(
+                                    PhysicalWallCandidateSelector(
+                                        document_id=opening.document_id,
+                                        revision_id=opening.revision_id,
+                                        source_sha256=opening.source_sha256,
+                                        snapshot_id=opening.snapshot_id,
+                                        page_id=opening.page_id,
+                                        decision_scope_id=(
+                                            host_universe_selector.decision_scope_id
+                                        ),
+                                    )
+                                )
+                                if (
+                                    supplemental.status
+                                    is EvidenceResolutionStatus.CORROBORATED
+                                    and supplemental.scope_complete is False
+                                    and supplemental.records
+                                    and supplemental.equivalence is not None
+                                ):
+                                    supplemental_resolution = (
+                                        _resolve_raster_source_band_host(
+                                            self._opening,
+                                            opening,
+                                            tuple(supplemental.records),
+                                            geometry,
+                                            supplemental.equivalence,
+                                            tuple(
+                                                supplemental.source_observation_ids
+                                            ),
+                                        )
+                                    )
+                                    if (
+                                        supplemental_resolution.status
+                                        is EvidenceResolutionStatus.CONFLICT
+                                    ):
+                                        band_resolution = supplemental_resolution
+                                    elif (
+                                        supplemental_resolution.status
+                                        is EvidenceResolutionStatus.CORROBORATED
+                                        and supplemental_resolution.bands
+                                    ):
+                                        band_resolution = _HostBandResolution(
+                                            EvidenceResolutionStatus.CORROBORATED,
+                                            supplemental_resolution.bands,
+                                            (
+                                                OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,
+                                                *supplemental_resolution.reason_codes,
+                                            ),
+                                        )
+                                        host_source_observation_ids = tuple(
+                                            supplemental.source_observation_ids
+                                        )
+                                        binding_resolution_reasons = (
+                                            *binding_resolution_reasons,
+                                            OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,
+                                        )
         if band_resolution.status is not EvidenceResolutionStatus.CORROBORATED:
             return _blocked_binding(
                 *band_resolution.reason_codes,
