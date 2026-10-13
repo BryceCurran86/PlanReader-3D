@@ -16,7 +16,11 @@ from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMEN
 from pb_source_observation_authority import ObservationSelector
 from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
 from pb_opening_label_semantic_authority import OpeningLabelSemanticProducer
-from pb_source_room_face_authority import build_source_room_face_authority, SourceRoomFaceSelector
+from pb_source_room_face_authority import (
+    SourceRoomFaceSelector,
+    audit_source_room_face_owned_witnesses,
+    build_source_room_face_authority,
+)
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_migration_contracts import EvidenceResolutionStatus
 
@@ -81,7 +85,8 @@ def _opening_identity_text_receipts(source, published, label_traces) -> list[dic
 def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
                         source_all_pages: bool = False,
                         include_identity_text_receipts: bool = False,
-                        include_raw_candidate_source_groups: bool = False) -> dict:
+                        include_raw_candidate_source_groups: bool = False,
+                        include_room_face_ownership_witnesses: bool = False) -> dict:
     sha = hashlib.sha256(source_bytes).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -148,6 +153,7 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
                                       "result": asdict(label_semantics.publish_scope(selector))})
     room_authority = build_source_room_face_authority(composition.physical_wall_candidate_authority)
     room_scopes = []
+    room_ownership_witness_scopes = []
     wall_scopes = []
     for scope in composition.physical_wall_candidate_authority._scopes.values():
         if str(scope.page_id) not in page_ids:
@@ -162,6 +168,13 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
         )
         room_scopes.append({"selector": asdict(selector),
                             "result": asdict(room_authority.resolve_scope(selector))})
+        if include_room_face_ownership_witnesses:
+            room_ownership_witness_scopes.append({
+                "selector": asdict(selector),
+                "owned_face_witnesses": list(
+                    audit_source_room_face_owned_witnesses(scope)
+                ),
+            })
     report = {
         "source_sha256": sha,
         "revision_id": published.revision.revision_id,
@@ -217,6 +230,8 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
         report["opening_identity_text_receipts"] = _opening_identity_text_receipts(
             source, published, label_dimension_traces,
         )
+    if include_room_face_ownership_witnesses:
+        report["source_room_face_owned_witness_scopes"] = room_ownership_witness_scopes
     if include_raw_candidate_source_groups:
         # Diagnostic-only physical-source receipts. This sidecar is *not* an
         # authenticated opening or a source-universe completeness assertion.
@@ -249,13 +264,17 @@ def main() -> None:
     parser.add_argument("--source-all-pages", action="store_true")
     parser.add_argument("--include-identity-text-receipts", action="store_true")
     parser.add_argument("--include-raw-candidate-source-groups", action="store_true")
+    parser.add_argument("--include-room-face-ownership-witnesses", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = source_stage_report(args.pdf.read_bytes(),
         page_ids=tuple(sorted(set(args.page_id), key=int)),
         source_all_pages=args.source_all_pages,
         include_identity_text_receipts=args.include_identity_text_receipts,
-        include_raw_candidate_source_groups=args.include_raw_candidate_source_groups)
+        include_raw_candidate_source_groups=args.include_raw_candidate_source_groups,
+        include_room_face_ownership_witnesses=(
+            args.include_room_face_ownership_witnesses
+        ))
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True,
                                       default=lambda value: value.value) + "\n")
     print(json.dumps({"source_sha256": report["source_sha256"], **report["summary"]}))
