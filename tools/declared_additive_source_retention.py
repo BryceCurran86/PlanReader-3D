@@ -1101,6 +1101,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     unverified = approval.get("unverified_changed_report_keys") or []
     if unverified:
         print("UNVERIFIED changed report keys (acknowledged, not checked): " + ", ".join(unverified))
+        return 1
     return 0
 
 
