@@ -504,6 +504,15 @@ def _generate_project_handoff_locked(
         )
     else:
         opening_count_quantities = ()
+    if source_plan_page_index is not None and clean_family_group == "core":
+        # A bounded source-positive plan page never proves the complete
+        # original document's opening occurrence universe. A locally FIRM
+        # count cannot silently become a project-total sealed/customer row.
+        # Retain genuine measured opening AREAS, but withhold all counts.
+        opening_count_quantities = ()
+        summary["claim_reason_codes"].append(
+            "partial_original_source_opening_count_universe_unproven"
+        )
     summary["family_counts"]["opening_count"] = len(
         opening_count_quantities
     )
@@ -765,8 +774,18 @@ def _generate_project_handoff_locked(
                 if clean_family_group == "floor_area"
                 else project_live_opening_customer_rows
             )
+            projection_claim = claim
+            if (clean_family_group == "core"
+                    and source_plan_page_index is not None
+                    and tuple(getattr(claim, "opening_count_quantity_evidence", ()) or ())):
+                # The commercial adapter must see exactly the same eligible
+                # family inventory as the signed partial source handoff.
+                # This creates no evidence: it removes unproven global counts.
+                projection_claim = replace(
+                    claim, opening_count_quantity_evidence=(),
+                )
             rows = projection(
-                claim, workspace_id=workspace_id, project_id=project_id,
+                projection_claim, workspace_id=workspace_id, project_id=project_id,
             )
             verified = verify_sealed_customer_output(combined, rows)
             quantity_ids = {quantity.quantity_id for quantity in combined.quantities}
