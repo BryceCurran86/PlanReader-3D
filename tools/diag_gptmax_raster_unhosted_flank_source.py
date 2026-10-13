@@ -44,10 +44,15 @@ def audit_g17_unhosted_flank_original_ancestry(
     visibility=source_visibility_producer.authority()
     opening_authority=composition.physical_opening_authority
     wall_authority=composition.physical_wall_candidate_authority
-    wall_by_source: dict[str,list[dict[str,Any]]] = defaultdict(list)
+    wall_by_source: dict[tuple[str,str],list[dict[str,Any]]] = defaultdict(list)
     for scope in wall_authority._scopes.values():
         if scope.status is not EvidenceResolutionStatus.CORROBORATED:
             continue
+        if (scope.source_sha256 != revision.source_sha256
+                or scope.revision_id != revision.revision_id
+                or scope.snapshot_id != snapshot.snapshot_id
+                or not _clean(scope.page_id)):
+            raise RuntimeError("foreign W4 scope in exact raster source lineage audit")
         for wall in scope.records:
             identity=wall.physical_identity
             if not identity.usable:
@@ -58,7 +63,7 @@ def audit_g17_unhosted_flank_original_ancestry(
             for source_ref in identity.source_primitive_ids:
                 if not _clean(source_ref):
                     continue
-                wall_by_source[_clean(source_ref)].append({
+                wall_by_source[(str(scope.page_id),_clean(source_ref))].append({
                     "wall_candidate_id":wall_id,
                     "candidate_identity_id":identity.candidate_identity_id,
                     "decision_scope_id":scope.decision_scope_id,
@@ -114,7 +119,7 @@ def audit_g17_unhosted_flank_original_ancestry(
                     or observation.page_id != source_opening.page_id):
                 raise RuntimeError("G17 raster flank source observation unverified")
             source_ref=_clean(observation.source_primitive_ref)
-            owners=wall_by_source.get(source_ref,[])
+            owners=wall_by_source.get((str(observation.page_id),source_ref),[])
             parents=[]
             for parent_id in sorted(observation.derivation_parent_ids):
                 parent_selector=ObservationSelector(
@@ -139,7 +144,7 @@ def audit_g17_unhosted_flank_original_ancestry(
                     "source_primitive_ref":parent_source_ref,
                     "geometry_pdf_pts":list(parent.geometry),
                     "exact_source_ref_w4_candidates":sorted(
-                        wall_by_source.get(parent_source_ref,[]),
+                        wall_by_source.get((str(parent.page_id),parent_source_ref),[]),
                         key=lambda row:(row["decision_scope_id"],row["wall_candidate_id"])
                     ),
                 })
