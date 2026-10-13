@@ -108,3 +108,39 @@ def test_foreign_malformed_and_missing_source_receipts_abstain():
     assert source_room_ring_crossing_wall_owner_census(valid)[
         "first_source_gate"
     ] == "original_source_ring_crossing_not_verified"
+
+
+def test_repeated_same_original_w4_candidate_is_not_distinct_physical_wall_proof():
+    original = face(owners=(
+        ("w-a", (RING[0], RING[1])),
+        ("w-a", (RING[0], RING[1])),
+        ("w-b", (RING[2], RING[3])),
+    ))
+    result = source_room_ring_crossing_wall_owner_census(original)
+    first, second = result["indexed_original_w4_wall_owner_receipts"]
+    assert first["exact_source_boundary_edge_owner_count"] == 2
+    assert first["distinct_original_w4_candidate_id_count"] == 1
+    assert first["repeated_same_w4_candidate_address_diagnostic_only"] is True
+    assert first["competing_distinct_w4_candidate_addresses_diagnostic_only"] is False
+    assert first["unique_original_indexed_w4_owner_receipt"] is False
+    assert second["distinct_original_w4_candidate_id_count"] == 1
+    assert result["first_source_gate"] == (
+        "original_ring_crossing_edge_w4_receipt_missing_or_ambiguous"
+    )
+    assert result["source_room_polygon_repaired"] is False
+    assert result["source_room_metric_area_published"] is False
+
+
+def test_distinct_original_w4_candidate_addresses_remain_unproven():
+    original = face(owners=(
+        ("w-a", (RING[0], RING[1])),
+        ("w-b", (RING[0], RING[1])),
+        ("w-b", (RING[2], RING[3])),
+    ))
+    result = source_room_ring_crossing_wall_owner_census(original)
+    first = result["indexed_original_w4_wall_owner_receipts"][0]
+    assert first["exact_source_boundary_edge_owner_count"] == 2
+    assert first["distinct_original_w4_candidate_id_count"] == 2
+    assert first["repeated_same_w4_candidate_address_diagnostic_only"] is False
+    assert first["competing_distinct_w4_candidate_addresses_diagnostic_only"] is True
+    assert result["source_crossing_physical_wall_equivalence_authenticated"] is False

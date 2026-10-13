@@ -109,6 +109,9 @@ def source_room_ring_crossing_wall_owner_census(record):
             "original_indexed_w4_wall_candidate_ids": sorted(set(matches)),
             "exact_source_boundary_edge_owner_count": len(matches),
             "unique_original_indexed_w4_owner_receipt": unique,
+            "distinct_original_w4_candidate_id_count": len(set(matches)),
+            "repeated_same_w4_candidate_address_diagnostic_only": len(matches)>1 and len(set(matches))==1,
+            "competing_distinct_w4_candidate_addresses_diagnostic_only": len(set(matches))>1,
             "second_physical_room_face_proven": False,
         })
     output["indexed_original_w4_wall_owner_receipts"] = found
