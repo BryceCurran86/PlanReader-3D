@@ -241,9 +241,9 @@ def _validate_source_handoff_inputs(
         raise ValueError("workspace_id must be a positive integer")
 
     clean_family_group = str(family_group or "").strip().lower()
-    if clean_family_group not in {"all", "core", "surfaces"}:
+    if clean_family_group not in {"all", "core", "surfaces", "floor_area"}:
         raise ValueError(
-            "family_group must be one of: all, core, surfaces"
+            "family_group must be one of: all, core, surfaces, floor_area"
         )
 
     return clean_family_group
@@ -256,6 +256,7 @@ def _generate_project_handoff_locked(
     workspace_id: int,
     output_dir: Path,
     family_group: str = "all",
+    source_plan_page_index: Optional[int] = None,
 ) -> dict[str, Any]:
     clean_family_group = _validate_source_handoff_inputs(
         pdf_path, project_id, workspace_id, family_group,
@@ -269,8 +270,26 @@ def _generate_project_handoff_locked(
         pdf_path
     )
     all_pages = tuple(range(page_count))
-    topology_restricted = bool(topology_pages) and (
-        tuple(topology_pages) != tuple(all_pages)
+    # Partial signed publication only for a producer-POSITIVE original
+    # floor-plan page. A caller-supplied page index does not prove its role.
+    if source_plan_page_index is not None:
+        if (type(source_plan_page_index) is not int
+                or source_plan_page_index not in all_pages):
+            raise ValueError("source plan page index must be an original page")
+        from pb_source_floor_plan_page_scope import (
+            FLOOR_PLAN, source_floor_plan_topology_scope,
+        )
+        classified = source_floor_plan_topology_scope(pdf_path, all_pages)
+        if (classified is None or not any(
+            row.page_index == source_plan_page_index
+            and row.classification == FLOOR_PLAN
+            for row in classified.decisions
+        )):
+            raise RuntimeError("source_positive_floor_plan_page_required")
+        topology_pages = (source_plan_page_index,)
+        room_area_support_pages = ()
+    topology_restricted = source_plan_page_index is not None or (
+        bool(topology_pages) and tuple(topology_pages) != tuple(all_pages)
     )
     topology_mode = (
         "source_classified_scope"
@@ -279,8 +298,8 @@ def _generate_project_handoff_locked(
     )
 
     if topology_restricted:
-        if clean_family_group == "core":
-            # Core execution is intentionally topology-only.
+        if clean_family_group in {"core", "floor_area"}:
+            # Bounded floor-area is topology-only: no inferred finish/ceiling.
             claim_execution_pages = tuple(topology_pages)
             semantic_execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
@@ -330,7 +349,8 @@ def _generate_project_handoff_locked(
         ],
         "topology_mode": topology_mode,
         "family_group": clean_family_group,
-        "complete_project_handoff": clean_family_group == "all",
+        "complete_project_handoff": (clean_family_group == "all" and source_plan_page_index is None),
+        "source_positive_partial_page": (None if source_plan_page_index is None else source_plan_page_index + 1),
         "execution_pages": [page + 1 for page in claim_execution_pages],
         "semantic_execution_pages": [
             page + 1 for page in semantic_execution_pages
@@ -409,7 +429,7 @@ def _generate_project_handoff_locked(
 
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
-    if clean_family_group in {"all", "surfaces"}:
+    if clean_family_group in {"all", "surfaces", "floor_area"}:
         floor_quantities = _non_abstained(
             publish_live_floor_area_quantities(claim)
         )
@@ -757,6 +777,7 @@ def generate_project_handoff(
     workspace_id: int,
     output_dir: Path,
     family_group: str = "all",
+    source_plan_page_index: Optional[int] = None,
 ) -> dict[str, Any]:
     """Serialize one source run per output directory without trusting stale seals.
 
@@ -781,6 +802,7 @@ def generate_project_handoff(
             workspace_id=workspace_id,
             output_dir=output_dir,
             family_group=family_group,
+            source_plan_page_index=source_plan_page_index,
         )
     finally:
         os.close(descriptor)
@@ -796,13 +818,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace-id", type=int, default=1)
     parser.add_argument(
         "--family-group",
-        choices=("all", "core", "surfaces"),
+        choices=("all", "core", "surfaces", "floor_area"),
         default="all",
         help=(
             "Families to seal: all=current behavior, "
-            "core=opening area/count only, surfaces=floor/ceiling only"
+            "core=opening area/count only, surfaces=floor/ceiling only, "
+            "floor_area=source-owned floor areas only"
         ),
     )
+    parser.add_argument("--source-plan-page-index", type=int, default=None,
+                        help="0-based original page; source-positive FLOOR_PLAN required")
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser
 
@@ -815,6 +840,7 @@ def main() -> int:
         workspace_id=args.workspace_id,
         output_dir=args.output_dir,
         family_group=args.family_group,
+        source_plan_page_index=args.source_plan_page_index,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
