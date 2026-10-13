@@ -1,0 +1,101 @@
+name: GPT MAX Original Unhosted Raster G17 Source Ownership
+on:
+  pull_request:
+    paths:
+      - tools/diag_gptmax_raster_unhosted_flank_source.py
+      - tools/diag_gptmax_source_authority_stages.py
+      - tests/test_gptmax_raster_unhosted_flank_source.py
+      - .github/workflows/test-gptmax-original-unhosted-raster-flank.yml
+permissions:
+  contents: read
+jobs:
+  generic-flank-negative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Refuse missing original G17 and fabricated exact-source owner
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_raster_unhosted_flank_source.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+  original-bathroom-flank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+      SOURCE_SHA: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify immutable original page-3 source and run unmodified physical stage
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' "$SOURCE_SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages --output unmodified.json
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --include-unhosted-raster-flank-source --output flank-original.json
+      - name: Every unhosted raster source receipt is original, not a guessed host
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          standard=json.loads(Path("unmodified.json").read_text())
+          with_audit=json.loads(Path("flank-original.json").read_text())
+          receipts=with_audit.pop("unhosted_raster_flank_source_receipts")
+          assert standard==with_audit, "opt-in audit altered original production authority"
+          assert standard["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert standard["primitive_safety_cap"]==20_000
+          assert len(standard["source_owned_wall_scopes"][0]["records"])==2094
+          assert standard["summary"]["physical_existence_claims"]==21
+          assert standard["summary"]["authenticated_hosts"]==14
+          assert standard["summary"]["resolved_source_frames"]==9
+          target="physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+          selected=[r for r in receipts if r["physical_opening_id"]==target]
+          assert len(selected)==1, "original Bathroom 870 first failure missing or changed"
+          witness=selected[0]
+          assert "raster_source_band_left_source_primitive_unmapped" in witness["host_reason_codes"]
+          assert witness["host_status"]=="abstained"
+          assert witness["host_granted"] is False
+          assert witness["aperture_geometry_complete_granted"] is False
+          assert witness["opening_height_or_count_granted"] is False
+          assert witness["metric_quantity_granted"] is False
+          assert len(witness["source_g17_observations"])>=6
+          assert all(o["observation_id"] and o["source_primitive_ref"]
+                 and o["geometry_pdf_pts"] for o in witness["source_g17_observations"])
+          assert all(isinstance(o["exact_source_ref_w4_candidates"],list)
+                 for o in witness["source_g17_observations"])
+          print({"original_Bathroom_870_source_witness":"authenticated",
+                 "unhosted_raster_g17_candidates":len(receipts),
+                 "bathroom_g17_observations":len(witness["source_g17_observations"]),
+                 "physical_hosts_granted":0,"counts_granted":0,
+                 "firm_new_areas":0,"benchmark_matches_claimed":0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-lot16-original-870-source-left-flank-receipts
+          path: |
+            unmodified.json
+            flank-original.json
+          retention-days: 14
