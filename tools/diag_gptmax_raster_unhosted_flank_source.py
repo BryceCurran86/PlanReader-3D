@@ -115,6 +115,34 @@ def audit_g17_unhosted_flank_original_ancestry(
                 raise RuntimeError("G17 raster flank source observation unverified")
             source_ref=_clean(observation.source_primitive_ref)
             owners=wall_by_source.get(source_ref,[])
+            parents=[]
+            for parent_id in sorted(observation.derivation_parent_ids):
+                parent_selector=ObservationSelector(
+                    document_id=revision.document_id,
+                    revision_id=revision.revision_id,
+                    source_sha256=revision.source_sha256,
+                    snapshot_id=snapshot.snapshot_id,
+                    observation_id=parent_id,
+                )
+                parent_resolution=visibility.resolve(parent_selector)
+                parent=parent_resolution.observation
+                if (parent_resolution.status is not EvidenceResolutionStatus.CORROBORATED
+                        or parent is None or parent.observation_id != parent_id
+                        or parent.source_sha256 != revision.source_sha256
+                        or parent.snapshot_id != snapshot.snapshot_id
+                        or parent.page_id != observation.page_id):
+                    raise RuntimeError("G17 original producer derivation parent unverified")
+                parent_source_ref=_clean(parent.source_primitive_ref)
+                parents.append({
+                    "observation_id":parent_id,
+                    "observation_kind":parent.observation_kind,
+                    "source_primitive_ref":parent_source_ref,
+                    "geometry_pdf_pts":list(parent.geometry),
+                    "exact_source_ref_w4_candidates":sorted(
+                        wall_by_source.get(parent_source_ref,[]),
+                        key=lambda row:(row["decision_scope_id"],row["wall_candidate_id"])
+                    ),
+                })
             # No first/nearest selection: preserve all exact-source W4 owners,
             # including conflicting candidates or incomplete side-scope W4.
             source_rows.append({
@@ -123,6 +151,7 @@ def audit_g17_unhosted_flank_original_ancestry(
                 "source_primitive_ref":source_ref,
                 "geometry_pdf_pts":list(observation.geometry),
                 "source_lineage_parent_ids":list(observation.derivation_parent_ids),
+                "authenticated_source_parents":parents,
                 "exact_source_ref_w4_candidates":sorted(
                     owners,key=lambda row:(row["decision_scope_id"],row["wall_candidate_id"])
                 ),
