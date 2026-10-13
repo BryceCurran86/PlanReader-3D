@@ -57,7 +57,15 @@ def test_real_project_handoff_seals_single_source_claim_and_verifies_customer_on
         assert pdf_file == pdf
         assert page == 2
         assert callable(on_original_claim)
-        on_original_claim(object())
+        # A read-only original-source opening is required by the production
+        # witness sidecar; the mock must retain the producer's actual shape.
+        opening = SimpleNamespace(to_dict=lambda: {
+            "physical_opening_id": "physical-original",
+            "canonical_opening_id": "physical-original",
+            "source_sha256": sha,
+            "host_binding_record_id": "opening_host_binding_v3_original",
+        })
+        on_original_claim(SimpleNamespace(canonical_openings=(opening,)))
         return {
             "pdf_sha256": sha,
             "opening_sealing_diagnostic": {
@@ -92,6 +100,12 @@ def test_real_project_handoff_seals_single_source_claim_and_verifies_customer_on
     assert receipt["benchmark_accuracy"] is None
     assert receipt["identity_map_status"] == "INDEPENDENT_ORIGINAL_SOURCE_BINDINGS_REQUIRED"
     assert json.loads((out / "source_sealed_run.json").read_text())["project_id"] == handoff.PROJECT
+    assert json.loads((out / "source_production_openings.json").read_text()) == [{
+        "physical_opening_id": "physical-original",
+        "canonical_opening_id": "physical-original",
+        "source_sha256": sha,
+        "host_binding_record_id": "opening_host_binding_v3_original",
+    }]
     assert json.loads((out / "verified_customer_rows.json").read_text()) == [
         {"quantity_id": "original-opening-quantity-1"},
     ]
