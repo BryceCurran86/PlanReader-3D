@@ -163,6 +163,8 @@ jobs:
               old_rows,new_rows,old,new,
               expected_new_physical_id=target,
               expected_new_quantity_id=quantity_id,
+              baseline_quantities=old_run["quantities"],
+              candidate_quantities=new_run["quantities"],
           )
           evidence={
               "source_sha256":sha,
