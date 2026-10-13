@@ -155,3 +155,127 @@ def test_no_mutation_of_input_source_or_signed_rows():
     before = copy.deepcopy(case)
     check(case)
     assert case == before
+
+
+def sealed_quantity(row_id, physical, host, *, fingerprint):
+    return dict(
+        quantity_id=row_id,
+        source_sha256=SHA,
+        object_identity_refs=[physical],
+        family="opening_area",
+        value=1.8,
+        unit="m2",
+        evidence_ids=[host, "source_observation_original"],
+        trace_evidence_ids=[host, "source_observation_original"],
+        fingerprint=fingerprint,
+    )
+
+
+def cross_execution_samples():
+    old = report("source-report-A")
+    new = report("source-report-B", additive=True)
+    # Customer/sealed execution ids intentionally differ from the source-report
+    # execution ids, matching the real fresh paired source/customer workflow.
+    previous = customer(
+        QOLD, OLD, "customer-snapshot-A",
+        "opening_host_binding_v3_customer_old",
+        None,
+        "customer-wall-old",
+    )
+    changed = customer(
+        QOLD, OLD, "customer-snapshot-B",
+        "opening_host_binding_v3_customer_new",
+        None,
+        "customer-wall-new",
+    )
+    added = customer(
+        QNEW, NEW, "customer-snapshot-B",
+        "opening_host_binding_v3_customer_added",
+        None,
+        "customer-wall-added",
+    )
+    old_quantities = [
+        sealed_quantity(
+            QOLD, OLD, "opening_host_binding_v3_customer_old",
+            fingerprint="b" * 64,
+        )
+    ]
+    new_quantities = [
+        sealed_quantity(
+            QOLD, OLD, "opening_host_binding_v3_customer_new",
+            fingerprint="c" * 64,
+        ),
+        sealed_quantity(
+            QNEW, NEW, "opening_host_binding_v3_customer_added",
+            fingerprint="d" * 64,
+        ),
+    ]
+    return [previous], [changed, added], old, new, old_quantities, new_quantities
+
+
+def check_cross_execution(case):
+    before, after, old, new, old_quantities, new_quantities = case
+    return verify_customer_receipt_rekeys(
+        before,
+        after,
+        old,
+        new,
+        expected_new_physical_id=NEW,
+        expected_new_quantity_id=QNEW,
+        baseline_quantities=old_quantities,
+        candidate_quantities=new_quantities,
+    )
+
+
+def test_fresh_source_and_customer_executions_use_sealed_receipt_bridge():
+    result = check_cross_execution(cross_execution_samples())
+    assert result["previous_customers_preserved_except_authenticated_receipts"] == 1
+    assert result["cross_execution_sealed_receipts_verified"] is True
+
+
+@pytest.mark.parametrize("tamper", [
+    "sealed_non_host_evidence",
+    "sealed_physical",
+    "sealed_value",
+    "customer_host_receipt",
+    "customer_host_wall",
+    "customer_snapshot",
+])
+def test_cross_execution_bridge_refuses_unproven_customer_or_sealed_change(tamper):
+    case = copy.deepcopy(cross_execution_samples())
+    before, after, old, new, old_quantities, new_quantities = case
+    if tamper == "sealed_non_host_evidence":
+        new_quantities[0]["evidence_ids"][-1] = "invented-source"
+    elif tamper == "sealed_physical":
+        new_quantities[0]["object_identity_refs"] = ["different-opening"]
+    elif tamper == "sealed_value":
+        new_quantities[0]["value"] = 2.16
+    elif tamper == "customer_host_receipt":
+        after[0]["commercial_projection_provenance"]["quantity"]["metadata"][
+            "host_binding_record_id"
+        ] = "opening_host_binding_v3_forged"
+        after[0]["notes"] = json.dumps(
+            after[0]["commercial_projection_provenance"],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    elif tamper == "customer_host_wall":
+        after[0]["commercial_projection_provenance"]["quantity"]["metadata"][
+            "host_wall_id"
+        ] = "forged-wall"
+        after[0]["notes"] = json.dumps(
+            after[0]["commercial_projection_provenance"],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    else:
+        after[0]["commercial_projection_provenance"]["quantity"]["metadata"][
+            "snapshot_id"
+        ] = "customer-snapshot-A"
+        after[0]["notes"] = json.dumps(
+            after[0]["commercial_projection_provenance"],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    with pytest.raises(ValueError, match="customer original-source retention refused"):
+        check_cross_execution(case)
