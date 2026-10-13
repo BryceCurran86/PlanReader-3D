@@ -58,12 +58,19 @@ jobs:
           cache: pip
       - name: Dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          run-id: 37830114626
-          name: lot16-connected-frame-source-handoff
-          path: prerequisite-lot16
+      - name: Replay exact PR-base Lot16 source (replaces a stale archived baseline)
+        # The 2026-10-08 artifact (run 37830114626) holds 23 physical claims; main has since retired two
+        # source-opposed native hypotheses and holds 21, so equality with it can no longer be satisfied by
+        # ANY head, including main. Every sibling gate replays the PR base instead.
+        run: |
+          mkdir -p prerequisite-lot16
+          git worktree add --detach /tmp/native-description-lot16-base "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/native-description-lot16-base
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+              --page-id 3 --output "$GITHUB_WORKSPACE/prerequisite-lot16/lot16-connected-frame-source-handoff.json"
+          )
       - name: Real Lot16 source, wall and host handoff
         run: >-
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py
@@ -97,7 +104,9 @@ jobs:
         if: always()
         with:
           name: lot16-connected-frame-source-handoff
-          path: lot16-connected-frame-source-handoff.json
+          path: |
+            lot16-connected-frame-source-handoff.json
+            prerequisite-lot16/lot16-connected-frame-source-handoff.json
           retention-days: 14
   maryborough-source-proof:
     runs-on: ubuntu-latest
