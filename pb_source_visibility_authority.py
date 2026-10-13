@@ -2000,6 +2000,12 @@ class SourceVisibilityProducer:
                                   detector_version, full_sha in families
                               for index, segment in enumerate(family_segments)]
             if not source_segments:
+                # Render/detection and all producer-owned supplemental checks
+                # completed successfully, but there is nothing to publish.
+                # Memoize this successful empty attempt for idempotency. A
+                # publication failure never reaches this branch and remains
+                # retryable.
+                completed_attempts.add(raster_attempt_key)
                 continue
             for index, segment, render_sha, render_dpi, identity_version, detector_version, full_sha in source_segments:
                 segment_id = _raster_segment_observation_id(
