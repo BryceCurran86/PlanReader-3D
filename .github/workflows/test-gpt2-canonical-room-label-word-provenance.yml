@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - "pb_live_canonical_room_composition.py"
+      # OCR source-word crop/rotation can affect original PWD label ownership.
+      - "pb_raster_text_corroboration_authority.py"
+      - "tests/test_raster_text_corroboration_authority_v1.py"
       - "tests/test_gpt2_canonical_room_label_lineage.py"
       - ".github/workflows/test-gpt2-canonical-room-label-word-provenance.yml"
 concurrency:

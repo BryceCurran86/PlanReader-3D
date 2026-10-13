@@ -1197,3 +1197,60 @@ def test_real_rapidocr_contradicts_a_lying_tounicode() -> None:
     )
     assert result.status is EvidenceResolutionStatus.ABSTAINED
     assert result.record is None
+
+
+def test_native_rotated_word_with_spilling_ink_keeps_only_original_crop_and_proven_direction():
+    # Original glyph-origin coordinates are inside the native word's source
+    # bounding box; the actual source glyph ink extends beyond its native
+    # rectangle, so the historical all-glyph-bbox containment would fail.
+    from pb_raster_text_corroboration_authority import _exact_native_word_origin_run
+
+    word_box = (10.0, 10.0, 26.0, 55.0)
+    native = {
+        "spans": [{"chars": [
+            {"c": c, "origin": (13.0, 14.0 + i * 8.0),
+             "bbox": (7.0, 12.0 + i * 8.0, 30.0, 21.0 + i * 8.0)}
+            for i, c in enumerate("FT3")
+        ]}]
+    }
+    assert _exact_native_word_origin_run(
+        native, word_bbox=word_box, raw_text="FT3"
+    ) is True
+    assert _exact_native_word_origin_run(
+        native, word_bbox=word_box, raw_text="FT2"
+    ) is False
+    assert _exact_native_word_origin_run(
+        native, word_bbox=word_box, raw_text="WRONG"
+    ) is False
+    assert _exact_native_word_origin_run(
+        native, word_bbox=word_box, raw_text=""
+    ) is False
+
+
+def test_native_word_origin_fallback_rejects_neighbour_competing_and_corrupt_glyphs():
+    from pb_raster_text_corroboration_authority import _exact_native_word_origin_run
+
+    box = (10.0, 10.0, 30.0, 50.0)
+    def chars(text, base_x=14.0):
+        return [{"c": c, "origin": (base_x, 12.0 + i * 8.0),
+                 "bbox": (8.0, 12.0 + i * 8.0, 35.0, 18.0 + i * 8.0)}
+                for i, c in enumerate(text)]
+    assert not _exact_native_word_origin_run(
+        {"spans":[{"chars":chars("FT3", 150.0)}]},
+        word_bbox=box, raw_text="FT3"
+    )
+    assert not _exact_native_word_origin_run(
+        {"spans":[{"chars":chars("FT3")+chars("FT3")}]},
+        word_bbox=box, raw_text="FT3"
+    )
+    for wrong in (float("nan"), float("inf"), None):
+        bad = chars("FT3")
+        bad[1]["origin"] = (wrong, 20.0)
+        assert not _exact_native_word_origin_run(
+            {"spans":[{"chars":bad}]}, word_bbox=box, raw_text="FT3"
+        )
+    assert not _exact_native_word_origin_run(
+        {"spans":[{"chars":[{"c":"F", "origin":(14.0, 20.0),
+                             "bbox":(8.0, 12.0, 8.0, 30.0)}]}]},
+        word_bbox=box, raw_text="F"
+    )

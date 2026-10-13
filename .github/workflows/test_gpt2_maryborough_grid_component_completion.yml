@@ -7,6 +7,9 @@ on:
       - "pb_*room*.py"
       - "pb_*wall*.py"
       - "pb_live_physical_net_wall_integration.py"
+      # Native/raster text changes can alter commercial room labels or areas.
+      - "pb_raster_text_corroboration_authority.py"
+      - "tests/test_raster_text_corroboration_authority_v1.py"
       - "tests/test_source_*room*.py"
       - "pb_cross_view_floor_finish_authority.py"
       - "tests/test_cross_view_floor_finish_authority_v1.py"
@@ -24,6 +27,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -44,7 +49,13 @@ jobs:
           set -o pipefail
           OUT=artifacts/gpt2-maryborough-grid-component
           mkdir -p "$OUT"
-          git rev-parse HEAD > "$OUT/head_sha.txt"
+          # Never accept a synthetic merge checkout as an exact PR-head proof.
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          if [ "$ACTUAL_HEAD" != "$SOURCE_GATE_PR_HEAD_SHA" ]; then
+            echo "ERROR: original Maryborough gate checked out $ACTUAL_HEAD, expected PR head $SOURCE_GATE_PR_HEAD_SHA" >&2
+            exit 1
+          fi
+          printf '%s\n' "$ACTUAL_HEAD" > "$OUT/head_sha.txt"
           sha256sum "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf" > "$OUT/source_sha256.txt"
           PYTHONPATH=. python -u - <<'PY' 2>&1 | tee "$OUT/result.json"
           import hashlib,json,os,subprocess,time
