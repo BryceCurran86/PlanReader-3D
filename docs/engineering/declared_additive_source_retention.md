@@ -131,8 +131,7 @@ event needs one declaration per shape that its gates use.
   representative id, `source_segment_count`) change with the wall set, so it is
   **refused** until a derivation rule for them is reviewed.
 * #2610 (isolated opening-local supplemental W4): approved with canonical W4
-  2094 retained / 0 lost / 0 gained and an unchanged scope; `unverified_changed_report_keys` is only
-  `composition_reason_codes` (stage shape) or empty (face shape).
+  2094 retained / 0 lost / 0 gained and an unchanged scope; `composition_reason_codes` is now verified against the already-proven changed opening binding/frame rows, so the reviewed #2610 event has no intentionally blind changed report key. Any unrelated aggregate reason addition/removal is refused.
 
 Nothing in this PR enables either: the committed declaration list is empty and
 adding a real declaration needs the owners' sign-off.
