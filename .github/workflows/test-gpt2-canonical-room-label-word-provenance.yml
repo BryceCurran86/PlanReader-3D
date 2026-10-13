@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - "pb_live_canonical_room_composition.py"
+      # Physical GRID/source-wall changes must retain original PWD/room labels.
+      - "pb_wall_room_topology_typed_negative_evidence.py"
+      - "tests/test_wall_topology_typed_negative_evidence.py"
       # OCR source-word crop/rotation can affect original PWD label ownership.
       - "pb_raster_text_corroboration_authority.py"
       - "tests/test_raster_text_corroboration_authority_v1.py"
