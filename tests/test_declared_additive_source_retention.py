@@ -172,6 +172,10 @@ def declaration_raw(**overrides):
         "expected_unhosted_reason_changes": [
             {"opening_identity_id": U, "before": UNMAPPED_LEFT, "after": UNMAPPED_RIGHT}
         ],
+        "expected_changed_report_keys": [
+            "snapshot_id", "opening_bindings", "host_frames",
+            "resolved_host_frame_evidence", "source_owned_wall_scope_results",
+        ],
         "tracking_issue": 2608,
     }
     raw.update(overrides)
@@ -254,7 +258,11 @@ def test_stage_tool_report_shape_is_viewed_without_mutation():
         stage["source_owned_wall_scopes"] = stage.pop("source_owned_wall_scope_results")
     frozen = deepcopy((stage_base, stage_cand))
     assert "host_frames" in as_ledger_report(stage_base)
-    assert approve_declared_additive_rekeys(stage_base, stage_cand, declared())["rekeyed_host_ids"] == sorted([A, B])
+    stage_declaration = declared(expected_changed_report_keys=[
+        "snapshot_id", "opening_bindings", "host_frame_traces",
+        "resolved_host_frame_evidence", "source_owned_wall_scopes",
+    ])
+    assert approve_declared_additive_rekeys(stage_base, stage_cand, stage_declaration)["rekeyed_host_ids"] == sorted([A, B])
     assert (stage_base, stage_cand) == frozen
 
 
@@ -504,6 +512,11 @@ def test_tolerance_is_limited_to_receipt_addresses_of_declared_rows():
             {"opening_identity_id": U, "before": ["y"], "after": ["z"]}]},
         {"expected_unhosted_reason_changes": [{"opening_identity_id": U, "before": ["x"]}]},
         {"expected_unhosted_reason_changes": "none"},
+        {"expected_changed_report_keys": []},
+        {"expected_changed_report_keys": ["opening_bindings"]},  # snapshot_id is mandatory
+        {"expected_changed_report_keys": ["snapshot_id", "snapshot_id"]},
+        {"expected_changed_report_keys": ["snapshot_id", 3]},
+        {"expected_changed_report_keys": "snapshot_id"},
     ],
 )
 def test_malformed_declarations_are_rejected(override):
@@ -571,3 +584,76 @@ def test_declared_new_frame_must_occur_and_only_when_declared():
     base2, cand2 = event()
     with pytest.raises(ValueError, match="declared new frame did not occur"):
         approve_declared_additive_rekeys(base2, cand2, declared(expected_new_frame_host_ids=[T]))
+
+
+# --------------------------------------------------------------------------
+# A declared event cannot hide a change to an unrelated part of the report
+# --------------------------------------------------------------------------
+
+def test_undeclared_report_key_change_is_refused_even_when_hosts_are_fine():
+    base, cand = event()
+    base["source_decode_coverage"] = {"pages": 13, "decoded": 13}
+    cand["source_decode_coverage"] = {"pages": 13, "decoded": 12}
+    with pytest.raises(ValueError, match="undeclared report keys changed: source_decode_coverage"):
+        approve_declared_additive_rekeys(base, cand, declared())
+    with pytest.raises(ValueError):
+        compare_source_face_reports(base, cand, declarations=declared())
+    # Declaring the key makes the same change an explicit, reviewed expectation.
+    ok = approve_declared_additive_rekeys(base, cand, declared(expected_changed_report_keys=[
+        "snapshot_id", "opening_bindings", "host_frames", "resolved_host_frame_evidence",
+        "source_owned_wall_scope_results", "source_decode_coverage"]))
+    assert ok["declared_report_keys_without_change"] == []
+    # A key present in only one report counts as a change.
+    base2, cand2 = event()
+    cand2["extra_authority_key"] = {"x": 1}
+    with pytest.raises(ValueError, match="extra_authority_key"):
+        approve_declared_additive_rekeys(base2, cand2, declared())
+
+
+def test_normalizer_only_forgives_ordering_the_gate_itself_forgives():
+    base, cand = event()
+    base["opening_void_reason_codes"] = ["a", "b"]
+    cand["opening_void_reason_codes"] = ["b", "a"]
+    with pytest.raises(ValueError, match="opening_void_reason_codes"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+    def order_insensitive(value):
+        if isinstance(value, dict):
+            return {k: order_insensitive(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return sorted((order_insensitive(v) for v in value), key=json.dumps)
+        return value
+
+    # Order differences in an *undeclared* key pass only with the gate's own normalizer...
+    ok = approve_declared_additive_rekeys(base, cand, declared(), normalize=lambda v: (
+        sorted(v) if isinstance(v, list) and all(isinstance(x, str) for x in v) else v))
+    assert ok["declared_new_host_ids"] == [T]
+    # ...and never forgives a real content change.
+    cand["opening_void_reason_codes"] = ["b", "c"]
+    with pytest.raises(ValueError, match="opening_void_reason_codes"):
+        approve_declared_additive_rekeys(base, cand, declared(), normalize=order_insensitive)
+
+
+def test_declared_keys_that_did_not_change_are_reported_not_silently_accepted():
+    base, cand = event()
+    approval = approve_declared_additive_rekeys(base, cand, declared(expected_changed_report_keys=[
+        "snapshot_id", "opening_bindings", "host_frames", "resolved_host_frame_evidence",
+        "source_owned_wall_scope_results", "selected_geometry_page_ids"]))
+    assert approval["declared_report_keys_without_change"] == ["selected_geometry_page_ids"]
+
+
+def test_assert_unchanged_or_declared_has_exactly_three_outcomes(monkeypatch):
+    from tools import declared_additive_source_retention as module
+
+    base, cand = event()
+    module.assert_unchanged_or_declared(base, deepcopy(base))  # strictly equal: no declaration needed
+    monkeypatch.setattr(module, "load_declarations", lambda path=None: declared())
+    module.assert_unchanged_or_declared(base, cand)  # declared and proven
+    monkeypatch.setattr(module, "load_declarations", lambda path=None: ())
+    with pytest.raises(AssertionError, match="original source authority changed"):
+        module.assert_unchanged_or_declared(base, cand)  # undeclared: strict outcome
+    monkeypatch.setattr(module, "load_declarations", lambda path=None: declared())
+    broken = deepcopy(cand)
+    _damage("fragment_geometry", base, broken)
+    with pytest.raises(ValueError):  # declared but violated is never the undeclared case
+        module.assert_unchanged_or_declared(base, broken)

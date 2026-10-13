@@ -26,6 +26,7 @@ so it is single-use and every later rekey needs a new, reviewed declaration.
    "expected_new_frame_host_ids": [],
    "expected_unhosted_reason_changes": [
      {"opening_identity_id": "...", "before": ["..."], "after": ["..."]}],
+   "expected_changed_report_keys": ["snapshot_id", "opening_bindings", "..."],
    "tracking_issue": 2608}]}
 ```
 
@@ -48,7 +49,11 @@ generated `split_N` ordinals and snapshot-scoped receipt ids are ignored):
 * every other unhosted opening keeps status, page, representative observation,
   members, receipts and frame reasons; its host reason codes change only through
   an exact declared `before -> after` transition that actually occurs;
-* source SHA, page scope and the 20,000 primitive cap are unchanged.
+* source SHA, page scope and the 20,000 primitive cap are unchanged;
+* **every top-level report key not listed in `expected_changed_report_keys` is
+  equal** (after the gate's own order-insensitive normalizer, if it has one), so
+  a declared event cannot hide a change to an unrelated part of the report. The
+  approval also lists declared keys that did not actually change.
 
 A declared event that violates any of this raises. It is never silently
 downgraded to the undeclared (strict) path.
@@ -67,4 +72,7 @@ it does not replace the quantity / sealing / frozen-reconciliation gates.
 `compare_source_face_reports` and `compare_opposed_source_reports` load the
 committed declarations by default (empty = strict, identical behaviour to
 before). Inline workflow assertions use
-`assert <strict equality> or declared_event_approved(old, new)`.
+`assert_unchanged_or_declared(old, new, normalize=...)`: strict equality, or one
+declared and proven event, or an `AssertionError` (a declared-but-violated event
+raises `ValueError`, it is never mistaken for the undeclared case). The failing
+undeclared case prints the exact event key a declaration would have to bind.
