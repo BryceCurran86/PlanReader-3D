@@ -119,3 +119,93 @@ def test_partial_plan_cannot_pretend_to_cover_all_source_families(
             source_plan_page_index=0,
         )
     assert not (tmp_path / "partial" / "production_summary.json").exists()
+
+
+@pytest.mark.parametrize("customer_id_matches", [True, False])
+def test_scoped_firm_floor_requires_exact_verified_customer_bijection_before_any_seal(
+    monkeypatch, tmp_path, customer_id_matches,
+):
+    import hashlib
+    import json
+    from pb_migration_contracts import QuantityEvidence
+    from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
+    from pb_source_closed_run_export import seal_source_closed_run
+    import pb_source_floor_plan_page_scope as classifier
+
+    pdf = tmp_path / "original.pdf"
+    pdf.write_bytes(b"immutable original source bytes")
+    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0, 1), (), 3))
+    monkeypatch.setattr(classifier, "source_floor_plan_topology_scope",
+                        lambda _path, _pages: _plan_scope(positive=True))
+    claim = S(
+        status=S(value="corroborated"), reason_codes=(),
+        canonical_walls=(), canonical_openings=(), canonical_rooms=(),
+        canonical_floors=(), canonical_ceilings=(), canonical_spaces=(),
+    )
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim",
+                        lambda *args, **kwargs: claim)
+    q = QuantityEvidence(
+        quantity_id="q-firm-floor",
+        family="floor_area", semantic_key="floor_area:physical-1",
+        value=12.4, unit="m2", input_entity_ids=("physical-floor-1",),
+        formula="source independent figured dimensions",
+        formula_version="1", evidence_ids=("observation-1",),
+        authority="documented_dimension", status="firm",
+        confidence=1.0, abstained=False, blocking_reasons=(),
+        reason_codes=(), metadata={},
+    )
+    trace = CommercialTakeoffSourceTrace(
+        workspace_id=1, project_id="project_a",
+        document_id="doc", source_sha256=sha,
+        source_page="1", viewport_id="vp-1",
+        revision_id="rev", current_revision_id="rev",
+        evidence_ids=q.evidence_ids, canonical_entity_ids=q.input_entity_ids,
+    )
+    sealed = seal_source_closed_run(
+        (q,), project_id="project_a",
+        traces_by_quantity_id={q.quantity_id: trace},
+    )
+    monkeypatch.setattr(handoff, "publish_live_floor_area_quantities",
+                        lambda _claim: (q,))
+    monkeypatch.setattr(handoff, "seal_live_floor_area_run",
+                        lambda *a, **kw: sealed)
+    projected = ({"quantity_id": q.quantity_id},)
+    monkeypatch.setattr(handoff, "project_live_floor_area_customer_rows",
+                        lambda *a, **kw: projected)
+    seen = []
+
+    def verified(run, rows):
+        seen.append((run, rows))
+        return S(
+            verified_quantity_ids=("q-firm-floor",) if customer_id_matches else ("other",),
+            customer_row_count=1,
+        )
+
+    monkeypatch.setattr(handoff, "verify_sealed_customer_output", verified)
+    output = tmp_path / "produced"
+    if customer_id_matches:
+        result = handoff._generate_project_handoff_locked(
+            pdf_path=pdf, project_id="project_a", workspace_id=1,
+            output_dir=output, family_group="floor_area",
+            source_plan_page_index=0,
+        )
+        assert len(seen)==1 and seen[0][1]==projected
+        assert result["status"]=="sealed"
+        assert result["complete_project_handoff"] is False
+        assert result["customer_rows_verified"] is True
+        assert result["verified_customer_row_count"]==1
+        assert json.loads((output/"verified_customer_rows.json").read_text())==list(projected)
+        assert (output/"family_runs"/"floor_area.sealed.json").is_file()
+    else:
+        with pytest.raises(RuntimeError, match="floor-area sealed customer identities disagree"):
+            handoff._generate_project_handoff_locked(
+                pdf_path=pdf, project_id="project_a", workspace_id=1,
+                output_dir=output, family_group="floor_area",
+                source_plan_page_index=0,
+            )
+        summary=json.loads((output/"production_summary.json").read_text())
+        assert summary["status"]=="floor_area_customer_projection_unverified"
+        assert summary["customer_rows_verified"] is False
+        assert not (output/"family_runs"/"floor_area.sealed.json").exists()
+        assert not (output/"verified_customer_rows.json").exists()
