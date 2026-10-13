@@ -62,7 +62,9 @@ def fixture():
                  candidate_identity_id="other-original-owner",
                  source_primitive_ids=("raster-left-original",)))
     scope=Row(status=Status.CORROBORATED,scope_complete=True,
-              decision_scope_id="wall-source:page-3",records=(wall,wall2))
+              source_sha256=SHA,revision_id="rev",snapshot_id=SNAP,
+              page_id="3",decision_scope_id="wall-source:page-3",
+              records=(wall,wall2))
     comp=Row(physical_opening_authority=opening,
              physical_wall_candidate_authority=Row(_scopes={"page3":scope}),
              opening_bindings=(trace,))
@@ -105,7 +107,7 @@ def test_other_non_G17_abstention_is_not_reclassified():
 @pytest.mark.parametrize("damage",[
     "wrong_opening", "lost_original_source", "source_rekey", "missing_G17",
     "unverified_G17", "wrong_original_page", "duplicate_G17",
-    "forged_host", "bad_wall_id","missing_parent",
+    "forged_host", "bad_wall_id","missing_parent","foreign_W4_snapshot",
 ])
 def test_source_G17_flank_witness_fails_closed_on_unauthenticated_input(damage):
     source,pub,comp,originals,root,trace,scope=fixture()
@@ -124,5 +126,29 @@ def test_source_G17_flank_witness_fails_closed_on_unauthenticated_input(damage):
         scope.records[0].wall_candidate_id=""
     elif damage=="missing_parent":
         originals["G17-left"].derivation_parent_ids=("nonexistent-original-parent",)
+    elif damage=="foreign_W4_snapshot":
+        scope.snapshot_id="foreign-source-snapshot"
     with pytest.raises(RuntimeError):
         audit(source,pub,comp)
+
+
+def test_unrelated_original_page_owner_cannot_satisfy_exact_G17_primitive():
+    source,pub,comp,originals,root,trace,scope=fixture()
+    # Even with an identical primitive reference and physically close-looking
+    # line on an unrelated page, it is never an original page-3 W4 owner.
+    scope.page_id="4"
+    rows=audit(source,pub,comp)
+    assert len(rows)==1
+    assert all(not receipt["exact_source_ref_w4_candidates"]
+               for receipt in rows[0]["source_g17_observations"])
+
+
+def test_original_exact_source_parent_ref_never_selects_other_page_wall():
+    source,pub,comp,originals,root,trace,scope=fixture()
+    scope.records[0].physical_identity.source_primitive_ids=(
+        "original-visible-parent",)
+    scope.page_id="4"
+    rows=audit(source,pub,comp)
+    parents=[p for o in rows[0]["source_g17_observations"]
+             for p in o["authenticated_source_parents"]]
+    assert parents and all(not p["exact_source_ref_w4_candidates"] for p in parents)
