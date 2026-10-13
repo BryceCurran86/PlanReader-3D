@@ -456,9 +456,65 @@ class TestSourceLineageGridRecall:
                     viewport_id="vp1",
                 )
             )
-            assert [atom.to_dict() for atom in fast] == [
-                atom.to_dict() for atom in full
-            ]
+            # The producer-only source sidecar may retain an INDEPENDENT
+            # exact source lattice receipt when legacy family GRID has
+            # same-kind precedence in full U2. Full U2 is unchanged.
+            fast_by_id = {atom.evidence_id: atom for atom in fast}
+            assert all(
+                atom.evidence_id in fast_by_id
+                and fast_by_id[atom.evidence_id].to_dict() == atom.to_dict()
+                for atom in full
+            )
+            assert all(
+                atom.status is EvidenceResolutionStatus.CANDIDATE
+                and atom.kind == KIND_GRID
+                and (atom.metadata or {}).get("polarity") == "opposing"
+                and (atom.metadata or {})
+                    .get("feature_basis", {})
+                    .get("source_lineage_grid_proof")
+                for atom in fast
+            )
+
+    def test_source_grid_sidecar_cannot_be_suppressed_by_generic_legacy_family(
+        self, monkeypatch
+    ) -> None:
+        import pb_wall_room_topology_typed_negative_evidence as semantic
+
+        graph = build_wall_graph_for_viewport(self._lattice())
+        original = copy.deepcopy(graph)
+
+        def reject_legacy(*args, **kwargs):
+            raise AssertionError(
+                "legacy kind-precedence must not erase independent exact "
+                "native-source grid provenance"
+            )
+
+        monkeypatch.setattr(
+            semantic, "_generic_family_grid_nominations", reject_legacy
+        )
+        atoms = collect_source_lineage_grid_evidence(
+            graph, document_id="doc", page_id="page_1", viewport_id="vp1"
+        )
+        assert atoms
+        assert graph == original
+        assert all(
+            atom.kind == KIND_GRID
+            and "source_lineage_dense_orthogonal_lattice" in atom.reason_codes
+            and atom.status is EvidenceResolutionStatus.CANDIDATE
+            for atom in atoms
+        )
+
+        # Independently source-unproven lines stay ABSTAIN even if they could
+        # resemble a generic visual grid. Do not infer from stroke appearance.
+        for segments in (
+            self._lattice(include_second_width=False),
+            self._lattice(layer="A-WALL-PARTITION"),
+            self._lattice(coordinates=(0.0, 7.0, 19.0, 34.0, 55.0)),
+        ):
+            unproven = build_wall_graph_for_viewport(segments)
+            assert collect_source_lineage_grid_evidence(
+                unproven, document_id="doc", page_id="page_1", viewport_id="vp1"
+            ) == ()
 
     def test_split_native_lattice_recovers_existing_grid_role(self) -> None:
         graph, atoms = self._source_grid_atoms(self._lattice())
