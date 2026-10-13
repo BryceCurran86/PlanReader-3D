@@ -261,7 +261,11 @@ jobs:
               row for row in discovered["targets"][target]["native_candidates"]
               if row["page_1_based"]==7
           ] for target in targets}
+          from pb_source_room_face_authority import (
+              SOURCE_ROOM_FACE_SELF_INTERSECTING,
+          )
           face_records=[]
+          invalid_source_ring_withheld=[]
           for selector in selectors:
               face_scope=face_authority.resolve_scope(SourceRoomFaceSelector(
                   document_id=selector.document_id,
@@ -272,6 +276,10 @@ jobs:
                   decision_scope_id=selector.decision_scope_id,
               ))
               face_records.extend(face_scope.records)
+              invalid_source_ring_withheld.extend(
+                  face for face in face_scope.abstained_faces
+                  if face.reason == SOURCE_ROOM_FACE_SELF_INTERSECTING
+              )
           # FREEZER's exact crossing-edge source receipts are independently
           # preserved by merged #2587. This production change now withholds
           # the non-simple original room ring BEFORE room-label ownership, so
