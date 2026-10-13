@@ -1096,6 +1096,138 @@ def inspect_native_source_parent_w4_ancestry(
     }
 
 
+
+def inspect_original_external_atomic_second_face_scope(
+    room_scope: SourceRoomFaceScopeResult,
+    physical_union_first_gate: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Read-only original source face / abstention census around external edges.
+
+    Reuse the original room producer's W4-owned boundary-wall receipts. A
+    withheld face is NOT an authenticated second physical side; neither is a
+    partial overlap, a coincident different W4, or a second record ID alone.
+    No polygon construction, equivalence assignment or quantity is performed.
+    """
+    from pb_source_room_face_authority import (
+        _collinear_overlap_edge, _edge_contains_edge,
+    )
+
+    raw_rows = physical_union_first_gate.get(
+        "physical_union_external_grid_atomic_subedges_diagnostic_only", ()
+    )
+    if not isinstance(raw_rows, (list, tuple)):
+        return []
+    published = tuple(getattr(room_scope, "records", ()) or ())
+    abstained = tuple(getattr(room_scope, "abstained_faces", ()) or ())
+    all_faces = published + abstained
+    counts = Counter(
+        getattr(face, "face_id", None) for face in all_faces
+        if type(getattr(face, "face_id", None)) is str
+    )
+    record_counts = Counter(
+        getattr(face, "record_id", None) for face in all_faces
+        if type(getattr(face, "record_id", None)) is str
+    )
+    source_keys = (
+        "document_id", "revision_id", "source_sha256",
+        "snapshot_id", "page_id", "decision_scope_id",
+    )
+    output = []
+    for external in raw_rows[:48]:
+        if not isinstance(external, Mapping):
+            continue
+        wall_id = external.get("original_w4_wall_id")
+        atomic = _edge_key(external.get("original_atomic_wall_edge_pdf_pts"))
+        if type(wall_id) is not str or not wall_id or wall_id != wall_id.strip() or atomic is None:
+            continue
+        owner_ids = tuple(external.get("original_global_source_face_ids") or ())
+        if (
+            not owner_ids
+            or any(type(value) is not str or not value or value != value.strip() for value in owner_ids)
+        ):
+            continue
+        same_wall_published = []
+        same_wall_withheld = []
+        other_w4_candidates = []
+        conflicting = 0
+        for face, is_withheld in (
+            *((face, False) for face in published),
+            *((face, True) for face in abstained),
+        ):
+            face_id = getattr(face, "face_id", None)
+            record_id = getattr(face, "record_id", None)
+            if (
+                type(face_id) is not str or not face_id or face_id != face_id.strip()
+                or counts[face_id] != 1
+                or type(record_id) is not str or not record_id
+                or record_id != record_id.strip() or record_counts[record_id] != 1
+                or any(getattr(face, key, None) != getattr(room_scope, key, None)
+                       for key in source_keys)
+            ):
+                conflicting += 1
+                continue
+            receipt = getattr(face, "boundary_wall_edges", ())
+            if not isinstance(receipt, (tuple, list)):
+                conflicting += 1
+                continue
+            for item in receipt:
+                try:
+                    receipt_wall, raw_edge = item
+                except (TypeError, ValueError):
+                    conflicting += 1
+                    continue
+                edge = _edge_key(raw_edge)
+                if (
+                    type(receipt_wall) is not str or not receipt_wall
+                    or receipt_wall != receipt_wall.strip() or edge is None
+                ):
+                    conflicting += 1
+                    continue
+                overlap = _collinear_overlap_edge(edge, atomic)
+                if overlap is None:
+                    continue
+                row = {
+                    "source_face_id": face_id,
+                    "source_face_receipt_id": record_id,
+                    "source_w4_wall_id": receipt_wall,
+                    "source_edge_wholly_contains_atomic": _edge_contains_edge(edge, atomic),
+                    "source_positive_overlap_pdf_pts": [list(point) for point in overlap],
+                    "published_physical_face": not is_withheld,
+                    "withheld_reason": getattr(face, "reason", None) if is_withheld else None,
+                    "source_second_side_authenticated": False,
+                }
+                if receipt_wall == wall_id:
+                    (same_wall_withheld if is_withheld else same_wall_published).append(row)
+                else:
+                    other_w4_candidates.append(row)
+        sort_key = lambda row: (row["source_face_id"], row["source_w4_wall_id"],
+                                 row["source_face_receipt_id"])
+        output.append({
+            "original_w4_wall_id": wall_id,
+            "original_atomic_wall_edge_pdf_pts": [list(point) for point in atomic],
+            "original_existing_global_source_face_ids": sorted(set(owner_ids)),
+            "other_published_same_w4_edge_faces_diagnostic_only": sorted(
+                (r for r in same_wall_published
+                 if r["source_face_id"] not in owner_ids), key=sort_key
+            )[:32],
+            "withheld_same_w4_edge_faces_diagnostic_only": sorted(
+                same_wall_withheld, key=sort_key
+            )[:32],
+            "other_w4_collinear_face_receipts_diagnostic_only": sorted(
+                other_w4_candidates, key=sort_key
+            )[:32],
+            "malformed_or_conflicting_original_face_receipt_count": conflicting,
+            "source_room_face_universe_complete": bool(
+                getattr(room_scope, "face_universe_complete", False)
+            ),
+            "candidate_only_no_second_face_or_wall_transfer": True,
+            "second_source_face_authenticated_by_diagnostic": False,
+            "room_or_quantity_published": False,
+        })
+    return output
+
+
+
 def inspect_split_grid_component_first_failure(
     candidate: Any,
     *,
