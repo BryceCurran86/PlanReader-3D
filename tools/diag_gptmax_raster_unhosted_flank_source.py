@@ -129,7 +129,9 @@ def audit_g17_unhosted_flank_original_ancestry(
                     snapshot_id=snapshot.snapshot_id,
                     observation_id=parent_id,
                 )
-                parent_resolution=visibility.resolve(parent_selector)
+                # The sealed source authority authenticates the original G17 parent;
+                # the visibility facade has no generic resolve() method.
+                parent_resolution=visibility._source_authority.resolve(parent_selector)
                 parent=parent_resolution.observation
                 if (parent_resolution.status is not EvidenceResolutionStatus.CORROBORATED
                         or parent is None or parent.observation_id != parent_id
