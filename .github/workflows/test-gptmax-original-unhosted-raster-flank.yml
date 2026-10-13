@@ -85,6 +85,11 @@ jobs:
                  and o["geometry_pdf_pts"] for o in witness["source_g17_observations"])
           assert all(isinstance(o["exact_source_ref_w4_candidates"],list)
                  for o in witness["source_g17_observations"])
+          assert all(o["authenticated_source_parents"] for o in witness["source_g17_observations"])
+          assert all(parent["observation_id"] in o["source_lineage_parent_ids"]
+                 and parent["source_primitive_ref"]
+                 for o in witness["source_g17_observations"]
+                 for parent in o["authenticated_source_parents"])
           print({"original_Bathroom_870_source_witness":"authenticated",
                  "unhosted_raster_g17_candidates":len(receipts),
                  "bathroom_g17_observations":len(witness["source_g17_observations"]),
