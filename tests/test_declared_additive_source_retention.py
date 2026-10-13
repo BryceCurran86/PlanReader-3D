@@ -1226,6 +1226,7 @@ def test_composition_reason_codes_are_verified_not_blind():
     target["reason_codes"] = [
         "opening_host_binding_resolved",
         "opening_local_supplemental_source_band_host_resolved",
+        "opening_local_supplemental_source_band_host_resolved",
     ]
     cand["composition_reason_codes"] = sorted(
         {
