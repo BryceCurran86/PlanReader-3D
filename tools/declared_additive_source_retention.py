@@ -33,7 +33,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from tools.gptmax_source_host_rekey_parity_ledger import compare_source_host_rekeys
 
@@ -62,6 +62,7 @@ _DECLARATION_KEYS = frozenset(
         "expected_new_host_ids",
         "expected_new_frame_host_ids",
         "expected_unhosted_reason_changes",
+        "expected_changed_report_keys",
         "tracking_issue",
     }
 )
@@ -95,6 +96,7 @@ class Declaration:
     expected_new_host_ids: tuple[str, ...]
     expected_new_frame_host_ids: tuple[str, ...]
     expected_unhosted_reason_changes: tuple[ReasonChange, ...]
+    expected_changed_report_keys: tuple[str, ...]
     tracking_issue: int
 
 
@@ -143,6 +145,9 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
         raise ValueError("an opening may declare at most one reason change")
     if set(hosts) & {change.opening_identity_id for change in changes}:
         raise ValueError("a newly hosted opening cannot also declare a reason change")
+    keys = _unique_texts(raw["expected_changed_report_keys"], "expected_changed_report_keys")
+    if "snapshot_id" not in keys:
+        raise ValueError("a snapshot-changing event must declare snapshot_id among its changed report keys")
     issue = raw["tracking_issue"]
     if type(issue) is not int or issue <= 0:
         raise ValueError("declaration tracking_issue must be a positive integer")
@@ -153,6 +158,7 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
         expected_new_host_ids=hosts,
         expected_new_frame_host_ids=frames,
         expected_unhosted_reason_changes=tuple(changes),
+        expected_changed_report_keys=keys,
         tracking_issue=issue,
     )
 
@@ -234,12 +240,19 @@ def approve_declared_additive_rekeys(
     baseline: Mapping[str, Any],
     candidate: Mapping[str, Any],
     declarations: Sequence[Declaration] | None = None,
+    *,
+    normalize: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return an approval for a declared event, ``None`` when none is declared.
 
     When a declaration matches this exact (SHA, baseline snapshot, candidate
     snapshot) event but the reports violate it, a ``ValueError`` is raised: a
     declared event is never silently downgraded to the strict path.
+
+    Every top-level report key that the declaration does not list as expected to
+    change must be equal between the two reports (after the caller's optional
+    ``normalize``, e.g. an order-insensitive form of reason-code lists), so a
+    declared event can never hide a change to an unrelated part of the report.
     """
     if not isinstance(baseline, Mapping) or not isinstance(candidate, Mapping):
         raise ValueError("source reports must be objects")
@@ -356,6 +369,24 @@ def approve_declared_additive_rekeys(
             + ", ".join(unused)
         )
 
+    norm = normalize if normalize is not None else (lambda value: value)
+    changed_keys = set(declaration.expected_changed_report_keys)
+    undeclared_keys = sorted(
+        key
+        for key in (set(baseline) | set(candidate)) - changed_keys
+        if norm(baseline.get(key)) != norm(candidate.get(key))
+    )
+    if undeclared_keys:
+        raise ValueError(
+            "declared additive retention refused: undeclared report keys changed: "
+            + ", ".join(undeclared_keys)
+        )
+    unchanged_declared_keys = sorted(
+        key
+        for key in changed_keys
+        if key in baseline and key in candidate and norm(baseline[key]) == norm(candidate[key])
+    )
+
     rekeyed = sorted(
         row["physical_opening_id"]
         for row in rows
@@ -377,6 +408,7 @@ def approve_declared_additive_rekeys(
         "declared_new_host_ids": sorted(declared_hosts),
         "declared_new_frame_host_ids": sorted(declared_frames),
         "accepted_unhosted_reason_change_ids": sorted(consumed),
+        "declared_report_keys_without_change": unchanged_declared_keys,
         # Every row whose serialized binding may differ without failing retention.
         "tolerated_binding_change_ids": sorted(set(rekeyed) | declared_hosts | consumed),
         "official_host_receipt_identity_acceptance": False,
@@ -400,6 +432,7 @@ def declared_event_approved(
     candidate: Mapping[str, Any],
     declarations: Sequence[Declaration] | None = None,
     *,
+    normalize: Callable[[Any], Any] | None = None,
     explain: bool = True,
 ) -> bool:
     """For inline gate assertions: ``strict_equal or declared_event_approved``.
@@ -411,7 +444,9 @@ def declared_event_approved(
     declared but violated event raises, so it can never be mistaken for the
     undeclared case.
     """
-    approval = approve_declared_additive_rekeys(baseline, candidate, declarations)
+    approval = approve_declared_additive_rekeys(
+        baseline, candidate, declarations, normalize=normalize
+    )
     if approval is None and explain:
         import sys
 
@@ -421,6 +456,22 @@ def declared_event_approved(
             file=sys.stderr,
         )
     return approval is not None
+
+
+def assert_unchanged_or_declared(
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    *,
+    normalize: Callable[[Any], Any] | None = None,
+    message: str = "original source authority changed",
+) -> None:
+    """Strict equality, or exactly one declared and proven additive-source event."""
+    norm = normalize if normalize is not None else (lambda value: value)
+    if norm(baseline) == norm(candidate):
+        return
+    if declared_event_approved(baseline, candidate, normalize=normalize):
+        return
+    raise AssertionError(message)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
