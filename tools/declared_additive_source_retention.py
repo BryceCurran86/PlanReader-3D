@@ -579,6 +579,66 @@ def assert_unchanged_or_declared(
     raise AssertionError(message)
 
 
+# Evidence ids that are hashes of the SourceVisibility snapshot (one per quantity
+# at most): they legitimately rekey when genuine source observations are added.
+SNAPSHOT_SCOPED_EVIDENCE_PREFIXES = ("opening_host_binding_v3_", "opening_host_frame_v2_")
+SEALED_QUANTITY_REKEYABLE_FIELDS = frozenset({"evidence_ids", "trace_evidence_ids", "fingerprint"})
+
+
+def sealed_quantities_changed_only_by_snapshot_receipts(
+    old_quantities: Sequence[Mapping[str, Any]],
+    new_quantities: Sequence[Mapping[str, Any]],
+) -> dict[str, int]:
+    """Prove re-sealing changed prior rows only by snapshot-scoped receipts.
+
+    Every previously sealed quantity must still exist (same ``quantity_id``) with
+    every field equal except ``evidence_ids``, ``trace_evidence_ids`` and its
+    own ``fingerprint``.  Within the evidence sets the symmetric difference may
+    contain only snapshot-scoped host-binding / host-frame receipt ids, and at
+    most one of each kind may be swapped per row.  Returns the row counts.
+    """
+    old = {row["quantity_id"]: row for row in old_quantities}
+    new = {row["quantity_id"]: row for row in new_quantities}
+    if len(old) != len(old_quantities) or len(new) != len(new_quantities):
+        raise ValueError("sealed quantity ids must be unique")
+    if not set(old) <= set(new):
+        raise ValueError("a previously sealed quantity is missing: " + ", ".join(sorted(set(old) - set(new))))
+    rekeyed = 0
+    for quantity_id in sorted(old):
+        before, after = old[quantity_id], new[quantity_id]
+        changed_fields = {
+            key for key in set(before) | set(after) if before.get(key) != after.get(key)
+        }
+        if changed_fields - SEALED_QUANTITY_REKEYABLE_FIELDS:
+            raise ValueError(
+                f"sealed quantity changed beyond snapshot receipts: {quantity_id}: "
+                + ", ".join(sorted(changed_fields - SEALED_QUANTITY_REKEYABLE_FIELDS))
+            )
+        for field in ("evidence_ids", "trace_evidence_ids"):
+            old_ids, new_ids = set(before.get(field) or ()), set(after.get(field) or ())
+            removed, added = old_ids - new_ids, new_ids - old_ids
+            for prefix in SNAPSHOT_SCOPED_EVIDENCE_PREFIXES:
+                gone = [i for i in removed if i.startswith(prefix)]
+                new_one = [i for i in added if i.startswith(prefix)]
+                if len(gone) != len(new_one) or len(gone) > 1:
+                    raise ValueError(
+                        f"sealed quantity {field} swapped other than one {prefix}* receipt: {quantity_id}"
+                    )
+            other = [
+                i
+                for i in removed | added
+                if not i.startswith(SNAPSHOT_SCOPED_EVIDENCE_PREFIXES)
+            ]
+            if other:
+                raise ValueError(
+                    f"sealed quantity {field} changed beyond snapshot receipts: {quantity_id}: "
+                    + ", ".join(sorted(other)[:3])
+                )
+        if changed_fields:
+            rekeyed += 1
+    return {"prior_rows": len(old), "rekeyed_rows": rekeyed, "new_rows": len(set(new) - set(old))}
+
+
 @contextmanager
 def strict_or_declared(
     baseline: Mapping[str, Any],
