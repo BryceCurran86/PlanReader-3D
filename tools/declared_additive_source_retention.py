@@ -552,13 +552,21 @@ def _verify_canonical_openings(
             )
 
 
-def _reason_codes(value: object, name: str) -> set[str]:
+def _reason_codes(
+    value: object,
+    name: str,
+    *,
+    require_unique: bool = False,
+) -> set[str]:
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"declared additive retention refused: {name} must be a list")
     if any(type(code) is not str or not code or code != code.strip() for code in value):
         raise ValueError(f"declared additive retention refused: {name} contains malformed reasons")
-    if len(set(value)) != len(value):
+    if require_unique and len(set(value)) != len(value):
         raise ValueError(f"declared additive retention refused: {name} contains duplicate reasons")
+    # Individual producer rows may repeat a typed reason while aggregating
+    # several sub-authorities.  Aggregate composition reasons are required to
+    # be unique; row multiplicity carries no extra semantic authority here.
     return set(value)
 
 
@@ -580,8 +588,12 @@ def _verify_composition_reason_codes(
     the before/after binding or frame rows of an opening whose physical change
     was already verified by this approval.
     """
-    before = _reason_codes(baseline, "baseline composition_reason_codes")
-    after = _reason_codes(candidate, "candidate composition_reason_codes")
+    before = _reason_codes(
+        baseline, "baseline composition_reason_codes", require_unique=True
+    )
+    after = _reason_codes(
+        candidate, "candidate composition_reason_codes", require_unique=True
+    )
     added = after - before
     removed = before - after
     if not added and not removed:
