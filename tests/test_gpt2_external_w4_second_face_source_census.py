@@ -19,6 +19,9 @@ def face(face_id, wall="w4", edge=ATOMIC, *, abstained=False, reason=None, **cha
     )
     data.update(changes)
     if abstained:
+        # Genuine SourceRoomFaceAbstention deliberately has no record_id.
+        # Never fabricate a publication receipt for a withheld source face.
+        data.pop("record_id")
         data["reason"] = reason or "source_room_face_boundary_unresolved"
     return Record(**data)
 
@@ -57,6 +60,8 @@ def test_withheld_source_face_remains_abstained_even_if_exact_same_w4_edge():
     assert result["other_published_same_w4_edge_faces_diagnostic_only"] == []
     withheld = result["withheld_same_w4_edge_faces_diagnostic_only"]
     assert len(withheld) == 1 and withheld[0]["withheld_reason"] == "ambiguous_original_wall"
+    assert withheld[0]["source_face_receipt_id"] is None
+    assert withheld[0]["source_face_id"] == "face-unpublished"
     assert not withheld[0]["published_physical_face"]
     assert result["source_room_face_universe_complete"] is False
 
@@ -101,3 +106,22 @@ def test_invalid_geometry_and_missing_original_owner_fail_closed():
             "original_global_source_face_ids": [],
         }]}
     ) == []
+
+
+def test_abstained_face_rejects_a_fabricated_record_id():
+    real = face("face-abstained", abstained=True)
+    tainted = Record(**vars(real), record_id="invented-publication")
+    result = run((face("face-existing"),), (tainted,))
+    assert result["withheld_same_w4_edge_faces_diagnostic_only"] == []
+    assert result["malformed_or_conflicting_original_face_receipt_count"] >= 1
+    assert not result["second_source_face_authenticated_by_diagnostic"]
+
+
+def test_same_original_face_cannot_be_published_and_withheld():
+    result = run(
+        (face("face-existing"), face("face-duplicate")),
+        (face("face-duplicate", abstained=True),),
+    )
+    assert result["withheld_same_w4_edge_faces_diagnostic_only"] == []
+    assert result["other_published_same_w4_edge_faces_diagnostic_only"] == []
+    assert result["malformed_or_conflicting_original_face_receipt_count"] >= 2
