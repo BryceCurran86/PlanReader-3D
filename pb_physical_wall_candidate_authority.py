@@ -1272,6 +1272,13 @@ def _source_page_segments(
                 "viewport_id": decision_scope_id,
                 "source_observation_id": observation_id,
                 "source_kind": RASTER_PDF_VISIBLE_SEGMENT,
+                # Additive source geometry participates in the exact same W2
+                # topology, but Stage A may use this producer-owned namespace
+                # marker solely to preserve IDs of unchanged pre-existing
+                # split fragments. It is not wall/host authority.
+                "additive_split_identity_namespace": (
+                    f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in raster_ref
+                ),
             }
         )
 
