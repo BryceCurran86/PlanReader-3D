@@ -58,7 +58,7 @@ jobs:
             --candidate lot16-connected-frame-source-handoff.json \
             --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
             --output lot16-source-opposition-fresh-retention.json
-          python - <<'PY'
+          PYTHONPATH=. python - <<'PY'
           import json
           from pathlib import Path
           report = json.loads(Path('lot16-connected-frame-source-handoff.json').read_text())
@@ -75,12 +75,14 @@ jobs:
           keyed = lambda rows: {row['opening_identity_id']: row for row in rows}
           assert baseline['source_sha256'] == report['source_sha256']
           assert baseline['primitive_safety_cap'] == report['primitive_safety_cap']
-          old_bindings, new_bindings = keyed(baseline['opening_bindings']), keyed(report['opening_bindings'])
-          assert len(old_bindings) == len(baseline['opening_bindings'])
-          assert set(new_bindings) <= set(old_bindings)
-          assert all(old_bindings[key] == row for key, row in new_bindings.items())
-          old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
-          assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
+          from tools.declared_additive_source_retention import strict_or_declared
+          with strict_or_declared(baseline, report):
+              old_bindings, new_bindings = keyed(baseline['opening_bindings']), keyed(report['opening_bindings'])
+              assert len(old_bindings) == len(baseline['opening_bindings'])
+              assert set(new_bindings) <= set(old_bindings)
+              assert all(old_bindings[key] == row for key, row in new_bindings.items())
+              old_frames, new_frames = keyed(baseline['host_frames']), keyed(report['host_frames'])
+              assert all(new_frames[key] == row for key, row in old_frames.items() if row['record_id'])
           print({'bindings_and_proved_frames_retained': True, 'baseline': baseline['summary'], 'current': report['summary']})
           PY
       - uses: actions/upload-artifact@v4

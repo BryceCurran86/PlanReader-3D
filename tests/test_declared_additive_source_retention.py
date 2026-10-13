@@ -165,6 +165,7 @@ def event():
 def declaration_raw(**overrides):
     raw = {
         "source_sha256": SHA,
+        "report_shape": "stage_report",
         "baseline_snapshot_id": BASE_SNAP,
         "candidate_snapshot_id": NEW_SNAP,
         "expected_new_host_ids": [T],
@@ -497,6 +498,8 @@ def test_tolerance_is_limited_to_receipt_addresses_of_declared_rows():
         {"expected_new_host_ids": [T, T]},
         {"expected_new_host_ids": [" " + T]},
         {"expected_new_host_ids": [3]},
+        {"report_shape": "other"},
+        {"report_shape": None},
         {"expected_new_frame_host_ids": [U]},
         {"expected_new_frame_host_ids": [T, T]},
         {"expected_new_frame_host_ids": "none"},
@@ -617,21 +620,30 @@ def test_normalizer_only_forgives_ordering_the_gate_itself_forgives():
     with pytest.raises(ValueError, match="opening_void_reason_codes"):
         approve_declared_additive_rekeys(base, cand, declared())
 
-    def order_insensitive(value):
+    def gate_normalize(value):  # the shape the real workflows use
         if isinstance(value, dict):
-            return {k: order_insensitive(v) for k, v in value.items()}
+            return {
+                k: (sorted(v) if k in ("void_reason_codes", "opening_void_reason_codes") else gate_normalize(v))
+                for k, v in value.items()
+                if k != "sidecar_only"
+            }
         if isinstance(value, list):
-            return sorted((order_insensitive(v) for v in value), key=json.dumps)
+            return [gate_normalize(v) for v in value]
         return value
 
     # Order differences in an *undeclared* key pass only with the gate's own normalizer...
-    ok = approve_declared_additive_rekeys(base, cand, declared(), normalize=lambda v: (
-        sorted(v) if isinstance(v, list) and all(isinstance(x, str) for x in v) else v))
+    ok = approve_declared_additive_rekeys(base, cand, declared(), normalize=gate_normalize)
     assert ok["declared_new_host_ids"] == [T]
+    # ...including a sidecar key the gate itself ignores...
+    base["sidecar_only"] = {"a": 1}
+    cand["sidecar_only"] = {"a": 2}
+    assert approve_declared_additive_rekeys(base, cand, declared(), normalize=gate_normalize)
+    with pytest.raises(ValueError, match="sidecar_only"):
+        approve_declared_additive_rekeys(base, cand, declared())
     # ...and never forgives a real content change.
     cand["opening_void_reason_codes"] = ["b", "c"]
     with pytest.raises(ValueError, match="opening_void_reason_codes"):
-        approve_declared_additive_rekeys(base, cand, declared(), normalize=order_insensitive)
+        approve_declared_additive_rekeys(base, cand, declared(), normalize=gate_normalize)
 
 
 def test_declared_keys_that_did_not_change_are_reported_not_silently_accepted():
@@ -657,3 +669,190 @@ def test_assert_unchanged_or_declared_has_exactly_three_outcomes(monkeypatch):
     _damage("fragment_geometry", base, broken)
     with pytest.raises(ValueError):  # declared but violated is never the undeclared case
         module.assert_unchanged_or_declared(base, broken)
+
+
+def test_strict_or_declared_context_runs_the_gates_own_assertions_first(monkeypatch):
+    from tools import declared_additive_source_retention as module
+
+    base, cand = event()
+    ran = []
+    with module.strict_or_declared(base, deepcopy(base)):
+        ran.append("strict block ran")
+        assert base == deepcopy(base)
+    assert ran == ["strict block ran"]
+
+    monkeypatch.setattr(module, "load_declarations", lambda path=None: declared())
+    with module.strict_or_declared(base, cand):  # failing assertion excused by a proven event
+        assert base["opening_bindings"] == cand["opening_bindings"]
+    with pytest.raises(ValueError):  # ...but a declared, violated event is never excused
+        broken = deepcopy(cand)
+        _damage("fragment_geometry", base, broken)
+        with module.strict_or_declared(base, broken):
+            assert base["opening_bindings"] == broken["opening_bindings"]
+
+    monkeypatch.setattr(module, "load_declarations", lambda path=None: ())
+    with pytest.raises(AssertionError):  # undeclared: the gate's own assertion decides
+        with module.strict_or_declared(base, cand):
+            assert base["opening_bindings"] == cand["opening_bindings"]
+    with pytest.raises(KeyError):  # non-assertion errors are never swallowed
+        with module.strict_or_declared(base, cand):
+            base["missing"]
+
+
+# --------------------------------------------------------------------------
+# W4 changes must be explained by the added source
+# --------------------------------------------------------------------------
+
+def _add_unhosted_wall(rep, wid, y, prim):
+    record = _wall(wid, y, 900 + int(y))
+    record["physical_identity"]["source_primitive_ids"] = [prim]
+    record["source_edge_fragments"][0]["source_primitive_ids"] = [prim]
+    rep["source_owned_wall_scope_results"][0]["records"].append(record)
+    return record
+
+
+def _event_with_unhosted_wall():
+    base, cand = event()
+    _add_unhosted_wall(base, "wall_extra", 70.0, "raster_segment:source:1.0.0:extra")
+    _add_unhosted_wall(cand, "wall_extra", 70.0, "raster_segment:source:1.0.0:extra")
+    return base, cand
+
+
+def test_w4_delta_counts_are_reported_for_the_declared_event():
+    base, cand = _event_with_unhosted_wall()
+    approval = approve_declared_additive_rekeys(base, cand, declared())
+    assert approval["w4_wall_delta"] == {"retained": 3, "lost_with_successor": 0, "gained_from_new_source": 1}
+
+
+def test_unhosted_wall_may_gain_an_interior_split_node_without_changing_its_path():
+    base, cand = _event_with_unhosted_wall()
+    record = _walls(cand)["wall_extra"]
+    record["wall_candidate"]["centerline_pts"] = [[10.0, 70.0], [40.0, 70.0], [70.0, 70.0]]
+    record["source_edge_fragments"] = [
+        {"edge_id": "split_a", "geometry": [10.0, 70.0, 40.0, 70.0],
+         "source_primitive_ids": ["raster_segment:source:1.0.0:extra"]},
+        {"edge_id": "split_b", "geometry": [40.0, 70.0, 70.0, 70.0],
+         "source_primitive_ids": ["raster_segment:source:1.0.0:extra"]},
+    ]
+    assert approve_declared_additive_rekeys(base, cand, declared())["declared_new_host_ids"] == [T]
+
+
+def test_unhosted_wall_whose_terminal_moved_needs_a_successor_on_the_same_primitives():
+    base, cand = _event_with_unhosted_wall()
+    cand["source_owned_wall_scope_results"][0]["records"] = [
+        r for r in cand["source_owned_wall_scope_results"][0]["records"] if r["wall_candidate_id"] != "wall_extra"
+    ]
+    with pytest.raises(ValueError, match="disappeared without a successor"):
+        approve_declared_additive_rekeys(base, cand, declared())
+    moved = _add_unhosted_wall(cand, "wall_extra_moved", 70.0, "raster_segment:source:1.0.0:extra")
+    moved["physical_identity"]["path_fingerprint"] = [[10.0, 70.0], [68.2, 70.0]]
+    moved["wall_candidate"]["centerline_pts"] = [[10.0, 70.0], [68.2, 70.0]]
+    moved["source_edge_fragments"][0]["geometry"] = [10.0, 70.0, 68.2, 70.0]
+    approval = approve_declared_additive_rekeys(base, cand, declared())
+    assert approval["w4_wall_delta"]["lost_with_successor"] == 1
+
+
+@pytest.mark.parametrize("damage", ["path", "identity", "ancestry"])
+def test_retained_unhosted_wall_id_cannot_change_its_physical_identity_path_or_ancestry(damage):
+    base, cand = _event_with_unhosted_wall()
+    record = _walls(cand)["wall_extra"]
+    if damage == "path":
+        record["physical_identity"]["path_fingerprint"] = [[10.0, 70.0], [71.0, 70.0]]
+    elif damage == "identity":
+        record["physical_identity"]["candidate_identity_id"] = "wall2_other"
+    else:
+        record["physical_identity"]["source_primitive_ids"] = ["raster_segment:source:1.0.0:other"]
+        record["source_edge_fragments"][0]["source_primitive_ids"] = ["raster_segment:source:1.0.0:other"]
+    with pytest.raises(ValueError, match="retained W4 wall changed"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+def test_new_wall_built_only_from_old_source_is_not_explained_by_the_added_source():
+    base, cand = _event_with_unhosted_wall()
+    _add_unhosted_wall(cand, "wall_invented", 90.0, "raster_segment:source:1.0.0:extra")
+    with pytest.raises(ValueError, match="not built from any new source primitive"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+def test_wall_split_into_two_successors_is_conservatively_refused():
+    base, cand = _event_with_unhosted_wall()
+    cand["source_owned_wall_scope_results"][0]["records"] = [
+        r for r in cand["source_owned_wall_scope_results"][0]["records"] if r["wall_candidate_id"] != "wall_extra"
+    ]
+    for name, y in (("wall_extra_a", 70.0), ("wall_extra_b", 71.0)):
+        _add_unhosted_wall(cand, name, y, "raster_segment:source:1.0.0:extra")
+    with pytest.raises(ValueError, match="not built from any new source primitive"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+# --------------------------------------------------------------------------
+# face_report shape: no frame geometry array; the declared shape must match
+# --------------------------------------------------------------------------
+
+def _as_face(rep):
+    rep = deepcopy(rep)
+    rep.pop("resolved_host_frame_evidence")
+    return rep
+
+
+def face_declared(**overrides):
+    return declared(report_shape="face_report", **overrides)
+
+
+def test_face_report_event_is_approved_with_frame_geometry_explicitly_unverified():
+    base, cand = event()
+    fb, fc = _as_face(base), _as_face(cand)
+    approval = approve_declared_additive_rekeys(fb, fc, face_declared())
+    assert approval["report_shape"] == "face_report"
+    assert approval["frame_geometry_verified"] is False
+    assert approval["rekeyed_host_ids"] == sorted([A, B])
+    assert compare_source_face_reports(fb, fc, declarations=face_declared())["retention_pass"] is True
+    assert compare_opposed_source_reports(fb, fc, source_bytes=PDF_BYTES, declarations=face_declared())["retention_pass"]
+    assert approve_declared_additive_rekeys(base, cand, declared())["frame_geometry_verified"] is True
+
+
+def test_declared_shape_must_match_the_reports_so_evidence_cannot_be_silently_dropped():
+    base, cand = event()
+    fb, fc = _as_face(base), _as_face(cand)
+    with pytest.raises(ValueError):  # stage_report declared, but the evidence array vanished
+        approve_declared_additive_rekeys(fb, fc, declared())
+    with pytest.raises(ValueError, match="declared without it"):  # face_report declared, evidence present
+        approve_declared_additive_rekeys(base, cand, face_declared())
+    half_dropped = _as_face(cand)
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(base, half_dropped, declared())
+
+
+@pytest.mark.parametrize("damage", ["fragment_geometry", "centerline", "host_lost", "member_ids",
+                                    "host_reason", "frame_reason", "frame_status", "undeclared_new_host",
+                                    "unrelated_status", "undeclared_reason", "universe_removed"])
+def test_face_report_still_fails_closed_on_everything_it_can_see(damage):
+    base, cand = event()
+    fb, fc = _as_face(base), _as_face(cand)
+    _damage(damage, fb, fc)
+    fc.pop("resolved_host_frame_evidence", None)
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(fb, fc, face_declared())
+
+
+def test_face_report_catches_frame_loss_and_frame_membership_change():
+    base, cand = event()
+    fb, fc = _as_face(base), _as_face(cand)
+    frame = {r["opening_identity_id"]: r for r in fc["host_frames"]}
+    frame[A].update(record_id=None, host_wall_id=None)
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(fb, fc, face_declared())
+    fb, fc = _as_face(base), _as_face(cand)
+    for r in fc["host_frames"]:
+        if r["opening_identity_id"] == A:
+            r["whole_wall_candidate_ids"] = ["wall_" + A, "wall_" + B]
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(fb, fc, face_declared())
+
+
+@pytest.mark.parametrize("field", ["candidate_identity_id", "source_primitive_ids", "path_fingerprint"])
+def test_malformed_w4_wall_record_is_a_refusal_not_a_crash(field):
+    base, cand = _event_with_unhosted_wall()
+    del _walls(cand)["wall_extra"]["physical_identity"][field]
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(base, cand, declared())

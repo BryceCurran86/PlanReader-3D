@@ -34,7 +34,7 @@ def _unique(rows, label, key):
     return out
 
 
-def _source_views(report):
+def _source_views(report,*,frame_evidence=True):
     if not isinstance(report,dict):
         raise ValueError("source report missing")
     sha=report.get("source_sha256")
@@ -63,10 +63,18 @@ def _source_views(report):
             if k in walls:
                 raise ValueError("duplicate W4 physical candidate owner across pages")
             walls[k]=r
-    evidence=_unique(
-        report.get("resolved_host_frame_evidence"),
-        "source whole-wall frames","opening_identity_id",
-    )
+    # ``frame_evidence=False`` is for report shapes that never carry the frame
+    # geometry array (``diag_opening_wall_face_preservation``). The caller must
+    # then treat frame *geometry* as unverified; everything else still applies.
+    if frame_evidence:
+        evidence=_unique(
+            report.get("resolved_host_frame_evidence"),
+            "source whole-wall frames","opening_identity_id",
+        )
+    else:
+        if report.get("resolved_host_frame_evidence") is not None:
+            raise ValueError("frame geometry evidence present in a report declared without it")
+        evidence={}
     for oid in evidence:
         if oid not in physical or not frames[oid].get("record_id"):
             raise ValueError("source whole-wall geometry without authenticated frame receipt")
@@ -78,19 +86,22 @@ def _source_views(report):
             continue
         host=physical[oid]
         receipt=evidence.get(oid)
-        if not host.get("host_wall_id") or not host.get("record_id") or receipt is None:
+        if not host.get("host_wall_id") or not host.get("record_id") or (frame_evidence and receipt is None):
             raise ValueError("authenticated frame lacks source-owned host or geometry")
         if (frame.get("host_wall_id") != host["host_wall_id"]
-                or receipt.get("host_wall_id") != host["host_wall_id"]
-                or receipt.get("host_binding_record_id") != host["record_id"]
-                or receipt.get("record_id") != frame["record_id"]):
+                or (frame_evidence and (
+                    receipt.get("host_wall_id") != host["host_wall_id"]
+                    or receipt.get("host_binding_record_id") != host["record_id"]
+                    or receipt.get("record_id") != frame["record_id"]))):
             raise ValueError("inconsistent physical opening host/frame receipt lineage")
         members=frame.get("whole_wall_candidate_ids")
         if members is not None and (
                 not isinstance(members,list)
-                or members != receipt.get("whole_wall_candidate_ids")
+                or (frame_evidence and members != receipt.get("whole_wall_candidate_ids"))
                 or members != host.get("member_wall_candidate_ids")):
             raise ValueError("inconsistent framed whole-wall candidate membership")
+        if not frame_evidence:
+            continue
         selector=receipt.get("selector")
         if not isinstance(selector,dict):
             raise ValueError("framed receipt missing producer source selector")
@@ -245,9 +256,9 @@ def _frame_geometry_signature(frame):
         return None
 
 
-def compare_source_host_rekeys(baseline,candidate):
-    asha,ap,ab,af,aw,ae=_source_views(baseline)
-    bsha,bp,bb,bf,bw,be=_source_views(candidate)
+def compare_source_host_rekeys(baseline,candidate,*,frame_evidence=True):
+    asha,ap,ab,af,aw,ae=_source_views(baseline,frame_evidence=frame_evidence)
+    bsha,bp,bb,bf,bw,be=_source_views(candidate,frame_evidence=frame_evidence)
     if asha!=bsha or ap!=bp:
         raise ValueError("source file or page scope does not match")
     if not set(ab).issubset(bb):
@@ -284,6 +295,10 @@ def compare_source_host_rekeys(baseline,candidate):
         if oldframe.get("record_id"):
             if not newframe.get("record_id"):
                 why.append("ORIGINAL_FRAME_PROOF_LOST")
+            elif not frame_evidence:
+                # Geometry is not in this report shape; membership still is.
+                if oldframe.get("whole_wall_candidate_ids")!=newframe.get("whole_wall_candidate_ids"):
+                    why.append("FRAME_SOURCE_GEOMETRY_CHANGED")
             else:
                 old_geom=ae.get(oid)
                 new_geom=be.get(oid)
@@ -333,6 +348,7 @@ def compare_source_host_rekeys(baseline,candidate):
         "source_comparison_rows":rows,
         # This report NEVER becomes a replacement for the strict source
         # opening host/frame identity retention gate.
+        "frame_geometry_verified":bool(frame_evidence),
         "official_host_receipt_identity_acceptance":False,
         "opening_count_or_metric_publication_allowed":False,
         "benchmark_accuracy":None,

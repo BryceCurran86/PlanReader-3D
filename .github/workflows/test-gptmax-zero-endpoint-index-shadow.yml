@@ -69,13 +69,15 @@ jobs:
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
             --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
             --page-id 3 --output zero-index-head-production.json
-          python - <<'PY'
+          PYTHONPATH=. python - <<'PY'
           import json
           from pathlib import Path
+          from tools.declared_additive_source_retention import strict_or_declared
           r=json.loads(Path('zero-index-full-page-source.json').read_bytes())
-          assert Path('zero-index-base-production.json').read_bytes()==Path('zero-index-head-production.json').read_bytes()
           p=json.loads(Path('zero-index-head-production.json').read_bytes())
-          assert p['summary']=={'physical_existence_claims':21,'host_bindings':14,'host_frames':9}
+          with strict_or_declared(json.loads(Path('zero-index-base-production.json').read_bytes()), p):
+              assert Path('zero-index-base-production.json').read_bytes()==Path('zero-index-head-production.json').read_bytes()
+              assert p['summary']=={'physical_existence_claims':21,'host_bindings':14,'host_frames':9}
           assert p['primitive_safety_cap']==r['source_primitive_safety_cap']==20000
           assert p['source_sha256']==r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert r['original_source_reauthenticated'] is True

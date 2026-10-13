@@ -83,24 +83,26 @@ jobs:
           (cd /tmp/gptmax-face-baseline && PYTHONPATH=. python -u /tmp/gptmax-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output /tmp/lot16-face-baseline.json)
           PYTHONPATH=. python -u /tmp/gptmax-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output lot16-face-current.json
           cp /tmp/lot16-face-baseline.json lot16-face-baseline.json
-          python - <<'PY'
+          PYTHONPATH=. python - <<'PY'
           import json
           from pathlib import Path
           old = json.loads(Path('lot16-face-baseline.json').read_text())
           new = json.loads(Path('lot16-face-current.json').read_text())
           assert old['source_sha256'] == new['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert old['primitive_safety_cap'] == new['primitive_safety_cap'] == 20_000
-          assert old['source_decode_coverage'] == new['source_decode_coverage']
-          hosted = lambda report: {row['opening_identity_id']: row for row in report['opening_bindings'] if row['host_wall_id']}
-          assert hosted(old) == hosted(new)
-          assert old['resolved_host_frame_evidence'] == new['resolved_host_frame_evidence']
-          ids = lambda report: {row['physical_opening_id']: row for row in report['canonical_openings']}
-          before, after = ids(old), ids(new)
-          assert before.keys() == after.keys()
-          assert len(after) == len(new['canonical_openings'])
-          for key in before:
-              for field in ('physical_opening_id', 'canonical_opening_id', 'source_observation_ids', 'source_lineage_root_ids'):
-                  assert before[key][field] == after[key][field]
+          from tools.declared_additive_source_retention import strict_or_declared
+          with strict_or_declared(old, new):
+              assert old['source_decode_coverage'] == new['source_decode_coverage']
+              hosted = lambda report: {row['opening_identity_id']: row for row in report['opening_bindings'] if row['host_wall_id']}
+              assert hosted(old) == hosted(new)
+              assert old['resolved_host_frame_evidence'] == new['resolved_host_frame_evidence']
+              ids = lambda report: {row['physical_opening_id']: row for row in report['canonical_openings']}
+              before, after = ids(old), ids(new)
+              assert before.keys() == after.keys()
+              assert len(after) == len(new['canonical_openings'])
+              for key in before:
+                  for field in ('physical_opening_id', 'canonical_opening_id', 'source_observation_ids', 'source_lineage_root_ids'):
+                      assert before[key][field] == after[key][field]
           assert 'quantities' not in new
           print(json.dumps({'baseline': old['summary'], 'current': new['summary']}))
           PY

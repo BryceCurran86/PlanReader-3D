@@ -32,7 +32,7 @@ jobs:
           (cd /tmp/snap-source-baseline && PYTHONPATH=. python -u /tmp/snap-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output /tmp/snap-source-baseline.json)
           PYTHONPATH=. python -u /tmp/snap-source-stages.py --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' --page-id 3 --source-all-pages --output snap-source-current.json
           cp /tmp/snap-source-baseline.json snap-source-baseline.json
-          python - <<'PY'
+          PYTHONPATH=. python - <<'PY'
           import json
           from pathlib import Path
           old = json.loads(Path('snap-source-baseline.json').read_text())
@@ -45,7 +45,9 @@ jobs:
               if isinstance(value, list):
                   return [normalize_void_reason_order(v) for v in value]
               return value
-          assert normalize_void_reason_order(old) == normalize_void_reason_order(new)
+          from tools.declared_additive_source_retention import assert_unchanged_or_declared
+          assert_unchanged_or_declared(old, new, normalize=normalize_void_reason_order,
+              message='page opening proof cache changed original source authority')
           assert 'quantities' not in new
           print({'source_authority_unchanged': True, 'summary': new['summary']})
           PY
