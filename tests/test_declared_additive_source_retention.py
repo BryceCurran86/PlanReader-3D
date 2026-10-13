@@ -168,6 +168,7 @@ def declaration_raw(**overrides):
         "baseline_snapshot_id": BASE_SNAP,
         "candidate_snapshot_id": NEW_SNAP,
         "expected_new_host_ids": [T],
+        "expected_new_frame_host_ids": [],
         "expected_unhosted_reason_changes": [
             {"opening_identity_id": U, "before": UNMAPPED_LEFT, "after": UNMAPPED_RIGHT}
         ],
@@ -361,7 +362,7 @@ def _damage(name, base, cand):
         cand["resolved_host_frame_evidence"][0]["axis_unit"] = [0.0, 1.0]
     elif name == "new_frame_on_unframed_old_host":
         frame[B].update(
-            record_id="frame_new_B", host_wall_id=binding[B]["host_wall_id"],
+            record_id=f"frame_{NEW_SNAP}_{B}", host_wall_id=binding[B]["host_wall_id"],
             whole_wall_candidate_ids=["wall_" + B],
         )
         evidence = _frame_evidence(B, NEW_SNAP)
@@ -388,6 +389,16 @@ def _damage(name, base, cand):
         binding[T]["status"] = "conflict"
     elif name == "declared_host_without_receipt":
         binding[T]["record_id"] = None
+    elif name == "declared_host_page":
+        binding[T]["page_id"] = "4"
+    elif name == "declared_host_representative":
+        binding[T]["representative_observation_id"] = "obs_other"
+    elif name == "undeclared_new_frame":
+        frame[T].update(record_id=f"frame_{NEW_SNAP}_{T}", host_wall_id=binding[T]["host_wall_id"],
+                        whole_wall_candidate_ids=["wall_" + T])
+        evidence = _frame_evidence(T, NEW_SNAP)
+        evidence["whole_wall_candidate_ids"] = ["wall_" + T]
+        cand["resolved_host_frame_evidence"].append(evidence)
     elif name == "unrelated_status":
         binding[U]["status"] = "conflict"
     elif name == "unrelated_representative":
@@ -416,7 +427,8 @@ DAMAGE = [
     "fragment_geometry", "centerline", "source_primitive", "candidate_identity", "member_ids",
     "host_lost", "frame_lost", "frame_geometry", "frame_axis", "new_frame_on_unframed_old_host",
     "host_reason", "frame_reason", "host_representative", "host_status", "frame_status",
-    "undeclared_new_host", "declared_host_not_hosted",
+    "undeclared_new_host", "declared_host_page", "declared_host_representative",
+    "undeclared_new_frame", "declared_host_not_hosted",
     "declared_host_uncorroborated", "declared_host_without_receipt", "unrelated_status",
     "unrelated_representative", "unrelated_members", "undeclared_reason", "unrelated_frame_reason",
     "universe_added", "universe_removed", "cap", "pages",
@@ -477,6 +489,9 @@ def test_tolerance_is_limited_to_receipt_addresses_of_declared_rows():
         {"expected_new_host_ids": [T, T]},
         {"expected_new_host_ids": [" " + T]},
         {"expected_new_host_ids": [3]},
+        {"expected_new_frame_host_ids": [U]},
+        {"expected_new_frame_host_ids": [T, T]},
+        {"expected_new_frame_host_ids": "none"},
         {"baseline_snapshot_id": ""},
         {"candidate_snapshot_id": None},
         {"tracking_issue": True},
@@ -533,3 +548,22 @@ def test_inline_helper_and_cli_agree_with_the_approval(tmp_path, monkeypatch, ca
     monkeypatch.setattr(module, "load_declarations", lambda path=None: ())
     assert module.main(args) == 1
     assert "NO DECLARATION" in capsys.readouterr().out
+
+
+def test_declared_new_frame_must_occur_and_only_when_declared():
+    base, cand = event()
+    binding = {r["opening_identity_id"]: r for r in cand["opening_bindings"]}
+    frame = {r["opening_identity_id"]: r for r in cand["host_frames"]}
+    frame[T].update(record_id=f"frame_{NEW_SNAP}_{T}", host_wall_id=binding[T]["host_wall_id"],
+                    whole_wall_candidate_ids=["wall_" + T])
+    evidence = _frame_evidence(T, NEW_SNAP)
+    evidence["whole_wall_candidate_ids"] = ["wall_" + T]
+    cand["resolved_host_frame_evidence"].append(evidence)
+    with pytest.raises(ValueError, match="undeclared new frames"):
+        approve_declared_additive_rekeys(base, cand, declared())
+    ok = approve_declared_additive_rekeys(base, cand, declared(expected_new_frame_host_ids=[T]))
+    assert ok["declared_new_frame_host_ids"] == [T]
+    # Declaring a frame that the candidate does not resolve is a stale declaration.
+    base2, cand2 = event()
+    with pytest.raises(ValueError, match="declared new frame did not occur"):
+        approve_declared_additive_rekeys(base2, cand2, declared(expected_new_frame_host_ids=[T]))

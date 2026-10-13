@@ -60,6 +60,7 @@ _DECLARATION_KEYS = frozenset(
         "baseline_snapshot_id",
         "candidate_snapshot_id",
         "expected_new_host_ids",
+        "expected_new_frame_host_ids",
         "expected_unhosted_reason_changes",
         "tracking_issue",
     }
@@ -92,6 +93,7 @@ class Declaration:
     baseline_snapshot_id: str
     candidate_snapshot_id: str
     expected_new_host_ids: tuple[str, ...]
+    expected_new_frame_host_ids: tuple[str, ...]
     expected_unhosted_reason_changes: tuple[ReasonChange, ...]
     tracking_issue: int
 
@@ -120,6 +122,9 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
     hosts = _unique_texts(raw["expected_new_host_ids"], "expected_new_host_ids")
     if not hosts:
         raise ValueError("declaration must name at least one expected new host")
+    frames = _unique_texts(raw["expected_new_frame_host_ids"], "expected_new_frame_host_ids")
+    if not set(frames) <= set(hosts):
+        raise ValueError("a newly framed opening must itself be a declared new host")
     changes_raw = raw["expected_unhosted_reason_changes"]
     if not isinstance(changes_raw, list):
         raise ValueError("declaration expected_unhosted_reason_changes must be a list")
@@ -146,6 +151,7 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
         baseline_snapshot_id=_text(raw["baseline_snapshot_id"], "baseline_snapshot_id"),
         candidate_snapshot_id=_text(raw["candidate_snapshot_id"], "candidate_snapshot_id"),
         expected_new_host_ids=hosts,
+        expected_new_frame_host_ids=frames,
         expected_unhosted_reason_changes=tuple(changes),
         tracking_issue=issue,
     )
@@ -302,6 +308,22 @@ def approve_declared_additive_rekeys(
             raise ValueError(
                 f"declared additive retention refused: declared host lacks a corroborated receipt: {key}"
             )
+        # The opening itself must be the same source object; only its host is new.
+        for field in ("page_id", "representative_observation_id"):
+            if old[key].get(field) != row.get(field):
+                raise ValueError(
+                    f"declared additive retention refused: declared host {field} changed: {key}"
+                )
+    framed_before = {key for key, row in old_frames.items() if row.get("record_id")}
+    framed_after = {key for key, row in new_frames.items() if row.get("record_id")}
+    declared_frames = set(declaration.expected_new_frame_host_ids)
+    if (framed_after - framed_before) - declared_frames:
+        raise ValueError(
+            "declared additive retention refused: undeclared new frames: "
+            + ", ".join(sorted((framed_after - framed_before) - declared_frames))
+        )
+    if declared_frames - framed_after or declared_frames & framed_before:
+        raise ValueError("declared additive retention refused: declared new frame did not occur")
 
     declared_reasons = {c.opening_identity_id: c for c in declaration.expected_unhosted_reason_changes}
     consumed: set[str] = set()
@@ -353,6 +375,7 @@ def approve_declared_additive_rekeys(
         "exact_retained_host_ids": exact,
         "rekeyed_host_ids": rekeyed,
         "declared_new_host_ids": sorted(declared_hosts),
+        "declared_new_frame_host_ids": sorted(declared_frames),
         "accepted_unhosted_reason_change_ids": sorted(consumed),
         # Every row whose serialized binding may differ without failing retention.
         "tolerated_binding_change_ids": sorted(set(rekeyed) | declared_hosts | consumed),

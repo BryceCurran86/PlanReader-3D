@@ -23,6 +23,7 @@ so it is single-use and every later rekey needs a new, reviewed declaration.
    "source_sha256": "<64 hex>",
    "baseline_snapshot_id": "...", "candidate_snapshot_id": "...",
    "expected_new_host_ids": ["physical_opening_existence_..."],
+   "expected_new_frame_host_ids": [],
    "expected_unhosted_reason_changes": [
      {"opening_identity_id": "...", "before": ["..."], "after": ["..."]}],
    "tracking_issue": 2608}]}
@@ -41,7 +42,9 @@ generated `split_N` ordinals and snapshot-scoped receipt ids are ignored):
 * every previously hosted opening is still hosted, and its binding and frame
   rows differ **only** in `host_wall_id` / `record_id`;
 * newly hosted openings are exactly the declared ones, each an existing physical
-  opening with a corroborated host receipt;
+  opening (same page and representative source observation) with a corroborated
+  host receipt; a newly resolved frame must be declared too
+  (`expected_new_frame_host_ids`), a previously hosted opening can never gain one;
 * every other unhosted opening keeps status, page, representative observation,
   members, receipts and frame reasons; its host reason codes change only through
   an exact declared `before -> after` transition that actually occurs;
