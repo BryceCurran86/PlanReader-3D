@@ -281,7 +281,7 @@ def _snap_geometry_indexed(
                 grid.pop(old_cell, None)
         grid.setdefault(new_cell, set()).add(node_idx)
 
-    def locate(pt: Tuple[float, float]) -> int:
+    def locate(pt: Tuple[float, float], *, protect_terminal: bool = False) -> int:
         cx, cy = cell_for(pt[0], pt[1])
         candidate_indexes: set[int] = set()
         for dx in (-1, 0, 1):
@@ -293,11 +293,15 @@ def _snap_geometry_indexed(
         for idx in sorted(candidate_indexes):
             node = nodes[idx]
             d = math.hypot(node["x"] - pt[0], node["y"] - pt[1])
-            if d <= tolerance_pt and d < best_d:
+            limit = (_SOURCE_TERMINAL_COORD_EPS_PT if protect_terminal
+                     or node.get("_protected_source_terminal") else tolerance_pt)
+            if d <= limit and d < best_d:
                 best, best_d = idx, d
 
         if best >= 0:
             node = nodes[best]
+            if protect_terminal:
+                node["_protected_source_terminal"] = True
             old_cell = cell_for(node["x"], node["y"])
             count = node["samples"] + 1
             node["x"] = (node["x"] * node["samples"] + pt[0]) / count
@@ -306,16 +310,22 @@ def _snap_geometry_indexed(
             move_in_grid(best, old_cell)
             return best
 
-        nodes.append(
-            {"id": len(nodes), "x": pt[0], "y": pt[1], "samples": 1}
-        )
+        new_node = {"id": len(nodes), "x": pt[0], "y": pt[1], "samples": 1}
+        if protect_terminal:
+            new_node["_protected_source_terminal"] = True
+        nodes.append(new_node)
         add_to_grid(len(nodes) - 1)
         return len(nodes) - 1
 
     edges = []
     for seg in segments:
-        a = locate((float(seg["x1"]), float(seg["y1"])))
-        b = locate((float(seg["x2"]), float(seg["y2"])))
+        a = locate((float(seg["x1"]), float(seg["y1"])),
+                   protect_terminal=seg.get("_protect_source_terminal_start") is True)
+        b = locate((float(seg["x2"]), float(seg["y2"])),
+                   protect_terminal=seg.get("_protect_source_terminal_end") is True)
+        if a == b and (seg.get("_protect_source_terminal_start") is True
+                       or seg.get("_protect_source_terminal_end") is True):
+            raise RuntimeError("source-authenticated terminal segment was collapsed")
         if include_endpoint_assignments:
             segment_id = seg.get("id")
             if (not isinstance(segment_id, str) or not segment_id
@@ -693,6 +703,108 @@ def _restore_pre_additive_split_fragment_ids(
         raise ValueError("split fragment identity collision")
     return restored
 
+
+_SOURCE_TERMINAL_COORD_EPS_PT = 1e-6
+
+
+def _source_point_on_segment(
+    point: tuple[float, float],
+    segment: Dict[str, Any],
+    *,
+    strict_interior: bool = False,
+) -> bool:
+    """Compare actual source positions; never use the 2.5 pt snap threshold."""
+    x1, y1 = float(segment["x1"]), float(segment["y1"])
+    x2, y2 = float(segment["x2"]), float(segment["y2"])
+    dx, dy = x2 - x1, y2 - y1
+    length = math.hypot(dx, dy)
+    if not length or not all(math.isfinite(v) for v in (*point, x1, y1, x2, y2)):
+        return False
+    cross_distance = abs((point[0] - x1) * dy - (point[1] - y1) * dx) / length
+    if cross_distance > _SOURCE_TERMINAL_COORD_EPS_PT:
+        return False
+    projection = ((point[0] - x1) * dx + (point[1] - y1) * dy) / length
+    if strict_interior:
+        return _SOURCE_TERMINAL_COORD_EPS_PT < projection < length - _SOURCE_TERMINAL_COORD_EPS_PT
+    return -_SOURCE_TERMINAL_COORD_EPS_PT <= projection <= length + _SOURCE_TERMINAL_COORD_EPS_PT
+
+
+def _protect_additive_intersection_source_terminals(
+    fragments: Sequence[Dict[str, Any]],
+    source_segments: Sequence[Dict[str, Any]],
+    *,
+    tolerance_pt: float,
+) -> List[Dict[str, Any]]:
+    """Preserve a *real* original line ending next to a new source intersection.
+
+    Producer-authenticated supplemental linework may intersect an old visible
+    line less than the normal endpoint snap tolerance from its original end.
+    W2 must not collapse that short, actual original-source tail to the new
+    crossing. Both the old segment endpoint and the new line intersection are
+    required from independently supplied source geometry. No length alone,
+    guessed endpoint, annotation, or approximate proximity can grant this.
+    Nothing here classifies a physical wall, opening, host, or quantity.
+    """
+    additives = [
+        seg for seg in source_segments
+        if seg.get("additive_split_identity_namespace") is True
+    ]
+    if not additives or tolerance_pt <= 0:
+        return list(fragments)
+    ordinary: dict[str, Dict[str, Any] | None] = {}
+    for segment in source_segments:
+        if segment.get("additive_split_identity_namespace") is True:
+            continue
+        source_id = segment.get("id")
+        if not isinstance(source_id, str) or not source_id:
+            continue
+        if source_id in ordinary:
+            ordinary[source_id] = None
+        else:
+            ordinary[source_id] = segment
+
+    marked: List[Dict[str, Any]] = []
+    for source_fragment in fragments:
+        fragment = dict(source_fragment)
+        first = (float(fragment["x1"]), float(fragment["y1"]))
+        last = (float(fragment["x2"]), float(fragment["y2"]))
+        length = math.dist(first, last)
+        if not (
+            _SOURCE_TERMINAL_COORD_EPS_PT < length <= tolerance_pt
+            and all(math.isfinite(v) for v in (*first, *last))
+        ):
+            marked.append(fragment)
+            continue
+        ancestors = tuple((fragment.get(LINEAGE_KEY) or {}).get("source_primitive_ids") or ())
+        parents = [ordinary[source_id] for source_id in ancestors
+                   if source_id in ordinary and ordinary[source_id] is not None]
+        # Refuse ambiguous co-owned / duplicate original geometry.
+        if len(parents) != 1:
+            marked.append(fragment)
+            continue
+        parent = parents[0]
+        endpoints = (
+            (float(parent["x1"]), float(parent["y1"])),
+            (float(parent["x2"]), float(parent["y2"])),
+        )
+        for key, terminal, crossing in (
+            ("_protect_source_terminal_start", first, last),
+            ("_protect_source_terminal_end", last, first),
+        ):
+            if not (
+                any(math.dist(terminal, end) <= _SOURCE_TERMINAL_COORD_EPS_PT
+                    for end in endpoints)
+                and _source_point_on_segment(crossing, parent, strict_interior=True)
+                and any(_source_point_on_segment(crossing, additive)
+                        for additive in additives)
+            ):
+                continue
+            fragment[key] = True
+            break
+        marked.append(fragment)
+    return marked
+
+
 def build_wall_graph_for_viewport(
     segments: Sequence[Dict[str, Any]],
     *,
@@ -755,6 +867,11 @@ def build_wall_graph_for_viewport(
             split_segment_dicts,
             baseline_fragments,
         )
+    split_segment_dicts = _protect_additive_intersection_source_terminals(
+        split_segment_dicts,
+        structural_segments,
+        tolerance_pt=gap_snap_tolerance_pt,
+    )
     audit_short_source = os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1"
     snapped_graph = _snap_geometry_indexed(
         split_segment_dicts,
