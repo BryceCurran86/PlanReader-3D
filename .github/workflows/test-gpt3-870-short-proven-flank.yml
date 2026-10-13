@@ -1,0 +1,159 @@
+name: TEST GPT3 Lot16 870 Proven Short Flank Host
+
+on:
+  pull_request:
+    branches:
+      - main
+      - gpt3/1215-current-main-replay-20261013
+    paths:
+      - "pb_raster_unchanged_band_segments.py"
+      - "pb_source_visibility_authority.py"
+      - "tests/test_raster_unchanged_band_segments.py"
+      - ".github/workflows/test-gpt3-870-short-proven-flank.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-lot16-870-short-flank-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Proven short-flank fail-closed regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q \
+            tests/test_raster_unchanged_band_segments.py \
+            tests/test_raster_source_visibility_v1.py \
+            tests/test_source_visibility_task3_hardening.py
+          python -m compileall -q \
+            pb_raster_unchanged_band_segments.py \
+            pb_source_visibility_authority.py
+          ruff check --select F821,F823 \
+            pb_raster_unchanged_band_segments.py \
+            pb_source_visibility_authority.py \
+            tests/test_raster_unchanged_band_segments.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-bathroom-870:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+
+      - name: Exact original Lot16 Bathroom 870 host only
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          ROOT=artifacts/gpt3-lot16-870-short-flank
+          mkdir -p "$ROOT"
+          git rev-parse HEAD > "$ROOT/producer_head_sha.txt"
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+
+          python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --include-identity-text-receipts \
+            --output "$ROOT/source-report.json"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root=Path("artifacts/gpt3-lot16-870-short-flank")
+          d=json.loads((root/"source-report.json").read_text())
+          target="physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+          binding=next(x for x in d["opening_bindings"]
+                       if x["opening_identity_id"]==target)
+          canonical=next(x for x in d["canonical_openings"]
+                         if x["physical_opening_id"]==target)
+          frame=next(x for x in d["host_frame_traces"]
+                     if x["opening_identity_id"]==target)
+          scope=d["source_owned_wall_scopes"][0]
+
+          assert d["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert d["primitive_safety_cap"]==20000
+          assert len(d["canonical_openings"])==21
+          assert len(scope["boundary_evaluation"]["evaluated_wall_candidate_ids"])==2094
+          assert binding["status"]=="corroborated", binding
+          assert binding["record_id"] and binding["host_wall_id"]
+          assert "opening_local_supplemental_source_band_host_resolved" in binding["reason_codes"], binding
+          assert canonical["host_binding_record_id"]==binding["record_id"]
+          assert canonical["area_m2"] is None
+          assert canonical["height_m"] is None
+          assert canonical["height_record_id"] is None
+          assert canonical["host_frame_record_id"] in (None, frame.get("record_id"))
+          print("BATHROOM 870 SOURCE HOST ONLY",json.dumps({
+              "physical_opening_id":target,
+              "host_binding_record_id":binding["record_id"],
+              "frame_status":frame["status"],
+              "area_m2":canonical["area_m2"],
+              "height_m":canonical["height_m"],
+              "canonical_w4_count":2094,
+          },sort_keys=True))
+          PY
+
+      - name: Preserve eight-row sealed output and withhold Bathroom quantity
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          ROOT=artifacts/gpt3-lot16-870-short-flank
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          python -u -m tools.run_gpt3_lot16_original_sealed_score_input \
+            --pdf "$PDF" --output-dir "$ROOT/production"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_customer_output_verification import verify_sealed_customer_output
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+          root=Path("artifacts/gpt3-lot16-870-short-flank")
+          target="physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8"
+          sealed=sealed_source_closed_run_from_dict(json.loads(
+              (root/"production/source_sealed_run.json").read_text()
+          ))
+          rows=json.loads((root/"production/verified_customer_rows.json").read_text())
+          verified=verify_sealed_customer_output(sealed, rows)
+          assert len(sealed.quantities)==8
+          assert verified.valid_quantity_count==8
+          assert verified.customer_row_count==8
+          assert all(tuple(q.object_identity_refs)!=(target,) for q in sealed.quantities)
+          assert all(q.lineage_ok and not q.abstained for q in sealed.quantities)
+          print("BATHROOM 870 QUANTITY WITHHELD",json.dumps({
+              "sealed_count":len(sealed.quantities),
+              "customer_count":len(rows),
+              "bathroom_quantity_present":False,
+          },sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-lot16-870-short-proven-flank
+          path: artifacts/gpt3-lot16-870-short-flank
+          retention-days: 30
