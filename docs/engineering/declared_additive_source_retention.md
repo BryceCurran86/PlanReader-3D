@@ -28,6 +28,7 @@ so it is single-use and every later rekey needs a new, reviewed declaration.
    "expected_unhosted_reason_changes": [
      {"opening_identity_id": "...", "before": ["..."], "after": ["..."]}],
    "expected_changed_report_keys": ["snapshot_id", "opening_bindings", "..."],
+   "expected_id_churn_report_keys": ["native_candidate_closures", "..."],
    "allow_snapshot_receipt_rekey": false,
    "tracking_issue": 2608}]}
 ```
@@ -78,10 +79,21 @@ generated `split_N` ordinals and snapshot-scoped receipt ids are ignored):
   retained id whose path changed is refused (a wall split into several
   successors is conservatively refused too);
 * **every top-level report key not listed in `expected_changed_report_keys` is
-  equal** (after the gate's own order-insensitive normalizer, if it has one), so
-  a declared event cannot hide a change to an unrelated part of the report. The
-  approval also lists declared keys that did not actually change.
-
+  equal** (after the gate's own order-insensitive normalizer, if it has one), and
+  every key that *is* listed is either verified or reported:
+  * `canonical_openings`: per opening, only the host receipts, `snapshot_id` and
+    receipt evidence ids may move (one binding + one frame per prior row, one new
+    binding for a declared new host); figured areas, geometry and every other
+    field stay equal, and the record must agree with the verified host/frame rows;
+  * `summary`: host / frame counts move only by the declared new hosts / frames;
+  * `semantic_inventory`: equal modulo snapshot-scoped ids, `*_observation_ids`
+    may only gain members;
+  * `expected_id_churn_report_keys`: equal modulo the code-derived set of
+    snapshot-scoped id prefixes (`tools/source_report_scoped_equality.py`; each
+    prefix hashes `snapshot_id`) and list order -- physical ids, source
+    observation ids, values and counts are still compared exactly;
+  * any other declared key is listed in `unverified_changed_report_keys` of the
+    approval: nothing verified it, and reviewers should read that list.
 A declared event that violates any of this raises. It is never silently
 downgraded to the undeclared (strict) path.
 
