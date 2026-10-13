@@ -91,7 +91,14 @@ jobs:
           assert old['source_sha256'] == new['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert old['primitive_safety_cap'] == new['primitive_safety_cap'] == 20_000
           from tools.declared_additive_source_retention import strict_or_declared
-          with strict_or_declared(old, new):
+          def normalize_void_reason_order(value):
+              # void reason codes come from a frozenset; two processes may order them differently
+              if isinstance(value, dict):
+                  return {k: (sorted(v) if k in ('void_reason_codes', 'opening_void_reason_codes') else normalize_void_reason_order(v)) for k, v in value.items()}
+              if isinstance(value, list):
+                  return [normalize_void_reason_order(v) for v in value]
+              return value
+          with strict_or_declared(old, new, normalize=normalize_void_reason_order):
               assert old['source_decode_coverage'] == new['source_decode_coverage']
               hosted = lambda report: {row['opening_identity_id']: row for row in report['opening_bindings'] if row['host_wall_id']}
               assert hosted(old) == hosted(new)
