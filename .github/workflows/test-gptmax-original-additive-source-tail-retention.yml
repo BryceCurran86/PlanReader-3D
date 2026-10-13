@@ -36,6 +36,16 @@ jobs:
               --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
               --page-id 3 --output "$GITHUB_WORKSPACE/source-before.json"
           )
+          # The stacked PR base already contains additive 1215 source. Also
+          # recover the independent original main geometry before *any* 1215
+          # terminal additions, otherwise a shortened base would look safe.
+          git worktree add --detach /tmp/lot16-original-main origin/main
+          (
+            cd /tmp/lot16-original-main
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --page-id 3 --output "$GITHUB_WORKSPACE/source-original-main.json"
+          )
           PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
             --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
             --page-id 3 --output source-after.json
@@ -45,11 +55,12 @@ jobs:
           import json
           from pathlib import Path
 
-          old=json.loads(Path('source-before.json').read_text())
+          old=json.loads(Path('source-original-main.json').read_text())
+          stacked=json.loads(Path('source-before.json').read_text())
           new=json.loads(Path('source-after.json').read_text())
           source_sha='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
-          assert old['source_sha256']==new['source_sha256']==source_sha
-          assert old['primitive_safety_cap']==new['primitive_safety_cap']==20_000
+          assert old['source_sha256']==stacked['source_sha256']==new['source_sha256']==source_sha
+          assert old['primitive_safety_cap']==stacked['primitive_safety_cap']==new['primitive_safety_cap']==20_000
           assert old['summary']['physical_existence_claims']==new['summary']['physical_existence_claims']==21
           assert old['summary']['host_frames']==new['summary']['host_frames']==9
           # Original signed image-only raster primitive IDs. These are immutable
@@ -107,6 +118,7 @@ jobs:
         with:
           name: gptmax-original-additive-source-tail-retention
           path: |
+            source-original-main.json
             source-before.json
             source-after.json
             source-terminal-coverage.json
