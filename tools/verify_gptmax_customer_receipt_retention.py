@@ -80,6 +80,198 @@ def _notes_provenance(row: Mapping[str, Any]) -> Mapping[str, Any]:
     return value
 
 
+def _host_receipt_substitutions_from_sealed_quantities(
+    baseline_quantities: Sequence[Mapping[str, Any]],
+    candidate_quantities: Sequence[Mapping[str, Any]],
+    *,
+    expected_new_quantity_id: str,
+    sha: str,
+) -> dict[str, dict[str, str]]:
+    """Prove row-local receipt swaps in two separately sealed executions.
+
+    This is intentionally narrower than a generic quantity comparison. Every
+    prior quantity must retain every field except its signed fingerprint and
+    snapshot-scoped host/frame evidence ids. Non-host evidence is exact.
+    """
+    old = _by(baseline_quantities, "quantity_id")
+    new = _by(candidate_quantities, "quantity_id")
+    _require(
+        bool(old)
+        and set(old) <= set(new)
+        and set(new) - set(old) == {expected_new_quantity_id},
+        "paired sealed runs are not exactly prior rows plus one new quantity",
+    )
+    result: dict[str, dict[str, str]] = {}
+    allowed = frozenset({"fingerprint", "evidence_ids", "trace_evidence_ids"})
+    for quantity_id, before in old.items():
+        after = new[quantity_id]
+        _same_except(before, after, allowed, f"{quantity_id} sealed quantity")
+        _require(
+            before.get("source_sha256") == after.get("source_sha256") == sha,
+            f"{quantity_id}: sealed source SHA changed",
+        )
+        physical = before.get("object_identity_refs")
+        _require(
+            isinstance(physical, list)
+            and len(physical) == 1
+            and physical == after.get("object_identity_refs"),
+            f"{quantity_id}: sealed physical identity changed",
+        )
+        substitutions: dict[str, str] = {}
+        for field in ("evidence_ids", "trace_evidence_ids"):
+            old_ids, new_ids = before.get(field), after.get(field)
+            _require(
+                isinstance(old_ids, list) and isinstance(new_ids, list),
+                f"{quantity_id}: sealed evidence list malformed",
+            )
+            old_non_host = [
+                value for value in old_ids
+                if not (
+                    isinstance(value, str)
+                    and value.startswith(HOST_RECEIPT_PREFIXES)
+                )
+            ]
+            new_non_host = [
+                value for value in new_ids
+                if not (
+                    isinstance(value, str)
+                    and value.startswith(HOST_RECEIPT_PREFIXES)
+                )
+            ]
+            _require(
+                old_non_host == new_non_host,
+                f"{quantity_id}: sealed non-host evidence changed",
+            )
+            for prefix in HOST_RECEIPT_PREFIXES:
+                gone = [
+                    value for value in old_ids
+                    if isinstance(value, str)
+                    and value.startswith(prefix)
+                    and value not in new_ids
+                ]
+                added = [
+                    value for value in new_ids
+                    if isinstance(value, str)
+                    and value.startswith(prefix)
+                    and value not in old_ids
+                ]
+                _require(
+                    len(gone) == len(added) and len(gone) <= 1,
+                    f"{quantity_id}: sealed {prefix} receipt swap malformed",
+                )
+                if gone:
+                    prior = substitutions.get(gone[0])
+                    _require(
+                        prior in (None, added[0]),
+                        f"{quantity_id}: inconsistent sealed receipt rekey",
+                    )
+                    substitutions[gone[0]] = added[0]
+        before_fp, after_fp = before.get("fingerprint"), after.get("fingerprint")
+        _require(
+            isinstance(before_fp, str)
+            and isinstance(after_fp, str)
+            and bool(FINGERPRINT.fullmatch(before_fp))
+            and bool(FINGERPRINT.fullmatch(after_fp)),
+            f"{quantity_id}: malformed sealed fingerprint",
+        )
+        _require(
+            bool(substitutions) == (before_fp != after_fp),
+            f"{quantity_id}: sealed fingerprint/receipt rekey disagreement",
+        )
+        result[quantity_id] = substitutions
+    return result
+
+
+def _customer_execution_substitutions(
+    old_row: Mapping[str, Any],
+    new_row: Mapping[str, Any],
+    *,
+    physical_id: str,
+    sealed_receipts: Mapping[str, str],
+    old_binding: Mapping[str, Any],
+    new_binding: Mapping[str, Any],
+) -> dict[str, str]:
+    """Authorize only signed execution-local ids for one unchanged host.
+
+    The source reports already proved the physical host proposition unchanged.
+    The paired sealed quantity proves exactly which host/frame receipt ids
+    changed in the independently executed customer run. This helper then binds
+    the customer-only wall-group/snapshot ids to that same physical row.
+    """
+    _require(
+        old_binding.get("status") == new_binding.get("status") == "corroborated",
+        f"{physical_id}: source host not retained",
+    )
+    _require(
+        old_binding.get("member_wall_candidate_ids")
+        == new_binding.get("member_wall_candidate_ids"),
+        f"{physical_id}: customer host members changed",
+    )
+    old_prov, new_prov = _notes_provenance(old_row), _notes_provenance(new_row)
+    oq = old_prov.get("quantity")
+    nq = new_prov.get("quantity")
+    ost = old_prov.get("source_trace")
+    nst = new_prov.get("source_trace")
+    _require(
+        isinstance(oq, Mapping)
+        and isinstance(nq, Mapping)
+        and isinstance(ost, Mapping)
+        and isinstance(nst, Mapping),
+        f"{physical_id}: customer provenance structure malformed",
+    )
+    om, nm = oq.get("metadata"), nq.get("metadata")
+    osm, nsm = ost.get("metadata"), nst.get("metadata")
+    _require(
+        isinstance(om, Mapping)
+        and isinstance(nm, Mapping)
+        and isinstance(osm, Mapping)
+        and isinstance(nsm, Mapping),
+        f"{physical_id}: customer provenance metadata malformed",
+    )
+    substitutions = dict(sealed_receipts)
+    old_host = om.get("host_binding_record_id")
+    new_host = nm.get("host_binding_record_id")
+    _require(
+        isinstance(old_host, str)
+        and isinstance(new_host, str)
+        and sealed_receipts.get(old_host) == new_host,
+        f"{physical_id}: customer host receipt not proven by sealed run",
+    )
+    old_frame = om.get("host_frame_record_id")
+    new_frame = nm.get("host_frame_record_id")
+    if old_frame is not None or new_frame is not None:
+        _require(
+            isinstance(old_frame, str)
+            and isinstance(new_frame, str)
+            and sealed_receipts.get(old_frame) == new_frame,
+            f"{physical_id}: customer frame receipt not proven by sealed run",
+        )
+
+    old_wall, new_wall = om.get("host_wall_id"), nm.get("host_wall_id")
+    _require(
+        isinstance(old_wall, str)
+        and isinstance(new_wall, str)
+        and bool(old_wall)
+        and bool(new_wall)
+        and osm.get("host_wall_id") == old_wall
+        and nsm.get("host_wall_id") == new_wall,
+        f"{physical_id}: customer host wall provenance inconsistent",
+    )
+    substitutions[old_wall] = new_wall
+
+    old_snapshot, new_snapshot = om.get("snapshot_id"), nm.get("snapshot_id")
+    _require(
+        isinstance(old_snapshot, str)
+        and isinstance(new_snapshot, str)
+        and bool(old_snapshot)
+        and bool(new_snapshot)
+        and old_snapshot != new_snapshot,
+        f"{physical_id}: customer execution snapshot did not rekey",
+    )
+    substitutions[old_snapshot] = new_snapshot
+    return substitutions
+
+
 def verify_customer_receipt_rekeys(
     baseline_rows: Sequence[Mapping[str, Any]],
     candidate_rows: Sequence[Mapping[str, Any]],
@@ -88,6 +280,8 @@ def verify_customer_receipt_rekeys(
     *,
     expected_new_physical_id: str,
     expected_new_quantity_id: str,
+    baseline_quantities: Sequence[Mapping[str, Any]] | None = None,
+    candidate_quantities: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Reject any non-receipt change to the seven old customer rows.
 
@@ -185,6 +379,19 @@ def verify_customer_receipt_rekeys(
              "additional row lacks the expected authenticated physical source")
     _notes_provenance(new_row)
 
+    cross_execution_receipts: dict[str, dict[str, str]] | None = None
+    if baseline_quantities is not None or candidate_quantities is not None:
+        _require(
+            baseline_quantities is not None and candidate_quantities is not None,
+            "paired sealed quantities must be supplied together",
+        )
+        cross_execution_receipts = _host_receipt_substitutions_from_sealed_quantities(
+            baseline_quantities,
+            candidate_quantities,
+            expected_new_quantity_id=expected_new_quantity_id,
+            sha=sha,
+        )
+
     signed_receipts = 0
     for quantity_id, old in before_rows.items():
         new = after_rows[quantity_id]
@@ -200,11 +407,23 @@ def verify_customer_receipt_rekeys(
                     "notes", "evidence_ids"}
         _same_except(old, new, frozenset(excluded), f"{quantity_id} commercial row")
         old_prov, new_prov = _notes_provenance(old), _notes_provenance(new)
-        _require(_rewrite_approved_receipts(old_prov, substitutions) == new_prov,
+        row_substitutions = dict(substitutions)
+        if cross_execution_receipts is not None:
+            row_substitutions.update(
+                _customer_execution_substitutions(
+                    old,
+                    new,
+                    physical_id=physical[0],
+                    sealed_receipts=cross_execution_receipts[quantity_id],
+                    old_binding=old_bindings[physical[0]],
+                    new_binding=new_bindings[physical[0]],
+                )
+            )
+        _require(_rewrite_approved_receipts(old_prov, row_substitutions) == new_prov,
                  f"{quantity_id}: nested commercial provenance altered")
         old_ids, new_ids = old.get("evidence_ids"), new.get("evidence_ids")
         _require(isinstance(old_ids, list) and isinstance(new_ids, list)
-                 and _rewrite_approved_receipts(old_ids, substitutions,
+                 and _rewrite_approved_receipts(old_ids, row_substitutions,
                                                 field="evidence_ids") == new_ids,
                  f"{quantity_id}: non-host evidence changed")
         signed_receipts += 1
@@ -219,5 +438,8 @@ def verify_customer_receipt_rekeys(
         "original_positive_frames_preserved": frame_count,
         "additional_source_owned_customer_id": expected_new_quantity_id,
         "new_host_frame_still_abstained": True,
+        "cross_execution_sealed_receipts_verified": (
+            cross_execution_receipts is not None
+        ),
         "frozen_benchmark_matches_claimed": 0,
     }
