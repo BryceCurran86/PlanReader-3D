@@ -10,6 +10,7 @@ from PIL import Image
 import pb_raster_unchanged_band_segments as capture
 from pb_migration_contracts import EvidenceResolutionStatus as Status
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
 from test_raster_source_visibility_v1 import _selector
 
 
@@ -137,17 +138,40 @@ def test_actual_source_capture_closes_host_and_figured_area_without_default_coun
                                                   source_locator='memory://terminal-test.pdf')
         composition = compose_live_wall_opening_authority(source_visibility_producer=source,
             revision_id=published.revision.revision_id, page_ids=('1',))
+        current = source.published_snapshot_for_revision(published.revision.revision_id)
+        assert current is not None
+        wall_scope = composition.physical_wall_candidate_authority.resolve_scope(
+            PhysicalWallCandidateSelector(
+                document_id=current.revision.document_id,
+                revision_id=current.revision.revision_id,
+                source_sha256=current.revision.source_sha256,
+                snapshot_id=current.snapshot.snapshot_id,
+                page_id='1',
+                decision_scope_id='wall-source:page-1',
+            )
+        )
+        wall_signature = tuple(
+            (
+                record.wall_candidate_id,
+                record.physical_identity.candidate_identity_id,
+                tuple(record.physical_identity.source_primitive_ids),
+                tuple(record.physical_identity.edge_ids),
+                tuple(tuple(point) for point in record.wall_candidate.centerline_pts),
+            )
+            for record in wall_scope.records
+        )
         voids = compose_live_physical_opening_voids(source_visibility_producer=source,
                                                    wall_opening_composition=composition)
-        return composition, voids, publish_live_opening_area_quantities(voids)
+        return composition, voids, publish_live_opening_area_quantities(voids), wall_signature
 
     with monkeypatch.context() as absent:
         absent.setattr('pb_source_visibility_authority.detect_unchanged_terminal_band_segments',
                        lambda *args, **kwargs: ())
-        before, _voids, previous = collect()
+        before, _voids, previous, baseline_walls = collect()
     assert before.opening_bindings[0].status is Status.ABSTAINED
     assert previous == ()
-    composition, voids, quantities = collect()
+    composition, voids, quantities, candidate_walls = collect()
+    assert candidate_walls == baseline_walls
     assert len(composition.opening_bindings) == 1
     binding = composition.opening_bindings[0]
     assert binding.status is Status.CORROBORATED
