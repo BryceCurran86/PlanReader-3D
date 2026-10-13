@@ -82,3 +82,39 @@ def test_foreign_native_id_does_not_change_candidates():
     assert result["matched_w4_candidate_count"] == 0
     assert result["malformed_or_ambiguous_w4_receipt_count"] == 0
     assert data["candidate_only_no_w4_owner_assignment"] is True
+
+
+def test_real_producer_flat_w4_source_line_is_valid_native_ancestry():
+    # Production PhysicalWallSourceEdgeFragment.geometry is four scalars,
+    # unlike the two-pair format used by source room polygon edges.
+    data = inspect_native_source_parent_w4_ancestry(
+        scope(wall("w4-from-production", frag(
+            "split_21306", source_ids=("d50048i0",),
+            geom=(260.16000366, 476.48010254, 226.31999207, 476.48010254),
+        ))),
+        ["d50048i0"],
+    )
+    row = data["sources"][0]
+    assert row["matched_w4_candidate_count"] == 1
+    assert row["matched_source_w2_edge_count"] == 1
+    assert row["malformed_or_ambiguous_w4_receipt_count"] == 0
+    assert row["candidate_w4_ancestry_receipts"][0]["source_w2_edge_id"] == "split_21306"
+    assert row["source_wall_role_authenticated"] is False
+
+
+def test_real_producer_flat_invalid_values_fail_closed():
+    for geometry in (
+        (float("nan"), 0, 1, 0),
+        (float("inf"), 0, 1, 0),
+        (0, 0, 0, 0),
+        (0, 0, 1),
+        None,
+    ):
+        data = inspect_native_source_parent_w4_ancestry(
+            scope(wall("wall-A", frag("split-1", geom=geometry))),
+            ["native-A"],
+        )
+        row = data["sources"][0]
+        assert row["matched_source_w2_edge_count"] == 0
+        assert row["malformed_or_ambiguous_w4_receipt_count"] == 1
+        assert row["source_w4_receipt_universe_complete"] is False
