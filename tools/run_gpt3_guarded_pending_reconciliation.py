@@ -79,10 +79,18 @@ def build_guarded_exact_report(
     if manifest_path.resolve() != canonical_manifest.resolve():
         raise ValueError("guarded reconciliation requires canonical frozen manifest")
     frozen_manifest = _object(canonical_manifest)
-    if dict(source_manifest) != frozen_manifest:
+    # Python mapping equality conflates JSON booleans and numbers (True == 1).
+    # Compare canonical JSON representations so substituted scalar types cannot
+    # pass frozen manifest or object-universe preactivation checks.
+    def same_frozen_json(candidate: Mapping[str, Any], frozen: Mapping[str, Any]) -> bool:
+        return json.dumps(candidate, sort_keys=True, allow_nan=False) == json.dumps(
+            frozen, sort_keys=True, allow_nan=False
+        )
+
+    if not same_frozen_json(source_manifest, frozen_manifest):
         raise ValueError("guarded reconciliation manifest payload differs from frozen manifest")
     canonical_universe = canonical_manifest.with_name("object_universe.json")
-    if dict(object_universe) != _object(canonical_universe):
+    if not same_frozen_json(object_universe, _object(canonical_universe)):
         raise ValueError(
             "guarded reconciliation object universe differs from frozen universe"
         )
