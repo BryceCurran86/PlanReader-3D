@@ -1124,8 +1124,13 @@ def inspect_original_external_atomic_second_face_scope(
         getattr(face, "face_id", None) for face in all_faces
         if type(getattr(face, "face_id", None)) is str
     )
+    # Published SourceRoomFaceRecord has a record_id. Producer-owned
+    # SourceRoomFaceAbstention intentionally has NO record_id: its unique
+    # source face_id, source scope and reason are its only valid authority.
+    # Requiring a fabricated record_id here silently discarded every actual
+    # abstention from the original page's second-side census.
     record_counts = Counter(
-        getattr(face, "record_id", None) for face in all_faces
+        getattr(face, "record_id", None) for face in published
         if type(getattr(face, "record_id", None)) is str
     )
     source_keys = (
@@ -1159,8 +1164,16 @@ def inspect_original_external_atomic_second_face_scope(
             if (
                 type(face_id) is not str or not face_id or face_id != face_id.strip()
                 or counts[face_id] != 1
-                or type(record_id) is not str or not record_id
-                or record_id != record_id.strip() or record_counts[record_id] != 1
+                or (
+                    is_withheld and record_id is not None
+                )
+                or (
+                    not is_withheld and (
+                        type(record_id) is not str or not record_id
+                        or record_id != record_id.strip()
+                        or record_counts[record_id] != 1
+                    )
+                )
                 or any(getattr(face, key, None) != getattr(room_scope, key, None)
                        for key in source_keys)
             ):
@@ -1188,6 +1201,8 @@ def inspect_original_external_atomic_second_face_scope(
                     continue
                 row = {
                     "source_face_id": face_id,
+                    # An abstention has NO producer record_id. Keep null
+                    # rather than inventing a publication identity.
                     "source_face_receipt_id": record_id,
                     "source_w4_wall_id": receipt_wall,
                     "source_edge_wholly_contains_atomic": _edge_contains_edge(edge, atomic),
