@@ -148,6 +148,7 @@ def report(snap, *, ordinal_shift=0, t_hosted=False, u_reasons=UNMAPPED_LEFT):
         "resolved_host_frame_evidence": [_frame_evidence(A, snap)],
         "source_owned_wall_scope_results": [
             {
+                "decision_scope_id": "wall-source:page-3",
                 "source_sha256": SHA,
                 "page_id": "3",
                 "status": "corroborated",
@@ -1359,3 +1360,104 @@ def test_cli_suggest_prints_a_parseable_declaration(tmp_path, capsys):
     printed = json.loads(capsys.readouterr().out)
     assert printed == json.loads(out.read_text())
     parse_declaration(printed)
+
+
+# --------------------------------------------------------------------------
+# Metamorphic invariance of the geometric conservation rule (AGENTS.md §tests)
+# --------------------------------------------------------------------------
+
+def _transform(segments, *, angle_deg=0.0, scale=1.0, dx=0.0, dy=0.0):
+    import math
+
+    c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
+
+    def pt(x, y):
+        return (scale * (c * x - s * y) + dx, scale * (s * x + c * y) + dy)
+
+    return [(*pt(x1, y1), *pt(x2, y2)) for x1, y1, x2, y2 in segments]
+
+
+@pytest.mark.parametrize("angle,scale,dx,dy", [(0.0, 1.0, 0.0, 0.0), (30.0, 1.0, 0.0, 0.0), (90.0, 2.0, 10.0, -4.0),
+                                               (-37.5, 1.0, 1234.5, 99.0), (180.0, 3.0, 0.0, 0.0)])
+def test_conservation_verdict_is_invariant_under_rotation_translation_and_scale(angle, scale, dx, dy):
+    t = lambda segs: _transform(segs, angle_deg=angle, scale=scale, dx=dx, dy=dy)
+    # conserving: successor covers everything (interior split + longer)
+    base, cand = _lost_wall_event(t([(585.5, 392.0, 585.5, 463.5)]),
+                                  t([(585.5, 392.0, 585.5, 427.8), (585.5, 427.8, 585.5, 463.5)]), same_id=True)
+    assert approve_declared_additive_rekeys(base, cand, declared())["w4_wall_delta"]["retained"] == 3
+    # losing the original 1.70 pt terminal tail is refused at every pose
+    base, cand = _lost_wall_event(t(RASTER_TAIL_OLD), t(RASTER_TAIL_NEW))
+    with pytest.raises(ValueError, match="does not cover the original source geometry"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+def test_conservation_verdict_ignores_segment_splitting_and_input_order():
+    segments = [(0.0, 0.0, 10.0, 0.0), (10.0, 0.0, 20.0, 0.0), (20.0, 0.0, 30.0, 0.0)]
+    rng = random.Random(3)
+    for _ in range(5):
+        shuffled = segments[:]
+        rng.shuffle(shuffled)
+        base, cand = _lost_wall_event([(0.0, 0.0, 30.0, 0.0)], shuffled, same_id=True)
+        assert approve_declared_additive_rekeys(base, cand, declared())["w4_wall_delta"]["retained"] == 3
+    # splitting the *original* instead of the successor is equally fine
+    base, cand = _lost_wall_event(segments, [(0.0, 0.0, 30.0, 0.0)], same_id=True)
+    assert approve_declared_additive_rekeys(base, cand, declared())["w4_wall_delta"]["retained"] == 3
+
+
+def test_conservation_ignores_unrelated_added_walls_and_does_not_mutate_inputs():
+    base, cand = _lost_wall_event(RASTER_TAIL_OLD, RASTER_TAIL_OLD, same_id=True)
+    _add_unhosted_wall(cand, "wall_new_far_away", 500.0, "raster_segment:source:1.0.0:brand_new_primitive")
+    frozen = deepcopy((base, cand))
+    first = approve_declared_additive_rekeys(base, cand, declared())
+    assert (base, cand) == frozen
+    assert approve_declared_additive_rekeys(base, cand, declared()) == first
+
+
+# --------------------------------------------------------------------------
+# W4 scope-level metadata (status, completeness, equivalence, boundary, ...)
+# --------------------------------------------------------------------------
+
+def _with_scope_meta(rep, snap, *, observations=("o1", "o2"), equivalence=("g1",)):
+    scope = rep["source_owned_wall_scope_results"][0]
+    scope.update(
+        decision_scope_id="wall-source:page-3",
+        snapshot_id=sid("source_snapshot", "a" if snap == BASE_SNAP else "b"),
+        scope_kind="page",
+        reason_codes=["scope_ok"],
+        source_observation_ids=list(observations),
+        equivalence={"groups": list(equivalence), "status": "corroborated"},
+        boundary_evaluation={"complete": True},
+    )
+    return rep
+
+
+def test_w4_scope_metadata_may_change_only_by_snapshot_ids_and_added_observations():
+    base, cand = event()
+    _with_scope_meta(base, BASE_SNAP)
+    _with_scope_meta(cand, NEW_SNAP, observations=("o2", "o1", "o3"))
+    assert approve_declared_additive_rekeys(base, cand, declared())["declared_new_host_ids"] == [T]
+
+
+@pytest.mark.parametrize("change", ["complete_flag", "status", "equivalence", "boundary", "observations_lost",
+                                    "scope_removed", "reason"])
+def test_w4_scope_metadata_claims_cannot_move_silently(change):
+    base, cand = event()
+    _with_scope_meta(base, BASE_SNAP)
+    _with_scope_meta(cand, NEW_SNAP)
+    scope = cand["source_owned_wall_scope_results"][0]
+    if change == "complete_flag":
+        scope["scope_complete"] = False
+    elif change == "status":
+        scope["status"] = "conflict"
+    elif change == "equivalence":
+        scope["equivalence"] = {"groups": ["g1", "g2"], "status": "corroborated"}
+    elif change == "boundary":
+        scope["boundary_evaluation"] = {"complete": False}
+    elif change == "observations_lost":
+        scope["source_observation_ids"] = ["o1"]
+    elif change == "reason":
+        scope["reason_codes"] = ["scope_changed"]
+    else:  # scope_removed
+        cand["source_owned_wall_scope_results"] = []
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(base, cand, declared())

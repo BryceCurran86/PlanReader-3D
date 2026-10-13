@@ -358,6 +358,40 @@ def _covers(
     return all(_segment_covered(seg, successor_segments) for seg in _fragment_segments(original))
 
 
+def _verify_wall_scope_metadata(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> None:
+    """Scope-level W4 fields (status, completeness, equivalence, boundary, ...) stay equal.
+
+    Only snapshot-scoped ids may move and source observation lists may only grow;
+    anything else (an equivalence group, a boundary evaluation, a completeness
+    flag) is a change to what the W4 scope *claims* and is refused.
+    """
+    def scopes(report: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+        result: dict[str, Mapping[str, Any]] = {}
+        for scope in report.get("source_owned_wall_scope_results") or ():
+            scope_id = scope.get("decision_scope_id") if isinstance(scope, Mapping) else None
+            if type(scope_id) is not str or not scope_id or scope_id in result:
+                raise ValueError("declared additive retention refused: malformed W4 scope identity")
+            result[scope_id] = scope
+        return result
+
+    old, new = scopes(baseline), scopes(candidate)
+    if set(old) != set(new):
+        raise ValueError("declared additive retention refused: W4 scope universe changed")
+    for scope_id in sorted(old):
+        before = {k: v for k, v in old[scope_id].items() if k != "records"}
+        after = {k: v for k, v in new[scope_id].items() if k != "records"}
+        if not additive_observation_inventory_equal(before, after):
+            differing = sorted(
+                k
+                for k in set(before) | set(after)
+                if not additive_observation_inventory_equal({k: before.get(k)}, {k: after.get(k)})
+            )
+            raise ValueError(
+                "declared additive retention refused: W4 scope metadata changed beyond snapshot ids and added "
+                f"source observations: {scope_id}: " + ", ".join(differing)
+            )
+
+
 def w4_delta_explained_by_source_delta(
     baseline: Mapping[str, Any], candidate: Mapping[str, Any]
 ) -> dict[str, int]:
@@ -434,6 +468,10 @@ def w4_delta_explained_by_source_delta(
             "declared additive retention refused: new W4 wall is not built from any new source primitive: "
             + ", ".join(unexplained[:5])
         )
+    # Record-level conservation (above) names the exact wall that lost geometry;
+    # scope-level claims (equivalence groups, boundary evaluation, completeness)
+    # are checked after it and must be equal modulo snapshot ids / added observations.
+    _verify_wall_scope_metadata(baseline, candidate)
     return {
         "retained": len(set(old) & set(new)),
         "lost_with_covering_successor": len(lost),

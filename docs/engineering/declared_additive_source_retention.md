@@ -80,6 +80,13 @@ generated `split_N` ordinals and snapshot-scoped receipt ids are ignored):
   merely shares primitive ids but lost a terminal tail (snap-collapsed at a new
   crossing), a shifted endpoint or diagonal, a hole, several candidate
   successors, or a new wall made only of old source is refused -- never elected;
+* the W4 **scope-level claims** (status, completeness, equivalence groups,
+  boundary evaluation, source metadata table, ...) are equal modulo snapshot ids,
+  with `*observation_ids` lists allowed to grow; any change to what the scope
+  claims is refused (after the record-level check above names the wall). This
+  means an event that adds or re-addresses W4 walls cannot be approved by this
+  contract as it stands -- the aggregate lists derived from the wall set change --
+  and needs a reviewed derivation rule first;
 * **every top-level report key not listed in `expected_changed_report_keys` is
   equal** (after the gate's own order-insensitive normalizer, if it has one), and
   every key that *is* listed is either verified or reported:
@@ -117,8 +124,14 @@ event needs one declaration per shape that its gates use.
   original terminal (raster tails `[x, 427.8 .. 429.5]` at x=597.75 / 669 / 682.25
   and three native diagonals shifted 0.12-0.13 pt), first reported at
   `wall_280f16c8… -> wall_c902ecb0…`.
+* #2609 (W2 terminal-tail retention, head `d8f01bb2`): record-level conservation
+  holds (2092 retained exactly, 2 re-addressed ids with covering successors) but
+  the scope-level aggregates (`evaluated_wall_candidate_ids`, equivalence
+  ambiguous/abstained lists, blocking reasons of the 4 changed walls, one
+  representative id, `source_segment_count`) change with the wall set, so it is
+  **refused** until a derivation rule for them is reviewed.
 * #2610 (isolated opening-local supplemental W4): approved with canonical W4
-  2094 retained / 0 lost / 0 gained; `unverified_changed_report_keys` is only
+  2094 retained / 0 lost / 0 gained and an unchanged scope; `unverified_changed_report_keys` is only
   `composition_reason_codes` (stage shape) or empty (face shape).
 
 Nothing in this PR enables either: the committed declaration list is empty and
