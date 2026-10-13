@@ -57,6 +57,13 @@ jobs:
           (
             cd /tmp/gpt3-1215-base
             printf '%s  %s\n' "$SOURCE_SHA" "$PDF" | sha256sum --check
+            # Use the exact final-head read-only handoff harness for BOTH
+            # executions. Only this harness is overlaid in the base worktree;
+            # all production/source authority modules remain at BASE_SHA.
+            cp "$GITHUB_WORKSPACE/tools/run_gpt3_lot16_original_sealed_score_input.py" \
+              tools/run_gpt3_lot16_original_sealed_score_input.py
+            test "$(git diff --name-only)" = \
+              "tools/run_gpt3_lot16_original_sealed_score_input.py"
             PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
               --pdf "$PDF" --page-id 3 --source-all-pages \
               --include-identity-text-receipts \
@@ -204,8 +211,10 @@ jobs:
             artifacts/baseline/source-report.json
             artifacts/baseline/production/source_sealed_run.json
             artifacts/baseline/production/verified_customer_rows.json
+            artifacts/baseline/production/source_production_openings.json
             artifacts/candidate/source-report.json
             artifacts/candidate/production/source_sealed_run.json
             artifacts/candidate/production/verified_customer_rows.json
+            artifacts/candidate/production/source_production_openings.json
             artifacts/gpt3-1215-fresh-customer-retention.json
           retention-days: 30
