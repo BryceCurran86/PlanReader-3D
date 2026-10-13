@@ -1,1 +1,43 @@
-{"schema": "declared_additive_source_retention.v1", "declarations": []}
+{
+  "schema": "declared_additive_source_retention.v1",
+  "declarations": [
+    {
+      "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+      "report_shape": "stage_report",
+      "baseline_snapshot_id": "source_snapshot_fc75bec9daf6e71985fc742038f5cb28",
+      "candidate_snapshot_id": "source_snapshot_7ad8bf09e3ebbec9797df89842574683",
+      "expected_new_host_ids": [
+        "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
+      ],
+      "expected_new_frame_host_ids": [],
+      "expected_unhosted_reason_changes": [],
+      "expected_changed_report_keys": [
+        "canonical_openings",
+        "composition_reason_codes",
+        "host_frame_traces",
+        "native_candidate_closures",
+        "opening_bindings",
+        "opening_identity_text_receipts",
+        "opening_measurement_traces",
+        "opening_void_reason_codes",
+        "raster_candidate_closures",
+        "resolved_host_frame_evidence",
+        "semantic_inventory",
+        "snapshot_id",
+        "source_owned_wall_scopes",
+        "source_room_face_scopes",
+        "summary"
+      ],
+      "expected_id_churn_report_keys": [
+        "native_candidate_closures",
+        "opening_identity_text_receipts",
+        "opening_measurement_traces",
+        "opening_void_reason_codes",
+        "raster_candidate_closures",
+        "source_room_face_scopes"
+      ],
+      "allow_snapshot_receipt_rekey": true,
+      "tracking_issue": 2004
+    }
+  ]
+}
