@@ -39,7 +39,7 @@ def fixture():
         return Row(status=Status.CORROBORATED,
                    observation=parent if selector.observation_id=="source-parent-1" else None)
     visibility=Row(resolve_raster_opening_primitive=resolve,
-                   resolve=resolve_parent)
+                   _source_authority=Row(resolve=resolve_parent))
     source=Row(authority=lambda:visibility)
     root=Row(status=Status.CORROBORATED,
              existence_record=Row(
