@@ -1,4 +1,4 @@
-name: GPT1 Q5446 original single-page FIRM floor-area production
+name: GPT1 Q5446 original positively classified FIRM floor-area production
 on:
   pull_request:
     paths:
@@ -10,7 +10,7 @@ on:
 jobs:
   source-positive-floor-area:
     runs-on: ubuntu-latest
-    timeout-minutes: 28
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,77 +19,99 @@ jobs:
           cache: pip
       - name: Install original-source dependencies
         run: pip install -r requirements.txt -r requirements-ci-v1228.txt
-      - name: Original page source authority + production run
+      - name: Classify every original sheet and independently produce only positive floor-plan surfaces
         env:
           PYTHONPATH: .
         run: |
           python - <<'PY'
           from pathlib import Path
-          import fitz,hashlib,subprocess,sys
-          path=Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
-          sha="5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
-          if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=sha:
-              raise SystemExit("Q5446 original architectural PDF SHA unavailable")
-          doc=fitz.open(path)
-          try:
-              if doc.page_count!=10: raise SystemExit("original Q5446 page universe differs")
-          finally: doc.close()
-          # Page zero is a request, NOT authority. The producer independently
-          # rejects it unless the original page title/F.07 proves FLOOR_PLAN.
-          subprocess.run([
-              sys.executable,"-u","tools/run_source_closed_project_handoff.py",
-              "--pdf",str(path),
-              "--project-id","au_qld_q5446_armstrong32_harlequin",
-              "--family-group","floor_area",
-              "--source-plan-page-index","0",
-              "--output-dir","q5446-source-positive-floor-output",
-          ],check=True)
-          PY
-      - name: Verify signed partial source receipts without truth lookup
-        if: success()
-        env:
-          PYTHONPATH: .
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib,json
+          import hashlib, fitz, json, subprocess, sys
+          from pb_source_floor_plan_page_scope import (
+              FLOOR_PLAN, source_floor_plan_topology_scope,
+          )
           from pb_source_closed_run_export import sealed_source_closed_run_from_dict
-          root=Path("q5446-source-positive-floor-output")
-          s=json.loads((root/"production_summary.json").read_text())
-          sha=hashlib.sha256(Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf").read_bytes()).hexdigest()
-          assert s["project_id"]=="au_qld_q5446_armstrong32_harlequin"
-          assert s["source_sha256"]==sha
-          assert s["family_group"]=="floor_area"
-          assert s["source_positive_partial_page"]==1
-          assert s["complete_project_handoff"] is False
-          assert s["execution_pages"] == [1]
-          assert s["benchmark_score_granted"] is False
-          assert s["family_counts"]["floor_finish_area"]==0
-          assert s["family_counts"]["ceiling_area"]==0
-          qty=int(s["combined_quantity_count"])
-          if qty:
-              assert s["status"]=="sealed"
-              run=sealed_source_closed_run_from_dict(json.loads(Path(s["combined_run_file"]).read_text()))
-              assert len(run.quantities)==qty and len({q.quantity_id for q in run.quantities})==qty
-              assert run.project_id==s["project_id"] and tuple(run.source_sha256s)==(sha,)
-              assert all(q.family=="floor_area" and not q.abstained for q in run.quantities)
-              assert s["customer_rows_verified"] is True
-              assert s["verified_customer_row_count"] == qty
-              from pb_customer_output_verification import verify_sealed_customer_output
-              rows=json.loads(Path(s["customer_rows_file"]).read_text())
-              assert verify_sealed_customer_output(run,rows).customer_row_count == qty
-          else:
-              assert s["status"]=="no_sealable_quantities"
-              assert s["combined_run_file"] is None
-              assert s["customer_rows_verified"] is False
-              assert s["customer_rows_file"] is None
-          print(json.dumps({"original_sha":sha,"signed_source_floor_areas":qty,
-                            "customer_rows_verified":bool(s["customer_rows_verified"]),
-                            "frozen_matching_unverified":True},sort_keys=True))
+          from pb_customer_output_verification import verify_sealed_customer_output
+
+          source = Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
+          expected = "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+          if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+              raise SystemExit("Q5446 immutable original architectural source SHA mismatch")
+          with fitz.open(source) as doc:
+              count = doc.page_count
+          if count != 10:
+              raise SystemExit("Q5446 immutable original source page universe mismatch")
+          destination = Path("q5446-original-positive-floor")
+          destination.mkdir()
+          scope = source_floor_plan_topology_scope(source, tuple(range(count)))
+          decisions = () if scope is None else scope.decisions
+          positive = sorted(d.page_index for d in decisions if d.classification == FLOOR_PLAN)
+          if len(positive) != len(set(positive)) or any(not 0 <= i < count for i in positive):
+              raise SystemExit("invalid original producer floor-plan classification")
+          evidence = {
+              "schema_version": "original_source_positive_page_attempt_v1",
+              "project_id": "au_qld_q5446_armstrong32_harlequin",
+              "source_sha256": expected, "source_page_count": count,
+              "original_source_page_classifications": [
+                  {"page_number": d.page_index+1, "classification": d.classification,
+                   "reason_code": d.reason_code, "source_bound_title": d.title,
+                   "view_types": list(d.view_types)} for d in decisions
+              ],
+              "positive_floor_plan_pages": [i+1 for i in positive],
+              "complete_project_handoff": False,
+              "benchmark_score_granted": False, "frozen_v2_reconciliation_complete": False,
+              "customer_rows_verified": False, "signed_floor_areas": 0,
+              "status": "source_floor_plan_role_abstained" if not positive else "source_positive_production_in_progress",
+          }
+          (destination/"original_source_page_receipt.json").write_text(json.dumps(evidence,indent=2))
+          for idx in positive:
+              out = destination/f"source_page_{idx+1}"
+              subprocess.run([
+                  sys.executable, "-u", "tools/run_source_closed_project_handoff.py",
+                  "--pdf", str(source), "--project-id",
+                  "au_qld_q5446_armstrong32_harlequin",
+                  "--family-group", "floor_area",
+                  "--source-plan-page-index", str(idx),
+                  "--output-dir", str(out),
+              ],check=True,timeout=1000)
+              summary=json.loads((out/"production_summary.json").read_text())
+              assert summary["source_sha256"]==expected
+              assert summary["source_positive_partial_page"]==idx+1
+              assert summary["execution_pages"]==[idx+1]
+              assert summary["complete_project_handoff"] is False
+              assert summary["benchmark_score_granted"] is False
+              assert summary["family_counts"]["floor_finish_area"]==0
+              assert summary["family_counts"]["ceiling_area"]==0
+              n=summary["combined_quantity_count"]
+              if n:
+                  assert summary["status"]=="sealed"
+                  run=sealed_source_closed_run_from_dict(
+                      json.loads(Path(summary["combined_run_file"]).read_text()))
+                  assert run.project_id==summary["project_id"]
+                  assert tuple(run.source_sha256s)==(expected,)
+                  assert len(run.quantities)==n
+                  assert len({q.quantity_id for q in run.quantities})==n
+                  assert all(q.family=="floor_area" and not q.abstained for q in run.quantities)
+                  assert summary["customer_rows_verified"] is True
+                  rows=json.loads(Path(summary["customer_rows_file"]).read_text())
+                  checked=verify_sealed_customer_output(run,rows)
+                  assert checked.customer_row_count==n
+              else:
+                  assert summary["status"]=="no_sealable_quantities"
+                  assert summary["combined_run_file"] is None
+                  assert summary["customer_rows_verified"] is False
+              evidence["signed_floor_areas"]+=n
+          if positive:
+              evidence["status"] = (
+                  "partial_source_sealed_and_customer_verified"
+                  if evidence["signed_floor_areas"] else "positive_pages_no_sealable_quantities"
+              )
+          evidence["customer_rows_verified"]=bool(evidence["signed_floor_areas"])
+          (destination/"original_source_page_receipt.json").write_text(json.dumps(evidence,indent=2))
+          print(json.dumps(evidence,sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gpt1-q5446-page1-source-positive-floor-area-output
-          path: q5446-source-positive-floor-output/
+          name: gpt1-q5446-original-source-positive-floor-attempt
+          path: q5446-original-positive-floor/
           retention-days: 14
