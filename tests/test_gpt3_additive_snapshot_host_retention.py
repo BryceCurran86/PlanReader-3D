@@ -23,19 +23,32 @@ def _wall(wall_id, candidate_id, source_id):
 
 
 def _binding(opening_id, *, hosted, wall_id=None, receipt="old"):
+    supplemental = hosted and opening_id == TARGET
     return {
         "opening_identity_id": opening_id,
         "representative_observation_id": f"obs:{opening_id}",
         "page_id": "3",
         "status": "corroborated" if hosted else "abstained",
         "reason_codes": (
-            ["opening_host_binding_resolved", "raster_source_band_host_resolved"]
+            [
+                "opening_host_binding_resolved",
+                *(
+                    ["opening_local_supplemental_source_band_host_resolved"]
+                    if supplemental
+                    else []
+                ),
+                "raster_source_band_host_resolved",
+            ]
             if hosted
             else ["no_authenticated_host_wall_band"]
         ),
         "record_id": f"binding:{receipt}:{opening_id}" if hosted else None,
         "host_wall_id": f"host:{receipt}:{opening_id}" if hosted else None,
-        "member_wall_candidate_ids": [wall_id] if hosted else [],
+        "member_wall_candidate_ids": (
+            ["supplemental-left", "supplemental-right"]
+            if supplemental
+            else ([wall_id] if hosted else [])
+        ),
     }
 
 
