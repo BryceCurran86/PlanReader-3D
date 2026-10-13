@@ -1138,6 +1138,12 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             dict[str, tuple[CandidateSemanticOpening, ...]],
         ] = {}
+        # Observability ONLY: exact producer-owned raw candidate -> original
+        # visible source observation membership. Never a count or wall host.
+        self._native_raw_candidate_support_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[tuple[str, str, tuple[str, ...]], ...],
+        ] = {}
         self._visible_viewport_candidate_membership_cache: dict[
             tuple[str, str, str, str, str],
             dict[str, tuple[CandidateSemanticOpening, ...]],
@@ -1214,6 +1220,7 @@ class PhysicalOpeningAuthority:
             "_visible_viewport_scope_cache",
             "_visible_candidate_cache",
             "_visible_candidate_membership_cache",
+            "_native_raw_candidate_support_cache",
             "_visible_viewport_candidate_membership_cache",
             "_visible_existence_cache",
             "_visible_disposition_cache",
@@ -3199,6 +3206,7 @@ class PhysicalOpeningAuthority:
             return record_by_index.get(int(segment.drawing_index))
 
         raw_candidates: dict[str, frozenset[str]] = {}
+        raw_patterns: dict[str, str] = {}
 
         def add_raw(pattern: str, support_records: tuple[Optional[SourceObservationRecord], ...]) -> None:
             if any(record is None for record in support_records):
@@ -3222,6 +3230,7 @@ class PhysicalOpeningAuthority:
                 digest_chars=32,
             )
             raw_candidates[candidate_id] = frozenset(ids)
+            raw_patterns[candidate_id] = pattern
 
         for gap in gaps:
             if gap.wall_segments:
@@ -3274,6 +3283,7 @@ class PhysicalOpeningAuthority:
                     and existence.candidate.candidate_id == candidate.candidate_id
                 ):
                     raw_candidates[candidate.candidate_id] = support
+                    raw_patterns[candidate.candidate_id] = candidate.structural_pattern
         typed_non_plan_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven
@@ -3299,6 +3309,15 @@ class PhysicalOpeningAuthority:
                 unresolved_ids.append(candidate_id)
                 unresolved_observation_ids.update(support)
 
+        # A diagnostic may subsequently reauthenticate this grouping without
+        # re-running a different detector. This does not make incomplete raw
+        # candidates physically real, resolved or countable.
+        self._native_raw_candidate_support_cache[
+            self._visible_page_candidate_key(seed)
+        ] = tuple(sorted(
+            (candidate_id, raw_patterns[candidate_id], tuple(sorted(support)))
+            for candidate_id, support in raw_candidates.items()
+        ))
         complete = not unresolved_ids
         return PhysicalOpeningCandidateClosureResult(
             status=EvidenceResolutionStatus.CORROBORATED,
@@ -3410,6 +3429,77 @@ class PhysicalOpeningAuthority:
             unresolved_observation_ids=tuple(sorted(unresolved_support)),
             reason_codes=((PHYSICAL_OPENING_CANDIDATE_CLOSURE_RESOLVED,)
                           if complete else (PHYSICAL_OPENING_CANDIDATE_CLOSURE_UNRESOLVED,)),
+        )
+
+
+    def audited_unresolved_source_candidate_groups(
+        self,
+        selector: ObservationSelector,
+        *,
+        family: str,
+    ) -> tuple[dict[str, object], ...]:
+        """Read-only exact raw candidate → source membership, NEVER authority.
+
+        Requires fresh corroborated closure on this original PDF snapshot;
+        uses its *actual* native detection groups or raster gap-audit groups.
+        Each candidate gets its individual source observation set, and each
+        raster gap retains the detector-owned physical aperture bounding box.
+        It does not promote any hypothesis, modify IDs, prove page-universe
+        completeness, assign wall hosts or publish opening counts.
+        """
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        if family not in ("native", "raster"):
+            raise ValueError("candidate source group family must be native or raster")
+        if family == "native":
+            closure = self.assess_visible_candidate_closure(selector)
+            source = self._resolve_visible_cached(selector)
+        else:
+            closure = self.assess_raster_candidate_closure(selector)
+            if self._source_visibility_authority is None:
+                raise RuntimeError("candidate source group visibility unavailable")
+            source = self._source_visibility_authority.resolve_raster_opening_primitive(selector)
+        if (closure.status is not EvidenceResolutionStatus.CORROBORATED
+                or source.status is not EvidenceResolutionStatus.CORROBORATED
+                or source.observation is None):
+            raise RuntimeError("candidate source group original scope unavailable")
+        key = self._visible_page_candidate_key(source.observation)
+        requested = frozenset(closure.unresolved_candidate_ids)
+        if family == "native":
+            groups = self._native_raw_candidate_support_cache.get(key)
+            if groups is None:
+                raise RuntimeError("native candidate source membership unavailable")
+            items = tuple(
+                (candidate_id, observation_ids, None, pattern)
+                for candidate_id, pattern, observation_ids in groups
+                if candidate_id in requested
+            )
+        else:
+            groups = self._raster_gap_candidate_audit_cache.get(key)
+            if groups is None:
+                raise RuntimeError("raster gap source membership unavailable")
+            items = tuple(
+                (candidate_id, tuple(sorted(source_ids)), tuple(aperture), "raster_gap_candidate")
+                for candidate_id, source_ids, aperture in groups
+                if candidate_id in requested
+            )
+        # Any dropped group or duplicated physical address is an audit failure.
+        # Do not mistake the remaining union for a candidate-wise proof.
+        identifiers = [item[0] for item in items]
+        if len(identifiers) != len(set(identifiers)) or set(identifiers) != requested:
+            raise RuntimeError("raw candidate group-to-source mapping incomplete")
+        union = {source_id for _, ids, _, _ in items for source_id in ids}
+        if not union.issubset(set(closure.unresolved_observation_ids)):
+            raise RuntimeError("raw candidate source outside authenticated closure")
+        return tuple(
+            dict(
+                candidate_id=candidate_id,
+                source_observation_ids=list(source_ids),
+                aperture_bbox_pt=list(aperture) if aperture is not None else None,
+                candidate_status="unresolved_source_only",
+                structural_pattern=pattern,
+            )
+            for candidate_id, source_ids, aperture, pattern in sorted(items)
         )
 
     @staticmethod

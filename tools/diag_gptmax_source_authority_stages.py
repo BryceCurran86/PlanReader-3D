@@ -80,7 +80,8 @@ def _opening_identity_text_receipts(source, published, label_traces) -> list[dic
 
 def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
                         source_all_pages: bool = False,
-                        include_identity_text_receipts: bool = False) -> dict:
+                        include_identity_text_receipts: bool = False,
+                        include_raw_candidate_source_groups: bool = False) -> dict:
     sha = hashlib.sha256(source_bytes).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -216,6 +217,28 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
         report["opening_identity_text_receipts"] = _opening_identity_text_receipts(
             source, published, label_dimension_traces,
         )
+    if include_raw_candidate_source_groups:
+        # Diagnostic-only physical-source receipts. This sidecar is *not* an
+        # authenticated opening or a source-universe completeness assertion.
+        opening = composition.physical_opening_authority
+        report["unresolved_candidate_source_groups"] = {
+            "native": [
+                {
+                    "page_id": page,
+                    "groups": list(opening.audited_unresolved_source_candidate_groups(
+                        selectors[page], family="native")),
+                }
+                for page in sorted(selectors, key=int)
+            ],
+            "raster": [
+                {
+                    "page_id": page,
+                    "groups": list(opening.audited_unresolved_source_candidate_groups(
+                        raster_selectors[page], family="raster")),
+                }
+                for page in sorted(raster_selectors, key=int)
+            ],
+        }
     return report
 
 
@@ -225,12 +248,14 @@ def main() -> None:
     parser.add_argument("--page-id", action="append", required=True)
     parser.add_argument("--source-all-pages", action="store_true")
     parser.add_argument("--include-identity-text-receipts", action="store_true")
+    parser.add_argument("--include-raw-candidate-source-groups", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = source_stage_report(args.pdf.read_bytes(),
         page_ids=tuple(sorted(set(args.page_id), key=int)),
         source_all_pages=args.source_all_pages,
-        include_identity_text_receipts=args.include_identity_text_receipts)
+        include_identity_text_receipts=args.include_identity_text_receipts,
+        include_raw_candidate_source_groups=args.include_raw_candidate_source_groups)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True,
                                       default=lambda value: value.value) + "\n")
     print(json.dumps({"source_sha256": report["source_sha256"], **report["summary"]}))
