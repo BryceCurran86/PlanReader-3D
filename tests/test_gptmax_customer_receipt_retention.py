@@ -155,3 +155,123 @@ def test_no_mutation_of_input_source_or_signed_rows():
     before = copy.deepcopy(case)
     check(case)
     assert case == before
+
+
+def _production_scope_samples():
+    """The all-pages diagnostic IDs intentionally differ from the signed page-3 producer."""
+    before, after, stage_old, stage_new = copy.deepcopy(samples())
+    before[0] = customer(
+        QOLD, OLD, "snapshot-A", "opening_host_binding_v3_production_old",
+        "opening_host_frame_v2_production_old", "opening_host_binding_group_production_old",
+    )
+    after[0] = customer(
+        QOLD, OLD, "snapshot-B", "opening_host_binding_v3_production_new",
+        "opening_host_frame_v2_production_new", "opening_host_binding_group_production_new",
+    )
+
+    def source_opening(physical, snapshot, row=None):
+        p = row["commercial_projection_provenance"]["quantity"]["metadata"] if row else {}
+        return {
+            "physical_opening_id": physical,
+            "canonical_opening_id": physical,
+            "snapshot_id": snapshot,
+            "source_sha256": SHA,
+            "source_geometries": [[1.0, 2.0, 3.0, 4.0]],
+            "source_observation_ids": ["source_observation_original"],
+            "host_binding_record_id": p.get("host_binding_record_id"),
+            "host_frame_record_id": p.get("host_frame_record_id"),
+            "host_wall_id": p.get("host_wall_id"),
+            "evidence_ids": list(row["evidence_ids"]) if row else ["source_observation_original"],
+        }
+
+    def seal(row):
+        provenance = row["commercial_projection_provenance"]
+        return {
+            "quantity_id": row["quantity_id"],
+            "source_sha256": SHA,
+            "object_identity_refs": list(row["canonical_entity_ids"]),
+            "evidence_ids": list(provenance["quantity"]["evidence_ids"]),
+            "trace_evidence_ids": list(provenance["source_trace"]["evidence_ids"]),
+        }
+
+    prod_old = [source_opening(OLD, "snapshot-A", before[0]),
+                source_opening(NEW, "snapshot-A")]
+    prod_new = [source_opening(OLD, "snapshot-B", after[0]),
+                source_opening(NEW, "snapshot-B", after[1])]
+    old_seal = [seal(before[0])]
+    new_seal = [seal(row) for row in after]
+    return before, after, stage_old, stage_new, prod_old, prod_new, old_seal, new_seal
+
+
+def _check_production_scope(case):
+    before, after, old, new, prod_old, prod_new, seal_old, seal_new = case
+    return verify_customer_receipt_rekeys(
+        before, after, old, new,
+        expected_new_physical_id=NEW, expected_new_quantity_id=QNEW,
+        baseline_production_openings=prod_old,
+        candidate_production_openings=prod_new,
+        baseline_sealed_quantities=seal_old,
+        candidate_sealed_quantities=seal_new,
+    )
+
+
+def test_original_production_claim_receipts_may_differ_from_diagnostic_scope():
+    case = _production_scope_samples()
+    # The older verifier correctly refuses nonmatching all-pages diagnostic
+    # receipts; accepting the actual original page-3 receipts requires extra
+    # producer-owned evidence, not weakening the default-deny path.
+    with pytest.raises(ValueError, match="nested commercial provenance altered"):
+        before, after, old, new, *_ = case
+        verify_customer_receipt_rekeys(
+            before, after, old, new,
+            expected_new_physical_id=NEW, expected_new_quantity_id=QNEW,
+        )
+    accepted = _check_production_scope(case)
+    assert accepted["previous_customers_preserved_except_authenticated_receipts"] == 1
+
+
+@pytest.mark.parametrize("tamper", [
+    "physical_geometry", "producer_wall", "producer_binding",
+    "signed_host_evidence", "changed_measurement", "producer_snapshot",
+    "sealed_physical_id", "new_frame_lost",
+])
+def test_production_receipt_requires_exact_signed_original_source(tamper):
+    case = copy.deepcopy(_production_scope_samples())
+    before, after, old, new, prod_old, prod_new, seal_old, seal_new = case
+    if tamper == "physical_geometry":
+        prod_new[0]["source_geometries"] = [[11.0, 12.0, 13.0, 14.0]]
+    elif tamper == "producer_wall":
+        prod_new[0]["host_wall_id"] = "opening_host_binding_group_unverified"
+    elif tamper == "producer_binding":
+        prod_new[0]["host_binding_record_id"] = "opening_host_binding_v3_unverified"
+    elif tamper == "signed_host_evidence":
+        seal_new[0]["evidence_ids"][0] = "opening_host_binding_v3_forged"
+    elif tamper == "changed_measurement":
+        after[0]["commercial_projection_provenance"]["figured_dimensions"] = [1300, 1500]
+        after[0]["notes"] = json.dumps(after[0]["commercial_projection_provenance"])
+    elif tamper == "producer_snapshot":
+        prod_new[0]["snapshot_id"] = "different-source-snapshot"
+    elif tamper == "sealed_physical_id":
+        seal_new[0]["object_identity_refs"] = [NEW]
+    elif tamper == "new_frame_lost":
+        prod_new[0]["host_frame_record_id"] = None
+    with pytest.raises(ValueError, match="customer original-source retention refused"):
+        _check_production_scope(case)
+
+
+def test_incomplete_production_scope_evidence_fails_closed():
+    case = _production_scope_samples()
+    before, after, old, new, prod_old, *_ = case
+    with pytest.raises(ValueError, match="incomplete production-scope"):
+        verify_customer_receipt_rekeys(
+            before, after, old, new,
+            expected_new_physical_id=NEW, expected_new_quantity_id=QNEW,
+            baseline_production_openings=prod_old,
+        )
+
+
+def test_production_scope_verification_is_read_only():
+    case = _production_scope_samples()
+    copy_original = copy.deepcopy(case)
+    _check_production_scope(case)
+    assert case == copy_original
