@@ -5,6 +5,8 @@ on:
     paths:
       - "tools/diag_lot16_room_face_scope.py"
       - "pb_live_opening_area_quantity_publication.py"
+      - "pb_source_room_label_authority.py"
+      - "tests/test_source_room_label_authority_v1.py"
       - "pb_live_opening_count_quantity_publication.py"
       - "tests/test_live_opening_count_quantity_publication.py"
       - "pb_cross_view_floor_finish_authority.py"
@@ -46,6 +48,9 @@ jobs:
               [
                   sys.executable, "-u", "tools/diag_lot16_room_face_scope.py",
                   "--pdf", str(matched[0]), "--page-index", "2",
+                  "--diagnostic-label", "BED",
+                  "--diagnostic-label", "2",
+                  "--diagnostic-label", "3",
                   "--output", "lot16-room-face-scope.json",
               ],
               check=True,
