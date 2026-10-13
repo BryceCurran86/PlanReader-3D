@@ -533,6 +533,10 @@ def test_inline_helper_and_cli_agree_with_the_approval(tmp_path, monkeypatch, ca
     base, cand = event()
     assert module.declared_event_approved(base, cand, declared()) is True
     assert module.declared_event_approved(base, cand, ()) is False
+    stderr = capsys.readouterr().err
+    assert "UNDECLARED additive-source event" in stderr and BASE_SNAP in stderr and NEW_SNAP in stderr
+    assert module.declared_event_approved(base, cand, (), explain=False) is False
+    assert capsys.readouterr().err == ""
     broken = deepcopy(cand)
     _damage("fragment_geometry", base, broken)
     with pytest.raises(ValueError):  # a violated declared event is never "just undeclared"

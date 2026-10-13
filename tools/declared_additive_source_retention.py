@@ -386,19 +386,41 @@ def approve_declared_additive_rekeys(
     }
 
 
+def event_key(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """The exact fields a declaration must bind, for error messages."""
+    return {
+        "source_sha256": baseline.get("source_sha256"),
+        "baseline_snapshot_id": baseline.get("snapshot_id"),
+        "candidate_snapshot_id": candidate.get("snapshot_id"),
+    }
+
+
 def declared_event_approved(
     baseline: Mapping[str, Any],
     candidate: Mapping[str, Any],
     declarations: Sequence[Declaration] | None = None,
+    *,
+    explain: bool = True,
 ) -> bool:
     """For inline gate assertions: ``strict_equal or declared_event_approved``.
 
     ``True`` only when this exact (SHA, baseline snapshot, candidate snapshot)
     event is declared and fully proven.  ``False`` when nothing is declared for
-    it (the strict assertion then decides).  A declared but violated event
-    raises, so it can never be mistaken for the undeclared case.
+    it (the strict assertion then decides); the event key is printed to stderr
+    so a reviewer can see exactly what a declaration would have to bind.  A
+    declared but violated event raises, so it can never be mistaken for the
+    undeclared case.
     """
-    return approve_declared_additive_rekeys(baseline, candidate, declarations) is not None
+    approval = approve_declared_additive_rekeys(baseline, candidate, declarations)
+    if approval is None and explain:
+        import sys
+
+        print(
+            "UNDECLARED additive-source event (no matching declaration): "
+            + json.dumps(event_key(baseline, candidate), sort_keys=True),
+            file=sys.stderr,
+        )
+    return approval is not None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -417,17 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"DECLARED EVENT REFUSED: {exc}")
         return 1
     if approval is None:
-        print(
-            "NO DECLARATION for this event: "
-            + json.dumps(
-                {
-                    "source_sha256": baseline.get("source_sha256"),
-                    "baseline_snapshot_id": baseline.get("snapshot_id"),
-                    "candidate_snapshot_id": candidate.get("snapshot_id"),
-                },
-                sort_keys=True,
-            )
-        )
+        print("NO DECLARATION for this event: " + json.dumps(event_key(baseline, candidate), sort_keys=True))
         return 1
     if args.output:
         args.output.write_text(json.dumps(approval, indent=2, sort_keys=True) + "\n", encoding="utf-8")
