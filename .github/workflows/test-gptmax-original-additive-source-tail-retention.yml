@@ -1,0 +1,114 @@
+name: GPT MAX Original Additive Source Tail Retention
+on:
+  pull_request:
+    paths:
+      - pb_wall_room_topology_stage_a.py
+      - tests/test_w2_additive_source_terminal_protection.py
+      - .github/workflows/test-gptmax-original-additive-source-tail-retention.yml
+jobs:
+  original-lot16-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact original-source terminal and adverse geometry regressions
+        run: |
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_w2_additive_source_terminal_protection.py \
+            tests/test_w2_additive_split_identity_stability.py \
+            tests/test_wall_room_topology_stage_a.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Reproduce immutable original PDF scope before and after
+        run: |
+          set -euo pipefail
+          git worktree add --detach /tmp/lot16-terminal-old "${{ github.event.pull_request.base.sha }}"
+          (
+            cd /tmp/lot16-terminal-old
+            PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+              --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+              --page-id 3 --output "$GITHUB_WORKSPACE/source-before.json"
+          )
+          PYTHONPATH=. python -u tools/diag_opening_wall_face_preservation.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-id 3 --output source-after.json
+      - name: Prove original source-owned terminal spans not shortened
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          old=json.loads(Path('source-before.json').read_text())
+          new=json.loads(Path('source-after.json').read_text())
+          source_sha='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert old['source_sha256']==new['source_sha256']==source_sha
+          assert old['primitive_safety_cap']==new['primitive_safety_cap']==20_000
+          assert old['summary']['physical_existence_claims']==new['summary']['physical_existence_claims']==21
+          assert old['summary']['host_frames']==new['summary']['host_frames']==9
+          # Original signed image-only raster primitive IDs. These are immutable
+          # source-positive control inputs, NEVER benchmark expected values.
+          raster_sha='64e58ab817b1b89d3c83e0e04a972f5e4e48fa3816d346af9cc809b9b56357ab'
+          cases=[
+              (f'raster_segment:{raster_sha}:1.0.0:1895',682.25),
+              (f'raster_segment:{raster_sha}:1.0.0:1865',669.0),
+              (f'raster_segment:{raster_sha}:1.0.0:1766',597.75),
+          ]
+          def source_intervals(report,source_id,x):
+              ranges=[]
+              for scope in report['source_owned_wall_scope_results']:
+                  for wall in scope['records']:
+                      for edge in wall['source_edge_fragments']:
+                          if source_id not in edge['source_primitive_ids']:
+                              continue
+                          x0,y0,x1,y1=edge['geometry']
+                          if abs(x0-x)<=1e-6 and abs(x1-x)<=1e-6:
+                              ranges.append((min(y0,y1),max(y0,y1)))
+              return sorted(ranges)
+          def covered_by(original, candidate):
+              if not original or not candidate:
+                  return False
+              for start,end in original:
+                  pos=start
+                  for lo,hi in candidate:
+                      if lo > pos + 1e-6:
+                          continue
+                      if hi >= pos-1e-6:
+                          pos=max(pos,hi)
+                      if pos >= end-1e-6:
+                          break
+                  if pos < end-1e-6:
+                      return False
+              return True
+          evidence={}
+          for source_id,x in cases:
+              original=source_intervals(old,source_id,x)
+              after=source_intervals(new,source_id,x)
+              assert original,('old original source line unavailable',source_id)
+              assert covered_by(original,after),('original physical wall tail LOST',source_id,original,after)
+              evidence[source_id]={'original':original,'candidate':after,'unchanged_coverage':True}
+          Path('source-terminal-coverage.json').write_text(
+              json.dumps({'source_sha256':source_sha,'records':evidence},indent=2,sort_keys=True))
+          print({'source_terminal_geometry_preserved':True,'old':old['summary'],'new':new['summary']})
+          PY
+      - name: Preserve every existing actual source host and frame identity
+        run: |
+          PYTHONPATH=. python tools/gptmax_compare_source_face_retention.py \
+            --baseline source-before.json --candidate source-after.json \
+            --output source-host-frame-identity-retention.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-additive-source-tail-retention
+          path: |
+            source-before.json
+            source-after.json
+            source-terminal-coverage.json
+            source-host-frame-identity-retention.json
+          retention-days: 14
