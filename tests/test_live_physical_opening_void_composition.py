@@ -421,3 +421,46 @@ def test_live_void_composition_cannot_resolve_a_narrowed_opening_subset() -> Non
     assert LIVE_PHYSICAL_OPENING_VOID_UPSTREAM_INCOMPLETE in composition.reason_codes
     assert composition.traces == ()
     assert composition.canonical_openings == ()
+
+
+def test_reason_tuple_orders_set_inputs_and_keeps_ordered_inputs():
+    from pb_live_physical_opening_void_composition import _reason_tuple
+
+    reasons = ["z_reason", "a_reason", "m_reason", "b_reason", "q_reason", "c_reason"]
+    assert _reason_tuple(frozenset(reasons)) == tuple(sorted(reasons))
+    assert _reason_tuple(set(reasons)) == tuple(sorted(reasons))
+    # ordered inputs keep their order, duplicates collapse, empty reasons are dropped
+    assert _reason_tuple(["z", "a", "z", "", "m"]) == ("z", "a", "m")
+    assert _reason_tuple(("b", "a")) == ("b", "a")
+    assert _reason_tuple(frozenset()) == ()
+
+
+def test_reason_tuple_of_a_frozenset_does_not_depend_on_the_hash_seed():
+    """The same frozenset must serialise identically in processes with different hash seeds."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "import json;"
+        "from pb_live_physical_opening_void_composition import _reason_tuple;"
+        "print(json.dumps(_reason_tuple(frozenset("
+        "['physical_opening_void_universe_incomplete','opening_universe_completeness_record_unavailable',"
+        "'opening_height_unavailable','opening_width_unavailable','physical_scale_unavailable',"
+        "'opening_host_binding_unavailable','schedule_opening_instance_binding_no_contained_tag']))))"
+    )
+    outputs = set()
+    for seed in ("0", "1", "2", "3", "12345"):
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": os.pathsep.join(
+                [os.getcwd(), os.environ.get("PYTHONPATH", "")])},
+        )
+        outputs.add(completed.stdout.strip())
+    assert len(outputs) == 1
+    (only,) = outputs
+    assert json.loads(only) == sorted(json.loads(only))
