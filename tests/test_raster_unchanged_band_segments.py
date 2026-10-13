@@ -1,0 +1,216 @@
+from dataclasses import replace
+from io import BytesIO
+
+import cv2
+import fitz
+import numpy as np
+import pytest
+from PIL import Image
+
+import pb_raster_unchanged_band_segments as capture
+from pb_migration_contracts import EvidenceResolutionStatus as Status
+from pb_source_visibility_authority import SourceVisibilityProducer
+from test_raster_source_visibility_v1 import _selector
+
+
+def _png(image):
+    ok, encoded = cv2.imencode('.png', image)
+    assert ok
+    return encoded.tobytes()
+
+
+def _images():
+    source = np.full((160, 240, 3), 255, dtype=np.uint8)
+    source[70:80, 30:210] = 0
+    return source, source.copy()
+
+
+def test_changed_native_paint_is_a_cut_and_terminal_source_run_survives():
+    source, full = _images()
+    full[70:80, 35:40] = (0, 0, 255)
+    before = (source.copy(), full.copy())
+    result = capture.detect_unchanged_terminal_band_segments(_png(source), _png(full), dpi=144)
+    assert len(result) == 1
+    assert result[0].geometry_pt == (20.0, 37.25, 104.5, 37.25)
+    assert result[0].pixel_support_bounds == (40, 70, 209, 79)
+    assert np.array_equal(source, before[0]) and np.array_equal(full, before[1])
+    assert result == capture.detect_unchanged_terminal_band_segments(_png(source), _png(full), dpi=144)
+
+
+@pytest.mark.parametrize('change', ['white_overlay', 'changed_core', 'changed_center', 'same_gray_other_rgb'])
+def test_changed_pixels_never_bridge_or_keep_interior_runs(change):
+    source, full = _images()
+    full[70:80, 30:40] = 255
+    full[70:80, 200:210] = 255
+    if change == 'white_overlay': full[70:80, 110:120] = 255
+    elif change == 'changed_core': full[72:73, 110:120] = (0, 0, 100)
+    elif change == 'changed_center': full[74:76, 110:120] = (0, 0, 100)
+    else: full[70:80, 110:120] = (1, 0, 0)
+    assert capture.detect_unchanged_terminal_band_segments(_png(source), _png(full), dpi=144) == ()
+
+
+@pytest.mark.parametrize('transform', ['translate', 'rotate', 'scale'])
+def test_source_geometry_follows_render_transform(transform):
+    source, full = _images()
+    base = capture.detect_unchanged_terminal_band_segments(_png(source), _png(full), dpi=144)[0]
+    if transform == 'translate':
+        shifted = np.full((180, 260, 3), 255, dtype=np.uint8)
+        shifted[10:170, 10:250] = source
+        result = capture.detect_unchanged_terminal_band_segments(_png(shifted), _png(shifted), dpi=144)[0]
+        assert result.geometry_pt == tuple(v + 5 for v in base.geometry_pt)
+    elif transform == 'rotate':
+        rotated = np.rot90(source).copy()
+        result = capture.detect_unchanged_terminal_band_segments(_png(rotated), _png(rotated), dpi=144)[0]
+        assert result.orientation == 'vertical'
+        assert result.geometry_pt == (37.25, 15.0, 37.25, 104.5)
+    else:
+        scaled = cv2.resize(source, None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST)
+        result = capture.detect_unchanged_terminal_band_segments(_png(scaled), _png(scaled), dpi=288)[0]
+        assert max(abs(a-b) for a,b in zip(result.geometry_pt,base.geometry_pt)) <= 72/288
+
+
+def test_render_extents_and_existing_primitive_cap_fail_closed(monkeypatch):
+    source, _ = _images()
+    with pytest.raises(ValueError):
+        capture.detect_unchanged_terminal_band_segments(_png(source), _png(source[:-1]), dpi=144)
+    def bounded(*args, **kwargs):
+        raise ValueError('raster opening primitive count exceeds safety bound')
+    monkeypatch.setattr(capture, 'detect_raster_opening_source_primitives', bounded)
+    with pytest.raises(ValueError, match='safety bound'):
+        capture.detect_unchanged_terminal_band_segments(_png(source), _png(source), dpi=144)
+
+
+def _pdf():
+    source = np.full((360, 640, 3), 255, dtype=np.uint8)
+    cv2.rectangle(source, (200, 150), (240, 164), (0,0,0), -1)
+    cv2.rectangle(source, (400, 150), (610, 164), (0,0,0), -1)
+    cv2.line(source, (248, 154), (392, 154), (0,0,0), 1)
+    cv2.line(source, (248, 160), (392, 160), (0,0,0), 1)
+    buf = BytesIO()
+    Image.fromarray(source).save(buf, format='PNG')
+    pdf = fitz.open()
+    page = pdf.new_page(width=320, height=180)
+    page.insert_image(page.rect, stream=buf.getvalue())
+    page.draw_line((101, 70), (101, 85), color=(1,0,0), width=1)
+    page.insert_text((145, 83), '1218 SGW', fontsize=4)
+    result = pdf.tobytes()
+    pdf.close()
+    return result
+
+
+@pytest.mark.parametrize('warm', [False, True])
+@pytest.mark.parametrize('damage', ['full_hash', 'image_hash', 'dpi', 'pixel_geometry'])
+def test_supplemental_visible_reader_reauthenticates_exact_render_registration(warm, damage):
+    source = SourceVisibilityProducer(producer_method='terminal-test', producer_version='1')
+    published = source.ingest_native_pdf_bytes(document_id='terminal-test', source_bytes=_pdf(),
+                                              source_locator='memory://terminal-test.pdf')
+    published = source.augment_with_raster_opening_primitives(published.revision.revision_id)
+    published = source.augment_with_raster_visible_segments(published.revision.revision_id)
+    authority = source.authority()
+    rows = authority.authenticated_visible_observations(published)
+    ids = [oid for oid, row in rows if capture.UNCHANGED_BAND_IDENTITY_VERSION in row.source_primitive_ref]
+    assert ids
+    oid = ids[0]
+    key = (published.snapshot.snapshot_id, oid)
+    selector = _selector(published, oid)
+    if warm:
+        assert authority.resolve_visible(selector).status is Status.CORROBORATED
+    receipt = source._raster_visibility_receipts[key]
+    if damage == 'full_hash': receipt = replace(receipt, visibility_render_sha256='0' * 64)
+    elif damage == 'image_hash': receipt = replace(receipt, image_sha256='0' * 64)
+    elif damage == 'dpi': receipt = replace(receipt, dpi=144)
+    else: receipt = replace(receipt, pixel_geometry=(0.,0.,1.,1.))
+    source._raster_visibility_receipts[key] = receipt
+    assert authority.resolve_visible(selector).status in (Status.ABSTAINED, Status.CONFLICT)
+    with pytest.raises(RuntimeError):
+        authority.authenticated_visible_observations(published)
+
+
+def test_actual_source_capture_closes_host_and_figured_area_without_default_count(monkeypatch):
+    from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
+    from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
+    from pb_live_opening_area_quantity_publication import publish_live_opening_area_quantities
+
+    def collect():
+        source = SourceVisibilityProducer(producer_method='terminal-test', producer_version='1')
+        published = source.ingest_native_pdf_bytes(document_id='terminal-test', source_bytes=_pdf(),
+                                                  source_locator='memory://terminal-test.pdf')
+        composition = compose_live_wall_opening_authority(source_visibility_producer=source,
+            revision_id=published.revision.revision_id, page_ids=('1',))
+        voids = compose_live_physical_opening_voids(source_visibility_producer=source,
+                                                   wall_opening_composition=composition)
+        return composition, voids, publish_live_opening_area_quantities(voids)
+
+    with monkeypatch.context() as absent:
+        absent.setattr('pb_source_visibility_authority.detect_unchanged_terminal_band_segments',
+                       lambda *args, **kwargs: ())
+        before, _voids, previous = collect()
+    assert before.opening_bindings[0].status is Status.ABSTAINED
+    assert previous == ()
+    composition, voids, quantities = collect()
+    assert len(composition.opening_bindings) == 1
+    binding = composition.opening_bindings[0]
+    assert binding.status is Status.CORROBORATED
+    assert binding.record_id and binding.host_wall_id
+    assert len(binding.member_wall_candidate_ids) == 2
+    assert 'raster_source_band_host_resolved' in binding.reason_codes
+    assert len(quantities) == 1
+    assert quantities[0].value == pytest.approx(2.16)
+    assert quantities[0].abstained is False
+    assert voids.canonical_openings[0].schedule_count_explicit is False
+    assert voids.canonical_openings[0].schedule_declared_count is None
+
+
+def test_existing_raster_w2_input_order_survives_additive_terminal_observations(monkeypatch):
+    """New source-backed flanks must not reindex unrelated historical inputs."""
+    from pb_physical_wall_candidate_authority import _source_page_segments
+
+    original_bytes = _pdf()
+
+    def original_segments(*, include_terminal):
+        source = SourceVisibilityProducer(
+            producer_method="terminal-order-regression", producer_version="1",
+        )
+        initial = source.ingest_native_pdf_bytes(
+            document_id="terminal-order-regression", source_bytes=original_bytes,
+            source_locator="memory://terminal-order-regression.pdf",
+        )
+        revision_id = initial.revision.revision_id
+        source.augment_with_raster_opening_primitives(revision_id)
+        if not include_terminal:
+            with monkeypatch.context() as context:
+                context.setattr(
+                    "pb_source_visibility_authority.detect_unchanged_terminal_band_segments",
+                    lambda *args, **kwargs: (),
+                )
+                source.augment_with_raster_visible_segments(revision_id)
+        else:
+            source.augment_with_raster_visible_segments(revision_id)
+        published = source.published_snapshot_for_revision(revision_id)
+        segments, _ids, _width, _height = _source_page_segments(
+            source_producer=source,
+            published=published,
+            source_bytes=original_bytes,
+            page_id="1",
+            decision_scope_id="wall-source:page-1",
+        )
+        return tuple(
+            segment["id"]
+            for segment in segments
+            if str(segment["id"]).startswith("raster_segment:")
+        )
+
+    original = original_segments(include_terminal=False)
+    extended = original_segments(include_terminal=True)
+    ordinary = tuple(
+        sid for sid in extended
+        if f":{capture.UNCHANGED_BAND_IDENTITY_VERSION}:" not in sid
+    )
+    added = tuple(
+        sid for sid in extended
+        if f":{capture.UNCHANGED_BAND_IDENTITY_VERSION}:" in sid
+    )
+    assert original, "original raster-visible source geometry is required"
+    assert added, "new authenticated supplemental raster segments are required"
+    assert ordinary == original, "old raster observation order and W2 IDs must be retained"
+    assert extended == (*original, *added), "new source bands must follow all old sources"

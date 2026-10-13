@@ -35,6 +35,12 @@ from pb_raster_visible_segment_detector import (
     RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
     detect_axis_aligned_raster_segments,
 )
+from pb_raster_unchanged_band_segments import (
+    UNCHANGED_BAND_IDENTITY_VERSION,
+    UNCHANGED_BAND_DETECTOR_VERSION,
+    detect_unchanged_terminal_band_segments,
+    band_segment_already_observed,
+)
 from pb_raster_opening_source_primitives import (
     RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION,
     RASTER_LINE_RUN,
@@ -219,6 +225,7 @@ class RasterSegmentVisibilityReceipt:
     pixel_geometry: tuple[float, float, float, float]
     geometry: tuple[float, float, float, float]
     detector_version: str = RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION
+    visibility_render_sha256: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -508,6 +515,7 @@ def _raster_segment_observation_id(
     pixel_geometry: Sequence[float],
     geometry: Sequence[float],
     index: int,
+    visibility_render_sha256: Optional[str] = None,
 ) -> str:
     """Stable raster source identity with detector version kept as provenance.
 
@@ -529,6 +537,8 @@ def _raster_segment_observation_id(
         "geometry": tuple(float(v) for v in geometry),
         "index": int(index),
     }
+    if visibility_render_sha256 is not None:
+        payload['visibility_render_sha256'] = visibility_render_sha256
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
@@ -541,12 +551,28 @@ def _raster_segment_receipt_matches_parent(
     fixed independently. A replaced receipt cannot change pixel geometry,
     render identity or DPI while borrowing an already verified source record.
     """
-    if receipt.dpi != RASTER_RENDER_DPI:
-        return False
     try:
-        prefix, render_sha, identity_version, index = str(parent.source_primitive_ref).split(":")
+        parts = str(parent.source_primitive_ref).split(":")
+        if len(parts) == 4:
+            prefix, render_sha, identity_version, index = parts
+            if (receipt.dpi != RASTER_RENDER_DPI
+                    or identity_version != RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION
+                    or receipt.visibility_render_sha256 is not None):
+                return False
+        elif len(parts) == 5:
+            prefix, render_sha, identity_version, full_sha, index = parts
+            if (receipt.dpi != RASTER_OPENING_PRIMITIVE_RENDER_DPI
+                    or identity_version != UNCHANGED_BAND_IDENTITY_VERSION
+                    or full_sha != receipt.visibility_render_sha256
+                    or len(full_sha) != 64
+                    or any(c not in '0123456789abcdef' for c in full_sha)):
+                return False
+        else:
+            return False
         if (prefix != "raster_segment" or render_sha != receipt.image_sha256
-                or identity_version != RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION):
+                or len(render_sha) != 64
+                or any(c not in '0123456789abcdef' for c in render_sha)
+                or str(int(index)) != index or int(index) < 0):
             return False
         expected_geometry = tuple(round(float(value) * 72.0 / receipt.dpi, 6)
                                   for value in receipt.pixel_geometry)
@@ -558,10 +584,24 @@ def _raster_segment_receipt_matches_parent(
             image_sha256=receipt.image_sha256, identity_version=identity_version,
             pixel_geometry=receipt.pixel_geometry, geometry=receipt.geometry,
             index=int(index),
+            visibility_render_sha256=receipt.visibility_render_sha256,
         )
         return expected_id == parent.observation_id
     except (TypeError, ValueError, OverflowError, ZeroDivisionError):
         return False
+
+
+def _unchanged_segment_inside_flank(segment, flank, *, dpi):
+    axis, (x0, y0, x1, y1) = flank
+    if axis != segment.orientation:
+        return False
+    a, b, c, d = segment.geometry_pt
+    tol = 72.0 / dpi
+    if axis == 'horizontal':
+        return (a >= x0 - tol and c <= x1 + tol and y0 <= b <= y1
+                and (abs(a-x0) <= tol or abs(c-x1) <= tol))
+    return (b >= y0 - tol and d <= y1 + tol and x0 <= a <= x1
+            and (abs(b-y0) <= tol or abs(d-y1) <= tol))
 
 
 def _axis_aligned_geometry_fully_covered_by_rect_union(
@@ -1879,9 +1919,9 @@ class SourceVisibilityProducer:
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
             )
-            # Commit the attempt only after the entire augmented snapshot
-            # publishes successfully. A later page or receipt failure must not
-            # silently suppress this page on the next source-owned retry.
+            # Commit this attempt only after all ordinary and supplemental
+            # source observations for the page publish successfully. A later
+            # receipt/write failure must leave the page retryable.
             if page_id in pages_with_visible and image_regions:
                 segments = tuple(
                     segment
@@ -1890,10 +1930,6 @@ class SourceVisibilityProducer:
                         segment.geometry_pt, image_regions
                     )
                 )
-            if not segments:
-                completed_attempts.add(raster_attempt_key)
-                continue
-
             # Visibility publishes each proven source-owned primitive regardless
             # of whether enough neighbouring primitives exist to prove a wall or
             # opening. Object-completeness gates belong downstream. Re-sort using
@@ -1910,27 +1946,79 @@ class SourceVisibilityProducer:
                 )
             )
 
+            # Supplemental geometry has its own frozen identity namespace;
+            # existing ordinary render geometry and index order stay intact.
+            families = [(segments, image_sha256, RASTER_RENDER_DPI,
+                         RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                         RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION, None)]
+            if image_regions and published.raster_opening_primitive_observation_ids:
+                render_args = dict(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=snapshot.snapshot_id, page_id=page_id,
+                    dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                    include_native_frame=True,
+                )
+                image_png, image_parent, image_frame = self._producer.render_native_page_png(
+                    **render_args, images_only=True,
+                )
+                full_png, full_parent, full_frame = self._producer.render_native_page_png(**render_args)
+                if image_parent != full_parent or image_frame != full_frame:
+                    raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: raster render frames differ")
+                if int(image_frame.rotation) == 0:
+                    supplemental = detect_unchanged_terminal_band_segments(
+                        image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                        registration_scale=(self.raster_opening_registration_scale(
+                            published.revision.revision_id, page_id) or (1.0, 1.0)),
+                    )
+                    supplemental = tuple(s for s in supplemental
+                        if _axis_aligned_geometry_fully_covered_by_rect_union(s.geometry_pt, image_regions)
+                        and not band_segment_already_observed(s, segments,
+                            dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI, ordinary_dpi=RASTER_RENDER_DPI))
+                    # Source nomination is limited to the complete independently
+                    # proven raster-opening support inventory. Unrelated raster
+                    # table/furniture bands must not perturb the ordinary W4
+                    # graph simply because they contain solid paint.
+                    flank_boxes = self._proven_raster_opening_flank_boxes(published, page_id)
+                    supplemental = tuple(s for s in supplemental
+                        if any(_unchanged_segment_inside_flank(s, box,
+                            dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
+                    families.append((supplemental, hashlib.sha256(image_png).hexdigest(),
+                        RASTER_OPENING_PRIMITIVE_RENDER_DPI, UNCHANGED_BAND_IDENTITY_VERSION,
+                        UNCHANGED_BAND_DETECTOR_VERSION, hashlib.sha256(full_png).hexdigest()))
+
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
             page_receipts: list[
                 tuple[str, RasterSegmentVisibilityReceipt]
             ] = []
 
-            for index, segment in enumerate(segments):
+            source_segments = [(index, segment, render_sha, render_dpi, identity_version,
+                                detector_version, full_sha)
+                              for family_segments, render_sha, render_dpi, identity_version,
+                                  detector_version, full_sha in families
+                              for index, segment in enumerate(family_segments)]
+            if not source_segments:
+                continue
+            for index, segment, render_sha, render_dpi, identity_version, detector_version, full_sha in source_segments:
                 segment_id = _raster_segment_observation_id(
                     document_id=published.revision.document_id,
                     revision_id=published.revision.revision_id,
                     page_id=page_id,
                     partition_id=page_parent.source_partition_id,
-                    image_sha256=image_sha256,
-                    identity_version=RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                    image_sha256=render_sha,
+                    identity_version=identity_version,
                     pixel_geometry=segment.pixel_geometry,
                     geometry=segment.geometry_pt,
                     index=index,
+                    visibility_render_sha256=full_sha,
                 )
                 segment_ref = (
-                    f"raster_segment:{image_sha256}:"
-                    f"{RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION}:{index}"
+                    f"raster_segment:{render_sha}:"
+                    f"{identity_version}:"
+                    + (f"{full_sha}:" if full_sha is not None else "")
+                    + str(index)
                 )
                 segment_specs.append(
                     {
@@ -1983,11 +2071,12 @@ class SourceVisibilityProducer:
                             source_sha256=published.revision.source_sha256,
                             page_id=page_id,
                             source_partition_id=page_parent.source_partition_id,
-                            image_sha256=image_sha256,
-                            dpi=RASTER_RENDER_DPI,
+                            image_sha256=render_sha,
+                            dpi=render_dpi,
                             pixel_geometry=tuple(segment.pixel_geometry),
                             geometry=tuple(segment.geometry_pt),
-                            detector_version=RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION,
+                            detector_version=detector_version,
+                            visibility_render_sha256=full_sha,
                         ),
                     )
                 )
@@ -2007,6 +2096,7 @@ class SourceVisibilityProducer:
             for visible_id, receipt in page_receipts:
                 visible_ids.append(visible_id)
                 new_receipts[visible_id] = receipt
+
             completed_attempts.add(raster_attempt_key)
 
         if snapshot.snapshot_id == old_snapshot_id:
@@ -2067,6 +2157,66 @@ class SourceVisibilityProducer:
         self._published_by_revision[updated.revision.revision_id] = updated
         self._raster_visibility_attempted_pages.update(completed_attempts)
         return updated
+
+    def _proven_raster_opening_flank_boxes(self, published, page_id):
+        """Nominate source capture only; never supply a host or completeness."""
+        physical = self.physical_opening_authority()
+        visibility = self.authority()
+        # The existing source compiler reauthenticates the *complete* isolated
+        # snapshot in one batch. A seed addresses that inventory; it does not
+        # select an opening or omit competing source records.
+        seed_selector = ObservationSelector(published.revision.document_id,
+            published.revision.revision_id, published.revision.source_sha256,
+            published.snapshot.snapshot_id, published.raster_opening_primitive_observation_ids[0])
+        seed = visibility.resolve_raster_opening_primitive(seed_selector)
+        if seed.status is not EvidenceResolutionStatus.CORROBORATED or seed.observation is None:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        all_records, failures = physical._raster_primitive_snapshot_records(seed)
+        if failures:
+            raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
+        records = tuple(r for r in all_records if r.page_id == page_id)
+        selectors = {r.observation_id: replace(seed_selector, observation_id=r.observation_id)
+                     for r in records}
+        if not records:
+            return ()
+        # Enumerate all raw candidates from the existing compiler, not a
+        # nearest/first support or a caller-narrowed candidate universe.
+        candidates = physical._raster_framed_candidates_for(records[0], tuple(records))
+        openings = {}
+        for oid in sorted({oid for c in candidates for oid in c.source_observation_ids}):
+            result = physical.prove_existence(selectors[oid])
+            opening = result.existence_record
+            if result.status is EvidenceResolutionStatus.CORROBORATED and opening is not None:
+                openings[opening.record_id] = opening
+        by_id = {r.observation_id: r for r in records}
+        boxes = set()
+        from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
+        labels = OpeningLabelDimensionProducer.from_source_visibility_producer(self)
+        for opening in openings.values():
+            # This recovery path addresses individually measurable source
+            # objects. A complete independently authenticated dimension
+            # product nominates capture; its numeric value never determines
+            # geometry, role, host choice or any detector threshold.
+            results = tuple(labels.publish_scope(selectors[oid])
+                for oid in opening.source_observation_ids if oid in selectors)
+            if not any(r.status is EvidenceResolutionStatus.CORROBORATED
+                       and r.evidence is not None and r.evidence.area_m2 is not None
+                       for r in results):
+                continue
+            faces = [by_id[oid].geometry for oid in opening.source_observation_ids
+                     if by_id[oid].observation_kind == RASTER_WALL_BAND_FACE]
+            grouped = {}
+            for x0, y0, x1, y1 in faces:
+                if y0 == y1 and x0 < x1:
+                    grouped.setdefault(('horizontal', x0, x1), []).append(y0)
+                elif x0 == x1 and y0 < y1:
+                    grouped.setdefault(('vertical', y0, y1), []).append(x0)
+            for (axis, lo, hi), offsets in grouped.items():
+                if len(offsets) == 2:
+                    a, b = sorted(offsets)
+                    box = (lo, a, hi, b) if axis == 'horizontal' else (a, lo, b, hi)
+                    boxes.add((axis, box))
+        return tuple(sorted(boxes))
 
     def augment_with_raster_opening_primitives(
         self,
