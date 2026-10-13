@@ -1,0 +1,94 @@
+name: GPT1 3Laurel original source-positive canonical floor and customer publication
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/gpt1-3laurel-original-floor-area.yml"
+      - "tools/run_source_closed_project_handoff.py"
+      - "tests/test_gpt1_source_positive_scoped_floor_area.py"
+  workflow_dispatch:
+
+jobs:
+  original-canonical-floor-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install original-source dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Measure original p3 floor source with fail-closed customer handoff
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, fitz, subprocess, sys
+          original = Path("documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf")
+          sha="014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+          if not original.is_file() or hashlib.sha256(original.read_bytes()).hexdigest()!=sha:
+              raise SystemExit("3Laurel original source SHARED PDF SHA mismatch")
+          with fitz.open(original) as doc:
+              if doc.page_count !=18: raise SystemExit("3Laurel original page universe mismatch")
+          # Original p3 was independently proven floor_plan on the 3Laurel
+          # opening replay. The producer re-proves its role before any seal.
+          subprocess.run([
+              sys.executable,"-u","tools/run_source_closed_project_handoff.py",
+              "--pdf",str(original),"--project-id","au_qld_3laurel",
+              "--family-group","floor_area","--source-plan-page-index","2",
+              "--output-dir","laurel-original-floor-produced",
+          ],check=True,timeout=1600)
+          PY
+      - name: Independently validate signed output and customer row bijection
+        if: success()
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          from pb_customer_output_verification import verify_sealed_customer_output
+          p=Path("documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf")
+          sha=hashlib.sha256(p.read_bytes()).hexdigest()
+          out=Path("laurel-original-floor-produced")
+          summary=json.loads((out/"production_summary.json").read_text())
+          assert summary["project_id"]=="au_qld_3laurel"
+          assert summary["source_sha256"]==sha
+          assert summary["source_positive_partial_page"]==3
+          assert summary["complete_project_handoff"] is False
+          assert summary["execution_pages"]==[3]
+          assert summary["family_group"]=="floor_area"
+          assert summary["benchmark_score_granted"] is False
+          assert summary["family_counts"]["floor_finish_area"]==0
+          assert summary["family_counts"]["ceiling_area"]==0
+          n=summary["combined_quantity_count"]
+          if n:
+              assert summary["status"]=="sealed"
+              run=sealed_source_closed_run_from_dict(
+                  json.loads(Path(summary["combined_run_file"]).read_text()))
+              assert run.project_id=="au_qld_3laurel" and tuple(run.source_sha256s)==(sha,)
+              assert len(run.quantities)==n
+              assert len({q.quantity_id for q in run.quantities})==n
+              assert all(q.family=="floor_area" and not q.abstained for q in run.quantities)
+              rows=json.loads(Path(summary["customer_rows_file"]).read_text())
+              assert summary["customer_rows_verified"] is True
+              verified=verify_sealed_customer_output(run,rows)
+              assert verified.customer_row_count==n
+          else:
+              assert summary["status"]=="no_sealable_quantities"
+              assert summary["combined_run_file"] is None
+              assert summary["customer_rows_verified"] is False
+          print(json.dumps({"source_sha256":sha,"source_positive_floor_page":3,
+                            "signed_firm_floor_areas":n,
+                            "customer_rows_verified":bool(summary["customer_rows_verified"]),
+                            "benchmark_identity_score":None},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-3laurel-original-firm-floor-area-and-customer
+          path: laurel-original-floor-produced/
+          retention-days: 14
