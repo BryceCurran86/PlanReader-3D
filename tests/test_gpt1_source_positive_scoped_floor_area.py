@@ -209,3 +209,81 @@ def test_scoped_firm_floor_requires_exact_verified_customer_bijection_before_any
         assert summary["customer_rows_verified"] is False
         assert not (output/"family_runs"/"floor_area.sealed.json").exists()
         assert not (output/"verified_customer_rows.json").exists()
+
+
+@pytest.mark.parametrize("opening_customer_matches", [True, False])
+def test_source_scoped_opening_customer_mismatch_does_not_publish_a_signed_family(
+    monkeypatch, tmp_path, opening_customer_matches,
+):
+    import hashlib, json
+    from pb_migration_contracts import QuantityEvidence
+    from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
+    from pb_source_closed_run_export import seal_source_closed_run
+    import pb_source_floor_plan_page_scope as classifier
+
+    pdf=tmp_path/"original.pdf"
+    pdf.write_bytes(b"original physical opening bytes")
+    sha=hashlib.sha256(pdf.read_bytes()).hexdigest()
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0,1), (), 3))
+    monkeypatch.setattr(classifier, "source_floor_plan_topology_scope",
+                        lambda _p,_pages: _plan_scope(positive=True))
+    q=QuantityEvidence(
+        quantity_id="q-original-opening",family="opening_area",
+        semantic_key="opening_area:physical-1",
+        value=1.8,unit="m2",
+        input_entity_ids=("canonical-opening-1",),
+        formula="source-owned figured dimensions",
+        formula_version="1",evidence_ids=("dimension-1",),
+        authority="documented_dimension",status="corroborated",
+        confidence=1.0,abstained=False,blocking_reasons=(),
+        reason_codes=(),metadata={},
+    )
+    claim=S(status=S(value="corroborated"),reason_codes=(),
+            canonical_walls=(),canonical_openings=(),canonical_rooms=(),
+            canonical_floors=(),canonical_spaces=(),canonical_ceilings=(),
+            opening_quantity_evidence=(q,),opening_count_quantity_evidence=())
+    trace=CommercialTakeoffSourceTrace(
+        workspace_id=1,project_id="test_project",document_id="doc",
+        source_sha256=sha,source_page="1",viewport_id="viewport",
+        revision_id="rev",current_revision_id="rev",
+        evidence_ids=q.evidence_ids,canonical_entity_ids=q.input_entity_ids,
+    )
+    sealed=seal_source_closed_run(
+        (q,),project_id="test_project",
+        traces_by_quantity_id={q.quantity_id:trace},
+    )
+    monkeypatch.setattr(handoff,"collect_live_physical_net_wall_claim",
+                        lambda *a,**kw:claim)
+    monkeypatch.setattr(handoff,"seal_live_opening_area_claim_run",
+                        lambda *a,**kw:sealed)
+    rows=({"quantity_id":q.quantity_id},)
+    monkeypatch.setattr(handoff,"project_live_opening_customer_rows",
+                        lambda *a,**kw:rows)
+    monkeypatch.setattr(handoff,"verify_sealed_customer_output",
+                        lambda *_: S(
+                            verified_quantity_ids=("q-original-opening",)
+                                if opening_customer_matches else ("different-opening",),
+                            customer_row_count=1))
+    output=tmp_path/"out"
+    if opening_customer_matches:
+        summary=handoff._generate_project_handoff_locked(
+            pdf_path=pdf,project_id="test_project",workspace_id=1,
+            output_dir=output,family_group="core",
+            source_plan_page_index=0,
+        )
+        assert summary["status"]=="sealed"
+        assert summary["customer_rows_verified"] is True
+        assert summary["verified_customer_row_count"]==1
+        assert json.loads((output/"verified_customer_rows.json").read_text())==list(rows)
+        assert (output/"family_runs"/"opening_area.sealed.json").is_file()
+    else:
+        with pytest.raises(RuntimeError,match="sealed customer identities disagree"):
+            handoff._generate_project_handoff_locked(
+                pdf_path=pdf,project_id="test_project",workspace_id=1,
+                output_dir=output,family_group="core",
+                source_plan_page_index=0,
+            )
+        summary=json.loads((output/"production_summary.json").read_text())
+        assert summary["status"]=="opening_customer_projection_unverified"
+        assert not (output/"verified_customer_rows.json").exists()
+        assert not (output/"family_runs"/"opening_area.sealed.json").exists()
