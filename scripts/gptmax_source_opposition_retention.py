@@ -21,6 +21,9 @@ from pb_physical_opening_authority import _physical_opening_geometry_identity
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
 from tools.gptmax_compare_source_face_retention import compare_source_face_reports
+from tools.declared_additive_source_retention import (
+    approve_declared_additive_rekeys,
+)
 
 
 def _index(rows, name):
@@ -155,8 +158,14 @@ def _fresh_opposition(source_bytes, pages, missing):
     return proofs
 
 
-def compare_opposed_source_reports(before, after, *, source_bytes: bytes):
-    """Preserve exact shared bindings/firm frames; explain only unproven loss."""
+def compare_opposed_source_reports(before, after, *, source_bytes: bytes, declarations=None):
+    """Preserve exact shared bindings/firm frames; explain only unproven loss.
+
+    A reviewed, declared additive-source event (see
+    ``tools.declared_additive_source_retention``) may relax *only* the
+    row/frame equality of retained hosts whose physical source proposition is
+    proven unchanged, the declared new hosts and declared reason transitions.
+    """
     if not isinstance(source_bytes, bytes):
         raise TypeError("original PDF must be immutable bytes")
     if not isinstance(before, dict) or not isinstance(after, dict):
@@ -187,10 +196,15 @@ def compare_opposed_source_reports(before, after, *, source_bytes: bytes):
                 or row.get("status") != EvidenceResolutionStatus.ABSTAINED.value
                 or old_frames[key].get("record_id") is not None):
             raise ValueError("source opposition cannot remove any existing host or frame proof")
+    approval = approve_declared_additive_rekeys(before, after, declarations)
+    tolerated_rows = set(approval["tolerated_binding_change_ids"]) if approval else set()
+    tolerated_frames = set(approval["rekeyed_host_ids"]) if approval else set()
     for key, row in new.items():
-        if old[key] != row:
+        if old[key] != row and key not in tolerated_rows:
             raise ValueError("original shared opening binding changed")
-        if old_frames[key].get("record_id") is not None and old_frames[key] != new_frames[key]:
+        if (old_frames[key].get("record_id") is not None
+                and old_frames[key] != new_frames[key]
+                and key not in tolerated_frames):
             raise ValueError("original authenticated frame changed")
     proofs = _fresh_opposition(source_bytes, pages, missing) if missing else []
     # Filter only independently explained *unproven* rows for this secondary
@@ -198,7 +212,7 @@ def compare_opposed_source_reports(before, after, *, source_bytes: bytes):
     retained_before = dict(before,
         opening_bindings=[row for row in before["opening_bindings"] if row["opening_identity_id"] in new],
         host_frames=[row for row in before["host_frames"] if row["opening_identity_id"] in new])
-    result = compare_source_face_reports(retained_before, after)
+    result = compare_source_face_reports(retained_before, after, declarations=declarations)
     result.update(original_baseline_physical_claim_count=len(old),
         source_opposed_missing_claims=proofs,
         source_opposition_freshly_reauthenticated=bool(proofs),
