@@ -764,6 +764,18 @@ def _protect_additive_intersection_source_terminals(
             ordinary[source_id] = segment
 
     marked: List[Dict[str, Any]] = []
+    # A positive old terminal and its exact crossing are two distinct source
+    # vertices even if only 0.12 pt apart. Protect all fragments that truly
+    # share either vertex, not just the short tail: its adjoining old and new
+    # source edges must meet that same actual point. Separate nearby crossings
+    # of different original primitives must NEVER share a snapped graph node.
+    source_vertices: dict[tuple[int, int], list[tuple[float, float]]] = {}
+
+    def own_vertex(point: tuple[float, float]) -> None:
+        key = (round(point[0] / _SOURCE_TERMINAL_COORD_EPS_PT),
+               round(point[1] / _SOURCE_TERMINAL_COORD_EPS_PT))
+        source_vertices.setdefault(key, []).append(point)
+
     for source_fragment in fragments:
         fragment = dict(source_fragment)
         first = (float(fragment["x1"]), float(fragment["y1"]))
@@ -799,9 +811,34 @@ def _protect_additive_intersection_source_terminals(
                         for additive in additives)
             ):
                 continue
-            fragment[key] = True
+            # Both endpoints are authenticated: the immutable original
+            # source terminal AND the exact intersection with added source.
+            # Store coordinates, not W2 list positions or guessed wall roles.
+            own_vertex(terminal)
+            own_vertex(crossing)
             break
         marked.append(fragment)
+
+    if not source_vertices:
+        return marked
+
+    def is_owned_vertex(point: tuple[float, float]) -> bool:
+        cx = round(point[0] / _SOURCE_TERMINAL_COORD_EPS_PT)
+        cy = round(point[1] / _SOURCE_TERMINAL_COORD_EPS_PT)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for witness in source_vertices.get((cx + dx, cy + dy), ()):
+                    if math.dist(point, witness) <= _SOURCE_TERMINAL_COORD_EPS_PT:
+                        return True
+        return False
+
+    for fragment in marked:
+        first = (float(fragment["x1"]), float(fragment["y1"]))
+        last = (float(fragment["x2"]), float(fragment["y2"]))
+        if is_owned_vertex(first):
+            fragment["_protect_source_terminal_start"] = True
+        if is_owned_vertex(last):
+            fragment["_protect_source_terminal_end"] = True
     return marked
 
 
