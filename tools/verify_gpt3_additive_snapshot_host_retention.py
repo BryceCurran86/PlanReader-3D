@@ -260,7 +260,25 @@ def compare_additive_snapshot_retention(
         binding = new_bindings[opening_id]
         if binding.get("status") != "corroborated" or not binding.get("host_wall_id"):
             raise ValueError(f"expected new host is not corroborated: {opening_id}")
-        _host_signature(candidate, binding)
+        reasons = tuple(binding.get("reason_codes") or ())
+        if "opening_local_supplemental_source_band_host_resolved" not in reasons:
+            raise ValueError(
+                f"expected new host is not opening-local supplemental: {opening_id}"
+            )
+        member_ids = binding.get("member_wall_candidate_ids")
+        if (
+            not isinstance(member_ids, (list, tuple))
+            or len(member_ids) != 2
+            or any(type(value) is not str or not value for value in member_ids)
+            or len(set(member_ids)) != len(member_ids)
+        ):
+            raise ValueError(
+                f"expected new supplemental host members are malformed: {opening_id}"
+            )
+        # Supplemental W4 candidates are intentionally absent from the
+        # canonical page-wide wall scope. Their positive source proposition is
+        # re-proved by OpeningHostBindingProducer itself; this checker only
+        # verifies that no pre-existing global host/frame proposition changed.
         evidence = new_frames.get(opening_id)
         if evidence is not None:
             _frame_signature(evidence)
