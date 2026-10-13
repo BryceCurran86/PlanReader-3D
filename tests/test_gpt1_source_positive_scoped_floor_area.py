@@ -308,3 +308,58 @@ def test_source_scoped_opening_customer_mismatch_does_not_publish_a_signed_famil
         assert summary["status"]=="opening_customer_projection_unverified"
         assert not (output/"verified_customer_rows.json").exists()
         assert not (output/"family_runs"/"opening_area.sealed.json").exists()
+
+
+def test_source_positive_floor_keeps_only_authenticated_dimension_support_not_topology(
+    monkeypatch, tmp_path,
+):
+    import json
+    import pb_source_floor_plan_page_scope as classifier
+
+    pdf = tmp_path / "original.pdf"
+    pdf.write_bytes(b"three-sheet original source")
+    # The real source-owned classifier can distinguish an independently
+    # positive floor-plan page from its positively classified cross-view
+    # dimension support sheets. No guessed source/benchmark page IDs.
+    monkeypatch.setattr(
+        handoff, "_source_page_scopes",
+        lambda _: ((0,), (1, 2), 3),
+    )
+    monkeypatch.setattr(
+        classifier, "source_floor_plan_topology_scope",
+        lambda *_: _plan_scope(positive=True),
+    )
+    calls = []
+
+    def collect(_pdf, **kwargs):
+        calls.append(kwargs)
+        return S(
+            status=S(value="abstained"), reason_codes=("unresolved_source_room_area",),
+            canonical_walls=(), canonical_openings=(), canonical_rooms=(),
+            canonical_floors=(), canonical_spaces=(), canonical_ceilings=(),
+        )
+
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", collect)
+    monkeypatch.setattr(handoff, "publish_live_floor_area_quantities", lambda _: ())
+    out = tmp_path / "produced"
+    result = handoff._generate_project_handoff_locked(
+        pdf_path=pdf, project_id="source-positive-three-sheet",
+        workspace_id=1, output_dir=out, family_group="floor_area",
+        source_plan_page_index=0,
+    )
+    assert len(calls) == 1
+    assert tuple(calls[0]["pages"]) == (0, 1, 2)
+    assert tuple(calls[0]["topology_pages"]) == (0,)
+    assert tuple(calls[0]["room_area_support_pages"]) == (1, 2)
+    assert tuple(calls[0]["surface_semantic_pages"]) == (0,)
+    assert result["execution_pages"] == [1, 2, 3]
+    assert result["topology_pages"] == [1]
+    assert result["room_area_support_pages"] == [2, 3]
+    assert result["complete_project_handoff"] is False
+    assert result["source_positive_partial_page"] == 1
+    assert result["family_counts"]["opening_area"] == 0
+    assert result["family_counts"]["opening_count"] == 0
+    assert result["family_counts"]["floor_finish_area"] == 0
+    assert result["family_counts"]["ceiling_area"] == 0
+    assert result["status"] == "no_sealable_quantities"
+    assert json.loads((out / "production_summary.json").read_text())["customer_rows_verified"] is False
