@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 import math
+from typing import Sequence
 
 import cv2
 import numpy as np
@@ -57,9 +58,35 @@ def _closed_source_boxes(primitives):
     return tuple(sorted(boxes))
 
 
+def _whole_box_is_proven_flank(
+    axis: str,
+    box: tuple[int, int, int, int],
+    proven_flank_boxes: Sequence[tuple[str, Sequence[float]]],
+    *,
+    dpi: int,
+) -> bool:
+    """True only when one producer-proven G17 flank is this exact closed box."""
+    x0, y0, x1, y1 = box
+    box_pt = tuple(float(v) * 72.0 / float(dpi) for v in box)
+    tol = 72.0 / float(dpi)
+    for raw_axis, raw_box in proven_flank_boxes:
+        if str(raw_axis) != axis or len(raw_box) != 4:
+            continue
+        try:
+            candidate = tuple(float(v) for v in raw_box)
+        except (TypeError, ValueError):
+            continue
+        if not all(math.isfinite(v) for v in candidate):
+            continue
+        if all(abs(a - b) <= tol for a, b in zip(box_pt, candidate)):
+            return True
+    return False
+
+
 def detect_unchanged_terminal_band_segments(
     image_png: bytes, full_png: bytes, *, dpi: int,
     registration_scale: tuple[float, float] = (1.0, 1.0),
+    proven_flank_boxes: Sequence[tuple[str, Sequence[float]]] = (),
 ) -> tuple[UnchangedRasterBandSegment, ...]:
     """Return only solid terminal intervals with exact visible RGB agreement."""
     if type(dpi) is not int or dpi <= 0:
@@ -95,8 +122,23 @@ def detect_unchanged_terminal_band_segments(
             first, last = int(first), int(stop) - 1
             if first != 0 and stop != len(solid):
                 continue
-            if (last - first) * 72.0 / dpi < _MIN_LINE_LENGTH_PT:
-                continue
+            span_pt = (last - first) * 72.0 / dpi
+            if span_pt < _MIN_LINE_LENGTH_PT:
+                # Never relax the ordinary raster minimum for a partial remnant.
+                # A short run survives only when the *entire* independently
+                # detected closed G17 wall-band flank is unchanged and the
+                # producer has already nominated that exact source flank.
+                whole_box_unchanged = first == 0 and stop == len(solid)
+                if (
+                    not whole_box_unchanged
+                    or not _whole_box_is_proven_flank(
+                        axis,
+                        (x0, y0, x1, y1),
+                        proven_flank_boxes,
+                        dpi=dpi,
+                    )
+                ):
+                    continue
             if axis == "horizontal":
                 bounds = (x0 + first, y0, x0 + last, y1)
                 center = (y0 + y1) / 2.0
