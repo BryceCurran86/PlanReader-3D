@@ -32,14 +32,20 @@ def test_true_original_terminal_tail_is_not_destroyed_by_additive_crossing():
     old = _line("original:vertical", 10.0, 0.0, 10.0, 10.0)
     new = _line("authenticated:horizontal", 5.0, 8.5, 15.0, 8.5, additive=True)
     graph = build_wall_graph_for_viewport([old, new], gap_snap_tolerance_pt=2.5)
-    tails = [e for e in graph["edges"] if "original:vertical" in _edge_source_ids(e)
-             and e.get("_protect_source_terminal_end") is True
-             or "original:vertical" in _edge_source_ids(e)
-             and e.get("_protect_source_terminal_start") is True]
+    # After the source-vertex repair BOTH adjoining source fragments protect
+    # their exact common crossing. Counting flags is not counting tails.
+    # Requiring the real 8.5→10.0 terminal geometry is strictly stronger
+    # than accepting any arbitrary flagged source edge.
+    original_edges = [e for e in graph["edges"]
+                      if "original:vertical" in _edge_source_ids(e)]
+    assert len(original_edges) == 2
+    tails = [e for e in original_edges if e["length_pt"] == pytest.approx(1.5)]
     assert len(tails) == 1
     tail = tails[0]
     assert tail["a"] != tail["b"]
     assert tail["length_pt"] == pytest.approx(1.5)
+    assert tail.get("_protect_source_terminal_start") is True
+    assert tail.get("_protect_source_terminal_end") is True
     assert graph["nodes"][tail["a"]]["id"] != graph["nodes"][tail["b"]]["id"]
     # One endpoint retains the EXACT original source terminal point.
     endpoints = [graph["nodes"][tail[side]] for side in ("a", "b")]
@@ -47,6 +53,16 @@ def test_true_original_terminal_tail_is_not_destroyed_by_additive_crossing():
                for n in endpoints)
     assert any(n["x"] == pytest.approx(10.0) and n["y"] == pytest.approx(8.5)
                for n in endpoints)
+    # The preceding original source edge also retains the same EXACT
+    # 8.5pt crossing rather than silently absorbing the 1.5pt terminal.
+    prefix = [e for e in original_edges if e is not tail]
+    assert len(prefix) == 1
+    assert prefix[0]["length_pt"] == pytest.approx(8.5)
+    prefix_points = [graph["nodes"][prefix[0][side]] for side in ("a", "b")]
+    assert any(n["x"] == pytest.approx(10.0) and n["y"] == pytest.approx(0.0)
+               for n in prefix_points)
+    assert any(n["x"] == pytest.approx(10.0) and n["y"] == pytest.approx(8.5)
+               for n in prefix_points)
 
 
 def test_adjacent_unjoined_additive_ink_does_not_protect_short_source_fragment():
