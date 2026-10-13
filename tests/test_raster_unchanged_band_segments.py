@@ -70,6 +70,74 @@ def test_source_geometry_follows_render_transform(transform):
         assert max(abs(a-b) for a,b in zip(result.geometry_pt,base.geometry_pt)) <= 72/288
 
 
+
+def _short_closed_band_images():
+    # 17 raster pixels at 300dpi are admitted by the existing inclusive G17
+    # band detector, while endpoint-to-endpoint span is 16px = 3.84pt.
+    source = np.full((80, 100, 3), 255, dtype=np.uint8)
+    source[30:40, 20:37] = 0
+    return source, source.copy()
+
+
+def _short_proven_flank_box(source):
+    primitives = capture.detect_raster_opening_source_primitives(
+        _png(source), dpi=300,
+    )
+    boxes = capture._closed_source_boxes(primitives)
+    assert boxes
+    axis, box = min(
+        boxes,
+        key=lambda row: (
+            (row[1][2] - row[1][0]) if row[0] == "horizontal"
+            else (row[1][3] - row[1][1])
+        ),
+    )
+    scale = 72.0 / 300.0
+    box_pt = tuple(float(v) * scale for v in box)
+    return axis, box_pt
+
+
+def test_short_whole_closed_g17_flank_requires_exact_producer_nomination():
+    source, full = _short_closed_band_images()
+    flank = _short_proven_flank_box(source)
+
+    # Ordinary 4pt behavior is unchanged without producer-owned flank proof.
+    assert capture.detect_unchanged_terminal_band_segments(
+        _png(source), _png(full), dpi=300,
+    ) == ()
+
+    retained = capture.detect_unchanged_terminal_band_segments(
+        _png(source), _png(full), dpi=300,
+        proven_flank_boxes=(flank,),
+    )
+    assert len(retained) == 1
+    assert retained[0].orientation == flank[0]
+    x0, y0, x1, y1 = retained[0].geometry_pt
+    assert max(abs(x1 - x0), abs(y1 - y0)) < capture._MIN_LINE_LENGTH_PT
+
+
+def test_short_partial_remnant_stays_rejected_even_with_proven_flank():
+    source, full = _short_closed_band_images()
+    flank = _short_proven_flank_box(source)
+
+    # Alter a terminal part in the full render. The surviving source paint is
+    # no longer the entire closed G17 flank and must not use the short exception.
+    full[30:40, 20:24] = 255
+    assert capture.detect_unchanged_terminal_band_segments(
+        _png(source), _png(full), dpi=300,
+        proven_flank_boxes=(flank,),
+    ) == ()
+
+
+def test_wrong_flank_box_cannot_authorize_short_segment():
+    source, full = _short_closed_band_images()
+    axis, box = _short_proven_flank_box(source)
+    shifted = (box[0] + 10.0, box[1], box[2] + 10.0, box[3])
+    assert capture.detect_unchanged_terminal_band_segments(
+        _png(source), _png(full), dpi=300,
+        proven_flank_boxes=((axis, shifted),),
+    ) == ()
+
 def test_render_extents_and_existing_primitive_cap_fail_closed(monkeypatch):
     source, _ = _images()
     with pytest.raises(ValueError):
