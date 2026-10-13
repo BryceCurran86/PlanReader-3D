@@ -1445,6 +1445,7 @@ def _evaluate_face_ownership(
     wall_edges: Mapping[str, tuple[Edge, ...]],
     edge_owner: Mapping[Edge, str],
     raw_faces: Iterable[Iterable[Iterable[float]]],
+    owned_witnesses: Optional[dict[str, dict[str, object]]] = None,
 ) -> SourceRoomFaceOwnershipEvaluation:
     """Classify every planar face's edge ownership without deciding anything.
 
@@ -1480,16 +1481,20 @@ def _evaluate_face_ownership(
         if face_id in owned_area or face_id in unresolved:
             continue
         edge_findings: list[SourceRoomFaceEdgeOwnershipFinding] = []
+        owned_boundary_edges: list[tuple[str, Edge]] = []
         for index, first in enumerate(polygon):
             second = polygon[(index + 1) % len(polygon)]
             face_edge = _edge(first, second)
             face_edge_count += 1
-            if edge_owner.get(face_edge) is not None:
+            exact_owner = edge_owner.get(face_edge)
+            if exact_owner is not None:
+                owned_boundary_edges.append((exact_owner, face_edge))
                 continue
             walls = _containing_wall_ids(
                 face_edge, grid=grid, oversized=oversized, wall_edges=wall_edges
             )
             if len(walls) == 1:
+                owned_boundary_edges.append((walls[0], face_edge))
                 continue
             edge_findings.append(
                 SourceRoomFaceEdgeOwnershipFinding(
@@ -1501,6 +1506,22 @@ def _evaluate_face_ownership(
         area = _polygon_area(polygon)
         if not edge_findings:
             owned_area[face_id] = area
+            if owned_witnesses is not None:
+                if face_id in owned_witnesses:
+                    raise ValueError("duplicate owned room-face witness identity")
+                if len(owned_boundary_edges) != len(polygon):
+                    raise ValueError("owned room-face witness boundary is incomplete")
+                owned_witnesses[face_id] = {
+                    "face_id": face_id,
+                    "page_id": str(scope.page_id),
+                    "decision_scope_id": str(scope.decision_scope_id),
+                    "polygon_pdf_pts": tuple(polygon),
+                    "bounding_wall_ids": tuple(
+                        sorted({wall_id for wall_id, _edge_value in owned_boundary_edges})
+                    ),
+                    "boundary_wall_edges": tuple(owned_boundary_edges),
+                    "area_page_pts2": float(area),
+                }
             continue
         competing = [f for f in edge_findings if f.kind == EDGE_OWNERSHIP_COMPETING]
         competing_edge_count += len(competing)
@@ -1607,6 +1628,66 @@ def _shadow_ownership_evaluation(scope: object) -> SourceRoomFaceOwnershipEvalua
         )
 
 
+def audit_source_room_face_owned_witnesses(
+    scope: object,
+) -> tuple[dict[str, object], ...]:
+    """Return exact read-only witnesses for every shadow-owned planar face.
+
+    The witness is diagnostic only. It reuses the same ownership evaluator as
+    the existing ownership evaluation and publishes no room, quantity,
+    benchmark identity or source-completeness authority.
+    """
+    if getattr(scope, "status", None) is not EvidenceResolutionStatus.CORROBORATED:
+        raise ValueError("room-face witness scope is not corroborated")
+    records = tuple(getattr(scope, "records", ()) or ())
+    if not records:
+        raise ValueError("room-face witness scope has no wall records")
+
+    wall_edges: dict[str, tuple[Edge, ...]] = {}
+    edge_owner: dict[Edge, str] = {}
+    duplicate_edges: set[Edge] = set()
+    for record in records:
+        wall_id = _clean(getattr(record, "wall_candidate_id", ""))
+        edges = _wall_edges(record)
+        if not wall_id or not edges:
+            continue
+        wall_edges[wall_id] = edges
+        for edge in edges:
+            prior = edge_owner.get(edge)
+            if prior is not None and prior != wall_id:
+                duplicate_edges.add(edge)
+            else:
+                edge_owner[edge] = wall_id
+    if not wall_edges:
+        raise ValueError("room-face witness scope has no source wall edges")
+    for edge in duplicate_edges:
+        edge_owner.pop(edge, None)
+    if sum(len(edges) for edges in wall_edges.values()) > _OWNERSHIP_EVALUATION_MAX_EDGES:
+        raise ValueError("room-face witness scope exceeds ownership audit bound")
+
+    raw_segments = [
+        (edge[0], edge[1])
+        for wall_id in sorted(wall_edges)
+        for edge in wall_edges[wall_id]
+    ]
+    if duplicate_edges:
+        raw_segments = list(dict.fromkeys(raw_segments))
+    raw_faces = extract_planar_faces(raw_segments, min_area=1e-6)
+
+    witnesses: dict[str, dict[str, object]] = {}
+    evaluation = _evaluate_face_ownership(
+        scope,
+        wall_edges=wall_edges,
+        edge_owner=edge_owner,
+        raw_faces=raw_faces,
+        owned_witnesses=witnesses,
+    )
+    if evaluation.status != OWNERSHIP_EVALUATION_EVALUATED:
+        raise ValueError("room-face witness ownership evaluation unavailable")
+    if set(witnesses) != set(evaluation.owned_face_ids):
+        raise RuntimeError("room-face witness set does not equal evaluated owned faces")
+    return tuple(witnesses[face_id] for face_id in sorted(witnesses))
+
 def _derive_scope(scope: object) -> SourceRoomFaceScopeResult:
     """Live room-face derivation plus the additive ownership audit evaluation."""
     result = _derive_scope_outcome(scope)
@@ -1663,5 +1744,6 @@ __all__ = [
     "SourceRoomFaceRecord",
     "SourceRoomFaceScopeResult",
     "SourceRoomFaceSelector",
+    "audit_source_room_face_owned_witnesses",
     "build_source_room_face_authority",
 ]

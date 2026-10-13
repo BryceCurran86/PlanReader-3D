@@ -1,0 +1,133 @@
+name: TEST GPT3 1215 Room Face Owned Retention
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_room_face_authority.py"
+      - "tools/diag_gptmax_source_authority_stages.py"
+      - "tools/verify_gpt3_room_face_owned_retention.py"
+      - "tests/test_gpt3_room_face_owned_retention.py"
+      - ".github/workflows/test-gpt3-1215-room-face-owned-retention.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt3-1215-room-face-owned-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Room-face witness fail-closed tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt3_room_face_owned_retention.py
+          python -m compileall -q pb_source_room_face_authority.py tools/diag_gptmax_source_authority_stages.py tools/verify_gpt3_room_face_owned_retention.py
+          ruff check --select F821,F823 pb_source_room_face_authority.py tools/diag_gptmax_source_authority_stages.py tools/verify_gpt3_room_face_owned_retention.py tests/test_gpt3_room_face_owned_retention.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+
+  original-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      SOURCE_SHA: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+      CANDIDATE_SHA: "0d2c064919ba65ded8c07f69cfbd0030eaa52ef0"
+      ORIGINAL_ROOM_BLOB: "86429e301b740ea2a478ea20bdbed8b0b51d062d"
+      BASELINE_DIAG_BLOB: "2644bb99e2e40436020bddd9e6ce5d0424ae0bf1"
+      CANDIDATE_DIAG_BLOB: "abe213abbe90f3620017d35f4023ba2110940c5d"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Immutable source and frozen truth
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          printf '%s  %s\n' "$SOURCE_SHA" 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' | sha256sum --check
+      - name: Produce exact room-face witness reports before and after 1215
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          git worktree add --detach /tmp/gpt3-room-base "$BASE_SHA"
+          git fetch --no-tags origin "$CANDIDATE_SHA"
+          git worktree add --detach /tmp/gpt3-room-candidate "$CANDIDATE_SHA"
+          mkdir -p artifacts
+
+          test "$(git -C /tmp/gpt3-room-base rev-parse HEAD:pb_source_room_face_authority.py)" = "$ORIGINAL_ROOM_BLOB"
+          test "$(git -C /tmp/gpt3-room-candidate rev-parse HEAD:pb_source_room_face_authority.py)" = "$ORIGINAL_ROOM_BLOB"
+          test "$(git -C /tmp/gpt3-room-base rev-parse HEAD:tools/diag_gptmax_source_authority_stages.py)" = "$BASELINE_DIAG_BLOB"
+          test "$(git -C /tmp/gpt3-room-candidate rev-parse HEAD:tools/diag_gptmax_source_authority_stages.py)" = "$CANDIDATE_DIAG_BLOB"
+          for root in /tmp/gpt3-room-base /tmp/gpt3-room-candidate; do
+            cp "$GITHUB_WORKSPACE/pb_source_room_face_authority.py" "$root/pb_source_room_face_authority.py"
+            cp "$GITHUB_WORKSPACE/tools/diag_gptmax_source_authority_stages.py" "$root/tools/diag_gptmax_source_authority_stages.py"
+            printf '%s  %s\n' "$SOURCE_SHA" "$root/documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" | sha256sum --check
+          done
+
+          (
+            cd /tmp/gpt3-room-base
+            PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py               --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'               --page-id 3 --source-all-pages               --include-room-face-ownership-witnesses               --output "$GITHUB_WORKSPACE/artifacts/baseline.json"
+          )
+          (
+            cd /tmp/gpt3-room-candidate
+            PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py               --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'               --page-id 3 --source-all-pages               --include-room-face-ownership-witnesses               --output "$GITHUB_WORKSPACE/artifacts/candidate.json"
+          )
+      - name: Prove all owned room-face physical propositions
+        env:
+          PYTHONPATH: .
+        run: |
+          python tools/verify_gpt3_room_face_owned_retention.py             --baseline artifacts/baseline.json             --candidate artifacts/candidate.json             --output artifacts/room-face-retention.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path("artifacts/baseline.json").read_text())
+          after=json.loads(Path("artifacts/candidate.json").read_text())
+          receipt=json.loads(Path("artifacts/room-face-retention.json").read_text())
+          assert receipt["verified_room_face_owned_bijection"] is True
+          assert receipt["owned_face_proposition_count"]==107
+          assert receipt["room_publication_granted"] is False
+          assert receipt["quantity_publication_granted"] is False
+          assert receipt["benchmark_score_granted"] is False
+          for report in (before, after):
+              scopes=report["source_room_face_scopes"]
+              assert len(scopes)==1
+              result=scopes[0]["result"]
+              assert len(result["records"])==61
+              assert len(result["abstained_faces"])==41
+              assert len(result["ownership_evaluation"]["owned_face_ids"])==107
+              witness=report["source_room_face_owned_witness_scopes"]
+              assert len(witness)==1
+              assert len(witness[0]["owned_face_witnesses"])==107
+              page3=[s for s in report["source_owned_wall_scopes"]
+                     if str(s["page_id"])=="3"
+                     and s["decision_scope_id"]=="wall-source:page-3"]
+              assert len(page3)==1 and len(page3[0]["records"])==2094
+          assert before["source_owned_wall_scopes"][0]["records"] == after["source_owned_wall_scopes"][0]["records"]
+          print("GPT3_ROOM_FACE_OWNED_RETENTION", json.dumps(receipt,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-1215-room-face-owned-retention
+          path: artifacts
+          retention-days: 30
