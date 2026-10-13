@@ -9,6 +9,7 @@ from pb_wall_room_topology_stage_a import (
     build_wall_graph_for_viewport,
 )
 from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+from pb_wall_room_topology_junction_classifier import deduplicate_coincident_edges
 
 
 def _line(source_id, x1, y1, x2, y2, *, additive=False):
@@ -107,3 +108,27 @@ def test_source_terminal_locator_rejects_unproven_snap_collapse():
                     _protect_source_terminal_end=True)
     with pytest.raises(RuntimeError, match="source-authenticated terminal"):
         _snap_geometry_indexed([fragment], tolerance_pt=2.5)
+
+
+def test_distinct_native_source_crossings_are_not_one_snapped_node_pair():
+    original = [
+        _line("native:a", 10, 0, 8, 10),
+        _line("native:b", 10, 0, 10, 10),
+        _line("native:c", 10, 0, 12, 10),
+    ]
+    added = _line("new:source", 5, 0.12, 15, 0.12, additive=True)
+    graph = build_wall_graph_for_viewport([*original, added], gap_snap_tolerance_pt=2.5)
+    anchor_nodes = [n for n in graph["nodes"] if abs(n["x"]-10)<1e-6 and abs(n["y"])<1e-6 and not n.get("merged_into_edge")]
+    assert len(anchor_nodes) == 1
+    anchor = anchor_nodes[0]["id"]
+    tails = []
+    for name in ("native:a", "native:b", "native:c"):
+        found = [e for e in graph["edges"] if name in _edge_source_ids(e) and anchor in (e["a"],e["b"]) and e["length_pt"] < 0.3]
+        assert len(found) == 1
+        tails.append(found[0])
+    opposite_nodes = {next(n for n in (e["a"],e["b"]) if n!=anchor) for e in tails}
+    assert len(opposite_nodes) == 3
+    deduped, removed = deduplicate_coincident_edges(graph)
+    surviving = {e["id"] for e in deduped["edges"]}
+    assert all(e["id"] in surviving for e in tails)
+    assert not {e["id"] for e in tails} & set(removed)
