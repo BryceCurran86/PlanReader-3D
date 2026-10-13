@@ -1,0 +1,169 @@
+name: TEST GPT3 Exact 1215 Source Declaration
+
+on:
+  pull_request:
+    branches:
+      - main
+      - gpt3/1215-retention-final-safety-20261013
+    paths:
+      - "tools/declared_additive_source_retention.json"
+      - "tools/declared_additive_source_retention.py"
+      - ".github/workflows/test-gpt3-exact-1215-source-declaration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: gpt3-1215-exact-declaration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-event:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Frozen truth and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+      - name: Download immutable fresh paired 1215 source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/paired
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/11791130182/zip" \
+            -o artifacts/paired.zip
+          printf '%s  %s\n' \
+            '5752b59145355c4b52bc6a3056969630f7aa800ce8b414b3d116eaf459f7f0c5' \
+            artifacts/paired.zip | sha256sum --check
+          unzip -q artifacts/paired.zip -d artifacts/paired
+          test -f artifacts/paired/baseline/source-report.json
+          test -f artifacts/paired/candidate/source-report.json
+      - name: Download immutable W4 face-retention artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/face
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/11792949927/zip" \
+            -o artifacts/face.zip
+          printf '%s  %s\n' \
+            'a6f1633e6b4697d73ff3bb1eea6213f87a2ab1d019d2c1d985e6f750ffab16f0' \
+            artifacts/face.zip | sha256sum --check
+          unzip -q artifacts/face.zip -d artifacts/face
+          test -f artifacts/face/original-w4-base.json
+          test -f artifacts/face/original-w4-candidate.json
+
+      - name: Exact face-report declaration must be fully proven
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python tools/declared_additive_source_retention.py \
+            --baseline artifacts/face/original-w4-base.json \
+            --candidate artifacts/face/original-w4-candidate.json \
+            --output artifacts/face-approval.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.declared_additive_source_retention import (
+              declared_event_approved,
+              load_declarations,
+          )
+
+          baseline=json.loads(Path("artifacts/face/original-w4-base.json").read_text())
+          candidate=json.loads(Path("artifacts/face/original-w4-candidate.json").read_text())
+          approval=json.loads(Path("artifacts/face-approval.json").read_text())
+          declarations=load_declarations()
+          target="physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
+
+          assert approval["report_shape"]=="face_report"
+          assert approval["declared_new_host_ids"]==[target]
+          assert approval["declared_new_frame_host_ids"]==[]
+          assert approval["unverified_changed_report_keys"]==[]
+          assert approval["baseline_snapshot_id"]=="source_snapshot_7c0d199651fda42b90c25182b4755b88"
+          assert approval["candidate_snapshot_id"]=="source_snapshot_3fcb6bc5c44b51d930e9600080501d27"
+          assert approval["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          delta=approval["w4_wall_delta"]
+          assert delta["lost_with_covering_successor"]==0
+          assert delta["gained_from_new_source"]==0
+          assert delta["retained"]>0
+          assert declared_event_approved(
+              baseline,candidate,declarations,explain=False
+          ) is True
+          print("GPT3_1215_FACE_DECLARATION_FULLY_PROVEN",json.dumps({
+              "new_host_ids":approval["declared_new_host_ids"],
+              "unverified_changed_report_keys":approval["unverified_changed_report_keys"],
+              "w4_wall_delta":approval["w4_wall_delta"],
+              "source_sha256":approval["source_sha256"],
+          },sort_keys=True))
+          PY
+
+      - name: Exact declaration must be fully proven
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python tools/declared_additive_source_retention.py \
+            --baseline artifacts/paired/baseline/source-report.json \
+            --candidate artifacts/paired/candidate/source-report.json \
+            --output artifacts/approval.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.declared_additive_source_retention import (
+              assert_unchanged_or_declared,
+              declared_event_approved,
+              load_declarations,
+          )
+
+          baseline=json.loads(Path("artifacts/paired/baseline/source-report.json").read_text())
+          candidate=json.loads(Path("artifacts/paired/candidate/source-report.json").read_text())
+          approval=json.loads(Path("artifacts/approval.json").read_text())
+          declarations=load_declarations()
+
+          target="physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
+          assert approval["declared_new_host_ids"]==[target]
+          assert approval["declared_new_frame_host_ids"]==[]
+          assert approval["unverified_changed_report_keys"]==[]
+          assert approval["baseline_snapshot_id"]=="source_snapshot_fc75bec9daf6e71985fc742038f5cb28"
+          assert approval["candidate_snapshot_id"]=="source_snapshot_7ad8bf09e3ebbec9797df89842574683"
+          assert approval["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert declared_event_approved(
+              baseline,candidate,declarations,explain=False
+          ) is True
+          assert_unchanged_or_declared(
+              baseline,candidate,
+              message="exact 1215 source event was not fully approved",
+          )
+          print("GPT3_1215_DECLARATION_FULLY_PROVEN",json.dumps({
+              "new_host_ids":approval["declared_new_host_ids"],
+              "unverified_changed_report_keys":approval["unverified_changed_report_keys"],
+              "retained_w4_count":approval.get("retained_w4_count"),
+              "source_sha256":approval["source_sha256"],
+          },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-exact-1215-source-declaration
+          path: artifacts
+          retention-days: 30
