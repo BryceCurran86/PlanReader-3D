@@ -16,9 +16,9 @@ QNEW = "opening_area_additive"
 
 
 def report(snapshot, *, additive=False):
-    old_host = "old-hb" if not additive else "new-hb"
+    old_host = "opening_host_binding_v3_old" if not additive else "opening_host_binding_v3_new"
     old_wall = "old-wall" if not additive else "new-wall"
-    old_frame = "old-hf" if not additive else "new-hf"
+    old_frame = "opening_host_frame_v2_old" if not additive else "opening_host_frame_v2_new"
     bindings = [
         dict(opening_identity_id=OLD, status="corroborated",
              record_id=old_host, host_wall_id=old_wall,
@@ -80,8 +80,8 @@ def customer(row_id, physical, snapshot, host, frame, wall):
 def samples():
     old = report("snapshot-A")
     new = report("snapshot-B", additive=True)
-    previous = customer(QOLD, OLD, "snapshot-A", "old-hb", "old-hf", "old-wall")
-    changed = customer(QOLD, OLD, "snapshot-B", "new-hb", "new-hf", "new-wall")
+    previous = customer(QOLD, OLD, "snapshot-A", "opening_host_binding_v3_old", "opening_host_frame_v2_old", "old-wall")
+    changed = customer(QOLD, OLD, "snapshot-B", "opening_host_binding_v3_new", "opening_host_frame_v2_new", "new-wall")
     added = customer(QNEW, NEW, "snapshot-B", "new-additive-hb", None, "new-additive-wall")
     return [previous], [changed, added], old, new
 
