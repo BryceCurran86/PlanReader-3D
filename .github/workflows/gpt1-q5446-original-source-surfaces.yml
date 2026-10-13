@@ -1,0 +1,92 @@
+name: GPT1 Q5446 original-source surface production
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/gpt1-q5446-original-source-surfaces.yml"
+      - "tools/run_source_closed_project_handoff.py"
+      - "pb_live_floor_area_source_closed_export.py"
+      - "pb_live_floor_finish_area_source_closed_export.py"
+  workflow_dispatch:
+
+jobs:
+  source-to-sealed-surfaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install pinned production dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Verify original source and run actual customer production families
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import fitz, hashlib, subprocess, sys
+          source = Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
+          expected = "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+          if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+              raise SystemExit("Q5446 ORIGINAL architectural source unavailable or SHA conflict")
+          pdf = fitz.open(source)
+          try:
+              if pdf.page_count != 10:
+                  raise SystemExit("Q5446 source page count mismatch")
+          finally:
+              pdf.close()
+          subprocess.run([
+              sys.executable, "-u", "tools/run_source_closed_project_handoff.py",
+              "--pdf", str(source), "--project-id",
+              "au_qld_q5446_armstrong32_harlequin",
+              "--family-group", "surfaces", "--output-dir", "q5446-produced-surfaces",
+          ], check=True)
+          PY
+      - name: Verify genuinely signed family output without frozen truth
+        if: success()
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          root=Path("q5446-produced-surfaces")
+          summary=json.loads((root/"production_summary.json").read_text())
+          source=Path("documents/sources/Q5446_Standard_Plans_V1_20220320.pdf")
+          sha=hashlib.sha256(source.read_bytes()).hexdigest()
+          assert summary["project_id"]=="au_qld_q5446_armstrong32_harlequin"
+          assert summary["source_sha256"]==sha
+          assert summary["family_group"]=="surfaces"
+          assert summary["status"] in {"sealed","no_sealable_quantities"}
+          amount=int(summary["combined_quantity_count"])
+          if summary["status"]=="no_sealable_quantities":
+              assert amount==0 and summary["combined_run_file"] is None
+          else:
+              assert amount>0 and summary["combined_run_file"]
+              run=sealed_source_closed_run_from_dict(
+                  json.loads(Path(summary["combined_run_file"]).read_text()))
+              assert run.project_id==summary["project_id"]
+              assert tuple(run.source_sha256s)==(sha,)
+              assert len(run.quantities)==amount
+              assert len({q.quantity_id for q in run.quantities})==amount
+              assert all(not q.abstained and q.value is not None
+                         and q.unit in ("m2","m²") for q in run.quantities)
+          assert summary["benchmark_score_granted"] is False
+          assert summary["frozen_v2_reconciliation_complete"] is False
+          print(json.dumps({
+              "source_sha256":sha,"status":summary["status"],
+              "signed_source_surface_quantities":amount,
+              "family_counts":summary["family_counts"],
+              "customer_rows_verified":False,
+              "benchmark_matched_objects":None,
+          },sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-q5446-original-produced-surface-handoff
+          path: q5446-produced-surfaces/
+          retention-days: 14
