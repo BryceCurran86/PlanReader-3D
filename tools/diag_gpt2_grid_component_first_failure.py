@@ -874,6 +874,75 @@ def inspect_external_atomic_grid_w2_source_fragments(
         row["source_w2_partial_overlap_candidates_diagnostic_only"] = (
             overlapping[:24]
         )
+        # Independent read-only W4 ancestry census: the current owner may
+        # lack the source fragment because a distinct authenticated W4 owns it,
+        # rather than because Stage A lost the original native W2 primitive.
+        # Never choose the first, nearest, or coincident alternative as owner.
+        # No positive result here changes this row's original first gate.
+        other_w4 = []
+        other_w4_ambiguity = 0
+        for alternative_id in sorted(records_by_id):
+            if alternative_id == wall_id:
+                continue
+            if counts[alternative_id] != 1:
+                # A collided W4 address cannot prove a unique alternative.
+                other_w4_ambiguity += 1
+                continue
+            alternative = records_by_id[alternative_id]
+            for fragment in tuple(
+                getattr(alternative, "source_edge_fragments", ()) or ()
+            ):
+                alt_edge_id = getattr(fragment, "edge_id", None)
+                alt_source_ids = getattr(fragment, "source_primitive_ids", None)
+                if (
+                    not isinstance(alt_edge_id, str) or not alt_edge_id
+                    or alt_edge_id != alt_edge_id.strip()
+                    or not isinstance(alt_source_ids, (tuple, list))
+                    or not alt_source_ids
+                    or any(type(value) is not str or not value
+                           or value != value.strip() for value in alt_source_ids)
+                ):
+                    other_w4_ambiguity += 1
+                    continue
+                alt_geom = getattr(fragment, "geometry", None)
+                try:
+                    complete = _edge_contains_edge(alt_geom, atomic)
+                    overlap = (
+                        None if complete
+                        else _collinear_overlap_edge(alt_geom, atomic)
+                    )
+                except (TypeError, ValueError, OverflowError, IndexError):
+                    other_w4_ambiguity += 1
+                    continue
+                if not complete and overlap is None:
+                    continue
+                if len(other_w4) < 24:
+                    other_w4.append({
+                        "alternative_original_w4_wall_id": alternative_id,
+                        "alternative_source_w2_edge_id": alt_edge_id,
+                        "original_source_primitive_ids": sorted(
+                            set(alt_source_ids)
+                        )[:24],
+                        "atomic_subedge_wholly_contained": bool(complete),
+                        "partial_original_overlap_pdf_pts": (
+                            [list(pt) for pt in overlap]
+                            if overlap is not None else None
+                        ),
+                        "candidate_only_no_wall_identity_transfer": True,
+                        "second_face_owner_authenticated": False,
+                    })
+        row["other_w4_source_fragments_diagnostic_only"] = sorted(
+            other_w4,
+            key=lambda item: (
+                item["alternative_original_w4_wall_id"],
+                item["alternative_source_w2_edge_id"],
+            ),
+        )
+        row["other_w4_source_fragment_conflict_receipt_count"] = (
+            other_w4_ambiguity
+        )
+        row["other_w4_search_is_not_complete_w2_source_universe"] = True
+        row["other_w4_alternative_owner_granted"] = False
         if invalid_receipts:
             row["source_first_unclosed_gate"] = (
                 "original_w2_fragment_source_receipt_invalid"
