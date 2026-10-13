@@ -1830,6 +1830,7 @@ class SourceVisibilityProducer:
         snapshot = published.snapshot
         visible_ids = list(published.visible_observation_ids)
         new_receipts: dict[str, RasterSegmentVisibilityReceipt] = {}
+        completed_attempts: set[tuple[str, str]] = set()
 
         decoded_page_ids = {
             str(int(value)) for value in published.coverage.decoded_pages
@@ -1878,10 +1879,9 @@ class SourceVisibilityProducer:
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
             )
-            # Once render + detection complete successfully, repeating the same
-            # immutable revision/page cannot produce new source evidence.
-            self._raster_visibility_attempted_pages.add(raster_attempt_key)
-
+            # Commit the attempt only after the entire augmented snapshot
+            # publishes successfully. A later page or receipt failure must not
+            # silently suppress this page on the next source-owned retry.
             if page_id in pages_with_visible and image_regions:
                 segments = tuple(
                     segment
@@ -1891,6 +1891,7 @@ class SourceVisibilityProducer:
                     )
                 )
             if not segments:
+                completed_attempts.add(raster_attempt_key)
                 continue
 
             # Visibility publishes each proven source-owned primitive regardless
@@ -2006,8 +2007,10 @@ class SourceVisibilityProducer:
             for visible_id, receipt in page_receipts:
                 visible_ids.append(visible_id)
                 new_receipts[visible_id] = receipt
+            completed_attempts.add(raster_attempt_key)
 
         if snapshot.snapshot_id == old_snapshot_id:
+            self._raster_visibility_attempted_pages.update(completed_attempts)
             return published
 
         final_snapshot_id = snapshot.snapshot_id
@@ -2062,6 +2065,7 @@ class SourceVisibilityProducer:
             ),
         )
         self._published_by_revision[updated.revision.revision_id] = updated
+        self._raster_visibility_attempted_pages.update(completed_attempts)
         return updated
 
     def augment_with_raster_opening_primitives(
