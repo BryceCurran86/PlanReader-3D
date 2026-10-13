@@ -100,3 +100,22 @@ def test_source_positive_page_runs_only_its_own_floor_area_without_finish_or_cei
     assert result["status"] == "no_sealable_quantities"
     assert result["benchmark_score_granted"] is False
     assert not (destination / "family_runs").exists()
+
+
+@pytest.mark.parametrize("family_group", ["all", "surfaces"])
+def test_partial_plan_cannot_pretend_to_cover_all_source_families(
+    monkeypatch, tmp_path, family_group,
+):
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"synthetic immutable source")
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda _: ((0, 1), (), 3))
+    with pytest.raises(ValueError, match="partial original floor-plan scope requires"):
+        handoff._generate_project_handoff_locked(
+            pdf_path=original,
+            project_id="test_project",
+            workspace_id=1,
+            output_dir=tmp_path / "partial",
+            family_group=family_group,
+            source_plan_page_index=0,
+        )
+    assert not (tmp_path / "partial" / "production_summary.json").exists()
