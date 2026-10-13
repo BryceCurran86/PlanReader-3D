@@ -80,10 +80,11 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          python -u tools/verify_gpt3_additive_snapshot_host_retention.py \
+          # The shared, snapshot-independent contract (tools/declared_additive_source_retention.json
+          # names the exact snapshot pair, the one new host and the one reason transition).
+          python -u -m tools.declared_additive_source_retention \
             --baseline artifacts/gpt3-additive-retention/baseline.json \
             --candidate artifacts/gpt3-additive-retention/candidate.json \
-            --expected-new-host-id physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9 \
             --output artifacts/gpt3-additive-retention/retention.json
 
       - uses: actions/upload-artifact@v4
