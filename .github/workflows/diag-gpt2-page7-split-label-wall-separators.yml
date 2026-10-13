@@ -12,6 +12,8 @@ on:
       - "tools/diag_gpt2_split_face_collinear_first_gates.py"
       - "tools/diag_gpt2_grid_component_first_failure.py"
       - "tests/test_gpt2_cross_w4_atomic_source_audit.py"
+      - "pb_source_room_face_authority.py"
+      - "tests/test_source_room_face_non_simple_failclosed.py"
       - "tests/test_gpt2_native_source_parent_w4_ancestry.py"
       - "tools/diag_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_freezer_source_crossing_wall_owners.py"
@@ -47,6 +49,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_split_label_wall_separators.py
           PYTHONPATH=. pytest -q tests/test_gpt2_split_face_collinear_first_gates.py
           PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
+          PYTHONPATH=. pytest -q tests/test_source_room_face_non_simple_failclosed.py
           PYTHONPATH=. pytest -q tests/test_gpt2_freezer_source_crossing_wall_owners.py
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
@@ -462,6 +465,25 @@ jobs:
                   page_id=selector.page_id,
                   decision_scope_id=selector.decision_scope_id,
               ))
+              # Source simple-ring proof is additional to wall ownership:
+              # a producer-owned self-crossing polygon cannot be physical
+              # geometry, even when W4 edges all have original receipts.
+              from pb_source_room_face_authority import (
+                  _original_source_polygon_is_simple,
+                  SOURCE_ROOM_FACE_SELF_INTERSECTING,
+              )
+              assert all(
+                  _original_source_polygon_is_simple(face.polygon_pdf_pts)
+                  for face in room_scope.records
+              ), "source_room_face_invalid_polygon_published"
+              invalid_source_ring_withheld = tuple(
+                  face for face in room_scope.abstained_faces
+                  if face.reason == SOURCE_ROOM_FACE_SELF_INTERSECTING
+              )
+              assert all(
+                  not _original_source_polygon_is_simple(face.polygon_pdf_pts)
+                  for face in invalid_source_ring_withheld
+              ), "invalid_original_face_withholding_regression"
               # Original W4 candidate addresses are not proof of unique
               # physical walls. Record actual collisions from the producer's
               # untouched source scope before computing grid/room authority.
@@ -538,6 +560,11 @@ jobs:
                   "room_scope_complete":room_scope.scope_complete,
                   "room_face_universe_complete":room_scope.face_universe_complete,
                   "room_scope_reason_codes":list(room_scope.reason_codes),
+                  "source_self_intersecting_face_withheld_count":len(invalid_source_ring_withheld),
+                  "original_invalid_face_source_ids_diagnostic_only":[
+                      face.face_id for face in invalid_source_ring_withheld[:8]
+                  ],
+                  "source_invalid_polygon_published_count":0,
                   "source_sealed_split_label_count":len(label_scope.split_face_candidates),
                   "fully_grid_opposed_wall_count":len(fully_grid),
                   "grid_wall_evidence_ids":dict(
