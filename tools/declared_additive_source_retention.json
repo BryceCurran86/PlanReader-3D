@@ -38,6 +38,28 @@
       ],
       "allow_snapshot_receipt_rekey": true,
       "tracking_issue": 2004
+    },
+    {
+      "source_sha256": "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",
+      "report_shape": "face_report",
+      "baseline_snapshot_id": "source_snapshot_7c0d199651fda42b90c25182b4755b88",
+      "candidate_snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
+      "expected_new_host_ids": [
+        "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
+      ],
+      "expected_new_frame_host_ids": [],
+      "expected_unhosted_reason_changes": [],
+      "expected_changed_report_keys": [
+        "host_frames",
+        "opening_bindings",
+        "semantic_inventory",
+        "snapshot_id",
+        "source_owned_wall_scope_results",
+        "summary"
+      ],
+      "expected_id_churn_report_keys": [],
+      "allow_snapshot_receipt_rekey": true,
+      "tracking_issue": 2004
     }
   ]
 }
