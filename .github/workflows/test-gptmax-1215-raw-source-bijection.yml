@@ -1,0 +1,92 @@
+name: GPT MAX Lot16 1215 Raw Candidate Source Bijection
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test-gptmax-1215-raw-source-bijection.yml
+permissions:
+  contents: read
+jobs:
+  original-bijection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+      CANDIDATE_SHA: "0d2c064919ba65ded8c07f69cfbd0030eaa52ef0"
+      ORIGINAL_SHA: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Authenticate immutable frozen truth and source candidate grouping API
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+          PYTHONPATH=. python -m pytest -q \
+            tests/test_opening_candidate_source_group_witness.py \
+            tests/test_gptmax_raw_source_group_retention.py
+      - name: Generate exact original source-before and 1215 source-after candidate sidecars
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          printf '%s  %s\n' "$ORIGINAL_SHA" "$PDF" | sha256sum --check
+          git fetch --no-tags origin "$CANDIDATE_SHA"
+          git worktree add --detach /tmp/gptmax-1215-group-after "$CANDIDATE_SHA"
+          # The production #2610 commit edits 12 other files, not these two
+          # read-only native/raster group proof seam files. Copying them into
+          # its isolated worktree adds diagnostics, NOT geometry/host selection.
+          test -z "$(git diff --name-only \
+            c1cc7d5aea85ad46b1b48b68e5ac855fe64594a0 "$CANDIDATE_SHA" -- \
+            pb_physical_opening_authority.py tools/diag_gptmax_source_authority_stages.py)"
+          cp pb_physical_opening_authority.py /tmp/gptmax-1215-group-after/pb_physical_opening_authority.py
+          cp tools/diag_gptmax_source_authority_stages.py /tmp/gptmax-1215-group-after/tools/diag_gptmax_source_authority_stages.py
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --include-raw-candidate-source-groups --output original-before.json
+          (
+            cd /tmp/gptmax-1215-group-after
+            printf '%s  %s\n' "$ORIGINAL_SHA" "$PDF" | sha256sum --check
+            PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+              --pdf "$PDF" --page-id 3 --source-all-pages \
+              --include-raw-candidate-source-groups \
+              --output "$GITHUB_WORKSPACE/original-after-1215.json"
+          )
+      - name: Prove per-raw-group source/geometry identity without approving counts
+        run: |
+          PYTHONPATH=. python tools/verify_gptmax_raw_source_group_retention.py \
+            --baseline original-before.json --candidate original-after-1215.json \
+            --output paired-raw-source-bijection.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          b=json.loads(Path("original-before.json").read_text())
+          a=json.loads(Path("original-after-1215.json").read_text())
+          proof=json.loads(Path("paired-raw-source-bijection.json").read_text())
+          assert proof["verified_raw_source_membership"] is True
+          assert proof["native_unresolved_groups"]==125
+          assert proof["raster_unresolved_groups"]==9
+          assert b["source_sha256"] == a["source_sha256"]
+          assert b["primitive_safety_cap"] == a["primitive_safety_cap"] == 20_000
+          assert b["source_owned_wall_scopes"][0]["records"] == a["source_owned_wall_scopes"][0]["records"]
+          assert len(b["source_owned_wall_scopes"][0]["records"])==2094
+          assert b["summary"]["physical_existence_claims"]==a["summary"]["physical_existence_claims"]==21
+          assert b["summary"]["authenticated_hosts"]==14 and a["summary"]["authenticated_hosts"]==15
+          assert b["summary"]["resolved_source_frames"]==a["summary"]["resolved_source_frames"]==9
+          print({"original_candidate_bijection_proved":True,
+                 "native_unresolved":125,"raster_unresolved":9,
+                 "new_customer_quantities_granted":0,"opening_counts_granted":0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-1215-original-raw-source-bijection
+          path: |
+            original-before.json
+            original-after-1215.json
+            paired-raw-source-bijection.json
+          retention-days: 14
