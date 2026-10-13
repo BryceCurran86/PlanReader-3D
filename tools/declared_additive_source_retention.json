@@ -1,6 +1,7 @@
 {
   "declarations": [
     {
+      "allow_snapshot_receipt_rekey": true,
       "baseline_snapshot_id": "source_snapshot_fc75bec9daf6e71985fc742038f5cb28",
       "candidate_snapshot_id": "source_snapshot_7ad8bf09e3ebbec9797df89842574683",
       "expected_changed_report_keys": [
@@ -42,6 +43,7 @@
       "tracking_issue": 2608
     },
     {
+      "allow_snapshot_receipt_rekey": true,
       "baseline_snapshot_id": "source_snapshot_7c0d199651fda42b90c25182b4755b88",
       "candidate_snapshot_id": "source_snapshot_3fcb6bc5c44b51d930e9600080501d27",
       "expected_changed_report_keys": [
