@@ -48,7 +48,9 @@ def inspect_non_simple_original_face_ring(record: Any) -> dict[str, Any]:
     the ring. This evidence cannot substitute corrected physical source walls
     or override source-room-face publication/metric gates.
     """
-    from pb_source_room_face_authority import _publication_polygon, _polygon_area
+    from pb_source_room_face_authority import (
+        _publication_polygon, _polygon_area, _collapse_exact_ring_backtracks,
+    )
     raw = getattr(record, "polygon_pdf_pts", ()) or ()
     result = {
         "source_face_id": getattr(record, "face_id", None),
@@ -75,7 +77,7 @@ def inspect_non_simple_original_face_ring(record: Any) -> dict[str, Any]:
         ]
         normalized = _publication_polygon(points)
         result["exact_backtrack_cleanup_changed_original_ring"] = (
-            normalized != points
+            _collapse_exact_ring_backtracks(points) != points
         )
         if len(normalized) >= 3:
             candidate = Polygon(normalized)
