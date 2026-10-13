@@ -1232,6 +1232,8 @@ def test_composition_reason_codes_are_verified_not_blind():
         {
             "opening_host_binding_resolved",
             "opening_local_supplemental_source_band_host_resolved",
+            "no_authenticated_host_wall_band",
+            "raster_source_band_right_source_primitive_unmapped",
             "opening_host_frame_host_unavailable",
             "stable_reason",
         }
