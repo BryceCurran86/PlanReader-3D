@@ -13,6 +13,7 @@ on:
       - "tools/diag_gpt2_grid_component_first_failure.py"
       - "tests/test_gpt2_cross_w4_atomic_source_audit.py"
       - "tests/test_gpt2_native_source_parent_w4_ancestry.py"
+      - "tests/test_gpt2_external_w4_second_face_source_census.py"
       - "tools/diag_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_split_face_collinear_first_gates.py"
@@ -50,6 +51,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_freezer_source_crossing_wall_owners.py
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_external_w4_second_face_source_census.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
         run: |
@@ -442,6 +444,7 @@ jobs:
               inspect_split_grid_component_first_failure,
               diagnose_original_w4_address_collisions,
               inspect_native_source_parent_w4_ancestry,
+              inspect_original_external_atomic_second_face_scope,
           )
           composite_scopes=[]
           for selector in selectors:
@@ -518,6 +521,28 @@ jobs:
                   )
                   for row in split_component_gates
               )
+              # Record source-withheld and alternative W4 face receipts only.
+              # A candidate on the opposite support is not authority for
+              # a complete physical face or quantity.
+              source_second_face_census=[
+                  {
+                      "native_room_label": row["native_room_label"],
+                      "source_split_candidate_record_id":row["source_split_candidate_record_id"],
+                      "original_external_face_receipts_diagnostic_only":
+                          inspect_original_external_atomic_second_face_scope(
+                              room_scope,
+                              row["physical_union_source_first_failure_diagnostic_only"],
+                          ),
+                  }
+                  for row in split_component_gates
+                  if row.get("physical_union_source_first_failure_diagnostic_only")
+              ]
+              assert all(
+                  not rec["second_source_face_authenticated_by_diagnostic"]
+                  and not rec["room_or_quantity_published"]
+                  for result in source_second_face_census
+                  for rec in result["original_external_face_receipts_diagnostic_only"]
+              )
               assert all(
                   not row["source_room_composite_published_by_diagnostic"]
                   and not row["source_room_metric_area_published"]
@@ -525,6 +550,7 @@ jobs:
               )
               composite_scopes.append({
                   "source_split_candidate_first_failure_gates":split_component_gates,
+                  "original_external_source_second_face_candidates_diagnostic_only":source_second_face_census,
                   "source_decision_scope_id":selector.decision_scope_id,
                   "original_wall_candidate_count":len(original_w4_ids),
                   "unique_wall_candidate_id_count":len(w4_counts),
