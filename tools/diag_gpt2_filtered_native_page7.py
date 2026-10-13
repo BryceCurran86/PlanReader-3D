@@ -195,6 +195,9 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
             source_index: dict[str, set[str]] = {
                 source_id: set() for source_id in ORIGINAL_NATIVE_IDS
             }
+            native_edge_receipts: dict[str, list[dict[str, object]]] = {
+                source_id: [] for source_id in ORIGINAL_NATIVE_IDS
+            }
             collapsed_index: dict[str, set[str]] = {
                 source_id: set() for source_id in ORIGINAL_NATIVE_IDS
             }
@@ -205,6 +208,16 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
                 for parent in parents:
                     if parent in source_index and edge_id:
                         source_index[parent].add(edge_id)
+                        # Exact original W2 descendant geometry. Report only;
+                        # this does not create wall chains, rooms or dimensions.
+                        native_edge_receipts[parent].append({
+                            "w2_edge_id": edge_id,
+                            "w2_geometry_pdf_pts": [
+                                float(edge["x1"]), float(edge["y1"]),
+                                float(edge["x2"]), float(edge["y2"]),
+                            ],
+                            "native_source_parents": sorted(set(parents))[:32],
+                        })
             for fragment in w2_graph.get("snap_collapsed_fragments", ()):
                 lineage = fragment.get(LINEAGE_KEY) or {}
                 parents = lineage.get("source_primitive_ids", ())
@@ -223,6 +236,12 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
                 row["w2_snap_collapsed_source_fragment_count"] = len(
                     collapsed_index[source_id]
                 )
+                row["w2_descendant_exact_geometry_candidate_only"] = sorted(
+                    native_edge_receipts[source_id],
+                    key=lambda fragment: (
+                        fragment["w2_edge_id"], fragment["w2_geometry_pdf_pts"]
+                    ),
+                )[:16]
                 row["w2_graph_physical_wall_proven"] = False
             w2_counts = {
                 "w2_graph_edge_count": len(w2_graph.get("edges", ())),
