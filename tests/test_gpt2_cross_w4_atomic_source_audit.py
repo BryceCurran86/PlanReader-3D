@@ -94,3 +94,40 @@ def test_conflicting_or_malformed_other_wall_cannot_be_promoted():
     )
     assert duplicate["other_w4_source_fragments_diagnostic_only"] == []
     assert duplicate["other_w4_source_fragment_conflict_receipt_count"] >= 1
+
+
+def test_production_flat_w4_line_exact_owner_diagnostic_is_not_physical_proof():
+    # The actual W4 source fragment contract is (x1,y1,x2,y2).
+    own = Record(
+        wall_candidate_id="wall-A",
+        source_edge_fragments=(
+            source_fragment("w2-native-child", (0.0, 0.0, 10.0, 0.0)),
+        ),
+    )
+    row = first_gate(own)
+    assert row["source_first_unclosed_gate"] == (
+        "original_w2_fragment_observed_second_face_missing"
+    )
+    assert row["source_w2_fragment_candidates_diagnostic_only"][0][
+        "original_w2_edge_id"
+    ] == "w2-native-child"
+    assert row["source_second_face_owner_authenticated"] is False
+    assert row["source_room_geometry_or_area_published"] is False
+
+
+def test_flat_line_in_alternative_w4_never_transfers_original_owner():
+    own = Record(wall_candidate_id="wall-A", source_edge_fragments=())
+    other = Record(
+        wall_candidate_id="wall-B",
+        source_edge_fragments=(
+            source_fragment("w2-other", (0.0, 0.0, 10.0, 0.0)),
+        ),
+    )
+    row = first_gate(own, other)
+    assert row["source_first_unclosed_gate"] == (
+        "original_atomic_wall_subedge_w2_fragment_unavailable"
+    )
+    assert row["other_w4_source_fragments_diagnostic_only"][0][
+        "alternative_source_w2_edge_id"
+    ] == "w2-other"
+    assert row["other_w4_alternative_owner_granted"] is False
