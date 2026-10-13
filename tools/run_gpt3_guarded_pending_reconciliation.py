@@ -81,6 +81,11 @@ def build_guarded_exact_report(
     frozen_manifest = _object(canonical_manifest)
     if dict(source_manifest) != frozen_manifest:
         raise ValueError("guarded reconciliation manifest payload differs from frozen manifest")
+    canonical_universe = canonical_manifest.with_name("object_universe.json")
+    if dict(object_universe) != _object(canonical_universe):
+        raise ValueError(
+            "guarded reconciliation object universe differs from frozen universe"
+        )
 
     candidate_map, activation_receipt = build_activation(
         pending_ledger=pending_ledger,
