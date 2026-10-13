@@ -11,6 +11,7 @@ on:
       - "tests/test_gpt2_split_label_wall_separators.py"
       - "tools/diag_gpt2_split_face_collinear_first_gates.py"
       - "tools/diag_gpt2_grid_component_first_failure.py"
+      - "tests/test_gpt2_cross_w4_atomic_source_audit.py"
       - "tools/diag_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_split_face_collinear_first_gates.py"
@@ -23,6 +24,12 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Enforce exact source-test commit
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -40,6 +47,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_split_face_collinear_first_gates.py
           PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
           PYTHONPATH=. pytest -q tests/test_gpt2_freezer_source_crossing_wall_owners.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
         run: |
