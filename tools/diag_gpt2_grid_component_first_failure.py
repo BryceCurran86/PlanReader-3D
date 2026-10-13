@@ -853,6 +853,9 @@ def inspect_external_atomic_grid_w2_source_fragments(
             native_geom = _physical_w4_source_fragment_edge(
                 getattr(fragment, "geometry", None)
             )
+            if native_geom is None:
+                invalid_receipts = True
+                continue
             try:
                 contains = _edge_contains_edge(native_geom, atomic)
             except (TypeError, ValueError, OverflowError, IndexError):
@@ -928,6 +931,9 @@ def inspect_external_atomic_grid_w2_source_fragments(
                 alt_geom = _physical_w4_source_fragment_edge(
                     getattr(fragment, "geometry", None)
                 )
+                if alt_geom is None:
+                    other_w4_ambiguity += 1
+                    continue
                 try:
                     complete = _edge_contains_edge(alt_geom, atomic)
                     overlap = (
