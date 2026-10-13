@@ -76,6 +76,9 @@ def test_source_positive_page_runs_only_its_own_floor_area_without_finish_or_cei
                  room_area_quantity_evidence=(), floor_area_quantity_evidence=())
 
     monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", collect)
+    # This test isolates page-scope handoff control. The real floor publisher
+    # correctly requires a sealed LivePhysicalNetWallClaim, not this fake.
+    monkeypatch.setattr(handoff, "publish_live_floor_area_quantities", lambda _: ())
     destination = tmp_path / "scoped-output"
     result = handoff._generate_project_handoff_locked(
         pdf_path=source, project_id="test_project", workspace_id=1,
