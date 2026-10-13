@@ -750,6 +750,25 @@ def inspect_original_w4_grid_opposition_first_gate(
     return output
 
 
+
+def _physical_w4_source_fragment_edge(raw: Any):
+    """Decode the producer's 4-coordinate Line into an exact source Edge.
+
+    PhysicalWallSourceEdgeFragment.geometry is (x1, y1, x2, y2);
+    source-room face edges are ((x1, y1), (x2, y2)). Both must be
+    explicitly validated before calling _edge_contains_edge. This is
+    read-only translation of recorded source coordinates, never snapping,
+    joining, wall ownership, or geometry repair.
+    """
+    if not isinstance(raw, (tuple, list)):
+        return None
+    if len(raw) == 4:
+        return _edge_key(((raw[0], raw[1]), (raw[2], raw[3])))
+    if len(raw) == 2:
+        return _edge_key(raw)
+    return None
+
+
 def inspect_external_atomic_grid_w2_source_fragments(
     wall_scope: PhysicalWallCandidateScopeResult,
     physical_union_first_gate: Mapping[str, Any],
@@ -831,7 +850,9 @@ def inspect_external_atomic_grid_w2_source_fragments(
             ):
                 invalid_receipts = True
                 continue
-            native_geom = getattr(fragment, "geometry", None)
+            native_geom = _physical_w4_source_fragment_edge(
+                getattr(fragment, "geometry", None)
+            )
             try:
                 contains = _edge_contains_edge(native_geom, atomic)
             except (TypeError, ValueError, OverflowError, IndexError):
@@ -904,7 +925,9 @@ def inspect_external_atomic_grid_w2_source_fragments(
                 ):
                     other_w4_ambiguity += 1
                     continue
-                alt_geom = getattr(fragment, "geometry", None)
+                alt_geom = _physical_w4_source_fragment_edge(
+                    getattr(fragment, "geometry", None)
+                )
                 try:
                     complete = _edge_contains_edge(alt_geom, atomic)
                     overlap = (
@@ -1013,7 +1036,9 @@ def inspect_native_source_parent_w4_ancestry(
             if not matched:
                 continue
             edge_id = getattr(fragment, "edge_id", None)
-            geometry = _edge_key(getattr(fragment, "geometry", None))
+            geometry = _physical_w4_source_fragment_edge(
+                getattr(fragment, "geometry", None)
+            )
             good = (
                 valid_wall_id
                 and type(edge_id) is str and bool(edge_id)
