@@ -292,7 +292,16 @@ def _generate_project_handoff_locked(
         )):
             raise RuntimeError("source_positive_floor_plan_page_required")
         topology_pages = (source_plan_page_index,)
-        room_area_support_pages = ()
+        # Retain ONLY support pages already authenticated by original-source
+        # classification. These may carry cross-view figured dimensions but
+        # never become topology or physical-room geometry owners.
+        if clean_family_group == "core":
+            room_area_support_pages = ()
+        else:
+            room_area_support_pages = tuple(
+                page for page in room_area_support_pages
+                if page != source_plan_page_index
+            )
     topology_restricted = source_plan_page_index is not None or (
         bool(topology_pages) and tuple(topology_pages) != tuple(all_pages)
     )
@@ -303,11 +312,22 @@ def _generate_project_handoff_locked(
     )
 
     if topology_restricted:
-        if clean_family_group in {"core", "floor_area"}:
-            # Bounded floor-area is topology-only: no inferred finish/ceiling.
+        if clean_family_group == "core":
+            # Opening-only local source evidence: no room/support inference.
             claim_execution_pages = tuple(topology_pages)
             semantic_execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
+        elif clean_family_group == "floor_area":
+            # The authenticated floor plan alone owns walls/room faces.
+            # Certified dimension support pages may contribute source words,
+            # never unrelated topology or unproved material finish scope.
+            claim_execution_pages = tuple(sorted(
+                set(topology_pages) | set(room_area_support_pages)
+            ))
+            semantic_execution_pages = tuple(topology_pages)
+            execution_room_support_pages = (
+                tuple(room_area_support_pages) if room_area_support_pages else None
+            )
         elif clean_family_group == "surfaces":
             # Surface geometry and room measurement only need positively
             # classified topology plus plan-like room-area support pages.
