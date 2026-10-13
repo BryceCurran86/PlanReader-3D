@@ -40,6 +40,78 @@ def _internal_grid_source_evidence_present(internal, by_wall) -> bool:
     )
 
 
+
+def inspect_non_simple_original_face_ring(record: Any) -> dict[str, Any]:
+    """Original producer-owned invalid ring proof, never geometry correction.
+
+    Inspect how the EXISTING exact-retrace publication helper would describe
+    the ring. This evidence cannot substitute corrected physical source walls
+    or override source-room-face publication/metric gates.
+    """
+    from pb_source_room_face_authority import _publication_polygon, _polygon_area
+    raw = getattr(record, "polygon_pdf_pts", ()) or ()
+    result = {
+        "source_face_id": getattr(record, "face_id", None),
+        "original_source_face_record_id": getattr(record, "record_id", None),
+        "original_ring_vertex_count": len(raw),
+        "original_vertex_receipts_truncated": len(raw) > 96,
+        "original_ring_vertices_pdf_pts": [],
+        "source_w4_boundary_edge_receipt_count": 0,
+        "source_w4_boundary_receipts_truncated": False,
+        "source_w4_boundary_edges_candidate_only": [],
+        "exact_backtrack_cleanup_changed_original_ring": None,
+        "exact_backtrack_cleanup_yields_simple_polygon": False,
+        "exact_backtrack_cleanup_preserves_original_area": False,
+        "authentic_physical_room_polygon_published": False,
+        "source_face_identity_or_wall_equivalence_rewritten": False,
+    }
+    try:
+        points = tuple((float(p[0]), float(p[1])) for p in raw)
+        if (len(points) < 3 or
+                not all(math.isfinite(value) for pt in points for value in pt)):
+            return result
+        result["original_ring_vertices_pdf_pts"] = [
+            list(p) for p in points[:96]
+        ]
+        normalized = _publication_polygon(points)
+        result["exact_backtrack_cleanup_changed_original_ring"] = (
+            normalized != points
+        )
+        if len(normalized) >= 3:
+            candidate = Polygon(normalized)
+            result["exact_backtrack_cleanup_yields_simple_polygon"] = (
+                not candidate.is_empty and candidate.is_valid
+                and candidate.area > 0
+            )
+            original_area = float(getattr(record, "area_page_pts2", float("nan")))
+            result["exact_backtrack_cleanup_preserves_original_area"] = (
+                math.isfinite(original_area)
+                and math.isclose(_polygon_area(normalized), original_area,
+                                 rel_tol=1e-12, abs_tol=1e-6)
+            )
+    except (ValueError, TypeError, OverflowError, IndexError):
+        return result
+    edges = tuple(getattr(record, "boundary_wall_edges", ()) or ())
+    result["source_w4_boundary_edge_receipt_count"] = len(edges)
+    result["source_w4_boundary_receipts_truncated"] = len(edges) > 96
+    for value in edges[:96]:
+        if not isinstance(value, (tuple, list)) or len(value) != 2:
+            continue
+        wall_id, raw_edge = value
+        edge = _edge_key(raw_edge)
+        if (
+            type(wall_id) is not str or not wall_id
+            or wall_id != wall_id.strip() or edge is None
+        ):
+            continue
+        result["source_w4_boundary_edges_candidate_only"].append({
+            "source_w4_wall_candidate_id": wall_id,
+            "original_edge_pdf_pts": [list(pt) for pt in edge],
+            "physical_wall_role_or_equivalence_proven": False,
+        })
+    return result
+
+
 def _physical_union_first_unclosed_gate(
     component: tuple[str, ...],
     *,
@@ -116,6 +188,9 @@ def _physical_union_first_unclosed_gate(
                         "source_polygon_empty_or_nonpositive_area"
                     ),
                     "physical_room_polygon_published": False,
+                    "original_non_simple_ring_source_receipt": (
+                        inspect_non_simple_original_face_ring(records[face_id])
+                    ),
                 }
                 for face_id, poly in invalid_faces[:16]
             ]
