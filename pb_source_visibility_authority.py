@@ -1967,20 +1967,25 @@ class SourceVisibilityProducer:
                 if image_parent != full_parent or image_frame != full_frame:
                     raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: raster render frames differ")
                 if int(image_frame.rotation) == 0:
+                    # Source nomination is limited to producer-proven G17 flank
+                    # boxes. Pass those boxes into the unchanged-paint detector
+                    # so a fully unchanged short flank can be retained without
+                    # changing the ordinary 4pt raster minimum.
+                    flank_boxes = self._proven_raster_opening_flank_boxes(
+                        published, page_id
+                    )
                     supplemental = detect_unchanged_terminal_band_segments(
                         image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
                         registration_scale=(self.raster_opening_registration_scale(
                             published.revision.revision_id, page_id) or (1.0, 1.0)),
+                        proven_flank_boxes=flank_boxes,
                     )
                     supplemental = tuple(s for s in supplemental
                         if _axis_aligned_geometry_fully_covered_by_rect_union(s.geometry_pt, image_regions)
                         and not band_segment_already_observed(s, segments,
                             dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI, ordinary_dpi=RASTER_RENDER_DPI))
-                    # Source nomination is limited to the complete independently
-                    # proven raster-opening support inventory. Unrelated raster
-                    # table/furniture bands must not perturb the ordinary W4
-                    # graph simply because they contain solid paint.
-                    flank_boxes = self._proven_raster_opening_flank_boxes(published, page_id)
+                    # Unrelated raster table/furniture bands cannot perturb the
+                    # supplemental W4 graph merely because they contain paint.
                     supplemental = tuple(s for s in supplemental
                         if any(_unchanged_segment_inside_flank(s, box,
                             dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
@@ -2193,15 +2198,19 @@ class SourceVisibilityProducer:
         from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
         labels = OpeningLabelDimensionProducer.from_source_visibility_producer(self)
         for opening in openings.values():
-            # This recovery path addresses individually measurable source
-            # objects. A complete independently authenticated dimension
-            # product nominates capture; its numeric value never determines
-            # geometry, role, host choice or any detector threshold.
+            # Capture nomination needs authentic opening ownership, not a
+            # commercial area. A producer-authenticated single width (for
+            # example an 870 door label) may nominate exact source flank paint
+            # while remaining wholly insufficient for height/area/quantity.
+            # Numeric values never choose geometry, role, host or thresholds.
             results = tuple(labels.publish_scope(selectors[oid])
                 for oid in opening.source_observation_ids if oid in selectors)
-            if not any(r.status is EvidenceResolutionStatus.CORROBORATED
-                       and r.evidence is not None and r.evidence.area_m2 is not None
-                       for r in results):
+            if not any(
+                r.status is EvidenceResolutionStatus.CORROBORATED
+                and r.evidence is not None
+                and bool(r.evidence.dimension_values_mm)
+                for r in results
+            ):
                 continue
             faces = [by_id[oid].geometry for oid in opening.source_observation_ids
                      if by_id[oid].observation_kind == RASTER_WALL_BAND_FACE]
