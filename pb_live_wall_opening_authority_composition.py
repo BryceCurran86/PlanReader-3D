@@ -199,8 +199,7 @@ def compose_live_wall_opening_authority(
         page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
     )
     supplemental_wall_producer = (
-        PhysicalWallCandidateProducer.
-        from_opening_local_supplemental_source_visibility_producer(
+        PhysicalWallCandidateProducer.from_opening_local_supplemental_source_visibility_producer(
             source_visibility_producer,
             page_ids=_clean_page_ids((*selected_pages, *evidence_pages)),
         )
