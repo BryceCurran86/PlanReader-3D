@@ -5,6 +5,8 @@ on:
       - pb_physical_opening_authority.py
       - tools/diag_gptmax_source_authority_stages.py
       - tests/test_opening_candidate_source_group_witness.py
+      - tests/test_gptmax_raw_source_group_retention.py
+      - tools/verify_gptmax_raw_source_group_retention.py
       - .github/workflows/test-gptmax-original-candidate-membership.yml
 permissions:
   contents: read
@@ -30,6 +32,7 @@ jobs:
       - name: Positive and adverse per-raw-candidate source membership
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_opening_candidate_source_group_witness.py \
+            tests/test_gptmax_raw_source_group_retention.py \
             tests/test_gptmax_source_first_failure_ledger.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
@@ -89,6 +92,7 @@ jobs:
                   union={i for row in rows for i in row['source_observation_ids']}
                   assert union <= set(closure['unresolved_observation_ids'])
                   assert all(r['candidate_status']=='unresolved_source_only' for r in rows)
+                  assert all(isinstance(r['structural_pattern'],str) and r['structural_pattern'] for r in rows)
                   assert all(r['source_observation_ids'] for r in rows)
                   assert all((r['aperture_bbox_pt'] is None)==(family=='native') for r in rows)
                   assert not closure['candidate_universe_complete'], "fixture unexpectedly claims complete source universe"
@@ -97,6 +101,8 @@ jobs:
           assert current['summary']['authenticated_hosts']==14
           assert current['summary']['resolved_source_frames']==9
           assert current['summary']['physical_existence_claims']==21
+          assert 'quantities' not in current
+          assert 'quantities' not in grouped
           print({"original_source_unchanged":True,
                  "native_raw_candidate_source_groups":125,
                  "raster_raw_candidate_source_groups":9,
