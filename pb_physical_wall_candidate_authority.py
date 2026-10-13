@@ -979,6 +979,18 @@ def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> boo
     return f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in source_id
 
 
+def _is_opening_local_supplemental_observation(observation: object) -> bool:
+    """Identify only producer-owned unchanged-terminal visible observations.
+
+    Canonical page/viewport wall reconstruction must exclude these records
+    before cache keys and W2 source ordering are constructed.  The dedicated
+    opening-local supplemental scope is the only consumer allowed to include
+    them.
+    """
+    source_ref = str(getattr(observation, "source_primitive_ref", "") or "")
+    return f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in source_ref
+
+
 def _partition_opening_local_supplemental_segments(
     segments: Sequence[Mapping[str, object]],
 ) -> tuple[list[dict], list[dict]]:
@@ -1090,6 +1102,7 @@ def _source_page_segments(
     decision_scope_id: str,
     resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
     resolved_text_receipts: Optional[Sequence[object]] = None,
+    include_opening_local_supplemental: bool = True,
 ) -> tuple[list[dict], tuple[str, ...], float, float]:
     """Rebuild W2 inputs from exact bytes and exact receipted visible membership.
 
@@ -1099,10 +1112,24 @@ def _source_page_segments(
     continuation is unknown -- it may simply be cropped by this sheet).
     """
 
-    observation_cache_key = (
+    if type(include_opening_local_supplemental) is not bool:
+        raise ValueError("include_opening_local_supplemental must be boolean")
+    effective_resolved_visible_observations = (
         None
         if resolved_visible_observations is None
-        else tuple(str(row[0]) for row in resolved_visible_observations)
+        else tuple(
+            row
+            for row in resolved_visible_observations
+            if (
+                include_opening_local_supplemental
+                or not _is_opening_local_supplemental_observation(row[1])
+            )
+        )
+    )
+    observation_cache_key = (
+        None
+        if effective_resolved_visible_observations is None
+        else tuple(str(row[0]) for row in effective_resolved_visible_observations)
     )
     page_cache_key = (
         str(published.revision.document_id),
@@ -1129,7 +1156,7 @@ def _source_page_segments(
     raster_visible: list[tuple[str, str, tuple[float, ...]]] = []
     page_visible_ids: list[str] = []
 
-    if resolved_visible_observations is None:
+    if effective_resolved_visible_observations is None:
         page_rows: list[tuple[str, object]] = []
         for observation_id in published.visible_observation_ids:
             result = visibility.resolve_visible(
@@ -1147,10 +1174,16 @@ def _source_page_segments(
                 or observation is None
             ):
                 raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
-            if observation.page_id == page_id:
+            if (
+                observation.page_id == page_id
+                and (
+                    include_opening_local_supplemental
+                    or not _is_opening_local_supplemental_observation(observation)
+                )
+            ):
                 page_rows.append((observation_id, observation))
     else:
-        page_rows = list(resolved_visible_observations)
+        page_rows = list(effective_resolved_visible_observations)
 
     for observation_id, observation in page_rows:
         if str(observation.page_id) != str(page_id):
@@ -3330,6 +3363,7 @@ def _build_scope_result(
             decision_scope_id=scope_id,
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
+            include_opening_local_supplemental=False,
         )
         segments, _supplemental = _partition_opening_local_supplemental_segments(segments)
         source_observation_ids = _segment_source_observation_ids(segments)
@@ -3402,6 +3436,7 @@ def _build_opening_local_supplemental_scope_result(
             decision_scope_id=scope_id,
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
+            include_opening_local_supplemental=True,
         )
     except WallPageFrameUnresolved:
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED)
@@ -3479,6 +3514,7 @@ def _build_authenticated_viewport_scope_results(
             decision_scope_id=page_scope_id,
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
+            include_opening_local_supplemental=False,
         )
     except WallPageFrameUnresolved:
         return ()
