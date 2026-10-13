@@ -73,11 +73,17 @@ jobs:
               assert len(run.quantities)==amount
               assert len({q.quantity_id for q in run.quantities})==amount
               assert all(q.family in ("opening_area","opening_count") and not q.abstained for q in run.quantities)
+              assert s["customer_rows_verified"] is True
+              assert s["verified_customer_row_count"]==amount
+              from pb_customer_output_verification import verify_sealed_customer_output
+              rows=json.loads(Path(s["customer_rows_file"]).read_text())
+              assert verify_sealed_customer_output(run,rows).customer_row_count==amount
           else:
               assert s["status"]=="no_sealable_quantities" and s["combined_run_file"] is None
+              assert s["customer_rows_verified"] is False
           print(json.dumps({"original_source_sha":sha,
                             "signed_source_opening_quantities":amount,
-                            "customer_rows_verified":False,
+                            "customer_rows_verified":bool(s["customer_rows_verified"]),
                             "frozen_identity_matches":None},sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
