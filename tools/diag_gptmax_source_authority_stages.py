@@ -80,7 +80,8 @@ def _opening_identity_text_receipts(source, published, label_traces) -> list[dic
 
 def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
                         source_all_pages: bool = False,
-                        include_identity_text_receipts: bool = False) -> dict:
+                        include_identity_text_receipts: bool = False,
+                        include_shadow_room_face_source_polygons: bool = False) -> dict:
     sha = hashlib.sha256(source_bytes).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -147,6 +148,7 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
                                       "result": asdict(label_semantics.publish_scope(selector))})
     room_authority = build_source_room_face_authority(composition.physical_wall_candidate_authority)
     room_scopes = []
+    shadow_room_polygons = []
     wall_scopes = []
     for scope in composition.physical_wall_candidate_authority._scopes.values():
         if str(scope.page_id) not in page_ids:
@@ -159,8 +161,21 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
             source_sha256=scope.source_sha256, snapshot_id=scope.snapshot_id,
             page_id=scope.page_id, decision_scope_id=scope.decision_scope_id,
         )
+        result = room_authority.resolve_scope(selector)
         room_scopes.append({"selector": asdict(selector),
-                            "result": asdict(room_authority.resolve_scope(selector))})
+                            "result": asdict(result)})
+        if include_shadow_room_face_source_polygons:
+            # Reauthenticate the same original W4 source-owned polygons even
+            # when shadow-only face IDs have not reached live room publication.
+            # This is NOT a new room/area/quantity/opening-count authority.
+            from tools.verify_gptmax_room_face_shadow_rekeys import (
+                owned_shadow_face_polygon_witness,
+            )
+            shadow_room_polygons.append({
+                "page_id": str(scope.page_id),
+                "decision_scope_id": str(scope.decision_scope_id),
+                "faces": owned_shadow_face_polygon_witness(scope, result),
+            })
     report = {
         "source_sha256": sha,
         "revision_id": published.revision.revision_id,
@@ -216,6 +231,8 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
         report["opening_identity_text_receipts"] = _opening_identity_text_receipts(
             source, published, label_dimension_traces,
         )
+    if include_shadow_room_face_source_polygons:
+        report["shadow_owned_face_source_polygons"] = shadow_room_polygons
     return report
 
 
@@ -225,12 +242,14 @@ def main() -> None:
     parser.add_argument("--page-id", action="append", required=True)
     parser.add_argument("--source-all-pages", action="store_true")
     parser.add_argument("--include-identity-text-receipts", action="store_true")
+    parser.add_argument("--include-shadow-room-face-source-polygons", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = source_stage_report(args.pdf.read_bytes(),
         page_ids=tuple(sorted(set(args.page_id), key=int)),
         source_all_pages=args.source_all_pages,
-        include_identity_text_receipts=args.include_identity_text_receipts)
+        include_identity_text_receipts=args.include_identity_text_receipts,
+        include_shadow_room_face_source_polygons=args.include_shadow_room_face_source_polygons)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True,
                                       default=lambda value: value.value) + "\n")
     print(json.dumps({"source_sha256": report["source_sha256"], **report["summary"]}))
