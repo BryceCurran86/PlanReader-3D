@@ -1217,16 +1217,71 @@ def test_rich_event_is_approved_and_names_nothing_unverified():
     assert approval["rekeyed_host_ids"] == sorted([A, B])
 
 
-def test_blind_keys_are_reported_not_hidden():
+def test_composition_reason_codes_are_verified_not_blind():
     base, cand = rich_event()
-    base["composition_reason_codes"] = ["a", "b"]
-    cand["composition_reason_codes"] = ["a", "c"]
+    base["composition_reason_codes"] = sorted(
+        set(UNMAPPED_LEFT + ["opening_host_frame_host_unavailable", "stable_reason"])
+    )
+    target = next(row for row in cand["opening_bindings"] if row["opening_identity_id"] == T)
+    target["reason_codes"] = [
+        "opening_host_binding_resolved",
+        "opening_local_supplemental_source_band_host_resolved",
+    ]
+    cand["composition_reason_codes"] = sorted(
+        {
+            "opening_host_binding_resolved",
+            "opening_local_supplemental_source_band_host_resolved",
+            "opening_host_frame_host_unavailable",
+            "stable_reason",
+        }
+    )
     with pytest.raises(ValueError, match="undeclared report keys changed: composition_reason_codes"):
         approve_declared_additive_rekeys(base, cand, rich_declared())
     approval = approve_declared_additive_rekeys(
-        base, cand, rich_declared(expected_changed_report_keys=RICH_KEYS + ["composition_reason_codes"])
+        base, cand, rich_declared(
+            expected_changed_report_keys=RICH_KEYS + ["composition_reason_codes"]
+        )
     )
-    assert approval["unverified_changed_report_keys"] == ["composition_reason_codes"]
+    assert approval["unverified_changed_report_keys"] == []
+
+
+@pytest.mark.parametrize("mode", ["rogue_added", "unrelated_removed", "still_live_removed"])
+def test_composition_reason_codes_refuse_unverified_global_semantic_change(mode):
+    base, cand = rich_event()
+    base["composition_reason_codes"] = sorted(
+        set(UNMAPPED_LEFT + ["opening_host_frame_host_unavailable", "stable_reason"])
+    )
+    target = next(row for row in cand["opening_bindings"] if row["opening_identity_id"] == T)
+    target["reason_codes"] = [
+        "opening_host_binding_resolved",
+        "opening_local_supplemental_source_band_host_resolved",
+    ]
+    cand["composition_reason_codes"] = sorted(
+        {
+            "opening_host_binding_resolved",
+            "opening_local_supplemental_source_band_host_resolved",
+            "opening_host_frame_host_unavailable",
+            "stable_reason",
+        }
+    )
+    if mode == "rogue_added":
+        cand["composition_reason_codes"].append("unrelated_global_reason")
+    elif mode == "unrelated_removed":
+        cand["composition_reason_codes"].remove("stable_reason")
+    else:
+        # U still carries this reason, so aggregate removal is impossible.
+        cand["composition_reason_codes"] = [
+            code for code in cand["composition_reason_codes"]
+            if code != "opening_host_frame_host_unavailable"
+        ]
+    with pytest.raises(ValueError, match="composition reason"):
+        approve_declared_additive_rekeys(
+            base,
+            cand,
+            rich_declared(
+                expected_changed_report_keys=RICH_KEYS + ["composition_reason_codes"]
+            ),
+        )
 
 
 @pytest.mark.parametrize("damage", [
