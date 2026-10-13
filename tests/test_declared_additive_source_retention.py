@@ -177,6 +177,7 @@ def declaration_raw(**overrides):
             "snapshot_id", "opening_bindings", "host_frames",
             "resolved_host_frame_evidence", "source_owned_wall_scope_results",
         ],
+        "allow_snapshot_receipt_rekey": True,
         "tracking_issue": 2608,
     }
     raw.update(overrides)
@@ -500,6 +501,8 @@ def test_tolerance_is_limited_to_receipt_addresses_of_declared_rows():
         {"expected_new_host_ids": [3]},
         {"report_shape": "other"},
         {"report_shape": None},
+        {"allow_snapshot_receipt_rekey": "yes"},
+        {"allow_snapshot_receipt_rekey": 1},
         {"expected_new_frame_host_ids": [U]},
         {"expected_new_frame_host_ids": [T, T]},
         {"expected_new_frame_host_ids": "none"},
@@ -915,3 +918,36 @@ def test_resealed_prior_rows_that_changed_anything_else_are_refused(damage):
         row["trace_evidence_ids"] = sorted(i if i != "source_observation_1" else "source_observation_9" for i in row["trace_evidence_ids"])
     with pytest.raises(ValueError):
         check(old, new)
+
+
+# --------------------------------------------------------------------------
+# Receipt rekey is a separate, explicit decision (default: exact retention)
+# --------------------------------------------------------------------------
+
+def test_rekeyed_receipts_are_refused_unless_the_declaration_explicitly_allows_them():
+    base, cand = event()
+    with pytest.raises(ValueError, match="allow_snapshot_receipt_rekey"):
+        approve_declared_additive_rekeys(base, cand, declared(allow_snapshot_receipt_rekey=False))
+    with pytest.raises(ValueError):
+        compare_source_face_reports(base, cand, declarations=declared(allow_snapshot_receipt_rekey=False))
+    ok = approve_declared_additive_rekeys(base, cand, declared())
+    assert ok["snapshot_receipt_rekey_allowed"] is True
+
+
+def test_exact_retention_event_needs_no_rekey_permission():
+    # Same snapshot, same receipts for every prior host/frame; only the declared
+    # host is new.  This is the strict stance: nothing previously authenticated moves.
+    base = report(BASE_SNAP)
+    cand = report(BASE_SNAP, t_hosted=True, u_reasons=UNMAPPED_RIGHT)
+    strict = declared(candidate_snapshot_id=BASE_SNAP, allow_snapshot_receipt_rekey=False)
+    approval = approve_declared_additive_rekeys(base, cand, strict)
+    assert approval["rekeyed_host_ids"] == []
+    assert approval["exact_retained_host_ids"] == sorted([A, B])
+    assert approval["snapshot_receipt_rekey_allowed"] is False
+    assert compare_source_face_reports(base, cand, declarations=strict)["retention_pass"] is True
+    assert compare_opposed_source_reports(base, cand, source_bytes=PDF_BYTES, declarations=strict)["retention_pass"]
+    # ...and a single moved prior receipt breaks exactness even in that event.
+    moved = deepcopy(cand)
+    next(r for r in moved["opening_bindings"] if r["opening_identity_id"] == A)["record_id"] = "moved"
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(base, moved, strict)

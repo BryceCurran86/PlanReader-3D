@@ -66,6 +66,7 @@ _DECLARATION_KEYS = frozenset(
         "expected_new_frame_host_ids",
         "expected_unhosted_reason_changes",
         "expected_changed_report_keys",
+        "allow_snapshot_receipt_rekey",
         "tracking_issue",
     }
 )
@@ -101,6 +102,7 @@ class Declaration:
     expected_new_frame_host_ids: tuple[str, ...]
     expected_unhosted_reason_changes: tuple[ReasonChange, ...]
     expected_changed_report_keys: tuple[str, ...]
+    allow_snapshot_receipt_rekey: bool
     tracking_issue: int
 
 
@@ -155,6 +157,9 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
     keys = _unique_texts(raw["expected_changed_report_keys"], "expected_changed_report_keys")
     if "snapshot_id" not in keys:
         raise ValueError("a snapshot-changing event must declare snapshot_id among its changed report keys")
+    rekey = raw["allow_snapshot_receipt_rekey"]
+    if type(rekey) is not bool:
+        raise ValueError("declaration allow_snapshot_receipt_rekey must be a boolean")
     issue = raw["tracking_issue"]
     if type(issue) is not int or issue <= 0:
         raise ValueError("declaration tracking_issue must be a positive integer")
@@ -167,6 +172,7 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
         expected_new_frame_host_ids=frames,
         expected_unhosted_reason_changes=tuple(changes),
         expected_changed_report_keys=keys,
+        allow_snapshot_receipt_rekey=rekey,
         tracking_issue=issue,
     )
 
@@ -369,6 +375,20 @@ def approve_declared_additive_rekeys(
             + ", ".join(refused)
         )
 
+    rekeyed_rows = [
+        row["physical_opening_id"]
+        for row in rows
+        if row["source_comparison_status"] == "UNCHANGED_W4_AND_FRAME_SOURCE_WITH_RECEIPT_REKEY"
+    ]
+    if rekeyed_rows and not declaration.allow_snapshot_receipt_rekey:
+        # Default stance: previously authenticated receipts must be retained
+        # exactly.  Accepting a rekey of snapshot-scoped receipts is a separate,
+        # explicit decision that the declaration has to make.
+        raise ValueError(
+            "declared additive retention refused: prior receipts were rekeyed but the declaration does not "
+            "allow_snapshot_receipt_rekey: " + ", ".join(sorted(rekeyed_rows)[:5])
+        )
+
     old = _index(base.get("opening_bindings"), "baseline opening_bindings")
     new = _index(cand.get("opening_bindings"), "candidate opening_bindings")
     if set(old) != set(new):
@@ -503,6 +523,7 @@ def approve_declared_additive_rekeys(
         "declaration_applied": True,
         "tracking_issue": declaration.tracking_issue,
         "report_shape": declaration.report_shape,
+        "snapshot_receipt_rekey_allowed": declaration.allow_snapshot_receipt_rekey,
         "frame_geometry_verified": ledger["frame_geometry_verified"],
         "source_sha256": declaration.source_sha256,
         "baseline_snapshot_id": declaration.baseline_snapshot_id,
