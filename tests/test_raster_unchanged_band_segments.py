@@ -132,9 +132,11 @@ def test_actual_source_capture_closes_host_and_figured_area_without_default_coun
     from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
     from pb_live_opening_area_quantity_publication import publish_live_opening_area_quantities
 
+    source_bytes = _pdf()
+
     def collect():
         source = SourceVisibilityProducer(producer_method='terminal-test', producer_version='1')
-        published = source.ingest_native_pdf_bytes(document_id='terminal-test', source_bytes=_pdf(),
+        published = source.ingest_native_pdf_bytes(document_id='terminal-test', source_bytes=source_bytes,
                                                   source_locator='memory://terminal-test.pdf')
         composition = compose_live_wall_opening_authority(source_visibility_producer=source,
             revision_id=published.revision.revision_id, page_ids=('1',))
