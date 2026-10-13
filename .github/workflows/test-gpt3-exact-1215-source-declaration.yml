@@ -102,7 +102,10 @@ jobs:
           assert approval["baseline_snapshot_id"]=="source_snapshot_7c0d199651fda42b90c25182b4755b88"
           assert approval["candidate_snapshot_id"]=="source_snapshot_3fcb6bc5c44b51d930e9600080501d27"
           assert approval["source_sha256"]=="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
-          assert approval["w4_wall_delta"]["lost_w4_ids"]==[]
+          delta=approval["w4_wall_delta"]
+          assert delta["lost_with_covering_successor"]==0
+          assert delta["gained_from_new_source"]==0
+          assert delta["retained"]>0
           assert declared_event_approved(
               baseline,candidate,declarations,explain=False
           ) is True
