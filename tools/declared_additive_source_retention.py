@@ -300,19 +300,80 @@ def _wall_physical_key(record: Mapping[str, Any]) -> tuple[str, frozenset[str], 
         raise ValueError("declared additive retention refused: malformed W4 wall record") from exc
 
 
+# Source geometry is compared in PDF points.  Tolerance is far below the shortest
+# real terminal fragment that additive source has been seen to destroy (0.12 pt).
+COVERAGE_TOLERANCE_PT = 1e-3
+
+
+def _fragment_segments(record: Mapping[str, Any]) -> list[tuple[float, float, float, float]]:
+    try:
+        segments = [
+            tuple(float(v) for v in fragment["geometry"])
+            for fragment in record["source_edge_fragments"]
+        ]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("declared additive retention refused: malformed W4 source fragments") from exc
+    if not segments or any(len(segment) != 4 for segment in segments):
+        raise ValueError("declared additive retention refused: malformed W4 source fragments")
+    return segments
+
+
+def _segment_covered(
+    segment: tuple[float, float, float, float],
+    others: Sequence[tuple[float, float, float, float]],
+) -> bool:
+    """True when ``segment`` lies entirely on the union of collinear ``others``."""
+    import math
+
+    x1, y1, x2, y2 = segment
+    length = math.hypot(x2 - x1, y2 - y1)
+    if length <= COVERAGE_TOLERANCE_PT:
+        return False  # a degenerate source fragment proves nothing
+    ux, uy = (x2 - x1) / length, (y2 - y1) / length
+    intervals: list[tuple[float, float]] = []
+    for a1, b1, a2, b2 in others:
+        off1 = abs((a1 - x1) * uy - (b1 - y1) * ux)
+        off2 = abs((a2 - x1) * uy - (b2 - y1) * ux)
+        if off1 > COVERAGE_TOLERANCE_PT or off2 > COVERAGE_TOLERANCE_PT:
+            continue  # not on the same physical line
+        t1 = (a1 - x1) * ux + (b1 - y1) * uy
+        t2 = (a2 - x1) * ux + (b2 - y1) * uy
+        low, high = min(t1, t2), max(t1, t2)
+        if high < -COVERAGE_TOLERANCE_PT or low > length + COVERAGE_TOLERANCE_PT:
+            continue
+        intervals.append((max(low, 0.0), min(high, length)))
+    reached = 0.0
+    for low, high in sorted(intervals):
+        if low > reached + COVERAGE_TOLERANCE_PT:
+            return False
+        reached = max(reached, high)
+    return reached >= length - COVERAGE_TOLERANCE_PT
+
+
+def _covers(
+    successor: Mapping[str, Any], original: Mapping[str, Any]
+) -> bool:
+    """Every original source fragment lies on the successor's source fragments."""
+    successor_segments = _fragment_segments(successor)
+    return all(_segment_covered(seg, successor_segments) for seg in _fragment_segments(original))
+
+
 def w4_delta_explained_by_source_delta(
     baseline: Mapping[str, Any], candidate: Mapping[str, Any]
 ) -> dict[str, int]:
-    """Refuse W4 changes that the added source observations do not explain.
+    """Refuse W4 changes that conserve less than all original source geometry.
 
     * a wall id present in both keeps its candidate identity, source primitive
-      ancestry and physical path (it may gain an interior split node);
-    * every wall id that disappears has exactly one successor built from the
-      same source primitives (its terminal moved or it was re-addressed);
-    * every other new wall is built from at least one source primitive that no
-      baseline wall used, i.e. from genuinely new source.
-    Anything else -- a wall vanishing without a successor, an old-source-only
-    wall appearing, a retained id changing its physical path -- is refused.
+      ancestry and physical path, and its source fragments cover exactly the same
+      physical line (it may only gain an interior split node);
+    * every wall id that disappears has exactly one successor on the same source
+      primitives, and that successor's source fragments cover **every** original
+      source fragment, terminal endpoints included -- a successor that merely
+      shares primitive ids but lost a terminal tail (e.g. snap-collapsed at a new
+      crossing) is refused, as is any shifted endpoint or diagonal;
+    * every other new wall is built from at least one source primitive no baseline
+      wall used.
+    Ambiguity (several walls on the same primitives) is refused, never elected.
     """
     old, new = _wall_records(baseline), _wall_records(candidate)
     retained_changed = sorted(
@@ -325,25 +386,48 @@ def w4_delta_explained_by_source_delta(
             "declared additive retention refused: retained W4 wall changed identity, ancestry or path: "
             + ", ".join(retained_changed[:5])
         )
+    not_conserved = sorted(
+        wall_id
+        for wall_id in set(old) & set(new)
+        if not (_covers(new[wall_id], old[wall_id]) and _covers(old[wall_id], new[wall_id]))
+    )
+    if not_conserved:
+        raise ValueError(
+            "declared additive retention refused: retained W4 wall no longer covers exactly its original source geometry: "
+            + ", ".join(not_conserved[:5])
+        )
     lost = sorted(set(old) - set(new))
     gained = sorted(set(new) - set(old))
-    successors: dict[frozenset[str], list[str]] = {}
-    for wall_id in gained:
-        successors.setdefault(_wall_physical_key(new[wall_id])[1], []).append(wall_id)
+    by_ancestry_lost: dict[frozenset[str], list[str]] = {}
+    by_ancestry_gained: dict[frozenset[str], list[str]] = {}
     for wall_id in lost:
-        ancestry = _wall_physical_key(old[wall_id])[1]
-        if not successors.get(ancestry):
+        by_ancestry_lost.setdefault(_wall_physical_key(old[wall_id])[1], []).append(wall_id)
+    for wall_id in gained:
+        by_ancestry_gained.setdefault(_wall_physical_key(new[wall_id])[1], []).append(wall_id)
+    for ancestry, lost_ids in by_ancestry_lost.items():
+        successors = by_ancestry_gained.get(ancestry, [])
+        if not successors:
             raise ValueError(
                 "declared additive retention refused: W4 wall disappeared without a successor on its source primitives: "
-                + wall_id
+                + lost_ids[0]
             )
-        successors[ancestry].pop()
+        if len(lost_ids) != 1 or len(successors) != 1:
+            raise ValueError(
+                "declared additive retention refused: ambiguous W4 successors on the same source primitives: "
+                + ", ".join(sorted(lost_ids + successors)[:4])
+            )
+        if not _covers(new[successors[0]], old[lost_ids[0]]):
+            raise ValueError(
+                "declared additive retention refused: W4 successor does not cover the original source geometry "
+                f"(terminal or path lost): {lost_ids[0]} -> {successors[0]}"
+            )
     baseline_primitives = set().union(*(_wall_physical_key(r)[1] for r in old.values())) if old else set()
     unexplained = sorted(
         wall_id
-        for rows in successors.values()
+        for ancestry, rows in by_ancestry_gained.items()
+        if ancestry not in by_ancestry_lost
         for wall_id in rows
-        if not (_wall_physical_key(new[wall_id])[1] - baseline_primitives)
+        if not (ancestry - baseline_primitives)
     )
     if unexplained:
         raise ValueError(
@@ -352,7 +436,7 @@ def w4_delta_explained_by_source_delta(
         )
     return {
         "retained": len(set(old) & set(new)),
-        "lost_with_successor": len(lost),
+        "lost_with_covering_successor": len(lost),
         "gained_from_new_source": len(gained) - len(lost),
     }
 

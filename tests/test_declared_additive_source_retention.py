@@ -733,7 +733,7 @@ def _event_with_unhosted_wall():
 def test_w4_delta_counts_are_reported_for_the_declared_event():
     base, cand = _event_with_unhosted_wall()
     approval = approve_declared_additive_rekeys(base, cand, declared())
-    assert approval["w4_wall_delta"] == {"retained": 3, "lost_with_successor": 0, "gained_from_new_source": 1}
+    assert approval["w4_wall_delta"] == {"retained": 3, "lost_with_covering_successor": 0, "gained_from_new_source": 1}
 
 
 def test_unhosted_wall_may_gain_an_interior_split_node_without_changing_its_path():
@@ -749,19 +749,105 @@ def test_unhosted_wall_may_gain_an_interior_split_node_without_changing_its_path
     assert approve_declared_additive_rekeys(base, cand, declared())["declared_new_host_ids"] == [T]
 
 
-def test_unhosted_wall_whose_terminal_moved_needs_a_successor_on_the_same_primitives():
+def test_unhosted_wall_needs_a_successor_on_the_same_primitives_that_covers_it():
     base, cand = _event_with_unhosted_wall()
     cand["source_owned_wall_scope_results"][0]["records"] = [
         r for r in cand["source_owned_wall_scope_results"][0]["records"] if r["wall_candidate_id"] != "wall_extra"
     ]
     with pytest.raises(ValueError, match="disappeared without a successor"):
         approve_declared_additive_rekeys(base, cand, declared())
-    moved = _add_unhosted_wall(cand, "wall_extra_moved", 70.0, "raster_segment:source:1.0.0:extra")
-    moved["physical_identity"]["path_fingerprint"] = [[10.0, 70.0], [68.2, 70.0]]
-    moved["wall_candidate"]["centerline_pts"] = [[10.0, 70.0], [68.2, 70.0]]
-    moved["source_edge_fragments"][0]["geometry"] = [10.0, 70.0, 68.2, 70.0]
+    # A successor on the same primitives that covers the whole original (and more) is explained.
+    longer = _add_unhosted_wall(cand, "wall_extra_longer", 70.0, "raster_segment:source:1.0.0:extra")
+    _set_fragments(longer, [(10.0, 70.0, 75.0, 70.0)])
     approval = approve_declared_additive_rekeys(base, cand, declared())
-    assert approval["w4_wall_delta"]["lost_with_successor"] == 1
+    assert approval["w4_wall_delta"]["lost_with_covering_successor"] == 1
+
+
+def _set_fragments(record, segments):
+    record["source_edge_fragments"] = [
+        {"edge_id": f"split_{i}", "geometry": list(seg),
+         "source_primitive_ids": record["physical_identity"]["source_primitive_ids"]}
+        for i, seg in enumerate(segments)
+    ]
+    first, last = segments[0], segments[-1]
+    path = [[first[0], first[1]], [last[2], last[3]]]
+    record["physical_identity"]["path_fingerprint"] = path
+    record["wall_candidate"]["centerline_pts"] = path
+
+
+def _lost_wall_event(old_segments, new_segments, *, same_id=False):
+    """Baseline wall_extra with ``old_segments``; candidate successor with ``new_segments``."""
+    base, cand = event()
+    prim = "raster_segment:source:1.0.0:extra"
+    old_record = _add_unhosted_wall(base, "wall_extra", 70.0, prim)
+    _set_fragments(old_record, old_segments)
+    new_record = _add_unhosted_wall(cand, "wall_extra" if same_id else "wall_successor", 70.0, prim)
+    _set_fragments(new_record, new_segments)
+    if same_id:
+        new_record["physical_identity"]["path_fingerprint"] = old_record["physical_identity"]["path_fingerprint"]
+    return base, cand
+
+
+# Real original Lot16 page-3 geometry that additive source destroyed (GPT MAX review of #2611):
+RASTER_TAIL_OLD = [(682.25, 331.0, 682.25, 341.5), (682.25, 341.5, 682.25, 362.5),
+                   (682.25, 362.5, 682.25, 394.25), (682.25, 394.25, 682.25, 429.5)]
+RASTER_TAIL_NEW = [(682.25, 331.0, 682.25, 341.5), (682.25, 341.5, 682.25, 362.5),
+                   (682.25, 362.5, 682.25, 394.25), (682.25, 394.25, 682.25, 427.8)]
+
+
+def test_lost_one_point_seven_pt_original_terminal_tail_is_refused_even_on_the_same_primitives():
+    base, cand = _lost_wall_event(RASTER_TAIL_OLD, RASTER_TAIL_NEW)
+    with pytest.raises(ValueError, match="does not cover the original source geometry"):
+        approve_declared_additive_rekeys(base, cand, declared())
+    # ...and when it keeps the same id the retained wall no longer covers its original span.
+    base, cand = _lost_wall_event(RASTER_TAIL_OLD, RASTER_TAIL_NEW, same_id=True)
+    with pytest.raises(ValueError, match="no longer covers exactly its original source geometry"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+def test_shifted_native_diagonal_start_is_refused():
+    old = [(612.5999755859375, 427.67999267578125, 609.75, 434.65754927)]
+    new = [(612.55095872, 427.8, 609.75, 434.65754927)]  # start moved ~0.13 pt
+    base, cand = _lost_wall_event(old, new)
+    with pytest.raises(ValueError, match="does not cover the original source geometry"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+def test_endpoint_shift_of_one_hundredth_of_a_point_is_refused():
+    base, cand = _lost_wall_event([(10.0, 70.0, 70.0, 70.0)], [(10.0, 70.0, 69.99, 70.0)])
+    with pytest.raises(ValueError, match="does not cover"):
+        approve_declared_additive_rekeys(base, cand, declared())
+    base, cand = _lost_wall_event([(10.0, 70.0, 70.0, 70.0)], [(10.0, 70.0, 70.0, 70.0004)])  # below tolerance
+    assert approve_declared_additive_rekeys(base, cand, declared())["w4_wall_delta"]["lost_with_covering_successor"] == 1
+
+
+def test_retained_wall_may_gain_an_interior_split_but_not_lose_or_gain_extent():
+    base, cand = _lost_wall_event([(585.5, 392.0, 585.5, 463.5)],
+                                  [(585.5, 392.0, 585.5, 427.8), (585.5, 427.8, 585.5, 463.5)], same_id=True)
+    assert approve_declared_additive_rekeys(base, cand, declared())["w4_wall_delta"]["retained"] == 3
+    base, cand = _lost_wall_event([(585.5, 392.0, 585.5, 463.5)], [(585.5, 392.0, 585.5, 470.0)], same_id=True)
+    with pytest.raises(ValueError, match="no longer covers exactly"):  # grew: the original was not that long
+        approve_declared_additive_rekeys(base, cand, declared())
+    base, cand = _lost_wall_event([(585.5, 392.0, 585.5, 463.5)],
+                                  [(585.5, 392.0, 585.5, 420.0), (585.5, 430.0, 585.5, 463.5)], same_id=True)
+    with pytest.raises(ValueError, match="no longer covers exactly"):  # a hole
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+def test_fragments_on_a_parallel_line_do_not_count_as_coverage():
+    base, cand = _lost_wall_event([(10.0, 70.0, 70.0, 70.0)], [(10.0, 70.5, 70.0, 70.5)])
+    with pytest.raises(ValueError, match="does not cover"):
+        approve_declared_additive_rekeys(base, cand, declared())
+
+
+def test_malformed_or_degenerate_source_fragments_are_refused():
+    base, cand = _lost_wall_event([(10.0, 70.0, 70.0, 70.0)], [(10.0, 70.0, 70.0, 70.0)], same_id=True)
+    _walls(cand)["wall_extra"]["source_edge_fragments"][0]["geometry"] = [10.0, 70.0, 70.0]
+    with pytest.raises(ValueError, match="malformed W4 source fragments"):
+        approve_declared_additive_rekeys(base, cand, declared())
+    base, cand = _lost_wall_event([(10.0, 70.0, 10.0, 70.0)], [(10.0, 70.0, 10.0, 70.0)], same_id=True)
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(base, cand, declared())
 
 
 @pytest.mark.parametrize("damage", ["path", "identity", "ancestry"])
@@ -786,14 +872,14 @@ def test_new_wall_built_only_from_old_source_is_not_explained_by_the_added_sourc
         approve_declared_additive_rekeys(base, cand, declared())
 
 
-def test_wall_split_into_two_successors_is_conservatively_refused():
+def test_wall_split_into_two_successors_is_refused_as_ambiguous_not_elected():
     base, cand = _event_with_unhosted_wall()
     cand["source_owned_wall_scope_results"][0]["records"] = [
         r for r in cand["source_owned_wall_scope_results"][0]["records"] if r["wall_candidate_id"] != "wall_extra"
     ]
     for name, y in (("wall_extra_a", 70.0), ("wall_extra_b", 71.0)):
         _add_unhosted_wall(cand, name, y, "raster_segment:source:1.0.0:extra")
-    with pytest.raises(ValueError, match="not built from any new source primitive"):
+    with pytest.raises(ValueError, match="ambiguous W4 successors"):
         approve_declared_additive_rekeys(base, cand, declared())
 
 

@@ -70,14 +70,16 @@ generated `split_N` ordinals and snapshot-scoped receipt ids are ignored):
   members, receipts and frame reasons; its host reason codes change only through
   an exact declared `before -> after` transition that actually occurs;
 * source SHA, page scope and the 20,000 primitive cap are unchanged;
-* the W4 change is **explained by the added source**: a wall id present in both
-  keeps its candidate identity, source primitive ancestry and physical path (it
-  may gain an interior split node); every wall id that disappears has exactly
-  one successor built from the same source primitives; every other new wall is
-  built from at least one source primitive no baseline wall used. A wall that
-  vanishes without a successor, a new wall made only of old source, or a
-  retained id whose path changed is refused (a wall split into several
-  successors is conservatively refused too);
+* **all original source geometry is conserved** (W4): a wall id present in both
+  keeps its candidate identity, source primitive ancestry and physical path, and
+  its source fragments cover exactly the same physical line (it may only gain an
+  interior split node); every wall id that disappears has exactly one successor
+  on the same source primitives whose source fragments **cover every original
+  fragment, terminal endpoints included** (tolerance 1e-3 pt); every other new
+  wall contains a source primitive no baseline wall used. A successor that
+  merely shares primitive ids but lost a terminal tail (snap-collapsed at a new
+  crossing), a shifted endpoint or diagonal, a hole, several candidate
+  successors, or a new wall made only of old source is refused -- never elected;
 * **every top-level report key not listed in `expected_changed_report_keys` is
   equal** (after the gate's own order-insensitive normalizer, if it has one), and
   every key that *is* listed is either verified or reported:
@@ -108,6 +110,19 @@ match the reports (an evidence array that appears or vanishes is refused), so a
 tool change cannot silently downgrade a `stage_report` verification. The two
 shapes have different snapshot ids (the stage tool ingests every page), so an
 event needs one declaration per shape that its gates use.
+
+## Real Lot16 evidence (page 3, original SHA `10109b4b…65844`)
+
+* #2606 (global additive source): **refused** -- seven unhosted W4 walls lose an
+  original terminal (raster tails `[x, 427.8 .. 429.5]` at x=597.75 / 669 / 682.25
+  and three native diagonals shifted 0.12-0.13 pt), first reported at
+  `wall_280f16c8… -> wall_c902ecb0…`.
+* #2610 (isolated opening-local supplemental W4): approved with canonical W4
+  2094 retained / 0 lost / 0 gained; `unverified_changed_report_keys` is only
+  `composition_reason_codes` (stage shape) or empty (face shape).
+
+Nothing in this PR enables either: the committed declaration list is empty and
+adding a real declaration needs the owners' sign-off.
 
 ## What it does not do
 
