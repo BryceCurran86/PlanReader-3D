@@ -28,11 +28,29 @@ so it is single-use and every later rekey needs a new, reviewed declaration.
    "expected_unhosted_reason_changes": [
      {"opening_identity_id": "...", "before": ["..."], "after": ["..."]}],
    "expected_changed_report_keys": ["snapshot_id", "opening_bindings", "..."],
+   "allow_snapshot_receipt_rekey": false,
    "tracking_issue": 2608}]}
 ```
 
 The snapshot ids are printed by `python -m tools.declared_additive_source_retention
 --baseline before.json --candidate after.json` when no declaration matches.
+
+## Receipt rekey is a separate decision
+
+`allow_snapshot_receipt_rekey: false` (the stance to start from) means every
+previously authenticated host and frame receipt must be retained **exactly**; the
+declaration then only admits the declared new host(s), reason transitions and
+changed report keys, i.e. it turns a full-report parity gate into "unchanged
+except exactly this". Set `true` only when the production change adds source
+observations to the page snapshot, which rekeys every snapshot-hashed receipt
+(`host_wall_id`, `opening_host_binding_v3`, `opening_host_frame_v2`); the
+approval then additionally proves the physical proposition behind each rekeyed
+receipt is unchanged. Reviewers should treat `true` as the decision to accept a
+re-signed seal for prior quantities (their evidence ids and fingerprints change
+by exactly one host-binding and one frame receipt per row, which
+`sealed_quantities_changed_only_by_snapshot_receipts` can prove). The better
+long-term fix is a design where additive source does not change the primary
+snapshot (see #2297); this flag exists so that decision is explicit, not hidden.
 
 ## What an approval proves
 
