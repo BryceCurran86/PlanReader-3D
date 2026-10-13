@@ -6,6 +6,7 @@ override withheld faces, authenticate a second side, or publish quantities.
 from __future__ import annotations
 
 from collections import Counter
+import math
 from typing import Any
 
 from pb_source_composite_room_face_authority import _edge_key
@@ -108,6 +109,24 @@ def inspect_unpublished_source_face_counterparts(
                             if kind == "withheld" else None
                         ),
                         "source_w4_subedges": matched[:_MAX_OBSERVATIONS],
+                        # These are original producer-owned withheld face
+                        # geometry receipts, not dimension or room authority.
+                        "original_area_pdf_points2_observed_only": (
+                            float(getattr(face, "area_page_pts2"))
+                            if (
+                                isinstance(getattr(face, "area_page_pts2", None), (int, float))
+                                and math.isfinite(float(face.area_page_pts2))
+                                and float(face.area_page_pts2) >= 0
+                            ) else None
+                        ),
+                        "original_polygon_source_pts_observed_only": [
+                            list(pt) for pt in tuple(
+                                getattr(face, "polygon_pdf_pts", ()) or ()
+                            )[:96]
+                        ],
+                        "original_polygon_source_vertices_truncated": len(
+                            tuple(getattr(face, "polygon_pdf_pts", ()) or ())
+                        ) > 96,
                         "opposite_side_proven": False,
                     })
             elif kind == "withheld":
