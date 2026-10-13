@@ -17,15 +17,23 @@ What an approval proves, on top of ``compare_source_host_rekeys``:
 * the physical opening identity universe is identical;
 * every previously hosted opening keeps the same W4 member candidates, the same
   positive candidate identity / source primitive ancestry / source-edge
-  geometry / centerline and (when framed) the same source-space frame geometry
+  geometry / centerline and (stage shape) the same source-space frame geometry
   -- only snapshot-scoped receipt addresses and generated split ordinals move;
-* no previously hosted opening is lost and no previously framed opening gains a
-  different frame;
-* the only newly hosted openings are the declared ones, and each is an
-  existing, corroborated physical opening with a host receipt;
-* every other unhosted opening keeps its status, representative observation,
-  members and receipts; its reason codes change only through an exact declared
-  ``before -> after`` transition.
+* the only newly hosted openings are the declared ones, each an existing,
+  corroborated physical opening with a host receipt; every other unhosted
+  opening is unchanged except exact declared reason transitions;
+* **all original W4 source geometry is conserved**: retained walls cover exactly
+  their original line, a vanished wall has one successor covering every original
+  fragment (terminal endpoints included), and the W4 scope-level claims are equal
+  modulo snapshot ids;
+* every declared report key is verified (canonical openings, summary, semantic
+  inventory, id-churn keys) or listed in ``unverified_changed_report_keys``;
+  every undeclared key is equal;
+* the declaration may rekey snapshot-scoped receipts only when it says so
+  (``allow_snapshot_receipt_rekey``; default is exact retention).
+
+It does not replace the physical-source gates: it can only pass an event that
+leaves the canonical W4 scope untouched apart from snapshot ids.
 """
 from __future__ import annotations
 
