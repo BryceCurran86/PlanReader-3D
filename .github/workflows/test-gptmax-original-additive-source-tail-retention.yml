@@ -104,6 +104,55 @@ jobs:
               assert original,('old original source line unavailable',source_id)
               assert covered_by(original,after),('original physical wall tail LOST',source_id,original,after)
               evidence[source_id]={'original':original,'candidate':after,'unchanged_coverage':True}
+          # Preserve every original native source-owned line, not just raster.
+          # The three short native original endpoint tails around the new
+          # 1215 crossing are real source fragments even when W3 abstains.
+          def source_fragments(report,source_id):
+              return [tuple(edge['geometry'])
+                      for scope in report['source_owned_wall_scope_results']
+                      for wall in scope['records']
+                      for edge in wall['source_edge_fragments']
+                      if source_id in edge['source_primitive_ids']]
+          def entire_source_covered(original, candidate, tolerance=1e-6):
+              import math
+              if not original or not candidate:
+                  return False
+              for x1,y1,x2,y2 in original:
+                  vx,vy=x2-x1,y2-y1
+                  length2=vx*vx+vy*vy
+                  if length2 <= tolerance*tolerance:
+                      return False
+                  length=math.sqrt(length2)
+                  covered=[]
+                  for ax,ay,bx,by in candidate:
+                      # Both candidate endpoints must be truly collinear with
+                      # THIS original source line; do not use snap tolerances.
+                      da=abs((ax-x1)*vy-(ay-y1)*vx)/length
+                      db=abs((bx-x1)*vy-(by-y1)*vx)/length
+                      if da > tolerance or db > tolerance:
+                          continue
+                      t0=((ax-x1)*vx+(ay-y1)*vy)/length2
+                      t1=((bx-x1)*vx+(by-y1)*vy)/length2
+                      lo,hi=max(0,min(t0,t1)),min(1,max(t0,t1))
+                      if hi>=lo:
+                          covered.append((lo,hi))
+                  point=0.0
+                  for lo,hi in sorted(covered):
+                      if lo > point+tolerance/length:
+                          break
+                      point=max(point,hi)
+                      if point>=1-tolerance/length:
+                          break
+                  if point<1-tolerance/length:
+                      return False
+              return True
+          for source_id in ('d782i0','d783i0','d785i0'):
+              original=source_fragments(old,source_id)
+              after=source_fragments(new,source_id)
+              assert original,('original positive native source unavailable',source_id)
+              assert entire_source_covered(original,after),(
+                  'original positive native W2/W3 source terminal LOST',source_id,original,after)
+              evidence[source_id]={'original':original,'candidate':after,'unchanged_coverage':True}
           Path('source-terminal-coverage.json').write_text(
               json.dumps({'source_sha256':source_sha,'records':evidence},indent=2,sort_keys=True))
           print({'source_terminal_geometry_preserved':True,'old':old['summary'],'new':new['summary']})
