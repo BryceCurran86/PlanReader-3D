@@ -716,6 +716,27 @@ class OpeningHostBindingProducer:
                                     )
                                     if (
                                         supplemental_resolution.status
+                                        is EvidenceResolutionStatus.CORROBORATED
+                                        and not supplemental_resolution.bands
+                                    ):
+                                        # The canonical wall universe may already
+                                        # own one real G17 flank. The opening-local
+                                        # source may own only the missing opposite
+                                        # flank. Re-evaluate BOTH original W4
+                                        # authorities with exact source ancestry;
+                                        # their joint wall population is NOT a
+                                        # complete page-wide W4 or frame scope.
+                                        supplemental_resolution = (
+                                            _resolve_opening_local_mixed_scope_source_band(
+                                                self._opening, opening, geometry,
+                                                host_records,
+                                                tuple(supplemental.records),
+                                                host_source_observation_ids,
+                                                tuple(supplemental.source_observation_ids),
+                                            )
+                                        )
+                                    if (
+                                        supplemental_resolution.status
                                         is EvidenceResolutionStatus.CONFLICT
                                     ):
                                         band_resolution = supplemental_resolution
@@ -732,9 +753,10 @@ class OpeningHostBindingProducer:
                                                 *supplemental_resolution.reason_codes,
                                             ),
                                         )
-                                        host_source_observation_ids = tuple(
-                                            supplemental.source_observation_ids
-                                        )
+                                        host_source_observation_ids = tuple(sorted(
+                                            set(host_source_observation_ids)
+                                            | set(supplemental.source_observation_ids)
+                                        ))
                                         binding_resolution_reasons = (
                                             *binding_resolution_reasons,
                                             OPENING_LOCAL_SUPPLEMENTAL_SOURCE_BAND_HOST_RESOLVED,
@@ -3017,6 +3039,67 @@ def _resolve_raster_source_band_host_from_records(
         ),),
         (RASTER_SOURCE_BAND_HOST_RESOLVED,),
     )
+
+
+
+def _resolve_opening_local_mixed_scope_source_band(
+    authority: PhysicalOpeningAuthority,
+    opening_record: PhysicalOpeningExistenceRecord,
+    opening: _OpeningGeometry,
+    ordinary_records: Sequence[PhysicalWallCandidateRecord],
+    supplemental_records: Sequence[PhysicalWallCandidateRecord],
+    ordinary_source_observation_ids: Sequence[str],
+    supplemental_source_observation_ids: Sequence[str],
+) -> _HostBandResolution:
+    """Recover opposite G17 flanks across two source-authenticated W4 scopes.
+
+    The supplemental W4 universe is deliberately incomplete: a genuine
+    opening may have its old left/right solid flank already represented by
+    canonical W4 and only its *missing* opposite flank in the supplemental
+    source set. Require both original producer authorities, recompute physical
+    equivalence for EVERY locally eligible wall across scopes, then apply the
+    unchanged exact source-primitive/face/end/chain resolver. No consumer input,
+    nearest-wall rule, global W4 mutation, completeness claim or frame grant.
+    """
+    selected: dict[str, PhysicalWallCandidateRecord] = {}
+    supplemental_ids: set[str] = set()
+    for supplement, records in ((False, ordinary_records), (True, supplemental_records)):
+        for record in records:
+            if not _candidate_host_roles(record, opening):
+                continue
+            wall_id = str(record.wall_candidate_id)
+            previous = selected.get(wall_id)
+            if previous is not None and previous != record:
+                return _HostBandResolution(
+                    EvidenceResolutionStatus.CONFLICT, (),
+                    ("opening_local_supplemental_wall_identity_collision",),
+                )
+            selected[wall_id] = record
+            if supplement:
+                supplemental_ids.add(wall_id)
+    if not supplemental_ids or len(selected) < 2:
+        return _HostBandResolution(EvidenceResolutionStatus.CORROBORATED, ())
+    # No silent filtering of an ambiguous local W4 identity.  Producer-owned
+    # physical-equivalence compares all role-eligible identities in this
+    # opening-local scope, including canonical vs supplemental competitors.
+    local = tuple(selected[wall_id] for wall_id in sorted(selected))
+    equivalence = resolve_physical_wall_equivalence(
+        tuple(record.physical_identity for record in local),
+    )
+    resolution = _resolve_raster_source_band_host(
+        authority, opening_record, local, opening, equivalence,
+        tuple(sorted(set(ordinary_source_observation_ids)
+                     | set(supplemental_source_observation_ids))),
+    )
+    if (resolution.status is EvidenceResolutionStatus.CORROBORATED
+            and resolution.bands
+            and not any(set(band.member_ids) & supplemental_ids
+                        for band in resolution.bands)):
+        return _HostBandResolution(
+            EvidenceResolutionStatus.ABSTAINED, (),
+            ("opening_local_supplemental_source_not_used",),
+        )
+    return resolution
 
 
 def _resolve_raster_source_band_host(
