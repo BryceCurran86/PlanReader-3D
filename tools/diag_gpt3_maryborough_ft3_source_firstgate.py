@@ -23,6 +23,7 @@ from pb_source_material_semantic_authority import (
     SourceMaterialSemanticProducer,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_raster_text_corroboration_authority import RasterTextCorroborationSelector
 from tools.diag_gpt2_ft3_native_text_integrity_firstgate import (
     native_finish_schedule_text_first_gates,
 )
@@ -42,6 +43,64 @@ FLOOR_PAGE_NUMBER = 7
 def _status(value: Any) -> str:
     owned = getattr(value, "value", value)
     return str(owned)
+
+
+def _raster_word_gate_rows(
+    *,
+    producer: SourceMaterialSemanticProducer,
+    published: object,
+    words: tuple[object, ...],
+    block_numbers: tuple[int, ...],
+) -> list[dict[str, Any]]:
+    """Expose current producer outcomes for exact native schedule words only.
+
+    This reuses the SAME raster corroboration producer already consumed by the
+    material semantic producer. It does not create trust or retry OCR.
+    """
+    raster = producer._raster
+    out: list[dict[str, Any]] = []
+    for word in words:
+        if int(getattr(word, "block_no")) not in block_numbers:
+            continue
+        result = raster.publish(
+            RasterTextCorroborationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=str(getattr(word, "observation_id")),
+            )
+        )
+        record = result.record
+        out.append(
+            {
+                "observation_id": str(getattr(word, "observation_id")),
+                "block_no": int(getattr(word, "block_no")),
+                "line_no": int(getattr(word, "line_no")),
+                "word_no": int(getattr(word, "word_no")),
+                "native_text": str(getattr(word, "text")),
+                "native_integrity_trusted": bool(getattr(word, "trusted")),
+                "native_integrity_reason_codes": list(
+                    getattr(word, "reason_codes")
+                ),
+                "raster_status": _status(result.status),
+                "raster_reason_codes": list(result.reason_codes),
+                "raster_corroborated_text": result.corroborated_text,
+                "raster_record_id": getattr(record, "record_id", None),
+                "views": [
+                    {
+                        "dpi": view.dpi,
+                        "line_count": view.line_count,
+                        "ocr_reading": view.ocr_reading,
+                        "rotation_degrees": view.ocr_rotation_degrees,
+                        "clip_pt": list(view.clip_pt),
+                        "image_size_px": list(view.image_size_px),
+                    }
+                    for view in (getattr(record, "views", ()) or ())
+                ],
+            }
+        )
+    return out
 
 
 def _verify_source(pdf: Path) -> tuple[bytes, str]:
@@ -96,9 +155,10 @@ def inspect_ft3_firstgate(pdf: Path) -> dict[str, Any]:
     # The material producer has already performed its own trusted-text check.
     # Inspect those same original receipts independently as a diagnostic:
     # raw FT3 schedule text is NOT a semantic definition or material occurrence.
+    page11_words = _trusted_words_by_page(source, published).get("11", ())
     try:
         native_schedule = native_finish_schedule_text_first_gates(
-            _trusted_words_by_page(source, published).get("11", ())
+            page11_words
         )
     except RuntimeError as exc:
         native_schedule = {
@@ -185,6 +245,12 @@ def inspect_ft3_firstgate(pdf: Path) -> dict[str, Any]:
         "floor_viewport_bbox": list(floor_view.bounding_box),
         "definitions": definitions,
         "original_page11_native_schedule_word_first_gates_diagnostic_only": native_schedule,
+        "original_page11_raster_text_first_gates_diagnostic_only": _raster_word_gate_rows(
+            producer=producer,
+            published=published,
+            words=page11_words,
+            block_numbers=(257, 262),
+        ),
         "floor_occurrence_scope": {
             "status": _status(scope.status),
             "reason_codes": list(scope.reason_codes),
