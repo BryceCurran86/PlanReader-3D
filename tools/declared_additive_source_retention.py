@@ -873,7 +873,20 @@ def declared_event_approved(
             + json.dumps(event_key(baseline, candidate), sort_keys=True),
             file=sys.stderr,
         )
-    return approval is not None
+    if approval is None:
+        return False
+    unverified = approval.get("unverified_changed_report_keys") or []
+    if unverified:
+        if explain:
+            import sys
+
+            print(
+                "DECLARED additive-source event is not fully proven; "
+                "unverified changed report keys: " + ", ".join(unverified),
+                file=sys.stderr,
+            )
+        return False
+    return True
 
 
 def assert_unchanged_or_declared(
