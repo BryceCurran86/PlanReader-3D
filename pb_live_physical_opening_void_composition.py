@@ -220,6 +220,12 @@ class LivePhysicalOpeningVoidComposition:
 
 
 def _reason_tuple(values) -> tuple[str, ...]:
+    # Set-like inputs (e.g. PhysicalOpeningVoidResult.reason_codes is a frozenset)
+    # have no stable iteration order: it follows PYTHONHASHSEED.  Sort them so the
+    # same source serialises the same reason codes in every process; ordered inputs
+    # keep their (already deterministic) order.
+    if isinstance(values, (set, frozenset)):
+        values = sorted(str(value) for value in values)
     return tuple(dict.fromkeys(str(value) for value in values if str(value)))
 
 
