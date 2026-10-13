@@ -1142,7 +1142,7 @@ class PhysicalOpeningAuthority:
         # visible source observation membership. Never a count or wall host.
         self._native_raw_candidate_support_cache: dict[
             tuple[str, str, str, str, str],
-            tuple[tuple[str, tuple[str, ...]], ...],
+            tuple[tuple[str, str, tuple[str, ...]], ...],
         ] = {}
         self._visible_viewport_candidate_membership_cache: dict[
             tuple[str, str, str, str, str],
@@ -3206,6 +3206,7 @@ class PhysicalOpeningAuthority:
             return record_by_index.get(int(segment.drawing_index))
 
         raw_candidates: dict[str, frozenset[str]] = {}
+        raw_patterns: dict[str, str] = {}
 
         def add_raw(pattern: str, support_records: tuple[Optional[SourceObservationRecord], ...]) -> None:
             if any(record is None for record in support_records):
@@ -3229,6 +3230,7 @@ class PhysicalOpeningAuthority:
                 digest_chars=32,
             )
             raw_candidates[candidate_id] = frozenset(ids)
+            raw_patterns[candidate_id] = pattern
 
         for gap in gaps:
             if gap.wall_segments:
@@ -3281,6 +3283,7 @@ class PhysicalOpeningAuthority:
                     and existence.candidate.candidate_id == candidate.candidate_id
                 ):
                     raw_candidates[candidate.candidate_id] = support
+                    raw_patterns[candidate.candidate_id] = candidate.structural_pattern
         typed_non_plan_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven
@@ -3312,7 +3315,7 @@ class PhysicalOpeningAuthority:
         self._native_raw_candidate_support_cache[
             self._visible_page_candidate_key(seed)
         ] = tuple(sorted(
-            (candidate_id, tuple(sorted(support)))
+            (candidate_id, raw_patterns[candidate_id], tuple(sorted(support)))
             for candidate_id, support in raw_candidates.items()
         ))
         complete = not unresolved_ids
@@ -3467,8 +3470,8 @@ class PhysicalOpeningAuthority:
             if groups is None:
                 raise RuntimeError("native candidate source membership unavailable")
             items = tuple(
-                (candidate_id, observation_ids, None)
-                for candidate_id, observation_ids in groups
+                (candidate_id, observation_ids, None, pattern)
+                for candidate_id, pattern, observation_ids in groups
                 if candidate_id in requested
             )
         else:
@@ -3476,7 +3479,7 @@ class PhysicalOpeningAuthority:
             if groups is None:
                 raise RuntimeError("raster gap source membership unavailable")
             items = tuple(
-                (candidate_id, tuple(sorted(source_ids)), tuple(aperture))
+                (candidate_id, tuple(sorted(source_ids)), tuple(aperture), "raster_gap_candidate")
                 for candidate_id, source_ids, aperture in groups
                 if candidate_id in requested
             )
@@ -3485,7 +3488,7 @@ class PhysicalOpeningAuthority:
         identifiers = [item[0] for item in items]
         if len(identifiers) != len(set(identifiers)) or set(identifiers) != requested:
             raise RuntimeError("raw candidate group-to-source mapping incomplete")
-        union = {source_id for _, ids, _ in items for source_id in ids}
+        union = {source_id for _, ids, _, _ in items for source_id in ids}
         if not union.issubset(set(closure.unresolved_observation_ids)):
             raise RuntimeError("raw candidate source outside authenticated closure")
         return tuple(
@@ -3494,8 +3497,9 @@ class PhysicalOpeningAuthority:
                 source_observation_ids=list(source_ids),
                 aperture_bbox_pt=list(aperture) if aperture is not None else None,
                 candidate_status="unresolved_source_only",
+                structural_pattern=pattern,
             )
-            for candidate_id, source_ids, aperture in sorted(items)
+            for candidate_id, source_ids, aperture, pattern in sorted(items)
         )
 
     @staticmethod
