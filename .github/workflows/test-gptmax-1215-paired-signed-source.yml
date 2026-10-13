@@ -1,0 +1,150 @@
+name: GPT MAX Lot16 Paired Original Signed Source
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test-gptmax-1215-paired-signed-source.yml
+permissions:
+  contents: read
+jobs:
+  original-paired-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+      CANDIDATE_SHA: "0d2c064919ba65ded8c07f69cfbd0030eaa52ef0"
+      SOURCE_SHA: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Immutable frozen truth and provider isolation
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+      - name: Restore exact original baseline and candidate production heads
+        run: |
+          set -euo pipefail
+          git worktree add --detach /tmp/gptmax-paired-base "${{ github.event.pull_request.base.sha }}"
+          git fetch --no-tags origin "$CANDIDATE_SHA"
+          git worktree add --detach /tmp/gptmax-paired-candidate "$CANDIDATE_SHA"
+          mkdir -p artifacts/baseline/production artifacts/candidate/production
+          for role in baseline candidate; do
+            if [ "$role" = baseline ]; then root=/tmp/gptmax-paired-base; else root=/tmp/gptmax-paired-candidate; fi
+            ( cd "$root" &&
+              printf '%s  %s\n' "$SOURCE_SHA" 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' | sha256sum --check &&
+              PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+                --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+                --page-id 3 --source-all-pages --include-identity-text-receipts \
+                --output "$GITHUB_WORKSPACE/artifacts/$role/source-report.json" &&
+              PYTHONPATH=. python -u -m tools.run_gpt3_lot16_original_sealed_score_input \
+                --pdf 'documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf' \
+                --output-dir "$GITHUB_WORKSPACE/artifacts/$role/production"
+            )
+          done
+      - name: Prove original wall, host, frame and customer signed quantity retention
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_customer_output_verification import verify_sealed_customer_output
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          from tools.declared_additive_source_retention import (
+              sealed_quantities_changed_only_by_snapshot_receipts,
+          )
+
+          root = Path("artifacts")
+          def load(role):
+              directory=root/role
+              src=json.loads((directory/"source-report.json").read_text())
+              sealed_raw=json.loads((directory/"production/source_sealed_run.json").read_text())
+              customer=json.loads((directory/"production/verified_customer_rows.json").read_text())
+              sealed=sealed_source_closed_run_from_dict(sealed_raw)
+              verified=verify_sealed_customer_output(sealed,customer)
+              assert verified.valid_quantity_count==len(sealed.quantities)
+              assert verified.customer_row_count==len(sealed.quantities)
+              return src,sealed_raw,customer
+          old,old_run,old_customer=load("baseline")
+          new,new_run,new_customer=load("candidate")
+          sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert old["source_sha256"]==new["source_sha256"]==sha
+          assert old["primitive_safety_cap"]==new["primitive_safety_cap"]==20_000
+          assert old["snapshot_id"]!=new["snapshot_id"]
+          assert old["source_owned_wall_scopes"][0]["records"] == new["source_owned_wall_scopes"][0]["records"]
+          assert len(old["source_owned_wall_scopes"][0]["records"])==2094
+
+          old_hosts={r["opening_identity_id"]:r for r in old["opening_bindings"]}
+          new_hosts={r["opening_identity_id"]:r for r in new["opening_bindings"]}
+          old_frames={r["opening_identity_id"]:r for r in old["host_frame_traces"]}
+          new_frames={r["opening_identity_id"]:r for r in new["host_frame_traces"]}
+          assert set(old_hosts)==set(new_hosts)==set(old_frames)==set(new_frames)
+          assert len(old_hosts)==21
+          target="physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
+          assert not old_hosts[target]["host_wall_id"]
+          assert new_hosts[target]["status"]=="corroborated"
+          assert len(new_hosts[target]["member_wall_candidate_ids"])==2
+          assert old_frames[target]["status"]!="corroborated" and new_frames[target]["status"]!="corroborated"
+          old_positive=0
+          old_frames_positive=0
+          for opening_id, before in old_hosts.items():
+              after=new_hosts[opening_id]
+              if before["status"]=="corroborated":
+                  old_positive+=1
+                  assert {k:v for k,v in before.items() if k not in ("record_id","host_wall_id")} == {
+                      k:v for k,v in after.items() if k not in ("record_id","host_wall_id")}
+              elif opening_id!=target:
+                  assert before==after
+              before_frame=old_frames[opening_id]
+              after_frame=new_frames[opening_id]
+              if before_frame["status"]=="corroborated":
+                  old_frames_positive+=1
+                  assert {k:v for k,v in before_frame.items() if k not in ("record_id","host_wall_id")} == {
+                      k:v for k,v in after_frame.items() if k not in ("record_id","host_wall_id")}
+              elif opening_id!=target:
+                  assert before_frame==after_frame
+          assert old_positive==14 and old_frames_positive==9
+          assert new["summary"]["authenticated_hosts"]==15
+          assert new["summary"]["resolved_source_frames"]==9
+
+          previous=old_run["quantities"]
+          current=new_run["quantities"]
+          assert len(previous)==7 and len(current)==8
+          rekeys=sealed_quantities_changed_only_by_snapshot_receipts(previous,current)
+          prior={q["quantity_id"] for q in previous}
+          extra=[q for q in current if q["quantity_id"] not in prior]
+          assert len(extra)==1 and extra[0]["quantity_id"]=="opening_area_11bd4d5f9acb00b9dc46f12105a374bf"
+          assert extra[0]["value"]==1.8 and extra[0]["unit"]=="m2" and not extra[0]["abstained"]
+          assert len(old_customer)==7 and len(new_customer)==8
+          assert {r["quantity_id"] for r in old_customer} == prior
+          assert {r["quantity_id"] for r in new_customer} == {q["quantity_id"] for q in current}
+          evidence={"source_sha256":sha,
+              "baseline_snapshot_id":old["snapshot_id"],
+              "candidate_snapshot_id":new["snapshot_id"],
+              "existing_w4_record_count":2094,"prior_hosts":old_positive,
+              "retained_frame_count":old_frames_positive,
+              "signed_baseline_customers":len(old_customer),
+              "signed_candidate_customers":len(new_customer),
+              "signed_receipt_only_rekeys":rekeys,
+              "new_quantity_id":extra[0]["quantity_id"],
+              "candidate_benchmark_score_granted":False}
+          (root/"source-paired-proof.json").write_text(json.dumps(evidence,sort_keys=True,indent=2))
+          print(json.dumps(evidence,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-lot16-paired-same-source-signed-proof
+          path: |
+            artifacts/baseline/source-report.json
+            artifacts/baseline/production/source_sealed_run.json
+            artifacts/baseline/production/verified_customer_rows.json
+            artifacts/candidate/source-report.json
+            artifacts/candidate/production/source_sealed_run.json
+            artifacts/candidate/production/verified_customer_rows.json
+            artifacts/source-paired-proof.json
+          retention-days: 14
