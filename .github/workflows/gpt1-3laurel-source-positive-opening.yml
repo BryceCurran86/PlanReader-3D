@@ -1,0 +1,94 @@
+name: GPT1 3Laurel source-positive original opening production
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/gpt1-3laurel-source-positive-opening.yml"
+      - "tools/run_source_closed_project_handoff.py"
+  workflow_dispatch:
+
+jobs:
+  original-opening-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Authenticate full original PDF and execute source-positive plan page
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, fitz, subprocess, sys
+          path=Path("documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf")
+          sha="014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+          if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=sha:
+              raise SystemExit("3Laurel source unavailable or changed")
+          doc=fitz.open(path)
+          try:
+              if doc.page_count!=18:
+                  raise SystemExit("3Laurel original page universe mismatch")
+          finally: doc.close()
+          # A0.3 plan page 3 is only the requested address. It cannot become
+          # production scope until source title/F.07 authority proves FLOOR_PLAN.
+          subprocess.run([
+              sys.executable,"-u","tools/run_source_closed_project_handoff.py",
+              "--pdf",str(path),"--project-id","au_qld_3laurel",
+              "--family-group","core",
+              "--source-plan-page-index","2",
+              "--output-dir","laurel-source-positive-core",
+          ],check=True)
+          PY
+      - name: Prove any sealed quantities and refuse scores without identity
+        if: success()
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          path=Path("documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf")
+          root=Path("laurel-source-positive-core")
+          s=json.loads((root/"production_summary.json").read_text())
+          sha=hashlib.sha256(path.read_bytes()).hexdigest()
+          assert s["project_id"]=="au_qld_3laurel" and s["source_sha256"]==sha
+          assert s["family_group"]=="core" and s["execution_pages"]==[3]
+          assert s["source_positive_partial_page"]==3
+          assert s["complete_project_handoff"] is False
+          assert s["benchmark_score_granted"] is False
+          assert s["family_counts"]["floor_area"]==0
+          assert s["family_counts"]["floor_finish_area"]==0
+          assert s["family_counts"]["ceiling_area"]==0
+          amount=int(s["combined_quantity_count"])
+          if amount:
+              assert s["status"]=="sealed"
+              run=sealed_source_closed_run_from_dict(json.loads(Path(s["combined_run_file"]).read_text()))
+              assert run.project_id=="au_qld_3laurel" and tuple(run.source_sha256s)==(sha,)
+              assert len(run.quantities)==amount
+              assert len({q.quantity_id for q in run.quantities})==amount
+              assert all(q.family in ("opening_area","opening_count") and not q.abstained for q in run.quantities)
+              assert s["customer_rows_verified"] is True
+              assert s["verified_customer_row_count"]==amount
+              from pb_customer_output_verification import verify_sealed_customer_output
+              rows=json.loads(Path(s["customer_rows_file"]).read_text())
+              assert verify_sealed_customer_output(run,rows).customer_row_count==amount
+          else:
+              assert s["status"]=="no_sealable_quantities" and s["combined_run_file"] is None
+              assert s["customer_rows_verified"] is False
+          print(json.dumps({"original_source_sha":sha,
+                            "signed_source_opening_quantities":amount,
+                            "customer_rows_verified":bool(s["customer_rows_verified"]),
+                            "frozen_identity_matches":None},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-3laurel-source-positive-opening-output
+          path: laurel-source-positive-core/
+          retention-days: 14

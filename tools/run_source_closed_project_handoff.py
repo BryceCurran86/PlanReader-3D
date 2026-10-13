@@ -20,7 +20,7 @@ import re
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import fitz
 
@@ -46,6 +46,9 @@ from pb_live_floor_area_quantity_publication import (
     publish_live_floor_area_quantities,
 )
 from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
+from pb_live_floor_area_customer_projection import project_live_floor_area_customer_rows
+from pb_live_opening_customer_projection import project_live_opening_customer_rows
+from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
     seal_live_floor_finish_area_run,
 )
@@ -241,9 +244,9 @@ def _validate_source_handoff_inputs(
         raise ValueError("workspace_id must be a positive integer")
 
     clean_family_group = str(family_group or "").strip().lower()
-    if clean_family_group not in {"all", "core", "surfaces"}:
+    if clean_family_group not in {"all", "core", "surfaces", "floor_area"}:
         raise ValueError(
-            "family_group must be one of: all, core, surfaces"
+            "family_group must be one of: all, core, surfaces, floor_area"
         )
 
     return clean_family_group
@@ -256,6 +259,7 @@ def _generate_project_handoff_locked(
     workspace_id: int,
     output_dir: Path,
     family_group: str = "all",
+    source_plan_page_index: Optional[int] = None,
 ) -> dict[str, Any]:
     clean_family_group = _validate_source_handoff_inputs(
         pdf_path, project_id, workspace_id, family_group,
@@ -269,8 +273,37 @@ def _generate_project_handoff_locked(
         pdf_path
     )
     all_pages = tuple(range(page_count))
-    topology_restricted = bool(topology_pages) and (
-        tuple(topology_pages) != tuple(all_pages)
+    # Partial signed publication only for a producer-POSITIVE original
+    # floor-plan page. A caller-supplied page index does not prove its role.
+    if source_plan_page_index is not None:
+        if clean_family_group not in {"core", "floor_area"}:
+            raise ValueError("partial original floor-plan scope requires core or floor_area")
+        if (type(source_plan_page_index) is not int
+                or source_plan_page_index not in all_pages):
+            raise ValueError("source plan page index must be an original page")
+        from pb_source_floor_plan_page_scope import (
+            FLOOR_PLAN, source_floor_plan_topology_scope,
+        )
+        classified = source_floor_plan_topology_scope(pdf_path, all_pages)
+        if (classified is None or not any(
+            row.page_index == source_plan_page_index
+            and row.classification == FLOOR_PLAN
+            for row in classified.decisions
+        )):
+            raise RuntimeError("source_positive_floor_plan_page_required")
+        topology_pages = (source_plan_page_index,)
+        # Retain ONLY support pages already authenticated by original-source
+        # classification. These may carry cross-view figured dimensions but
+        # never become topology or physical-room geometry owners.
+        if clean_family_group == "core":
+            room_area_support_pages = ()
+        else:
+            room_area_support_pages = tuple(
+                page for page in room_area_support_pages
+                if page != source_plan_page_index
+            )
+    topology_restricted = source_plan_page_index is not None or (
+        bool(topology_pages) and tuple(topology_pages) != tuple(all_pages)
     )
     topology_mode = (
         "source_classified_scope"
@@ -280,10 +313,21 @@ def _generate_project_handoff_locked(
 
     if topology_restricted:
         if clean_family_group == "core":
-            # Core execution is intentionally topology-only.
+            # Opening-only local source evidence: no room/support inference.
             claim_execution_pages = tuple(topology_pages)
             semantic_execution_pages = tuple(topology_pages)
             execution_room_support_pages = None
+        elif clean_family_group == "floor_area":
+            # The authenticated floor plan alone owns walls/room faces.
+            # Certified dimension support pages may contribute source words,
+            # never unrelated topology or unproved material finish scope.
+            claim_execution_pages = tuple(sorted(
+                set(topology_pages) | set(room_area_support_pages)
+            ))
+            semantic_execution_pages = tuple(topology_pages)
+            execution_room_support_pages = (
+                tuple(room_area_support_pages) if room_area_support_pages else None
+            )
         elif clean_family_group == "surfaces":
             # Surface geometry and room measurement only need positively
             # classified topology plus plan-like room-area support pages.
@@ -330,7 +374,8 @@ def _generate_project_handoff_locked(
         ],
         "topology_mode": topology_mode,
         "family_group": clean_family_group,
-        "complete_project_handoff": clean_family_group == "all",
+        "complete_project_handoff": (clean_family_group == "all" and source_plan_page_index is None),
+        "source_positive_partial_page": (None if source_plan_page_index is None else source_plan_page_index + 1),
         "execution_pages": [page + 1 for page in claim_execution_pages],
         "semantic_execution_pages": [
             page + 1 for page in semantic_execution_pages
@@ -346,6 +391,9 @@ def _generate_project_handoff_locked(
         "family_run_files": {},
         "combined_run_file": None,
         "combined_run_id": None,
+        "verified_customer_row_count": 0,
+        "customer_rows_verified": False,
+        "customer_rows_file": None,
         "canonical_counts": {},
         "claim_status": None,
         "claim_reason_codes": [],
@@ -409,7 +457,7 @@ def _generate_project_handoff_locked(
 
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
-    if clean_family_group in {"all", "surfaces"}:
+    if clean_family_group in {"all", "surfaces", "floor_area"}:
         floor_quantities = _non_abstained(
             publish_live_floor_area_quantities(claim)
         )
@@ -476,6 +524,15 @@ def _generate_project_handoff_locked(
         )
     else:
         opening_count_quantities = ()
+    if source_plan_page_index is not None and clean_family_group == "core":
+        # A bounded source-positive plan page never proves the complete
+        # original document's opening occurrence universe. A locally FIRM
+        # count cannot silently become a project-total sealed/customer row.
+        # Retain genuine measured opening AREAS, but withhold all counts.
+        opening_count_quantities = ()
+        summary["claim_reason_codes"].append(
+            "partial_original_source_opening_count_universe_unproven"
+        )
     summary["family_counts"]["opening_count"] = len(
         opening_count_quantities
     )
@@ -724,6 +781,52 @@ def _generate_project_handoff_locked(
             _write_json(output_dir / "production_summary.json", summary)
             raise RuntimeError("combined sealed run has conflicting source SHA envelope")
 
+    verified_partial_customer_rows = None
+    if combined is not None and (clean_family_group == "floor_area" or (
+        clean_family_group == "core" and source_plan_page_index is not None
+    )):
+        # A signed FIRM floor/opening is not a source-owned customer row until
+        # the separate commercial authority proves a strict bijection.
+        # Refuse to write ANY sealed family file on projection disagreement.
+        try:
+            projection = (
+                project_live_floor_area_customer_rows
+                if clean_family_group == "floor_area"
+                else project_live_opening_customer_rows
+            )
+            projection_claim = claim
+            if (clean_family_group == "core"
+                    and source_plan_page_index is not None
+                    and tuple(getattr(claim, "opening_count_quantity_evidence", ()) or ())):
+                # The commercial adapter must see exactly the same eligible
+                # family inventory as the signed partial source handoff.
+                # This creates no evidence: it removes unproven global counts.
+                projection_claim = replace(
+                    claim, opening_count_quantity_evidence=(),
+                )
+            rows = projection(
+                projection_claim, workspace_id=workspace_id, project_id=project_id,
+            )
+            verified = verify_sealed_customer_output(combined, rows)
+            quantity_ids = {quantity.quantity_id for quantity in combined.quantities}
+            if (len(quantity_ids) != len(combined.quantities)
+                    or set(verified.verified_quantity_ids) != quantity_ids
+                    or verified.customer_row_count != len(quantity_ids)):
+                raise RuntimeError("floor-area sealed customer identities disagree")
+            verified_partial_customer_rows = tuple(rows)
+        except Exception as exc:
+            summary["status"] = (
+                "floor_area_customer_projection_unverified"
+                if clean_family_group == "floor_area"
+                else "opening_customer_projection_unverified"
+            )
+            summary["claim_reason_codes"] = [
+                *summary["claim_reason_codes"],
+                f"{clean_family_group}_customer_projection_error:{type(exc).__name__}",
+            ]
+            _write_json(output_dir / "production_summary.json", summary)
+            raise
+
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
         summary["family_run_ids"][family] = run.run_id
@@ -745,6 +848,12 @@ def _generate_project_handoff_locked(
         summary["combined_quantity_count"] = 0
         summary["status"] = "no_sealable_quantities"
 
+    if verified_partial_customer_rows is not None:
+        customer_path = output_dir / "verified_customer_rows.json"
+        _write_json(customer_path, list(verified_partial_customer_rows))
+        summary["verified_customer_row_count"] = len(verified_partial_customer_rows)
+        summary["customer_rows_verified"] = True
+        summary["customer_rows_file"] = str(customer_path)
     _write_json(output_dir / "production_summary.json", summary)
     return summary
 
@@ -757,6 +866,7 @@ def generate_project_handoff(
     workspace_id: int,
     output_dir: Path,
     family_group: str = "all",
+    source_plan_page_index: Optional[int] = None,
 ) -> dict[str, Any]:
     """Serialize one source run per output directory without trusting stale seals.
 
@@ -781,6 +891,7 @@ def generate_project_handoff(
             workspace_id=workspace_id,
             output_dir=output_dir,
             family_group=family_group,
+            source_plan_page_index=source_plan_page_index,
         )
     finally:
         os.close(descriptor)
@@ -796,13 +907,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace-id", type=int, default=1)
     parser.add_argument(
         "--family-group",
-        choices=("all", "core", "surfaces"),
+        choices=("all", "core", "surfaces", "floor_area"),
         default="all",
         help=(
             "Families to seal: all=current behavior, "
-            "core=opening area/count only, surfaces=floor/ceiling only"
+            "core=opening area/count only, surfaces=floor/ceiling only, "
+            "floor_area=source-owned floor areas only"
         ),
     )
+    parser.add_argument("--source-plan-page-index", type=int, default=None,
+                        help="0-based original page; source-positive FLOOR_PLAN required")
     parser.add_argument("--output-dir", required=True, type=Path)
     return parser
 
@@ -815,6 +929,7 @@ def main() -> int:
         workspace_id=args.workspace_id,
         output_dir=args.output_dir,
         family_group=args.family_group,
+        source_plan_page_index=args.source_plan_page_index,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
