@@ -88,6 +88,10 @@ def verify_customer_receipt_rekeys(
     *,
     expected_new_physical_id: str,
     expected_new_quantity_id: str,
+    baseline_production_openings: Sequence[Mapping[str, Any]] | None = None,
+    candidate_production_openings: Sequence[Mapping[str, Any]] | None = None,
+    baseline_sealed_quantities: Sequence[Mapping[str, Any]] | None = None,
+    candidate_sealed_quantities: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Reject any non-receipt change to the seven old customer rows.
 
@@ -185,6 +189,48 @@ def verify_customer_receipt_rekeys(
              "additional row lacks the expected authenticated physical source")
     _notes_provenance(new_row)
 
+    # The all-pages stage diagnostic and single-page original-source customer
+    # run have distinct collection scopes: both their snapshot IDs AND host
+    # receipts can differ. Keep both authenticated scopes independently; never
+    # authorize one run's customer receipts from the other run's source IDs.
+    # Only original source openings captured from the SAME production callback
+    # as the signed seal may authorize these production-scope receipt pairs.
+    production_inputs = (
+        baseline_production_openings, candidate_production_openings,
+        baseline_sealed_quantities, candidate_sealed_quantities,
+    )
+    production_mode = any(item is not None for item in production_inputs)
+    _require(not production_mode or all(item is not None for item in production_inputs),
+             "incomplete production-scope opening/sealed evidence")
+    if production_mode:
+        prod_old = _by(baseline_production_openings, "physical_opening_id")
+        prod_new = _by(candidate_production_openings, "physical_opening_id")
+        seal_old = _by(baseline_sealed_quantities, "quantity_id")
+        seal_new = _by(candidate_sealed_quantities, "quantity_id")
+        _require(set(prod_old) == set(prod_new) == set(old_bindings),
+                 "single-page physical opening identity inventory changed")
+        _require(set(seal_old) == set(before_rows)
+                 and set(seal_new) == set(after_rows),
+                 "production seal/customer quantity inventory diverged")
+        old_production_snapshots = {row.get("snapshot_id") for row in prod_old.values()}
+        new_production_snapshots = {row.get("snapshot_id") for row in prod_new.values()}
+        _require(len(old_production_snapshots) == len(new_production_snapshots) == 1,
+                 "original production opening snapshot scope is inconsistent")
+        production_old_snapshot = next(iter(old_production_snapshots))
+        production_new_snapshot = next(iter(new_production_snapshots))
+        _require(
+            isinstance(production_old_snapshot, str)
+            and isinstance(production_new_snapshot, str)
+            and production_old_snapshot.startswith("source_snapshot_")
+            and production_new_snapshot.startswith("source_snapshot_")
+            and production_old_snapshot != production_new_snapshot
+            and all(row.get("source_sha256") == sha for row in (*prod_old.values(), *prod_new.values())),
+            "original production opening snapshot/source not authenticated",
+        )
+        _require(production_old_snapshot not in substitutions
+                 or substitutions[production_old_snapshot] == production_new_snapshot,
+                 "independent source/production snapshot pairs disagree")
+
     signed_receipts = 0
     for quantity_id, old in before_rows.items():
         new = after_rows[quantity_id]
@@ -200,11 +246,81 @@ def verify_customer_receipt_rekeys(
                     "notes", "evidence_ids"}
         _same_except(old, new, frozenset(excluded), f"{quantity_id} commercial row")
         old_prov, new_prov = _notes_provenance(old), _notes_provenance(new)
-        _require(_rewrite_approved_receipts(old_prov, substitutions) == new_prov,
+        receipt_substitutions = dict(substitutions)
+        if production_mode:
+            # The production snapshot is authenticated by the complete opening
+            # inventory from the same callback as the customer seal, NOT by the
+            # unrelated all-pages diagnostic report's snapshot.
+            receipt_substitutions[production_old_snapshot] = production_new_snapshot
+            physical_id = physical[0]
+            original, changed = prod_old[physical_id], prod_new[physical_id]
+            _require(original.get("snapshot_id") == production_old_snapshot
+                     and changed.get("snapshot_id") == production_new_snapshot
+                     and original.get("canonical_opening_id") == physical_id
+                     and changed.get("canonical_opening_id") == physical_id
+                     and original.get("source_sha256") == changed.get("source_sha256") == sha,
+                     f"{quantity_id}: production opening source/snapshot not authenticated")
+            _same_except(
+                original, changed,
+                frozenset({"snapshot_id", "host_wall_id", "host_binding_record_id",
+                           "host_frame_record_id", "evidence_ids"}),
+                f"{quantity_id} original production physical opening",
+            )
+            old_seal, new_seal = seal_old[quantity_id], seal_new[quantity_id]
+            _require(old_seal.get("object_identity_refs") == [physical_id]
+                     and new_seal.get("object_identity_refs") == [physical_id]
+                     and old_seal.get("source_sha256") == new_seal.get("source_sha256") == sha,
+                     f"{quantity_id}: sealed physical source identity diverged")
+            for customer, produced, sealed in (
+                (old_prov, original, old_seal), (new_prov, changed, new_seal),
+            ):
+                quantity = customer.get("quantity")
+                trace = customer.get("source_trace")
+                _require(isinstance(quantity, Mapping) and isinstance(trace, Mapping)
+                         and isinstance(quantity.get("metadata"), Mapping)
+                         and isinstance(trace.get("metadata"), Mapping),
+                         f"{quantity_id}: production commercial source metadata missing")
+                meta = quantity["metadata"]
+                for key in ("host_binding_record_id", "host_frame_record_id",
+                            "host_wall_id", "snapshot_id"):
+                    _require(meta.get(key) == produced.get(key),
+                             f"{quantity_id}: commercial {key} not from original production opening")
+                _require(trace["metadata"].get("host_wall_id") == produced.get("host_wall_id"),
+                         f"{quantity_id}: source trace host not from production opening")
+                _require(quantity.get("evidence_ids") == sealed.get("evidence_ids")
+                         and trace.get("evidence_ids") == sealed.get("trace_evidence_ids"),
+                         f"{quantity_id}: customer evidence not present in signed seal")
+                for key in ("host_binding_record_id", "host_frame_record_id"):
+                    ref = produced.get(key)
+                    if ref is not None:
+                        _require(ref in sealed.get("evidence_ids", ())
+                                 and ref in sealed.get("trace_evidence_ids", ()),
+                                 f"{quantity_id}: production host/frame receipt absent from seal")
+            for key, prefix in (
+                ("host_binding_record_id", "opening_host_binding_v3_"),
+                ("host_frame_record_id", "opening_host_frame_v2_"),
+                ("host_wall_id", "opening_host_binding_group_"),
+            ):
+                before, after = original.get(key), changed.get(key)
+                _require((before is None) == (after is None)
+                         and (before is None or (
+                             type(before) is str and before.startswith(prefix)
+                             and type(after) is str and after.startswith(prefix))),
+                         f"{quantity_id}: unauthenticated production {key} rekey")
+                if before is not None:
+                    _require(before not in receipt_substitutions
+                             or receipt_substitutions[before] == after,
+                             f"{quantity_id}: source receipt maps inconsistently")
+                    receipt_substitutions[before] = after
+            _require(_rewrite_approved_receipts(
+                         original.get("evidence_ids"), receipt_substitutions,
+                         field="evidence_ids") == changed.get("evidence_ids"),
+                     f"{quantity_id}: production opening lost original source evidence")
+        _require(_rewrite_approved_receipts(old_prov, receipt_substitutions) == new_prov,
                  f"{quantity_id}: nested commercial provenance altered")
         old_ids, new_ids = old.get("evidence_ids"), new.get("evidence_ids")
         _require(isinstance(old_ids, list) and isinstance(new_ids, list)
-                 and _rewrite_approved_receipts(old_ids, substitutions,
+                 and _rewrite_approved_receipts(old_ids, receipt_substitutions,
                                                 field="evidence_ids") == new_ids,
                  f"{quantity_id}: non-host evidence changed")
         signed_receipts += 1
