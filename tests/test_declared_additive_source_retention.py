@@ -173,6 +173,7 @@ def declaration_raw(**overrides):
         "expected_unhosted_reason_changes": [
             {"opening_identity_id": U, "before": UNMAPPED_LEFT, "after": UNMAPPED_RIGHT}
         ],
+        "expected_id_churn_report_keys": [],
         "expected_changed_report_keys": [
             "snapshot_id", "opening_bindings", "host_frames",
             "resolved_host_frame_evidence", "source_owned_wall_scope_results",
@@ -523,6 +524,14 @@ def test_tolerance_is_limited_to_receipt_addresses_of_declared_rows():
         {"expected_changed_report_keys": ["snapshot_id", "snapshot_id"]},
         {"expected_changed_report_keys": ["snapshot_id", 3]},
         {"expected_changed_report_keys": "snapshot_id"},
+        {"expected_id_churn_report_keys": ["not_declared_changed"]},
+        {"expected_id_churn_report_keys": ["snapshot_id", "snapshot_id"]},
+        {"expected_id_churn_report_keys": "summary"},
+        # keys verified by dedicated rules cannot be waved through as id churn
+        {"expected_id_churn_report_keys": ["canonical_openings"],
+         "expected_changed_report_keys": ["snapshot_id", "canonical_openings"]},
+        {"expected_id_churn_report_keys": ["summary"],
+         "expected_changed_report_keys": ["snapshot_id", "summary"]},
     ],
 )
 def test_malformed_declarations_are_rejected(override):
@@ -951,3 +960,266 @@ def test_exact_retention_event_needs_no_rekey_permission():
     next(r for r in moved["opening_bindings"] if r["opening_identity_id"] == A)["record_id"] = "moved"
     with pytest.raises(ValueError):
         approve_declared_additive_rekeys(base, moved, strict)
+
+
+# --------------------------------------------------------------------------
+# Scoped equality helpers
+# --------------------------------------------------------------------------
+
+HEX = "0123456789abcdef" * 2  # 32 hex digits
+
+
+def sid(prefix, digit="a"):
+    return f"{prefix}_{digit * 32}"
+
+
+def test_mask_and_unordered_equality_ignore_only_snapshot_scoped_ids_and_list_order():
+    from tools.source_report_scoped_equality import (
+        SNAPSHOT_SCOPED_ID_PREFIXES,
+        equal_modulo_snapshot_scoped_ids,
+        mask_snapshot_scoped_ids,
+    )
+
+    left = {"rows": [{"id": sid("opening_host_binding_v3", "a"), "v": 1}, {"id": sid("source_snapshot", "b"), "v": 2}]}
+    right = {"rows": [{"id": sid("source_snapshot", "c"), "v": 2}, {"id": sid("opening_host_binding_v3", "d"), "v": 1}]}
+    assert equal_modulo_snapshot_scoped_ids(left, right)
+    assert mask_snapshot_scoped_ids(sid("opening_host_binding_group", "e") + " text") == "<SNAPSHOT_SCOPED_ID> text"
+    # ids that are physical / source identities are never masked
+    for prefix in ("physical_opening_existence", "source_observation", "wall2", "opening_label_dimension"):
+        assert prefix not in SNAPSHOT_SCOPED_ID_PREFIXES
+        assert not equal_modulo_snapshot_scoped_ids({"id": sid(prefix, "a")}, {"id": sid(prefix, "b")})
+    # values, counts and structure still matter
+    assert not equal_modulo_snapshot_scoped_ids({"v": 1}, {"v": 2})
+    assert not equal_modulo_snapshot_scoped_ids({"rows": [1, 2]}, {"rows": [1, 2, 3]})
+    assert not equal_modulo_snapshot_scoped_ids({"a": 1}, {"b": 1})
+    assert not equal_modulo_snapshot_scoped_ids(
+        {"rows": [sid("source_room_face", "a"), sid("source_room_face", "b")]},
+        {"rows": [sid("source_room_face", "a")]},
+    )
+
+
+def test_snapshot_scoped_prefixes_are_the_code_derived_set():
+    import pathlib
+
+    from tools.source_report_scoped_equality import SNAPSHOT_SCOPED_ID_PREFIXES
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for prefix in SNAPSHOT_SCOPED_ID_PREFIXES:
+        if prefix == "source_snapshot":
+            continue
+        sources = [p for p in root.glob("pb_*.py") if f'"{prefix}"' in p.read_text(encoding="utf-8")]
+        assert sources, f"no production module constructs {prefix}"
+
+
+def test_additive_observation_inventory_allows_only_added_observations():
+    from tools.source_report_scoped_equality import additive_observation_inventory_equal as equal
+
+    base = {"record": {"visible_observation_ids": ["o1", "o2"], "conflict_observation_ids": ["o1"], "status": "conflict",
+                       "record_id": sid("semantic_opening_enumeration", "a")}}
+    grown = {"record": {"visible_observation_ids": ["o2", "o1", "o3"], "conflict_observation_ids": ["o1"], "status": "conflict",
+                        "record_id": sid("semantic_opening_enumeration", "b")}}
+    assert equal(base, grown)
+    lost = deepcopy(grown)
+    lost["record"]["visible_observation_ids"] = ["o1", "o3"]
+    assert not equal(base, lost)
+    repeated = deepcopy(grown)
+    repeated["record"]["visible_observation_ids"] = ["o1", "o1", "o2"]
+    assert not equal(base, repeated)
+    other = deepcopy(grown)
+    other["record"]["status"] = "abstained"
+    assert not equal(base, other)
+    renamed_key = deepcopy(grown)
+    renamed_key["record"]["extra"] = 1
+    assert not equal(base, renamed_key)
+
+
+def test_evidence_swap_matches_rules():
+    from tools.source_report_scoped_equality import evidence_swap_matches as ok
+
+    b1, f1 = sid("opening_host_binding_v3", "a"), sid("opening_host_frame_v2", "a")
+    b2, f2 = sid("opening_host_binding_v3", "b"), sid("opening_host_frame_v2", "b")
+    base = ["x", "y", b1, f1]
+    assert ok(base, ["x", "y", b2, f2])  # one binding + one frame swapped
+    assert ok(base, base)
+    assert not ok(base, ["x", "z", b2, f2])  # a non-receipt id changed
+    assert not ok(base, ["x", "y", b2, f2, sid("opening_host_binding_v3", "c")])  # second binding added
+    assert not ok(base, ["x", "y", b2])  # frame receipt silently dropped
+    assert ok(["x"], ["x", b2], net_additions={"opening_host_binding_v3": 1})  # declared new host binding
+    assert not ok(["x"], ["x", b2])  # ...but only when declared
+    assert not ok(["x", "x"], ["x"])  # duplicate ids are malformed
+    assert not ok("x", ["x"])
+
+
+# --------------------------------------------------------------------------
+# Dedicated key rules: canonical openings, summary, semantic inventory, id churn
+# --------------------------------------------------------------------------
+
+def _canonical(oid, snap, *, hosted, framed, area=1.8):
+    ids = ["source_observation_1", "opening_label_dimension_x", f"physical_opening_existence_{oid[-1]}"]
+    if hosted:
+        ids.append(sid("opening_host_binding_v3", snap[-1] if snap[-1] in HEX else "a"))
+    if framed:
+        ids.append(sid("opening_host_frame_v2", snap[-1] if snap[-1] in HEX else "a"))
+    return {
+        "physical_opening_id": oid,
+        "area_m2": area,
+        "area_basis": "figured_opening_label",
+        "snapshot_id": snap,
+        "host_wall_id": f"group_{snap}_{oid}" if hosted else None,
+        "host_binding_record_id": f"host_{snap}_{oid}" if hosted else None,
+        "host_frame_record_id": f"frame_{snap}_{oid}" if framed else None,
+        "evidence_ids": sorted(ids),
+    }
+
+
+def rich_event():
+    """The basic event plus canonical openings, summary, semantic inventory and a churn key."""
+    base, cand = event()
+    for rep, snap, t_hosted in ((base, BASE_SNAP, False), (cand, NEW_SNAP, True)):
+        # distinct hex digit per snapshot so the receipt ids differ like real ones
+        digit = "a" if snap == BASE_SNAP else "b"
+        rows = []
+        for oid in (A, B, T, U):
+            hosted = oid in (A, B) or (oid == T and t_hosted)
+            row = _canonical(oid, snap, hosted=hosted, framed=(oid == A))
+            row["evidence_ids"] = sorted(
+                i if not i.startswith(("opening_host_binding_v3_", "opening_host_frame_v2_"))
+                else i.rsplit("_", 1)[0] + "_" + digit * 32
+                for i in row["evidence_ids"]
+            )
+            rows.append(row)
+        rep["canonical_openings"] = rows
+        rep["summary"] = {
+            "authenticated_hosts": 3 if t_hosted else 2,
+            "resolved_source_frames": 1,
+            "physical_existence_claims": 4,
+            "room_scope_reason_counts": {"resolved": 1},
+        }
+        rep["semantic_inventory"] = {"record": {
+            "visible_observation_ids": ["o1", "o2"] + (["o3"] if t_hosted else []),
+            "status": "conflict",
+            "record_id": sid("semantic_opening_enumeration", digit),
+        }}
+        rep["native_candidate_closures"] = [
+            {"candidate_id": sid("physical_opening_candidate", digit), "physical": "physical_opening_existence_x", "n": 3},
+            {"candidate_id": sid("physical_opening_raw_candidate", digit), "physical": "physical_opening_existence_y", "n": 4},
+        ]
+    return base, cand
+
+
+RICH_KEYS = [
+    "snapshot_id", "opening_bindings", "host_frames", "resolved_host_frame_evidence",
+    "source_owned_wall_scope_results", "canonical_openings", "summary", "semantic_inventory",
+    "native_candidate_closures",
+]
+
+
+def rich_declared(**overrides):
+    fields = {
+        "expected_changed_report_keys": RICH_KEYS,
+        "expected_id_churn_report_keys": ["native_candidate_closures"],
+    }
+    fields.update(overrides)
+    return declared(**fields)
+
+
+def test_rich_event_is_approved_and_names_nothing_unverified():
+    base, cand = rich_event()
+    approval = approve_declared_additive_rekeys(base, cand, rich_declared())
+    assert approval["unverified_changed_report_keys"] == []
+    assert approval["rekeyed_host_ids"] == sorted([A, B])
+
+
+def test_blind_keys_are_reported_not_hidden():
+    base, cand = rich_event()
+    base["composition_reason_codes"] = ["a", "b"]
+    cand["composition_reason_codes"] = ["a", "c"]
+    with pytest.raises(ValueError, match="undeclared report keys changed: composition_reason_codes"):
+        approve_declared_additive_rekeys(base, cand, rich_declared())
+    approval = approve_declared_additive_rekeys(
+        base, cand, rich_declared(expected_changed_report_keys=RICH_KEYS + ["composition_reason_codes"])
+    )
+    assert approval["unverified_changed_report_keys"] == ["composition_reason_codes"]
+
+
+@pytest.mark.parametrize("damage", [
+    "area_changed",                   # an old opening's figured area moved
+    "area_basis_changed",
+    "evidence_other_changed",         # a non-receipt evidence id swapped
+    "evidence_second_binding",        # two host-binding receipts instead of one
+    "unrelated_host_field",           # an unhosted opening gained host fields
+    "unrelated_evidence",             # an unhosted opening's evidence changed
+    "canonical_disagrees_with_binding",
+    "canonical_universe_changed",
+    "new_host_two_bindings",
+    "new_host_area_changed",
+    "summary_hosts_wrong",
+    "summary_other_key_changed",
+    "summary_shape_changed",
+    "inventory_lost_observation",
+    "inventory_status_changed",
+    "churn_value_changed",
+    "churn_physical_id_changed",
+    "churn_count_changed",
+])
+def test_dedicated_rules_refuse_what_a_blind_excuse_would_have_hidden(damage):
+    base, cand = rich_event()
+    can = {r["physical_opening_id"]: r for r in cand["canonical_openings"]}
+    if damage == "area_changed":
+        can[A]["area_m2"] = 2.2
+    elif damage == "area_basis_changed":
+        can[B]["area_basis"] = "schedule"
+    elif damage == "evidence_other_changed":
+        can[A]["evidence_ids"] = sorted(i if i != "source_observation_1" else "source_observation_2" for i in can[A]["evidence_ids"])
+    elif damage == "evidence_second_binding":
+        can[B]["evidence_ids"] = sorted(can[B]["evidence_ids"] + [sid("opening_host_binding_v3", "f")])
+    elif damage == "unrelated_host_field":
+        can[U]["host_wall_id"] = "group_x"
+    elif damage == "unrelated_evidence":
+        can[U]["evidence_ids"] = sorted(can[U]["evidence_ids"] + [sid("opening_host_binding_v3", "f")])
+    elif damage == "canonical_disagrees_with_binding":
+        can[A]["host_wall_id"] = "group_other"
+    elif damage == "canonical_universe_changed":
+        cand["canonical_openings"] = [r for r in cand["canonical_openings"] if r["physical_opening_id"] != U]
+    elif damage == "new_host_two_bindings":
+        can[T]["evidence_ids"] = sorted(can[T]["evidence_ids"] + [sid("opening_host_binding_v3", "f")])
+    elif damage == "new_host_area_changed":
+        can[T]["area_m2"] = 9.9
+    elif damage == "summary_hosts_wrong":
+        cand["summary"]["authenticated_hosts"] = 5
+    elif damage == "summary_other_key_changed":
+        cand["summary"]["physical_existence_claims"] = 5
+    elif damage == "summary_shape_changed":
+        cand["summary"]["extra"] = 1
+    elif damage == "inventory_lost_observation":
+        cand["semantic_inventory"]["record"]["visible_observation_ids"] = ["o1", "o3"]
+    elif damage == "inventory_status_changed":
+        cand["semantic_inventory"]["record"]["status"] = "corroborated"
+    elif damage == "churn_value_changed":
+        cand["native_candidate_closures"][0]["n"] = 99
+    elif damage == "churn_physical_id_changed":
+        cand["native_candidate_closures"][0]["physical"] = "physical_opening_existence_z"
+    else:  # churn_count_changed
+        cand["native_candidate_closures"].append({"candidate_id": sid("physical_opening_candidate", "f"), "n": 1})
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(base, cand, rich_declared())
+
+
+def test_exact_retention_event_with_rich_report_needs_no_receipt_changes():
+    # Same snapshot: canonical rows may then differ only for the declared new host.
+    base, _ = rich_event()
+    cand = deepcopy(base)
+    cand["opening_bindings"] = report(BASE_SNAP, t_hosted=True, u_reasons=UNMAPPED_RIGHT)["opening_bindings"]
+    cand["host_frames"] = report(BASE_SNAP, t_hosted=True, u_reasons=UNMAPPED_RIGHT)["host_frames"]
+    cand["source_owned_wall_scope_results"] = report(BASE_SNAP, t_hosted=True)["source_owned_wall_scope_results"]
+    can = {r["physical_opening_id"]: r for r in cand["canonical_openings"]}
+    can[T].update(host_wall_id=f"group_{BASE_SNAP}_{T}", host_binding_record_id=f"host_{BASE_SNAP}_{T}",
+                  evidence_ids=sorted(can[T]["evidence_ids"] + [sid("opening_host_binding_v3", "a")]))
+    cand["summary"]["authenticated_hosts"] = 3
+    strict = rich_declared(candidate_snapshot_id=BASE_SNAP, allow_snapshot_receipt_rekey=False)
+    approval = approve_declared_additive_rekeys(base, cand, strict)
+    assert approval["rekeyed_host_ids"] == []
+    # an old host's canonical host fields moving is a rekey and is refused when not allowed
+    can[A]["host_wall_id"] = "moved"
+    with pytest.raises(ValueError):
+        approve_declared_additive_rekeys(base, cand, strict)

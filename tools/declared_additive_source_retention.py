@@ -37,6 +37,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from tools.gptmax_source_host_rekey_parity_ledger import compare_source_host_rekeys
+from tools.source_report_scoped_equality import (
+    additive_observation_inventory_equal,
+    equal_modulo_snapshot_scoped_ids,
+    evidence_swap_matches,
+)
 
 DECLARATION_SCHEMA = "declared_additive_source_retention.v1"
 DEFAULT_DECLARATIONS_PATH = Path(__file__).with_name(
@@ -66,10 +71,28 @@ _DECLARATION_KEYS = frozenset(
         "expected_new_frame_host_ids",
         "expected_unhosted_reason_changes",
         "expected_changed_report_keys",
+        "expected_id_churn_report_keys",
         "allow_snapshot_receipt_rekey",
         "tracking_issue",
     }
 )
+# Report keys whose change is verified by dedicated code in the approval itself.
+_VERIFIED_ELSEWHERE_KEYS = frozenset(
+    {
+        "snapshot_id",  # bound exactly by the declaration's baseline/candidate snapshot ids
+        "opening_bindings",
+        "host_frames",
+        "host_frame_traces",
+        "resolved_host_frame_evidence",
+        "source_owned_wall_scopes",
+        "source_owned_wall_scope_results",
+        "canonical_openings",
+        "summary",
+        "semantic_inventory",
+    }
+)
+_HOST_COUNT_SUMMARY_KEYS = frozenset({"authenticated_hosts", "host_bindings"})
+_FRAME_COUNT_SUMMARY_KEYS = frozenset({"resolved_source_frames", "host_frames"})
 _REASON_CHANGE_KEYS = frozenset({"opening_identity_id", "before", "after"})
 # The only binding / frame fields that follow a snapshot change on a retained
 # host.  Everything else on those rows must be identical.
@@ -102,6 +125,7 @@ class Declaration:
     expected_new_frame_host_ids: tuple[str, ...]
     expected_unhosted_reason_changes: tuple[ReasonChange, ...]
     expected_changed_report_keys: tuple[str, ...]
+    expected_id_churn_report_keys: tuple[str, ...]
     allow_snapshot_receipt_rekey: bool
     tracking_issue: int
 
@@ -157,6 +181,11 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
     keys = _unique_texts(raw["expected_changed_report_keys"], "expected_changed_report_keys")
     if "snapshot_id" not in keys:
         raise ValueError("a snapshot-changing event must declare snapshot_id among its changed report keys")
+    churn = _unique_texts(raw["expected_id_churn_report_keys"], "expected_id_churn_report_keys")
+    if not set(churn) <= set(keys):
+        raise ValueError("id-churn report keys must also be declared changed report keys")
+    if set(churn) & _VERIFIED_ELSEWHERE_KEYS:
+        raise ValueError("keys verified by dedicated rules cannot be declared as id-churn keys")
     rekey = raw["allow_snapshot_receipt_rekey"]
     if type(rekey) is not bool:
         raise ValueError("declaration allow_snapshot_receipt_rekey must be a boolean")
@@ -172,6 +201,7 @@ def parse_declaration(raw: Mapping[str, Any]) -> Declaration:
         expected_new_frame_host_ids=frames,
         expected_unhosted_reason_changes=tuple(changes),
         expected_changed_report_keys=keys,
+        expected_id_churn_report_keys=churn,
         allow_snapshot_receipt_rekey=rekey,
         tracking_issue=issue,
     )
@@ -325,6 +355,93 @@ def w4_delta_explained_by_source_delta(
         "lost_with_successor": len(lost),
         "gained_from_new_source": len(gained) - len(lost),
     }
+
+
+def _verify_canonical_openings(
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    *,
+    old_hosted: set[str],
+    gained: set[str],
+    declared_frames: set[str],
+    allow_rekey: bool,
+    bindings: Mapping[str, Mapping[str, Any]],
+    frames: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Canonical opening records change only where the verified host rows change."""
+    try:
+        old = {row["physical_opening_id"]: row for row in baseline["canonical_openings"]}
+        new = {row["physical_opening_id"]: row for row in candidate["canonical_openings"]}
+    except (KeyError, TypeError) as exc:
+        raise ValueError("declared additive retention refused: malformed canonical_openings") from exc
+    if set(old) != set(new):
+        raise ValueError("declared additive retention refused: canonical opening universe changed")
+    host_fields = {"host_wall_id", "host_binding_record_id", "host_frame_record_id"}
+    always = {"snapshot_id", "evidence_ids"} | host_fields
+    for opening_id in sorted(old):
+        before, after = old[opening_id], new[opening_id]
+        changed = {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
+        if changed - always:
+            raise ValueError(
+                f"declared additive retention refused: canonical opening changed beyond host receipts: "
+                f"{opening_id}: " + ", ".join(sorted(changed - always))
+            )
+        binding = bindings.get(opening_id, {})
+        frame = frames.get(opening_id, {})
+        # The canonical record must agree with the (verified) host and frame rows.
+        if (
+            (after.get("host_wall_id") or None) != (binding.get("host_wall_id") or None)
+            or (after.get("host_binding_record_id") or None) != (binding.get("record_id") or None)
+            or (after.get("host_frame_record_id") or None) != (frame.get("record_id") or None)
+        ):
+            raise ValueError(
+                f"declared additive retention refused: canonical opening disagrees with host/frame rows: {opening_id}"
+            )
+        if opening_id in gained:
+            net = {"opening_host_binding_v3": 1, "opening_host_frame_v2": int(opening_id in declared_frames)}
+            allowed_changes = {"snapshot_id", "evidence_ids", "host_wall_id", "host_binding_record_id"}
+            if opening_id in declared_frames:
+                allowed_changes.add("host_frame_record_id")
+        elif opening_id in old_hosted:
+            net = {}
+            allowed_changes = {"snapshot_id", "evidence_ids"} | (host_fields if allow_rekey else set())
+        else:
+            net = {}
+            allowed_changes = {"snapshot_id"}
+        if changed - allowed_changes:
+            raise ValueError(
+                f"declared additive retention refused: canonical opening field changed without a verified cause: "
+                f"{opening_id}: " + ", ".join(sorted(changed - allowed_changes))
+            )
+        if "evidence_ids" in changed and not evidence_swap_matches(
+            before.get("evidence_ids"), after.get("evidence_ids"), net_additions=net
+        ):
+            raise ValueError(
+                f"declared additive retention refused: canonical opening evidence changed beyond receipts: {opening_id}"
+            )
+
+
+def _verify_summary(
+    baseline: Any,
+    candidate: Any,
+    *,
+    new_hosts: int,
+    new_frames: int,
+) -> None:
+    """Counts move only by the declared new hosts / frames; every other entry is equal."""
+    if not isinstance(baseline, Mapping) or not isinstance(candidate, Mapping) or set(baseline) != set(candidate):
+        raise ValueError("declared additive retention refused: summary shape changed")
+    for key in sorted(baseline):
+        before, after = baseline[key], candidate[key]
+        if key in _HOST_COUNT_SUMMARY_KEYS or key in _FRAME_COUNT_SUMMARY_KEYS:
+            expected = new_hosts if key in _HOST_COUNT_SUMMARY_KEYS else new_frames
+            if type(before) is not int or type(after) is not int or after != before + expected:
+                raise ValueError(
+                    f"declared additive retention refused: summary {key} is not {expected} above the baseline"
+                )
+        elif before != after:
+            raise ValueError(f"declared additive retention refused: summary {key} changed")
+
 
 
 def approve_declared_additive_rekeys(
@@ -486,13 +603,16 @@ def approve_declared_additive_rekeys(
 
     norm = normalize if normalize is not None else (lambda value: value)
     changed_keys = set(declaration.expected_changed_report_keys)
+    churn_keys = set(declaration.expected_id_churn_report_keys)
 
     def _differs(key: str) -> bool:
         if (key in baseline) != (key in candidate):
             return True
-        # Normalize the *keyed* single-entry view, exactly as a gate's own
+        if key not in baseline:
+            return False
+        # Normalize the keyed single-entry view, exactly as a gate's own
         # recursive normalizer sees it (it may act on the key, e.g. sort the
-        # value of ``void_reason_codes`` or drop a sidecar key).
+        # value of void_reason_codes or drop a sidecar key).
         return norm({key: baseline[key]}) != norm({key: candidate[key]})
 
     undeclared_keys = sorted(
@@ -503,6 +623,46 @@ def approve_declared_additive_rekeys(
             "declared additive retention refused: undeclared report keys changed: "
             + ", ".join(undeclared_keys)
         )
+
+    # Dedicated verification of the keys that carry quantities / host state: the
+    # declaration acknowledges them, it never excuses them.
+    if "canonical_openings" in baseline or "canonical_openings" in candidate:
+        _verify_canonical_openings(
+            baseline,
+            candidate,
+            old_hosted=old_hosted,
+            gained=gained,
+            declared_frames=declared_frames,
+            allow_rekey=declaration.allow_snapshot_receipt_rekey,
+            bindings=new,
+            frames=new_frames,
+        )
+    if "summary" in baseline or "summary" in candidate:
+        _verify_summary(
+            baseline.get("summary"),
+            candidate.get("summary"),
+            new_hosts=len(gained),
+            new_frames=len(framed_after - framed_before),
+        )
+    if "semantic_inventory" in baseline or "semantic_inventory" in candidate:
+        if not additive_observation_inventory_equal(
+            baseline.get("semantic_inventory"), candidate.get("semantic_inventory")
+        ):
+            raise ValueError(
+                "declared additive retention refused: semantic inventory changed beyond added source observations"
+            )
+    for key in sorted(churn_keys):
+        if (key in baseline) != (key in candidate) or not equal_modulo_snapshot_scoped_ids(
+            norm({key: baseline.get(key)}), norm({key: candidate.get(key)})
+        ):
+            raise ValueError(
+                f"declared additive retention refused: report key {key} changed beyond snapshot-scoped ids"
+            )
+    blind_keys = sorted(
+        key
+        for key in changed_keys
+        if key not in churn_keys and key not in _VERIFIED_ELSEWHERE_KEYS and _differs(key)
+    )
     unchanged_declared_keys = sorted(
         key
         for key in changed_keys
@@ -534,6 +694,8 @@ def approve_declared_additive_rekeys(
         "declared_new_frame_host_ids": sorted(declared_frames),
         "accepted_unhosted_reason_change_ids": sorted(consumed),
         "declared_report_keys_without_change": unchanged_declared_keys,
+        # Acknowledged semantic changes that no code verified: reviewers read these.
+        "unverified_changed_report_keys": blind_keys,
         "w4_wall_delta": w4_delta,
         # Every row whose serialized binding may differ without failing retention.
         "tolerated_binding_change_ids": sorted(set(rekeyed) | declared_hosts | consumed),
