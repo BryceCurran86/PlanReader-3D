@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 import math
-from typing import Any
+from typing import Any, Sequence
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
@@ -1053,9 +1053,8 @@ def inspect_native_source_parent_w4_ancestry(
             "matched_source_w2_edge_count": len(candidates),
             "malformed_or_ambiguous_w4_receipt_count": conflicts[source_id],
             "candidate_w4_ancestry_receipts": candidates[:32],
-            "source_w4_receipt_universe_complete": (
-                not conflicts[source_id] and len(candidates) <= 32
-            ),
+            "w4_receipt_listing_truncated": len(candidates) > 32,
+            "source_w4_receipt_universe_complete": False,
             "source_wall_role_authenticated": False,
             "unique_physical_room_face_authenticated": False,
         })
