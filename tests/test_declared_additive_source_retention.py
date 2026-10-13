@@ -1223,3 +1223,53 @@ def test_exact_retention_event_with_rich_report_needs_no_receipt_changes():
     can[A]["host_wall_id"] = "moved"
     with pytest.raises(ValueError):
         approve_declared_additive_rekeys(base, cand, strict)
+
+
+# --------------------------------------------------------------------------
+# --suggest: derive a declaration from a pair (it only describes; approval verifies)
+# --------------------------------------------------------------------------
+
+def test_suggested_declaration_round_trips_through_parse_and_approval():
+    from tools.declared_additive_source_retention import suggest_declaration
+
+    base, cand = rich_event()
+    suggestion = suggest_declaration(
+        base, cand, report_shape="stage_report", tracking_issue=2608, allow_snapshot_receipt_rekey=True
+    )
+    assert suggestion["expected_new_host_ids"] == [T]
+    assert suggestion["expected_new_frame_host_ids"] == []
+    assert suggestion["expected_unhosted_reason_changes"] == [
+        {"opening_identity_id": U, "before": UNMAPPED_LEFT, "after": UNMAPPED_RIGHT}
+    ]
+    assert suggestion["expected_id_churn_report_keys"] == ["native_candidate_closures"]
+    assert "snapshot_id" in suggestion["expected_changed_report_keys"]
+    approval = approve_declared_additive_rekeys(base, cand, (parse_declaration(suggestion),))
+    assert approval["unverified_changed_report_keys"] == []
+
+
+def test_suggestion_describes_but_the_approval_still_refuses_a_bad_pair():
+    from tools.declared_additive_source_retention import suggest_declaration
+
+    base, cand = rich_event()
+    can = {r["physical_opening_id"]: r for r in cand["canonical_openings"]}
+    can[A]["area_m2"] = 9.9  # a quantity-bearing change the suggestion happily "describes"
+    suggestion = suggest_declaration(
+        base, cand, report_shape="stage_report", tracking_issue=1, allow_snapshot_receipt_rekey=True
+    )
+    with pytest.raises(ValueError, match="canonical opening changed beyond host receipts"):
+        approve_declared_additive_rekeys(base, cand, (parse_declaration(suggestion),))
+
+
+def test_cli_suggest_prints_a_parseable_declaration(tmp_path, capsys):
+    from tools import declared_additive_source_retention as module
+
+    base, cand = rich_event()
+    (tmp_path / "b.json").write_text(json.dumps(base))
+    (tmp_path / "c.json").write_text(json.dumps(cand))
+    out = tmp_path / "suggested.json"
+    rc = module.main(["--baseline", str(tmp_path / "b.json"), "--candidate", str(tmp_path / "c.json"),
+                      "--suggest", "stage_report", "--tracking-issue", "2608", "--output", str(out)])
+    assert rc == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed == json.loads(out.read_text())
+    parse_declaration(printed)

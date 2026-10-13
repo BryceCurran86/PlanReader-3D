@@ -822,6 +822,77 @@ def sealed_quantities_changed_only_by_snapshot_receipts(
     return {"prior_rows": len(old), "rekeyed_rows": rekeyed, "new_rows": len(set(new) - set(old))}
 
 
+def suggest_declaration(
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    *,
+    report_shape: str,
+    tracking_issue: int,
+    allow_snapshot_receipt_rekey: bool,
+    normalize: Callable[[Any], Any] | None = None,
+) -> dict[str, Any]:
+    """Derive the declaration that describes this exact report pair (a starting point).
+
+    This only *describes* the differences it sees; it grants nothing.  The
+    approval then verifies them, and a human decides whether the described event
+    is acceptable.  Keys that differ only by snapshot-scoped ids and ordering are
+    proposed as ``expected_id_churn_report_keys``; the rest are proposed as
+    changed (and show up in ``unverified_changed_report_keys`` unless a dedicated
+    rule verifies them).
+    """
+    base = as_ledger_report(baseline)
+    cand = as_ledger_report(candidate)
+    norm = normalize if normalize is not None else (lambda value: value)
+    old = _index(base.get("opening_bindings"), "baseline opening_bindings")
+    new = _index(cand.get("opening_bindings"), "candidate opening_bindings")
+    gained = sorted(k for k, row in new.items() if row.get("host_wall_id") and not old.get(k, {}).get("host_wall_id"))
+    old_frames = _index(base.get("host_frames"), "baseline host_frames")
+    new_frames = _index(cand.get("host_frames"), "candidate host_frames")
+    new_frame_hosts = sorted(
+        k for k in gained if new_frames.get(k, {}).get("record_id") and not old_frames.get(k, {}).get("record_id")
+    )
+    reason_changes = [
+        {
+            "opening_identity_id": key,
+            "before": list(old[key].get("reason_codes") or ()),
+            "after": list(new[key].get("reason_codes") or ()),
+        }
+        for key in sorted(old)
+        if key in new
+        and key not in gained
+        and not old[key].get("host_wall_id")
+        and tuple(old[key].get("reason_codes") or ()) != tuple(new[key].get("reason_codes") or ())
+    ]
+    changed = sorted(
+        key
+        for key in set(baseline) | set(candidate)
+        if (key in baseline) != (key in candidate)
+        or norm({key: baseline[key]}) != norm({key: candidate[key]})
+    )
+    churn = sorted(
+        key
+        for key in changed
+        if key not in _VERIFIED_ELSEWHERE_KEYS
+        and key in baseline
+        and key in candidate
+        and equal_modulo_snapshot_scoped_ids(norm({key: baseline[key]}), norm({key: candidate[key]}))
+    )
+    return {
+        "source_sha256": baseline.get("source_sha256"),
+        "report_shape": report_shape,
+        "baseline_snapshot_id": baseline.get("snapshot_id"),
+        "candidate_snapshot_id": candidate.get("snapshot_id"),
+        "expected_new_host_ids": gained,
+        "expected_new_frame_host_ids": new_frame_hosts,
+        "expected_unhosted_reason_changes": reason_changes,
+        "expected_changed_report_keys": changed,
+        "expected_id_churn_report_keys": churn,
+        "allow_snapshot_receipt_rekey": bool(allow_snapshot_receipt_rekey),
+        "tracking_issue": tracking_issue,
+    }
+
+
+
 @contextmanager
 def strict_or_declared(
     baseline: Mapping[str, Any],
@@ -850,9 +921,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--suggest",
+        choices=REPORT_SHAPES,
+        help="print a declaration describing this report pair (a starting point; grants nothing)",
+    )
+    parser.add_argument("--tracking-issue", type=int, default=0)
+    parser.add_argument("--allow-snapshot-receipt-rekey", action="store_true")
     args = parser.parse_args(argv)
     baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
     candidate = json.loads(args.candidate.read_text(encoding="utf-8"))
+    if args.suggest:
+        suggestion = suggest_declaration(
+            baseline,
+            candidate,
+            report_shape=args.suggest,
+            tracking_issue=args.tracking_issue,
+            allow_snapshot_receipt_rekey=args.allow_snapshot_receipt_rekey,
+        )
+        text = json.dumps(suggestion, indent=2, sort_keys=True) + "\n"
+        if args.output:
+            args.output.write_text(text, encoding="utf-8")
+        print(text, end="")
+        return 0
     try:
         approval = approve_declared_additive_rekeys(baseline, candidate)
     except ValueError as exc:
@@ -863,7 +954,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if args.output:
         args.output.write_text(json.dumps(approval, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({k: v for k, v in approval.items() if not isinstance(v, list)}, sort_keys=True))
+    print(json.dumps({k: v for k, v in approval.items() if not isinstance(v, (list, dict))}, sort_keys=True))
+    unverified = approval.get("unverified_changed_report_keys") or []
+    if unverified:
+        print("UNVERIFIED changed report keys (acknowledged, not checked): " + ", ".join(unverified))
     return 0
 
 
