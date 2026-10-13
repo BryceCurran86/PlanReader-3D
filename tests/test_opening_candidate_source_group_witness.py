@@ -38,7 +38,7 @@ def _setup(*, raster=False, ids=("candidate-a", "candidate-b"),
         authority.assess_raster_candidate_closure = lambda _: closure
     else:
         authority._native_raw_candidate_support_cache = {
-            key: (("candidate-b", ("obs-b",)), ("candidate-a", ("obs-a",)))
+            key: (("candidate-b", "window_jamb_pair_candidate", ("obs-b",)), ("candidate-a", "door_jamb_leaf_candidate", ("obs-a",)))
         }
         authority.assess_visible_candidate_closure = lambda _: closure
         authority._resolve_visible_cached = lambda _: result
@@ -53,6 +53,7 @@ def test_native_group_witness_retains_exact_original_per_candidate_source_member
     assert tuple(x["candidate_id"] for x in rows) == ("candidate-a", "candidate-b")
     assert tuple(x["source_observation_ids"] for x in rows) == (["obs-a"], ["obs-b"])
     assert all(x["aperture_bbox_pt"] is None for x in rows)
+    assert [x["structural_pattern"] for x in rows] == ["door_jamb_leaf_candidate", "window_jamb_pair_candidate"]
     assert all(x["candidate_status"] == "unresolved_source_only" for x in rows)
     assert authority._native_raw_candidate_support_cache == before
     assert closure.unresolved_candidate_ids == ("candidate-a", "candidate-b")
@@ -65,12 +66,13 @@ def test_raster_group_witness_has_detector_owned_exact_aperture_and_source_group
     assert tuple(x["source_observation_ids"] for x in rows) == (["obs-a"], ["obs-b"])
     assert rows[0]["aperture_bbox_pt"] == [1.0, 2.0, 3.0, 4.0]
     assert rows[1]["aperture_bbox_pt"] == [10.0, 20.0, 30.0, 40.0]
+    assert all(row["structural_pattern"] == "raster_gap_candidate" for row in rows)
 
 
 def test_missing_group_refuses_apparent_closure():
     authority, selector, key, _ = _setup()
     authority._native_raw_candidate_support_cache[key] = (
-        ("candidate-a", ("obs-a",)),)
+        ("candidate-a", "door_jamb_leaf_candidate", ("obs-a",)),)
     with pytest.raises(RuntimeError, match="group-to-source mapping incomplete"):
         authority.audited_unresolved_source_candidate_groups(selector, family="native")
 
