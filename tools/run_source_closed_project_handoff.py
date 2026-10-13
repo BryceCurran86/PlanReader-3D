@@ -273,6 +273,8 @@ def _generate_project_handoff_locked(
     # Partial signed publication only for a producer-POSITIVE original
     # floor-plan page. A caller-supplied page index does not prove its role.
     if source_plan_page_index is not None:
+        if clean_family_group not in {"core", "floor_area"}:
+            raise ValueError("partial original floor-plan scope requires core or floor_area")
         if (type(source_plan_page_index) is not int
                 or source_plan_page_index not in all_pages):
             raise ValueError("source plan page index must be an original page")
