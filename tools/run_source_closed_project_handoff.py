@@ -47,6 +47,7 @@ from pb_live_floor_area_quantity_publication import (
 )
 from pb_live_floor_area_source_closed_export import seal_live_floor_area_run
 from pb_live_floor_area_customer_projection import project_live_floor_area_customer_rows
+from pb_live_opening_customer_projection import project_live_opening_customer_rows
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
     seal_live_floor_finish_area_run,
@@ -751,14 +752,20 @@ def _generate_project_handoff_locked(
             _write_json(output_dir / "production_summary.json", summary)
             raise RuntimeError("combined sealed run has conflicting source SHA envelope")
 
-    verified_floor_customer_rows = None
-    if clean_family_group == "floor_area" and combined is not None:
-        # A signed FIRM floor is not a customer-facing measurement until the
-        # existing independent commercial projection authority proves exact
-        # one-row-per-quantity provenance. Refuse to write ANY sealed family
-        # file if that second source/customer authority stage fails.
+    verified_partial_customer_rows = None
+    if combined is not None and (clean_family_group == "floor_area" or (
+        clean_family_group == "core" and source_plan_page_index is not None
+    )):
+        # A signed FIRM floor/opening is not a source-owned customer row until
+        # the separate commercial authority proves a strict bijection.
+        # Refuse to write ANY sealed family file on projection disagreement.
         try:
-            rows = project_live_floor_area_customer_rows(
+            projection = (
+                project_live_floor_area_customer_rows
+                if clean_family_group == "floor_area"
+                else project_live_opening_customer_rows
+            )
+            rows = projection(
                 claim, workspace_id=workspace_id, project_id=project_id,
             )
             verified = verify_sealed_customer_output(combined, rows)
@@ -767,12 +774,16 @@ def _generate_project_handoff_locked(
                     or set(verified.verified_quantity_ids) != quantity_ids
                     or verified.customer_row_count != len(quantity_ids)):
                 raise RuntimeError("floor-area sealed customer identities disagree")
-            verified_floor_customer_rows = tuple(rows)
+            verified_partial_customer_rows = tuple(rows)
         except Exception as exc:
-            summary["status"] = "floor_area_customer_projection_unverified"
+            summary["status"] = (
+                "floor_area_customer_projection_unverified"
+                if clean_family_group == "floor_area"
+                else "opening_customer_projection_unverified"
+            )
             summary["claim_reason_codes"] = [
                 *summary["claim_reason_codes"],
-                f"floor_area_customer_projection_error:{type(exc).__name__}",
+                f"{clean_family_group}_customer_projection_error:{type(exc).__name__}",
             ]
             _write_json(output_dir / "production_summary.json", summary)
             raise
@@ -798,10 +809,10 @@ def _generate_project_handoff_locked(
         summary["combined_quantity_count"] = 0
         summary["status"] = "no_sealable_quantities"
 
-    if verified_floor_customer_rows is not None:
+    if verified_partial_customer_rows is not None:
         customer_path = output_dir / "verified_customer_rows.json"
-        _write_json(customer_path, list(verified_floor_customer_rows))
-        summary["verified_customer_row_count"] = len(verified_floor_customer_rows)
+        _write_json(customer_path, list(verified_partial_customer_rows))
+        summary["verified_customer_row_count"] = len(verified_partial_customer_rows)
         summary["customer_rows_verified"] = True
         summary["customer_rows_file"] = str(customer_path)
     _write_json(output_dir / "production_summary.json", summary)
