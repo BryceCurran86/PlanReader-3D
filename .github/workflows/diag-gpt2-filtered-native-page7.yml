@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "pb_filtered_native_primitive_receipts.py"
+      - "pb_physical_wall_candidate_authority.py"
       - "tests/test_filtered_native_primitive_receipts.py"
       - "tools/diag_gpt2_filtered_native_page7.py"
       - ".github/workflows/diag-gpt2-filtered-native-page7.yml"
