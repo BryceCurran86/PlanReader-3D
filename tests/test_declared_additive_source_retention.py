@@ -856,3 +856,62 @@ def test_malformed_w4_wall_record_is_a_refusal_not_a_crash(field):
     del _walls(cand)["wall_extra"]["physical_identity"][field]
     with pytest.raises(ValueError):
         approve_declared_additive_rekeys(base, cand, declared())
+
+
+# --------------------------------------------------------------------------
+# Re-sealed prior quantities change only by snapshot-scoped receipts
+# --------------------------------------------------------------------------
+
+def _sealed(quantity_id, value, host, frame=None):
+    ids = ["source_observation_1", "opening_label_dimension_x", f"opening_host_binding_v3_{host}"]
+    if frame:
+        ids.append(f"opening_host_frame_v2_{frame}")
+    return {
+        "quantity_id": quantity_id, "value": value, "unit": "m2", "family": "opening_area",
+        "object_identity_refs": [f"physical_{quantity_id}"], "status": "corroborated",
+        "evidence_ids": sorted(ids), "trace_evidence_ids": sorted(ids),
+        "fingerprint": f"fp_{host}_{frame}",
+    }
+
+
+def test_resealed_prior_rows_may_swap_only_one_host_and_one_frame_receipt():
+    from tools.declared_additive_source_retention import sealed_quantities_changed_only_by_snapshot_receipts as check
+
+    old = [_sealed("q1", 2.16, "a", "fa"), _sealed("q2", 0.9, "b")]
+    new = [_sealed("q1", 2.16, "a2", "fa2"), _sealed("q2", 0.9, "b2"), _sealed("q3", 1.8, "c")]
+    snapshot = deepcopy((old, new))
+    assert check(old, new) == {"prior_rows": 2, "rekeyed_rows": 2, "new_rows": 1}
+    assert check(old, old) == {"prior_rows": 2, "rekeyed_rows": 0, "new_rows": 0}
+    assert (old, new) == snapshot
+
+
+@pytest.mark.parametrize("damage", ["value", "unit", "refs", "status", "extra_evidence", "swap_source_observation",
+                                    "two_host_receipts", "missing_row", "duplicate_id", "retag_trace_only"])
+def test_resealed_prior_rows_that_changed_anything_else_are_refused(damage):
+    from tools.declared_additive_source_retention import sealed_quantities_changed_only_by_snapshot_receipts as check
+
+    old = [_sealed("q1", 2.16, "a", "fa")]
+    new = [_sealed("q1", 2.16, "a2", "fa2")]
+    row = new[0]
+    if damage == "value":
+        row["value"] = 2.17
+    elif damage == "unit":
+        row["unit"] = "m"
+    elif damage == "refs":
+        row["object_identity_refs"] = ["physical_other"]
+    elif damage == "status":
+        row["status"] = "candidate"
+    elif damage == "extra_evidence":
+        row["evidence_ids"] = sorted(row["evidence_ids"] + ["opening_host_binding_v3_extra"])
+    elif damage == "swap_source_observation":
+        row["evidence_ids"] = sorted(i if i != "source_observation_1" else "source_observation_2" for i in row["evidence_ids"])
+    elif damage == "two_host_receipts":
+        row["trace_evidence_ids"] = sorted(row["trace_evidence_ids"] + ["opening_host_binding_v3_other", "opening_host_binding_v3_third"])
+    elif damage == "missing_row":
+        new = []
+    elif damage == "duplicate_id":
+        new = [row, deepcopy(row)]
+    else:  # retag_trace_only: a non-receipt id swapped only in the trace set
+        row["trace_evidence_ids"] = sorted(i if i != "source_observation_1" else "source_observation_9" for i in row["trace_evidence_ids"])
+    with pytest.raises(ValueError):
+        check(old, new)
