@@ -16,7 +16,10 @@ from pb_drawing_evidence_binding import DrawingViewType
 from pb_filtered_native_primitive_receipts import filtered_native_primitive_receipts
 from pb_physical_wall_candidate_authority import (
     _filter_repeated_non_physical_drafting_primitives,
+    _proven_filled_wall_strips,
+    _filter_proven_wall_strip_geometry,
 )
+from pb_wall_room_topology_stage_a import is_structural_candidate_segment
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     segment_page_viewports,
@@ -79,6 +82,20 @@ def collect_page7_filtered_native_receipt() -> dict[str, object]:
                 or len(excluded_by_id) != len(excluded)):
             raise RuntimeError("native_filter_receipt_unavailable")
 
+        # Follow exact original source IDs through every lightweight gate
+        # BEFORE W2 graph splitting. The whole graph can remain expensive,
+        # but none of these stage receipts may mint missing W2 source edges.
+        proven_strips = _proven_filled_wall_strips(retained)
+        graph_inputs = _filter_proven_wall_strip_geometry(
+            retained, proven_strips
+        )
+        graph_input_ids = {row["id"] for row in graph_inputs}
+        if len(graph_input_ids) != len(graph_inputs):
+            raise RuntimeError("native_graph_input_identity_collision")
+        graph_input_by_id = {row["id"]: row for row in graph_inputs}
+        if not graph_input_ids <= retained_ids:
+            raise RuntimeError("native_graph_input_foreign_source_identity")
+
         targets = []
         for original_id in ORIGINAL_NATIVE_IDS:
             row = original_by_id.get(original_id)
@@ -89,8 +106,16 @@ def collect_page7_filtered_native_receipt() -> dict[str, object]:
             observed = excluded_by_id.get(original_id)
             status = (
                 "EXCLUDED_NATIVE_CANDIDATE_ONLY" if observed is not None
-                else "RETAINED_OR_OTHER_FILTER_NONCANDIDATE"
+                else ("RETAINED_AT_FIRST_FILTER" if original_id in retained_ids
+                      else "REJECTED_NONCANDIDATE_AT_FIRST_FILTER")
             )
+            graph_input = graph_input_by_id.get(original_id)
+            is_stage_a_candidate = None
+            stage_a_negative_reasons = []
+            if graph_input is not None:
+                is_stage_a_candidate, stage_a_negative_reasons = (
+                    is_structural_candidate_segment(graph_input)
+                )
             targets.append({
                 "original_source_id": original_id,
                 "source_path_index": row["path_index"],
@@ -100,6 +125,12 @@ def collect_page7_filtered_native_receipt() -> dict[str, object]:
                 "original_stroke": row.get("stroke"),
                 "original_width_pt": row.get("width"),
                 "source_filter_disposition": status,
+                "retained_by_first_filter": original_id in retained_ids,
+                "retained_by_proven_filled_wall_strip_filter": (
+                    original_id in graph_input_ids
+                ),
+                "stage_a_structural_candidate": is_stage_a_candidate,
+                "stage_a_metadata_exclusion_reasons": stage_a_negative_reasons,
                 "read_only_receipt_status": (
                     observed.status if observed is not None else None
                 ),
@@ -113,6 +144,8 @@ def collect_page7_filtered_native_receipt() -> dict[str, object]:
             "authenticated_floor_viewport_id": floor[0].view_id,
             "source_native_original_viewport_segment_count": len(original),
             "source_filter_retained_segment_count": len(retained),
+            "proven_filled_wall_strip_count": len(proven_strips),
+            "w2_original_graph_input_segment_count": len(graph_inputs),
             "filtered_native_line_receipt_count": len(excluded),
             "targets": targets,
             "source_wall_role_authenticated_by_diagnostic": False,
