@@ -100,6 +100,42 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
         if not graph_input_ids <= retained_ids:
             raise RuntimeError("native_graph_input_foreign_source_identity")
 
+        # Actual W2 structural pre-filter is a DISTINCT stage from the
+        # page-wide motif filter. Keep its exact reason codes without ever
+        # promoting candidate geometry into a wall or metric area.
+        from pb_wall_room_topology_stage_a import filter_structural_segments
+        from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
+        from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+        structural, stage_a_excluded = filter_structural_segments(retained)
+        structural_ids = {row.get("id") for row in structural}
+        stage_a_excluded_ids = {
+            row.get("id"): tuple(row.get("reason_codes", ()))
+            for row in stage_a_excluded
+        }
+        # Read-only W2 replay on the same original viewport native sources.
+        # W4 additionally applies authenticated strip proof and source-scope
+        # graph choices; this observation is not W4 physical wall ownership.
+        graph = build_wall_graph_for_viewport(retained)
+        graph_lineage_counts = {}
+        for edge in graph["edges"]:
+            lineage = edge.get(LINEAGE_KEY) or {}
+            for native_id in lineage.get("source_primitive_ids", ()):
+                graph_lineage_counts[native_id] = (
+                    graph_lineage_counts.get(native_id, 0) + 1
+                )
+        snap_collapse_counts = {}
+        for fragment in graph.get("snap_collapsed_fragments", ()):
+            # Diagnostic inventory only: report schema without assuming every
+            # collapsed fragment has an authenticated physical source owner.
+            lineage = (
+                fragment.get(LINEAGE_KEY, {}) if isinstance(fragment, dict)
+                else {}
+            )
+            for native_id in lineage.get("source_primitive_ids", ()):
+                snap_collapse_counts[native_id] = (
+                    snap_collapse_counts.get(native_id, 0) + 1
+                )
+
         targets = []
         for original_id in ORIGINAL_NATIVE_IDS:
             row = original_by_id.get(original_id)
@@ -129,6 +165,12 @@ def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> 
                 "original_stroke": row.get("stroke"),
                 "original_width_pt": row.get("width"),
                 "source_filter_disposition": status,
+                "w2_structural_prefilter_retained": original_id in structural_ids,
+                "w2_structural_prefilter_exclusion_reasons": list(
+                    stage_a_excluded_ids.get(original_id, ())
+                ),
+                "w2_graph_lineage_edge_count": graph_lineage_counts.get(original_id, 0),
+                "w2_snap_collapse_lineage_count_diagnostic": snap_collapse_counts.get(original_id, 0),
                 "retained_by_first_filter": original_id in retained_ids,
                 "retained_by_proven_filled_wall_strip_filter": (
                     original_id in graph_input_ids
