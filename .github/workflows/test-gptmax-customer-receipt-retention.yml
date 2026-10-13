@@ -1,0 +1,31 @@
+name: GPT MAX Authenticated Customer Receipt Retention
+on:
+  pull_request:
+    paths:
+      - tools/verify_gptmax_customer_receipt_retention.py
+      - tests/test_gptmax_customer_receipt_retention.py
+      - .github/workflows/test-gptmax-customer-receipt-retention.yml
+permissions:
+  contents: read
+jobs:
+  strict-customer-receipts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Generic original-source and customer projection negative tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_customer_receipt_retention.py
+          python -m compileall -q tools/verify_gptmax_customer_receipt_retention.py tests/test_gptmax_customer_receipt_retention.py
+      - name: Original immutable V2 and provider isolation controls
+        run: |
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
