@@ -95,3 +95,21 @@ def test_oversize_and_invalid_query_are_not_complete():
         wall_id="wall-A", atomic_edge=((0., 0.), (0., 0.)),
     )
     assert r["status"] == "invalid_source_query"
+
+
+def test_withheld_original_polygon_area_is_only_observed_source():
+    withheld = face(
+        "small-source", edges=(("wall-A", ((0., 0.), (10., 0.))),),
+        reason="source_room_face_tiny_or_degenerate",
+        polygon=((0., 0.), (10., 0.), (10., 2.), (0., 2.)),
+    )
+    withheld.area_page_pts2 = 20.0
+    r = audit(
+        N(records=(), abstained_faces=(withheld,)),
+        wall_id="wall-A", atomic_edge=ATOM,
+    )
+    item = r["matching_withheld_face_receipts"][0]
+    assert item["original_area_pdf_points2_observed_only"] == 20.
+    assert len(item["original_polygon_source_pts_observed_only"]) == 4
+    assert item["original_polygon_source_vertices_truncated"] is False
+    assert r["second_physical_source_face_authenticated"] is False
