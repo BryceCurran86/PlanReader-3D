@@ -46,8 +46,9 @@ jobs:
     env:
       SOURCE_SHA: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
       CANDIDATE_SHA: "0d2c064919ba65ded8c07f69cfbd0030eaa52ef0"
-      ORIGINAL_ROOM_BLOB: "86429e301b740ea2a478ea20bdbed8b0b51d062d"
-      BASELINE_DIAG_BLOB: "2644bb99e2e40436020bddd9e6ce5d0424ae0bf1"
+      BASELINE_ROOM_BLOB: "9ba005581e0d576fa6f6d376b2cc766e704bab8c"
+      CANDIDATE_ROOM_BLOB: "86429e301b740ea2a478ea20bdbed8b0b51d062d"
+      BASELINE_DIAG_BLOB: "3c298cdfefbf26146330094f9a2b68a7e3ca1e14"
       CANDIDATE_DIAG_BLOB: "abe213abbe90f3620017d35f4023ba2110940c5d"
     steps:
       - uses: actions/checkout@v4
@@ -74,8 +75,8 @@ jobs:
           git worktree add --detach /tmp/gpt3-room-candidate "$CANDIDATE_SHA"
           mkdir -p artifacts
 
-          test "$(git -C /tmp/gpt3-room-base rev-parse HEAD:pb_source_room_face_authority.py)" = "$ORIGINAL_ROOM_BLOB"
-          test "$(git -C /tmp/gpt3-room-candidate rev-parse HEAD:pb_source_room_face_authority.py)" = "$ORIGINAL_ROOM_BLOB"
+          test "$(git -C /tmp/gpt3-room-base rev-parse HEAD:pb_source_room_face_authority.py)" = "$BASELINE_ROOM_BLOB"
+          test "$(git -C /tmp/gpt3-room-candidate rev-parse HEAD:pb_source_room_face_authority.py)" = "$CANDIDATE_ROOM_BLOB"
           test "$(git -C /tmp/gpt3-room-base rev-parse HEAD:tools/diag_gptmax_source_authority_stages.py)" = "$BASELINE_DIAG_BLOB"
           test "$(git -C /tmp/gpt3-room-candidate rev-parse HEAD:tools/diag_gptmax_source_authority_stages.py)" = "$CANDIDATE_DIAG_BLOB"
           for root in /tmp/gpt3-room-base /tmp/gpt3-room-candidate; do
