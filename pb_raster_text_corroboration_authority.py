@@ -221,6 +221,110 @@ def _exact_native_word_origin_run(
     return matches == 1
 
 
+
+def _unique_native_word_source_ink_crop(
+    line: object,
+    *,
+    word_bbox: tuple[float, float, float, float],
+    raw_text: str,
+) -> Optional[tuple[float, float, float, float]]:
+    """Derive a single source-native glyph-ink crop for a rotated word.
+
+    The original native word box, not OCR or a nearby text block, determines
+    which source glyph origins can participate. The exact contiguous native
+    character sequence must be UNIQUE, and every glyph bbox must be finite.
+    The crop is the union of that original bbox and its native glyph bboxes.
+    Refuse any expansion enclosing another source character's origin.
+    This returns geometry only; it never makes native text trusted. Final
+    independently registered 300/450-DPI OCR still must exactly corroborate.
+    """
+    if not isinstance(line, dict) or _rect4(word_bbox) is None:
+        return None
+    if type(raw_text) is not str or not raw_text:
+        return None
+    chars: list[
+        tuple[str, tuple[float, float], tuple[float, float, float, float]]
+    ] = []
+    for span in line.get("spans") or ():
+        if not isinstance(span, dict):
+            return None
+        for char in span.get("chars") or ():
+            if not isinstance(char, dict):
+                return None
+            token = char.get("c")
+            origin = _point2(char.get("origin"))
+            glyph_box = _rect4(char.get("bbox"))
+            if (type(token) is not str or len(token) != 1
+                    or origin is None or glyph_box is None):
+                return None
+            chars.append((token, origin, glyph_box))
+    count = len(raw_text)
+    matches = []
+    for start in range(len(chars) - count + 1):
+        window = chars[start:start + count]
+        if "".join(char[0] for char in window) != raw_text:
+            continue
+        if all(
+            word_bbox[0] - 1e-4 <= char[1][0] <= word_bbox[2] + 1e-4
+            and word_bbox[1] - 1e-4 <= char[1][1] <= word_bbox[3] + 1e-4
+            for char in window
+        ):
+            matches.append(start)
+            if len(matches) > 1:
+                return None
+    if len(matches) != 1:
+        return None
+    start = matches[0]
+    word_chars = chars[start:start + count]
+    crop = (
+        min([word_bbox[0], *(char[2][0] for char in word_chars)]),
+        min([word_bbox[1], *(char[2][1] for char in word_chars)]),
+        max([word_bbox[2], *(char[2][2] for char in word_chars)]),
+        max([word_bbox[3], *(char[2][3] for char in word_chars)]),
+    )
+    if _rect4(crop) is None:
+        return None
+    # Ink protrusion is not an excuse to take a neighbouring source word.
+    for index, (_text, origin, _box) in enumerate(chars):
+        if start <= index < start + count:
+            continue
+        if crop[0] <= origin[0] <= crop[2] and crop[1] <= origin[1] <= crop[3]:
+            return None
+    return crop
+
+
+def _source_ink_crop_avoids_other_lines(
+    rawdict: object,
+    *,
+    selected_line: object,
+    crop: tuple[float, float, float, float],
+) -> bool:
+    """Reject a native glyph expansion that also encloses foreign-line ink."""
+    if not isinstance(rawdict, dict) or _rect4(crop) is None:
+        return False
+    for block in rawdict.get("blocks") or ():
+        if not isinstance(block, dict):
+            return False
+        for line in block.get("lines") or ():
+            if line is selected_line:
+                continue
+            if not isinstance(line, dict):
+                return False
+            for span in line.get("spans") or ():
+                if not isinstance(span, dict):
+                    return False
+                for char in span.get("chars") or ():
+                    if not isinstance(char, dict):
+                        return False
+                    origin = _point2(char.get("origin"))
+                    if origin is None:
+                        return False
+                    if (crop[0] <= origin[0] <= crop[2]
+                            and crop[1] <= origin[1] <= crop[3]):
+                        return False
+    return True
+
+
 def _producer_owned_ocr_target(
     source_producer: SourceObservationProducer,
     *,
@@ -311,6 +415,17 @@ def _producer_owned_ocr_target(
             # exact native line direction before OCR. Trace evidence remains
             # required only for bbox refinement.
             if not sequence_ids:
+                # A trace-less source word still has original native glyph ink
+                # geometry. Use it only with a unique exact source character
+                # run, excluding every other native line from the crop.
+                native_crop = _unique_native_word_source_ink_crop(
+                    line, word_bbox=word_bbox, raw_text=raw_text
+                )
+                if (native_crop is not None
+                        and _source_ink_crop_avoids_other_lines(
+                            rawdict, selected_line=line, crop=native_crop
+                        )):
+                    return native_crop, rotation_degrees
                 return word_bbox, rotation_degrees
 
             native_chars: list[
@@ -342,6 +457,14 @@ def _producer_owned_ocr_target(
                 if _exact_native_word_origin_run(
                     line, word_bbox=word_bbox, raw_text=raw_text
                 ):
+                    native_crop = _unique_native_word_source_ink_crop(
+                        line, word_bbox=word_bbox, raw_text=raw_text
+                    )
+                    if (native_crop is not None
+                            and _source_ink_crop_avoids_other_lines(
+                                rawdict, selected_line=line, crop=native_crop
+                            )):
+                        return native_crop, rotation_degrees
                     return word_bbox, rotation_degrees
                 return word_bbox, 0
 
