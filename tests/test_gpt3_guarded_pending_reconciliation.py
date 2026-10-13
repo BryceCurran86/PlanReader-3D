@@ -202,3 +202,23 @@ def test_guarded_report_rejects_activation_and_report_fingerprint_mismatch(
     monkeypatch.setattr(module, "_exact_report_module", lambda: _Changed)
     with pytest.raises(ValueError, match="fingerprint mismatch"):
         _run()
+
+
+def test_forged_object_universe_fails_before_activation(monkeypatch):
+    def must_not_activate(**kwargs):
+        raise AssertionError("activation must not see substituted frozen objects")
+
+    monkeypatch.setattr(module, "build_activation", must_not_activate)
+    forged = _json(OBJECT_UNIVERSE)
+    forged["injected_source_authority"] = True
+    with pytest.raises(ValueError, match="object universe differs from frozen"):
+        module.build_guarded_exact_report(
+            pending_ledger=_pending(),
+            sealed_run_payload=_json(EVIDENCE / "source_sealed_run.json"),
+            customer_rows=_json(EVIDENCE / "verified_customer_rows.json"),
+            active_identity_map_payload=_partial_map(),
+            source_manifest=_json(MANIFEST),
+            source_identity_proof=_json(SOURCE_IDENTITY_PROOF),
+            object_universe=forged,
+            manifest_path=MANIFEST,
+        )
