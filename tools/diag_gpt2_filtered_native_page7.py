@@ -19,7 +19,11 @@ from pb_physical_wall_candidate_authority import (
     _proven_filled_wall_strips,
     _filter_proven_wall_strip_geometry,
 )
-from pb_wall_room_topology_stage_a import is_structural_candidate_segment
+from pb_wall_room_topology_stage_a import (
+    is_structural_candidate_segment,
+    build_wall_graph_for_viewport,
+)
+from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     segment_page_viewports,
@@ -32,7 +36,7 @@ PAGE_INDEX = 6
 ORIGINAL_NATIVE_IDS = ("d50057i0", "d50507i0", "d50048i0")
 
 
-def collect_page7_filtered_native_receipt() -> dict[str, object]:
+def collect_page7_filtered_native_receipt(*, include_w2_graph: bool = False) -> dict[str, object]:
     payload = SOURCE_PATH.read_bytes()
     sha = hashlib.sha256(payload).hexdigest()
     if sha != SOURCE_SHA:
@@ -138,7 +142,60 @@ def collect_page7_filtered_native_receipt() -> dict[str, object]:
                 "two_sided_source_room_owner_proven": False,
                 "new_firm_quantity_produced": False,
             })
+        if include_w2_graph:
+            # This is the real, unmodified Stage A source graph on the
+            # original SHA-verified viewport input, not a new geometry guess.
+            # Missing lineage is evidence of a possible W2 handoff dropout;
+            # surviving lineage alone does not prove a W4 structural wall.
+            if len(graph_inputs) > 20_000:
+                raise RuntimeError("w2_source_segment_safety_bound")
+            w2_graph = build_wall_graph_for_viewport(graph_inputs)
+            source_index: dict[str, set[str]] = {
+                source_id: set() for source_id in ORIGINAL_NATIVE_IDS
+            }
+            collapsed_index: dict[str, set[str]] = {
+                source_id: set() for source_id in ORIGINAL_NATIVE_IDS
+            }
+            for edge in w2_graph.get("edges", ()):
+                lineage = edge.get(LINEAGE_KEY) or {}
+                parents = lineage.get("source_primitive_ids", ())
+                edge_id = str(edge.get("id") or "")
+                for parent in parents:
+                    if parent in source_index and edge_id:
+                        source_index[parent].add(edge_id)
+            for fragment in w2_graph.get("snap_collapsed_fragments", ()):
+                lineage = fragment.get(LINEAGE_KEY) or {}
+                parents = lineage.get("source_primitive_ids", ())
+                fragment_id = str(fragment.get("id") or "")
+                for parent in parents:
+                    if parent in collapsed_index and fragment_id:
+                        collapsed_index[parent].add(fragment_id)
+            for row in targets:
+                source_id = row["original_source_id"]
+                row["w2_source_descendant_edge_count"] = len(
+                    source_index[source_id]
+                )
+                row["w2_source_descendant_edge_ids_sample"] = sorted(
+                    source_index[source_id]
+                )[:8]
+                row["w2_snap_collapsed_source_fragment_count"] = len(
+                    collapsed_index[source_id]
+                )
+                row["w2_graph_physical_wall_proven"] = False
+            w2_counts = {
+                "w2_graph_edge_count": len(w2_graph.get("edges", ())),
+                "w2_snap_collapsed_total": len(
+                    w2_graph.get("snap_collapsed_fragments", ())
+                ),
+                "w2_graph_lineage_proves_structural_wall": False,
+            }
+        else:
+            w2_counts = {
+                "w2_graph_executed": False,
+                "w2_graph_lineage_proves_structural_wall": False,
+            }
         return {
+            **w2_counts,
             "source_sha256": sha,
             "original_page_number": 7,
             "authenticated_floor_viewport_id": floor[0].view_id,
@@ -158,4 +215,12 @@ def collect_page7_filtered_native_receipt() -> dict[str, object]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(collect_page7_filtered_native_receipt(), sort_keys=True))
+    import sys
+
+    graph_arg = sys.argv[1:] == ["--w2-graph"]
+    if sys.argv[1:] and not graph_arg:
+        raise SystemExit("usage: diag_gpt2_filtered_native_page7.py [--w2-graph]")
+    print(json.dumps(
+        collect_page7_filtered_native_receipt(include_w2_graph=graph_arg),
+        sort_keys=True,
+    ))
