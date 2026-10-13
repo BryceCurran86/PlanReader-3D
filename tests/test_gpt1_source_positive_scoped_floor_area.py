@@ -238,10 +238,26 @@ def test_source_scoped_opening_customer_mismatch_does_not_publish_a_signed_famil
         confidence=1.0,abstained=False,blocking_reasons=(),
         reason_codes=(),metadata={},
     )
+    # A locally FIRM count is deliberately present. One selected page does
+    # not prove the complete source opening instance inventory.
+    count_q=QuantityEvidence(
+        quantity_id="q-unsafe-partial-count",family="opening_count",
+        semantic_key="opening_count:unproven-global",value=3,unit="ea",
+        input_entity_ids=("canonical-opening-count-1",),
+        formula="not a project-level source-complete count",
+        formula_version="1",evidence_ids=("candidate-only",),
+        authority="documented_schedule",status="firm",
+        confidence=1.0,abstained=False,blocking_reasons=(),
+        reason_codes=(),metadata={"schedule_corroborated":True,
+                                  "commercial_projection_allowed":True},
+    )
     claim=S(status=S(value="corroborated"),reason_codes=(),
             canonical_walls=(),canonical_openings=(),canonical_rooms=(),
             canonical_floors=(),canonical_spaces=(),canonical_ceilings=(),
-            opening_quantity_evidence=(q,),opening_count_quantity_evidence=())
+            opening_quantity_evidence=(q,),
+            opening_count_quantity_evidence=(count_q,))
+    monkeypatch.setattr(handoff,"replace",
+                        lambda old,**changes:S(**{**vars(old),**changes}))
     trace=CommercialTakeoffSourceTrace(
         workspace_id=1,project_id="test_project",document_id="doc",
         source_sha256=sha,source_page="1",viewport_id="viewport",
@@ -257,8 +273,11 @@ def test_source_scoped_opening_customer_mismatch_does_not_publish_a_signed_famil
     monkeypatch.setattr(handoff,"seal_live_opening_area_claim_run",
                         lambda *a,**kw:sealed)
     rows=({"quantity_id":q.quantity_id},)
+    def source_only_area_customer_rows(source_claim, **_):
+        assert source_claim.opening_count_quantity_evidence == ()
+        return rows
     monkeypatch.setattr(handoff,"project_live_opening_customer_rows",
-                        lambda *a,**kw:rows)
+                        source_only_area_customer_rows)
     monkeypatch.setattr(handoff,"verify_sealed_customer_output",
                         lambda *_: S(
                             verified_quantity_ids=("q-original-opening",)
@@ -274,6 +293,8 @@ def test_source_scoped_opening_customer_mismatch_does_not_publish_a_signed_famil
         assert summary["status"]=="sealed"
         assert summary["customer_rows_verified"] is True
         assert summary["verified_customer_row_count"]==1
+        assert summary["family_counts"]["opening_count"]==0
+        assert "partial_original_source_opening_count_universe_unproven" in summary["claim_reason_codes"]
         assert json.loads((output/"verified_customer_rows.json").read_text())==list(rows)
         assert (output/"family_runs"/"opening_area.sealed.json").is_file()
     else:
