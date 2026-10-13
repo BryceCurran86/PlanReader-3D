@@ -98,15 +98,17 @@ jobs:
               source=json.loads((d/"source-report.json").read_text())
               sealed_raw=json.loads((d/"production/source_sealed_run.json").read_text())
               rows=json.loads((d/"production/verified_customer_rows.json").read_text())
+              openings=json.loads((d/"production/source_production_openings.json").read_text())
               sealed=sealed_source_closed_run_from_dict(sealed_raw)
               verified=verify_sealed_customer_output(sealed,rows)
               assert verified.valid_quantity_count==len(sealed.quantities)
               assert verified.customer_row_count==len(sealed.quantities)
               assert set(verified.verified_quantity_ids)=={q.quantity_id for q in sealed.quantities}
-              return source,sealed_raw,rows
+              assert len(openings)==21
+              return source,sealed_raw,rows,openings
 
-          old,old_run,old_rows=load("baseline")
-          new,new_run,new_rows=load("candidate")
+          old,old_run,old_rows,old_production_openings=load("baseline")
+          new,new_run,new_rows,new_production_openings=load("candidate")
           sha=os.environ["SOURCE_SHA"]
           target=os.environ["TARGET_PHYSICAL"]
           quantity_id=os.environ["TARGET_QUANTITY"]
@@ -163,8 +165,10 @@ jobs:
               old_rows,new_rows,old,new,
               expected_new_physical_id=target,
               expected_new_quantity_id=quantity_id,
-              baseline_quantities=old_run["quantities"],
-              candidate_quantities=new_run["quantities"],
+              baseline_production_openings=old_production_openings,
+              candidate_production_openings=new_production_openings,
+              baseline_sealed_quantities=old_run["quantities"],
+              candidate_sealed_quantities=new_run["quantities"],
           )
           evidence={
               "source_sha256":sha,
