@@ -97,6 +97,7 @@ _VERIFIED_ELSEWHERE_KEYS = frozenset(
         "canonical_openings",
         "summary",
         "semantic_inventory",
+        "composition_reason_codes",
     }
 )
 _HOST_COUNT_SUMMARY_KEYS = frozenset({"authenticated_hosts", "host_bindings"})
@@ -551,6 +552,104 @@ def _verify_canonical_openings(
             )
 
 
+def _reason_codes(value: object, name: str) -> set[str]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"declared additive retention refused: {name} must be a list")
+    if any(type(code) is not str or not code or code != code.strip() for code in value):
+        raise ValueError(f"declared additive retention refused: {name} contains malformed reasons")
+    if len(set(value)) != len(value):
+        raise ValueError(f"declared additive retention refused: {name} contains duplicate reasons")
+    return set(value)
+
+
+def _verify_composition_reason_codes(
+    baseline: object,
+    candidate: object,
+    *,
+    affected_opening_ids: set[str],
+    old_bindings: Mapping[str, Mapping[str, Any]],
+    new_bindings: Mapping[str, Mapping[str, Any]],
+    old_frames: Mapping[str, Mapping[str, Any]],
+    new_frames: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Aggregate reasons may move only with independently verified opening rows.
+
+    This closes the final blind top-level key in a declared source-addition
+    event.  The declaration cannot invent a semantic reason or silently remove
+    an unrelated reason: every aggregate addition/removal must be witnessed by
+    the before/after binding or frame rows of an opening whose physical change
+    was already verified by this approval.
+    """
+    before = _reason_codes(baseline, "baseline composition_reason_codes")
+    after = _reason_codes(candidate, "candidate composition_reason_codes")
+    added = after - before
+    removed = before - after
+    if not added and not removed:
+        return
+    if not affected_opening_ids:
+        raise ValueError(
+            "declared additive retention refused: composition reasons changed without "
+            "a verified opening authority change"
+        )
+
+    before_affected: set[str] = set()
+    after_affected: set[str] = set()
+    after_all_rows: set[str] = set()
+    for opening_id in affected_opening_ids:
+        if opening_id not in old_bindings or opening_id not in new_bindings:
+            raise ValueError(
+                "declared additive retention refused: composition reason owner is absent "
+                f"from opening bindings: {opening_id}"
+            )
+        if opening_id not in old_frames or opening_id not in new_frames:
+            raise ValueError(
+                "declared additive retention refused: composition reason owner is absent "
+                f"from frame rows: {opening_id}"
+            )
+        before_affected |= _reason_codes(
+            old_bindings[opening_id].get("reason_codes") or (),
+            f"baseline binding reasons for {opening_id}",
+        )
+        before_affected |= _reason_codes(
+            old_frames[opening_id].get("reason_codes") or (),
+            f"baseline frame reasons for {opening_id}",
+        )
+        after_affected |= _reason_codes(
+            new_bindings[opening_id].get("reason_codes") or (),
+            f"candidate binding reasons for {opening_id}",
+        )
+        after_affected |= _reason_codes(
+            new_frames[opening_id].get("reason_codes") or (),
+            f"candidate frame reasons for {opening_id}",
+        )
+    for rows, label in ((new_bindings, "candidate binding"), (new_frames, "candidate frame")):
+        for opening_id, row in rows.items():
+            after_all_rows |= _reason_codes(
+                row.get("reason_codes") or (),
+                f"{label} reasons for {opening_id}",
+            )
+
+    unsupported_added = sorted(added - after_affected)
+    if unsupported_added:
+        raise ValueError(
+            "declared additive retention refused: composition reasons added without "
+            "verified opening-row authority: " + ", ".join(unsupported_added)
+        )
+    unsupported_removed = sorted(removed - before_affected)
+    if unsupported_removed:
+        raise ValueError(
+            "declared additive retention refused: composition reasons removed without "
+            "verified opening-row authority: " + ", ".join(unsupported_removed)
+        )
+    still_live = sorted(removed & after_all_rows)
+    if still_live:
+        raise ValueError(
+            "declared additive retention refused: aggregate composition reason was "
+            "removed while still present on a candidate opening row: "
+            + ", ".join(still_live)
+        )
+
+
 def _verify_summary(
     baseline: Any,
     candidate: Any,
@@ -781,6 +880,16 @@ def approve_declared_additive_rekeys(
             raise ValueError(
                 "declared additive retention refused: semantic inventory changed beyond added source observations"
             )
+    if "composition_reason_codes" in baseline or "composition_reason_codes" in candidate:
+        _verify_composition_reason_codes(
+            baseline.get("composition_reason_codes"),
+            candidate.get("composition_reason_codes"),
+            affected_opening_ids=set(gained) | set(consumed),
+            old_bindings=old,
+            new_bindings=new,
+            old_frames=old_frames,
+            new_frames=new_frames,
+        )
     for key in sorted(churn_keys):
         if (key in baseline) != (key in candidate) or not equal_modulo_snapshot_scoped_ids(
             norm({key: baseline.get(key)}), norm({key: candidate.get(key)})
