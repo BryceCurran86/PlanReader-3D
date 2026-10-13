@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: \${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -30,7 +30,7 @@ jobs:
       - name: Restore exact original baseline and candidate production heads
         run: |
           set -euo pipefail
-          git worktree add --detach /tmp/gptmax-paired-base "\${{ github.event.pull_request.base.sha }}"
+          git worktree add --detach /tmp/gptmax-paired-base "${{ github.event.pull_request.base.sha }}"
           git fetch --no-tags origin "$CANDIDATE_SHA"
           git worktree add --detach /tmp/gptmax-paired-candidate "$CANDIDATE_SHA"
           mkdir -p artifacts/baseline/production artifacts/candidate/production
