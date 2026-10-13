@@ -21,6 +21,13 @@
         "source_room_face_scopes",
         "summary"
       ],
+      "expected_id_churn_report_keys": [
+        "native_candidate_closures",
+        "opening_identity_text_receipts",
+        "opening_measurement_traces",
+        "opening_void_reason_codes",
+        "raster_candidate_closures"
+      ],
       "expected_new_frame_host_ids": [],
       "expected_new_host_ids": [
         "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
@@ -55,6 +62,7 @@
         "summary",
         "wall_scopes"
       ],
+      "expected_id_churn_report_keys": [],
       "expected_new_frame_host_ids": [],
       "expected_new_host_ids": [
         "physical_opening_existence_2b2a91e8afaf8b7e9a3e07605a80a4a9"
