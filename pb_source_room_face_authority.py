@@ -42,6 +42,8 @@ import math
 from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, Optional
 
+from shapely.geometry import Polygon
+
 from pb_accuracy_v13_engines_v145 import extract_planar_faces
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_physical_wall_candidate_authority import (
@@ -65,6 +67,7 @@ SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED = "source_room_face_boundary_unresolved"
 SOURCE_ROOM_FACE_BOUNDARY_LOCAL_RECOVERY = "source_room_face_boundary_local_recovery"
 SOURCE_ROOM_FACE_DUPLICATE_EDGE = "source_room_face_duplicate_edge_ownership"
 SOURCE_ROOM_FACE_DEGENERATE = "source_room_face_tiny_or_degenerate"
+SOURCE_ROOM_FACE_SELF_INTERSECTING = "source_room_face_non_simple_source_ring"
 SOURCE_ROOM_FACE_COMPONENT_AMBIGUOUS = "source_room_face_component_ambiguous"
 
 # Shadow per-face boundary-ownership evaluation (descriptive; never a decision).
@@ -296,6 +299,26 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
         if edge[0] != edge[1]:
             result.append(edge)
     return tuple(result)
+
+
+def _original_source_polygon_is_simple(points: tuple[Point, ...]) -> bool:
+    """Reject self-intersecting source-face rings; never repair or buffer them.
+
+    Exact source vertices remain unchanged. A planarized face with a crossing
+    or repeated nontrivial ring is not a physical room even if its signed
+    shoelace area is positive. Distinct valid neighbouring faces stay eligible.
+    """
+    if len(points) < 3:
+        return False
+    try:
+        polygon = Polygon(points)
+        return bool(
+            not polygon.is_empty and polygon.is_valid
+            and math.isfinite(float(polygon.area))
+            and polygon.area > 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _finite_source_edge(value: Edge) -> bool:
@@ -1160,13 +1183,26 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
         return _blocked(scope, SOURCE_ROOM_FACE_DUPLICATE_EDGE
                         if duplicate_edges else SOURCE_ROOM_FACE_BOUNDARY_UNRESOLVED)
 
-    # Tiny/degenerate classification is evaluated only over boundary- and
-    # ownership-clean faces. A contaminated giant must never make an otherwise
-    # sound room appear tiny.
-    largest_area = max(face_areas[face_id] for face_id in ownership_clean_face_ids)
+    # Do not publish an original self-intersecting or repeated source ring.
+    # Withhold its EXACT source face receipt rather than repairing geometry,
+    # changing metric scale or selecting a different physical W4 owner.
+    invalid_source_polygon_face_ids = {
+        face_id for face_id in ownership_clean_face_ids
+        if not _original_source_polygon_is_simple(polygons[face_id])
+    }
+    simple_owned_face_ids = (
+        ownership_clean_face_ids - invalid_source_polygon_face_ids
+    )
+    if not simple_owned_face_ids:
+        return _blocked(scope, SOURCE_ROOM_FACE_SELF_INTERSECTING)
+
+    # Tiny/degenerate classification is evaluated only over simple,
+    # ownership-clean faces. A contaminated or non-simple giant must never
+    # make an otherwise sound source room look tiny.
+    largest_area = max(face_areas[face_id] for face_id in simple_owned_face_ids)
     degenerate_face_ids = {
         face_id
-        for face_id in ownership_clean_face_ids
+        for face_id in simple_owned_face_ids
         if face_areas[face_id] < _ABSOLUTE_DEGENERATE_AREA_PT2
         or (
             largest_area > 0.0
@@ -1178,7 +1214,8 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
     # remain a strict minority of the discovered face universe. Otherwise the
     # survivors are not independently trustworthy enough to publish.
     locally_withheld_face_ids = (
-        ownership_tainted_face_ids | boundary_tainted_face_ids | degenerate_face_ids
+        ownership_tainted_face_ids | boundary_tainted_face_ids
+        | degenerate_face_ids | invalid_source_polygon_face_ids
     )
     if locally_withheld_face_ids and 2 * len(locally_withheld_face_ids) >= len(polygons):
         return _blocked(
@@ -1196,6 +1233,7 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
             face_id
             for face_id in ownership_clean_face_ids
             if face_id not in degenerate_face_ids
+            and face_id not in invalid_source_polygon_face_ids
         )
     )
     if not valid_face_ids:
@@ -1335,6 +1373,8 @@ def _derive_scope_outcome(scope: object) -> SourceRoomFaceScopeResult:
                     face_id in ownership_tainted_face_ids
                     or face_id in boundary_tainted_face_ids
                 )
+                else SOURCE_ROOM_FACE_SELF_INTERSECTING
+                if face_id in invalid_source_polygon_face_ids
                 else SOURCE_ROOM_FACE_DEGENERATE
             ),
             document_id=scope.document_id,
