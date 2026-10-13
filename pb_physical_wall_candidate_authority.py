@@ -21,7 +21,7 @@ segments, graphs, candidate lists/counts or completeness flags.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import math
 import re
@@ -67,6 +67,7 @@ from pb_source_visibility_authority import (
     SourceVisibilityProducer,
     classify_native_segment_visibility,
 )
+from pb_raster_unchanged_band_segments import UNCHANGED_BAND_IDENTITY_VERSION
 from pb_vector_geometry_v130 import extract_native_page
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
@@ -147,6 +148,9 @@ PHYSICAL_WALL_CANDIDATE_VIEWPORT_LINEAGE_MISMATCH = (
 )
 PHYSICAL_WALL_CANDIDATE_SOURCE_PRIMITIVE_OWNERSHIP_AMBIGUOUS = (
     "physical_wall_candidate_source_primitive_ownership_ambiguous"
+)
+PHYSICAL_WALL_CANDIDATE_OPENING_LOCAL_SUPPLEMENTAL_SCOPE = (
+    "physical_wall_candidate_opening_local_supplemental_scope"
 )
 # Shadow-only boundary evaluation (never read by scope_complete / reason_codes).
 PHYSICAL_WALL_CANDIDATE_TOUCHES_EXCLUDED_BOUNDARY_PRIMITIVE = (
@@ -961,6 +965,41 @@ def _segment_is_authenticated_vector_frame_edge(
         )
         for edge in frame_edges
     )
+
+
+def _is_opening_local_supplemental_segment(segment: Mapping[str, object]) -> bool:
+    """True only for producer-authenticated terminal-band source geometry.
+
+    These observations are deliberately excluded from the canonical page-wide
+    W2/W3/W4 graph. They exist solely to support a later opening-local raster
+    host proposition, preventing additive source capture from re-splitting or
+    rekeying unrelated wall topology.
+    """
+    source_id = str(segment.get("id") or "")
+    return f":{UNCHANGED_BAND_IDENTITY_VERSION}:" in source_id
+
+
+def _partition_opening_local_supplemental_segments(
+    segments: Sequence[Mapping[str, object]],
+) -> tuple[list[dict], list[dict]]:
+    ordinary: list[dict] = []
+    supplemental: list[dict] = []
+    for raw in segments:
+        row = dict(raw)
+        (supplemental if _is_opening_local_supplemental_segment(row) else ordinary).append(row)
+    return ordinary, supplemental
+
+
+def _segment_source_observation_ids(
+    segments: Sequence[Mapping[str, object]],
+) -> tuple[str, ...]:
+    values = [
+        str(segment.get("source_observation_id") or "").strip()
+        for segment in segments
+    ]
+    if any(not value for value in values):
+        raise RuntimeError(PHYSICAL_WALL_CANDIDATE_SOURCE_INTEGRITY_FAILURE)
+    return tuple(sorted(dict.fromkeys(values)))
 
 
 def _blocked(selector: PhysicalWallCandidateSelector, reason: str) -> PhysicalWallCandidateScopeResult:
@@ -3292,6 +3331,8 @@ def _build_scope_result(
             resolved_visible_observations=resolved_visible_observations,
             resolved_text_receipts=resolved_text_receipts,
         )
+        segments, _supplemental = _partition_opening_local_supplemental_segments(segments)
+        source_observation_ids = _segment_source_observation_ids(segments)
     except WallPageFrameUnresolved:
         return _blocked(selector, PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED)
     scale_producer = (
@@ -3317,6 +3358,92 @@ def _build_scope_result(
         points_per_mm=points_per_mm,
         resolved_visible_observations=resolved_visible_observations,
         physical_opening_authority=physical_opening_authority,
+    )
+
+
+def _build_opening_local_supplemental_scope_result(
+    *,
+    source_producer: SourceVisibilityProducer,
+    published,
+    source_bytes: bytes,
+    page_id: str,
+    resolved_visible_observations: Optional[Sequence[tuple[str, object]]] = None,
+    resolved_text_receipts: Optional[Sequence[object]] = None,
+    physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
+    physical_scale_producer: Optional[PhysicalScaleProducer] = None,
+) -> PhysicalWallCandidateScopeResult:
+    """Assemble only supplemental terminal-band W4 candidates.
+
+    This result is never a complete page wall universe. Its records may be
+    consumed only by the opening-local supplemental host fallback in
+    OpeningHostBindingProducer.
+    """
+    scope_id = _decision_scope_id(page_id)
+    selector = PhysicalWallCandidateSelector(
+        document_id=published.revision.document_id,
+        revision_id=published.revision.revision_id,
+        source_sha256=published.revision.source_sha256,
+        snapshot_id=published.snapshot.snapshot_id,
+        page_id=page_id,
+        decision_scope_id=scope_id,
+    )
+    page_number = int(page_id)
+    if (
+        page_number not in published.coverage.decoded_pages
+        or page_number in published.coverage.failed_pages
+    ):
+        return _blocked(selector, PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
+    try:
+        all_segments, _all_ids, page_width, page_height = _source_page_segments(
+            source_producer=source_producer,
+            published=published,
+            source_bytes=source_bytes,
+            page_id=page_id,
+            decision_scope_id=scope_id,
+            resolved_visible_observations=resolved_visible_observations,
+            resolved_text_receipts=resolved_text_receipts,
+        )
+    except WallPageFrameUnresolved:
+        return _blocked(selector, PHYSICAL_WALL_CANDIDATE_PAGE_FRAME_UNRESOLVED)
+    _ordinary, supplemental = _partition_opening_local_supplemental_segments(all_segments)
+    if not supplemental:
+        return _blocked(
+            selector,
+            PHYSICAL_WALL_CANDIDATE_OPENING_LOCAL_SUPPLEMENTAL_SCOPE,
+        )
+    source_observation_ids = _segment_source_observation_ids(supplemental)
+    scale_producer = (
+        physical_scale_producer
+        if physical_scale_producer is not None
+        else source_producer.physical_scale_producer()
+    )
+    points_per_mm = _producer_owned_points_per_mm(
+        scale_producer=scale_producer,
+        published=published,
+        page_id=page_id,
+    )
+    result = _assemble_scope_result(
+        source_producer=source_producer,
+        published=published,
+        page_id=page_id,
+        selector=selector,
+        segments=supplemental,
+        source_observation_ids=source_observation_ids,
+        page_width=page_width,
+        page_height=page_height,
+        source_bytes=source_bytes,
+        points_per_mm=points_per_mm,
+        resolved_visible_observations=resolved_visible_observations,
+        physical_opening_authority=physical_opening_authority,
+    )
+    if result.status is not EvidenceResolutionStatus.CORROBORATED:
+        return result
+    return replace(
+        result,
+        scope_complete=False,
+        reason_codes=(
+            PHYSICAL_WALL_CANDIDATE_OPENING_LOCAL_SUPPLEMENTAL_SCOPE,
+        ),
     )
 
 
@@ -3519,6 +3646,26 @@ class PhysicalWallCandidateProducer:
         self._scopes = MappingProxyType(dict(scopes))
 
     @classmethod
+    def from_opening_local_supplemental_source_visibility_producer(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Optional[Sequence[str]] = None,
+    ):
+        """Build only producer-authenticated terminal-band W4 candidates.
+
+        The returned scopes are intentionally incomplete and cannot satisfy a
+        normal OpeningHostWallUniverseAuthority completeness gate.
+        """
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=page_ids,
+            include_authenticated_viewports=False,
+            include_page_scopes=True,
+            supplemental_only=True,
+        )
+
+    @classmethod
     def from_authenticated_viewports(
         cls,
         source_visibility_producer,
@@ -3541,6 +3688,7 @@ class PhysicalWallCandidateProducer:
             page_ids=page_ids,
             include_authenticated_viewports=True,
             include_page_scopes=False,
+            supplemental_only=False,
         )
 
     @classmethod
@@ -3555,6 +3703,7 @@ class PhysicalWallCandidateProducer:
             page_ids=page_ids,
             include_authenticated_viewports=False,
             include_page_scopes=True,
+            supplemental_only=False,
         )
 
     @classmethod
@@ -3565,6 +3714,7 @@ class PhysicalWallCandidateProducer:
         page_ids: Optional[Sequence[str]],
         include_authenticated_viewports: bool,
         include_page_scopes: bool,
+        supplemental_only: bool,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -3667,7 +3817,12 @@ class PhysicalWallCandidateProducer:
             for page_id in materialized_page_ids:
                 page_visible_observations = visible_by_page.get(page_id, ())
                 if include_page_scopes:
-                    result = _build_scope_result(
+                    builder = (
+                        _build_opening_local_supplemental_scope_result
+                        if supplemental_only
+                        else _build_scope_result
+                    )
+                    result = builder(
                         source_producer=source_visibility_producer,
                         published=published,
                         source_bytes=source_bytes,
@@ -3687,7 +3842,7 @@ class PhysicalWallCandidateProducer:
                     )
                     scopes[key] = result
 
-                if include_authenticated_viewports:
+                if include_authenticated_viewports and not supplemental_only:
                     for viewport_result in _build_authenticated_viewport_scope_results(
                         source_producer=source_visibility_producer,
                         published=published,
