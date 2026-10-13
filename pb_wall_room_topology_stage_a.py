@@ -627,6 +627,72 @@ def _merge_collinear_degree_two_nodes_indexed(
     return {"nodes": nodes, "edges": final_edges, "adjacency": adjacency}
 
 
+
+_ADDITIVE_SPLIT_IDENTITY_FIELD = "additive_split_identity_namespace"
+
+
+def _split_fragment_identity_key(fragment: Dict[str, Any]) -> Tuple[Any, ...]:
+    """Snapshot-independent key for one exact W2 split fragment.
+
+    Geometry is kept in splitter-emitted orientation and precision. Source
+    primitive lineage is included so coincident fragments from different
+    producer-owned sources never alias. This helper elects no wall role.
+    """
+    lineage = fragment.get(LINEAGE_KEY) or {}
+    return (
+        float(fragment["x1"]),
+        float(fragment["y1"]),
+        float(fragment["x2"]),
+        float(fragment["y2"]),
+        tuple(str(value) for value in lineage.get("source_primitive_ids") or ()),
+    )
+
+
+def _restore_pre_additive_split_fragment_ids(
+    full_fragments: Sequence[Dict[str, Any]],
+    baseline_fragments: Sequence[Dict[str, Any]],
+    *,
+    id_prefix: str = "split",
+) -> List[Dict[str, Any]]:
+    """Keep legacy IDs only for fragments unchanged by additive source geometry.
+
+    The full graph still contains and is split by every source segment.
+    The baseline is an ordinary-source-only shadow used solely to retain
+    historical enumeration IDs. A legacy ID is reused iff geometry and source
+    ancestry are exactly identical and uniquely matched. New, changed, or
+    ambiguous fragments receive fresh IDs strictly after the historical range.
+    """
+    by_key: Dict[Tuple[Any, ...], List[str]] = {}
+    for fragment in baseline_fragments:
+        key = _split_fragment_identity_key(fragment)
+        fragment_id = str(fragment.get("id") or "")
+        if not fragment_id:
+            raise ValueError("baseline split fragment id unavailable")
+        by_key.setdefault(key, []).append(fragment_id)
+
+    next_index = len(baseline_fragments)
+    used_ids: set[str] = set()
+    restored: List[Dict[str, Any]] = []
+    for source in full_fragments:
+        fragment = dict(source)
+        candidates = by_key.get(_split_fragment_identity_key(fragment), ())
+        stable_id = candidates[0] if len(candidates) == 1 else None
+        if stable_id is not None and stable_id not in used_ids:
+            fragment["id"] = stable_id
+            used_ids.add(stable_id)
+        else:
+            while f"{id_prefix}_{next_index}" in used_ids:
+                next_index += 1
+            new_id = f"{id_prefix}_{next_index}"
+            next_index += 1
+            fragment["id"] = new_id
+            used_ids.add(new_id)
+        restored.append(fragment)
+
+    if len(used_ids) != len(restored):
+        raise ValueError("split fragment identity collision")
+    return restored
+
 def build_wall_graph_for_viewport(
     segments: Sequence[Dict[str, Any]],
     *,
@@ -666,6 +732,29 @@ def build_wall_graph_for_viewport(
         split_pairs, source_segments=structural_segments,
         source_parent_indexes=parent_indexes,
     )
+
+    additive_segments = [
+        segment
+        for segment in structural_segments
+        if segment.get(_ADDITIVE_SPLIT_IDENTITY_FIELD) is True
+    ]
+    if additive_segments:
+        ordinary_segments = [
+            segment
+            for segment in structural_segments
+            if segment.get(_ADDITIVE_SPLIT_IDENTITY_FIELD) is not True
+        ]
+        baseline_pairs = split_segments_at_intersections(
+            _segments_to_point_pairs(ordinary_segments)
+        )
+        baseline_fragments = _point_pairs_to_segment_dicts(
+            baseline_pairs,
+            source_segments=ordinary_segments,
+        )
+        split_segment_dicts = _restore_pre_additive_split_fragment_ids(
+            split_segment_dicts,
+            baseline_fragments,
+        )
     audit_short_source = os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1"
     snapped_graph = _snap_geometry_indexed(
         split_segment_dicts,
