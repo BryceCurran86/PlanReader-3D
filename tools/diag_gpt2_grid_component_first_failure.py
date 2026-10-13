@@ -963,6 +963,109 @@ def inspect_external_atomic_grid_w2_source_fragments(
     return output
 
 
+
+def inspect_native_source_parent_w4_ancestry(
+    wall_scope: PhysicalWallCandidateScopeResult,
+    native_source_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Read-only W4 owner census for *exact* producer-native source IDs.
+
+    A surviving W2 primitive may appear in zero, one or many W4 wall chains.
+    Those alternatives are observations, not physical wall equivalence, GRID
+    roles, second-face ownership or authority to publish a room.
+    Duplicate W4 addresses and malformed source receipts remain unresolved.
+    """
+    requested = tuple(native_source_ids)
+    if (
+        not requested or len(requested) > 32
+        or any(type(value) is not str or not value
+               or value != value.strip() for value in requested)
+        or len(set(requested)) != len(requested)
+    ):
+        return {
+            "status": "original_source_parent_selection_invalid",
+            "candidate_only_no_w4_owner_assignment": True,
+            "sources": [],
+        }
+    counts: Counter[str] = Counter()
+    records = tuple(getattr(wall_scope, "records", ()) or ())
+    for record in records:
+        wall_id = getattr(record, "wall_candidate_id", None)
+        if type(wall_id) is str and wall_id and wall_id == wall_id.strip():
+            counts[wall_id] += 1
+    result: dict[str, list[dict[str, Any]]] = {key: [] for key in requested}
+    conflicts: Counter[str] = Counter()
+    for record in records:
+        wall_id = getattr(record, "wall_candidate_id", None)
+        valid_wall_id = (
+            type(wall_id) is str and bool(wall_id)
+            and wall_id == wall_id.strip() and counts[wall_id] == 1
+        )
+        for fragment in tuple(
+            getattr(record, "source_edge_fragments", ()) or ()
+        ):
+            source_ids = getattr(fragment, "source_primitive_ids", None)
+            if not isinstance(source_ids, (tuple, list)):
+                continue
+            matched = set(requested).intersection(
+                value for value in source_ids if type(value) is str
+            )
+            if not matched:
+                continue
+            edge_id = getattr(fragment, "edge_id", None)
+            geometry = _edge_key(getattr(fragment, "geometry", None))
+            good = (
+                valid_wall_id
+                and type(edge_id) is str and bool(edge_id)
+                and edge_id == edge_id.strip()
+                and bool(source_ids)
+                and all(type(value) is str and bool(value)
+                        and value == value.strip() for value in source_ids)
+                and geometry is not None
+            )
+            for source_id in matched:
+                if not good:
+                    conflicts[source_id] += 1
+                    continue
+                result[source_id].append({
+                    "original_w4_wall_candidate_id": wall_id,
+                    "source_w2_edge_id": edge_id,
+                    "exact_w2_edge_pdf_pts": [list(p) for p in geometry],
+                    "source_primitive_ids": sorted(set(source_ids)),
+                    "physical_wall_role_proven": False,
+                    "w4_identity_transfer_authorized": False,
+                })
+    rows = []
+    for source_id in sorted(requested):
+        candidates = sorted(
+            result[source_id],
+            key=lambda item: (
+                item["original_w4_wall_candidate_id"],
+                item["source_w2_edge_id"],
+                item["exact_w2_edge_pdf_pts"],
+            ),
+        )
+        rows.append({
+            "original_source_primitive_id": source_id,
+            "matched_w4_candidate_count": len({
+                item["original_w4_wall_candidate_id"] for item in candidates
+            }),
+            "matched_source_w2_edge_count": len(candidates),
+            "malformed_or_ambiguous_w4_receipt_count": conflicts[source_id],
+            "candidate_w4_ancestry_receipts": candidates[:32],
+            "source_w4_receipt_universe_complete": (
+                not conflicts[source_id] and len(candidates) <= 32
+            ),
+            "source_wall_role_authenticated": False,
+            "unique_physical_room_face_authenticated": False,
+        })
+    return {
+        "status": "read_only_native_w4_ancestry_candidates",
+        "candidate_only_no_w4_owner_assignment": True,
+        "sources": rows,
+    }
+
+
 def inspect_split_grid_component_first_failure(
     candidate: Any,
     *,
