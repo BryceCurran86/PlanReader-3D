@@ -1254,3 +1254,72 @@ def test_native_word_origin_fallback_rejects_neighbour_competing_and_corrupt_gly
                              "bbox":(8.0, 12.0, 8.0, 30.0)}]}]},
         word_bbox=box, raw_text="F"
     )
+
+
+def test_native_source_glyph_ink_crop_from_unique_rotated_word_origin():
+    from pb_raster_text_corroboration_authority import (
+        _source_ink_crop_avoids_other_lines,
+        _unique_native_word_source_ink_crop,
+    )
+
+    word_box = (10.0, 10.0, 26.0, 55.0)
+    chars = [
+        {"c": text, "origin": (13.0, 14.0 + i * 8.0),
+         "bbox": (7.0, 12.0 + i * 8.0, 30.0, 21.0 + i * 8.0)}
+        for i, text in enumerate("FT3")
+    ]
+    line = {"spans": [{"chars": chars}]}
+    crop = _unique_native_word_source_ink_crop(
+        line, word_bbox=word_box, raw_text="FT3"
+    )
+    assert crop == (7.0, 10.0, 30.0, 55.0)
+    assert _source_ink_crop_avoids_other_lines(
+        {"blocks": [{"lines": [line]}]}, selected_line=line, crop=crop
+    )
+    # An independent native glyph in the source-ink expansion is a hard veto.
+    neighbour = {"spans": [{"chars": [
+        {"c": "N", "origin": (28.0, 16.0),
+         "bbox": (27.0, 13.0, 29.0, 19.0)}
+    ]}]}
+    assert not _source_ink_crop_avoids_other_lines(
+        {"blocks": [{"lines": [line, neighbour]}]},
+        selected_line=line, crop=crop
+    )
+
+
+def test_native_source_ink_crop_refuses_competing_neighbor_and_corrupt_origins():
+    from pb_raster_text_corroboration_authority import (
+        _unique_native_word_source_ink_crop,
+    )
+
+    word_box = (10.0, 10.0, 26.0, 55.0)
+
+    def chars(text):
+        return [
+            {"c": c, "origin": (13.0, 14.0 + i * 8.0),
+             "bbox": (7.0, 12.0 + i * 8.0, 30.0, 21.0 + i * 8.0)}
+            for i, c in enumerate(text)
+        ]
+
+    assert _unique_native_word_source_ink_crop(
+        {"spans": [{"chars": chars("FT3")}]},
+        word_bbox=word_box, raw_text="FT2"
+    ) is None
+    assert _unique_native_word_source_ink_crop(
+        {"spans": [{"chars": chars("FT3FT3")}]},
+        word_bbox=(10.0, 10.0, 26.0, 105.0), raw_text="FT3"
+    ) is None
+    extra = chars("FT3")
+    extra.append({"c": "X", "origin": (28.0, 17.0),
+                  "bbox": (27.0, 12.0, 29.0, 21.0)})
+    assert _unique_native_word_source_ink_crop(
+        {"spans": [{"chars": extra}]},
+        word_bbox=word_box, raw_text="FT3"
+    ) is None
+    for bad in (None, float("nan"), float("inf")):
+        damaged = chars("FT3")
+        damaged[1]["origin"] = (bad, 20.0)
+        assert _unique_native_word_source_ink_crop(
+            {"spans": [{"chars": damaged}]},
+            word_bbox=word_box, raw_text="FT3"
+        ) is None
