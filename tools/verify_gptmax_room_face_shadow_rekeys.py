@@ -211,6 +211,33 @@ def verify_room_face_shadow_source_rekeys(
             return found,keys
         old_index,oldids=by_signature(old_faces)
         new_index,newids=by_signature(new_faces)
+        # Prove that the actual published and explicitly ABSTAINED face rows
+        # carry the precise original source polygon addresses in this witness.
+        # An attacker cannot silently rekey a face row by altering face_id
+        # while leaving its snapshot-independent geometry unchanged.
+        for witness_rows, scoped_result in (
+            (old_faces, old_result), (new_faces, new_result),
+        ):
+            witness_by_id={r["face_id"]:r for r in witness_rows}
+            recorded_ids=set()
+            for live_key, expected_status in (
+                ("records", "published"),
+                ("abstained_faces", "abstained"),
+            ):
+                for physical in scoped_result[live_key]:
+                    face_id=physical.get("face_id")
+                    source_witness=witness_by_id.get(face_id)
+                    _require(source_witness is not None
+                             and source_witness["status"]==expected_status,
+                             "published/abstained source face address unproven")
+                    _require(physical.get("polygon_pdf_pts") ==
+                             source_witness["polygon_pdf_pts"],
+                             "published/abstained room polygon disagrees with source")
+                    recorded_ids.add(face_id)
+            _require(len(recorded_ids) == sum(
+                r["status"] in {"published","abstained"}
+                for r in witness_rows
+            ), "original published/abstained face role changed")
         _require(set(old_index)==set(new_index),
                  "shadow-owned original polygon/source ancestry changed")
         mapping={old_index[k]:new_index[k] for k in old_index}
