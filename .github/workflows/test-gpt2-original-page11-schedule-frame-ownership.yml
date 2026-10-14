@@ -53,6 +53,34 @@ jobs:
               ]
               anchors=extract_view_title_anchors(page)
               result=segment_page_viewports(page,page_number=11)
+              # Compare the accepted p9 semantic-table ownership to the
+              # page11 false schedule without changing source authority.
+              from pb_viewport_segmentation import (
+                  _frame_candidates_for_title, _rejected_ownership_frame,
+                  _text_fragments,
+              )
+              other=doc[8]
+              other_cal=calibrate_viewport_layout(other)
+              other_frames=extract_vector_frames(other,other_cal)
+              other_anchors=extract_view_title_anchors(other)
+              other_title_evidence=[
+                  {"text":a.text,"type":a.view_type,"bbox":a.bbox,"direction":a.direction,
+                   "frame_candidates":[list(f) for f in _frame_candidates_for_title(other,a,other_frames,other_cal,anchors=other_anchors)]}
+                  for a in other_anchors if a.view_type=="schedule"
+              ]
+              print("GPT2_P9_VS_P11_ORIGINAL_SOURCE_SEMANTIC_FRAMES",json.dumps({
+                  "p9_title_rows":other_title_evidence,
+                  "p9_source_frames":[{"frame":list(f),
+                      "positive_table":bool(_frame_looks_like_table(f,other,other_cal)),
+                      "line_grid":bool(_frame_looks_like_line_grid_table(f,other,other_cal)),
+                      "candidate_not_owned":bool(_rejected_ownership_frame(other,f,other_cal,_text_fragments(other),view_type="schedule"))}
+                      for f in other_frames],
+                  "p11_source_frames":[{"frame":list(f),
+                      "positive_table":bool(_frame_looks_like_table(f,page,cal)),
+                      "line_grid":bool(_frame_looks_like_line_grid_table(f,page,cal)),
+                      "candidate_not_owned":bool(_rejected_ownership_frame(page,f,cal,_text_fragments(page),view_type="schedule"))}
+                      for f in frames],
+              },sort_keys=True),flush=True)
               print("GPT2_SOURCE_PAGE11_TABLE_FRAME_DIAGNOSTICS",json.dumps({
                   "source_sha256":sha,
                   "frames":table_evidence,
