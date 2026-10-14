@@ -263,9 +263,6 @@ def build_four_project_evidence_ledger(
             customer_rows = _json_customer_rows(customer_path)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
-            _enforce_cross_project_quantity_uniqueness(
-                sealed, project_id=project_id, seen=seen_signed_quantity_ids,
-            )
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )
@@ -284,6 +281,9 @@ def build_four_project_evidence_ledger(
                 originals=original_files,
                 expected_hashes=hashes,
                 signed_hashes=signed_hashes,
+            )
+            _enforce_cross_project_quantity_uniqueness(
+                sealed, project_id=project_id, seen=seen_signed_quantity_ids,
             )
             entry["customer_bijection_verified"] = True
             entry["reconciliation_complete"] = True
