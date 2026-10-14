@@ -161,6 +161,8 @@ def test_competing_finish_codes_conflict_and_other_code_abstains():
     assert none["status"] == "abstained" and "no_finish_mark_in_box" in none["reason_codes"]
     near = d.classify_floor(corr, registration_unique=True, marks_inside=[{"code": "FT3", "margin_pt": 1.0}], other_labelled_boxes_overlapping=0, material_code="FT3")
     assert near["status"] == "abstained" and "mark_too_close_to_box_side" in near["reason_codes"]
+    unregistered = d.classify_floor(corr, registration_unique=True, marks_inside=[{"code": "FT3", "margin_pt": 30, "registered_region": False}], other_labelled_boxes_overlapping=0, material_code="FT3")
+    assert unregistered["status"] == "abstained" and "mark_in_unregistered_region" in unregistered["reason_codes"]
     overlap = d.classify_floor(corr, registration_unique=True, marks_inside=[{"code": "FT3", "margin_pt": 30}], other_labelled_boxes_overlapping=1, material_code="FT3")
     assert overlap["status"] == "abstained"
     unreg = d.classify_floor(corr, registration_unique=False, marks_inside=[{"code": "FT3", "margin_pt": 30}], other_labelled_boxes_overlapping=0, material_code="FT3")

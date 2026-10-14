@@ -314,6 +314,8 @@ def classify_floor(
         reasons.append("overlapping_measured_boxes")
     if any(m["margin_pt"] < min_margin_pt for m in marks_inside):
         reasons.append("mark_too_close_to_box_side")
+    if any(not m.get("registered_region", True) for m in marks_inside):
+        reasons.append("mark_in_unregistered_region")
     if len(codes) > 1:
         status, reasons = "conflict", reasons + ["competing_finish_codes_in_box"]
     elif not codes:
