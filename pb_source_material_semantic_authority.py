@@ -52,6 +52,7 @@ from pb_viewport_segmentation import (
     is_authoritative_derived_viewport,
     is_segment_page_viewports_product,
     segment_page_viewports,
+    segment_source_page_viewports,
     validate_non_overlapping_viewports,
 )
 
@@ -1635,13 +1636,19 @@ class SourceMaterialSemanticProducer:
         self,
         source_visibility_producer: SourceVisibilityProducer,
         *,
+        physical_plan_view_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
         if type(source_visibility_producer) is not SourceVisibilityProducer:
             raise TypeError("source_visibility_producer must be producer-owned")
+        if type(physical_plan_view_shadow) is not bool:
+            raise TypeError("physical_plan_view_shadow must be bool")
         self._source = source_visibility_producer
+        # Explicitly opt-in; the commercial/live material consumer retains
+        # its existing F.07 behavior unless a caller requests source-view proof.
+        self._physical_plan_view_shadow = physical_plan_view_shadow
         self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
             source_visibility_producer
         )
@@ -1660,8 +1667,14 @@ class SourceMaterialSemanticProducer:
     def from_source_visibility_producer(
         cls,
         source_visibility_producer: SourceVisibilityProducer,
+        *,
+        physical_plan_view_shadow: bool = False,
     ) -> "SourceMaterialSemanticProducer":
-        return cls(source_visibility_producer, _seal=_PRODUCER_SEAL)
+        return cls(
+            source_visibility_producer,
+            physical_plan_view_shadow=physical_plan_view_shadow,
+            _seal=_PRODUCER_SEAL,
+        )
 
     def authority(self) -> SourceMaterialSemanticAuthority:
         return SourceMaterialSemanticAuthority(
@@ -1784,9 +1797,23 @@ class SourceMaterialSemanticProducer:
                         )
                         raw_definitions.setdefault(code, []).append(raw)
 
-                viewports = tuple(
-                    segment_page_viewports(page, page_number=page_number)
-                )
+                if self._physical_plan_view_shadow:
+                    # The source-owned drawing extent is producer-stamped and
+                    # SHA/revision/page authenticated. It cannot grant a material
+                    # occurrence by itself: all existing scoped-word,
+                    # definition and complete-universe gates remain mandatory.
+                    viewports = tuple(
+                        segment_source_page_viewports(
+                            self._source,
+                            revision_id=revision_id,
+                            page_id=str(page_number),
+                            physical_plan_view_shadow=True,
+                        )
+                    )
+                else:
+                    viewports = tuple(
+                        segment_page_viewports(page, page_number=page_number)
+                    )
                 if (
                     not viewports
                     or any(
