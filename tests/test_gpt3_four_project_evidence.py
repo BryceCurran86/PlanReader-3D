@@ -364,7 +364,11 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
         manifests.append(SimpleNamespace(
             project_id=project_id, source_documents=(document,),
             verified_items=tuple(
-                SimpleNamespace(denominator_eligible=True) for _ in range(30)
+                SimpleNamespace(
+                    item_id=f"synthetic-{i}-{j}",
+                    trade_category="flooring",
+                    denominator_eligible=True,
+                ) for j in range(30)
             ),
             status="VERIFIED", source_package_complete=True, reason_codes=(),
         ))
@@ -406,6 +410,7 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
         module, "identity_map_from_dict",
         lambda data: SimpleNamespace(
             project_id=data["project_id"], source_sha256s=data["source_sha256s"],
+            bindings=(),
         ),
     )
     monkeypatch.setattr(
@@ -454,3 +459,100 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
     assert report["frozen_denominator"] == 120
     assert all(x["publication_status"] == "PROJECT_VERIFIED" for x in report["projects"])
     assert report["coverage_accuracy"] == 0.0
+
+
+def _family_mapping_fixture(
+    *, family, trade, semantic_key="source-owned", bound_family="same",
+    mapped_refs=("physical-source-id",), quantity_refs=("physical-source-id",),
+):
+    from types import SimpleNamespace
+    item = SimpleNamespace(
+        item_id="benchmark-target", trade_category=trade,
+        denominator_eligible=True,
+    )
+    sealed = SimpleNamespace(quantities=(
+        SimpleNamespace(
+            family=family, semantic_key=semantic_key,
+            object_identity_refs=quantity_refs,
+        ),
+    ))
+    binding = SimpleNamespace(
+        benchmark_item_id="benchmark-target",
+        production_object_identity_refs=mapped_refs,
+        production_family=family if bound_family == "same" else bound_family,
+    )
+    return (
+        SimpleNamespace(verified_items=(item,)),
+        sealed,
+        SimpleNamespace(bindings=(binding,)),
+    )
+
+
+def test_generic_floor_area_cannot_be_mapped_to_tiled_finish_or_ceiling():
+    for trade in ("tiling", "ceilings", "painting", "doors", "windows"):
+        fixture = _family_mapping_fixture(family="floor_area", trade=trade)
+        with pytest.raises(ValueError, match="reclassified"):
+            module._enforce_mapped_production_family_trade(*fixture)
+
+
+def test_genuine_floor_area_and_finished_floor_keep_distinct_allowed_trades():
+    for family, trade in (
+        ("floor_area", "flooring"),  # eg independent figured alfresco floor
+        ("floor_finish_area", "tiling"),  # source-authenticated FT3 tile
+        ("floor_finish_area", "flooring"),
+        ("ceiling_area", "ceilings"),
+        ("opening_area", "windows"),
+        ("opening_count", "doors"),
+    ):
+        fixture = _family_mapping_fixture(family=family, trade=trade)
+        assert module._enforce_mapped_production_family_trade(*fixture) is None
+
+
+def test_source_owned_window_cannot_be_reclassified_as_door_by_identity_map():
+    window = _family_mapping_fixture(
+        family="opening_area", trade="doors",
+        semantic_key="window_area:physical-source-id",
+    )
+    with pytest.raises(ValueError, match="opening kind"):
+        module._enforce_mapped_production_family_trade(*window)
+    correct = _family_mapping_fixture(
+        family="opening_area", trade="windows",
+        semantic_key="window_area:physical-source-id",
+    )
+    assert module._enforce_mapped_production_family_trade(*correct) is None
+
+
+def test_bound_production_family_must_be_explicit_and_correct():
+    for altered in (None, "opening_area"):
+        fixture = _family_mapping_fixture(
+            family="floor_finish_area", trade="tiling", bound_family=altered,
+        )
+        with pytest.raises(ValueError, match="explicit original production family"):
+            module._enforce_mapped_production_family_trade(*fixture)
+
+
+def test_unmapped_production_floor_remains_unmapped_without_reclassification():
+    fixture = _family_mapping_fixture(
+        family="floor_area", trade="tiling",
+        mapped_refs=("unrelated-source-object",),
+    )
+    assert module._enforce_mapped_production_family_trade(*fixture) is None
+
+
+def test_existing_original_lot16_sealed_identity_mapping_remains_compatible():
+    """Real committed producer-signed source evidence; never fixture-mint quantities."""
+    import json
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    root = Path(__file__).resolve().parents[1]
+    inputs = root / "docs/engineering/lot16_original_identity_reconciliation_20261012"
+    sealed = sealed_source_closed_run_from_dict(
+        json.loads((inputs / "source_sealed_run.json").read_text(encoding="utf-8"))
+    )
+    mapping = module.identity_map_from_dict(
+        json.loads((inputs / "identity_map.json").read_text(encoding="utf-8"))
+    )
+    manifests = module.load_suite_manifests(module.FROZEN_ROOT)
+    manifest = next(m for m in manifests if m.project_id == sealed.project_id)
+    assert module._enforce_mapped_production_family_trade(
+        manifest, sealed, mapping,
+    ) is None

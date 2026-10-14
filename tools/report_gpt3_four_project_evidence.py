@@ -20,6 +20,9 @@ import sys
 
 from scripts.report_full_plan_v2_readiness import _write_readiness_report
 from pb_customer_output_verification import verify_sealed_customer_output
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from tools.run_gpt3_original_byte_gated_exact_project import (
     FROZEN_ROOT,
@@ -135,6 +138,17 @@ def _enforce_cross_project_quantity_uniqueness(
             raise ValueError("cross-project signed quantity identity collision")
     for quantity_id in candidate_ids:
         seen[quantity_id] = project_id
+
+
+def _enforce_mapped_production_family_trade(
+    manifest: Any, sealed: Any, mapping: Any,
+) -> None:
+    """Share exactly the same commercial-semantic veto as project-only score."""
+    require_signed_v2_family_trade_integrity(
+        verified_items=manifest.verified_items,
+        sealed_quantities=sealed.quantities,
+        identity_bindings=mapping.bindings,
+    )
 
 
 def _resolve_original_paths(
@@ -265,6 +279,7 @@ def build_four_project_evidence_ledger(
             customer_rows = _json_customer_rows(customer_path)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
+            _enforce_mapped_production_family_trade(manifest, sealed, mapping)
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )
