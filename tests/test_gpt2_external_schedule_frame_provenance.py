@@ -14,6 +14,7 @@ INSIDE = (50., 90., 180., 112.)
 @pytest.fixture()
 def isolated_frame(monkeypatch):
     monkeypatch.setattr(v, "_text_fragments", lambda _page: [])
+    monkeypatch.setattr(v, "_frame_looks_like_line_grid_table", lambda *a: False)
     monkeypatch.setattr(v, "_frame_candidates_for_title", lambda *a, **k: [FRAME])
     monkeypatch.setattr(v, "_rejected_ownership_frame", lambda *a, **k: False)
     monkeypatch.setattr(v, "_extract_scales_for_bbox", lambda *a, **k: (None, None, False, []))
