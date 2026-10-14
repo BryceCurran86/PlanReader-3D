@@ -24,6 +24,7 @@ from tools.run_gpt3_original_byte_gated_exact_project import (
     FROZEN_ROOT,
     _original_sha_gate,
     _unchanged_frozen_exact_report,
+    _sha256,
 )
 
 
@@ -75,6 +76,20 @@ def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
     if any(type(row.get("quantity_id")) is not str or not row["quantity_id"] for row in value):
         raise ValueError("automated customer row lacks canonical quantity identity")
     return value
+
+
+def _assert_inputs_unchanged(
+    *, manifest: dict[str, Any],
+    originals: list[Path],
+    expected_hashes: list[str],
+    signed_hashes: dict[Path, str],
+) -> None:
+    """Reject TOCTOU changes to originals or signed artifacts during scoring."""
+    source_ok, _, hashes = _original_sha_gate(manifest, originals)
+    if not source_ok or hashes != expected_hashes:
+        raise ValueError("original source changed during reconciliation")
+    if any(_sha256(path) != digest for path, digest in signed_hashes.items()):
+        raise ValueError("frozen manifest or signed artifact changed during reconciliation")
 
 
 def build_four_project_evidence_ledger(
@@ -152,6 +167,10 @@ def build_four_project_evidence_ledger(
             continue
 
         try:
+            signed_hashes = {
+                path: _sha256(path)
+                for path in (canonical_manifest, sealed_path, identity_path, customer_path)
+            }
             sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
             mapping = identity_map_from_dict(_json_object(identity_path))
             actual_hashes = set(hashes)
@@ -171,7 +190,6 @@ def build_four_project_evidence_ledger(
                 or verified_rows.valid_quantity_count != len(sealed.quantities)
             ):
                 raise ValueError("signed customer projection cardinality mismatch")
-            entry["customer_bijection_verified"] = True
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )
@@ -185,6 +203,13 @@ def build_four_project_evidence_ledger(
                 or exact["denominator"] != entry["denominator"]
             ):
                 raise ValueError("unchanged frozen per-project evaluator rejected evidence")
+            _assert_inputs_unchanged(
+                manifest=original_manifest,
+                originals=original_files,
+                expected_hashes=hashes,
+                signed_hashes=signed_hashes,
+            )
+            entry["customer_bijection_verified"] = True
             entry["reconciliation_complete"] = True
             entry["exact_project_report"] = exact
             if manifest.status != "VERIFIED" or not manifest.source_package_complete:
