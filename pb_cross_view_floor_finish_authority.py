@@ -947,18 +947,19 @@ class CrossViewFloorFinishProducer:
             if len(candidates) == 1:
                 occurrence, definition = candidates[0]
             else:
+                # A native text block can span several physical spaces. An
+                # identical room label on two pages and a code in its text
+                # block do not establish physical wall, source-room-face or
+                # canonical-floor equivalence. Keep all exact-block candidate
+                # observations for diagnosis, but do not turn them into
+                # commercial floor-finish area without a separately proven
+                # cross-page *physical* owner. The dimension-box path above
+                # is unchanged and retains authenticated same-view output.
                 owned = cross_view_candidates.get(area_record.physical_room_id, ())
-                if len(owned) != 1:
-                    unresolved.add(floor.canonical_floor_id)
-                    if len(owned) > 1:
-                        conflict = True
-                    continue
-                occurrence, definition, occurrence_line, _label_line = owned[0]
-                binding_mode = "native_block_room_label"
-                support_source_partition_id = _clean(
-                    occurrence_line.source_partition_id
-                )
-                support_block_no = int(occurrence_line.block_no)
+                unresolved.add(floor.canonical_floor_id)
+                if len(owned) > 1:
+                    conflict = True
+                continue
             area_value = _area_value(area_record)
             if area_value is None:
                 unresolved.add(floor.canonical_floor_id)
