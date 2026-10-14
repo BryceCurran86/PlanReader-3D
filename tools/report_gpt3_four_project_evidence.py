@@ -18,6 +18,7 @@ import importlib
 import importlib.util
 import sys
 
+from scripts.report_full_plan_v2_readiness import _write_readiness_report
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from tools.run_gpt3_original_byte_gated_exact_project import (
@@ -265,8 +266,14 @@ def main(argv: list[str] | None = None) -> int:
         source_dir=args.source_dir, sealed_dir=args.sealed_dir,
         identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_readiness_report(
+        args.output,
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        protected_roots=(
+            FROZEN_ROOT, args.source_dir, args.sealed_dir,
+            args.identity_map_dir, args.customer_dir,
+        ),
+    )
     print(json.dumps({
         "publication_status": report["publication_status"],
         "frozen_denominator": report["frozen_denominator"],
