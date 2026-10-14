@@ -17,6 +17,7 @@ from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_face_authority import (
     EDGE_OWNERSHIP_COMPETING,
     SourceRoomFaceSelector,
+    _source_interval_owner_check,
     build_source_room_face_authority,
 )
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -30,6 +31,18 @@ def _competing_source_edges(wall, face):
     """
     by_id = {r.wall_candidate_id: r for r in wall.records
              if hasattr(r, "wall_candidate_id")}
+    if len(by_id) != len(wall.records):
+        raise RuntimeError("duplicate_source_w4_candidate_identity")
+    equivalence = getattr(wall, "equivalence", None)
+    pair_decisions = {}
+    if equivalence is not None:
+        for left, right, value in getattr(equivalence, "pair_classifications", ()):
+            pair_decisions.setdefault(tuple(sorted((left, right))), set()).add(
+                getattr(value, "value", str(value))
+            )
+    # Reuse the production proof as a *read-only diagnosis*, never as a
+    # permission to rewrite the authoritative face decision.
+    source_parent_proof = _source_interval_owner_check(wall, tuple(wall.records))
     rows = []
     for finding in face.ownership_evaluation.unresolved_faces:
         for edge in finding.edge_findings:
@@ -55,10 +68,25 @@ def _competing_source_edges(wall, face):
                         len(record.source_snap_collapsed_fragments),
                     "structural_wall_role_proven_by_this_report": False,
                 })
+            pair_rows = []
+            wall_ids = tuple(sorted(edge.wall_ids))
+            for index, left in enumerate(wall_ids):
+                for right in wall_ids[index + 1:]:
+                    pair_rows.append({
+                        "left_wall_id": left,
+                        "right_wall_id": right,
+                        "sealed_w4_equivalence_classes": tuple(sorted(
+                            pair_decisions.get((left, right), ())
+                        )),
+                    })
             rows.append({
                 "face_id": finding.face_id,
                 "competing_planar_edge": tuple(edge.edge),
                 "candidate_walls": candidates,
+                "pairwise_source_equivalence_receipts": pair_rows,
+                "existing_local_source_interval_proof": bool(
+                    source_parent_proof(edge.edge, wall_ids)
+                ),
                 "unique_source_wall_owner_granted": False,
             })
     return rows
