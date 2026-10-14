@@ -87,7 +87,16 @@ def test_original_positive_plan_flows_to_sealed_source_w4_scope():
     )
     owners = [v for v in views if is_authoritative_derived_viewport(v)]
     assert len(owners) == 1
+    source_snapshot = source.published_snapshot_for_revision(
+        pub.revision.revision_id
+    )
     selectors, authority = _selectors(source, pub)
+    assert source.published_snapshot_for_revision(pub.revision.revision_id) == source_snapshot
+    replay_views = segment_source_page_viewports(
+        source, revision_id=pub.revision.revision_id,
+        page_id="1", physical_plan_view_shadow=True,
+    )
+    assert [v.view_id for v in replay_views] == [v.view_id for v in views]
     assert len(selectors) == 1
     result = authority.resolve_scope(selectors[0])
     assert result.scope_kind == "viewport"
