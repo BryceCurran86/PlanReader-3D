@@ -93,6 +93,33 @@ def _assert_inputs_unchanged(
         raise ValueError("frozen manifest or signed artifact changed during reconciliation")
 
 
+def _verify_customer_counts(sealed: Any, verified: Any, customer_rows: list[dict[str, Any]]) -> None:
+    """Check signed commercial bijection without treating ABSTAIN as a sale."""
+    valid = {
+        quantity.quantity_id
+        for quantity in sealed.quantities if not quantity.abstained
+    }
+    abstained = {
+        quantity.quantity_id
+        for quantity in sealed.quantities if quantity.abstained
+    }
+    if valid & abstained or len(valid) + len(abstained) != len(sealed.quantities):
+        raise ValueError("duplicate or conflicting signed quantity identities")
+    customer_ids = [row["quantity_id"] for row in customer_rows]
+    if (
+        verified.project_id != sealed.project_id
+        or verified.sealed_quantity_count != len(sealed.quantities)
+        or verified.valid_quantity_count != len(valid)
+        or verified.abstained_quantity_count != len(abstained)
+        or verified.customer_row_count != len(customer_rows)
+        or len(customer_ids) != len(set(customer_ids))
+        or set(customer_ids) != valid
+        or set(verified.verified_quantity_ids) != valid
+        or len(verified.verified_quantity_ids) != len(valid)
+    ):
+        raise ValueError("signed customer projection cardinality or identity mismatch")
+
+
 def _resolve_original_paths(
     source_dir: Path, project_id: str, source_documents: tuple,
 ) -> tuple[list[Path], list[str]]:
@@ -217,11 +244,7 @@ def build_four_project_evidence_ledger(
                 raise ValueError("source envelope or project identity mismatch")
             customer_rows = _json_customer_rows(customer_path)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
-            if (
-                verified_rows.customer_row_count != len(customer_rows)
-                or verified_rows.valid_quantity_count != len(sealed.quantities)
-            ):
-                raise ValueError("signed customer projection cardinality mismatch")
+            _verify_customer_counts(sealed, verified_rows, customer_rows)
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )
