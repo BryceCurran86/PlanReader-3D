@@ -120,6 +120,23 @@ def _verify_customer_counts(sealed: Any, verified: Any, customer_rows: list[dict
         raise ValueError("signed customer projection cardinality or identity mismatch")
 
 
+def _enforce_cross_project_quantity_uniqueness(
+    sealed: Any,
+    *, project_id: str,
+    seen: dict[str, str],
+) -> None:
+    """Reject reused sealed quantity identities even across different projects."""
+    candidate_ids = tuple(quantity.quantity_id for quantity in sealed.quantities)
+    if len(candidate_ids) != len(set(candidate_ids)):
+        raise ValueError("duplicate quantity identity inside signed project")
+    for quantity_id in candidate_ids:
+        previous_project = seen.get(quantity_id)
+        if previous_project is not None and previous_project != project_id:
+            raise ValueError("cross-project signed quantity identity collision")
+    for quantity_id in candidate_ids:
+        seen[quantity_id] = project_id
+
+
 def _resolve_original_paths(
     source_dir: Path, project_id: str, source_documents: tuple,
 ) -> tuple[list[Path], list[str]]:
@@ -164,6 +181,7 @@ def build_four_project_evidence_ledger(
 
     rows: list[dict[str, Any]] = []
     scored: dict[str, tuple] = {}
+    seen_signed_quantity_ids: dict[str, str] = {}
     for manifest in manifests:
         project_id = manifest.project_id
         entry: dict[str, Any] = {
@@ -245,6 +263,9 @@ def build_four_project_evidence_ledger(
             customer_rows = _json_customer_rows(customer_path)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
+            _enforce_cross_project_quantity_uniqueness(
+                sealed, project_id=project_id, seen=seen_signed_quantity_ids,
+            )
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )
