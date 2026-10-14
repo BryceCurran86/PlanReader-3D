@@ -59,8 +59,15 @@ jobs:
           assert data["source_native_text_grid_candidate"] is True, data["first_unclosed_gate"]
           assert data["letter_grid_control_count"]>=3
           assert data["number_grid_control_count"]>=4
-          assert data["first_unclosed_gate"]=="source_grid_drawn_line_and_raster_receipts_unverified"
-          print("ORIGINAL_GRID_NATIVE_CANDIDATE_ONLY_NO_PHYSICAL_OR_QUANTITY_AUTHORITY")
+          assert data["source_native_vector_grid_candidate"] is True, data.get("first_grid_vector_gate")
+          assert len(data["native_vector_grid_letter_lineage"])>=3
+          assert len(data["native_vector_grid_number_lineage"])>=4
+          assert data["first_unclosed_gate"]=="source_grid_producer_and_room_physical_equivalence_unverified"
+          assert len(data["native_vector_grid_translation_candidate_pdf_pts"])==2
+          for row in data["native_vector_grid_letter_lineage"]+data["native_vector_grid_number_lineage"]:
+              assert len(row["first_original_path_item_addresses"])>=12
+              assert len(row["second_original_path_item_addresses"])>=12
+          print("ORIGINAL_GRID_NATIVE_TEXT_AND_NATIVE_VECTOR_CANDIDATES_NO_PHYSICAL_OR_QUANTITY_AUTHORITY")
           PY
       - uses: actions/upload-artifact@v4
         if: always()
