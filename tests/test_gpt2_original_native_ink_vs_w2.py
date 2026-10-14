@@ -108,6 +108,31 @@ def test_actual_gap_cannot_be_infilled_by_snapped_edges():
     assert not out["scopes"][0]["edges"][0]["source_room_boundary_closed"]
 
 
+def test_original_native_ink_witness_survives_where_w2_splits_drop_edge():
+    original, ids = _source([
+        ((10, 10), (60, 10)), ((20, 5), (20, 70))
+    ])
+    report = _report(original, ((ids[0],), (ids[1],)),
+                     edge=((29, 10), (40, 10)))
+    # Original source item really crosses 29..40, but surviving W2 split
+    # fragment on that candidate ends at 30. This is source-vs-W2 LOSS,
+    # not permission to invent a wall or alter the original source.
+    report["scopes"][0]["competing_source_edges"][0]["candidate_walls"][0][
+        "source_edge_fragments"
+    ][0]["geometry"] = (10, 10, 30, 10)
+    result = inspect_native_ink_against_w2(report, original)
+    a, b = result["scopes"][0]["edges"][0]["w4_candidate_original_ink_evidence"]
+    assert a["direct_indexed_native_ink_witness"] is True
+    assert a["same_edge_surviving_w2_full_span_supported"] is False
+    assert a["first_source_vs_w2_divergence"] == (
+        "original_native_ink_spans_edge_but_surviving_w2_does_not"
+    )
+    assert b["direct_indexed_native_ink_witness"] is False
+    assert b["same_edge_surviving_w2_full_span_supported"] is False
+    assert b["first_source_vs_w2_divergence"] == "source_and_surviving_w2_span_agree"
+    assert not result["physical_wall_or_room_authority_granted"]
+
+
 def test_missing_native_source_id_causes_unavailable_not_false():
     original, ids = _source([((10, 10), (60, 10))])
     out = inspect_native_ink_against_w2(
