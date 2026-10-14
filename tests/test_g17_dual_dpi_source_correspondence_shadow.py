@@ -49,7 +49,7 @@ def test_original_144_complete_interior_ink_and_changed_overlay_negatives():
 
 def test_original_144_vertical_projection_and_frame_loss_are_negative():
     image = np.full((42, 30, 3), 255, dtype=np.uint8)
-    image[3:29, 8] = (0, 0, 0)
+    image[3:30, 8] = (0, 0, 0)
     p = _source_144_pixel_profile(image, image.copy(), (4., 1., 4., 15.))
     assert p["status"] == "evaluated" and p["original_144_solid_and_unchanged"]
     assert _source_144_pixel_profile(image, image, (4., 1., 4., 100.))["status"] != "evaluated"
