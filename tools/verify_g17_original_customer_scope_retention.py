@@ -36,9 +36,11 @@ def _customer_receipt(claim,project_id):
 
 
 def verify_original_customer_scope_retention(pdf:Path,*,page_indices:tuple[int,...],
-    project_id:str,infill_opposition:bool=False)->dict:
-    if type(infill_opposition) is not bool:
+    project_id:str,infill_opposition:bool=False,terminal_flanks:bool=False)->dict:
+    if type(infill_opposition) is not bool or type(terminal_flanks) is not bool:
         raise ValueError('explicit boolean source observer mode required')
+    if infill_opposition and terminal_flanks:
+        raise ValueError('one independently addressed source experiment per run')
     if (not page_indices or any(type(p) is not int or p<0 for p in page_indices)
             or len(set(page_indices))!=len(page_indices)):
         raise ValueError('unique nonnegative production page indices required')
@@ -56,7 +58,9 @@ def verify_original_customer_scope_retention(pdf:Path,*,page_indices:tuple[int,.
             pub=source.published_snapshot_for_revision(revision)
             if pub is None or pub.revision.source_sha256!=digest:
                 raise RuntimeError('original production source SHA mismatch')
-            if infill_opposition:
+            if terminal_flanks:
+                from pb_g17_terminal_flank_source_shadow import build_g17_terminal_flank_source_inventory_shadow as reader
+            elif infill_opposition:
                 from pb_g17_source_infill_opposition_shadow import build_g17_source_infill_opposition_shadow as reader
             else:
                 from pb_g17_plan_wall_scope_shadow import build_g17_plan_wall_scope_shadow as reader
@@ -96,11 +100,13 @@ def main():
     parser.add_argument('--pdf',required=True,type=Path)
     parser.add_argument('--page',required=True,type=int)
     parser.add_argument('--project-id',required=True)
-    parser.add_argument('--infill-opposition',action='store_true')
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument('--infill-opposition',action='store_true')
+    mode.add_argument('--terminal-flanks',action='store_true')
     parser.add_argument('--output',required=True,type=Path)
     args=parser.parse_args()
     result=verify_original_customer_scope_retention(args.pdf,page_indices=(args.page-1,),
-        project_id=args.project_id,infill_opposition=args.infill_opposition)
+        project_id=args.project_id,infill_opposition=args.infill_opposition,terminal_flanks=args.terminal_flanks)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(result,sort_keys=True,indent=2)+'\n')
     receipt=result['baseline_customer_receipts']
