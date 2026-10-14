@@ -8,6 +8,7 @@ import pytest
 
 from pb_migration_provider_envelope import ProviderContext
 from pb_source_plan_view_authority import _raster_plane_extent
+from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
 from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_migration_adapter import adapt_f07_viewport_to_migration
 from pb_viewport_segmentation import (
@@ -389,3 +390,38 @@ def test_raster_planes_retain_all_supports_and_abstain_for_competitors():
     assert (
         _raster_plane_extent((*labels, *other), (*facts, *otherfacts), physical) is None
     )
+
+
+def test_source_material_shadow_consumer_requires_explicit_source_view_opt_in():
+    """A real source-owned view may enter material analysis, never a default seal."""
+    source, published = _source(_sheet())
+    revision = published.revision.revision_id
+    (physical_view,) = _authenticated(_views(source, published))
+
+    default = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+    assert default._physical_plan_view_shadow is False
+    default.publish(revision)
+    assert not any(
+        key[-1] == physical_view.view_id
+        for key in default._occurrence_results
+    )
+
+    shadow = SourceMaterialSemanticProducer.from_source_visibility_producer(
+        source, physical_plan_view_shadow=True
+    )
+    before = source.published_snapshot_for_revision(revision)
+    shadow.publish(revision)
+    assert any(
+        key[-1] == physical_view.view_id and key[-2] == "1"
+        for key in shadow._occurrence_results
+    )
+    assert source.published_snapshot_for_revision(revision) == before
+    assert all(
+        not result.records for result in shadow.published_occurrence_results()
+    )
+    # This synthetic plan has no authenticated material schedule and cannot
+    # claim a FIRM finish merely because the drawing itself is authenticated.
+    with pytest.raises(TypeError, match="physical_plan_view_shadow"):
+        SourceMaterialSemanticProducer.from_source_visibility_producer(
+            source, physical_plan_view_shadow="true"
+        )
