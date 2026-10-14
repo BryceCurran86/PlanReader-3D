@@ -1,0 +1,78 @@
+name: GPT MAX Original G17 Shadow Inclusive Source Cells
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_raster_unchanged_band_segments.py"
+      - "tests/test_gptmax_original_g17_shadow_inclusive_cells.py"
+      - ".github/workflows/test-gptmax-original-g17-shadow-cells.yml"
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Strict default source parity and adversarial inclusive shadow
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_raster_unchanged_band_segments.py tests/test_gptmax_original_g17_shadow_inclusive_cells.py
+          python -m compileall -q pb_raster_unchanged_band_segments.py
+          ruff check --select F821,F823 pb_raster_unchanged_band_segments.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+  original-lot16-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Immutable original Lot16 physical and customer source stage default-equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          git worktree add --detach /tmp/gptmax-shadow-source-before ${{ github.event.pull_request.base.sha }}
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          (cd /tmp/gptmax-shadow-source-before && PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output "$GITHUB_WORKSPACE/artifacts/before.json")
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output artifacts/after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('artifacts/before.json').read_text())
+          after=json.loads(Path('artifacts/after.json').read_text())
+          assert before==after, "production source record changed when shadow flag omitted"
+          assert before['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert before['primitive_safety_cap']==20000
+          assert before['summary']['physical_existence_claims']==21
+          assert before['summary']['authenticated_hosts']==15
+          assert before['summary']['resolved_source_frames']==9
+          assert before['summary']['canonical_opening_area_records']==8
+          assert len(before['source_owned_wall_scopes'][0]['records'])==2094
+          print({'byte_exact_default_source_parity':True,'prior_accepted_hosts':15,'prior_frames':9,'prior_areas':8,'firm_gain':0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-g17-shadow-default-original-lot16-parity
+          path: artifacts
+          retention-days: 21
