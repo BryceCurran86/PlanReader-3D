@@ -50,7 +50,11 @@ jobs:
           set -euo pipefail
           HEAD_SHA="$(git rev-parse HEAD)"
           test "$HEAD_SHA" = "${{ github.event.pull_request.head.sha }}"
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          # Pin the authenticated historical PRE-1215 control, not the current
+          # post-1215 PR base, which already has the eighth sealed quantity.
+          # The strict runner-only sidecar proof below independently confirms
+          # the historical script differs by exactly the read-only witness.
+          BASE_SHA="f1ce6adcd20eee4004edd995f534694dcdd5c7ad"
           git worktree add --detach /tmp/gpt3-1215-base "$BASE_SHA"
           # The baseline predates the optional read-only original opening sidecar.
           # Backport ONLY that sidecar into the isolated baseline worktree.
