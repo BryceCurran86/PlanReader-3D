@@ -22,7 +22,7 @@ from pb_live_ceiling_area_source_closed_export import (
 )
 from pb_live_ceiling_lining_integration import LiveCeilingLiningResult
 from pb_migration_contracts import QuantityEvidence
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     quantities_to_takeoff_output_rows,
@@ -123,6 +123,31 @@ def project_live_ceiling_area_customer_rows(
         raise TypeError("result must be LiveCeilingLiningResult")
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
+
+    # Original ceiling quantity IDs and typed source claims must be validated
+    # *before* the publisher filters non-FIRM and ABSTAINED rows. Otherwise an
+    # invalid or duplicate all-abstained source universe silently becomes a
+    # valid-looking empty customer inventory. The source-closed exporter has
+    # the same stronger contract for positive quantities.
+    original_ids: set[str] = set()
+    for source in result.quantity_evidence:
+        if not isinstance(source, QuantityEvidence):
+            raise TypeError("ceiling customer original inventory must contain QuantityEvidence")
+        if source.family != "ceiling_lining":
+            raise SourceClosedRunConflictError(
+                "non-ceiling original quantity reached ceiling customer inventory"
+            )
+        source_id = source.quantity_id
+        if (
+            type(source_id) is not str
+            or not source_id
+            or source_id != source_id.strip()
+            or source_id in original_ids
+        ):
+            raise SourceClosedRunConflictError(
+                f"duplicate or invalid original ceiling source quantity id: {source_id}"
+            )
+        original_ids.add(source_id)
 
     original = tuple(
         quantity
