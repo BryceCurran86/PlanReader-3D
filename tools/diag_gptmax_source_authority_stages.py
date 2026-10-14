@@ -86,7 +86,8 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
                         source_all_pages: bool = False,
                         include_identity_text_receipts: bool = False,
                         include_raw_candidate_source_groups: bool = False,
-                        include_room_face_ownership_witnesses: bool = False) -> dict:
+                        include_room_face_ownership_witnesses: bool = False,
+                        include_unhosted_raster_flank_source: bool = False) -> dict:
     sha = hashlib.sha256(source_bytes).hexdigest()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall",
@@ -232,6 +233,15 @@ def source_stage_report(source_bytes: bytes, *, page_ids: tuple[str, ...],
         )
     if include_room_face_ownership_witnesses:
         report["source_room_face_owned_witness_scopes"] = room_ownership_witness_scopes
+    if include_unhosted_raster_flank_source:
+        from tools.diag_gptmax_raster_unhosted_flank_source import (
+            audit_g17_unhosted_flank_original_ancestry,
+        )
+        report["unhosted_raster_flank_source_receipts"] = (
+            audit_g17_unhosted_flank_original_ancestry(
+                source, published, composition,
+            )
+        )
     if include_raw_candidate_source_groups:
         # Diagnostic-only physical-source receipts. This sidecar is *not* an
         # authenticated opening or a source-universe completeness assertion.
@@ -265,6 +275,7 @@ def main() -> None:
     parser.add_argument("--include-identity-text-receipts", action="store_true")
     parser.add_argument("--include-raw-candidate-source-groups", action="store_true")
     parser.add_argument("--include-room-face-ownership-witnesses", action="store_true")
+    parser.add_argument("--include-unhosted-raster-flank-source", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = source_stage_report(args.pdf.read_bytes(),
@@ -274,6 +285,9 @@ def main() -> None:
         include_raw_candidate_source_groups=args.include_raw_candidate_source_groups,
         include_room_face_ownership_witnesses=(
             args.include_room_face_ownership_witnesses
+        ),
+        include_unhosted_raster_flank_source=(
+            args.include_unhosted_raster_flank_source
         ))
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True,
                                       default=lambda value: value.value) + "\n")
