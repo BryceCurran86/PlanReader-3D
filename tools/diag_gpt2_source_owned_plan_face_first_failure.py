@@ -134,6 +134,15 @@ def _face_report(wall, face):
         "shadow_unowned_edge_count": evaluation.unowned_edge_count,
         "shadow_unresolved_face_ids": evaluation.unresolved_face_ids,
         "shadow_competing_wall_ids": evaluation.competing_wall_ids,
+        # Candidate-only. Even a completely edge-owned *shadow* face is NOT a
+        # published SourceRoomFace nor a material/floor/quantity identity.
+        "shadow_evaluated_face_count": evaluation.face_count,
+        "shadow_owned_face_count": len(evaluation.owned_face_ids),
+        "shadow_owned_face_ids": evaluation.owned_face_ids,
+        "shadow_degenerate_owned_face_ids": evaluation.degenerate_owned_face_ids,
+        "shadow_largest_owned_face_area_page_pts2":
+            evaluation.largest_owned_face_area_pt2,
+        "shadow_owned_face_publication_granted": False,
         "competing_source_edges": _competing_source_edges(wall, face),
         # An incomplete room face scope is NOT a commercial floor or finish.
         "unique_physical_room_label_claim_granted": False,
