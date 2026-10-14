@@ -1,0 +1,89 @@
+name: GPT MAX Original G17 Inclusive Pixel Support
+on:
+  pull_request:
+    paths:
+      - pb_raster_unchanged_band_segments.py
+      - tests/test_raster_unchanged_band_segments.py
+      - .github/workflows/test-gptmax-g17-inclusive-pixel-support.yml
+permissions:
+  contents: read
+jobs:
+  inclusive-cell-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Inclusive real-source pixel support and 4pt adverse control
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_raster_unchanged_band_segments.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+  original-lot16-physical-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Replay exact immutable original Lot16 before and after pixel nomination
+        run: |
+          set -euo pipefail
+          git worktree add --detach /tmp/gptmax-before ${{ github.event.pull_request.base.sha }}
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          EXPECTED='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$EXPECTED" "$PDF" | sha256sum --check
+          printf '%s  %s\n' "$EXPECTED" "/tmp/gptmax-before/$PDF" | sha256sum --check
+          (cd /tmp/gptmax-before && PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output "$GITHUB_WORKSPACE/before.json")
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output after.json
+      - name: Fail closed on lost source identity, old signed areas or any unpublished physical promotion
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('before.json').read_text())
+          after=json.loads(Path('after.json').read_text())
+          sha='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          for name,report in (('before',before),('after',after)):
+              assert report['source_sha256']==sha, (name,'source_sha')
+              assert report['primitive_safety_cap']==20000, (name,'cap')
+              assert report['summary']['physical_existence_claims']==21, (name,'physical_claims')
+              assert report['summary']['authenticated_hosts']==15, (name,'hosts')
+              assert report['summary']['resolved_source_frames']==9, (name,'frames')
+              assert report['summary']['canonical_opening_area_records']==8, (name,'areas')
+              assert len(report['source_owned_wall_scopes'][0]['records'])==2094, (name,'W4')
+          # Deliberately strict: any new supplementary physical evidence requires
+          # a separate exact-source object-by-object source/host/measurement audit,
+          # not an implicit CI waiver or a new customer quantity from this PR.
+          if before!=after:
+              differing=[key for key in sorted(set(before)|set(after))
+                         if before.get(key)!=after.get(key)]
+              print({'original_source_differences_requiring_review':differing})
+              raise AssertionError('inclusive pixel nomination changed physical/source evidence; review before merge')
+          print({'original_lot16_source_retention':'exact', 'hosts':15,
+                 'frames':9,'W4':2094,'existing_area_records':8,
+                 'new_firm_grants':0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-g17-inclusive-cell-before-after
+          path: |
+            before.json
+            after.json
+          retention-days: 14
