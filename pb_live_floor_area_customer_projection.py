@@ -19,7 +19,7 @@ from pb_live_floor_area_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     quantities_to_takeoff_output_rows,
@@ -118,6 +118,31 @@ def project_live_floor_area_customer_rows(
         raise TypeError("claim must be LivePhysicalNetWallClaim")
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
+
+    # The canonical room-area producer may intentionally abstain on an
+    # identical provisional replay. The *final customer boundary* cannot
+    # silently discard a duplicate source identity merely because NO room
+    # survived the FIRM floor filter. Mirror the source-closed exporter's
+    # original family and exact-ID census before the empty-return path.
+    original_room_area_ids: set[str] = set()
+    for source in claim.room_area_quantity_evidence:
+        if not isinstance(source, QuantityEvidence):
+            raise TypeError("room_area_quantity_evidence must contain QuantityEvidence")
+        if source.family != "room_area":
+            raise SourceClosedRunConflictError(
+                "floor customer source inventory contains non-room-area quantity"
+            )
+        source_id = source.quantity_id
+        if (
+            type(source_id) is not str
+            or not source_id
+            or source_id != source_id.strip()
+            or source_id in original_room_area_ids
+        ):
+            raise SourceClosedRunConflictError(
+                f"duplicate or invalid original room-area source ID in customer projection: {source_id}"
+            )
+        original_room_area_ids.add(source_id)
 
     quantities = tuple(
         quantity
