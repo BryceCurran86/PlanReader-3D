@@ -87,7 +87,23 @@ jobs:
           assert r['default_production_state_unchanged'] is True
           assert r['identical_full_page_source_inputs_for_both_modes'] is True
           assert r['full_source_input_primitive_count']==10099<=20000
-          assert len(r['local_legacy_exact_controls'])==7
+          # Original SHA-only six-opening local G17 scope excludes the now-hosted
+          # 1215 SGW. Source artifact 11899680880 independently proves every ID.
+          # These are regression controls, never predictor or production defaults.
+          source_local_ids = {
+              'physical_opening_existence_33d277d4c6b6ce758b0594f9d47ce4d8',
+              'physical_opening_existence_81a45c3a33c2a4c0bfdf243aa45a780d',
+              'physical_opening_existence_a68d0b7d738b5de9a1588b4e680e1a8f',
+              'physical_opening_existence_b248972669988c108ebc90c6ca3908fd',
+              'physical_opening_existence_ba7f75a2e5f68bcce87cd00ac1acf90b',
+              'physical_opening_existence_f819752382d44a00d9f28feca4b00787',
+          }
+          def assert_source_local_opening_universe(rows):
+              identities=[row['opening_identity_id'] for row in rows]
+              assert len(identities)==6==len(source_local_ids)
+              assert len(set(identities))==len(identities), 'duplicate physical G17 identity'
+              assert set(identities)==source_local_ids, 'original six source-local opening identities changed'
+          assert_source_local_opening_universe(r['local_legacy_exact_controls'])
           assert all(c['complete_local_legacy_graph_equal'] is True for c in r['local_legacy_exact_controls'])
           for key in ('complete_full_page_legacy_zero_graph_equality_proven',
                       'full_page_scope_is_authenticated_floor_plan_viewport','physical_wall_authority',
@@ -111,7 +127,7 @@ jobs:
                   assert receipt['actual_owned_w3_fragment_rows']
                   assert all(e['w3_retained'] is True and e['physical_host_authority'] is False for e in receipt['actual_owned_w3_fragment_rows'])
                   spans=r[mode]['source_span_rows_before_w4']
-                  assert len(spans)==7
+                  assert_source_local_opening_universe(spans)
                   for row in spans:
                       assert row['w4_membership_available'] is False and row['host_publication_allowed'] is False
                       for flank in row['flanks']:
@@ -128,7 +144,7 @@ jobs:
               assert graph['w4_edge_map_consistent'] is True
               assert len(graph['source_parent_census'])==10099
               assert all(e['physical_host_authority'] is False for e in graph['all_w2_edges'])
-              assert len(r[mode]['opening_rows'])==7
+              assert_source_local_opening_universe(r[mode]['opening_rows'])
               for row in r[mode]['opening_rows']:
                   for flank in row['flanks']:
                       for pixel in flank['source_run_rows']:
@@ -173,7 +189,7 @@ jobs:
                   assert edges[key]['w4_candidate_membership_available'] is False
           assert len(set(candidate))==len(candidate) and len(set(abstained))==len(abstained)
           assert not set(candidate)&set(abstained) and set(candidate)|set(abstained)==retained
-          assert len(third['opening_rows'])==7
+          assert_source_local_opening_universe(third['opening_rows'])
           for row in third['opening_rows']:
               for flank in row['flanks']:
                   for pixel in flank['source_run_rows']:
