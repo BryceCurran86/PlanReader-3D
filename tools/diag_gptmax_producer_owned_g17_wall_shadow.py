@@ -12,6 +12,7 @@ from pb_live_physical_opening_void_composition import compose_live_physical_open
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_opening_local_g17_wall_shadow import build_opening_local_g17_wall_shadow
 from pb_g17_w4_equivalence_competitor_shadow import compare_g17_to_ordinary_w4_shadow
+from pb_g17_dual_dpi_source_correspondence_shadow import g17_144_300_source_correspondence_shadow
 from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -70,6 +71,7 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
         for record in scope.records
     )
     shadows = []
+    authenticated_flank_shadows = []
     for trace in composition.opening_bindings:
         if trace.host_wall_id is not None:
             continue
@@ -82,6 +84,7 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
         shadow = build_opening_local_g17_wall_shadow(source,selector)
         if shadow.physical_opening_id != trace.opening_identity_id:
             raise ValueError("source shadow opening identity changed")
+        authenticated_flank_shadows.append(shadow)
         serialized = asdict(shadow)
         serialized["ordinary_w4_competitor_shadow"] = (
             compare_g17_to_ordinary_w4_shadow(shadow.flanks, ordinary_w4_records)
@@ -95,6 +98,11 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
         # Shared source observations are retained competitors, never permission
         # to transfer another opening's host, figure label or metric quantity.
         shadows.append(serialized)
+    dual_dpi = g17_144_300_source_correspondence_shadow(
+        source, published, page_id=page_id,
+        opening_shadows=tuple(authenticated_flank_shadows),
+        ordinary_w4_records=ordinary_w4_records,
+    )
     recomposed, revoids = compose()
     if _retention(recomposed,revoids) != before:
         raise RuntimeError("G17 shadow changed original wall/host/frame/area receipts")
@@ -110,6 +118,7 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
         "original_area_count":sum(r.area_m2 is not None for r in voids.canonical_openings),
         "original_area_values":sorted(r.area_m2 for r in voids.canonical_openings if r.area_m2 is not None),
         "opening_local_source_shadows":shadows,
+        "original_144_300_correspondence_shadow":dual_dpi,
         "published_source_snapshot_unchanged":True,
         "all_original_wall_host_frame_area_receipts_unchanged":True,
         "new_physical_host_or_metric_granted":False,
