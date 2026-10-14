@@ -122,8 +122,11 @@ def test_box_side_on_the_outer_face_of_a_wall_is_still_a_wall_side():
 
 def test_classify_unique_owner():
     corr = {"wall_bounded_on_both_sheets": True, "wall_evidence_identical_on_both_sheets": True}
-    out = d.classify_floor(corr, registration_unique=True, marks_inside=[{"code": "FT3", "margin_pt": 54.8}], other_labelled_boxes_overlapping=0, material_code="FT3")
-    assert out["status"] == "corroborated"
+    out = d.classify_floor(corr, registration_unique=True, marks_inside=[{"code": "FT3", "margin_pt": 54.8}], other_labelled_boxes_overlapping=0, material_code="FT3",
+                           authority_blockers=list(d.STANDING_AUTHORITY_BLOCKERS))
+    assert out["status"] == "candidate"  # geometric ownership only; the diagnostic never emits corroborated
+    assert out["authenticated_physical_wall_face_equivalence"] is False
+    assert out["authority_blockers"] == list(d.STANDING_AUTHORITY_BLOCKERS)
     assert out["finish_codes_in_box"] == {"FT3": 1}
 
 
@@ -255,3 +258,47 @@ def test_interval_iou_is_split_invariant():
     b = [(0.0, 4.0), (4.0, 10.0), (20.0, 25.0), (25.0, 30.0)]
     assert d.interval_iou(a, b) == pytest.approx(1.0)
     assert d.interval_iou(a, [(0.0, 10.0)]) == pytest.approx(0.5)
+
+
+# ------------------------------------------------------------------------------- ownership and face equivalence
+def _segments(segs):
+    return {f"p{i}": s for i, s in enumerate(segs)}
+
+
+def test_side_ownership_flags_shared_and_unowned_primitives():
+    segs = _segments([seg(100, 100, 100, 260), seg(100, 100, 100, 180), seg(300, 100, 300, 260), seg(100, 100, 300, 100), seg(100, 260, 300, 260)])
+    owners = {"p0": ["w1"], "p1": ["w1", "w2"], "p2": ["w3"], "p3": ["w4"]}  # p4 (the y1 side) is unowned
+    out = d.side_ownership((100, 100, 300, 260), segs, owners, {"w3": True})
+    assert out["x0"]["owned_by_multiple_candidates"] == 1 and out["x0"]["distinct_candidates"] == 2
+    assert out["x1"] == {"primitives_on_side": 1, "unowned_by_any_w4_candidate": 0, "owned_by_multiple_candidates": 0, "distinct_candidates": 1, "grid_opposed_candidates": 1}
+    assert out["y1"]["unowned_by_any_w4_candidate"] == 1
+    blockers = d.ownership_blockers({"7": out})
+    assert "page_7_box_side_primitive_claimed_by_several_w4_candidates" in blockers
+    assert "page_7_box_side_primitive_unowned_by_w4" in blockers
+
+
+def test_clean_unique_ownership_has_no_ownership_blockers():
+    segs = _segments([seg(100, 100, 100, 260), seg(300, 100, 300, 260), seg(100, 100, 300, 100), seg(100, 260, 300, 260)])
+    owners = {"p0": ["a"], "p1": ["b"], "p2": ["c"], "p3": ["d"]}
+    assert d.ownership_blockers({"7": d.side_ownership((100, 100, 300, 260), segs, owners, {})}) == []
+
+
+def test_ownership_is_invariant_to_primitive_splitting_and_order():
+    whole = _segments([seg(100, 100, 100, 260)])
+    split = _segments([seg(100, 180, 100, 260), seg(100, 100, 100, 180)])
+    a = d.side_ownership((100, 100, 300, 260), whole, {"p0": ["w"]}, {})
+    b = d.side_ownership((100, 100, 300, 260), split, {"p0": ["w"], "p1": ["w"]}, {})
+    assert a["x0"]["distinct_candidates"] == b["x0"]["distinct_candidates"] == 1
+    assert a["x0"]["owned_by_multiple_candidates"] == b["x0"]["owned_by_multiple_candidates"] == 0
+
+
+def test_face_equivalence_retains_every_alternative_and_periodic_cells_are_not_unique_identity():
+    cell = lambda x, y: [[x, y], [x + 34.0, y], [x + 34.0, y + 34.0], [x, y + 34.0]]
+    faces = {f"c{i}": cell(i * 34.0, 0.0) for i in range(5)}  # a periodic row of identical cells
+    exact = d.face_equivalence(cell(0.0, 0.0), faces, (68.0, 0.0), top=5)
+    assert exact[0]["face_id"] == "c2" and exact[0]["iou"] == pytest.approx(1.0)
+    shifted = d.face_equivalence(cell(0.0, 0.0), faces, (68.0 + 34.0, 0.0), top=5)
+    assert shifted[0]["face_id"] == "c3" and shifted[0]["iou"] == pytest.approx(1.0)  # an alias translation is equally 'exact'
+    partial = d.face_equivalence(cell(0.0, 0.0), faces, (85.0, 0.0), top=5)
+    assert [r["face_id"] for r in partial[:2]] == ["c2", "c3"]  # half-overlaps both neighbours: both retained, none elected
+    assert partial[0]["iou"] == pytest.approx(partial[1]["iou"], abs=1e-6)

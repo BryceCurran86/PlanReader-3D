@@ -69,7 +69,13 @@ jobs:
                 "over_competitor", report["registration"]["best_over_strongest_competitor"], "over_null", report["registration"]["best_over_null_max"])
           for f in report["measured_floors"]:
               print("FLOOR", f["room_label"], json.dumps({k: f["correspondence"].get(k) for k in ("status", "reason_codes", "finish_codes_in_box")}, sort_keys=True))
-          print("UNIQUELY_OWNED_FLOORS", json.dumps(report.get("uniquely_owned_floors"), sort_keys=True))
+          print("GEOMETRIC_CANDIDATE_OWNER_FLOORS", json.dumps(report.get("geometric_candidate_owner_floors"), sort_keys=True))
+          for f in report["measured_floors"]:
+              assert f["correspondence"].get("authenticated_physical_wall_face_equivalence", False) is False
+              assert f["correspondence"]["status"] != "corroborated"
+          for m in report["plan_marks"]:
+              if "binding" in m:
+                  print("MARK", m["code"], m["center"], json.dumps(m["binding"], sort_keys=True))
           print("FIRST_UNCLOSED_GATE", report.get("first_unclosed_gate"))
           PY
       - uses: actions/upload-artifact@v4

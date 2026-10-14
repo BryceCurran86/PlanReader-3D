@@ -1,7 +1,7 @@
 # FT3 page-11 -> page-7 floor correspondence: architecture report (shadow, no authority)
 
 **Read-only. Nothing is published: no material occurrence, floor finish, quantity, scale, customer row or benchmark identity.**
-Evidence tool: `tools/diag_ft3_p11_p7_floor_correspondence.py` (24 synthetic tests, exact-head CI replay with Tesseract).
+Evidence tool: `tools/diag_ft3_p11_p7_floor_correspondence.py` (25 synthetic tests, exact-head CI replay with Tesseract).
 Stop for review per AGENTS.md; no production file is changed in this PR.
 
 ## 0. Compliance block
@@ -149,7 +149,7 @@ region and inside the authenticated plan view; (G5) no overlapping measured box.
 Synthetic positives; look-alike negatives (periodic grid, open-plan box, wrong registration); ambiguity/conflict (repeated rooms,
 competing codes, overlapping boxes); translation/rotation/scale metamorphic; input-order and segment-splitting invariance;
 unrelated-content and viewport-expansion invariance; deterministic replay and stable IDs; no-mutation; proof that live predictions and
-commercial quantities are unchanged with the shadow present. 24 of these exist for the diagnostic's geometry; stable-ID and
+commercial quantities are unchanged with the shadow present. 25 tests of these exist for the diagnostic's geometry; stable-ID and
 live-unchanged proofs belong to the module PR.
 
 ## 8. Benchmark observations that must not influence implementation
