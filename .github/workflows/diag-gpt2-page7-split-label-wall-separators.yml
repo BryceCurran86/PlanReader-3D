@@ -12,6 +12,7 @@ on:
       - "tools/diag_gpt2_split_face_collinear_first_gates.py"
       - "tools/diag_gpt2_grid_component_first_failure.py"
       - "tests/test_gpt2_cross_w4_atomic_source_audit.py"
+      - "tests/test_gpt2_non_simple_original_face_ring_forensics.py"
       - "tests/test_gpt2_native_source_parent_w4_ancestry.py"
       - "tools/diag_gpt2_freezer_source_crossing_wall_owners.py"
       - "tests/test_gpt2_freezer_source_crossing_wall_owners.py"
@@ -49,6 +50,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
           PYTHONPATH=. pytest -q tests/test_gpt2_freezer_source_crossing_wall_owners.py
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
