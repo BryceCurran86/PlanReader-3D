@@ -1,0 +1,128 @@
+"""The handoff runner pauses the cyclic collector for one source run, and only for that run."""
+from __future__ import annotations
+
+import gc
+
+import pytest
+
+import tools.run_source_closed_project_handoff as handoff
+
+
+@pytest.fixture(autouse=True)
+def _restore_gc_state():
+    was_enabled = gc.isenabled()
+    yield
+    if was_enabled:
+        gc.enable()
+    else:
+        gc.disable()
+
+
+def test_collector_is_paused_inside_and_restored_after(monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    gc.enable()
+    with handoff._bulk_source_gc_regime():
+        assert not gc.isenabled()
+    assert gc.isenabled()
+
+
+def test_collector_is_restored_after_an_error(monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    gc.enable()
+    with pytest.raises(RuntimeError, match="boom"), handoff._bulk_source_gc_regime():
+        assert not gc.isenabled()
+        raise RuntimeError("boom")
+    assert gc.isenabled()
+
+
+def test_environment_opt_out_keeps_the_collector_enabled(monkeypatch):
+    monkeypatch.setenv("PB_KEEP_CYCLIC_GC", "1")
+    gc.enable()
+    with handoff._bulk_source_gc_regime():
+        assert gc.isenabled()
+    assert gc.isenabled()
+
+
+def test_a_caller_that_already_disabled_the_collector_is_not_overridden(monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    gc.disable()
+    with handoff._bulk_source_gc_regime():
+        assert not gc.isenabled()
+    assert not gc.isenabled()
+
+
+def test_nested_regimes_restore_only_at_the_outermost_exit(monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    gc.enable()
+    with handoff._bulk_source_gc_regime():
+        with handoff._bulk_source_gc_regime():
+            assert not gc.isenabled()
+        assert not gc.isenabled()
+    assert gc.isenabled()
+
+
+def _stub_inputs(tmp_path, monkeypatch):
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%stub\n")
+    seen = {}
+
+    def locked(**kwargs):
+        seen["collector_enabled"] = gc.isenabled()
+        seen["lock_exists"] = (kwargs["output_dir"] / ".source_closed_handoff.lock").exists()
+        if seen.get("raise"):
+            raise RuntimeError("stub failure")
+        return {"status": "stub"}
+
+    monkeypatch.setattr(handoff, "_generate_project_handoff_locked", locked)
+    return pdf, seen
+
+
+def test_generate_project_handoff_runs_inside_the_regime(tmp_path, monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    gc.enable()
+    pdf, seen = _stub_inputs(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    result = handoff.generate_project_handoff(
+        pdf_path=pdf, project_id="proj", workspace_id=1, output_dir=out
+    )
+    assert result == {"status": "stub"}
+    assert seen == {"collector_enabled": False, "lock_exists": True}
+    assert gc.isenabled()
+    assert not (out / ".source_closed_handoff.lock").exists()
+
+
+def test_generate_project_handoff_restores_the_collector_when_the_run_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    gc.enable()
+    pdf, seen = _stub_inputs(tmp_path, monkeypatch)
+    seen["raise"] = True
+    out = tmp_path / "out"
+    with pytest.raises(RuntimeError, match="stub failure"):
+        handoff.generate_project_handoff(
+            pdf_path=pdf, project_id="proj", workspace_id=1, output_dir=out
+        )
+    assert seen["collector_enabled"] is False
+    assert gc.isenabled()
+    assert not (out / ".source_closed_handoff.lock").exists()
+
+
+def test_invalid_inputs_never_reach_the_regime(tmp_path, monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    gc.enable()
+    entered = []
+    monkeypatch.setattr(
+        handoff,
+        "_bulk_source_gc_regime",
+        lambda: entered.append("entered") or handoff.contextlib.nullcontext(),
+    )
+    with pytest.raises(FileNotFoundError):
+        handoff.generate_project_handoff(
+            pdf_path=tmp_path / "missing.pdf",
+            project_id="proj",
+            workspace_id=1,
+            output_dir=tmp_path / "out",
+        )
+    assert entered == []
+    assert gc.isenabled()
