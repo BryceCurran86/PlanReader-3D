@@ -33,6 +33,55 @@ from pb_source_visibility_authority import (
 from tools.diag_gptmax_g17_source_only_flanks import source_only_closed_flanks
 
 
+def classify_original_terminal_flank_pixel_gate(
+    *,
+    source_flank: Mapping[str, Any],
+    original_300dpi_segments: tuple,
+    original_144dpi_segments: tuple,
+    original_image_regions: tuple,
+) -> dict[str, Any]:
+    """Diagnostic only: replay exact existing source filters in producer order."""
+    box = (
+        source_flank["orientation"],
+        tuple(float(value) for value in source_flank["source_bbox_pdf_pts"]),
+    )
+    if box[0] not in ("horizontal", "vertical") or len(box[1]) != 4:
+        raise ValueError("invalid source-owned G17 flank")
+    detected = [segment for segment in original_300dpi_segments if
+        _unchanged_segment_inside_flank(
+            segment, box, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+        )
+    ]
+    covered = [segment for segment in detected if
+        _axis_aligned_geometry_fully_covered_by_rect_union(
+            segment.geometry_pt, original_image_regions,
+        )
+    ]
+    retained = [segment for segment in covered if not
+        band_segment_already_observed(
+            segment, original_144dpi_segments,
+            dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+            ordinary_dpi=RASTER_RENDER_DPI,
+        )
+    ]
+    if not detected:
+        first = "original_300dpi_terminal_candidate_unavailable"
+    elif not covered:
+        first = "source_image_region_ownership_unavailable"
+    elif not retained:
+        first = "suppressed_by_original_144dpi_ordinary_raster_candidate"
+    else:
+        first = "pixel_and_image_source_nomination_eligible"
+    return {
+        "original_300dpi_terminal_candidates": len(detected),
+        "source_image_region_owned_candidates": len(covered),
+        "not_ordinary_deduplicated_candidates": len(retained),
+        "first_detector_gate": first,
+        "physical_host_granted": False,
+        "metric_quantity_granted": False,
+    }
+
+
 def detector_source_first_gate_report(
     *,
     original_pdf: bytes,
@@ -131,45 +180,19 @@ def detector_source_first_gate_report(
     for opening in shadow:
         identity = opening["physical_opening_id"]
         for flank in opening["source_flank_boxes"]:
-            box = (
-                flank["orientation"],
-                tuple(float(v) for v in flank["source_bbox_pdf_pts"]),
+            pixel_gate = classify_original_terminal_flank_pixel_gate(
+                source_flank=flank,
+                original_300dpi_segments=tuple(raw),
+                original_144dpi_segments=tuple(ordinary),
+                original_image_regions=tuple(regions),
             )
-            detected = [segment for segment in raw if
-                _unchanged_segment_inside_flank(
-                    segment, box, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                )
-            ]
-            covered = [segment for segment in detected if
-                _axis_aligned_geometry_fully_covered_by_rect_union(
-                    segment.geometry_pt, regions,
-                )
-            ]
-            retained = [segment for segment in covered if not
-                band_segment_already_observed(
-                    segment, ordinary,
-                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                    ordinary_dpi=RASTER_RENDER_DPI,
-                )
-            ]
-            if not detected:
-                first = "original_300dpi_terminal_candidate_unavailable"
-            elif not covered:
-                first = "source_image_region_ownership_unavailable"
-            elif not retained:
-                first = "suppressed_by_original_144dpi_ordinary_raster_candidate"
-            else:
-                first = "pixel_and_image_source_nomination_eligible"
             evidence = area_evidence.get(identity)
             has_area = isinstance(evidence, Mapping) and evidence.get("area_m2") is not None
             stage_rows.append({
                 "physical_opening_id": identity,
                 "source_flank": flank,
-                "original_300dpi_terminal_candidates": len(detected),
-                "source_image_region_owned_candidates": len(covered),
-                "not_ordinary_deduplicated_candidates": len(retained),
+                **pixel_gate,
                 "figured_area_evidence_available": has_area,
-                "first_detector_gate": first,
                 "metric_area_not_required_for_source_shadow": True,
                 "source_stage_only": True,
                 "physical_host_granted": False,
