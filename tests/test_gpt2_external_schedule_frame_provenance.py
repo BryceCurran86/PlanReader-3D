@@ -84,3 +84,39 @@ def test_actual_floor_plan_frame_not_changed_by_semantic_table_rule(
     assert consumed == {0}
     assert len(viewports) == 1
     assert viewports[0].view_type == v.DrawingViewType.FLOOR_PLAN.value
+
+
+def test_external_title_with_two_source_positive_table_frames_must_abstain(
+    monkeypatch, isolated_frame,
+):
+    # A physical plan with repeated GRID strokes can look table-like.
+    # No external title may select one when multiple original native
+    # candidate frames independently satisfy the same table criteria.
+    second = (10., 340., 160., 480.)
+    monkeypatch.setattr(v, "_frame_looks_like_table", lambda *a: True)
+    anchor = v._TitleAnchor(
+        "INTERNAL FINISHES SCHEDULE", OUTSIDE, v.DrawingViewType.SCHEDULE.value
+    )
+    views, consumed = v._frame_resolved_viewports(
+        SimpleNamespace(), (anchor,), (FRAME, second), isolated_frame, page_number=11,
+    )
+    assert not views
+    assert not consumed
+
+
+def test_source_enclosed_title_ignores_other_table_shaped_drawing_frames(
+    monkeypatch, isolated_frame,
+):
+    # The enclosing frame has independent source spatial ownership; the
+    # fail-closed external-binding criterion must not erase it.
+    second = (10., 340., 160., 480.)
+    monkeypatch.setattr(v, "_frame_looks_like_table", lambda *a: True)
+    anchor = v._TitleAnchor(
+        "INTERNAL FINISHES SCHEDULE", INSIDE, v.DrawingViewType.SCHEDULE.value
+    )
+    views, consumed = v._frame_resolved_viewports(
+        SimpleNamespace(), (anchor,), (FRAME, second), isolated_frame, page_number=11,
+    )
+    assert consumed == {0}
+    assert len(views) == 1
+    assert views[0].bounding_box == FRAME
