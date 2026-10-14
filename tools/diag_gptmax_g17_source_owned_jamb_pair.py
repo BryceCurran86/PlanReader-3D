@@ -60,9 +60,11 @@ def _flank_proof(
         raise ValueError("not exactly two original faces plus inner cap")
     if len(set(parents))!=3:
         raise ValueError("original parent source reused across distinct edges")
-    if (sorted(ids)!=sorted(w2.get("source_observation_ids",()))
-        or sorted(parents)!=sorted(w2.get("source_parent_observation_ids",()))):
-        raise ValueError("W2 source parent/observation address changed")
+    # The top-level flank wrapper identifies the original observation
+    # universe; each W2 default/exact graph separately carries its own
+    # original source parent list, checked independently below.
+    if sorted(ids)!=sorted(w2.get("source_observation_ids",())):
+        raise ValueError("W2 source observation address changed")
     default=w2.get("default_w2_w3_w4")
     exact=w2.get("exact_coordinate_w2_w3_w4")
     if not isinstance(default,Mapping) or not isinstance(exact,Mapping):
