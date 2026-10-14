@@ -34,7 +34,7 @@ MARK_PAGE = 11       # plan marks and the room-area dimension systems live here 
 AXIS_TOL = 0.02      # pt; a segment is axis-parallel below this
 MIN_LEN = 3.0        # pt
 COORD_TOL = 0.06     # pt; collinearity tolerance (PDF coordinate precision)
-WALL_BAND = (3.0, 15.0)  # pt; admissible distance of a wall's second face line behind a box side
+WALL_BAND = (3.0, 15.0)  # pt; admissible distance of a wall's second face line from a box side (either side)
 SIDE_FULL = 0.95     # coverage regarded as a complete wall side
 SIDE_PARTIAL = 0.50  # coverage regarded as a wall side with registered opening(s)
 MARK_WINDOW = 260.0  # pt; local-registration window radius around a mark
@@ -222,15 +222,17 @@ def side_evidence(box: Sequence[float], lines: Lines, *, tol: float = COORD_TOL,
             (max(a, lo), min(b, hi)) for k in index.near(orient, coord, tol) for a, b in lines[orient][k] if min(b, hi) > max(a, lo)
         )
         cov = sum(b - a for a, b in covered) / length if length > 0 else 0.0
-        behind = []
+        # A wall has two faces a wall-thickness apart.  The measured side may lie on either face, so the second face is searched on
+        # both sides; the signed offset is positive when it lies outside the box.
+        second = []
         for k in index.keys[orient]:
-            d = (k - coord) * sign
-            if band[0] <= d <= band[1]:
+            signed = (k - coord) * sign
+            if band[0] <= abs(signed) <= band[1]:
                 c2 = sum(max(0.0, min(b, hi) - max(a, lo)) for a, b in lines[orient][k]) / length
                 if c2 >= SIDE_PARTIAL:
-                    behind.append((round(d, 2), round(c2, 3)))
+                    second.append((round(signed, 2), round(c2, 3)))
         out[name] = {"coordinate": round(coord, 3), "face_coverage": round(cov, 4), "covered_intervals": [(round(a, 2), round(b, 2)) for a, b in covered],
-                     "second_face_behind": behind}
+                     "second_face": second}
     return out
 
 
@@ -276,8 +278,8 @@ def box_correspondence(
             "support_sheet": sup[name], "target_sheet": tgt[tgt_name],
             "covered_interval_iou": interval_iou(sup[name]["covered_intervals"], t_iv) if orientation == "identity" else None,
             "wall_side": (
-                "full" if min(sup[name]["face_coverage"], tgt[tgt_name]["face_coverage"]) >= SIDE_FULL and sup[name]["second_face_behind"] and tgt[tgt_name]["second_face_behind"]
-                else "with_openings" if min(sup[name]["face_coverage"], tgt[tgt_name]["face_coverage"]) >= SIDE_PARTIAL and sup[name]["second_face_behind"] and tgt[tgt_name]["second_face_behind"]
+                "full" if min(sup[name]["face_coverage"], tgt[tgt_name]["face_coverage"]) >= SIDE_FULL and sup[name]["second_face"] and tgt[tgt_name]["second_face"]
+                else "with_openings" if min(sup[name]["face_coverage"], tgt[tgt_name]["face_coverage"]) >= SIDE_PARTIAL and sup[name]["second_face"] and tgt[tgt_name]["second_face"]
                 else "not_wall"
             ),
         }
@@ -548,13 +550,18 @@ def inspect_floor_correspondence(pdf: Path, *, material_code: str, finish_codes:
         overlaps = sum(1 for other, ob in boxes if other is not floor and not (ob[2] <= box[0] or ob[0] >= box[2] or ob[3] <= box[1] or ob[1] >= box[3]))
         floor["correspondence"] = {**classify_floor(corr, registration_unique=registration["unique"], marks_inside=inside, other_labelled_boxes_overlapping=overlaps, material_code=material_code),
                                    "geometry": corr, "marks_inside_box": inside}
-        # competing placements: the same box test under every retained alternative registration (must fail to be wall-bounded)
+        # competing placements: the same box test under every retained alternative translation of the identity orientation
+        # (sheet-frame alignment, the best alias of each scale-1 hypothesis).  A wrong placement must fail to be wall-bounded.
+        alt_translations = [(0.0, 0.0)] + [
+            tuple(row["next_distinct_translation"]) for row in ranking
+            if row["orientation"] == "identity" and row["scale"] == 1.0 and row["next_distinct_translation"] is not None
+        ]
         alts = []
-        for alt in ranking[1:6]:
-            if alt["orientation"] != "identity" or alt["scale"] != 1.0:
+        for alt in dict.fromkeys(alt_translations):
+            if abs(alt[0] - translation[0]) <= 0.1 and abs(alt[1] - translation[1]) <= 0.1:
                 continue
-            c2 = box_correspondence(box, lines_support=lines[MARK_PAGE], lines_target=lines[SOURCE_PAGE], orientation="identity", translation=(alt["dx"], alt["dy"]))
-            alts.append({"translation": [alt["dx"], alt["dy"]], "wall_bounded_on_both_sheets": c2["wall_bounded_on_both_sheets"], "side_kinds": c2["side_kinds"]})
+            c2 = box_correspondence(box, lines_support=lines[MARK_PAGE], lines_target=lines[SOURCE_PAGE], orientation="identity", translation=alt)
+            alts.append({"translation": [alt[0], alt[1]], "wall_bounded_on_both_sheets": c2["wall_bounded_on_both_sheets"], "side_kinds": c2["side_kinds"]})
         floor["correspondence"]["competing_registrations_box_test"] = alts
         result["measured_floors"].append(floor)
     owners = [f for f in result["measured_floors"] if f["correspondence"]["status"] == "corroborated"]

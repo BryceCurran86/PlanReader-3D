@@ -111,6 +111,15 @@ def test_exact_box_correspondence_is_wall_bounded_on_both_sheets_with_registered
     assert corr["sides"]["y0"]["covered_interval_iou"] == pytest.approx(1.0, abs=1e-6)
 
 
+def test_box_side_on_the_outer_face_of_a_wall_is_still_a_wall_side():
+    # the measured box edge lies on the OUTER face of the east wall (second face 5.28 pt inside it)
+    plan = room(100, 100, 300, 260)
+    outer = (100 - 5.28, 100 - 5.28, 300 + 5.28, 260 + 5.28)
+    corr = d.box_correspondence(outer, lines_support=lines_of(plan), lines_target=lines_of(plan), orientation="identity", translation=(0.0, 0.0))
+    assert corr["wall_bounded_on_both_sheets"] is True
+    assert all(k == "full" for k in corr["side_kinds"].values())
+
+
 def test_classify_unique_owner():
     corr = {"wall_bounded_on_both_sheets": True, "wall_evidence_identical_on_both_sheets": True}
     out = d.classify_floor(corr, registration_unique=True, marks_inside=[{"code": "FT3", "margin_pt": 54.8}], other_labelled_boxes_overlapping=0, material_code="FT3")
