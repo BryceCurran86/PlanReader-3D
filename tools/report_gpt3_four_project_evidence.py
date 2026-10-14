@@ -137,6 +137,69 @@ def _enforce_cross_project_quantity_uniqueness(
         seen[quantity_id] = project_id
 
 
+def _enforce_mapped_production_family_trade(
+    manifest: Any, sealed: Any, mapping: Any,
+) -> None:
+    """Reject an exact-identity binding that changes source-owned trade semantics.
+
+    Frozen reconciliation deliberately takes the destination trade category
+    from its independently mapped benchmark item. Exact physical identity
+    alone must never turn a generic measured floor into a tiled finish or
+    a source-proven window into a door. This is a negative commercial safety
+    gate, not a source-to-benchmark identity discovery mechanism.
+    """
+    items = {
+        item.item_id: item for item in manifest.verified_items
+        if item.denominator_eligible
+    }
+    sealed_by_refs: dict[tuple[str, ...], list[Any]] = {}
+    for quantity in sealed.quantities:
+        refs = tuple(sorted(quantity.object_identity_refs))
+        sealed_by_refs.setdefault(refs, []).append(quantity)
+
+    compatible_trades = {
+        "floor_area": frozenset({"flooring"}),
+        "floor_finish_area": frozenset({"tiling", "flooring"}),
+        "ceiling_area": frozenset({"ceilings"}),
+        "ceiling_finish_area": frozenset({"ceilings"}),
+        "opening_area": frozenset({"doors", "windows"}),
+        "opening_count": frozenset({"doors", "windows"}),
+    }
+    typed_opening_prefix = {
+        "window_area:": "windows",
+        "door_area:": "doors",
+        "window_count:": "windows",
+        "door_count:": "doors",
+    }
+    for binding in mapping.bindings:
+        item = items.get(binding.benchmark_item_id)
+        if item is None:
+            # Frozen V2 reconciliation independently rejects unknown items.
+            continue
+        refs = tuple(sorted(binding.production_object_identity_refs))
+        for quantity in sealed_by_refs.get(refs, ()):
+            if (
+                binding.production_family is None
+                or quantity.family != binding.production_family
+            ):
+                raise ValueError(
+                    "mapped quantity identity requires its explicit original production family"
+                )
+            allowed = compatible_trades.get(quantity.family)
+            if allowed is not None and item.trade_category not in allowed:
+                raise ValueError(
+                    "bound production family cannot be reclassified as benchmark trade"
+                )
+            if quantity.family in {"opening_area", "opening_count"}:
+                for prefix, trade in typed_opening_prefix.items():
+                    if quantity.semantic_key.startswith(prefix):
+                        if item.trade_category != trade:
+                            raise ValueError(
+                                "source-owned opening kind disagrees with benchmark trade"
+                            )
+                        break
+
+
 def _resolve_original_paths(
     source_dir: Path, project_id: str, source_documents: tuple,
 ) -> tuple[list[Path], list[str]]:
@@ -265,6 +328,7 @@ def build_four_project_evidence_ledger(
             customer_rows = _json_customer_rows(customer_path)
             verified_rows = verify_sealed_customer_output(sealed, customer_rows)
             _verify_customer_counts(sealed, verified_rows, customer_rows)
+            _enforce_mapped_production_family_trade(manifest, sealed, mapping)
             produced = reconcile_sealed_run_v2(
                 manifest, sealed.to_dict(), mapping,
             )
