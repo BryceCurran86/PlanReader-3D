@@ -18,7 +18,6 @@ from pathlib import Path
 from pb_figured_dimension_scale_consistency_shadow import source_figured_scale_shadow
 from pb_source_figured_plan_plane_shadow import original_figured_plan_plane_shadow
 from pb_source_visibility_authority import SourceVisibilityProducer
-from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
 import pb_source_room_face_authority as face_authority
 import pb_source_room_label_authority as label_authority
 import pb_same_view_room_area_authority as same_view_authority
@@ -893,9 +892,13 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
         source_plan_plane = None
         if source_owned_plan_view:
             digest = hashlib.sha256(payload).hexdigest()
+            # The dedicated #2716 native drawing-proof producer is an
+            # independently versioned original-source observation root.
+            # It is NOT the live 1.3.0 measurement producer, and rooms from
+            # that producer are therefore explicitly cross-snapshot ABSTAIN.
             source = SourceVisibilityProducer(
                 producer_method="live-physical-net-wall",
-                producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+                producer_version="1",
             )
             owned = source.ingest_native_pdf_bytes(
                 document_id=f"live-source:{digest[:32]}",
