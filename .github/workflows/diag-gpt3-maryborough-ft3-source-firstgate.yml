@@ -10,6 +10,8 @@ on:
       - "tests/test_gpt3_maryborough_ft3_source_firstgate.py"
       - ".github/workflows/diag-gpt3-maryborough-ft3-source-firstgate.yml"
       - "pb_source_material_semantic_authority.py"
+      - "pb_material_schedule_v1222.py"
+      - "tests/test_material_schedule_v1222.py"
       - "pb_raster_text_corroboration_authority.py"
       - "tests/test_raster_text_corroboration_authority_v1.py"
       - "pb_source_visibility_authority.py"
