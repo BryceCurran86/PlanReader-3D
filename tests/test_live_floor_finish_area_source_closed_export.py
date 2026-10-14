@@ -567,3 +567,51 @@ def test_floor_finish_customer_retains_two_original_figured_dimensions():
     assert set(rows[0]["figured_dimension_ids"]) == {
         "dim-h-source", "dim-v-source",
     }
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ("foreign_family", "foreign_object", "padded_source_id", "blank_source_id"),
+)
+def test_floor_finish_customer_does_not_hide_invalid_original_inventory(invalid):
+    """Even an otherwise empty projection must reject foreign source identities."""
+    original = _quantity()
+    if invalid == "foreign_family":
+        record = replace(original, family="ceiling_area", abstained=True, value=None)
+    elif invalid == "foreign_object":
+        record = object()
+    elif invalid == "padded_source_id":
+        record = replace(original, quantity_id=" floor-finish-q1 ", abstained=True, value=None)
+    else:
+        record = replace(original, quantity_id="", abstained=True, value=None)
+    claim = replace(_claim(), floor_finish_quantity_evidence=(record,))
+    error = TypeError if invalid == "foreign_object" else SourceClosedRunConflictError
+    with pytest.raises(error):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1"
+        )
+
+
+def test_floor_finish_customer_cannot_hide_duplicate_abstained_source_id():
+    original = replace(
+        _quantity(), value=None, abstained=True,
+        blocking_reasons=("source_unresolved",),
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(original, original))
+    with pytest.raises(
+        SourceClosedRunConflictError, match="duplicate original floor-finish quantity id"
+    ):
+        project_live_floor_finish_customer_rows(
+            claim, workspace_id=1, project_id="project-1"
+        )
+
+
+def test_floor_finish_customer_legitimate_abstained_only_inventory_stays_empty():
+    source = replace(
+        _quantity(), value=None, abstained=True,
+        blocking_reasons=("original_source_unresolved",),
+    )
+    claim = replace(_claim(), floor_finish_quantity_evidence=(source,))
+    assert project_live_floor_finish_customer_rows(
+        claim, workspace_id=1, project_id="project-1"
+    ) == ()
