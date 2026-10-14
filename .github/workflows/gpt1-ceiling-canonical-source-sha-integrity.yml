@@ -1,0 +1,96 @@
+name: GPT1 Ceiling Canonical Source SHA Integrity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_live_ceiling_area_quantity_publication.py"
+      - "tests/test_live_ceiling_area_quantity_publication.py"
+      - ".github/workflows/gpt1-ceiling-canonical-source-sha-integrity.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-ceiling-sha-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Ceiling FIRM source checksum / exact source receipt boundary
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_live_ceiling_area_quantity_publication.py tests/test_gpt1_firm_floor_area_source_integrity.py tests/test_gpt1_floor_seal_raw_room_area_source_ids.py
+          ruff check --select F821,F823 pb_live_ceiling_area_quantity_publication.py tests/test_live_ceiling_area_quantity_publication.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-partial-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source-first 3Laurel partial scoped ceilings / floor controls
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-ceiling-source-sha
+          python - <<'PY'
+          import hashlib, json, subprocess, sys
+          from pathlib import Path
+          source=Path("documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf")
+          original_sha="014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+          assert source.is_file() and hashlib.sha256(source.read_bytes()).hexdigest()==original_sha
+          subprocess.run([
+              sys.executable,"-u","tools/run_source_closed_project_handoff.py",
+              "--pdf",str(source),"--project-id","au_qld_3laurel",
+              "--family-group","surfaces","--source-plan-page-index","2",
+              "--output-dir","artifacts/gpt1-ceiling-source-sha/original",
+          ],check=True,timeout=2100)
+          summary=json.loads(Path("artifacts/gpt1-ceiling-source-sha/original/production_summary.json").read_text())
+          assert summary["source_sha256"]==original_sha
+          assert summary["source_positive_partial_page"]==3
+          assert summary["complete_project_handoff"] is False
+          assert summary["benchmark_score_granted"] is False
+          assert summary["family_counts"]["ceiling_area"]==0
+          assert summary["combined_quantity_count"]==0
+          assert summary["customer_rows_verified"] is False
+          assert summary["combined_run_file"] is None
+          assert summary["status"] in ("no_sealable_quantities","source_complexity_blocked")
+          Path("artifacts/gpt1-ceiling-source-sha/summary.json").write_text(
+              json.dumps({
+                  "original_sha_verified":original_sha,
+                  "original_partial_plan_page":3,
+                  "metric_ceiling_quantity_published":False,
+                  "new_floor_finish_quantity_published":False,
+                  "signed_customer_rows":0,
+                  "first_producer_reasons":summary.get("claim_reason_codes",[]),
+                  "source_measurement_complete":False,
+                  "frozen_score":None,
+              },sort_keys=True,indent=2))
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-ceiling-source-sha-first-gate
+          path: artifacts/gpt1-ceiling-source-sha/
+          retention-days: 14
