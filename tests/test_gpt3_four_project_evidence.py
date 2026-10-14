@@ -202,3 +202,35 @@ def test_read_only_report_writes_safely_outside_inputs(tmp_path):
     parsed = json.loads(output.read_text(encoding="utf-8"))
     assert parsed["frozen_denominator"] == 120
     assert parsed["publication_status"] == "UNPUBLISHED"
+
+
+def test_flat_and_scoped_original_packages_are_both_supported(tmp_path):
+    from types import SimpleNamespace
+    name = "original-architectural.pdf"
+    doc = (SimpleNamespace(name=name),)
+    flat = tmp_path / name
+    flat.write_bytes(b"%PDF-same-source")
+    selected, conflicts = module._resolve_original_paths(tmp_path, "project-x", doc)
+    assert selected == [flat]
+    assert conflicts == []
+
+    scoped = tmp_path / "project-x" / name
+    scoped.parent.mkdir()
+    scoped.write_bytes(flat.read_bytes())
+    selected, conflicts = module._resolve_original_paths(tmp_path, "project-x", doc)
+    assert selected == [scoped]
+    assert conflicts == []
+
+
+def test_conflicting_flat_and_scoped_pdfs_fail_before_scoring(tmp_path):
+    from types import SimpleNamespace
+    name = "original-architectural.pdf"
+    doc = (SimpleNamespace(name=name),)
+    flat = tmp_path / name
+    scoped = tmp_path / "project-x" / name
+    scoped.parent.mkdir()
+    flat.write_bytes(b"%PDF-authentic-source")
+    scoped.write_bytes(b"%PDF-contradictory-source")
+    chosen, reasons = module._resolve_original_paths(tmp_path, "project-x", doc)
+    assert chosen == [scoped]  # returned only for audit; caller MUST refuse it
+    assert reasons == ["conflicting_flat_and_scoped_original:" + name]
