@@ -68,3 +68,11 @@ def test_no_area_substitution_and_no_benchmark_inference():
     assert r["status"] == "original_signed_source_area_unverified"
     assert not r["directed_source_cycle_area_conserved"]
     assert not r["new_authenticated_physical_room_or_metric_quantity"]
+
+
+def test_degenerate_exact_repeated_vertex_edge_is_not_a_source_wall():
+    original = face(((0., 0.), (4., 0.), (4., 0.), (4., 4.), (0., 4.)))
+    gate = inspect(original)
+    assert gate["status"] == "original_w4_source_receipt_mismatch"
+    assert not gate["exact_source_wall_edges_owned"]
+    assert not gate["new_authenticated_physical_room_or_metric_quantity"]
