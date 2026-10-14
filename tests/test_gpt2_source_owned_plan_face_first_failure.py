@@ -37,7 +37,9 @@ def _face(**changes):
         ownership_evaluation=SimpleNamespace(
             status="evaluated", competing_edge_count=1,
             unowned_edge_count=2, unresolved_face_ids=("source-face-a",),
-            unresolved_faces=(),
+            unresolved_faces=(), owned_face_ids=(),
+            degenerate_owned_face_ids=(), largest_owned_face_area_pt2=0.0,
+            face_count=1,
             competing_wall_ids=("wall-a", "wall-b"),
         ),
     )
@@ -50,6 +52,9 @@ def test_real_unresolved_edge_receipts_remain_explicit_abstentions():
     assert report["source_room_face_record_count"] == 0
     assert report["shadow_competing_wall_ids"] == ("wall-a", "wall-b")
     assert report["shadow_unowned_edge_count"] == 2
+    assert report["shadow_evaluated_face_count"] == 1
+    assert report["shadow_owned_face_count"] == 0
+    assert report["shadow_owned_face_publication_granted"] is False
     assert report["source_room_face_universe_complete"] is False
     assert all(
         report[key] is False
@@ -115,7 +120,9 @@ def test_competing_source_wall_ancestors_are_reported_without_winner():
         status="evaluated", competing_edge_count=1,
         unowned_edge_count=0, unresolved_face_ids=("face-one",),
         competing_wall_ids=("wall-a", "wall-b"),
-        unresolved_faces=(finding,),
+        unresolved_faces=(finding,), owned_face_ids=(),
+        degenerate_owned_face_ids=(), largest_owned_face_area_pt2=0.0,
+        face_count=1,
     )
     report = _face_report(
         _wall(records=(contender_a, contender_b)),
