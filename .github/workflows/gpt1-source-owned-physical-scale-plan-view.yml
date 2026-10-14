@@ -1,0 +1,122 @@
+name: GPT1 Source-Owned Physical Scale Plan View
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/gpt1-source-owned-physical-scale-plan-view.yml"
+      - "pb_physical_scale_authority.py"
+      - "tests/test_gpt1_source_owned_plan_scale_scope.py"
+      - "pb_source_plan_view_authority.py"
+      - "pb_viewport_segmentation.py"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-source-physical-scale-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Verify source-owned F07 viewport cannot invent scale
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt1_source_owned_plan_scale_scope.py tests/test_physical_scale_authority.py tests/test_source_owned_physical_plan_view.py
+          ruff check --select F821,F823 pb_physical_scale_authority.py tests/test_gpt1_source_owned_plan_scale_scope.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Original source F.07 proof requires its independent visible text backend.
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Reprove original SHA source plan and physical-scale first gate
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-source-plan-scale
+          python - <<'PY'
+          from dataclasses import asdict
+          from hashlib import sha256
+          from pathlib import Path
+          import json
+          from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+          from pb_physical_scale_authority import PhysicalScaleProducer, PhysicalScaleSelector
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_viewport_segmentation import is_authoritative_derived_viewport, segment_source_page_viewports
+          path=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          data=path.read_bytes()
+          sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert sha256(data).hexdigest()==sha
+          source=SourceVisibilityProducer(
+              producer_method="live-physical-net-wall",
+              producer_version=LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION,
+          )
+          pub=source.ingest_native_pdf_bytes(
+              document_id=f"live-source:{sha[:32]}",
+              source_bytes=data,source_locator="memory://actual-lot16-arch.pdf",
+              page_ids=("3",),
+          )
+          pub=source.augment_with_raster_opening_primitives(pub.revision.revision_id,page_ids=("3",))
+          before=source.published_snapshot_for_revision(pub.revision.revision_id)
+          all_views=segment_source_page_viewports(
+              source,revision_id=pub.revision.revision_id,
+              page_id="3",physical_plan_view_shadow=True,
+          )
+          plans=[v for v in all_views if (
+              v.view_type=="floor_plan" and is_authoritative_derived_viewport(v)
+          )]
+          assert len(plans)==1
+          viewport=plans[0]
+          selector=PhysicalScaleSelector(
+              document_id=pub.revision.document_id,
+              revision_id=pub.revision.revision_id,
+              source_sha256=sha,snapshot_id=pub.snapshot.snapshot_id,
+              page_id="3",viewport_id=viewport.view_id,
+          )
+          result=PhysicalScaleProducer.from_source_visibility_producer(source).publish_scope(selector)
+          assert source.published_snapshot_for_revision(pub.revision.revision_id)==before
+          assert result.evidence is None, "new scale authority unexpected: independently audit actual source"
+          assert result.status.value=="abstained"
+          report={
+              "source_sha256":sha,
+              "page_id":"3",
+              "source_owned_floor_plan_id":viewport.view_id,
+              "authenticated_viewport_bbox_pdf_points":list(viewport.bounding_box),
+              "physical_scale_status":result.status.value,
+              "physical_scale_first_reasons":list(result.reason_codes),
+              "physical_scale_record":None,
+              "metric_floor_area_published":False,
+              "commercial_quantity_published":False,
+              "source_snapshot_unchanged":True,
+              "benchmark_score":None,
+          }
+          out=Path("artifacts/gpt1-source-plan-scale/first_gate.json")
+          out.write_text(json.dumps(report,indent=2,sort_keys=True))
+          print(json.dumps(report,sort_keys=True))
+          PY
+      - name: Immutable frozen benchmark integrity
+        run: python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-source-plan-scale-first-gate
+          path: artifacts/gpt1-source-plan-scale/
+          retention-days: 14
