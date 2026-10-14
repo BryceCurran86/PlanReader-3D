@@ -370,6 +370,28 @@ def _record_payload(record: SourceObservationRecord) -> dict[str, object]:
     }
 
 
+def _bind_record_to_snapshot(
+    record: SourceObservationRecord, snapshot: ProducerSnapshotRecord
+) -> SourceObservationRecord:
+    """Fresh copy of a stored record bound to the snapshot being read.
+
+    Stored records may be shared by several snapshot generations, so the
+    snapshot id and generation that consumers see are taken from the snapshot
+    they resolved against, exactly as when each generation held its own clone.
+    """
+
+    if (
+        record.snapshot_id == snapshot.snapshot_id
+        and record.producer_generation == snapshot.producer_generation
+    ):
+        return replace(record)
+    return replace(
+        record,
+        snapshot_id=snapshot.snapshot_id,
+        producer_generation=snapshot.producer_generation,
+    )
+
+
 def _validated_clip_pt(
     clip_pt: Optional[Sequence[float]],
 ) -> Optional[tuple[float, float, float, float]]:
@@ -1150,12 +1172,15 @@ class SourceObservationProducer:
             },
             digest_chars=32,
         )
-        cloned = [
-            replace(
-                self._store.observations[(base_snapshot_id, obs_id)],
-                snapshot_id=snapshot_id,
-                producer_generation=generation,
-            )
+        # Share the immutable base records instead of cloning every one of them
+        # into each derived generation. A record's payload hash covers content
+        # only (never snapshot_id or producer_generation), so the same frozen
+        # object is valid in every snapshot that contains it. The snapshot-bound
+        # view is re-bound at the public resolve() boundary, which already
+        # returns a fresh defensive copy. Per-snapshot store entries, snapshot
+        # ids, fingerprints and tamper isolation are unchanged.
+        inherited = [
+            self._store.observations[(base_snapshot_id, obs_id)]
             for obs_id in base.observation_ids
         ]
         derived = SourceObservationRecord(
@@ -1181,7 +1206,7 @@ class SourceObservationProducer:
         derived = replace(
             derived, observation_payload_sha256=_content_sha256(_record_payload(derived))
         )
-        records = [*cloned, derived]
+        records = [*inherited, derived]
         ids = [r.observation_id for r in records]
         if len(ids) != len(set(ids)):
             by_id: dict[str, SourceObservationRecord] = {}
@@ -1342,12 +1367,15 @@ class SourceObservationProducer:
             digest_chars=32,
         )
 
-        cloned = [
-            replace(
-                self._store.observations[(base_snapshot_id, obs_id)],
-                snapshot_id=snapshot_id,
-                producer_generation=generation,
-            )
+        # Share the immutable base records instead of cloning every one of them
+        # into each derived generation. A record's payload hash covers content
+        # only (never snapshot_id or producer_generation), so the same frozen
+        # object is valid in every snapshot that contains it. The snapshot-bound
+        # view is re-bound at the public resolve() boundary, which already
+        # returns a fresh defensive copy. Per-snapshot store entries, snapshot
+        # ids, fingerprints and tamper isolation are unchanged.
+        inherited = [
+            self._store.observations[(base_snapshot_id, obs_id)]
             for obs_id in base.observation_ids
         ]
         derived_records: list[SourceObservationRecord] = []
@@ -1380,7 +1408,7 @@ class SourceObservationProducer:
             )
             derived_records.append(record)
 
-        records = [*cloned, *derived_records]
+        records = [*inherited, *derived_records]
         ids = [record.observation_id for record in records]
         if len(ids) != len(set(ids)):
             by_id: dict[str, SourceObservationRecord] = {}
@@ -1595,7 +1623,7 @@ class SourceObservationAuthority:
                 cached[4],
                 source_revision=replace(revision),
                 snapshot=replace(snapshot),
-                observation=replace(record),
+                observation=_bind_record_to_snapshot(record, snapshot),
             )
 
         actual = _content_sha256(_record_payload(record))
@@ -1613,7 +1641,7 @@ class SourceObservationAuthority:
             reason_codes=("producer_owned_source_observation_resolved",),
             source_revision=replace(revision),
             snapshot=replace(snapshot),
-            observation=replace(record),
+            observation=_bind_record_to_snapshot(record, snapshot),
             semantic_enumeration_complete=None,
             decision_scope_complete=None,
         )
@@ -1628,7 +1656,7 @@ class SourceObservationAuthority:
             result,
             source_revision=replace(revision),
             snapshot=replace(snapshot),
-            observation=replace(record),
+            observation=_bind_record_to_snapshot(record, snapshot),
         )
 
     def coverage(
