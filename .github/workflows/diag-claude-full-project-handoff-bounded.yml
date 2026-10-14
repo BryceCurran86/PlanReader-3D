@@ -4,7 +4,8 @@ name: DIAG Claude Full Project Handoff Bounded (3Laurel and Q5446)
 # projects whose full-project production has timed out or been OOM-killed. Shared CI runners differ by up to 2x in speed
 # from job to job, so every code variant for one project runs SEQUENTIALLY ON THE SAME RUNNER, bracketed by two runs of
 # the unchanged baseline to expose drift: "base" is the current tip of main and every other variant is main with the
-# named resource-change branches merged in. CPU time (user+sys), wall time and the sampled peak RSS are recorded per run,
+# named resource-change branches merged in (A shared records #2693, B single whole-source read and opening lookup #2694,
+# C cyclic GC regime #2695, E cheaper defensive copies, F opening-label page filter #2705). CPU time (user+sys), wall time and the sampled peak RSS are recorded per run,
 # and the deterministic handoff outputs of every variant are compared byte for byte with base. No production file is
 # changed by this workflow and no quantity or score is claimed; a resource change that altered any output fails.
 on:
@@ -67,14 +68,17 @@ jobs:
           A=claude/source-snapshot-shared-records-20261014
           B=claude/handoff-redundant-source-proof-20261014
           C=claude/handoff-bulk-gc-regime-20261014
+          E=claude/cheaper-authority-defensive-copies-20261014
+          F=claude/opening-label-page-text-filter-20261014
           # name | branches merged into main | PB_CYCLIC_GC_MODE
           VARIANTS=(
             "base||default"
-            "AB|$A $B|default"
-            "AB_disabled|$A $B $C|disabled"
-            "AB_staged|$A $B $C|staged"
             "A|$A|default"
-            "B|$B|default"
+            "AE|$A $E|default"
+            "F|$F|default"
+            "ABEF|$A $B $E $F|default"
+            "ABEF_staged|$A $B $E $F $C|staged"
+            "ABEF_disabled|$A $B $E $F $C|disabled"
             "base2||default"
           )
           mkdir -p artifacts
@@ -143,7 +147,7 @@ jobs:
           from pathlib import Path
 
           root = Path("artifacts")
-          VARIANTS = ("base", "AB", "AB_disabled", "AB_staged", "A", "B", "base2")
+          VARIANTS = ("base", "A", "AE", "F", "ABEF", "ABEF_staged", "ABEF_disabled", "base2")
 
           def parse_time(text):
               def get(pattern):
