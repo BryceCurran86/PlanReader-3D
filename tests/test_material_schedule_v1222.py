@@ -95,6 +95,37 @@ class MaterialScheduleV1222Tests(unittest.TestCase):
             "paint",
         )
 
+    def test_composite_floor_tile_row_keeps_primary_tile_role(self):
+        description = (
+            'Amber Tiles floor tile - 600x600 "Dura Grey". '
+            'Min. R12 slip rating. Grout: grey epoxy. '
+            '100mm aluminium skirting - black satin.'
+        )
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry(
+                {
+                    "code": "FT3",
+                    "status": "Confirmed",
+                    "description": description,
+                    "finish": description,
+                }
+            ),
+            "tile",
+        )
+
+    def test_distinct_explicit_finish_still_beats_description_material(self):
+        self.assertEqual(
+            mat.semantic_finish_from_schedule_entry(
+                {
+                    "code": "WT1",
+                    "status": "Confirmed",
+                    "description": "Porcelain wall tile substrate",
+                    "finish": "Dulux low sheen paint",
+                }
+            ),
+            "paint",
+        )
+
     def test_resolved_substrates_support_schedule_defined_generic_codes(self):
         resolver = {
             "WT1": {
