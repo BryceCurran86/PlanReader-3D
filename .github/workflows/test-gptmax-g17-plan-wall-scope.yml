@@ -1,0 +1,86 @@
+name: GPT MAX Original G17 Drawing Wall Scope
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_g17_plan_wall_scope_shadow.py"
+      - "tests/test_g17_plan_wall_scope_shadow.py"
+      - "tools/diag_gptmax_producer_owned_g17_wall_shadow.py"
+      - ".github/workflows/test-gptmax-g17-plan-wall-scope.yml"
+permissions:
+  contents: read
+env:
+  ORT_DISABLE_TELEMETRY: "1"
+jobs:
+  source-scope-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Real source lineage, complete alternatives, transforms and tampering
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_g17_plan_wall_scope_shadow.py tests/test_opening_local_g17_wall_shadow.py tests/test_g17_dual_dpi_source_correspondence_shadow.py tests/test_source_owned_physical_plan_view.py tests/test_g17_w4_equivalence_competitor_shadow.py
+          ruff check --select F821,F823 pb_g17_plan_wall_scope_shadow.py tests/test_g17_plan_wall_scope_shadow.py tools/diag_gptmax_producer_owned_g17_wall_shadow.py
+  original-source-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Same immutable original source and exact wall, host, frame, area retention
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_producer_owned_g17_wall_shadow.py --pdf "$PDF" --page-id 3 --plan-wall-scope --output artifacts/original-g17-plan-wall-scope.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/original-g17-plan-wall-scope.json').read_text())
+          assert r['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert r['primitive_safety_cap']==20000
+          assert (r['original_physical_opening_count'],r['original_host_count'],r['original_frame_count'],r['original_w4_count'],r['original_area_count'])==(21,15,9,2094,8)
+          assert r['published_source_snapshot_unchanged'] and r['all_original_wall_host_frame_area_receipts_unchanged']
+          assert r['all_original_sealed_customer_rows_unchanged']
+          sealed=r['original_sealed_customer_receipts']
+          assert len(sealed['quantities'])==len(sealed['customer_rows'])==8
+          assert sealed['customer_verification']['valid_quantity_count']==8
+          p=r['isolated_300_dpi_plan_wall_scope_shadow']
+          assert p['source_sha256']==r['source_sha256'] and p['snapshot_id']==r['snapshot_id']
+          assert p['source_viewport_ownership_id'] and p['source_positive_graph_primitive_count']>0
+          assert len(p['source_primitive_dispositions'])==p['source_primitive_count']
+          assert len(p['physical_openings'])==r['original_physical_opening_count']
+          assert len(r['original_opening_measurement_traces'])==r['original_physical_opening_count']
+          assert all(not p[k] for k in ('scope_complete','structural_wall_role_granted','physical_wall_equivalence_granted','host_granted','metric_quantity_granted'))
+          for name in ('default_w2_w3_w4','exact_coordinate_w2_w3_w4'):
+              g=p[name]
+              assert g is not None and g['w3_junctions']
+              assert all(s.startswith('raster_opening_primitive:') for w in g['w4_records'] for s in w['physical_identity']['source_primitive_ids'])
+          print(json.dumps({'same_source_view':p['source_viewport_ownership_id'],'source_primitives':p['source_primitive_count'],
+              'paint_positive_drawing_primitives':p['source_positive_graph_primitive_count'],
+              'default_w4':len(p['default_w2_w3_w4']['w4_records']),
+              'exact_w4':len(p['exact_coordinate_w2_w3_w4']['w4_records']),'retained_original_areas':r['original_area_count']}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-g17-plan-wall-scope
+          path: artifacts/original-g17-plan-wall-scope.json
+          retention-days: 21
