@@ -11,7 +11,7 @@ only for codes already confirmed by the schedule universe.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import io
 import math
@@ -31,6 +31,7 @@ from pb_material_schedule_v1222 import (
     semantic_finish_from_schedule_entry,
 )
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_provider_envelope import ProviderContext
 from pb_pdf_text_integrity_authority import (
     TEXT_CLIP_STATE_UNRESOLVED,
     TEXT_GLYPH_MAPPING_UNVERIFIED,
@@ -39,6 +40,7 @@ from pb_portable_raster_ocr_authority import TesseractOCRBackend
 from pb_raster_text_corroboration_authority import (
     RASTER_TEXT_CORROBORATION_DPIS,
     RasterTextCorroborationProducer,
+    RasterTextCorroborationResult,
     RasterTextCorroborationSelector,
     _lossless_rotate,
     _producer_owned_ocr_target,
@@ -46,12 +48,14 @@ from pb_raster_text_corroboration_authority import (
 )
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
+from pb_viewport_migration_adapter import adapt_f07_viewport_to_migration
 from pb_viewport_segmentation import (
     SegmentedViewport,
     ViewportSegmentationStatus,
     is_authoritative_derived_viewport,
     is_segment_page_viewports_product,
     segment_page_viewports,
+    segment_source_page_viewports,
     validate_non_overlapping_viewports,
 )
 
@@ -64,6 +68,8 @@ SOURCE_MATERIAL_SCOPE_RESOLVED = "source_material_occurrence_scope_resolved"
 SOURCE_MATERIAL_SCOPE_UNAVAILABLE = "source_material_occurrence_scope_unavailable"
 SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE = "source_material_source_integrity_failure"
 SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED = "source_material_viewport_unauthenticated"
+SOURCE_MATERIAL_SCOPE_INCOMPLETE = "source_material_occurrence_scope_incomplete"
+SOURCE_MATERIAL_BOUNDED_PLAN_SCOPE = "source_material_bounded_plan_occurrence_scope"
 
 _SCHEDULE_VIEW_TYPES = frozenset(
     {
@@ -240,6 +246,7 @@ class SourceMaterialOccurrenceRecord:
     source_evidence_id: str
     source_text_observation_ids: tuple[str, ...] = ()
     schema_version: str = SOURCE_MATERIAL_SEMANTIC_SCHEMA_VERSION
+    source_text_corroboration_record_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -249,6 +256,8 @@ class SourceMaterialOccurrenceScopeResult:
     scope_complete: bool
     records: tuple[SourceMaterialOccurrenceRecord, ...]
     schema_version: str = SOURCE_MATERIAL_SEMANTIC_SCHEMA_VERSION
+    source_viewport_ownership_id: str = ""
+    unresolved_source_text_observation_ids: tuple[str, ...] = ()
 
 
 def _definition_blocked(
@@ -1572,6 +1581,53 @@ def _trusted_lines_for_viewport(
     )
 
 
+def _complete_source_plan_lines(
+    words: Sequence[_TrustedTextWord], viewport: SegmentedViewport,
+):
+    """Keep complete original lines; never promote a readable line fragment."""
+    assert viewport.bounding_box is not None
+    _, complete, reasons = _trusted_lines_for_viewport(words, viewport)
+    reasons = list(reasons)
+    grouped = {}
+    for word in words:
+        grouped.setdefault(
+            (word.source_partition_id, word.block_no, word.line_no), []
+        ).append(word)
+    lines = []
+    unresolved = set()
+    for line_words in grouped.values():
+        if not any(_bbox_intersects(w.bbox, viewport.bounding_box) for w in line_words):
+            continue
+        line_words = sorted(line_words, key=lambda w: (w.word_no, w.observation_id))
+        owned = all(
+            _bbox_fully_inside(w.bbox, viewport.bounding_box) for w in line_words
+        )
+        indices = [w.word_no for w in line_words]
+        consecutive = indices == list(range(len(indices)))
+        if not owned or not consecutive or any(not w.trusted for w in line_words):
+            complete = False
+            unresolved.update(
+                w.observation_id
+                for w in line_words
+                if not w.trusted or not owned or not consecutive
+            )
+            if not owned:
+                reasons.append("source_material_native_line_crosses_viewport")
+            if not consecutive:
+                reasons.append("source_material_native_line_incomplete")
+            continue
+        text = " ".join(w.text.strip() for w in line_words if w.text.strip()).strip()
+        if text:
+            lines.append((
+                text, _native_block_bbox(line_words),
+                tuple(w.observation_id for w in line_words),
+            ))
+    return (
+        tuple(lines), complete, tuple(dict.fromkeys(reasons)),
+        tuple(sorted(unresolved)),
+    )
+
+
 class SourceMaterialSemanticAuthority:
     def __init__(
         self,
@@ -1636,6 +1692,7 @@ class SourceMaterialSemanticProducer:
         source_visibility_producer: SourceVisibilityProducer,
         *,
         _seal: object = None,
+        _physical_plan_page_ids: tuple[str, ...] = (),
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
             raise TypeError("Use from_source_visibility_producer()")
@@ -1645,6 +1702,19 @@ class SourceMaterialSemanticProducer:
         self._raster = RasterTextCorroborationProducer.from_source_visibility_producer(
             source_visibility_producer
         )
+        self._physical_plan_page_ids = frozenset(_physical_plan_page_ids)
+        self._plan_raster = (
+            RasterTextCorroborationProducer.for_physical_plan_view_shadow(
+                source_visibility_producer
+            )
+            if self._physical_plan_page_ids
+            else None
+        )
+        self._plan_viewports: dict[tuple[str, str], SegmentedViewport] = {}
+        self._plan_ownership_ids: dict[tuple[str, str], str] = {}
+        self._plan_text_results: dict[
+            tuple[str, str, str, str, str], RasterTextCorroborationResult
+        ] = {}
         self._definition_results: dict[
             tuple[str, str, str, str, str], SourceMaterialDefinitionResult
         ] = {}
@@ -1662,6 +1732,84 @@ class SourceMaterialSemanticProducer:
         source_visibility_producer: SourceVisibilityProducer,
     ) -> "SourceMaterialSemanticProducer":
         return cls(source_visibility_producer, _seal=_PRODUCER_SEAL)
+
+    @classmethod
+    def for_physical_plan_view_shadow(
+        cls,
+        source_visibility_producer: SourceVisibilityProducer,
+        *,
+        page_ids: Sequence[str],
+    ) -> "SourceMaterialSemanticProducer":
+        """Consume internally proven bounded views without commercial activation.
+
+        An incomplete source text universe stays ABSTAINED, retaining only
+        individually authenticated complete native material lines.
+        """
+        if not isinstance(page_ids, Sequence) or isinstance(page_ids, (str, bytes)) or not page_ids:
+            raise ValueError("page_ids must be a non-empty sequence of canonical page IDs")
+        if any(
+            type(p) is not str or not p.isdecimal()
+            or str(int(p)) != p or int(p) < 1
+            for p in page_ids
+        ):
+            raise ValueError("page_ids must contain canonical positive page IDs")
+        return cls(
+            source_visibility_producer,
+            _seal=_PRODUCER_SEAL,
+            _physical_plan_page_ids=tuple(sorted(set(page_ids), key=int)),
+        )
+
+    def published_plan_viewports(self) -> tuple[SegmentedViewport, ...]:
+        """Actual F.07 products consumed by this isolated producer."""
+        return tuple(self._plan_viewports[k] for k in sorted(self._plan_viewports))
+
+    def published_plan_text_corroboration_results(
+        self,
+    ) -> tuple[RasterTextCorroborationResult, ...]:
+        """Retain positive and negative fixed-source OCR receipts for review."""
+        return tuple(self._plan_text_results[k] for k in sorted(self._plan_text_results))
+
+    def _recover_plan_material_words(self, published, words, viewport, dictionary):
+        assert self._plan_raster is not None and viewport.bounding_box is not None
+        grouped = {}
+        for word in words:
+            grouped.setdefault(
+                (word.source_partition_id, word.block_no, word.line_no), []
+            ).append(word)
+        candidate_ids = set()
+        for line in grouped.values():
+            text = " ".join(w.text for w in sorted(line, key=lambda w: w.word_no))
+            if (
+                _source_owned_material_codes_in_line(text, dictionary)
+                and all(_bbox_fully_inside(w.bbox, viewport.bounding_box) for w in line)
+            ):
+                candidate_ids.update(w.observation_id for w in line)
+        recovered = []
+        for word in words:
+            if word.trusted or word.observation_id not in candidate_ids:
+                recovered.append(word)
+                continue
+            selector = RasterTextCorroborationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=word.observation_id,
+            )
+            result = self._plan_raster.publish(selector)
+            self._plan_text_results[selector.key] = result
+            if (
+                result.status is EvidenceResolutionStatus.CORROBORATED
+                and result.record is not None
+                and normalize_reading(result.corroborated_text) == normalize_reading(word.text)
+            ):
+                recovered.append(replace(
+                    word, trusted=True,
+                    reason_codes=(*word.reason_codes, "raster_text_corroborated"),
+                ))
+            else:
+                recovered.append(word)
+        return tuple(recovered)
 
     def authority(self) -> SourceMaterialSemanticAuthority:
         return SourceMaterialSemanticAuthority(
@@ -1785,7 +1933,14 @@ class SourceMaterialSemanticProducer:
                         raw_definitions.setdefault(code, []).append(raw)
 
                 viewports = tuple(
-                    segment_page_viewports(page, page_number=page_number)
+                    segment_source_page_viewports(
+                        self._source,
+                        revision_id=revision_id,
+                        page_id=str(page_number),
+                        physical_plan_view_shadow=True,
+                    )
+                    if str(page_number) in self._physical_plan_page_ids
+                    else segment_page_viewports(page, page_number=page_number)
                 )
                 if (
                     not viewports
@@ -1806,6 +1961,36 @@ class SourceMaterialSemanticProducer:
                 )
                 for viewport in authoritative:
                     if _is_explicit_non_material_schedule(viewport):
+                        continue
+                    if (
+                        str(page_number) in self._physical_plan_page_ids
+                        and viewport.provenance.get("source_owned_plan_view_proven") is True
+                    ):
+                        ids = tuple(v.view_id for v in viewports)
+                        context = ProviderContext(
+                            document_id=lineage["document_id"],
+                            revision_id=lineage["revision_id"],
+                            source_sha256=lineage["source_sha256"],
+                            run_id="source-plan-material-shadow",
+                            workspace_id="source-plan-material-shadow",
+                            project_id="source-only",
+                            current_revision_id=revision_id,
+                            selected_pages=(page_number - 1,),
+                            owned_viewport_ids=ids,
+                            owned_page_numbers=(page_number,),
+                            viewport_page_ownership=tuple((i, page_number) for i in ids),
+                            evidence_snapshot_id=lineage["snapshot_id"],
+                        )
+                        adapted = adapt_f07_viewport_to_migration(
+                            viewports, viewport_id=viewport.view_id,
+                            context=context, page_no=page_number,
+                        )
+                        if adapted.abstained or adapted.blocking_reasons:
+                            continue
+                        key = (str(page_number), viewport.view_id)
+                        self._plan_viewports[key] = viewport
+                        self._plan_ownership_ids[key] = adapted.ownership_proof.ownership_id
+                        drawing_viewports.append((page_number, viewport, page_words))
                         continue
                     scoped_words = _recover_admissible_viewport_words(
                         source=self._source,
@@ -2052,6 +2237,8 @@ class SourceMaterialSemanticProducer:
                 }
 
             for page_number, viewport, page_words in drawing_viewports:
+                plan_key = (str(page_number), viewport.view_id)
+                plan_shadow = plan_key in self._plan_ownership_ids
                 scope_selector = SourceMaterialOccurrenceSelector(
                     **lineage,
                     page_id=str(page_number),
@@ -2063,32 +2250,46 @@ class SourceMaterialSemanticProducer:
                     code: dict(entry)
                     for code, entry in confirmed_dictionary.items()
                 }
-                lines, text_complete, text_reasons = _trusted_lines_for_viewport(
-                    page_words,
-                    viewport,
-                )
-                if not text_complete:
+                unresolved_text_ids = ()
+                relevant_blocked_codes = set(blocked_definition_codes)
+                if plan_shadow:
+                    relevant_blocked_codes.update(
+                        key[-1] for key, result in self._definition_results.items()
+                        if key[:4] == scope_selector.key[:4]
+                        and result.status is not EvidenceResolutionStatus.CORROBORATED
+                    )
+                    page_words = self._recover_plan_material_words(
+                        published, page_words, viewport,
+                        {**dictionary_for_scan, **{c: {} for c in relevant_blocked_codes}},
+                    )
+                    lines, text_complete, text_reasons, unresolved_text_ids = _complete_source_plan_lines(page_words, viewport)
+                else:
+                    lines, text_complete, text_reasons = _trusted_lines_for_viewport(page_words, viewport)
+                if not text_complete and not plan_shadow:
                     self._occurrence_results[scope_selector.key] = _scope_blocked(
                         EvidenceResolutionStatus.ABSTAINED,
                         SOURCE_MATERIAL_VIEWPORT_UNAUTHENTICATED,
                         *text_reasons,
                     )
                     continue
-                if blocked_definition_codes:
+                if relevant_blocked_codes:
                     blocked_lookup = {
                         code: {}
-                        for code in blocked_definition_codes
+                        for code in relevant_blocked_codes
                     }
                     if any(
                         _source_owned_material_codes_in_line(raw_text, blocked_lookup)
                         for raw_text, _bbox, _ids in lines
                     ):
-                        self._occurrence_results[scope_selector.key] = _scope_blocked(
-                            EvidenceResolutionStatus.ABSTAINED,
-                            SOURCE_MATERIAL_SCOPE_UNAVAILABLE,
-                            *blocked_reasons,
-                        )
-                        continue
+                        if not plan_shadow:
+                            self._occurrence_results[scope_selector.key] = _scope_blocked(
+                                EvidenceResolutionStatus.ABSTAINED,
+                                SOURCE_MATERIAL_SCOPE_UNAVAILABLE,
+                                *blocked_reasons,
+                            )
+                            continue
+                        text_complete = False
+                        text_reasons = (*text_reasons, SOURCE_MATERIAL_SCOPE_UNAVAILABLE, *blocked_reasons)
                 for raw_text, bbox, text_observation_ids in lines:
                     for code in _source_owned_material_codes_in_line(raw_text, dictionary_for_scan):
                         entry = confirmed_dictionary.get(code)
@@ -2115,6 +2316,16 @@ class SourceMaterialSemanticProducer:
                                 text_observation_ids
                             ),
                         }
+                        corroboration_ids = tuple(sorted(
+                            result.record.record_id
+                            for key, result in self._plan_text_results.items()
+                            if plan_shadow and key[:4] == scope_selector.key[:4]
+                            and key[-1] in text_observation_ids
+                            and result.status is EvidenceResolutionStatus.CORROBORATED
+                            and result.record is not None
+                        ))
+                        if corroboration_ids:
+                            evidence_payload["source_text_corroboration_record_ids"] = corroboration_ids
                         evidence_id = stable_contract_id(
                             "source_material_occurrence_evidence",
                             evidence_payload,
@@ -2148,15 +2359,25 @@ class SourceMaterialSemanticProducer:
                                 source_text_observation_ids=tuple(
                                     text_observation_ids
                                 ),
+                                source_text_corroboration_record_ids=corroboration_ids,
                             )
                         )
                 records.sort(key=lambda row: row.record_id)
                 self._occurrence_results[scope_selector.key] = (
                     SourceMaterialOccurrenceScopeResult(
-                        status=EvidenceResolutionStatus.CORROBORATED,
-                        reason_codes=(SOURCE_MATERIAL_SCOPE_RESOLVED,),
-                        scope_complete=True,
+                        status=(EvidenceResolutionStatus.CORROBORATED if text_complete else EvidenceResolutionStatus.ABSTAINED),
+                        reason_codes=(
+                            (SOURCE_MATERIAL_SCOPE_RESOLVED,) if not plan_shadow
+                            else tuple(dict.fromkeys((
+                                SOURCE_MATERIAL_BOUNDED_PLAN_SCOPE,
+                                SOURCE_MATERIAL_SCOPE_RESOLVED if text_complete else SOURCE_MATERIAL_SCOPE_INCOMPLETE,
+                                *text_reasons,
+                            )))
+                        ),
+                        scope_complete=text_complete,
                         records=tuple(records),
+                        source_viewport_ownership_id=self._plan_ownership_ids.get(plan_key, ""),
+                        unresolved_source_text_observation_ids=unresolved_text_ids,
                     )
                 )
         finally:
@@ -2171,6 +2392,8 @@ __all__ = [
     "SOURCE_MATERIAL_DEFINITION_RESOLVED",
     "SOURCE_MATERIAL_DEFINITION_UNAVAILABLE",
     "SOURCE_MATERIAL_SCOPE_RESOLVED",
+    "SOURCE_MATERIAL_SCOPE_INCOMPLETE",
+    "SOURCE_MATERIAL_BOUNDED_PLAN_SCOPE",
     "SOURCE_MATERIAL_SCOPE_UNAVAILABLE",
     "SOURCE_MATERIAL_SEMANTIC_SCHEMA_VERSION",
     "SOURCE_MATERIAL_SOURCE_INTEGRITY_FAILURE",
