@@ -1,0 +1,104 @@
+name: DIAG Claude Full Project Handoff Bounded (3Laurel and Q5446)
+
+# Measurement only. Runs the COMPLETE original-source handoff (all pages decoded as the evidence universe) for the two
+# projects whose full-project production has timed out or been OOM-killed, under a hard timeout, and records wall time,
+# peak resident memory and an RSS timeline. No production file is changed; no quantity or score is claimed.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/diag-claude-full-project-handoff-bounded.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: 3laurel
+            project_id: au_qld_3laurel
+            pdf: "documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf"
+            sha: "014e9f68b377bef4fb556de61b83a94388792dfa4bfb8ea981644f9c323e9e2e"
+          - project: q5446
+            project_id: au_qld_q5446_armstrong32_harlequin
+            pdf: "documents/sources/Q5446_Standard_Plans_V1_20220320.pdf"
+            sha: "5f29aa0122d72e2cc8886b3f19239ff32865c8d705eee99f785c389ca27fb7f0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install original-source dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Machine resources
+        run: |
+          nproc
+          free -m
+          python -c "import shutil; print('OCR backends on PATH:', shutil.which('tesseract'))"
+      - name: Verify immutable original source
+        env:
+          PDF: ${{ matrix.pdf }}
+          SHA: ${{ matrix.sha }}
+        run: |
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+      - name: Complete original-source handoff under a hard timeout
+        env:
+          PYTHONPATH: .
+          ORT_DISABLE_TELEMETRY: "1"
+          PDF: ${{ matrix.pdf }}
+          PROJECT_ID: ${{ matrix.project_id }}
+        run: |
+          mkdir -p artifacts/full
+          ( while true; do
+              pid=$(pgrep -f run_source_closed_project_handoff.py | head -1 || true)
+              if [ -n "$pid" ]; then
+                echo "$(date +%s) $(awk '/VmRSS/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)" >> artifacts/full/rss_kb_timeline.txt
+              fi
+              sleep 5
+            done ) &
+          SAMPLER=$!
+          set +e
+          /usr/bin/time -v -o artifacts/full/time_v.txt \
+            timeout 3600s python -u tools/run_source_closed_project_handoff.py \
+              --pdf "$PDF" --project-id "$PROJECT_ID" --family-group all \
+              --output-dir artifacts/full/out > artifacts/full/handoff_stdout.txt 2> artifacts/full/handoff_stderr.txt
+          code=$?
+          set -e
+          kill $SAMPLER 2>/dev/null || true
+          echo "handoff_exit_code=$code" | tee artifacts/full/exit_code.txt
+          grep -E "Maximum resident|Elapsed \(wall" artifacts/full/time_v.txt || true
+          if [ -f artifacts/full/rss_kb_timeline.txt ]; then
+            sort -k2 -n artifacts/full/rss_kb_timeline.txt | tail -1 | awk '{printf "sampled_peak_rss_mb=%d\n", $2/1024}'
+          fi
+          ls -la artifacts/full/out 2>/dev/null || true
+          exit 0
+      - name: Read the production summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("artifacts/full/out/production_summary.json")
+          if not p.exists():
+              print("NO production_summary.json written")
+          else:
+              s = json.loads(p.read_text())
+              keys = ["status", "claim_status", "complete_project_handoff", "topology_mode", "topology_pages",
+                      "execution_pages", "canonical_counts", "canonical_wall_status", "family_counts",
+                      "combined_quantity_count", "verified_customer_row_count", "benchmark_score_granted"]
+              print("FULL_PROJECT_HANDOFF_SUMMARY", json.dumps({k: s.get(k) for k in keys}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-handoff-${{ matrix.project }}
+          path: artifacts/full
+          retention-days: 14
