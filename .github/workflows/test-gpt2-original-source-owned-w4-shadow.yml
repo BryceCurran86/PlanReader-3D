@@ -53,10 +53,26 @@ jobs:
               document_id=f'live-source:{sha[:32]}',source_bytes=content,
               source_locator='memory://original-source-view.pdf',page_ids=('11',),
           )
+          source_before=source.published_snapshot_for_revision(
+              published.revision.revision_id
+          )
+          views_before=segment_source_page_viewports(
+              source,revision_id=published.revision.revision_id,
+              page_id='11',physical_plan_view_shadow=True,
+          )
+          prior_owners=[v for v in views_before
+                        if v.view_type=='floor_finish_plan'
+                        and (v.provenance or {}).get('source_owned_plan_view_proven') is True]
+          assert len(prior_owners)==1,{
+              'first_gate':'original_source_plan_view_unavailable_before_w4',
+              'prior_view_types':[v.view_type for v in views_before],
+              'source_revision':published.revision.revision_id,
+          }
           factory=PhysicalWallCandidateProducer.from_source_owned_plan_view_shadow(
               source,page_ids=('11',)
           )
           snapshot=source.published_snapshot_for_revision(published.revision.revision_id)
+          assert snapshot==source_before,'source_owned_w4_mutated_source_snapshot'
           views=segment_source_page_viewports(
               source,revision_id=published.revision.revision_id,
               page_id='11',physical_plan_view_shadow=True,
