@@ -111,6 +111,12 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
     claim = SimpleNamespace(
         status=SimpleNamespace(value="corroborated"),
         reason_codes=("resolved",),
+        # Distinct independent canonical-wall conflict must be visible even
+        # if unrelated quantities can still be independently sealed.
+        canonical_wall_status=EvidenceResolutionStatus.CONFLICT,
+        canonical_wall_reason_codes=("live_canonical_wall_frame_conflict",),
+        canonical_wall_source_pages=(1,),
+        unresolved_wall_candidate_ids=("wall-ambiguous-1","wall-ambiguous-2"),
         canonical_walls=(),
         canonical_openings=(),
         canonical_rooms=(),
@@ -254,6 +260,23 @@ def test_project_handoff_preserves_nonoverlapping_legacy_ceiling(
         "legacy_seals": 1,
     }
     assert summary["canonical_counts"]["ceilings"] == 1
+    assert summary["canonical_wall_status"] == "conflict"
+    assert summary["canonical_wall_reason_codes"] == [
+        "live_canonical_wall_frame_conflict"
+    ]
+    assert summary["canonical_wall_source_pages"] == [1]
+    assert summary["unresolved_wall_candidate_count"] == 2
+    assert summary["canonical_counts"]["walls"] == 0
+    assert summary["claim_reason_codes"] == ["resolved"]
+    # The producer's on-disk report must not hide a canonical-id conflict
+    # in an aggregate claim status or silently change an unrelated FIRM seal.
+    import json
+    disk = json.loads((tmp_path / "out" / "production_summary.json").read_text())
+    assert disk["canonical_wall_status"] == "conflict"
+    assert disk["canonical_wall_reason_codes"] == [
+        "live_canonical_wall_frame_conflict"
+    ]
+    assert disk["family_counts"]["ceiling_area"] == 2
     assert summary["family_counts"]["ceiling_area"] == 2
     assert (
         summary["ceiling_authority_path"]
