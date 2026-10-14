@@ -90,7 +90,7 @@ jobs:
           new = json.loads(Path('lot16-face-current.json').read_text())
           assert old['source_sha256'] == new['source_sha256'] == '10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert old['primitive_safety_cap'] == new['primitive_safety_cap'] == 20_000
-          from tools.declared_additive_source_retention import strict_or_declared
+          from tools.declared_additive_source_retention import assert_unchanged_or_declared
           def normalize_void_reason_order(value):
               # void reason codes come from a frozenset; two processes may order them differently
               if isinstance(value, dict):
@@ -98,18 +98,24 @@ jobs:
               if isinstance(value, list):
                   return [normalize_void_reason_order(v) for v in value]
               return value
-          with strict_or_declared(old, new, normalize=normalize_void_reason_order):
-              assert old['source_decode_coverage'] == new['source_decode_coverage']
-              hosted = lambda report: {row['opening_identity_id']: row for row in report['opening_bindings'] if row['host_wall_id']}
-              assert hosted(old) == hosted(new)
-              assert old['resolved_host_frame_evidence'] == new['resolved_host_frame_evidence']
-              ids = lambda report: {row['physical_opening_id']: row for row in report['canonical_openings']}
-              before, after = ids(old), ids(new)
-              assert before.keys() == after.keys()
-              assert len(after) == len(new['canonical_openings'])
-              for key in before:
-                  for field in ('physical_opening_id', 'canonical_opening_id', 'source_observation_ids', 'source_lineage_root_ids'):
-                      assert before[key][field] == after[key][field]
+          # Only a proven receipt rekey is eligible for a declaration.
+          # Source decode scope and canonical physical identities remain strict.
+          assert old['source_decode_coverage'] == new['source_decode_coverage']
+          hosted = lambda report: {row['opening_identity_id']: row for row in report['opening_bindings'] if row['host_wall_id']}
+          if hosted(old) != hosted(new):
+              assert_unchanged_or_declared(old, new, normalize=normalize_void_reason_order,
+                                           message="source-authenticated host bindings changed")
+          if old['resolved_host_frame_evidence'] != new['resolved_host_frame_evidence']:
+              assert_unchanged_or_declared(old, new, normalize=normalize_void_reason_order,
+                                           message="original host frame evidence changed")
+          ids = lambda report: {row['physical_opening_id']: row for row in report['canonical_openings']}
+          before, after = ids(old), ids(new)
+          assert before.keys() == after.keys()
+          assert len(before) == len(old['canonical_openings'])
+          assert len(after) == len(new['canonical_openings'])
+          for key in before:
+              for field in ('physical_opening_id', 'canonical_opening_id', 'source_observation_ids', 'source_lineage_root_ids'):
+                  assert before[key][field] == after[key][field]
           assert 'quantities' not in new
           print(json.dumps({'baseline': old['summary'], 'current': new['summary']}))
           PY
