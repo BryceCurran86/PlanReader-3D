@@ -109,6 +109,7 @@ def _shadow_local_face_boundary_census(wall, face, *, witnesses=None):
             "boundary_tainted": None,
             "boundary_clean": None,
             "boundary_clean_non_degenerate": None,
+            "boundary_clean_non_degenerate_witnesses": (),
             "source_room_publication_granted": False,
         }
     if witnesses is None:
@@ -138,6 +139,20 @@ def _shadow_local_face_boundary_census(wall, face, *, witnesses=None):
         "boundary_tainted": len(tainted_face_ids),
         "boundary_clean": len(clean),
         "boundary_clean_non_degenerate": len(nondegenerate),
+        # Preserve every eligible witness and its exact source geometry
+        # without electing a room, label or finish. No caller bbox input.
+        "boundary_clean_non_degenerate_witnesses": tuple(
+            {
+                "face_id": face_id,
+                "polygon_pdf_pts": by_id[face_id]["polygon_pdf_pts"],
+                "area_page_pts2": by_id[face_id]["area_page_pts2"],
+                "bounding_wall_ids": by_id[face_id]["bounding_wall_ids"],
+                "physical_room_identity_granted": False,
+                "material_occurrence_granted": False,
+                "quantity_authority_granted": False,
+            }
+            for face_id in sorted(nondegenerate)
+        ),
         # A planar face with apparently owned edges is not a physical room.
         "source_room_publication_granted": False,
     }
