@@ -15,6 +15,7 @@ from pathlib import Path
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_room_face_authority import (
+    EDGE_OWNERSHIP_COMPETING,
     SourceRoomFaceSelector,
     build_source_room_face_authority,
 )
@@ -32,7 +33,7 @@ def _competing_source_edges(wall, face):
     rows = []
     for finding in face.ownership_evaluation.unresolved_faces:
         for edge in finding.edge_findings:
-            if edge.kind != "competing":
+            if edge.kind != EDGE_OWNERSHIP_COMPETING:
                 continue
             candidates = []
             for wall_id in edge.wall_ids:
