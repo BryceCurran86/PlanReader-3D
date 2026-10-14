@@ -24,39 +24,7 @@ from tools.diag_gptmax_raster_host_source_membership import nonpublishing_g17_su
 from tools.diag_gptmax_required_flank_source import _reported_flanks
 
 
-def pixel_paint_profile(image: np.ndarray, full: np.ndarray, box, *, orientation: str) -> dict:
-    """Descriptive supplied-array comparison, with no source/role authority."""
-    if (image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3
-            or full.dtype != np.uint8 or full.shape != image.shape):
-        raise ValueError("matching RGB source arrays required")
-    if (not isinstance(box, (list, tuple)) or len(box) != 4
-            or any(type(v) is not int for v in box) or orientation not in ("horizontal", "vertical")):
-        raise ValueError("invalid flank pixel query")
-    x0, y0, x1, y1 = box
-    if min(x0, y0) < 0 or x1 >= image.shape[1] or y1 >= image.shape[0] or min(x1-x0, y1-y0) < 2:
-        raise ValueError("flank query outside render or without inset core")
-    a, b = image[y0:y1+1, x0:x1+1], full[y0:y1+1, x0:x1+1]
-    ga, gb = (cv2.cvtColor(v, cv2.COLOR_RGB2GRAY) for v in (a, b))
-    mid = ((a.shape[0] if orientation == "horizontal" else a.shape[1])-1)/2
-    low, high = math.floor(mid), math.ceil(mid)
-    line = (slice(low, high+1), slice(None)) if orientation == "horizontal" else (slice(None), slice(low, high+1))
-    result = {"pixel_bbox_inclusive": list(box), "orientation": orientation,
-              "mass_threshold": MASS_THRESHOLD, "source_ownership_proven": False,
-              "native_paint_role_authenticated": False, "host_publication_allowed": False}
-    for name, region in (("inset_core", (slice(1, -1), slice(1, -1))), ("complete_centerline", line)):
-        sa, sb = a[region], b[region]
-        changed = np.any(sa != sb, axis=2)
-        result[name] = {"source_mass_solid": bool(np.all(ga[region] < MASS_THRESHOLD)),
-                        "full_render_mass_solid": bool(np.all(gb[region] < MASS_THRESHOLD)),
-                        "rgb_equal": bool(not changed.any()),
-                        "changed_rgb_pixel_count": int(changed.sum()),
-                        "source_rgb_sha256": sha256(sa.tobytes()).hexdigest(),
-                        "full_render_rgb_sha256": sha256(sb.tobytes()).hexdigest()}
-    changed = np.any(a != b, axis=2)
-    ys, xs = np.where(changed)
-    result["changed_rgb_pixel_bbox_inclusive"] = ([int(xs.min())+x0, int(ys.min())+y0,
-        int(xs.max())+x0, int(ys.max())+y0] if len(xs) else None)
-    return result
+from pb_raster_g17_source_shadow import pixel_paint_profile
 
 
 def _finite_box(box) -> tuple[float, ...]:
