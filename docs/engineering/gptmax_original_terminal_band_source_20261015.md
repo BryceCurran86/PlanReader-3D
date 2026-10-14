@@ -49,7 +49,7 @@ are validation controls only. Global 2.5pt W2 snap, existing 4pt minimum,
 
 ## Source experiment review
 
-27 actual-source, transform, splitting, order, short-terminal, foreign selector,
+30 actual-source, transform, splitting, order, short-terminal, foreign selector,
 warm-cache and mid-read damage tests pass. An independently ingested original
 all-page source root has 1,536 G17 primitives and 21 real opening records.
 Of eleven whole-flank paint negatives, seven have independently painted
@@ -64,3 +64,8 @@ The all-page source-only root is distinct from the production selected-page
 root. The production transparency harness must independently run the new
 reader inside its own actual collector and retain every original signed
 quantity/customer row and source-stage receipt before merge.
+
+The complete G17 inventory explicitly checks every page's fresh original
+images-only render hash and page parent as well as its pixel coordinates and
+DPI. Warmed corrupt receipts on another page cannot hide behind a positive
+selected-page proof; three two-page regressions exercise that boundary.

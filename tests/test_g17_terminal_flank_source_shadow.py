@@ -14,7 +14,7 @@ from tests.test_raster_framed_opening_g17_contract import (
 )
 
 
-def _prepare(*,hole='outer',turns=0,scale=1.,pad=0,split_image=False,overpaint=False):
+def _prepare(*,hole='outer',turns=0,scale=1.,pad=0,split_image=False,overpaint=False,pages=1):
     gray=_sheet(frame_lines=2)
     if hole=='outer':
         gray[156:159,79:82]=255
@@ -26,21 +26,23 @@ def _prepare(*,hole='outer',turns=0,scale=1.,pad=0,split_image=False,overpaint=F
     gray=np.pad(gray,((pad,pad),(pad,pad)),constant_values=255)
     h,w=gray.shape
     with fitz.open() as pdf:
-        page=pdf.new_page(width=w*scale/2,height=h*scale/2)
-        if split_image:
-            mid=w//2
-            page.insert_image(fitz.Rect(0,0,mid*scale/2,h*scale/2),stream=_png(gray[:,:mid]),keep_proportion=False)
-            page.insert_image(fitz.Rect(mid*scale/2,0,w*scale/2,h*scale/2),stream=_png(gray[:,mid:]),keep_proportion=False)
-        else:
-            page.insert_image(page.rect,stream=_png(gray),keep_proportion=False)
-        if overpaint:
-            page.draw_rect(fitz.Rect(105,75,121,83),color=None,fill=(1,1,1),overlay=True)
+        for _ in range(pages):
+            page=pdf.new_page(width=w*scale/2,height=h*scale/2)
+            if split_image:
+                mid=w//2
+                page.insert_image(fitz.Rect(0,0,mid*scale/2,h*scale/2),stream=_png(gray[:,:mid]),keep_proportion=False)
+                page.insert_image(fitz.Rect(mid*scale/2,0,w*scale/2,h*scale/2),stream=_png(gray[:,mid:]),keep_proportion=False)
+            else:
+                page.insert_image(page.rect,stream=_png(gray),keep_proportion=False)
+            if overpaint:
+                page.draw_rect(fitz.Rect(105,75,121,83),color=None,fill=(1,1,1),overlay=True)
         data=pdf.tobytes()
     source=SourceVisibilityProducer(producer_method='terminal-source-test',producer_version='1')
+    page_ids=tuple(str(i+1) for i in range(pages))
     pub=source.ingest_native_pdf_bytes(document_id='terminal-source-test',source_bytes=data,
-        source_locator='memory://terminal.pdf',page_ids=('1',))
-    pub=source.augment_with_raster_opening_primitives(pub.revision.revision_id,page_ids=('1',))
-    records=_corroborated_records(source,pub)
+        source_locator='memory://terminal.pdf',page_ids=page_ids)
+    pub=source.augment_with_raster_opening_primitives(pub.revision.revision_id,page_ids=page_ids)
+    records=[r for r in _corroborated_records(source,pub) if r.page_id=='1']
     assert records
     record=max(records,key=lambda r:len(r.source_observation_ids))
     selector=_selector(pub,record.source_observation_ids[0])
@@ -151,3 +153,16 @@ def test_page_inventory_reproves_every_opening_and_deterministic_replay():
     assert len(a['source_openings'])==1 and not a['scope_complete']
     assert a['source_openings'][0]==_run(source,selector)
     assert read(source,revision_id=pub.revision.revision_id,page_id='1')==a
+
+
+@pytest.mark.parametrize('damage',['render','pixels','dpi'])
+def test_other_page_original_receipt_damage_cannot_hide_behind_local_positive(damage):
+    source,pub,selector=_prepare(pages=2)
+    assert any(f['terminal_source_atom'] for f in _run(source,selector)['flanks'])
+    store=source._producer._store
+    oid=next(oid for oid in pub.raster_opening_primitive_observation_ids
+        if store.observations[(pub.snapshot.snapshot_id,oid)].page_id=='2')
+    key=(pub.snapshot.snapshot_id,oid)
+    fields={'render':{'render_sha256':'foreign'},'pixels':{'pixel_geometry':(1.,2.,3.,4.)},'dpi':{'dpi':144}}[damage]
+    source._raster_opening_primitive_receipts[key]=replace(source._raster_opening_primitive_receipts[key],**fields)
+    with pytest.raises((ValueError,RuntimeError)):_run(source,selector)

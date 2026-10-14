@@ -36,6 +36,7 @@ def _inventory(source, pub, selector):
     if data is None or sha256(data).hexdigest() != selector.source_sha256:
         raise RuntimeError("original terminal source bytes changed")
     observations = {}
+    original_page_renders = {}
     visibility = source.authority()
     for oid in sorted(ids):
         proof = visibility.resolve_raster_opening_primitive(replace(selector, observation_id=oid))
@@ -49,6 +50,16 @@ def _inventory(source, pub, selector):
                     and math.isclose(p, float(g)*receipt.dpi/72., rel_tol=0, abs_tol=1e-6)
                     for p, g in zip(receipt.pixel_geometry, proof.observation.geometry))):
             raise RuntimeError("original terminal pixel coordinate receipt unproven")
+        page_id = proof.observation.page_id
+        if page_id not in original_page_renders:
+            png, parent, _ = source._producer.render_native_page_png(
+                document_id=selector.document_id, revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256, snapshot_id=selector.snapshot_id,
+                page_id=page_id, dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                include_native_frame=True, images_only=True)
+            original_page_renders[page_id] = (sha256(png).hexdigest(), parent.observation_id)
+        if original_page_renders[page_id] != (receipt.render_sha256, receipt.page_parent_observation_id):
+            raise RuntimeError("original terminal source render receipt unproven")
         observations[oid] = proof.observation
     return observations
 
