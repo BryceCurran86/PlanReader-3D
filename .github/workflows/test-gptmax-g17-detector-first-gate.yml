@@ -1,0 +1,97 @@
+name: GPT MAX Original G17 Pixel First Gate
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_g17_detector_first_gate.py"
+      - "tests/test_gptmax_g17_detector_first_gate.py"
+      - ".github/workflows/test-gptmax-g17-detector-first-gate.yml"
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source-owned first gate and lookalike negative tests
+        env:
+          PYTHONPATH: "."
+        run: |
+          python -m pytest -q tests/test_gptmax_g17_detector_first_gate.py
+          python -m compileall -q tools/diag_gptmax_g17_detector_first_gate.py
+          ruff check --select F821,F823 tools/diag_gptmax_g17_detector_first_gate.py tests/test_gptmax_g17_detector_first_gate.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Replay exact source-owned G17 and independent pixel/region/dedup stages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SOURCE_SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SOURCE_SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --include-unhosted-raster-flank-source \
+            --output artifacts/source.json
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_detector_first_gate.py \
+            --pdf "$PDF" --page-id 3 \
+            --source-report artifacts/source.json \
+            --output artifacts/g17-detector-stage-census.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('artifacts/source.json').read_text())
+          stages=json.loads(Path('artifacts/g17-detector-stage-census.json').read_text())
+          assert before['source_sha256']==stages['source_sha256']
+          assert before['primitive_safety_cap']==20_000
+          assert before['summary']['physical_existence_claims']==21
+          assert before['summary']['authenticated_hosts']==15
+          assert before['summary']['resolved_source_frames']==9
+          assert before['summary']['canonical_opening_area_records']==8
+          assert len(before['source_owned_wall_scopes'][0]['records'])==2094
+          assert stages['source_flank_count_observed']==12
+          assert stages['opening_count_observed']==6
+          assert len(stages['source_flank_stage_rows'])==12
+          assert all(r['physical_host_granted'] is False and
+                     r['metric_quantity_granted'] is False and
+                     r['customer_quantity_granted'] is False and
+                     r['benchmark_score_granted'] is False
+                     for r in stages['source_flank_stage_rows'])
+          assert stages['canonical_wall_or_host_granted'] is False
+          assert stages['metric_quantity_granted'] is False
+          assert stages['benchmark_score_granted'] is False
+          print({'original_pdf_sha_verified':True,
+                 'authenticated_source_flanks':12,
+                 'first_detector_gate_counts':stages['first_detector_gate_counts'],
+                 'new_hosts_granted':0,'new_quantities_granted':0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-g17-first-pixel-gate
+          path: artifacts
+          retention-days: 30

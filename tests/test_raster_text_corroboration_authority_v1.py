@@ -724,6 +724,82 @@ def test_source_owned_vertical_line_orientation_survives_unmatchable_trace_refin
     assert direction == 0
 
 
+
+def test_source_owned_horizontal_ink_extension_requires_missing_trace_and_unique_origins() -> None:
+    """No padded OCR retry: only the original line glyphs may enlarge a bbox."""
+    from pb_raster_text_corroboration_authority import (
+        _producer_owned_ocr_target,
+        _unique_native_word_source_ink_crop,
+    )
+
+    setup = _Setup(_glyph_unverified_pdf([("150mm", 40, 120)]), _both("150mm"))
+    source = setup._receipts[setup.oid_of("150mm")]
+    payload = setup.svp._producer._store.source_bytes_by_revision[
+        setup.published.revision.revision_id
+    ]
+    document = fitz.open(stream=payload, filetype="pdf")
+    try:
+        original = document.load_page(0).get_text("rawdict")
+        line = original["blocks"][source.block_no]["lines"][source.line_no]
+        chars = [char for span in line["spans"] for char in span["chars"]]
+        assert "".join(char["c"] for char in chars) == "150mm"
+        # Original glyph origins remain inside this artificial native word
+        # bbox, but the source glyph INK extends further to the right.
+        clipped_word = (
+            float(source.geometry[0]),
+            float(source.geometry[1]),
+            max(float(char["origin"][0]) for char in chars) + 0.01,
+            float(source.geometry[3]),
+        )
+        assert clipped_word[2] < max(
+            float(char["bbox"][2]) for char in chars
+        )
+        assert _unique_native_word_source_ink_crop(
+            line, word_bbox=clipped_word, raw_text="150mm"
+        ) is not None
+    finally:
+        document.close()
+
+    untraced = replace(source, sequence_number=None, trace_sequence_numbers=())
+    enlarged, orientation = _producer_owned_ocr_target(
+        setup.svp._producer,
+        revision_id=setup.published.revision.revision_id,
+        source_sha256=setup.published.revision.source_sha256,
+        page_id="1", receipt=untraced,
+        word_bbox=clipped_word, raw_text="150mm",
+    )
+    assert orientation == 0
+    assert enlarged[2] > clipped_word[2]
+
+    # A claim with a trace source address must keep the original horizontal
+    # crop: native glyph proximity cannot supersede a trace contract.
+    traced = replace(
+        source, sequence_number=987654321,
+        trace_sequence_numbers=(987654321,),
+    )
+    unchanged, orientation = _producer_owned_ocr_target(
+        setup.svp._producer,
+        revision_id=setup.published.revision.revision_id,
+        source_sha256=setup.published.revision.source_sha256,
+        page_id="1", receipt=traced,
+        word_bbox=clipped_word, raw_text="150mm",
+    )
+    assert orientation == 0
+    assert unchanged == clipped_word
+
+    # The same source line with an unmatched native word claim cannot
+    # select any alternate glyph region by OCR/word similarity.
+    unknown, orientation = _producer_owned_ocr_target(
+        setup.svp._producer,
+        revision_id=setup.published.revision.revision_id,
+        source_sha256=setup.published.revision.source_sha256,
+        page_id="1", receipt=untraced,
+        word_bbox=clipped_word, raw_text="WRONG",
+    )
+    assert unknown == clipped_word
+    assert orientation == 0
+
+
 def test_source_owned_horizontal_line_unmatchable_trace_never_invents_rotation() -> None:
     from pb_raster_text_corroboration_authority import _producer_owned_ocr_target
 

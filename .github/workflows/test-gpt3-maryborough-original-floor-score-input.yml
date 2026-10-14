@@ -7,6 +7,7 @@ on:
       - "tools/run_gpt3_maryborough_original_floor_score_input.py"
       - "tests/test_gpt3_maryborough_original_floor_score_input.py"
       - ".github/workflows/test-gpt3-maryborough-original-floor-score-input.yml"
+      - "pb_wall_room_topology_typed_negative_evidence.py"
   workflow_dispatch:
 
 concurrency:
@@ -114,6 +115,57 @@ jobs:
           PY
         env:
           PYTHONPATH: .
+      - name: Write zero-binding current-source identity map
+        run: |
+          cat > artifacts/gpt3-maryborough-original-floor-score-input/identity_map.json <<'JSON'
+          {
+            "schema_version": "1.0.0",
+            "project_id": "au_qld_maryborough_service_station",
+            "source_sha256s": [
+              "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+            ],
+            "bindings": []
+          }
+          JSON
+
+      - name: Run unchanged frozen 24-object reconciler on fresh source output
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-maryborough-original-floor-score-input
+          python benchmarks/frozen_holdout/full_plan_v2/run_exact_project_reconciliation.py \
+            --manifest benchmarks/frozen_holdout/full_plan_v2/projects/au_qld_maryborough_service_station/source_manifest.json \
+            --sealed-run "$OUT/production/source_sealed_run.json" \
+            --identity-map "$OUT/identity_map.json" \
+            --output "$OUT/exact_project_report.json"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("artifacts/gpt3-maryborough-original-floor-score-input/exact_project_report.json")
+          d=json.loads(p.read_text())
+          assert d["project_id"]=="au_qld_maryborough_service_station"
+          assert d["source_sha_verified"] is True
+          assert d["reconciliation_complete"] is True
+          assert d["denominator"]==24
+          assert d["matched_within_tolerance"]==0
+          assert d["matched_outside_tolerance"]==0
+          assert d["missed"]==24
+          assert d["partial"]==0
+          assert d["unresolved"]==0
+          assert d["unsupported_extra"]==3
+          assert d["lineage_conflicts"]==0
+          assert d["coverage_accuracy"]==0.0
+          assert d["precision_adjusted_accuracy"]==0.0
+          assert len(d["produced_items"])==3
+          assert all(
+              all(str(ref).startswith("production-unmapped:")
+                  for ref in item["object_refs"])
+              for item in d["produced_items"]
+          )
+          print("MARYBOROUGH_CURRENT_SOURCE_EXACT24",json.dumps(d,sort_keys=True))
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

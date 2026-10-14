@@ -69,7 +69,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          # Fixed historical pre-1215 original-source control: current PR base
+          # already contains accepted 1215 and cannot prove the old->new
+          # source-snapshot event. Keep both historical pinned Git blob gates.
+          BASE_SHA="e579030e37606dfdd1b0d0b302b3f29138631552"
           git worktree add --detach /tmp/gpt3-room-base "$BASE_SHA"
           git fetch --no-tags origin "$CANDIDATE_SHA"
           git worktree add --detach /tmp/gpt3-room-candidate "$CANDIDATE_SHA"
