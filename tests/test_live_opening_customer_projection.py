@@ -160,3 +160,73 @@ def test_opening_customer_output_rejects_reused_quantity_identity_before_trace_m
     assert len(project_live_opening_customer_rows(
         claim, workspace_id=17, project_id="customer-workspace:17",
     )) == 1
+
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ("foreign_area_family", "foreign_count_family",
+     "foreign_area_object", "foreign_count_object"),
+)
+def test_opening_customer_cannot_hide_invalid_abstained_source_inventory(
+    tmp_path, invalid,
+):
+    path = tmp_path / "opening-inventory.pdf"
+    path.write_bytes(_opening_pdf())
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    assert len(claim.opening_quantity_evidence) == 1
+    original = replace(
+        claim.opening_quantity_evidence[0],
+        abstained=True, value=None,
+        blocking_reasons=("source_identity_unresolved",),
+    )
+    if invalid == "foreign_area_family":
+        forged = replace(
+            claim, opening_quantity_evidence=(replace(original, family="ceiling_area"),),
+            opening_count_quantity_evidence=(),
+        )
+    elif invalid == "foreign_count_family":
+        forged = replace(
+            claim, opening_quantity_evidence=(),
+            opening_count_quantity_evidence=(original,),
+        )
+    elif invalid == "foreign_area_object":
+        forged = replace(
+            claim, opening_quantity_evidence=(object(),),
+            opening_count_quantity_evidence=(),
+        )
+    else:
+        forged = replace(
+            claim, opening_quantity_evidence=(),
+            opening_count_quantity_evidence=(object(),),
+        )
+    error = TypeError if "object" in invalid else ValueError
+    with pytest.raises(error, match="source inventory"):
+        project_live_opening_customer_rows(
+            forged, workspace_id=17, project_id="customer-workspace:17",
+        )
+
+
+def test_opening_customer_never_silently_hides_double_abstained_identity(tmp_path):
+    path = tmp_path / "opening-abstain.pdf"
+    path.write_bytes(_opening_pdf())
+    claim = collect_live_physical_net_wall_claim(path, pages=(0,))
+    original = replace(
+        claim.opening_quantity_evidence[0], value=None, abstained=True,
+        blocking_reasons=("original_source_unresolved",),
+    )
+    forged = replace(
+        claim, opening_quantity_evidence=(original, original),
+        opening_count_quantity_evidence=(),
+    )
+    with pytest.raises(ValueError, match="quantity identities collide"):
+        project_live_opening_customer_rows(
+            forged, workspace_id=17, project_id="customer-workspace:17",
+        )
+    legitimate = replace(
+        claim, opening_quantity_evidence=(original,),
+        opening_count_quantity_evidence=(),
+    )
+    assert project_live_opening_customer_rows(
+        legitimate, workspace_id=17, project_id="customer-workspace:17",
+    ) == ()
