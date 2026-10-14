@@ -51,6 +51,9 @@ def inspect_non_simple_original_face_ring(record: Any) -> dict[str, Any]:
     from pb_source_room_face_authority import (
         _publication_polygon, _polygon_area, _collapse_exact_ring_backtracks,
     )
+    from tools.diag_gpt2_exact_w4_directed_cycles import (
+        inspect_exact_original_w4_directed_cycles,
+    )
     raw = getattr(record, "polygon_pdf_pts", ()) or ()
     result = {
         "source_face_id": getattr(record, "face_id", None),
@@ -66,6 +69,9 @@ def inspect_non_simple_original_face_ring(record: Any) -> dict[str, Any]:
         "exact_backtrack_cleanup_preserves_original_area": False,
         "authentic_physical_room_polygon_published": False,
         "source_face_identity_or_wall_equivalence_rewritten": False,
+        "original_w4_directed_cycles_observed_only": (
+            inspect_exact_original_w4_directed_cycles(record)
+        ),
     }
     try:
         points = tuple((float(p[0]), float(p[1])) for p in raw)
