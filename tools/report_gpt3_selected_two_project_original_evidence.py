@@ -142,12 +142,20 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
         paths["manifest"], paths["sealed"], paths["identity_map"],
     )
     stored = _json_object(paths["exact_report"])
-    if stored != recomputed:
+    # The unchanged frozen reporter returns dataclass asdict() rows with tuple
+    # object_refs. The persisted JSON report necessarily serialises those as
+    # arrays (lists). Compare *wire-equivalent* data, not Python tuple vs list;
+    # do not change the evaluator, identity map, quantities or numeric values.
+    recomputed_on_disk = json.loads(
+        json.dumps(recomputed, allow_nan=False, sort_keys=True)
+    )
+    if stored != recomputed_on_disk:
         # Diagnostic keys only: never log source quantities or substitute a
         # persisted result for the independent unchanged frozen evaluator.
         differing = sorted(
-            key for key in (set(stored) | set(recomputed))
-            if key not in stored or key not in recomputed or stored[key] != recomputed[key]
+            key for key in (set(stored) | set(recomputed_on_disk))
+            if key not in stored or key not in recomputed_on_disk
+            or stored[key] != recomputed_on_disk[key]
         )
         raise ValueError(
             "persisted frozen exact-project result differs from unchanged scorer; "
