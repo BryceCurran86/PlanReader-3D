@@ -1,0 +1,80 @@
+name: DIAG GPT2 Original FT3 Native Frame and Mark Ownership
+on:
+  pull_request:
+    paths:
+      - "tools/diag_gpt2_ft3_original_source_frame_scope.py"
+      - "tests/test_gpt2_ft3_original_source_frame_scope.py"
+      - ".github/workflows/diag-gpt2-original-ft3-native-frame-scope.yml"
+      - "pb_viewport_segmentation.py"
+  workflow_dispatch:
+jobs:
+  native-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Mutation and fail-closed source-scope proof
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_ft3_original_source_frame_scope.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+  original:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original immutable source mark and vector frame lineages
+        env:
+          PYTHONPATH: .
+          ORT_DISABLE_TELEMETRY: "1"
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          timeout 2100s python -u -m tools.diag_gpt2_ft3_original_source_frame_scope \
+            --pdf "$PDF" --source-sha256 "$SHA" --output artifacts/gpt2-native-ft3-frame-scope.json
+      - name: Original source first-gate assertions (no candidate promotion)
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gpt2-native-ft3-frame-scope.json").read_text())
+          assert r["original_source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert r["native_page_rotation"]==90
+          assert r["source_mark_count"]==6
+          assert r["all_native_source_mark_text_authenticated"] is True
+          assert r["original_native_frame_count"]==5
+          assert r["single_native_frame_max_whole_mark_count"]==5
+          assert len(r["original_source_uncontained_mark_observation_ids"])==1
+          assert r["authenticated_floor_finish_plan_viewport_count"]==0
+          assert r["source_first_unclosed_authority"]=="source_plan_viewport_unresolved"
+          assert r["material_occurrence_universe_complete"] is False
+          assert r["physical_floor_source_ownership_authenticated_by_audit"] is False
+          assert r["metric_floor_finish_area_published"] is False
+          assert r["new_customer_quantity_published"] is False
+          assert r["benchmark_identity_or_score_granted"] is False
+          assert r["diagnostic_only"] is True
+          print(json.dumps(r,sort_keys=True))
+          PY
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-native-ft3-frame-scope
+          path: artifacts/gpt2-native-ft3-frame-scope.json
+          retention-days: 20
