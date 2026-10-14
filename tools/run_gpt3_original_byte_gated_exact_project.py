@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from typing import Any, Sequence
 
-from scripts.report_full_plan_v2_readiness import _object, _write_readiness_report
+from scripts.report_full_plan_v2_readiness import _write_readiness_report
 from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
 )
@@ -22,6 +22,29 @@ FROZEN_ROOT = (
     Path(__file__).resolve().parents[1]
     / "benchmarks" / "frozen_holdout" / "full_plan_v2"
 )
+
+
+def _strict_original_json_object(path: Path) -> dict[str, Any]:
+    """Do not let a duplicated source identity be overwritten before validation.
+
+    The frozen scorer remains unchanged. This wrapper rejects ambiguous
+    external on-disk manifest, sealed run and identity-map JSON *before* it
+    invokes that scorer or credits the original-source SHA receipt.
+    """
+    def unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"original signed source JSON has duplicate key: {key}")
+            result[key] = value
+        return result
+
+    value = json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=unique_keys
+    )
+    if type(value) is not dict:
+        raise ValueError("original signed source JSON must be an object")
+    return value
 
 
 def _sha256(path: Path) -> str:
@@ -102,7 +125,7 @@ def build_original_byte_gated_project_report(
     identity_map_path: Path, original_files: Sequence[Path],
 ) -> dict:
     manifest_sha_before = _sha256(manifest_path)
-    manifest = _object(manifest_path)
+    manifest = _strict_original_json_object(manifest_path)
     project_id = manifest.get("project_id")
     if not isinstance(project_id, str) or not project_id:
         raise ValueError("frozen project manifest has invalid project identity")
@@ -151,8 +174,8 @@ def build_original_byte_gated_project_report(
     try:
         sealed_before = _sha256(sealed_run_path)
         identity_before = _sha256(identity_map_path)
-        sealed_claim = _object(sealed_run_path)
-        identity_claim = _object(identity_map_path)
+        sealed_claim = _strict_original_json_object(sealed_run_path)
+        identity_claim = _strict_original_json_object(identity_map_path)
     except (OSError, ValueError, TypeError, UnicodeError):
         return {
             "project_id": project_id, "publication_status": "UNPUBLISHED",
