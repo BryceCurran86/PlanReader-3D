@@ -17,7 +17,10 @@ def _wall(**changes):
         viewport_id="source-proven-view", viewport_view_type="floor_finish_plan",
         viewport_bbox=(10.0, 20.0, 150.0, 160.0),
         status=EvidenceResolutionStatus.CORROBORATED,
-        scope_complete=True, reason_codes=(), records=("w4-a", "w4-b"),
+        scope_complete=True, reason_codes=(), records=(
+            SimpleNamespace(wall_candidate_id="wall-a"),
+            SimpleNamespace(wall_candidate_id="wall-b"),
+        ),
     )
     return SimpleNamespace(**dict(attrs, **changes))
 
