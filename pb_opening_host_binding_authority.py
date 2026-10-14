@@ -2832,6 +2832,75 @@ def _resolve_raster_source_primitive_host_from_lines(
     )
 
 
+def _authenticated_isolated_g17_source_lines(
+    authority: PhysicalOpeningAuthority,
+    opening: PhysicalOpeningExistenceRecord,
+) -> dict[str, tuple[float, float, float, float]]:
+    """Read authentic isolated face/end ancestry, never certify a wall or host.
+
+    Unlike RASTER_PDF_VISIBLE_SEGMENT, original G17 primitives are separately
+    sealed. Their producer-owned visibility reader independently validates the
+    original native/raster parent, page, PDF SHA, and snapshot. A complete
+    original four-face/two-inner-jamb group is mandatory. This helper only
+    exposes raw source addresses for later opening-local equivalence work:
+    it must NOT be substituted for the existing page-wide visible source
+    publisher or used as a positive hosted-opening proposition.
+    """
+    visibility = authority.source_visibility_authority()
+    if type(visibility) is not SourceVisibilityAuthority:
+        return {}
+    ids = tuple(opening.source_observation_ids)
+    if not ids or len(set(ids)) != len(ids):
+        return {}
+    lines: dict[str, tuple[float, float, float, float]] = {}
+    parents: set[str] = set()
+    face_count = 0
+    end_count = 0
+    for observation_id in ids:
+        result = visibility.resolve_raster_opening_primitive(ObservationSelector(
+            document_id=opening.document_id,
+            revision_id=opening.revision_id,
+            source_sha256=opening.source_sha256,
+            snapshot_id=opening.snapshot_id,
+            observation_id=str(observation_id),
+        ))
+        observation = result.observation
+        if (result.status is not EvidenceResolutionStatus.CORROBORATED
+                or observation is None
+                or str(observation.page_id) != str(opening.page_id)
+                or observation.source_sha256 != opening.source_sha256
+                or observation.snapshot_id != opening.snapshot_id
+                or len(observation.derivation_parent_ids) != 1):
+            return {}
+        parent = observation.derivation_parent_ids[0]
+        if not isinstance(parent, str) or not parent or parent in parents:
+            return {}
+        parents.add(parent)
+        kind = observation.observation_kind
+        if kind not in (
+            "raster_wall_band_face", "raster_wall_band_end",
+            "raster_line_run", "raster_thin_ink_run",
+        ):
+            return {}
+        if kind not in ("raster_wall_band_face", "raster_wall_band_end"):
+            continue
+        primitive_ref = str(observation.source_primitive_ref or "")
+        if not primitive_ref.startswith("visible:raster_opening_primitive:"):
+            return {}
+        primitive_id = primitive_ref[len("visible:"):]
+        line = _line(observation)
+        if not primitive_id or line is None or primitive_id in lines:
+            return {}
+        lines[primitive_id] = line
+        if kind == "raster_wall_band_face":
+            face_count += 1
+        else:
+            end_count += 1
+    if face_count != 4 or end_count != 2 or len(lines) != 6:
+        return {}
+    return lines
+
+
 def _authenticated_raster_source_lines(
     authority: PhysicalOpeningAuthority,
     opening: PhysicalOpeningExistenceRecord,
