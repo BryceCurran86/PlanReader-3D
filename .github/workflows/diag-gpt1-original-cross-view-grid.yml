@@ -7,6 +7,7 @@ on:
       - "pb_source_grid_registration_shadow.py"
       - "tools/diag_gpt1_original_cross_view_grid.py"
       - "tests/test_gpt1_source_grid_registration_shadow.py"
+      - "tools/diag_gpt1_source_grid_room_mark_candidates.py"
       - ".github/workflows/diag-gpt1-original-cross-view-grid.yml"
   workflow_dispatch:
 
@@ -74,4 +75,68 @@ jobs:
         with:
           name: gpt1-original-cross-view-grid-native-evidence
           path: artifacts/gpt1-original-cross-view-grid/
+          retention-days: 30
+
+  original-room-mark-registration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact producer head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install original source toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original SHA->native grid->actual W4 source room->FT3 mark geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt1-original-crossview-room-mark
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA=b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007
+          echo "$SHA  $PDF" | sha256sum --check
+          timeout 3500s env PYTHONPATH=. ORT_DISABLE_TELEMETRY=1 python -u -m tools.diag_gpt1_source_grid_room_mark_candidates \
+            --pdf "$PDF" --sha256 "$SHA" --room-page 7 --material-page 11 \
+            --code FT3 --output "$OUT/original_room_mark_registration.json" \
+            2>&1 | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gpt1-original-crossview-room-mark/original_room_mark_registration.json").read_text())
+          assert r["source_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert r["diagnostic_only"] is True
+          assert r["original_grid_native_vector_candidate"] is True
+          assert r["material_code"]=="FT3"
+          assert len(r["native_material_marks"])==6
+          assert len(r["source_room_candidates"])>0
+          assert r["physical_room_crossview_equivalence_proven"] is False
+          assert r["material_occurrence_source_trusted"] is False
+          assert r["page_material_role_proven"] is False
+          assert r["original_room_wall_equivalence_proven"] is False
+          assert r["published_floor_finish_quantities"]==0
+          assert r["commercial_projection_allowed"] is False
+          assert all(
+              not x["material_occurrence_owned"]
+              and not x["crossview_structural_wall_equivalence_proven"]
+              and not x["customer_quantity_issued"]
+              for x in r["source_region_geometric_candidates"]
+          )
+          print("ORIGINAL_CROSSVIEW_ROOM_FT3_CANDIDATES_ONLY_NO_CONSTRUCTION_QUANTITY")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-crossview-room-ft3-shadow
+          path: artifacts/gpt1-original-crossview-room-mark/
           retention-days: 30
