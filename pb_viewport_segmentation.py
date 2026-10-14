@@ -1749,23 +1749,23 @@ def _frame_resolved_viewports(
                     if not _bbox_contains(frame, anchor.bbox, margin=margin)
                 ]
                 if external_table_candidates:
-                    # Repeated source GRID strokes within a physical plan can
-                    # pass table-shape checks. An *external* schedule title
-                    # cannot elect one such region while a different genuine
-                    # table-shaped native frame also survives. That is
-                    # insufficient source-owned title-to-frame identity.
-                    viable_table_frames = [
-                        frame for frame in frames
-                        if _frame_looks_like_table(frame, page, calibration)
-                        and not _rejected_ownership_frame(
-                            page, frame, calibration, fragments,
-                            view_type=anchor.view_type,
+                    # External semantic titles require positive repeated
+                    # source-CLOSED table cell layout, rather than only
+                    # intersecting orthogonal strokes. Authentic building
+                    # floor/wall grids can satisfy the line-grid predicate,
+                    # and the title by itself does not own those plan lines.
+                    # Only candidate frames with separately proven positive
+                    # native table-cell geometry may be spatially bound.
+                    true_cell_tables = [
+                        frame for frame in external_table_candidates
+                        if _frame_looks_like_table(
+                            frame, page, calibration,
+                            allow_line_grid_only=False,
                         )
                     ]
-                    if len(viable_table_frames) != 1:
-                        candidates = enclosed_candidates
-                    else:
-                        candidates = table_candidates
+                    candidates = list(dict.fromkeys([
+                        *enclosed_candidates, *true_cell_tables
+                    ]))
                 else:
                     candidates = table_candidates
             else:
