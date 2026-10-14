@@ -143,7 +143,16 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
     )
     stored = _json_object(paths["exact_report"])
     if stored != recomputed:
-        raise ValueError("persisted frozen exact-project result differs from unchanged scorer")
+        # Diagnostic keys only: never log source quantities or substitute a
+        # persisted result for the independent unchanged frozen evaluator.
+        differing = sorted(
+            key for key in (set(stored) | set(recomputed))
+            if key not in stored or key not in recomputed or stored[key] != recomputed[key]
+        )
+        raise ValueError(
+            "persisted frozen exact-project result differs from unchanged scorer; "
+            f"top-level differing fields: {differing}"
+        )
     if (
         recomputed.get("project_id") != project_id
         or recomputed.get("source_sha_verified") is not True
