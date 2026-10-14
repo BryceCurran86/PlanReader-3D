@@ -180,7 +180,7 @@ def _inputs():
             "expected_area_m2": 999999.0,
             "verification": {"fully_source_closed": True},
             "provenance": {
-                "source_evidence_refs": ["sheet:A", "sheet:B"],
+                "source_evidence_refs": ["sheet:B", "sheet:A"],
             },
         }],
     }
@@ -197,7 +197,7 @@ def _inputs():
                 "floor-1", "physical-floor-1",
             ],
             "required_trace_evidence_ids": ["ev-def", "ev-occ"],
-            "frozen_source_evidence_refs": ["sheet:A", "sheet:B"],
+            "frozen_source_evidence_refs": ["sheet:B", "sheet:A"],
         }],
     }
     return sealed.to_dict(), rows, pending, active, manifest, universe, proof
@@ -291,3 +291,12 @@ def test_floor_surface_activation_rejects_missing_customer_row() -> None:
     sealed, rows, pending, active, manifest, universe, proof = _inputs()
     with pytest.raises(Exception):
         _activate(customer_rows=[])
+
+
+def test_floor_surface_activation_preserves_nonlexical_frozen_provenance_order() -> None:
+    # Maryborough's immutable provenance is source-order A140 -> A110, which
+    # is not lexical order. Matching exact source order is valid; sorting it
+    # would rewrite frozen provenance.
+    identity_map, receipt = _activate()
+    assert receipt["activated_count"] == 1
+    assert identity_map["bindings"][0]["benchmark_item_id"] == "item-1"
