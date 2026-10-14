@@ -128,6 +128,11 @@ _AUTHORITY_SEAL = object()
 _MATERIAL_LINE_OCR_BLANK_MARGIN_MM = 1.0
 _MATERIAL_WORD_OCR_BLANK_MARGIN_MM = 0.4
 _MATERIAL_WORD_OCR_GAP_MM = 1.2
+# Fixed before reading OCR output, for EVERY source-native material row line.
+# The 300-DPI word path is unchanged. Small CAD fonts and vector quotation
+# marks need distinct native-line raster views; never retry a failed view at
+# a different scale or choose a scale from the OCR/native text result.
+_MATERIAL_NATIVE_LINE_OCR_DPIS = (450, 600)
 
 
 def _required(value: object, name: str) -> str:
@@ -708,6 +713,7 @@ def _recover_admissible_viewport_lines(
     raster: RasterTextCorroborationProducer,
     words: Sequence[_TrustedTextWord],
     viewport: SegmentedViewport,
+    render_dpis: tuple[int, int] = RASTER_TEXT_CORROBORATION_DPIS,
 ) -> tuple[_TrustedTextWord, ...]:
     """Corroborate exact native lines when per-word OCR remains unresolved.
 
@@ -718,6 +724,14 @@ def _recover_admissible_viewport_lines(
     renders must both read exactly the native whole line.
     """
     assert viewport.bounding_box is not None
+    # Reject caller-controlled / malformed profiles. Native rows select one
+    # fixed source-independent profile before any OCR; a failed reading never
+    # switches the profile, and all other viewport paths stay at 300/450.
+    if render_dpis not in (
+        RASTER_TEXT_CORROBORATION_DPIS,
+        _MATERIAL_NATIVE_LINE_OCR_DPIS,
+    ):
+        return tuple(words)
     backend = getattr(raster, "_backend", None)
     if backend is None or not backend.is_available():
         return tuple(words)
@@ -885,7 +899,7 @@ def _recover_admissible_viewport_lines(
         readings: list[str] = []
         parent_ids: set[tuple[str, str, str]] = set()
         full_line_exact = True
-        for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+        for dpi in render_dpis:
             try:
                 png_bytes, page_parent = source._producer.render_native_page_png(
                     document_id=published.revision.document_id,
@@ -951,7 +965,7 @@ def _recover_admissible_viewport_lines(
             line_valid
             and full_line_exact
             and len(parent_ids) == 1
-            and len(readings) == len(RASTER_TEXT_CORROBORATION_DPIS)
+            and len(readings) == len(render_dpis)
             and len({normalize_reading(value) for value in readings}) == 1
         )
 
@@ -966,7 +980,7 @@ def _recover_admissible_viewport_lines(
             composite_readings: list[str] = []
             composite_parent_ids: set[tuple[str, str, str]] = set()
             composite_valid = True
-            for dpi in RASTER_TEXT_CORROBORATION_DPIS:
+            for dpi in render_dpis:
                 word_images: list[Image.Image] = []
                 for target in targets:
                     try:
@@ -1057,7 +1071,7 @@ def _recover_admissible_viewport_lines(
             verified = (
                 composite_valid
                 and len(composite_parent_ids) == 1
-                and len(composite_readings) == len(RASTER_TEXT_CORROBORATION_DPIS)
+                and len(composite_readings) == len(render_dpis)
                 and len(
                     {normalize_reading(value) for value in composite_readings}
                 ) == 1
@@ -1265,6 +1279,7 @@ def _recover_native_material_block(
         raster=raster,
         words=recovered,
         viewport=viewport,
+        render_dpis=_MATERIAL_NATIVE_LINE_OCR_DPIS,
     )
 
 
