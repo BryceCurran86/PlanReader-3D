@@ -1,0 +1,60 @@
+name: DIAG GPT2 Original Source Native Parallel Wall Band
+on:
+  pull_request:
+    paths:
+      - "tools/diag_gpt2_native_parallel_wall_band_candidates.py"
+      - "tests/test_gpt2_native_parallel_wall_band_candidates.py"
+      - ".github/workflows/diag-gpt2-original-source-native-parallel-wall-band.yml"
+  workflow_dispatch:
+jobs:
+  original-native-positive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact native source parallel geometry adversarial tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt2_native_parallel_wall_band_candidates.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Source-positive original PDF WashUp stroke parallel companion census
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          timeout 600s python -u -m tools.diag_gpt2_native_parallel_wall_band_candidates \
+            --pdf "$PDF" --sha "$SHA" --page 7 --primitive d50048i0 \
+            --atomic-edge-json '[[226.319992,476.480103],[260.160004,476.480103]]' \
+            --output artifacts/gpt2-washup-original-parallel-candidates.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("artifacts/gpt2-washup-original-parallel-candidates.json").read_text())
+          assert r["original_sha256"]=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert r["original_pdf_page"]==7 and r["original_pdf_page_count"]==31
+          assert r["source_selected_primitive_id"]=="d50048i0"
+          assert r["source_original_native_path_count"]==109354
+          assert r["source_selected_primitive_verified"] is True
+          assert r["selected_physical_wall_band_companion"] is None
+          assert r["source_wall_role_authenticated"] is False
+          assert r["source_room_composite_closed"] is False
+          assert r["metric_room_area_published"] is False
+          assert r["benchmark_accuracy_granted"] is False
+          assert r["original_source_geometry_only"] is True
+          print(json.dumps(r,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-washup-parallel-source-candidates
+          path: artifacts/gpt2-washup-original-parallel-candidates.json
+          retention-days: 20
