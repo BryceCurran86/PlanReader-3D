@@ -13,6 +13,8 @@ on:
       - "tests/test_gpt2_split_label_wall_separators.py"
       - "tools/diag_gpt2_split_face_collinear_first_gates.py"
       - "tools/diag_gpt2_grid_component_first_failure.py"
+      - "tools/diag_gpt2_exact_w4_atomic_w2_ancestry.py"
+      - "tests/test_gpt2_exact_w4_atomic_w2_ancestry.py"
       - "tools/diag_gpt2_competing_grid_label_paths.py"
       - "tests/test_gpt2_competing_grid_label_paths.py"
       - "tests/test_gpt2_cross_w4_atomic_source_audit.py"
@@ -56,6 +58,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_wall_topology_typed_negative_evidence.py
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_exact_w4_atomic_w2_ancestry.py
           PYTHONPATH=. pytest -q tests/test_gpt2_competing_grid_label_paths.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
       - name: Source-owned native room text vs authentic physical face first gate
@@ -309,6 +312,36 @@ jobs:
               "original_ring_crossing_edge_source_census":w4_first_gate,
               "new_metric_quantity_claim":False,
               "benchmark_accuracy":None,
+          },sort_keys=True))
+          # Inspect the original W2/native primitive ancestors of the exact
+          # two original Freezer crossing W4 subedges. Duplicate same-W4
+          # source receipts remain plural, NEVER an elected physical wall.
+          from tools.diag_gpt2_exact_w4_atomic_w2_ancestry import (
+              inspect_original_w4_atomic_w2_ancestry,
+          )
+          freezer_selections=[
+              candidate for candidate in selectors
+              if candidate.decision_scope_id==freezer_source[0].decision_scope_id
+          ]
+          assert len(freezer_selections)==1, "Freezer W4 scope identity must be exact"
+          freezer_w4_scope=wall_authority.resolve_scope(freezer_selections[0])
+          freezer_w2_first_gates=[]
+          for crossing in w4_first_gate["indexed_original_w4_wall_owner_receipts"]:
+              for wall_id in sorted(set(crossing["original_indexed_w4_wall_candidate_ids"])):
+                  receipt=inspect_original_w4_atomic_w2_ancestry(
+                      freezer_w4_scope,
+                      original_w4_wall_id=wall_id,
+                      atomic_edge=crossing["original_exact_edge_pdf_pts"],
+                  )
+                  assert receipt["candidate_only_no_wall_or_room_authority"]
+                  assert not receipt["physical_room_closed_or_metric_quantity_published"]
+                  freezer_w2_first_gates.append(receipt)
+          print("GPT2_FREEZER_ORIGINAL_W4_W2_NATIVE_SOURCE_ANCESTRY",json.dumps({
+              "source_sha256":sha,
+              "freezer_label_record_id":freezer_labels[0]["source_label_record_id"],
+              "source_room_face_record_id":freezer_source[0].record_id,
+              "original_w4_crossing_w2_source_first_gates":freezer_w2_first_gates,
+              "new_metric_quantity_published":False,
           },sort_keys=True))
           report_rows={}
           for target, candidates in native_rows.items():
