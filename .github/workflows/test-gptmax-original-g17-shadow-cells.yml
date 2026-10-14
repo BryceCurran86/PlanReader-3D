@@ -5,6 +5,7 @@ on:
     paths:
       - "pb_raster_unchanged_band_segments.py"
       - "tests/test_gptmax_original_g17_shadow_inclusive_cells.py"
+      - "tests/test_gptmax_original_g17_shadow_one_end_paint.py"
       - "tools/diag_gptmax_g17_original_inclusive_source_shadow.py"
       - ".github/workflows/test-gptmax-original-g17-shadow-cells.yml"
 permissions:
@@ -27,7 +28,7 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Strict default source parity and adversarial inclusive shadow
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_raster_unchanged_band_segments.py tests/test_gptmax_original_g17_shadow_inclusive_cells.py
+          PYTHONPATH=. python -m pytest -q tests/test_raster_unchanged_band_segments.py tests/test_gptmax_original_g17_shadow_inclusive_cells.py tests/test_gptmax_original_g17_shadow_one_end_paint.py
           python -m compileall -q pb_raster_unchanged_band_segments.py
           ruff check --select F821,F823 pb_raster_unchanged_band_segments.py
           python scripts/check_full_plan_v2_integrity.py
@@ -88,15 +89,37 @@ jobs:
           left=[r for r in bathroom[0]['flanks'] if abs(r['source_bbox_pdf_pts'][0]-581.04)<0.01]
           assert len(left)==1
           assert left[0]['original_default_count']==0
-          assert left[0]['new_original_painted_cell_candidate_count']>=1
+          assert left[0]['inclusive_source_shadow_count']==0
+          # Physical G17 has two authenticated faces and its INNER jamb cap,
+          # not the TWO caps demanded by the generic terminal-box detector.
+          # Original source mass+RGB is separately positive under that
+          # immutable three-observation source topology: nominate SOURCE
+          # evidence only, never a W2/W4 host.
+          paint=left[0]['one_ended_G17_original_source_paint']
+          assert paint['source_one_end_shadow_eligible'] is True
+          assert paint['inclusive_original_painted_cells']==17
+          assert paint['inclusive_original_painted_length_pt']==4.08
+          assert paint['source_original_rgb_solid'] is True
+          assert paint['source_vs_full_rgb_identical'] is True
+          assert paint['original_image_region_owned'] is True
+          assert paint['complete_outer_end_cap_assumed'] is False
+          assert paint['structural_W2_or_W4_proven'] is False
+          other=[r for r in s['source_openings'] if r['physical_opening_id'].startswith('physical_opening_existence_b2489726')]
+          assert len(other)==1
+          dry=[r for r in other[0]['flanks'] if abs(r['source_bbox_pdf_pts'][0]-604.8)<0.01 and r['source_bbox_pdf_pts'][1]<200]
+          assert len(dry)==1
+          missing=dry[0]['one_ended_G17_original_source_paint']
+          assert missing['source_original_rgb_solid'] is False
+          assert missing['source_one_end_shadow_eligible'] is False
+          assert missing['source_shadow_first_failure']=='original_source_ink_not_solid'
           assert s['canonical_snapshot_modified'] is False
           assert s['original_w4_modified'] is False
           assert s['physical_host_granted'] is False
           assert s['metric_area_or_count_granted'] is False
           assert s['customer_quantity_granted'] is False
-          print({'Bathroom870_first_flank_original_shadow_positive':True,
-                 'new_source_painted_candidates':left[0]['new_original_painted_cell_candidate_count'],
-                 'original_pixel_support':left[0]['new_source_pixel_support_bounds'],
+          print({'Bathroom870_one_end_G17_source_positive':True,
+                 'original_source_pixel_cells':paint['inclusive_original_painted_cells'],
+                 'unproven_second_left_non_solid':True,
                  'production_host_gain':0})
           PY
       - uses: actions/upload-artifact@v4
