@@ -1721,6 +1721,11 @@ def _frame_resolved_viewports(
             anchors=anchors,
         )
         if str(anchor.view_type) in _SEMANTIC_TABLE_VIEW_TYPES:
+            # A schedule/legend title OUTSIDE a candidate drawing frame
+            # cannot turn a large physical plan into a schedule. Require a
+            # genuinely source-positive repeated table grid for such external
+            # title-to-frame bindings. A title actually enclosed by its native
+            # source frame retains the existing binding contract.
             table_candidates = [
                 frame
                 for frame in candidates
@@ -1728,6 +1733,16 @@ def _frame_resolved_viewports(
             ]
             if table_candidates:
                 candidates = table_candidates
+            else:
+                candidates = [
+                    frame
+                    for frame in candidates
+                    if _bbox_contains(
+                        frame,
+                        anchor.bbox,
+                        margin=calibration.median_word_height_pt * 0.25,
+                    )
+                ]
         usable = [
             frame for frame in candidates
             if not _rejected_ownership_frame(
