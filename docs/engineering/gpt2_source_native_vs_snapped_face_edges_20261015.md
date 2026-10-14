@@ -1,0 +1,60 @@
+# GPT2 source-native versus snapped room-face edge overlap — authority review
+
+**Status:** architecture and original-source analysis only. **No production fix proposed for promotion before review.** Tracking issue [#2009](https://github.com/BryceCurran86/PlanReader-3D/issues/2009). Dependent evidence [#2726](https://github.com/BryceCurran86/PlanReader-3D/pull/2726) and [#2731](https://github.com/BryceCurran86/PlanReader-3D/pull/2731).
+
+## 1. Compliance / repository evidence actually reviewed
+
+Read `AGENTS.md`, `docs/AI_ENGINEERING_PLAYBOOK.md`, `docs/wall_topology_observability_architecture.md`, `docs/planreader_wall_room_topology_spec.md`, `docs/planreader_public_tender_benchmarks.md`, `.github/workflows/ci.yml`. Traced existing production `PhysicalWallCandidateProducer.from_source_owned_plan_view_shadow` → `PhysicalWallCandidateAuthority.resolve_scope` → `build_source_room_face_authority` → `_derive_scope_outcome` → `_shadow_ownership_evaluation`; exact sources in `PhysicalWallCandidateRecord.source_edge_fragments`, `PhysicalWallEquivalenceResolution.pair_classifications`, `_same_source_owner_groups`, `_source_interval_owner_check`, `_edge_contains_edge`.
+
+**Authority seam:** source W2/W3/W4 geometry and lineage → source-owned physical room-face candidate. Detection is not quantity authority. Neither a signed F07 viewport nor a snapped W4 `WallCandidate` creates a FIRM surface, material, measured quantity, or customer row. Preserve all original candidates and conflicting evidence.
+
+**Untouched:** production `pb_source_room_face_authority.py`, `pb_physical_wall_candidate_authority.py`, original 31-page PDF bytes, material glyph/text integrity and viewport semantics, signed Lot16 opening output, historical Food Prep/Office/Cold Room measurements, frozen V2 truth/evaluator/tolerances/denominators, global W2 snap, 20k-primitive bound, GPT1/GPT3/Cursor ownership.
+
+## 2. Observed exact original-source results
+
+Original Maryborough SHA `b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007`; original page11; exact run [38641853800](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38641853800), artifact [11929899382](https://github.com/BryceCurran86/PlanReader-3D/actions/runs/38641853800/artifacts/11929899382), head `fc2ffffa4c75c043a6599ee639c834e6e52abfbf`. An original independently authenticated F07 `FLOOR_FINISH_PLAN` produced one W4 source viewport, 890 source W4 wall candidates; the physical room-face production result is `source_room_face_boundary_unresolved` with **zero** published closed faces. Existing read-only shadow evaluator found three unresolved source faces, four competing planarized subedges, zero missing source edge owners.
+
+The four findings reduce to **two source-native different kinds**, with each occurrence listed twice by the planarizer:
+
+| Original wall candidates | Production W4 classification | Contested snapped face subedge (PDF pt) | Original source split geometry |
+| --- | --- | --- | --- |
+| `wall_2124bace9c8dcf8fc029` / `wall_358287456fa73c5d0f2b` | `distinct_physical_walls` | x523.679993, y1471.320028 to y1471.520020 (≈0.200 pt) | Source `split_3431` on `d3574i0,d3579i0` ends at y1471.52001953; successor `split_3432` on same native primitives **starts** there and goes to y1516.88000488. Original spans meet at an endpoint; no positive original overlap. |
+| `wall_792ce0d4b8923d295c6c` / `wall_d80bed4ae3528fa1be13` | `ambiguous_physical_equivalence` | y578.479980, x477.359985 to x477.626658 (≈0.267 pt) | First wall's originals `d3883i0,d3887i0` run **vertically** at x477.359985 from y578.479980 upward. Second wall's `d1293i0,d1475i0,d3882i0` source fragments run **horizontally** at y578.479980. A perpendicular crossing cannot supply a shared positive horizontal interval. |
+
+Both pairs return `existing_local_source_interval_proof=false` on the production-read-only implementation. An identical primitive *set* in pair one is NOT sufficient to waive the typed `distinct_physical_walls` classification. No true source-collinear overlap exists in pair two.
+
+The original producer’s `viewport_bbox_pdf_pts` is (251.519989, 471.200073, 1195.439941, 1946.479980); original scope `scope_complete=false` and includes `physical_wall_candidate_scope_cropped_at_viewport_boundary`. An independent Office dimension rectangle has its west bound around x251.04 (slightly outside that viewport) in the separate Claude diagnostic; this is **only a suspected original source cropping risk**, not independently authenticated geometric floor membership or permission to enlarge the F07 viewport.
+
+## 3. Inference — not source authority
+
+The positive planarized overlap appears introduced by graph-endpoint snapping/rekeying rather than the original source-owned fragment geometry. The existing `_edge_contains_edge` implements a six-decimal page-point quantization bound derived from its own contract, **not** a manually tuned close-enough threshold. It can answer whether any original fragment actually spans a nominated contested face subedge; a W4 candidate may look overlapping in snapped node space while its immutable original fragment does not.
+
+This may explain why at least some physical room-face candidates currently abstain. It **does not** prove Office has a closed physical room, nor whether other cropping/identity failures remain. It does not reclassify any W4 wall or remove a competing original fragment.
+
+## 4. Proposed safe first experiment (requires independent authority review)
+
+A read-only shadow sibling of the existing source-room-face ownership audit would:
+
+1. Accept only producer-sealed W4 source scope and its unmodified per-record `PhysicalWallSourceEdgeFragment` ancestry, plus actual planarized contested edges from the existing `SourceRoomFaceOwnershipEvaluation`.
+2. Apply the already-shipped `_edge` and `_edge_contains_edge` to each *original source fragment*, never to a caller-invented line or a benchmark reference.
+3. Report for **every** wall contender a positive original fragment coverage, no coverage, malformed/unavailable source, and exact source primitive IDs. Retain all original candidate IDs regardless of the result.
+4. Distinguish `ORIGINAL_SOURCE_DOUBLE_COVERAGE`, `ORIGINAL_SOURCE_SINGLE_COVERAGE`, `ORIGINAL_SOURCE_ZERO_COVERAGE`, `ORIGINAL_SOURCE_UNAVAILABLE` as **diagnostic-only** statuses, each with `commercial_projection_allowed=false`.
+5. Test synthetic end-to-end positives, a snapped false endpoint overlap, orthogonal crossing, two truly overlapping source intervals, neither true source owner, repeated/split/rotated representations, source-revision mismatch, competing viewports, source preservation and deterministic replay. Verify the actual immutable original source and a second drawing before generalising.
+6. Never change a `SourceRoomFaceAuthority` decision or quantity until a separate authority-promotion review establishes that eliminating source-unsupported *snapped-graph* competitors also preserves original source physical-wall existence, wall topology and partial-scope contamination rules.
+
+**First exact blocker after this diagnostic:** if no truly source-supported and independently enclosed Office face exists, record the particular source frame/physical-ring failure. The 0.48-pt left extent discrepancy is NOT an admissible tolerance without original frame/ink authority.
+
+## 5. Counterexamples and rejection criteria
+
+- Both originals cover the same positive span → **retain** competing owners, no first/nearest/longest election.
+- Two distinct original walls touch at a common endpoint → **do not** assert wall equivalence.
+- Different original orientations cross → **do not** infer one wall is a continuation of the other.
+- One original source span missing because of W2 raster loss → **do not** infer it was absent from the original PDF.
+- Untrusted words, borrowed F07 snapshot, plan-frame title or a floor's documented dimension box → **cannot** authenticate room-face membership.
+- Incomplete wall scope/cropped frame → **ABSTAIN** on any unproved physical face even if four diagnostic edge conflicts look explainable.
+
+## 6. Benchmark firewall and request
+
+The original source and these fragments are engineering evidence. The frozen Full Plan V2 holdout expected values, evaluator, tolerance and benchmark identities **must never** influence the implementation. No FT3 definition trust beyond 21/24, no floor finish, no new customer row, no benchmark score claimed.
+
+**Review requested:** confirm whether the existing fragment containment contract is appropriate for a strictly read-only source-vs-snapped overlap census and whether a genuinely source-owned Office ring can ever be considered locally without violating the cropped F07 scope. Production algorithm changes are explicitly out of scope for this report.
