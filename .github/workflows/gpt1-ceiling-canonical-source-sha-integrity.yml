@@ -72,20 +72,39 @@ jobs:
           assert summary["source_positive_partial_page"] is None
           assert summary["complete_project_handoff"] is False
           assert summary["benchmark_score_granted"] is False
+          # This source control is scoped and historically ceiling-negative,
+          # but never suppress future independently authentic FIRM floors or
+          # finishes: verify any positive rows against the genuine sealed run.
           assert summary["family_counts"]["ceiling_area"]==0
-          assert summary["combined_quantity_count"]==0
-          assert summary["customer_rows_verified"] is False
-          assert summary["combined_run_file"] is None
-          assert summary["status"] in ("no_sealable_quantities","source_complexity_blocked")
+          n=summary["combined_quantity_count"]
+          if n:
+              from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+              from pb_customer_output_verification import verify_sealed_customer_output
+              run=sealed_source_closed_run_from_dict(
+                  json.loads(Path(summary["combined_run_file"]).read_text()))
+              rows=json.loads(Path(summary["customer_rows_file"]).read_text())
+              assert summary["status"]=="sealed"
+              assert summary["customer_rows_verified"] is True
+              assert len(run.quantities)==n
+              assert len({q.quantity_id for q in run.quantities})==n
+              assert all(q.family in {"floor_area","floor_finish_area"} and
+                         q.status in {"firm","corroborated"} and not q.abstained
+                         for q in run.quantities)
+              report=verify_sealed_customer_output(run,rows)
+              assert report.customer_row_count==n
+              assert tuple(run.source_sha256s)==(original_sha,)
+          else:
+              assert summary["customer_rows_verified"] is False
+              assert summary["combined_run_file"] is None
+              assert summary["status"] in ("no_sealable_quantities","source_complexity_blocked")
           Path("artifacts/gpt1-ceiling-source-sha/summary.json").write_text(
               json.dumps({
                   "original_sha_verified":original_sha,
-                  "original_partial_plan_page":None,
+                  "source_positive_partial_page":None,
                   "metric_ceiling_quantity_published":False,
-                  "new_floor_finish_quantity_published":False,
-                  "signed_customer_rows":0,
+                  "signed_source_verified_quantity_count":n,
                   "first_producer_reasons":summary.get("claim_reason_codes",[]),
-                  "source_measurement_complete":False,
+                  "complete_project_handoff":False,
                   "frozen_score":None,
               },sort_keys=True,indent=2))
           PY
