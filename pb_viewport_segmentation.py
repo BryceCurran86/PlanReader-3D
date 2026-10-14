@@ -825,6 +825,8 @@ def _frame_looks_like_table(
     frame: Sequence[float],
     page: Any,
     calibration: ViewportLayoutCalibration,
+    *,
+    allow_line_grid_only: bool = True,
 ) -> bool:
     """Return True only for positive repeated table-grid structure.
 
@@ -916,6 +918,11 @@ def _frame_looks_like_table(
             continue
         return True
 
+    # Closed repeated source cells establish stronger schedule evidence than
+    # linear strokes: ordinary construction plan/wall grids can look like a
+    # table without containing any independently source-closed table cells.
+    if not allow_line_grid_only:
+        return False
     return _frame_looks_like_line_grid_table(frame, page, calibration)
 
 
