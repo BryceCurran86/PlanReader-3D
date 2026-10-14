@@ -8,6 +8,7 @@ candidate canonical objects; they are never silently merged or discarded.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Mapping
@@ -219,6 +220,19 @@ def _make_wall(
     )
 
 
+def _candidate_membership_is_sound(
+    wall: LiveCanonicalWallObject, member_owners: Mapping[str, int]
+) -> bool:
+    """A candidate wall may be re-keyed only with an exclusive, source-matching lineage."""
+
+    members = tuple(wall.member_wall_candidate_ids)
+    if not members or any(not _clean(member_id) for member_id in members):
+        return False
+    if tuple(member.wall_candidate_id for member in wall.plan_members) != members:
+        return False
+    return all(member_owners[member_id] == 1 for member_id in members)
+
+
 def _localize_candidate_id_collisions(
     walls: list[LiveCanonicalWallObject],
     mapping: Mapping[str, str],
@@ -237,7 +251,9 @@ def _localize_candidate_id_collisions(
     unresolved candidate with ``physical_identity_resolved=False`` and a distinct
     identity status, and is never merged, dropped or promoted. A collision that
     involves any physically resolved wall is left untouched for the global
-    fail-closed guard.
+    fail-closed guard. So is any colliding wall whose member lineage is not
+    sound (empty, repeated within the wall, shared with another wall, or not
+    matching its plan members): such a mapping must never be silently published.
     """
 
     positions: dict[str, list[int]] = {}
@@ -250,8 +266,16 @@ def _localize_candidate_id_collisions(
     }
     if not colliding:
         return walls, dict(mapping), False
+    member_owners = Counter(
+        member_id for wall in walls for member_id in wall.member_wall_candidate_ids
+    )
     for indexes in colliding.values():
         if any(walls[index].physical_identity_resolved for index in indexes):
+            return walls, dict(mapping), False
+        if not all(
+            _candidate_membership_is_sound(walls[index], member_owners)
+            for index in indexes
+        ):
             return walls, dict(mapping), False
 
     rekeyed = list(walls)

@@ -288,3 +288,101 @@ def test_without_localization_the_same_input_reproduces_the_old_defect(monkeypat
     assert result.status is EvidenceResolutionStatus.CONFLICT
     assert result.walls == ()
     assert LIVE_CANONICAL_WALL_FRAME_CONFLICT in result.reason_codes
+
+
+# ---- membership integrity (review gate: never publish a malformed lineage) --------
+
+def _assert_not_localized(forged):
+    out, remap, localized = _localize_candidate_id_collisions(
+        forged, _mapping_for(forged)
+    )
+    assert localized is False
+    assert [w.canonical_wall_id for w in out] == [w.canonical_wall_id for w in forged]
+    assert remap == _mapping_for(forged)
+
+
+def test_empty_member_lineage_is_not_localized(clean_walls) -> None:
+    walls, _ = clean_walls
+    forged = _collide(walls, (0, 1))
+    forged[0] = replace(forged[0], member_wall_candidate_ids=(), plan_members=())
+    _assert_not_localized(forged)
+
+
+def test_blank_member_id_is_not_localized(clean_walls) -> None:
+    walls, _ = clean_walls
+    forged = _collide(walls, (0, 1))
+    blank = replace(forged[0].plan_members[0], wall_candidate_id="  ")
+    # Lineage and plan members agree with each other; only the id itself is blank.
+    forged[0] = replace(
+        forged[0], member_wall_candidate_ids=("  ",), plan_members=(blank,)
+    )
+    _assert_not_localized(forged)
+
+
+def test_member_repeated_within_a_wall_is_not_localized(clean_walls) -> None:
+    walls, _ = clean_walls
+    forged = _collide(walls, (0, 1))
+    member = forged[0].member_wall_candidate_ids[0]
+    forged[0] = replace(
+        forged[0],
+        member_wall_candidate_ids=(member, member),
+        plan_members=forged[0].plan_members * 2,
+    )
+    _assert_not_localized(forged)
+
+
+def test_member_claimed_by_another_wall_is_not_localized(clean_walls) -> None:
+    walls, _ = clean_walls
+    forged = _collide(walls, (0, 1))
+    stolen = forged[0].member_wall_candidate_ids[0]
+    forged[2] = replace(
+        forged[2],
+        member_wall_candidate_ids=(*forged[2].member_wall_candidate_ids, stolen),
+    )
+    _assert_not_localized(forged)
+
+
+def test_plan_members_that_do_not_match_the_lineage_are_not_localized(clean_walls) -> None:
+    walls, _ = clean_walls
+    forged = _collide(walls, (0, 1))
+    forged[0] = replace(forged[0], plan_members=walls[2].plan_members)
+    _assert_not_localized(forged)
+
+
+def test_rekey_colliding_with_an_existing_generated_id_still_fails_closed(
+    monkeypatch,
+) -> None:
+    """A re-keyed id that lands on another wall's id must not be published."""
+
+    def run(third_id=None):
+        source, wall_opening, _scope = _boundary_incomplete_source()
+        original = composition._make_wall
+        calls = {"n": 0}
+
+        def forcing(**kwargs):
+            wall = original(**kwargs)
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                wall = replace(wall, canonical_wall_id="wall2_forced_candidate_collision")
+            elif calls["n"] == 3 and third_id is not None:
+                wall = replace(wall, canonical_wall_id=third_id)
+            return wall
+
+        monkeypatch.setattr(composition, "_make_wall", forcing)
+        return compose_live_canonical_walls(
+            source_visibility_producer=source,
+            wall_opening_composition=wall_opening,
+        )
+
+    first = run()
+    assert first.status is EvidenceResolutionStatus.CANDIDATE
+    generated = next(
+        wall.canonical_wall_id
+        for wall in first.walls
+        if wall.identity_status == COLLISION_STATUS
+    )
+    second = run(third_id=generated)
+    assert second.status is EvidenceResolutionStatus.CONFLICT
+    assert second.walls == ()
+    assert dict(second.candidate_to_canonical_wall_id) == {}
+    assert LIVE_CANONICAL_WALL_FRAME_CONFLICT in second.reason_codes
