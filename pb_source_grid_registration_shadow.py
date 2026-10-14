@@ -79,6 +79,186 @@ def _rows(words: tuple[dict, ...], *, axis: str, tolerance: float,
     return tuple(results)
 
 
+
+def _native_vector_grid_axes(page: Any) -> dict[str, tuple[dict, ...]]:
+    """Candidate long collinear segmented source STROKES, not W4 wall roles.
+
+    Return original PDF path/index/coordinates.  No OCR, inferred vector,
+    reconstructed raster line or invented source primitive enters this
+    diagnostic. Drawing colors are not hard-coded to a project's grid color.
+    """
+    groups: dict[tuple, list[tuple]] = {}
+    for path_index, drawing in enumerate(page.get_drawings()):
+        color = drawing.get("color")
+        width = drawing.get("width")
+        if (
+            type(color) not in (tuple, list)
+            or len(color) != 3
+            or not all(math.isfinite(float(c)) for c in color)
+            or type(width) not in (float, int)
+            or not math.isfinite(float(width))
+            or float(width) <= 0
+        ):
+            continue
+        style = (
+            *(round(float(c), 4) for c in color),
+            round(float(width), 4),
+        )
+        for item_index, item in enumerate(drawing.get("items") or ()):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            a, b = item[1], item[2]
+            x1, y1, x2, y2 = float(a.x), float(a.y), float(b.x), float(b.y)
+            if not all(math.isfinite(v) for v in (x1,y1,x2,y2)):
+                continue
+            if abs(x1-x2) <= 0.05 and abs(y1-y2) > 1.0:
+                key=("x",round((x1+x2)/2.0,1),style)
+                low,high=sorted((y1,y2))
+            elif abs(y1-y2) <= 0.05 and abs(x1-x2) > 1.0:
+                key=("y",round((y1+y2)/2.0,1),style)
+                low,high=sorted((x1,x2))
+            else:
+                continue
+            groups.setdefault(key,[]).append(
+                (low,high,int(path_index),int(item_index))
+            )
+    result: dict[str,list[dict]]={"x":[],"y":[]}
+    for (orientation,coordinate,style),segments in groups.items():
+        if len(segments) < 12:
+            continue
+        source_span=max(row[1] for row in segments)-min(
+            row[0] for row in segments
+        )
+        needed=(
+            float(page.cropbox.height)*0.35
+            if orientation=="x" else float(page.cropbox.width)*0.35
+        )
+        if source_span < needed:
+            continue
+        result[orientation].append({
+            "native_constant_coordinate": coordinate,
+            "source_style": style,
+            "segment_count": len(segments),
+            "native_source_span_pdf_pts": round(source_span,3),
+            "original_path_item_addresses": tuple(
+                (s[2],s[3]) for s in segments
+            ),
+        })
+    return {axis:tuple(rows) for axis,rows in result.items()}
+
+
+def _grid_vector_witness_for_page(
+    axes: dict[str,tuple[dict,...]],
+    letters: dict, numbers: dict,
+) -> dict | None:
+    # Each source grid marker must have a uniquely associated original long
+    # stroke on *both* source axes. A label without a line remains unproven.
+    matches=[]
+    for orientation,controls,coordinate in (
+        ("x",letters,"x"),("y",numbers,"y")
+    ):
+        owned={}
+        for key,word in controls.items():
+            candidates=[
+                axis for axis in axes[orientation]
+                if abs(axis["native_constant_coordinate"]-word[coordinate]) <= 4.5
+            ]
+            if not candidates:
+                return None
+            owned[key]=candidates
+        matches.append(owned)
+    # A real drawn construction grid is a single original vector stroke style
+    # across all independent lettered and numbered axes on the one page.
+    styles=None
+    for group in matches:
+        for options in group.values():
+            group_styles={tuple(axis["source_style"]) for axis in options}
+            styles = group_styles if styles is None else styles & group_styles
+    if not styles or len(styles)!=1:
+        return None
+    style=next(iter(styles))
+    outputs=[]
+    for group in matches:
+        selected={}
+        for token,options in group.items():
+            same=[o for o in options if tuple(o["source_style"])==style]
+            if len(same)!=1:
+                return None
+            selected[token]=same[0]
+        outputs.append(selected)
+    return {"letters":outputs[0],"numbers":outputs[1],"style":style}
+
+
+def _native_cross_view_vector_registration(
+    source_bytes: bytes, pages: tuple[int,int],
+    text_hypothesis: tuple,
+) -> dict:
+    """Cross-check text control candidate against ORIGINAL, independent ink."""
+    letters,numbers,_,_,la,lb,na,nb=text_hypothesis
+    with fitz.open(stream=source_bytes,filetype="pdf") as doc:
+        geometries=[
+            _native_vector_grid_axes(doc[p]) for p in pages
+        ]
+    source_controls=[
+        _grid_vector_witness_for_page(
+            geometry, row["controls"], column["controls"]
+        )
+        for geometry,row,column in zip(
+            geometries,(la,lb),(na,nb)
+        )
+    ]
+    if any(value is None for value in source_controls):
+        return {"source_native_vector_grid_candidate":False,
+                "first_grid_vector_gate":"native_grid_marker_drawn_vector_ancestry_unavailable"}
+    a,b=source_controls
+    if a["style"]!=b["style"]:
+        return {"source_native_vector_grid_candidate":False,
+                "first_grid_vector_gate":"cross_view_grid_source_style_conflict"}
+    offsets_x=[
+        b["letters"][name]["native_constant_coordinate"]
+        -a["letters"][name]["native_constant_coordinate"]
+        for name in letters
+    ]
+    offsets_y=[
+        b["numbers"][name]["native_constant_coordinate"]
+        -a["numbers"][name]["native_constant_coordinate"]
+        for name in numbers
+    ]
+    if (
+        max(offsets_x)-min(offsets_x)>0.5
+        or max(offsets_y)-min(offsets_y)>0.5
+    ):
+        return {"source_native_vector_grid_candidate":False,
+                "first_grid_vector_gate":"drawn_gridline_cross_view_axis_conflict"}
+    return {
+        "source_native_vector_grid_candidate":True,
+        "first_grid_vector_gate":"producer_owned_grid_source_and_room_equivalence_unverified",
+        "native_vector_grid_translation_candidate_pdf_pts":[
+            round(median(offsets_x),6),round(median(offsets_y),6),
+        ],
+        "native_vector_grid_letter_lineage":[
+            {"grid_token":name,
+             "first_line_coordinate":a["letters"][name]["native_constant_coordinate"],
+             "second_line_coordinate":b["letters"][name]["native_constant_coordinate"],
+             "first_original_segment_count":a["letters"][name]["segment_count"],
+             "second_original_segment_count":b["letters"][name]["segment_count"],
+             "first_original_path_item_addresses":a["letters"][name]["original_path_item_addresses"],
+             "second_original_path_item_addresses":b["letters"][name]["original_path_item_addresses"],
+            } for name in letters
+        ],
+        "native_vector_grid_number_lineage":[
+            {"grid_token":name,
+             "first_line_coordinate":a["numbers"][name]["native_constant_coordinate"],
+             "second_line_coordinate":b["numbers"][name]["native_constant_coordinate"],
+             "first_original_segment_count":a["numbers"][name]["segment_count"],
+             "second_original_segment_count":b["numbers"][name]["segment_count"],
+             "first_original_path_item_addresses":a["numbers"][name]["original_path_item_addresses"],
+             "second_original_path_item_addresses":b["numbers"][name]["original_path_item_addresses"],
+            } for name in numbers
+        ],
+    }
+
+
 def source_grid_registration_shadow(
     source_pdf_bytes: bytes,
     *,
@@ -213,6 +393,17 @@ def source_grid_registration_shadow(
         ],
         "first_unclosed_gate": "source_grid_drawn_line_and_raster_receipts_unverified",
     })
+    vector=_native_cross_view_vector_registration(
+        source_pdf_bytes,(first_page_index,second_page_index),hypotheses[0]
+    )
+    base.update(vector)
+    # Raw native-vector path receipts are stronger source evidence than word
+    # coordinates alone. They still cannot grant producer-owned W2/W3/W4
+    # physical grid, room, finish or commercial authority.
+    if vector.get("source_native_vector_grid_candidate") is True:
+        base["first_unclosed_gate"]=(
+            "source_grid_producer_and_room_physical_equivalence_unverified"
+        )
     return base
 
 
