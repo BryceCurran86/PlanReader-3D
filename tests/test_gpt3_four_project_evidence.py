@@ -339,3 +339,118 @@ def test_cross_project_unique_ids_are_retained_and_duplicates_are_atomic():
         b, project_id="project-b", seen=seen,
     )
     assert seen == {"b": "project-b"}
+
+
+def test_full_four_project_success_passes_required_source_and_completion_receipts(
+    tmp_path, monkeypatch,
+):
+    """Synthetic sources only; no frozen truth or benchmark results are altered."""
+    import hashlib
+    import json
+    from dataclasses import dataclass
+    from types import SimpleNamespace
+
+    dirs = _dirs(tmp_path)
+    frozen = tmp_path / "synthetic-frozen"
+    manifests = []
+    for i in range(4):
+        project_id = f"test-project-{i}"
+        name = f"test-original-{i}.pdf"
+        original = dirs["source_dir"] / name
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes(f"%PDF-test-synthetic-{i}".encode("ascii"))
+        sha = hashlib.sha256(original.read_bytes()).hexdigest()
+        document = SimpleNamespace(name=name, sha256=sha)
+        manifests.append(SimpleNamespace(
+            project_id=project_id, source_documents=(document,),
+            verified_items=tuple(
+                SimpleNamespace(denominator_eligible=True) for _ in range(30)
+            ),
+            status="VERIFIED", source_package_complete=True, reason_codes=(),
+        ))
+        canonical = frozen / "projects" / project_id / "source_manifest.json"
+        canonical.parent.mkdir(parents=True)
+        canonical.write_text(json.dumps({
+            "project_id": project_id,
+            "source_documents": [{
+                "name": name, "size_bytes": original.stat().st_size,
+                "sha256": sha,
+            }],
+        }), encoding="utf-8")
+        for key, suffix in (
+            ("sealed_dir", ".json"),
+            ("identity_map_dir", ".identity_map.json"),
+            ("customer_dir", ".customer_rows.json"),
+        ):
+            path = dirs[key] / (project_id + suffix)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "[]" if key == "customer_dir" else json.dumps({
+                    "project_id": project_id, "source_sha256s": [sha],
+                }),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(module, "FROZEN_ROOT", frozen)
+    monkeypatch.setattr(module, "load_suite_manifests", lambda root: manifests)
+    monkeypatch.setattr(
+        module, "sealed_source_closed_run_from_dict",
+        lambda data: SimpleNamespace(
+            project_id=data["project_id"],
+            source_sha256s=data["source_sha256s"],
+            quantities=(),
+            to_dict=lambda: data,
+        ),
+    )
+    monkeypatch.setattr(
+        module, "identity_map_from_dict",
+        lambda data: SimpleNamespace(
+            project_id=data["project_id"], source_sha256s=data["source_sha256s"],
+        ),
+    )
+    monkeypatch.setattr(
+        module, "verify_sealed_customer_output",
+        lambda sealed, rows: SimpleNamespace(
+            project_id=sealed.project_id, sealed_quantity_count=0,
+            valid_quantity_count=0, abstained_quantity_count=0,
+            customer_row_count=0, verified_quantity_ids=(),
+        ),
+    )
+    monkeypatch.setattr(module, "reconcile_sealed_run_v2", lambda *a: ())
+    monkeypatch.setattr(
+        module, "_unchanged_frozen_exact_report",
+        lambda path, *_: {
+            "project_id": path.parent.name,
+            "source_sha_verified": True,
+            "reconciliation_complete": True,
+            "denominator": 30,
+        },
+    )
+
+    @dataclass
+    class SyntheticSuiteResult:
+        publication_status: str = "PUBLISHED"
+        coverage_accuracy: float = 0.0
+        precision_adjusted_accuracy: float = 0.0
+
+    calls = []
+    def strict_evaluator(manifests, scored, **kwargs):
+        calls.append(kwargs)
+        assert len(scored) == 4
+        assert kwargs["required_project_count"] == 4
+        assert kwargs["reconciliation_complete_by_project"] == {
+            item.project_id: True for item in manifests
+        }
+        assert kwargs["evaluated_source_sha256s_by_project"] == {
+            item.project_id: (item.source_documents[0].sha256,)
+            for item in manifests
+        }
+        return SyntheticSuiteResult()
+
+    monkeypatch.setattr(module, "evaluate_suite_v2", strict_evaluator)
+    report = module.build_four_project_evidence_ledger(**dirs)
+    assert len(calls) == 1
+    assert report["publication_status"] == "PUBLISHED"
+    assert report["frozen_denominator"] == 120
+    assert all(x["publication_status"] == "PROJECT_VERIFIED" for x in report["projects"])
+    assert report["coverage_accuracy"] == 0.0
