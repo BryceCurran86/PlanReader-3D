@@ -14,6 +14,9 @@ import sys
 from typing import Any, Sequence
 
 from scripts.report_full_plan_v2_readiness import _object, _write_readiness_report
+from tools.gpt3_signed_v2_family_trade_integrity import (
+    require_signed_v2_family_trade_integrity,
+)
 
 FROZEN_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -183,6 +186,15 @@ def build_original_byte_gated_project_report(
             "project_evaluation": None,
         }
 
+    # An independently supplied identity map must not reclassify a genuine
+    # producer-owned floor_area as tiling/ceiling, or a window as a door.
+    # Signed source documents and complete original source envelopes were
+    # already authenticated above. Check before invoking frozen scoring.
+    require_signed_v2_family_trade_integrity(
+        verified_items=manifest.get("verified_takeoff_items") or (),
+        sealed_quantities=sealed_claim.get("quantities") or (),
+        identity_bindings=identity_claim.get("bindings") or (),
+    )
     # It is safe to consult the unchanged frozen evaluator only after the
     # immutable manifest says this project's source/denominator is complete.
     report = _unchanged_frozen_exact_report(
