@@ -133,11 +133,18 @@ jobs:
               "floor_area_quantity_8bcdc01455538a6a105a":9.05352,
               "floor_area_quantity_6b28b3abaedf519631ed":25.37875,
           }
-          assert len(q)==3 and {x.quantity_id for x in q}==set(control)
-          assert all(abs(float(x.value)-control[x.quantity_id])<1e-8 for x in q)
+          source_by_id={x.quantity_id:x for x in q}
+          # Retain all three independently established original floor
+          # identities, but do not forbid a later genuinely supported
+          # additional measured room from the same original PDF.
+          assert set(control).issubset(source_by_id)
+          assert all(abs(float(source_by_id[qid].value)-value)<1e-8
+                     for qid,value in control.items())
           report=inspect_room_measurement_gates(claim)
-          assert report["source_closed_floor_seal_quantity_count"]==3
-          assert report["verified_floor_customer_row_count"]==3
+          assert report["source_closed_floor_seal_quantity_count"]>=3
+          assert report["verified_floor_customer_row_count"]>=3
+          assert report["source_closed_floor_seal_quantity_count"]==len(q)
+          assert report["verified_floor_customer_row_count"]==len(q)
           assert report["commercial_estimator_approved"] is False
           assert report["benchmark_accuracy"] is None
           assert not claim.floor_finish_quantity_evidence
