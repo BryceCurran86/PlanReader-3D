@@ -63,7 +63,18 @@ def inspect_native_ink_against_w2(report, pdf_bytes: bytes) -> dict:
             pages_seen.add(key)
             drawings = document.load_page(page_no - 1).get_drawings()
             audit_edges = []
-            for edge_row in scope["competing_source_edges"]:
+            previous_edges = previous["scopes"][len(rows)]["contested_source_edges"]
+            if len(previous_edges) != len(scope["competing_source_edges"]):
+                raise ValueError("w2_original_contested_edge_universe_mismatch")
+            for edge_row, w2_audit in zip(
+                scope["competing_source_edges"], previous_edges
+            ):
+                if (
+                    w2_audit["face_id"] != edge_row["face_id"]
+                    or w2_audit["competing_planar_edge"]
+                       != edge_row["competing_planar_edge"]
+                ):
+                    raise ValueError("w2_original_contested_edge_identity_mismatch")
                 contenders = edge_row.get("candidate_walls")
                 if not isinstance(contenders, (tuple, list)) or len(contenders) < 2:
                     raise ValueError("original_source_edge_contenders_incomplete")
@@ -125,6 +136,28 @@ def inspect_native_ink_against_w2(report, pdf_bytes: bytes) -> dict:
                         "physical_wall_equivalence_granted": False,
                     })
                 candidate_rows.sort(key=lambda v: v["w4_candidate_wall_id"])
+                w2_by_wall = {
+                    item["wall_id"]: item["full_surviving_w2_span_supported"]
+                    for item in w2_audit["all_wall_contenders"]
+                }
+                if (
+                    len(w2_by_wall) != len(w2_audit["all_wall_contenders"])
+                    or set(w2_by_wall) != set(candidate_ids)
+                ):
+                    raise ValueError("w2_original_wall_contender_universe_mismatch")
+                for item in candidate_rows:
+                    native = item["direct_indexed_native_ink_witness"]
+                    w2_span = w2_by_wall[item["w4_candidate_wall_id"]]
+                    item["same_edge_surviving_w2_full_span_supported"] = w2_span
+                    item["first_source_vs_w2_divergence"] = (
+                        "source_or_w2_unavailable"
+                        if native is None or w2_span is None else
+                        "original_native_ink_spans_edge_but_surviving_w2_does_not"
+                        if native and not w2_span else
+                        "surviving_w2_spans_edge_but_indexed_native_ink_does_not"
+                        if w2_span and not native else
+                        "source_and_surviving_w2_span_agree"
+                    )
                 positive_native_id_sets = [
                     {
                         ink["native_primitive_id"]
