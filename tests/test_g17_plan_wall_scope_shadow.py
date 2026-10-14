@@ -149,3 +149,31 @@ def test_source_receipt_changed_during_graph_read_cannot_escape_exit_proof(monke
     monkeypatch.setattr(module,"_graph",mutate)
     with pytest.raises(RuntimeError):
         build_g17_plan_wall_scope_shadow(source,revision_id=pub.revision.revision_id,page_id="1")
+
+
+def test_original_closed_or_coincident_chain_retains_ancestry_and_unrelated_wall():
+    from pb_g17_plan_wall_scope_shadow import _graph
+    segments = [dict(id='a',kind='line',x1=0.,y1=0.,x2=10.,y2=0.),
+                dict(id='b',kind='line',x1=10.,y1=0.,x2=4e-8,y2=0.),
+                dict(id='separate',kind='line',x1=50.,y1=50.,x2=100.,y2=50.)]
+    before = deepcopy(segments)
+    root = {"document_id":"d","page_id":"1"}
+    r = _graph(segments,root=root,scope_id='vp',tolerance=0.)
+    assert r['w4_abstained_chains']
+    assert all(a['status']=='abstained' and not a['host_publication_allowed']
+               for a in r['w4_abstained_chains'])
+    assert {p for a in r['w4_abstained_chains'] for e in a['actual_owned_w3_fragment_rows']
+            for p in e['primitive_lineage']['source_primitive_ids']} == {'a','b'}
+    assert len(r['w4_records'])==1
+    assert r['w4_records'][0]['physical_identity']['source_primitive_ids']==('separate',)
+    assert segments==before
+
+
+def test_unexpected_assembler_error_is_not_swallowed(monkeypatch):
+    import pb_g17_plan_wall_scope_shadow as module
+    def bad(*args, **kwargs):
+        raise ValueError('unrelated genuine source failure')
+    monkeypatch.setattr(module,'assemble_wall_candidates',bad)
+    with pytest.raises(ValueError,match='unrelated genuine source failure'):
+        module._graph([dict(id='a',kind='line',x1=0.,y1=0.,x2=10.,y2=0.)],
+                      root={"document_id":"d","page_id":"1"},scope_id='vp',tolerance=0.)

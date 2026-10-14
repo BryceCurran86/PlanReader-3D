@@ -46,6 +46,14 @@ within the authorized GPT MAX source lane. Existing wall/host authorities will
 not accept this wrapper. A separate reviewed producer integration is required
 if and only if original structural ownership and competing claims close.
 
+The first original drawing replay reached a W4 chain with coincident endpoints.
+The default `WallCandidate` constructor correctly rejected it. The isolated
+observer must use the existing explicit `identity_abstention_shadow` assembler
+contract, retaining that actual chain and all its W2/W3 ancestry as an ABSTAIN
+receipt alongside unrelated valid candidates. It must not catch arbitrary
+`ValueError`, delete the chain, invent endpoints or change default assembly.
+Coincident edges removed by the existing W3 deduplication also remain recorded.
+
 ## Benchmark observations excluded from implementation
 
 Original source hashes and existing 21/15/9/2094/eight controls are regression

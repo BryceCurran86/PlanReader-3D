@@ -18,8 +18,9 @@ from pb_migration_provider_envelope import ProviderContext
 from pb_physical_opening_authority import PHYSICAL_OPENING_EXISTS
 from pb_physical_wall_candidate_authority import (
     MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS, PhysicalWallCandidateRecord,
-    PhysicalWallSourceEdgeFragment, _assemble_source_owned_w4_identities_or_unavailable,
+    PhysicalWallSourceEdgeFragment,
 )
+from pb_physical_wall_identity import DuplicateW4CandidateAddress, collect_physical_wall_identities
 from pb_raster_opening_source_primitives import MASS_THRESHOLD
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import (
@@ -28,11 +29,12 @@ from pb_source_visibility_authority import (
 )
 from pb_viewport_migration_adapter import adapt_f07_viewport_to_migration
 from pb_viewport_segmentation import segment_source_page_viewports
-from pb_wall_room_topology_junction_classifier import classify_junctions
+from pb_wall_room_topology_junction_classifier import classify_junctions, deduplicate_coincident_edges
 from pb_wall_room_topology_primitive_lineage import LINEAGE_KEY
 from pb_wall_room_topology_stage_a import (
     DEFAULT_GAP_SNAP_TOLERANCE_PT, build_wall_graph_for_viewport,
 )
+from pb_wall_room_topology_wall_assembly import W4SourceCandidateAddressCollision, assemble_wall_candidates
 
 
 def _rgb(png):
@@ -70,12 +72,21 @@ def _graph(segments, *, root, scope_id, tolerance):
         exact_endpoint_index_shadow=(tolerance == 0.0), exact_split_parent_lineage_shadow=True)
     junctions, relationships = classify_junctions(graph,
         document_id=root["document_id"], page_id=root["page_id"], viewport_id=scope_id)
-    assembled = _assemble_source_owned_w4_identities_or_unavailable(
-        graph=graph, junctions=junctions, relationships=relationships, scope_id=scope_id)
+    deduped, removed = deduplicate_coincident_edges(graph)
+    abstained_chains = []
+    identities = None
+    try:
+        walls, _ = assemble_wall_candidates(deduped,junctions,relationships,
+            viewport_id=scope_id, identity_abstention_shadow=True,
+            abstained_chain_rows=abstained_chains)
+        identities = collect_physical_wall_identities(walls,deduped)
+    except (W4SourceCandidateAddressCollision,DuplicateW4CandidateAddress):
+        # The entire candidate address ambiguity remains unavailable. Other
+        # exceptions propagate; no arbitrary error becomes an empty success.
+        pass
     records = ()
-    if assembled is not None:
-        walls, _, identities = assembled
-        edges = {str(e["id"]):e for e in graph["edges"]}
+    if identities is not None:
+        edges = {str(e["id"]):e for e in deduped["edges"]}
         records = tuple(PhysicalWallCandidateRecord(w.candidate_id, w, identities[w.candidate_id],
             source_edge_fragments=tuple(PhysicalWallSourceEdgeFragment(
                 str(eid), tuple(float(edges[str(eid)][k]) for k in ("x1","y1","x2","y2")),
@@ -84,11 +95,17 @@ def _graph(segments, *, root, scope_id, tolerance):
             for w in sorted(walls, key=lambda w:w.candidate_id))
     # The complete source preparation losses and W3 alternatives remain visible.
     return {"snap_tolerance_pt":tolerance, "w2_edge_count":len(graph["edges"]),
+        "w2_edges":[{"edge_id":str(e["id"]),
+            "geometry":tuple(e[k] for k in ("x1","y1","x2","y2")),
+            "source_primitive_ids":tuple(sorted(e[LINEAGE_KEY]["source_primitive_ids"]))}
+            for e in graph["edges"]],
         "w2_excluded_segments":graph["excluded_segments"],
         "w2_snap_collapsed_fragments":graph["snap_collapsed_fragments"],
         "w3_junctions":[asdict(j) for j in junctions],
         "w3_relationships":[asdict(r) for r in relationships],
-        "w4_identity_unavailable":assembled is None,
+        "w3_coincident_edge_removals":tuple(sorted(removed)),
+        "w4_abstained_chains":abstained_chains,
+        "w4_identity_unavailable":identities is None,
         "w4_records":[asdict(r) for r in records]}
 
 
@@ -119,6 +136,7 @@ def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str) 
         source_viewport_ownership_id=None, source_viewport_id=None, source_viewport_bbox=None,
         source_primitive_count=0, source_primitive_dispositions=[], source_positive_graph_primitive_count=0,
         physical_openings=[], raster_candidate_closure=None,
+        shared_source_opening_identity_checks=[],
         default_w2_w3_w4=None, exact_coordinate_w2_w3_w4=None,
         scope_complete=False, structural_wall_role_granted=False,
         physical_wall_equivalence_granted=False, host_granted=False, metric_quantity_granted=False)
@@ -204,29 +222,49 @@ def build_g17_plan_wall_scope_shadow(source, *, revision_id: str, page_id: str) 
             report[name] = _graph(segments,root=root,scope_id=scope_id,tolerance=tol)
     opening = source.physical_opening_authority()
     physical = {}
+    proof_addresses = {}
     for oid in sorted(page_source):
         address = ObservationSelector(root["document_id"],revision_id,root["source_sha256"],root["snapshot_id"],oid)
         proof = opening.prove_existence(address)
         r = proof.existence_record
         if proof.status is EvidenceResolutionStatus.CORROBORATED and proof.proposition == PHYSICAL_OPENING_EXISTS and r is not None:
             physical[r.record_id] = r
+            proof_addresses[r.record_id] = address
     for rid,r in sorted(physical.items()):
         own = set(r.source_observation_ids)
         dispositions = {row["observation_id"]:row for row in rows}
         graph_owners = {}
+        graph_abstentions = {}
         for name in ("default_w2_w3_w4", "exact_coordinate_w2_w3_w4"):
             graph = report[name]
             owners = {}
+            abstentions = {}
             if graph is not None:
                 for record in graph["w4_records"]:
                     for raw in record["physical_identity"]["source_primitive_ids"]:
                         owners.setdefault(raw, []).append(record["wall_candidate_id"])
+                for chain in graph["w4_abstained_chains"]:
+                    for fragment in chain["actual_owned_w3_fragment_rows"]:
+                        for raw in (fragment.get("primitive_lineage") or {}).get("source_primitive_ids",()):
+                            abstentions.setdefault(raw,[]).append(chain["record_id"])
             graph_owners[name] = {oid:sorted(owners.get(
                 dispositions.get(oid,{}).get("source_primitive_id"),())) for oid in sorted(own)}
+            graph_abstentions[name] = {oid:sorted(set(abstentions.get(
+                dispositions.get(oid,{}).get("source_primitive_id"),()))) for oid in sorted(own)}
         report["physical_openings"].append({"record":asdict(r),
             "source_w4_owners":graph_owners,
+            "source_w4_abstained_chain_ids":graph_abstentions,
             "shared_source_competitors":{other:sorted(own & set(p.source_observation_ids))
                 for other,p in sorted(physical.items()) if other != rid and own & set(p.source_observation_ids)}})
+        for other,p in sorted(physical.items()):
+            shared = sorted(own & set(p.source_observation_ids))
+            if other > rid and shared:
+                comparison = opening.compare_identity(proof_addresses[rid],proof_addresses[other])
+                report["shared_source_opening_identity_checks"].append({
+                    "left_opening_id":rid,"right_opening_id":other,
+                    "shared_source_observation_ids":shared,
+                    "producer_identity_comparison":asdict(comparison),
+                    "shared_source_is_host_transfer_authority":False})
     if page_source:
         address = ObservationSelector(root["document_id"],revision_id,root["source_sha256"],root["snapshot_id"],next(iter(page_source)))
         report["raster_candidate_closure"] = asdict(opening.assess_raster_candidate_closure(address))
