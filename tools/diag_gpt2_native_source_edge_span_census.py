@@ -1,8 +1,12 @@
-"""Read-only W4 original-source span audit for #2731 contested room-face edges.
+"""Read-only W2-survivor vs W4-snapped edge audit for #2731.
 
-Consumes a producer-owned original-source diagnostic JSON. It NEVER changes
-SourceRoomFace, W4 physical equivalence, floor/finish measurement, or customers.
-An absence of positive source support is not proof of absence from the drawing.
+SourceEdgeFragments are producer-owned SURVIVING W2 GRAPH facts that retain
+original native primitive *IDs*, not independently verified PDF paint or raw
+native primitive geometry. This tool makes no native-ink proof: a positive W2
+span does not establish a literal native source span or physical wall role.
+Only a separate original-PDF primitive reader can prove native ink. An absent
+W2 fragment is not proof of absent original ink. No room, quantity or customer
+publication is permitted.
 """
 from __future__ import annotations
 
@@ -21,10 +25,10 @@ from pb_source_room_face_authority import (
 )
 
 TOL = 4.0 * math.sqrt(2.0) * 10.0 ** -_NDIGITS
-ZERO = "original_source_zero_coverage"
-ONE = "original_source_single_coverage"
-MULTIPLE = "original_source_double_coverage"
-UNKNOWN = "original_source_unavailable"
+ZERO = "surviving_w2_zero_coverage"
+ONE = "surviving_w2_single_coverage"
+MULTIPLE = "surviving_w2_double_coverage"
+UNKNOWN = "surviving_w2_unavailable"
 
 
 def _native_edge(raw):
@@ -54,9 +58,9 @@ def _contested_edge(raw):
 
 
 def _candidate_support(candidate, child):
-    """One certified fragment or an exact connected same-native-ID split chain.
+    """One W2 source-lineage fragment or continuous same-parent-ID W2 split chain.
 
-    A source gap, crossing, or adjacency *between different wall candidates*
+    A surviving-W2 gap, crossing, or adjacency *between different wall candidates*
     cannot turn into shared source coverage. Split fragments with different
     source primitive IDs cannot silently be glued together.
     """
@@ -116,7 +120,7 @@ def _candidate_support(candidate, child):
         covered_end = intervals[0][1]
         for lo, hi in intervals[1:]:
             if lo > covered_end + TOL:
-                break  # Genuine uncovered native interval: fail closed.
+                break  # Uncovered W2 interval: never invent a native source span.
             covered_end = max(covered_end, hi)
         if covered_end >= length - TOL:
             return True, (source_id,)
@@ -124,7 +128,7 @@ def _candidate_support(candidate, child):
 
 
 def inspect_competing_source_edge(row):
-    """Keep all contenders, labels and source geometry; no authority promotion."""
+    """Keep W2 contenders and ancestry, not independent native ink proof."""
     child = _contested_edge(row.get("competing_planar_edge"))
     contenders = row.get("candidate_walls")
     if child is None or not isinstance(contenders, (list, tuple)) or not contenders:
@@ -146,22 +150,22 @@ def inspect_competing_source_edge(row):
         unknown |= proven is None
         results.append({
             "wall_id": wall_id,
-            "full_original_native_span_supported": proven,
+            "full_surviving_w2_span_supported": proven,
             "witness_source_primitive_ids": receipts,
             "source_edge_fragments_retained": contender.get("source_edge_fragments", ()),
             "structural_wall_role_granted": False,
         })
     supported = tuple(sorted(item["wall_id"] for item in results
-                             if item["full_original_native_span_supported"] is True))
+                             if item["full_surviving_w2_span_supported"] is True))
     status = (UNKNOWN if unknown else MULTIPLE if len(supported) > 1
               else ONE if len(supported) == 1 else ZERO)
     return {
         "face_id": row.get("face_id"),
         "competing_planar_edge": row["competing_planar_edge"],
-        "source_support_status": status,
+        "surviving_w2_span_support_status": status,
         "observed_supported_wall_ids": supported,
         "all_wall_contenders": tuple(sorted(results, key=lambda item: item["wall_id"])),
-        "native_source_universe_complete": False,
+        "independent_original_pdf_ink_proven": False,
         "original_source_wall_equivalence_granted": False,
         "physical_room_publication_granted": False,
         "commercial_projection_allowed": False,
@@ -220,7 +224,7 @@ def main():
     print(json.dumps({
         "original_sha": audit["source_sha256"],
         "contested_edge_statuses": [
-            edge["source_support_status"]
+            edge["surviving_w2_span_support_status"]
             for scope in audit["scopes"]
             for edge in scope["contested_source_edges"]
         ],
