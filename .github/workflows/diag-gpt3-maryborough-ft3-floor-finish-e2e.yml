@@ -61,6 +61,8 @@ jobs:
           if r["firm_floor_finish_area_count"]:
               assert r["sealed_floor_finish_run"] is not None
               assert r["sealed_floor_finish_run"]["quantity_count"] == r["firm_floor_finish_area_count"]
+              assert r["verified_customer_row_count"] == r["firm_floor_finish_area_count"]
+              assert len(r["customer_rows"]) == r["firm_floor_finish_area_count"]
               assert all(
                   row["status"].lower() in {"firm", "corroborated"}
                   and row["abstained"] is False
@@ -70,6 +72,7 @@ jobs:
           print("GPT3_FT3_E2E_SOURCE_REPORT_READY", {
               "floor_area": r["firm_floor_area_count"],
               "floor_finish_area": r["firm_floor_finish_area_count"],
+              "verified_customer_rows": r["verified_customer_row_count"],
               "finish_codes": sorted({
                   row.get("finish_code")
                   for row in r["floor_finish_quantities"]
