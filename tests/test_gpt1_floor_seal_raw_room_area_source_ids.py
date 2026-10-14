@@ -41,7 +41,7 @@ def test_canonical_floor_publisher_can_abstain_but_final_seal_rejects_reused_sou
         _traces(claim)
     with pytest.raises(SourceClosedRunConflictError, match="duplicate original room-area source ID"):
         seal_live_floor_area_run(claim, workspace_id=1, project_id="source-owned-floor")
-    with pytest.raises(SourceClosedRunConflictError, match="duplicate original room-area source ID"):
+    with pytest.raises(SourceClosedRunConflictError, match="duplicate or invalid original room-area source ID"):
         project_live_floor_area_customer_rows(
             claim, workspace_id=1, project_id="source-owned-floor"
         )
