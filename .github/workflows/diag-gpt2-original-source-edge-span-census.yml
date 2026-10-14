@@ -1,4 +1,4 @@
-name: DIAG GPT2 Original Source-Native Wall Span vs Snapped Face
+name: DIAG GPT2 Original-SHA Surviving W2 Graph Span vs Snapped Face
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  original-native-source-span:
+  original-sha-surviving-w2-span:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
-      - name: Shadow native fragment invariance and frozen separation
+      - name: Shadow W2 lineage fragment invariance and frozen separation
         env:
           PYTHONPATH: .
         run: |
@@ -31,7 +31,7 @@ jobs:
           ruff check --select F821,F823 tools/diag_gpt2_native_source_edge_span_census.py tests/test_gpt2_native_source_edge_span_census.py
           python scripts/check_provider_gold_isolation.py
           python scripts/check_full_plan_v2_integrity.py
-      - name: Exact original Maryborough native source ownership census
+      - name: Exact original Maryborough W2 source-lineage coverage census
         env:
           PYTHONPATH: .
         run: |
@@ -62,12 +62,12 @@ jobs:
           assert audit['source_sha256']==source['source_sha256']
           rows=audit['scopes'][0]['contested_source_edges']
           assert len(rows)==4, ('expected 4 original shadow contested edge receipts', rows)
-          counts=Counter(row['source_support_status'] for row in rows)
-          assert counts=={'original_source_single_coverage':2,'original_source_zero_coverage':2}, counts
+          counts=Counter(row['surviving_w2_span_support_status'] for row in rows)
+          assert counts=={'surviving_w2_single_coverage':2,'surviving_w2_zero_coverage':2}, counts
           assert all(not row['commercial_projection_allowed'] for row in rows)
           assert all(not row['original_source_wall_equivalence_granted'] for row in rows)
           assert all(not row['physical_room_publication_granted'] for row in rows)
-          print('ORIGINAL_SOURCE_WITNESS_CLASSES',dict(counts))
+          print('SURVIVING_W2_COVERAGE_CLASSES',dict(counts))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
