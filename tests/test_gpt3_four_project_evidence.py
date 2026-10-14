@@ -156,3 +156,49 @@ def test_signed_customer_or_frozen_manifest_change_after_score_fails(tmp_path):
         manifest=manifest, originals=[original],
         expected_hashes=[digest], signed_hashes=fingerprints,
     )
+
+
+def test_report_destination_cannot_overwrite_signed_inputs_or_alias(tmp_path):
+    dirs = _dirs(tmp_path)
+    input_path = dirs["sealed_dir"] / "signed-run.json"
+    input_path.parent.mkdir(parents=True)
+    input_path.write_text("unchanged signed bytes", encoding="utf-8")
+    args = [
+        "--source-dir", str(dirs["source_dir"]),
+        "--sealed-dir", str(dirs["sealed_dir"]),
+        "--identity-map-dir", str(dirs["identity_map_dir"]),
+        "--customer-dir", str(dirs["customer_dir"]),
+    ]
+    with pytest.raises(ValueError, match="may not overwrite evidence"):
+        module.main([*args, "--output", str(input_path)])
+    assert input_path.read_text(encoding="utf-8") == "unchanged signed bytes"
+
+    alias = tmp_path / "alias-to-signed"
+    alias.symlink_to(dirs["sealed_dir"], target_is_directory=True)
+    with pytest.raises(ValueError, match="may not overwrite evidence"):
+        module.main([*args, "--output", str(alias / "new-report.json")])
+    assert not (dirs["sealed_dir"] / "new-report.json").exists()
+
+    # Never allow a diagnostic to overwrite frozen benchmark truth.
+    with pytest.raises(ValueError, match="may not overwrite evidence"):
+        module.main([
+            *args, "--output",
+            str(module.FROZEN_ROOT / "manifest.json"),
+        ])
+
+
+def test_read_only_report_writes_safely_outside_inputs(tmp_path):
+    dirs = _dirs(tmp_path)
+    output = tmp_path / "reports" / "inventory.json"
+    code = module.main([
+        "--source-dir", str(dirs["source_dir"]),
+        "--sealed-dir", str(dirs["sealed_dir"]),
+        "--identity-map-dir", str(dirs["identity_map_dir"]),
+        "--customer-dir", str(dirs["customer_dir"]),
+        "--output", str(output),
+    ])
+    assert code == 2
+    import json
+    parsed = json.loads(output.read_text(encoding="utf-8"))
+    assert parsed["frozen_denominator"] == 120
+    assert parsed["publication_status"] == "UNPUBLISHED"
