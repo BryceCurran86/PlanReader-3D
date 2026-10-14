@@ -504,7 +504,13 @@ def test_genuine_floor_area_and_finished_floor_keep_distinct_allowed_trades():
         ("opening_area", "windows"),
         ("opening_count", "doors"),
     ):
-        fixture = _family_mapping_fixture(family=family, trade=trade)
+        semantic_key = {
+            "opening_area": "window_area:physical-source-id",
+            "opening_count": "door_count:physical-source-id",
+        }.get(family, "source-owned")
+        fixture = _family_mapping_fixture(
+            family=family, trade=trade, semantic_key=semantic_key,
+        )
         assert module._enforce_mapped_production_family_trade(*fixture) is None
 
 
@@ -556,3 +562,40 @@ def test_existing_original_lot16_sealed_identity_mapping_remains_compatible():
     assert module._enforce_mapped_production_family_trade(
         manifest, sealed, mapping,
     ) is None
+
+
+
+@pytest.mark.parametrize("family", (
+    "unknown_area", "wall_surface_area", "", "floor_ara",
+))
+def test_mapped_unknown_source_family_cannot_claim_arbitrary_frozen_trade(family):
+    fixture = _family_mapping_fixture(
+        family=family, trade="tiling", semantic_key="source-owned",
+    )
+    with pytest.raises(ValueError, match="no verified benchmark trade semantics"):
+        module._enforce_mapped_production_family_trade(*fixture)
+
+
+@pytest.mark.parametrize("family,trade,semantic_key", (
+    ("opening_area", "windows", "opening_area:physical-source-id"),
+    ("opening_area", "doors", "source-owned"),
+    ("opening_area", "doors", "window_count:physical-source-id"),
+    ("opening_count", "doors", "door_area:physical-source-id"),
+    ("opening_count", "windows", "opening_count:physical-source-id"),
+))
+def test_mapped_untyped_or_wrong_measurement_kind_opening_is_rejected(
+    family, trade, semantic_key
+):
+    fixture = _family_mapping_fixture(
+        family=family, trade=trade, semantic_key=semantic_key,
+    )
+    with pytest.raises(ValueError, match="no source-owned door/window kind"):
+        module._enforce_mapped_production_family_trade(*fixture)
+
+
+def test_unmapped_unknown_source_family_remains_unmapped_and_not_misclassified():
+    fixture = _family_mapping_fixture(
+        family="wall_surface_area", trade="painting",
+        mapped_refs=("different-source-identity",),
+    )
+    assert module._enforce_mapped_production_family_trade(*fixture) is None
