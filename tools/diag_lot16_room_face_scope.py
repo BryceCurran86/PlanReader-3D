@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
+from pb_figured_dimension_scale_consistency_shadow import source_figured_scale_shadow
 import pb_source_room_face_authority as face_authority
 import pb_source_room_label_authority as label_authority
 import pb_same_view_room_area_authority as same_view_authority
@@ -894,10 +895,7 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
             "opening_sealing_diagnostic": _opening_sealing_diagnostic(claim),
             "source_label_scope_diagnostic": label_scopes,
             "same_view_witness_intersection_audit": witness_audit,
-            "figured_dimension_scale_shadow": __import__(
-                "pb_figured_dimension_scale_consistency_shadow",
-                fromlist=["source_figured_scale_shadow"],
-            ).source_figured_scale_shadow(witness_audit),
+            "figured_dimension_scale_shadow": source_figured_scale_shadow(witness_audit),
             "label_ownership_diagnostic": {
                 "labelled_room_count": sum(bool(room.room_label) for room in claim.canonical_rooms),
                 "unlabelled_room_count": sum(not bool(room.room_label) for room in claim.canonical_rooms),
