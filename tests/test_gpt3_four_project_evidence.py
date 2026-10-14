@@ -504,7 +504,13 @@ def test_genuine_floor_area_and_finished_floor_keep_distinct_allowed_trades():
         ("opening_area", "windows"),
         ("opening_count", "doors"),
     ):
-        fixture = _family_mapping_fixture(family=family, trade=trade)
+        semantic_key = {
+            "opening_area": "window_area:physical-source-id",
+            "opening_count": "door_count:physical-source-id",
+        }.get(family, "source-owned")
+        fixture = _family_mapping_fixture(
+            family=family, trade=trade, semantic_key=semantic_key,
+        )
         assert module._enforce_mapped_production_family_trade(*fixture) is None
 
 
@@ -556,3 +562,91 @@ def test_existing_original_lot16_sealed_identity_mapping_remains_compatible():
     assert module._enforce_mapped_production_family_trade(
         manifest, sealed, mapping,
     ) is None
+
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"source_sha256":"a","source_sha256":"b"}',
+        '{"quantities":[{"quantity_id":"first","quantity_id":"second"}]}',
+        '{"metadata":{"revision_id":"old","revision_id":"new"}}',
+        '{"fingerprint":"good","fingerprint":"bad"}',
+    ],
+)
+def test_four_project_signed_input_rejects_duplicate_original_json_keys(tmp_path, payload):
+    original = tmp_path / "signed.json"
+    original.write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate key"):
+        module._json_object(original)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '[{"quantity_id":"q-original","quantity_id":"q-swap"}]',
+        '[{"quantity_id":"q","commercial_projection_provenance":{"quantity":{"quantity_id":"q","quantity_id":"foreign"}}}]',
+        '[{"quantity_id":"q","source_sha256":"one","source_sha256":"two"}]',
+    ],
+)
+def test_four_project_customer_input_rejects_nested_duplicate_json_keys(tmp_path, payload):
+    original = tmp_path / "customer.json"
+    original.write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate key"):
+        module._json_customer_rows(original)
+
+
+def test_four_project_strict_json_preserves_legitimate_original_receipts(tmp_path):
+    original = tmp_path / "signed.json"
+    original.write_text(
+        '{"schema_version":"1.0.0","source_sha256":"a","quantities":'
+        '[{"quantity_id":"q1","source_sha256":"b"}]}', encoding="utf-8",
+    )
+    assert module._json_object(original)["quantities"][0]["quantity_id"] == "q1"
+    original.write_text(
+        '[{"quantity_id":"q1","commercial_projection_provenance":'
+        '{"adapter":"commercial_takeoff","quantity":{"quantity_id":"q1"}}}]',
+        encoding="utf-8",
+    )
+    assert module._json_customer_rows(original)[0]["quantity_id"] == "q1"
+    # Empty private package still fails closed independently of JSON parsing.
+    ledger = module.build_four_project_evidence_ledger(**_dirs(tmp_path))
+    assert ledger["publication_status"] == "UNPUBLISHED"
+    assert ledger["frozen_denominator"] == 120
+    assert ledger["official_suite_result"] is None
+
+
+@pytest.mark.parametrize("family", (
+    "unknown_area", "wall_surface_area", "", "floor_ara",
+))
+def test_mapped_unknown_source_family_cannot_claim_arbitrary_frozen_trade(family):
+    fixture = _family_mapping_fixture(
+        family=family, trade="tiling", semantic_key="source-owned",
+    )
+    with pytest.raises(ValueError, match="no verified benchmark trade semantics"):
+        module._enforce_mapped_production_family_trade(*fixture)
+
+
+@pytest.mark.parametrize("family,trade,semantic_key", (
+    ("opening_area", "windows", "opening_area:physical-source-id"),
+    ("opening_area", "doors", "source-owned"),
+    ("opening_area", "doors", "window_count:physical-source-id"),
+    ("opening_count", "doors", "door_area:physical-source-id"),
+    ("opening_count", "windows", "opening_count:physical-source-id"),
+))
+def test_mapped_untyped_or_wrong_measurement_kind_opening_is_rejected(
+    family, trade, semantic_key
+):
+    fixture = _family_mapping_fixture(
+        family=family, trade=trade, semantic_key=semantic_key,
+    )
+    with pytest.raises(ValueError, match="no source-owned door/window kind"):
+        module._enforce_mapped_production_family_trade(*fixture)
+
+
+def test_unmapped_unknown_source_family_remains_unmapped_and_not_misclassified():
+    fixture = _family_mapping_fixture(
+        family="wall_surface_area", trade="painting",
+        mapped_refs=("different-source-identity",),
+    )
+    assert module._enforce_mapped_production_family_trade(*fixture) is None
