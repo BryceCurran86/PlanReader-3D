@@ -1,0 +1,225 @@
+"""Fail-closed four-project Full Plan V2 signed-source execution ledger.
+
+This runner does not extract plans or create benchmark identities. Inputs must
+already be original PDFs plus sealed production, independent identity mapping,
+and the corresponding complete customer projection. Missing private packages,
+partial runs and incomplete frozen manifests NEVER become zero-scored projects.
+Only the existing immutable V2 evaluator may publish a full-suite percentage.
+"""
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict
+import json
+from pathlib import Path
+from typing import Any
+
+from benchmarks.frozen_holdout.full_plan_v2.evaluator import evaluate_suite_v2
+from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
+from benchmarks.frozen_holdout.full_plan_v2.sealed_reconciliation import (
+    identity_map_from_dict,
+    reconcile_sealed_run_v2,
+)
+from pb_customer_output_verification import verify_sealed_customer_output
+from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+from tools.run_gpt3_original_byte_gated_exact_project import (
+    FROZEN_ROOT,
+    _original_sha_gate,
+    _unchanged_frozen_exact_report,
+)
+
+
+def _json_object(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if type(value) is not dict:
+        raise ValueError("signed evidence file must contain a JSON object")
+    return value
+
+
+def _json_customer_rows(path: Path) -> list[dict[str, Any]]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if type(value) is not list or any(type(row) is not dict for row in value):
+        raise ValueError("customer projection must be a JSON array of objects")
+    # Manual/customer-only rows are not allowed into this signed automated lane.
+    if any(type(row.get("quantity_id")) is not str or not row["quantity_id"] for row in value):
+        raise ValueError("automated customer row lacks canonical quantity identity")
+    return value
+
+
+def build_four_project_evidence_ledger(
+    *, source_dir: Path, sealed_dir: Path,
+    identity_map_dir: Path, customer_dir: Path,
+) -> dict[str, Any]:
+    """Inventory all frozen projects, verify supplied original bytes and score safely."""
+    manifests = load_suite_manifests(FROZEN_ROOT)
+    if len(manifests) != 4:
+        raise ValueError("frozen V2 suite must contain exactly four projects")
+    eligible = sum(
+        1 for manifest in manifests for item in manifest.verified_items
+        if item.denominator_eligible
+    )
+    if eligible != 120:
+        raise ValueError("frozen V2 denominator drift: expected existing 120-item suite")
+
+    rows: list[dict[str, Any]] = []
+    scored: dict[str, tuple] = {}
+    for manifest in manifests:
+        project_id = manifest.project_id
+        entry: dict[str, Any] = {
+            "project_id": project_id,
+            "denominator": sum(item.denominator_eligible for item in manifest.verified_items),
+            "manifest_status": manifest.status,
+            "publication_status": "UNAVAILABLE",
+            "source_sha_verified": False,
+            "customer_bijection_verified": False,
+            "reconciliation_complete": False,
+            "reason_codes": [],
+            "exact_project_report": None,
+        }
+        rows.append(entry)
+        original_files = [
+            source_dir / project_id / doc.name for doc in manifest.source_documents
+        ]
+        missing = [
+            doc.name for doc, path in zip(manifest.source_documents, original_files)
+            if not path.is_file()
+        ]
+        if missing:
+            entry["reason_codes"] = [
+                "original_source_not_supplied_in_this_execution",
+                f"missing_original_file_count:{len(missing)}",
+            ]
+            continue
+
+        canonical_manifest = FROZEN_ROOT / "projects" / project_id / "source_manifest.json"
+        original_manifest = _json_object(canonical_manifest)
+        verified, source_reasons, hashes = _original_sha_gate(
+            original_manifest, original_files,
+        )
+        if not verified:
+            entry["publication_status"] = "CONFLICT"
+            entry["reason_codes"] = source_reasons
+            continue
+        entry["source_sha_verified"] = True
+        entry["source_sha256s"] = hashes
+
+        sealed_path = sealed_dir / f"{project_id}.json"
+        identity_path = identity_map_dir / f"{project_id}.identity_map.json"
+        customer_path = customer_dir / f"{project_id}.customer_rows.json"
+        missing_evidence = [
+            label for label, path in (
+                ("sealed_run", sealed_path),
+                ("identity_map", identity_path),
+                ("customer_rows", customer_path),
+            ) if not path.is_file()
+        ]
+        if missing_evidence:
+            entry["reason_codes"] = [
+                "signed_production_evidence_unavailable",
+                *("missing:" + name for name in missing_evidence),
+            ]
+            continue
+
+        try:
+            sealed = sealed_source_closed_run_from_dict(_json_object(sealed_path))
+            mapping = identity_map_from_dict(_json_object(identity_path))
+            actual_hashes = set(hashes)
+            if (
+                sealed.project_id != project_id
+                or mapping.project_id != project_id
+                or len(sealed.source_sha256s) != len(actual_hashes)
+                or len(mapping.source_sha256s) != len(actual_hashes)
+                or set(sealed.source_sha256s) != actual_hashes
+                or set(mapping.source_sha256s) != actual_hashes
+            ):
+                raise ValueError("source envelope or project identity mismatch")
+            customer_rows = _json_customer_rows(customer_path)
+            verified_rows = verify_sealed_customer_output(sealed, customer_rows)
+            if (
+                verified_rows.customer_row_count != len(customer_rows)
+                or verified_rows.valid_quantity_count != len(sealed.quantities)
+            ):
+                raise ValueError("signed customer projection cardinality mismatch")
+            entry["customer_bijection_verified"] = True
+            produced = reconcile_sealed_run_v2(
+                manifest, sealed.to_dict(), mapping,
+            )
+            exact = _unchanged_frozen_exact_report(
+                canonical_manifest, sealed_path, identity_path,
+            )
+            if (
+                exact["project_id"] != project_id
+                or exact["source_sha_verified"] is not True
+                or exact["reconciliation_complete"] is not True
+                or exact["denominator"] != entry["denominator"]
+            ):
+                raise ValueError("unchanged frozen per-project evaluator rejected evidence")
+            entry["reconciliation_complete"] = True
+            entry["exact_project_report"] = exact
+            if manifest.status != "VERIFIED" or not manifest.source_package_complete:
+                entry["publication_status"] = "DIAGNOSTIC_UNPUBLISHED"
+                entry["reason_codes"] = [
+                    "frozen_project_source_universe_incomplete",
+                    *manifest.reason_codes,
+                ]
+            else:
+                entry["publication_status"] = "PROJECT_VERIFIED"
+                entry["reason_codes"] = []
+                scored[project_id] = produced
+        except (OSError, UnicodeError, TypeError, ValueError, RuntimeError, KeyError) as exc:
+            entry["publication_status"] = "CONFLICT"
+            entry["reconciliation_complete"] = False
+            entry["exact_project_report"] = None
+            entry["reason_codes"] = ["signed_evidence_reconciliation_rejected", type(exc).__name__]
+
+    result: dict[str, Any] = {
+        "benchmark_id": "full_plan_takeoff_reconciliation_v2",
+        "required_project_count": 4,
+        "frozen_denominator": eligible,
+        "publication_status": "UNPUBLISHED",
+        "coverage_accuracy": None,
+        "precision_adjusted_accuracy": None,
+        "projects": rows,
+        "reason_codes": [],
+        "official_suite_result": None,
+    }
+    if len(scored) != 4:
+        result["reason_codes"] = ["four_project_signed_source_universe_not_complete"]
+        return result
+    official = evaluate_suite_v2(manifests, scored, required_project_count=4)
+    result["official_suite_result"] = asdict(official)
+    if official.publication_status == "PUBLISHED":
+        result["publication_status"] = "PUBLISHED"
+        result["coverage_accuracy"] = official.coverage_accuracy
+        result["precision_adjusted_accuracy"] = official.precision_adjusted_accuracy
+    else:
+        result["reason_codes"] = ["unchanged_frozen_evaluator_declined_publication"]
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-dir", type=Path, required=True)
+    parser.add_argument("--sealed-dir", type=Path, required=True)
+    parser.add_argument("--identity-map-dir", type=Path, required=True)
+    parser.add_argument("--customer-dir", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(argv)
+    report = build_four_project_evidence_ledger(
+        source_dir=args.source_dir, sealed_dir=args.sealed_dir,
+        identity_map_dir=args.identity_map_dir, customer_dir=args.customer_dir,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps({
+        "publication_status": report["publication_status"],
+        "frozen_denominator": report["frozen_denominator"],
+        "project_statuses": {
+            value["project_id"]: value["publication_status"] for value in report["projects"]
+        },
+    }, sort_keys=True))
+    return 0 if report["publication_status"] == "PUBLISHED" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
