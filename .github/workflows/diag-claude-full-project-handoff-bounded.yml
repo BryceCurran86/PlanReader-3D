@@ -1,8 +1,12 @@
 name: DIAG Claude Full Project Handoff Bounded (3Laurel and Q5446)
 
 # Measurement only. Runs the COMPLETE original-source handoff (all pages decoded as the evidence universe) for the two
-# projects whose full-project production has timed out or been OOM-killed, under a hard timeout, and records wall time,
-# peak resident memory, an RSS timeline and a sampled profile. No production file is changed; no quantity or score is claimed.
+# projects whose full-project production has timed out or been OOM-killed. Each project runs once per code variant in the
+# same workflow run: "base" is the current tip of main and every other variant is main with the named resource-change
+# branches merged in. Each runs under a hard timeout. Wall time, peak resident memory, an RSS timeline and a sampled
+# profile are recorded for all of them, and the deterministic handoff outputs of every variant are compared byte for byte
+# with base. No production file is changed by this workflow and no quantity or score is claimed; a resource change that
+# altered any output would fail the comparison.
 on:
   pull_request:
     paths:
@@ -19,7 +23,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        project: [3laurel, q5446]
+        variant: [base, A, B, C, ABC]
         include:
+          - variant: base
+            merge: ""
+          - variant: A
+            merge: "claude/source-snapshot-shared-records-20261014"
+          - variant: B
+            merge: "claude/handoff-redundant-source-proof-20261014"
+          - variant: C
+            merge: "claude/handoff-bulk-gc-regime-20261014"
+          - variant: ABC
+            merge: "claude/source-snapshot-shared-records-20261014 claude/handoff-redundant-source-proof-20261014 claude/handoff-bulk-gc-regime-20261014"
           - project: 3laurel
             project_id: au_qld_3laurel
             pdf: "documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf"
@@ -32,6 +48,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Select the code under test (${{ matrix.variant }})
+        env:
+          MERGE_REFS: ${{ matrix.merge }}
+        run: |
+          set -euo pipefail
+          git checkout --detach origin/main
+          for ref in $MERGE_REFS; do
+            git -c user.name=diag -c user.email=diag@example.invalid merge --no-edit "origin/$ref"
+          done
+          echo "variant=${{ matrix.variant }} code_sha=$(git rev-parse HEAD)"
+          git log --oneline -8
+          echo "CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -57,6 +86,7 @@ jobs:
           PROJECT_ID: ${{ matrix.project_id }}
         run: |
           mkdir -p artifacts/full
+          echo "$CODE_SHA" > artifacts/full/code_sha.txt
           ( while true; do
               pid=$(pgrep -f '^python -u tools/run_source_closed_project_handoff.py' | head -1 || true)
               if [ -n "$pid" ]; then
@@ -129,6 +159,107 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: full-handoff-${{ matrix.project }}
+          name: full-handoff-${{ matrix.project }}-${{ matrix.variant }}
           path: artifacts/full
           retention-days: 14
+
+  compare:
+    name: Compare every variant with base (outputs byte-identical; resources reported)
+    needs: full-handoff
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: full-handoff-*
+          path: artifacts
+      - name: Compare deterministic outputs and report resources
+        run: |
+          python - <<'PY'
+          import difflib
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          root = Path("artifacts")
+
+          def wall_seconds(text):
+              match = re.search(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): ([\d:.]+)", text)
+              if not match:
+                  return None
+              total = 0.0
+              for part in match.group(1).split(":"):
+                  total = total * 60 + float(part)
+              return total
+
+          def peak_mib(text):
+              match = re.search(r"Maximum resident set size \(kbytes\): (\d+)", text)
+              return None if not match else int(match.group(1)) / 1024.0
+
+          VARIANTS = ("base", "A", "B", "C", "ABC")
+          failures = []
+          lines = ["| project | variant | code | exit | wall | peak RSS | status | walls |", "|---|---|---|---|---|---|---|---|"]
+          measured = {}
+          for project in ("3laurel", "q5446"):
+              for variant in VARIANTS:
+                  d = root / f"full-handoff-{project}-{variant}"
+                  if not d.is_dir():
+                      failures.append(f"{project}/{variant}: artifact missing")
+                      lines.append(f"| {project} | {variant} | - | - | - | - | MISSING | - |")
+                      continue
+                  exit_code = (d / "exit_code.txt").read_text().strip().split("=")[-1] if (d / "exit_code.txt").exists() else "?"
+                  time_v = (d / "time_v.txt").read_text() if (d / "time_v.txt").exists() else ""
+                  wall, peak = wall_seconds(time_v), peak_mib(time_v)
+                  summary_path = d / "out" / "production_summary.json"
+                  status = walls = "-"
+                  if summary_path.exists():
+                      import json
+                      summary = json.loads(summary_path.read_text())
+                      status = f"{summary.get('status')}/{summary.get('claim_status')}"
+                      walls = f"{summary.get('canonical_wall_status')}:{(summary.get('canonical_counts') or {}).get('walls')}"
+                  code = (d / "code_sha.txt").read_text().strip()[:8] if (d / "code_sha.txt").exists() else "-"
+                  measured[(project, variant)] = (wall, peak)
+                  fmt_wall = "-" if wall is None else f"{int(wall // 60)}:{wall % 60:04.1f}"
+                  fmt_peak = "-" if peak is None else f"{peak:,.0f} MiB"
+                  lines.append(f"| {project} | {variant} | {code} | {exit_code} | {fmt_wall} | {fmt_peak} | {status} | {walls} |")
+                  if exit_code != "0":
+                      failures.append(f"{project}/{variant}: handoff exit code {exit_code}")
+          lines.append("")
+          for project in ("3laurel", "q5446"):
+              bw, bp = measured.get((project, "base"), (None, None))
+              for variant in VARIANTS[1:]:
+                  vw, vp = measured.get((project, variant), (None, None))
+                  if bw and vw and bp and vp:
+                      lines.append(
+                          f"- {project} {variant}/base: wall time = {vw / bw:.3f}, peak RSS = {vp / bp:.3f}"
+                      )
+
+          lines.append("")
+          for project in ("3laurel", "q5446"):
+              for variant in VARIANTS[1:]:
+                  for name in ("production_summary.json", "source_attempt_preflight.json"):
+                      base_path = root / f"full-handoff-{project}-base" / "out" / name
+                      var_path = root / f"full-handoff-{project}-{variant}" / "out" / name
+                      if not base_path.exists() or not var_path.exists():
+                          failures.append(f"{project}/{variant}/{name}: missing on base or variant")
+                          continue
+                      if base_path.read_bytes() == var_path.read_bytes():
+                          lines.append(f"- {project}/{variant}/{name}: BYTE-IDENTICAL to base ({base_path.stat().st_size} bytes)")
+                      else:
+                          failures.append(f"{project}/{variant}/{name}: differs from base")
+                          diff = difflib.unified_diff(
+                              base_path.read_text().splitlines(), var_path.read_text().splitlines(),
+                              "base", variant, lineterm="",
+                          )
+                          lines.append(f"- {project}/{variant}/{name}: DIFFERS\n```diff\n" + "\n".join(diff) + "\n```")
+
+          report = "\n".join(lines)
+          print(report)
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_file:
+              Path(summary_file).write_text(report + "\n")
+          if failures:
+              print("FAILURES:", *failures, sep="\n  ")
+              sys.exit(1)
+          PY
