@@ -15,15 +15,17 @@ that same text:
          exactly ``text_glyph_mapping_unverified``, optionally plus
          ``text_clip_state_unresolved``; the latter can be discharged only
          by the same post-clip rendered-pixel proof below
-      -> producer-owned word bbox for ordinary left-to-right text; for a
-         non-horizontal source word, only a uniquely bound source texttrace
-         character run may replace that bbox as the raster target
+      -> producer-owned word bbox; for an original left-to-right word
+         missing texttrace lineage, a UNIQUE native character-origin run
+         may supply an ink-bbox enlargement only when every expanded
+         glyph is source-owned and foreign native characters are vetoed;
+         for non-horizontal words use existing source direction/trace rules
       -> the exact region rendered from the immutable stored PDF bytes at
          300 DPI and at 450 DPI (renderer clip; never a page crop)
       -> non-horizontal source text is normalized by one producer-derived,
          lossless quarter-turn before OCR; ordinary text is unchanged
-      -> NO padding, NO expansion into neighbouring source pixels and NO
-         retry / alternative preprocessing: one deterministic raster pipeline only
+      -> NO heuristic padding, foreign-word expansion, retry or alternative
+         preprocessing: one deterministic source-owned raster crop per word
          (trying a tight crop, then a padded one, then keeping whichever
          matches the claim would turn preprocessing selection into an
          authority preference)
@@ -337,8 +339,10 @@ def _producer_owned_ocr_target(
 ) -> tuple[tuple[float, float, float, float], int]:
     """Resolve one source-owned raster target for non-horizontal native text.
 
-    The historical word bbox remains authoritative for ordinary left-to-right
-    text. For text whose authenticated source line direction renders vertical
+    The historical word bbox remains the fallback for left-to-right text.
+    When its trace IDs are unavailable, only a uniquely anchored native
+    glyph-origin run with verified foreign-ink exclusion may extend it.
+    For text whose authenticated source line direction renders vertical
     or reversed, PyMuPDF's native word bbox can clip glyph ink even though its
     text identity is correct. In that case this helper uses exact source
     character identity (codepoint + origin) to bind the word to one unique
@@ -399,6 +403,28 @@ def _producer_owned_ocr_target(
             display_dy /= magnitude
             axis_tol = 1e-6
             if abs(display_dy) <= axis_tol and display_dx > 0.0:
+                # Native LTR ink can protrude outside the word's PDF bbox,
+                # including punctuation or very small schedule tokens.
+                # Allow precisely ONE source-owned crop, never an OCR retry:
+                # only when texttrace linkage is absent, the entire native
+                # character run matches exactly once by original glyph
+                # origins, and no neighbouring native line or character
+                # contributes pixels to the expanded bbox. This does not
+                # authenticate the word; both DPI OCR readings still must
+                # exactly match the claimed native text.
+                if not sequence_ids:
+                    ink_crop = _unique_native_word_source_ink_crop(
+                        line, word_bbox=word_bbox, raw_text=raw_text
+                    )
+                    if (ink_crop is not None and (
+                            ink_crop[0] < word_bbox[0] - 1e-4
+                            or ink_crop[1] < word_bbox[1] - 1e-4
+                            or ink_crop[2] > word_bbox[2] + 1e-4
+                            or ink_crop[3] > word_bbox[3] + 1e-4
+                        ) and _source_ink_crop_avoids_other_lines(
+                            rawdict, selected_line=line, crop=ink_crop
+                        )):
+                        return ink_crop, 0
                 return word_bbox, 0
             if abs(display_dy) <= axis_tol and display_dx < 0.0:
                 rotation_degrees = 180
