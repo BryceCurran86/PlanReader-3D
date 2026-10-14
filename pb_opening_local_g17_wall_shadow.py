@@ -7,6 +7,8 @@ All outputs remain shadow candidates pending structural role and equivalence.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from hashlib import sha256
+import math
 
 import cv2
 import numpy as np
@@ -153,10 +155,21 @@ def build_opening_local_g17_wall_shadow(
         **args, dpi=float(dpi), include_native_frame=True, images_only=True)
     full_png, fparent, fframe = source._producer.render_native_page_png(
         **args, dpi=float(dpi), include_native_frame=True)
-    registration = source.raster_opening_registration_scale(opening.revision_id, opening.page_id)
-    if (iparent != fparent or iframe != fframe or iframe.rotation != 0
-            or registration != (1.0, 1.0)):
+    if iparent != fparent or iframe != fframe or iframe.rotation != 0:
         return replace(blocked, reason_codes=("g17_original_render_frame_unproven",))
+    # Page-wide image placement agreement is not primitive coordinate proof.
+    # Tiled pages may have no global registration. Verify each actual source
+    # receipt against the fresh ORIGINAL render and its own pixel coordinates.
+    image_digest = sha256(image_png).hexdigest()
+    for oid, observation in support.items():
+        receipt = source._raster_opening_primitive_receipts.get((selector.snapshot_id,oid))
+        if (receipt is None or receipt.dpi != dpi
+                or receipt.render_sha256 != image_digest
+                or len(receipt.pixel_geometry) != 4
+                or not all(type(p) in (int,float) and math.isfinite(p)
+                           and math.isclose(p, float(g)*dpi/72.0, rel_tol=0,abs_tol=1e-6)
+                           for p,g in zip(receipt.pixel_geometry,observation.geometry))):
+            return replace(blocked, reason_codes=("g17_original_pixel_render_receipt_unproven",))
     def rgb(png):
         decoded = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
         if decoded is None:

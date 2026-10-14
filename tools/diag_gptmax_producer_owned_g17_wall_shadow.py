@@ -46,6 +46,18 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
     composition, voids = compose()
     published = source.published_snapshot_for_revision(published.revision.revision_id)
     before = _retention(composition,voids)
+    original_source_claims = {}
+    for trace in composition.opening_bindings:
+        selector = ObservationSelector(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id, source_sha256=digest,
+            snapshot_id=published.snapshot.snapshot_id,
+            observation_id=trace.representative_observation_id,
+        )
+        record = composition.physical_opening_authority.prove_existence(selector).existence_record
+        if record is None or record.record_id != trace.opening_identity_id:
+            raise ValueError("original source opening universe no longer authenticates")
+        original_source_claims[record.record_id] = frozenset(record.source_observation_ids)
     shadows = []
     for trace in composition.opening_bindings:
         if trace.host_wall_id is not None:
@@ -59,7 +71,16 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
         shadow = build_opening_local_g17_wall_shadow(source,selector)
         if shadow.physical_opening_id != trace.opening_identity_id:
             raise ValueError("source shadow opening identity changed")
-        shadows.append(asdict(shadow))
+        serialized = asdict(shadow)
+        own_sources = original_source_claims[shadow.physical_opening_id]
+        serialized['shared_original_source_observations'] = {
+            other: sorted(own_sources & sources)
+            for other,sources in sorted(original_source_claims.items())
+            if other != shadow.physical_opening_id and own_sources & sources
+        }
+        # Shared source observations are retained competitors, never permission
+        # to transfer another opening's host, figure label or metric quantity.
+        shadows.append(serialized)
     recomposed, revoids = compose()
     if _retention(recomposed,revoids) != before:
         raise RuntimeError("G17 shadow changed original wall/host/frame/area receipts")

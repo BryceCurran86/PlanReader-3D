@@ -64,6 +64,8 @@ jobs:
           assert r['all_original_wall_host_frame_area_receipts_unchanged'] is True
           assert r['new_physical_host_or_metric_granted'] is False
           assert len(r['opening_local_source_shadows'])==6
+          assert all(len(s['flanks'])==2 for s in r['opening_local_source_shadows'])
+          assert sum(f['source_ink_supported'] for s in r['opening_local_source_shadows'] for f in s['flanks'])==10
           for s in r['opening_local_source_shadows']:
               assert s['scope_complete'] is False
               assert s['physical_wall_role_granted'] is False
@@ -72,6 +74,8 @@ jobs:
               for f in s['flanks']:
                   if not f['source_ink_supported']:
                       assert not f['default_records'] and not f['exact_coordinate_records']
+                  else:
+                      assert len(f['exact_coordinate_records'])==3
                   for w in f['exact_coordinate_records']:
                       assert all(p.startswith('raster_opening_primitive:') for p in w['physical_identity']['source_primitive_ids'])
           PY

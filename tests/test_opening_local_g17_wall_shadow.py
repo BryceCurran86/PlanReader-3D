@@ -92,7 +92,8 @@ def test_caller_reports_and_producer_lookalikes_are_rejected():
         build_opening_local_g17_wall_shadow(source, {"observation_id":selector.observation_id})
 
 
-@pytest.mark.parametrize("damage", ["receipt", "parent", "geometry", "source_bytes"])
+@pytest.mark.parametrize("damage", ["receipt", "parent", "geometry", "source_bytes",
+                                    "receipt_pixels", "receipt_render", "receipt_dpi"])
 def test_changed_producer_source_fails_even_after_positive_shadow_replay(damage):
     source, published = _prepare(frame_lines=2)
     selector = address(source,published)
@@ -108,6 +109,12 @@ def test_changed_producer_source_fails_even_after_positive_shadow_replay(damage)
         store.observations.pop(parent_key)
     elif damage == "geometry":
         store.observations[key]=replace(observation,geometry=(1.,2.,3.,4.))
+    elif damage.startswith("receipt_"):
+        fields={"receipt_pixels":{"pixel_geometry":(1.,2.,3.,4.)},
+                "receipt_render":{"render_sha256":"foreign"},
+                "receipt_dpi":{"dpi":144}}[damage]
+        source._raster_opening_primitive_receipts[key]=replace(
+            source._raster_opening_primitive_receipts[key],**fields)
     else:
         store.source_bytes_by_revision[selector.revision_id]=b"foreign bytes"
     try:
@@ -115,6 +122,16 @@ def test_changed_producer_source_fails_even_after_positive_shadow_replay(damage)
     except (ValueError, RuntimeError):
         return
     assert result.flanks == ()
+    assert not result.opening_host_granted
+
+
+def test_no_global_tile_registration_is_required_when_actual_pixels_are_owned(monkeypatch):
+    source, published = _prepare(frame_lines=2)
+    selector = address(source,published)
+    monkeypatch.setattr(source,"raster_opening_registration_scale",lambda *args:None)
+    result = build_opening_local_g17_wall_shadow(source,selector)
+    assert len(result.flanks)==2
+    assert all(f.source_ink_supported for f in result.flanks)
     assert not result.opening_host_granted
 
 

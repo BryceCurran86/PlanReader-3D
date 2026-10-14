@@ -44,6 +44,16 @@ No diagnostic JSON, consumer geometry, pixels or caller-supplied completeness
 flag may enter the builder. Tests must cover actual producer inputs, tampering,
 order/replay, transforms, no augmentation and stable published snapshots.
 
+Original-source execution exposed an unresolved page-wide placement scale on
+the tiled PDF. Page-wide registration is not a coordinate prerequisite in
+`SourceVisibilityProducer.augment_with_raster_opening_primitives`: its source
+primitives retain render-pixel geometry regardless of that morphology setting.
+The builder therefore verifies EACH authenticated primitive receipt's pixel
+coordinates against its own PDF geometry/DPI and the SHA of the freshly rendered
+original image. It never assumes a missing page-wide registration or uses a
+typical opening width as scale. Forged pixel coordinates, DPI and render hashes
+are separate negative tests.
+
 Review: this is an isolated shadow seam, not an authority promotion. It must
 not be wired into host selection, quantities or commercial output. Ordinary
 W4 competitors remain outside its authority and cannot be displaced. Future
