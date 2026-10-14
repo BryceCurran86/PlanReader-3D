@@ -125,13 +125,33 @@ def inspect_native_ink_against_w2(report, pdf_bytes: bytes) -> dict:
                         "physical_wall_equivalence_granted": False,
                     })
                 candidate_rows.sort(key=lambda v: v["w4_candidate_wall_id"])
-                positives = sum(v["direct_indexed_native_ink_witness"] is True
-                                for v in candidate_rows)
+                positive_native_id_sets = [
+                    {
+                        ink["native_primitive_id"]
+                        for ink in candidate["original_pdf_native_primitive_receipts"]
+                        if ink["source_ink_span_covered"] is True
+                    }
+                    for candidate in candidate_rows
+                    if candidate["direct_indexed_native_ink_witness"] is True
+                ]
+                positives = len(positive_native_id_sets)
                 unavailable = any(v["direct_indexed_native_ink_witness"] is None
                                   for v in candidate_rows)
+                shared_original_native_ids = sorted({
+                    primitive
+                    for i, left in enumerate(positive_native_id_sets)
+                    for right in positive_native_id_sets[i + 1:]
+                    for primitive in left & right
+                })
+                # Shared source address across two W4 graph candidates is ONE
+                # original indexed native item, not two independent native
+                # walls. Never use this to override typed W4 equivalence.
                 classification = (
                     "original_pdf_native_ink_unavailable" if unavailable else
-                    "original_pdf_multiple_w4_candidates_have_native_ink" if positives > 1 else
+                    "original_pdf_w4_candidates_share_same_native_ink" if
+                    positives > 1 and shared_original_native_ids else
+                    "original_pdf_distinct_w4_candidates_have_native_ink" if
+                    positives > 1 else
                     "original_pdf_one_w4_candidate_has_native_ink" if positives == 1 else
                     "original_pdf_no_indexed_candidate_native_ink_span"
                 )
@@ -139,6 +159,7 @@ def inspect_native_ink_against_w2(report, pdf_bytes: bytes) -> dict:
                     "face_id": edge_row["face_id"],
                     "original_competing_planar_edge_pdf_pts": edge_row["competing_planar_edge"],
                     "indexed_native_ink_status": classification,
+                    "shared_original_native_source_ids": shared_original_native_ids,
                     "w4_candidate_original_ink_evidence": candidate_rows,
                     "source_native_wall_role_authenticated": False,
                     "source_room_boundary_closed": False,
