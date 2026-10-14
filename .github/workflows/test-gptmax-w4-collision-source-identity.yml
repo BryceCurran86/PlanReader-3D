@@ -44,7 +44,7 @@ jobs:
             pdf: "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
             pages: "--page-id 3"
             expected_sha: "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
-            expected_hosts: 14
+            expected_hosts: 15
             expected_frames: 9
           - name: maryborough
             pdf: "documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"
