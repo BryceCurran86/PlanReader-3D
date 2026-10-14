@@ -97,6 +97,7 @@ def source_plan_mark_census(
                 "status": v.status,
                 "boundary_source": v.boundary_source,
                 "floor_plan": v.view_type == DrawingViewType.FLOOR_PLAN.value,
+                "floor_finish_plan": v.view_type == DrawingViewType.FLOOR_FINISH_PLAN.value,
                 "authoritative": bool(
                     v.status == "resolved"
                     or (nonoverlapping and is_authoritative_derived_viewport(v))
@@ -122,7 +123,7 @@ def source_plan_mark_census(
             "eligible_positive_source_mark_only": bool(
                 source_verified
                 and len(owning_views) == 1
-                and owning_views[0]["floor_plan"]
+                and owning_views[0]["floor_finish_plan"]
                 and owning_views[0]["authoritative"]
             ),
             "floor_identity_owner": None,
