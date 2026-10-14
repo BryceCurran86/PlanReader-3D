@@ -181,6 +181,8 @@ def build_four_project_evidence_ledger(
 
     rows: list[dict[str, Any]] = []
     scored: dict[str, tuple] = {}
+    source_hashes_by_project: dict[str, tuple[str, ...]] = {}
+    completed_by_project: dict[str, bool] = {}
     seen_signed_quantity_ids: dict[str, str] = {}
     for manifest in manifests:
         project_id = manifest.project_id
@@ -298,6 +300,8 @@ def build_four_project_evidence_ledger(
                 entry["publication_status"] = "PROJECT_VERIFIED"
                 entry["reason_codes"] = []
                 scored[project_id] = produced
+                source_hashes_by_project[project_id] = tuple(sorted(hashes))
+                completed_by_project[project_id] = True
         except (OSError, UnicodeError, TypeError, ValueError, RuntimeError, KeyError) as exc:
             entry["publication_status"] = "CONFLICT"
             entry["reconciliation_complete"] = False
@@ -318,7 +322,21 @@ def build_four_project_evidence_ledger(
     if len(scored) != 4:
         result["reason_codes"] = ["four_project_signed_source_universe_not_complete"]
         return result
-    official = evaluate_suite_v2(manifests, scored, required_project_count=4)
+    # The unchanged evaluator fails closed unless the caller supplies BOTH
+    # complete original-source SHA receipts and independent reconciliation
+    # completion for every scored project. Omitting either silently makes even
+    # authentic all-project evidence permanently UNPUBLISHED.
+    if (
+        set(scored) != set(source_hashes_by_project)
+        or set(scored) != set(completed_by_project)
+        or any(completed is not True for completed in completed_by_project.values())
+    ):
+        raise ValueError("verified suite publication receipts are incomplete")
+    official = evaluate_suite_v2(
+        manifests, scored, required_project_count=4,
+        evaluated_source_sha256s_by_project=source_hashes_by_project,
+        reconciliation_complete_by_project=completed_by_project,
+    )
     result["official_suite_result"] = asdict(official)
     if official.publication_status == "PUBLISHED":
         result["publication_status"] = "PUBLISHED"
