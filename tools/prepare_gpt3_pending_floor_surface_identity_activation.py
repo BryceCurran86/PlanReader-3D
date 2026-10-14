@@ -75,6 +75,7 @@ def _string_array(
     *,
     name: str,
     nonempty: bool = True,
+    require_sorted: bool = True,
 ) -> tuple[str, ...]:
     if type(value) not in (list, tuple):
         raise ValueError(f"{name} must be an array")
@@ -86,8 +87,10 @@ def _string_array(
         for item in rows
     ):
         raise ValueError(f"{name} contains malformed identity")
-    if rows != tuple(sorted(set(rows))):
-        raise ValueError(f"{name} must be sorted and unique")
+    if len(rows) != len(set(rows)):
+        raise ValueError(f"{name} must be unique")
+    if require_sorted and rows != tuple(sorted(rows)):
+        raise ValueError(f"{name} must be sorted")
     return rows
 
 
@@ -246,6 +249,7 @@ def _proof_bindings(
         _string_array(
             proof.get("frozen_source_evidence_refs"),
             name="proof frozen source evidence refs",
+            require_sorted=False,
         )
         if canonical in by_canonical:
             raise ValueError("surface identity proof canonical floors are not unique")
@@ -363,6 +367,7 @@ def build_floor_surface_activation(
         frozen_evidence = _string_array(
             provenance.get("source_evidence_refs"),
             name="frozen floor source evidence refs",
+            require_sorted=False,
         )
 
         proof = proofs.get(canonical)
