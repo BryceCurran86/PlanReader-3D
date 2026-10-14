@@ -205,7 +205,7 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
     # in the same finish field leaves the dominant surface ambiguous: abstain
     # rather than arbitrarily making a tile or paint quantity.
     primary_tile = re.search(
-        r"\\b(?:floor|wall|ceramic|porcelain)\\s+tiles?\\b",
+        r"\b(?:floor|wall|ceramic|porcelain)\s+tiles?\b",
         finish_text,
     )
     if primary_tile:
