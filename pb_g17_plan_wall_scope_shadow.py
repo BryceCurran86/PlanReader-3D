@@ -67,16 +67,56 @@ def _paint(image, full, pixels):
         "original_solid_and_unchanged":bool(np.all(solid & equal))}
 
 
-def _graph(segments, *, root, scope_id, tolerance):
+def _infill_edge_opening_ids(edge,infill_intervals):
+    """Exact source interval union, never spanning two different apertures."""
+    from pb_g17_dual_dpi_source_correspondence_shadow import _axis_line
+    from pb_g17_w4_equivalence_competitor_shadow import _positive_collinear_source_overlap
+    geometry=tuple(edge[k] for k in ("x1","y1","x2","y2"))
+    axis=_axis_line(geometry)
+    if axis is None:
+        return ()
+    groups={}
+    for interval in infill_intervals:
+        owner=interval.get('physical_opening_id')
+        if (not owner or interval['source_primitive_id'] not in edge[LINEAGE_KEY]['source_primitive_ids']
+                or not _positive_collinear_source_overlap(geometry,interval['geometry'])):
+            continue
+        value=_axis_line(interval['geometry'])
+        groups.setdefault(owner,[]).append((value[1],value[2]))
+    owners=[]
+    for owner,spans in sorted(groups.items()):
+        covered=axis[1]
+        for lo,hi in sorted(spans):
+            if lo>covered+1e-6:
+                break
+            covered=max(covered,hi)
+        if covered>=axis[2]-1e-6:
+            owners.append(owner)
+    return tuple(owners)
+
+
+def _graph(segments, *, root, scope_id, tolerance, infill_intervals=()):
     graph = build_wall_graph_for_viewport(segments, gap_snap_tolerance_pt=tolerance,
         exact_endpoint_index_shadow=(tolerance == 0.0), exact_split_parent_lineage_shadow=True)
     junctions, relationships = classify_junctions(graph,
         document_id=root["document_id"], page_id=root["page_id"], viewport_id=scope_id)
     deduped, removed = deduplicate_coincident_edges(graph)
+    # Optional source-owned candidate experiment. Keep every original edge and
+    # relationship; only the ADDITIONAL W4 union receives opposing boundaries.
+    infill_edges = {
+        str(e["id"])
+        for e in deduped["edges"]
+        if _infill_edge_opening_ids(e,infill_intervals)
+    }
+    opposed = tuple(r for r in relationships
+        if r.relationship_type.value == "continues_as"
+        and ((r.from_edge_id in infill_edges) != (r.to_edge_id in infill_edges)))
+    opposed_ids = {r.relationship_id for r in opposed}
+    consumed = tuple(r for r in relationships if r.relationship_id not in opposed_ids)
     abstained_chains = []
     identities = None
     try:
-        walls, _ = assemble_wall_candidates(deduped,junctions,relationships,
+        walls, _ = assemble_wall_candidates(deduped,junctions,consumed,
             viewport_id=scope_id, identity_abstention_shadow=True,
             abstained_chain_rows=abstained_chains)
         identities = collect_physical_wall_identities(walls,deduped)
@@ -103,6 +143,8 @@ def _graph(segments, *, root, scope_id, tolerance):
         "w2_snap_collapsed_fragments":graph["snap_collapsed_fragments"],
         "w3_junctions":[asdict(j) for j in junctions],
         "w3_relationships":[asdict(r) for r in relationships],
+        "source_infill_edge_ids":tuple(sorted(infill_edges)),
+        "source_opposed_continuations":[asdict(r) for r in opposed],
         "w3_coincident_edge_removals":tuple(sorted(removed)),
         "w4_abstained_chains":abstained_chains,
         "w4_identity_unavailable":identities is None,
