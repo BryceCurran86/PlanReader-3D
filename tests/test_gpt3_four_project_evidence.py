@@ -556,3 +556,55 @@ def test_existing_original_lot16_sealed_identity_mapping_remains_compatible():
     assert module._enforce_mapped_production_family_trade(
         manifest, sealed, mapping,
     ) is None
+
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"source_sha256":"a","source_sha256":"b"}',
+        '{"quantities":[{"quantity_id":"first","quantity_id":"second"}]}',
+        '{"metadata":{"revision_id":"old","revision_id":"new"}}',
+        '{"fingerprint":"good","fingerprint":"bad"}',
+    ],
+)
+def test_four_project_signed_input_rejects_duplicate_original_json_keys(tmp_path, payload):
+    original = tmp_path / "signed.json"
+    original.write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate key"):
+        module._json_object(original)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '[{"quantity_id":"q-original","quantity_id":"q-swap"}]',
+        '[{"quantity_id":"q","commercial_projection_provenance":{"quantity":{"quantity_id":"q","quantity_id":"foreign"}}}]',
+        '[{"quantity_id":"q","source_sha256":"one","source_sha256":"two"}]',
+    ],
+)
+def test_four_project_customer_input_rejects_nested_duplicate_json_keys(tmp_path, payload):
+    original = tmp_path / "customer.json"
+    original.write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate key"):
+        module._json_customer_rows(original)
+
+
+def test_four_project_strict_json_preserves_legitimate_original_receipts(tmp_path):
+    original = tmp_path / "signed.json"
+    original.write_text(
+        '{"schema_version":"1.0.0","source_sha256":"a","quantities":'
+        '[{"quantity_id":"q1","source_sha256":"b"}]}', encoding="utf-8",
+    )
+    assert module._json_object(original)["quantities"][0]["quantity_id"] == "q1"
+    original.write_text(
+        '[{"quantity_id":"q1","commercial_projection_provenance":'
+        '{"adapter":"commercial_takeoff","quantity":{"quantity_id":"q1"}}}]',
+        encoding="utf-8",
+    )
+    assert module._json_customer_rows(original)[0]["quantity_id"] == "q1"
+    # Empty private package still fails closed independently of JSON parsing.
+    ledger = module.build_four_project_evidence_ledger(**_dirs(tmp_path))
+    assert ledger["publication_status"] == "UNPUBLISHED"
+    assert ledger["frozen_denominator"] == 120
+    assert ledger["official_suite_result"] is None
