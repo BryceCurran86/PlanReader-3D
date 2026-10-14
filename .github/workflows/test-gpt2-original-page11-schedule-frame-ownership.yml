@@ -35,7 +35,8 @@ jobs:
           from pb_viewport_segmentation import (
               segment_page_viewports, extract_vector_frames,
               extract_view_title_anchors, calibrate_viewport_layout,
-              _frame_looks_like_table, _title_field_owned_regions,
+              _frame_looks_like_table, _frame_looks_like_line_grid_table,
+              _page_rectangle_primitives, _title_field_owned_regions,
           )
           p=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
           sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
@@ -52,6 +53,14 @@ jobs:
               ]
               anchors=extract_view_title_anchors(page)
               result=segment_page_viewports(page,page_number=11)
+              print("GPT2_SOURCE_PAGE11_TABLE_FRAME_DIAGNOSTICS",json.dumps({
+                  "source_sha256":sha,
+                  "frames":table_evidence,
+                  "line_grid_by_frame":[(list(frame),bool(_frame_looks_like_line_grid_table(frame,page,cal))) for frame in frames],
+                  "rectangle_source_primitives":len(_page_rectangle_primitives(page)),
+                  "anchors":[{"text":a.text,"bbox":a.bbox,"direction":a.direction} for a in anchors],
+                  "actual_viewports":[{"label":v.label,"type":v.view_type,"status":v.status,"bbox":v.bounding_box} for v in result],
+              },sort_keys=True),flush=True)
               assert len(_title_field_owned_regions(page))>=1
               assert not any(a.view_type=="floor_finish_plan" for a in anchors), (
                   "the original native split page title is sheet metadata, not independently proven plan viewport"
