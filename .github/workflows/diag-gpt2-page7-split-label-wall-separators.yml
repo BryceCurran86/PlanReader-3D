@@ -11,6 +11,8 @@ on:
       - "tests/test_gpt2_split_label_wall_separators.py"
       - "tools/diag_gpt2_split_face_collinear_first_gates.py"
       - "tools/diag_gpt2_grid_component_first_failure.py"
+      - "tools/diag_gpt2_competing_grid_label_paths.py"
+      - "tests/test_gpt2_competing_grid_label_paths.py"
       - "tests/test_gpt2_cross_w4_atomic_source_audit.py"
       - "tests/test_gpt2_non_simple_original_face_ring_forensics.py"
       - "tests/test_gpt2_native_source_parent_w4_ancestry.py"
@@ -51,6 +53,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_freezer_source_crossing_wall_owners.py
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
+          PYTHONPATH=. pytest -q tests/test_gpt2_competing_grid_label_paths.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
       - name: Source-owned native room text vs authentic physical face first gate
         shell: bash
@@ -445,6 +448,9 @@ jobs:
               diagnose_original_w4_address_collisions,
               inspect_native_source_parent_w4_ancestry,
           )
+          from tools.diag_gpt2_competing_grid_label_paths import (
+              inspect_exact_grid_competing_label_paths,
+          )
           composite_scopes=[]
           for selector in selectors:
               wall_scope=wall_authority.resolve_scope(selector)
@@ -512,6 +518,24 @@ jobs:
                   )
                   for candidate in label_scope.split_face_candidates
               ]
+              # Existing exact two-sided W4 GRID source receipts explain why
+              # a component connects multiple genuine native room labels.
+              # No geometry, wall role, label owner or quantity is inferred.
+              for first_gate in split_component_gates:
+                  if first_gate.get("first_unclosed_gate") != "grid_connected_component_has_competing_room_label":
+                      continue
+                  paths=inspect_exact_grid_competing_label_paths(
+                      adjacency,
+                      source_face_records=room_scope.records,
+                      seed_face_ids=first_gate["native_word_face_ids"],
+                      competitor_receipts=first_gate.get(
+                          "competing_original_label_receipts_diagnostic_only", ()
+                      ),
+                  )
+                  first_gate["original_w4_grid_competing_label_paths_diagnostic_only"]=paths
+                  assert paths["diagnostic_only_no_wall_cut_or_room_publication"]
+                  assert not paths["authenticated_physical_boundary_or_room_recovered"]
+                  assert not paths["original_source_room_face_universe_proven_complete"]
               assert all(
                   not row.get("physical_union_source_first_failure_diagnostic_only")
                   or (
