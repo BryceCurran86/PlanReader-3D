@@ -9,7 +9,6 @@ physical room separator. No geometry, quantities or benchmark truth mutated.
 from __future__ import annotations
 
 from collections import Counter
-import math
 from typing import Any
 
 from pb_source_composite_room_face_authority import _edge_key
