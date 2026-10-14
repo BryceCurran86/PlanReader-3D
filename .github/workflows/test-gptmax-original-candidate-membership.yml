@@ -98,7 +98,10 @@ jobs:
                   assert not closure['candidate_universe_complete'], "fixture unexpectedly claims complete source universe"
           assert sum(len(x['groups']) for x in sidecar['native'])==125
           assert sum(len(x['groups']) for x in sidecar['raster'])==9
-          assert current['summary']['authenticated_hosts']==14
+          assert before['summary']['authenticated_hosts']==15
+          assert current['summary']['authenticated_hosts']==15
+          # 1215 SGW was accepted on main (#2648); the raw G17 source
+          # candidate universe and physical source receipts stay exactly paired.
           assert current['summary']['resolved_source_frames']==9
           assert current['summary']['physical_existence_claims']==21
           assert 'quantities' not in current
@@ -106,7 +109,7 @@ jobs:
           print({"original_source_unchanged":True,
                  "native_raw_candidate_source_groups":125,
                  "raster_raw_candidate_source_groups":9,
-                 "authenticated_hosts":14,"frames":9,"benchmark_matches_claimed":0})
+                 "authenticated_hosts":15,"frames":9,"benchmark_matches_claimed":0})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
