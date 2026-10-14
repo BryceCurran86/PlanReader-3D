@@ -1763,8 +1763,34 @@ def _frame_resolved_viewports(
                             allow_line_grid_only=False,
                         )
                     ]
+                    # Genuine line-only CAD schedule grids must still work
+                    # when they are the SOLE positive line-grid source frame
+                    # available to the title. Two such independent native
+                    # frames constitute an unresolved semantic ownership
+                    # conflict (Maryborough page 11), not permission to
+                    # choose the physically closest plan grid.
+                    if true_cell_tables:
+                        external_source_owned = true_cell_tables
+                    else:
+                        positive_line_frames = [
+                            frame for frame in frames
+                            if _frame_looks_like_line_grid_table(
+                                frame, page, calibration
+                            )
+                            and not _rejected_ownership_frame(
+                                page, frame, calibration, fragments,
+                                view_type=anchor.view_type,
+                            )
+                        ]
+                        external_source_owned = (
+                            [
+                                positive_line_frames[0]
+                            ] if len(positive_line_frames) == 1
+                            and positive_line_frames[0] in external_table_candidates
+                            else []
+                        )
                     candidates = list(dict.fromkeys([
-                        *enclosed_candidates, *true_cell_tables
+                        *enclosed_candidates, *external_source_owned
                     ]))
                 else:
                     candidates = table_candidates
