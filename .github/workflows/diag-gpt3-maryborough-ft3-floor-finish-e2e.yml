@@ -1,0 +1,85 @@
+name: DIAG GPT3 Maryborough FT3 Floor Finish E2E
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_material_semantic_authority.py"
+      - "pb_cross_view_floor_finish_authority.py"
+      - "pb_live_physical_net_wall_integration.py"
+      - "pb_live_floor_finish_area_source_closed_export.py"
+      - "tools/diag_gpt3_maryborough_ft3_floor_finish_e2e.py"
+      - ".github/workflows/diag-gpt3-maryborough-ft3-floor-finish-e2e.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-maryborough-ft3-floor-finish-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-source-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Fail closed before source run
+        run: |
+          set -euo pipefail
+          python -m py_compile tools/diag_gpt3_maryborough_ft3_floor_finish_e2e.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+      - name: Run real production floor-finish authority and seal
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt3-maryborough-ft3-floor-finish-e2e
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          /usr/bin/time -v timeout 2400s python -u -m tools.diag_gpt3_maryborough_ft3_floor_finish_e2e \
+            --pdf "$PDF" --expected-sha256 "$SHA" \
+            --output "$OUT/report.json" 2>&1 | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("artifacts/gpt3-maryborough-ft3-floor-finish-e2e/report.json")
+          r = json.loads(p.read_text())
+          assert r["source_sha256_verified"] is True
+          assert r["benchmark_score_granted"] is False
+          assert r["frozen_benchmark_accuracy"] is None
+          assert r["firm_floor_area_count"] >= 3, r
+          if r["firm_floor_finish_area_count"]:
+              assert r["sealed_floor_finish_run"] is not None
+              assert r["sealed_floor_finish_run"]["quantity_count"] == r["firm_floor_finish_area_count"]
+              assert all(
+                  row["status"].lower() in {"firm", "corroborated"}
+                  and row["abstained"] is False
+                  and row["source_sha256"] == r["source_sha256"]
+                  for row in r["floor_finish_quantities"]
+              ), r["floor_finish_quantities"]
+          print("GPT3_FT3_E2E_SOURCE_REPORT_READY", {
+              "floor_area": r["firm_floor_area_count"],
+              "floor_finish_area": r["firm_floor_finish_area_count"],
+              "finish_codes": sorted({
+                  row.get("finish_code")
+                  for row in r["floor_finish_quantities"]
+                  if row.get("finish_code")
+              }),
+          })
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-maryborough-ft3-floor-finish-e2e
+          path: artifacts/gpt3-maryborough-ft3-floor-finish-e2e/
+          retention-days: 30
