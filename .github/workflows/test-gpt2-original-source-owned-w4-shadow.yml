@@ -43,10 +43,15 @@ jobs:
           content=pdf.read_bytes()
           sha=hashlib.sha256(content).hexdigest()
           assert sha=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
-          source=SourceVisibilityProducer(producer_method='gpt2-wall-shadow', producer_version='1')
+          # Reproduce the same genuine live source root used by the
+          # independently SHA-verified F.07 plan-view proof (#2716).
+          # Do not rekey its words into a different revision/snapshot.
+          source=SourceVisibilityProducer(
+              producer_method='live-physical-net-wall', producer_version='1'
+          )
           published=source.ingest_native_pdf_bytes(
-              document_id='source-maryborough',source_bytes=content,
-              source_locator=str(pdf),page_ids=('11',),
+              document_id=f'live-source:{sha[:32]}',source_bytes=content,
+              source_locator='memory://original-source-view.pdf',page_ids=('11',),
           )
           factory=PhysicalWallCandidateProducer.from_source_owned_plan_view_shadow(
               source,page_ids=('11',)
@@ -67,7 +72,13 @@ jobs:
               view_type='floor_finish_plan'
           )
           receipts=[authority.resolve_scope(s) for s in selectors]
-          assert len(owners)==1 and len(receipts)==1,(len(owners),len(receipts))
+          assert len(owners)==1 and len(receipts)==1, {
+              'source_owned_positive_views':len(owners),
+              'sealed_source_w4_scopes':len(receipts),
+              'revision':published.revision.revision_id,
+              'snapshot':published.snapshot.snapshot_id,
+              'all_source_view_types':[v.view_type for v in views],
+          }
           assert receipts[0].source_sha256==sha and receipts[0].scope_kind=='viewport'
           assert receipts[0].viewport_id==owners[0].view_id
           print(json.dumps({
