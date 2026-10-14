@@ -73,9 +73,12 @@ def inspect_exact_original_w4_directed_cycles(record: Any) -> dict[str, Any]:
             result["status"] = "original_w4_source_receipt_invalid"
             return result
         wall, edge = receipt
-        if not _valid_id(wall) or _edge_key(edge) != _edge_key((
+        claimed = _edge_key(edge)
+        original = _edge_key((
             vertices[idx], vertices[(idx + 1) % len(vertices)]
-        )):
+        ))
+        if (not _valid_id(wall) or claimed is None or original is None
+                or claimed != original):
             result["status"] = "original_w4_source_receipt_mismatch"
             return result
         owners.append(wall)
