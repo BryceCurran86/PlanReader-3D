@@ -72,11 +72,13 @@ jobs:
                   "p9_title_rows":other_title_evidence,
                   "p9_source_frames":[{"frame":list(f),
                       "positive_table":bool(_frame_looks_like_table(f,other,other_cal)),
+                      "closed_cell_table":bool(_frame_looks_like_table(f,other,other_cal,allow_line_grid_only=False)),
                       "line_grid":bool(_frame_looks_like_line_grid_table(f,other,other_cal)),
                       "candidate_not_owned":bool(_rejected_ownership_frame(other,f,other_cal,_text_fragments(other),view_type="schedule"))}
                       for f in other_frames],
                   "p11_source_frames":[{"frame":list(f),
                       "positive_table":bool(_frame_looks_like_table(f,page,cal)),
+                      "closed_cell_table":bool(_frame_looks_like_table(f,page,cal,allow_line_grid_only=False)),
                       "line_grid":bool(_frame_looks_like_line_grid_table(f,page,cal)),
                       "candidate_not_owned":bool(_rejected_ownership_frame(page,f,cal,_text_fragments(page),view_type="schedule"))}
                       for f in frames],
