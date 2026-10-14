@@ -112,12 +112,56 @@ jobs:
           assert d["source_sha_verified"] is True
           assert d["reconciliation_complete"] is True
           assert d["denominator"]==24
+          # Exact original source signed *floor_area* is not an authenticated
+          # FT2/FT3 floor *finish*. The benchmark-side identity map must not
+          # invent the missing material/source-occurrence equivalence.
+          assert d["source_sha256s"]==[
+              "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          ]
           assert d["matched_within_tolerance"]==0
-          assert len(d["produced_items"])==3
+          assert d["matched_outside_tolerance"]==0
+          assert d["missed"]==24
+          assert d["partial"]==0
+          assert d["unresolved"]==0
+          assert d["unsupported_extra"]==3
+          assert d["abstained_outputs"]==0
+          assert d["lineage_conflicts"]==0
+          assert d["coverage_accuracy"]==0.0
+          assert d["precision_adjusted_accuracy"]==0.0
+          expected_source_quantity_ids={
+              "floor_area_quantity_6b28b3abaedf519631ed",
+              "floor_area_quantity_8bcdc01455538a6a105a",
+              "floor_area_quantity_d62c2f382a0c773ec36f",
+          }
+          produced=d["produced_items"]
+          assert len(produced)==3
+          assert len({item["quantity_id"] for item in produced})==3
+          assert {item["quantity_id"] for item in produced}==expected_source_quantity_ids
           assert all(
-              all(str(ref).startswith("production-unmapped:")
-                  for ref in item["object_refs"])
-              for item in d["produced_items"]
+              item["trade_category"]=="production-unmapped:floor_area"
+              and item["lineage_ok"] is True and item["abstained"] is False
+              and len(item["object_refs"])==1
+              and item["object_refs"][0].startswith("production-unmapped:")
+              for item in produced
+          )
+          receipt={
+              "source_sha_verified":True,
+              "reconciliation_complete":True,
+              "denominator":d["denominator"],
+              "matched_within_tolerance":d["matched_within_tolerance"],
+              "matched_outside_tolerance":d["matched_outside_tolerance"],
+              "missed":d["missed"],
+              "partial":d["partial"],
+              "unresolved":d["unresolved"],
+              "unsupported_extra":d["unsupported_extra"],
+              "coverage_accuracy":d["coverage_accuracy"],
+              "precision_adjusted_accuracy":d["precision_adjusted_accuracy"],
+              "produced_quantity_ids":sorted(expected_source_quantity_ids),
+              "no_unsupported_ft3_material_binding":True,
+              "four_project_publication_allowed":False,
+          }
+          Path("artifacts/maryborough-exact-24/reconciliation_integrity_receipt.json").write_text(
+              json.dumps(receipt,indent=2,sort_keys=True)+"\\n"
           )
           print("MARYBOROUGH_EXACT_24",json.dumps(d,sort_keys=True))
           PY
