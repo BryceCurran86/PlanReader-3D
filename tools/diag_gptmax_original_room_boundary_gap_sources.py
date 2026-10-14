@@ -116,6 +116,18 @@ def inspect_original_source_gaps(pdf_bytes: bytes, source_report: Mapping[str,An
         native=[dict(text=str(w[4]),bbox=[float(v) for v in w[:4]],
                      source_block=int(w[5]),source_line=int(w[6]),source_word=int(w[7]))
                 for w in words if str(w[4]).upper()==native_word_filter.upper()]
+        # Bound original render/native-path work to the independently printed
+        # room words. This is a diagnostic locality filter, never proof of
+        # a physical room owner, polygon, or metric quantity.
+        def word_distance(g):
+            axis=g["axis"]
+            fixed=g["fixed_coordinate_pdf_pts"]
+            mid=(g["gap_start_pdf_pts"]+g["gap_end_pdf_pts"])/2
+            cx,cy=(fixed,mid) if axis=="vertical" else (mid,fixed)
+            return min((math.hypot((w["bbox"][0]+w["bbox"][2])/2-cx,
+                                   (w["bbox"][1]+w["bbox"][3])/2-cy)
+                        for w in native),default=math.inf)
+        gaps=[g for g in sorted(gaps,key=word_distance) if word_distance(g)<=120][:80]
         drawings=page.get_drawings()
         for g in gaps:
             fixed,start,end=(g["fixed_coordinate_pdf_pts"],
