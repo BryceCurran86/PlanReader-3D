@@ -1,0 +1,155 @@
+name: GPT1 Live Same-Root Source Plan Scale Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_live_physical_net_wall_integration.py"
+      - "tests/test_gpt1_live_source_plan_scale_scope.py"
+      - ".github/workflows/gpt1-live-source-plan-metric-scope.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-original-live-source-plan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13","3.14"]
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Strict source-F07 room scope and native scale guard
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt1_live_source_plan_scale_scope.py tests/test_gpt1_source_owned_plan_scale_scope.py tests/test_gpt1_source_owned_figured_plan_bridge.py
+          ruff check --select F821,F823 pb_live_physical_net_wall_integration.py tests/test_gpt1_live_source_plan_scale_scope.py
+          python scripts/check_full_plan_v2_integrity.py
+
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Original immutable Lot16 live source to customer output, no inferred metric
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-source-plan
+          python -u tools/diag_lot16_room_face_scope.py \
+            --pdf "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf" \
+            --page-index 2 --source-owned-plan-view \
+            --output artifacts/gpt1-source-plan/lot16.json
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          source=Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf")
+          sha="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          assert hashlib.sha256(source.read_bytes()).hexdigest()==sha
+          d=json.loads(Path("artifacts/gpt1-source-plan/lot16.json").read_text())
+          assert d["pdf_sha256"]==sha
+          assert d["diagnostic_only"] is True
+          assert d["downstream"]["canonical_floor_count"]==61
+          assert d["downstream"]["metric_floor_count"]==0
+          assert d["downstream"]["floor_finish_quantity_count"]==0
+          assert d["opening_sealing_diagnostic"]["status"]=="source_sealed_and_customer_rows_verified"
+          ids=set(d["opening_sealing_diagnostic"]["sealed_quantity_ids"])
+          expected={
+             "opening_area_0b6477e219f9117d29b2803c181af665",
+             "opening_area_0e2bb9501b5cefdce2eb0150d992f54f",
+             "opening_area_11bd4d5f9acb00b9dc46f12105a374bf",
+             "opening_area_1a755970ebeca773650f41e73eb0f113",
+             "opening_area_4227fdeb71838722a4a7f0251c3dda60",
+             "opening_area_6809b61112132ffd701e6eae02076876",
+             "opening_area_a26f4787e6f8b51c5474c28dc7f249ad",
+             "opening_area_a2c85322d97e20ba087f6d74574fa7eb",
+          }
+          assert expected.issubset(ids)
+          assert set(d["opening_sealing_diagnostic"]["verified_quantity_ids"])==ids
+          assert not d["source_owned_figured_plan_plane_shadow"]["physical_scale_authority_granted"]
+          assert not d["source_owned_figured_plan_plane_shadow"]["room_metric_area_authority_granted"]
+          Path("artifacts/gpt1-source-plan/lot16-verified.json").write_text(json.dumps({
+              "source_sha256":sha,"source_floor_candidates":61,
+              "published_metric_floor_count":0,
+              "source_sealed_opening_identity_retained":sorted(expected),
+              "benchmark_accuracy":None,
+          },sort_keys=True,indent=2)+"\n")
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-lot16-live-source-scale-firstgate
+          path: artifacts/gpt1-source-plan/
+          retention-days: 14
+
+  original-maryborough-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Preserve exact original three measured floors and customer source closure
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-source-plan
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
+          from tools.diag_gpt2_room_measurement_gates import inspect_room_measurement_gates
+          from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
+          pdf=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          assert hashlib.sha256(pdf.read_bytes()).hexdigest()==sha
+          claim=collect_live_physical_net_wall_claim(
+              pdf,pages=(6,),topology_pages=(6,),room_area_support_pages=(10,),
+          )
+          q=publish_live_floor_area_quantities(claim)
+          control={
+              "floor_area_quantity_d62c2f382a0c773ec36f":13.270425,
+              "floor_area_quantity_8bcdc01455538a6a105a":9.05352,
+              "floor_area_quantity_6b28b3abaedf519631ed":25.37875,
+          }
+          assert len(q)==3 and {x.quantity_id for x in q}==set(control)
+          assert all(abs(float(x.value)-control[x.quantity_id])<1e-8 for x in q)
+          report=inspect_room_measurement_gates(claim)
+          assert report["source_closed_floor_seal_quantity_count"]==3
+          assert report["verified_floor_customer_row_count"]==3
+          assert report["commercial_estimator_approved"] is False
+          assert report["benchmark_accuracy"] is None
+          assert not claim.floor_finish_quantity_evidence
+          Path("artifacts/gpt1-source-plan/maryborough.json").write_text(json.dumps({
+              "source_sha256":sha,"firm_floor_area_ids":sorted(control),
+              "customer_row_count":3,"frozen_score":None,
+          },sort_keys=True,indent=2)+"\n")
+          PY
+          python scripts/check_full_plan_v2_integrity.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-maryborough-three-floor-retention
+          path: artifacts/gpt1-source-plan/
+          retention-days: 14
