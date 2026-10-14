@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "pb_viewport_segmentation.py"
+      - "pb_wall_room_topology_typed_negative_evidence.py"
+      - "tests/test_wall_topology_typed_negative_evidence.py"
       - "tools/diag_gpt2_remaining_label_source_face_candidates.py"
       - "tests/test_gpt2_remaining_label_source_face_candidates.py"
       - "tools/diag_gpt2_split_label_wall_separators.py"
@@ -49,6 +51,7 @@ jobs:
           PYTHONPATH=. pytest -q tests/test_gpt2_split_face_collinear_first_gates.py
           PYTHONPATH=. pytest -q tests/test_source_composite_room_face_authority.py
           PYTHONPATH=. pytest -q tests/test_gpt2_freezer_source_crossing_wall_owners.py
+          PYTHONPATH=. pytest -q tests/test_wall_topology_typed_negative_evidence.py
           PYTHONPATH=. pytest -q tests/test_gpt2_cross_w4_atomic_source_audit.py
           PYTHONPATH=. pytest -q tests/test_gpt2_non_simple_original_face_ring_forensics.py
           PYTHONPATH=. pytest -q tests/test_gpt2_native_source_parent_w4_ancestry.py
