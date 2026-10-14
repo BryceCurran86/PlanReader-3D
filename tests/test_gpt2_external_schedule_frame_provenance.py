@@ -141,3 +141,45 @@ def test_external_source_line_grid_without_closed_table_cells_abstains(
     )
     assert views == []
     assert consumed == set()
+
+
+def test_unique_original_line_grid_can_still_own_external_schedule(
+    monkeypatch, isolated_frame,
+):
+    monkeypatch.setattr(
+        v, "_frame_looks_like_table",
+        lambda *a, **kw: kw.get("allow_line_grid_only", True),
+    )
+    monkeypatch.setattr(v, "_frame_looks_like_line_grid_table", lambda *a: True)
+    anchor = v._TitleAnchor(
+        "CEILING FINISHES SCHEDULE", OUTSIDE, v.DrawingViewType.SCHEDULE.value
+    )
+    views, consumed = v._frame_resolved_viewports(
+        SimpleNamespace(), (anchor,), (FRAME,), isolated_frame, page_number=9,
+    )
+    assert consumed == {0}
+    assert len(views) == 1
+    assert views[0].status == v.ViewportSegmentationStatus.RESOLVED.value
+    assert views[0].bounding_box == FRAME
+
+
+def test_competing_original_line_grids_cannot_mint_external_schedule(
+    monkeypatch, isolated_frame,
+):
+    # A false physical building plan may show the same GRID intersections
+    # as a genuine schedule. Two distinct eligible source line-grid frames
+    # mean no unique external frame ownership is available.
+    second = (10., 340., 160., 480.)
+    monkeypatch.setattr(
+        v, "_frame_looks_like_table",
+        lambda *a, **kw: kw.get("allow_line_grid_only", True),
+    )
+    monkeypatch.setattr(v, "_frame_looks_like_line_grid_table", lambda *a: True)
+    anchor = v._TitleAnchor(
+        "INTERNAL FINISHES SCHEDULE", OUTSIDE, v.DrawingViewType.SCHEDULE.value
+    )
+    views, consumed = v._frame_resolved_viewports(
+        SimpleNamespace(), (anchor,), (FRAME, second), isolated_frame, page_number=11,
+    )
+    assert views == []
+    assert consumed == set()
