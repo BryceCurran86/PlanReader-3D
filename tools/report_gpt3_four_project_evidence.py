@@ -18,7 +18,7 @@ import importlib
 import importlib.util
 import sys
 
-from scripts.report_full_plan_v2_readiness import _write_readiness_report
+from scripts.report_full_plan_v2_readiness import _parse_evidence_json, _write_readiness_report
 from pb_customer_output_verification import verify_sealed_customer_output
 from tools.gpt3_signed_v2_family_trade_integrity import (
     require_signed_v2_family_trade_integrity,
@@ -66,23 +66,14 @@ def _load_unchanged_frozen_modules():
 
 
 def _read_json_without_duplicate_keys(path: Path) -> Any:
-    """Never discard conflicting keys before signed source/customer validation.
+    """Reject malformed signed evidence before source/customer verification.
 
-    Unlike default json.loads, this retains the immutable wire document's
-    original identity semantics: even a nested conflicting key must fail
-    rather than silently replacing the previous source/quantity claim.
+    Reuse the existing strict readiness JSON parser: nested duplicate keys,
+    NaN/Infinity, numeric overflow, oversized integers, and pathological
+    nesting must not reach the unchanged signed or frozen reconciliation.
+    This reads only; it never changes producer signatures or source bytes.
     """
-    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"signed evidence JSON contains duplicate key: {key}")
-            result[key] = value
-        return result
-
-    return json.loads(
-        path.read_text(encoding="utf-8"), object_pairs_hook=unique_object
-    )
+    return _parse_evidence_json(path.read_text(encoding="utf-8"))
 
 
 def _json_object(path: Path) -> dict[str, Any]:
