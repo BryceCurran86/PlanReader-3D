@@ -129,6 +129,12 @@ jobs:
           assert sorted(p["denominator"] for p in result["projects"])==[24,27]
           assert sorted(p["matched_within_tolerance"] for p in result["projects"])==[0,8]
           assert all(len(p["source_sha256s"])==1 for p in result["projects"])
+          by_id={p["project_id"]:p for p in result["projects"]}
+          # The real Lot16 original architectural page-3 producer never
+          # claimed to ingest the unrelated frozen structural PDF. The
+          # complete two-PDF source package remains unproven on this run.
+          assert by_id["au_qld_lot16_power"]["original_source_document_universe_complete"] is False
+          assert by_id["au_qld_maryborough_service_station"]["original_source_document_universe_complete"] is True
           print("TWO_VERIFIED_SELECTED_PROJECTS",json.dumps({
               "denominator":51,"matched_within":8,"missed":43,
               "unsupported_extra_genuine_source_rows":3,
