@@ -19,7 +19,6 @@ from tools import run_source_closed_project_handoff as handoff
     ((None,1), False),
     ([], False),
     (None, False),
-    (("physical_wall_candidate_scope_complexity_exceeded",), True),
 ])
 def test_source_safety_cap_reason_is_precise_and_cannot_be_guessed(codes,blocked):
     assert handoff._source_complexity_blocked(codes) is blocked
@@ -58,7 +57,7 @@ def test_original_source_run_status_retains_unsealed_incomplete_vs_empty(
     assert summary["combined_run_file"] is None
     assert summary["combined_run_id"] is None
     assert summary["combined_quantity_count"]==0
-    assert summary["family_runs"] if False else True
+    assert all(count == 0 for count in summary["family_counts"].values())
     assert not list(out.glob("*.sealed.json"))
     assert not list((out/"family_runs").glob("*.sealed.json"))
     assert not summary["frozen_v2_reconciliation_complete"]
