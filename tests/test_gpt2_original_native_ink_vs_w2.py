@@ -120,6 +120,9 @@ def test_original_native_ink_witness_survives_where_w2_splits_drop_edge():
     report["scopes"][0]["competing_source_edges"][0]["candidate_walls"][0][
         "source_edge_fragments"
     ][0]["geometry"] = (10, 10, 30, 10)
+    report["scopes"][0]["competing_source_edges"][0]["candidate_walls"][1][
+        "source_edge_fragments"
+    ][0]["geometry"] = (20, 5, 20, 70)
     result = inspect_native_ink_against_w2(report, original)
     a, b = result["scopes"][0]["edges"][0]["w4_candidate_original_ink_evidence"]
     assert a["direct_indexed_native_ink_witness"] is True
