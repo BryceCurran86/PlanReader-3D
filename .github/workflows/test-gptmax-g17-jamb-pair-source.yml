@@ -1,0 +1,87 @@
+name: GPT MAX Original G17 Two-Flank W3 Jamb Source Review
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_g17_source_owned_jamb_pair.py"
+      - "tests/test_gptmax_g17_source_owned_jamb_pair.py"
+      - ".github/workflows/test-gptmax-g17-jamb-pair-source.yml"
+permissions:
+  contents: read
+jobs:
+  source-jamb-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Exact original G17 face/end W3 ownership, conflicts and independence
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_g17_source_owned_jamb_pair.py
+          python -m compileall -q tools/diag_gptmax_g17_source_owned_jamb_pair.py
+          ruff check --select F821,F823 tools/diag_gptmax_g17_source_owned_jamb_pair.py tests/test_gptmax_g17_source_owned_jamb_pair.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+  original-lot16-source-jamb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Reconcile exact immutable source G17 face/end and W2/W3/W4 receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --include-unhosted-raster-flank-source --output artifacts/source.json
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_original_inclusive_source_shadow.py --pdf "$PDF" --source-report artifacts/source.json --page-id 3 --output artifacts/paint.json
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_original_w2_w4_source_shadow.py --pdf "$PDF" --source-report artifacts/source.json --source-paint-report artifacts/paint.json --page-id 3 --output artifacts/w2.json
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_source_owned_jamb_pair.py --pdf "$PDF" --source-report artifacts/source.json --w2-shadow-report artifacts/w2.json --page-id 3 --output artifacts/jamb-pair.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('artifacts/source.json').read_text())
+          b=json.loads(Path('artifacts/jamb-pair.json').read_text())
+          assert a['source_sha256']==b['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert a['primitive_safety_cap']==20000
+          assert a['summary']['physical_existence_claims']==21
+          assert a['summary']['authenticated_hosts']==15
+          assert a['summary']['resolved_source_frames']==9
+          assert a['summary']['canonical_opening_area_records']==8
+          assert len(a['source_owned_wall_scopes'][0]['records'])==2094
+          assert b['original_g17_physical_opening_count']==6
+          expected=[x for x in b['opening_source_ribbon_review'] if x['physical_opening_id'].startswith('physical_opening_existence_a68d0b7d')]
+          assert len(expected)==1 and expected[0]['both_original_flanks_w2_w3_source_closed'] is True
+          assert all(x['retained'] for x in expected[0]['flank_source_proofs'])
+          assert b['published_source_snapshot_modified'] is False
+          assert b['physical_w4_or_host_granted'] is False
+          assert b['opening_area_or_count_granted'] is False
+          assert b['customer_row_granted'] is False
+          assert b['benchmark_score_granted'] is False
+          print({'original_G17_two_flank_W3_source_candidates':b['source_closed_two_flank_candidates'],'physical_hosts_granted':0,'metric_area_granted':0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-g17-source-owned-jamb-pair
+          path: artifacts/jamb-pair.json
+          retention-days: 21
