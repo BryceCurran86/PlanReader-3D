@@ -5,7 +5,7 @@ import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
 from tools.diag_gpt2_source_owned_plan_face_first_failure import (
-    _face_report, replay,
+    _face_report, _shadow_local_face_boundary_census, replay,
 )
 
 
@@ -154,3 +154,65 @@ def test_competing_source_wall_ancestors_are_reported_without_winner():
     }
     assert all(not item["structural_wall_role_proven_by_this_report"]
                for item in edge["candidate_walls"])
+
+
+def test_shadow_edge_owned_faces_can_be_boundary_tainted_without_publication():
+    face = _face(ownership_evaluation=SimpleNamespace(
+        status="evaluated", owned_face_ids=("face-a", "face-b"),
+        degenerate_owned_face_ids=("face-b",),
+    ))
+    wall = _wall(boundary_evaluation=SimpleNamespace(
+        status="evaluated", boundary_tainted_wall_candidate_ids=("wall-a",),
+        evaluated_wall_candidate_ids=("wall-a", "wall-b"),
+        excluded_boundary_primitives=(),
+    ))
+    candidates = (
+        {"face_id": "face-a", "bounding_wall_ids": ("wall-a",),
+         "area_page_pts2": 12.,
+         "polygon_pdf_pts": ((0., 0.), (4., 0.), (4., 3.), (0., 3.))},
+        {"face_id": "face-b", "bounding_wall_ids": ("wall-b",),
+         "area_page_pts2": 1.,
+         "polygon_pdf_pts": ((10., 0.), (11., 0.), (11., 1.), (10., 1.))},
+    )
+    result = _shadow_local_face_boundary_census(wall, face, witnesses=candidates)
+    assert result == {
+        "status": "evaluated",
+        "original_edge_owned": 2,
+        "boundary_tainted": 1,
+        "boundary_clean": 1,
+        "boundary_clean_non_degenerate": 0,
+        "boundary_clean_non_degenerate_witnesses": (),
+        "source_room_publication_granted": False,
+    }
+    face2 = _face(ownership_evaluation=SimpleNamespace(
+        status="evaluated", owned_face_ids=("face-b",),
+        degenerate_owned_face_ids=(),
+    ))
+    second = _shadow_local_face_boundary_census(
+        wall, face2, witnesses=candidates[1:]
+    )
+    assert second["boundary_clean_non_degenerate"] == 1
+    candidate, = second["boundary_clean_non_degenerate_witnesses"]
+    assert candidate["face_id"] == "face-b"
+    assert candidate["area_page_pts2"] == 1.0
+    assert candidate["bounding_wall_ids"] == ("wall-b",)
+    assert candidate["physical_room_identity_granted"] is False
+    assert candidate["material_occurrence_granted"] is False
+    assert candidate["quantity_authority_granted"] is False
+    assert second["source_room_publication_granted"] is False
+
+
+def test_shadow_witnesses_cannot_omit_or_repeat_producer_face_ids():
+    face = _face(ownership_evaluation=SimpleNamespace(
+        status="evaluated", owned_face_ids=("source-one",),
+        degenerate_owned_face_ids=(),
+    ))
+    with pytest.raises(RuntimeError, match="shadow_source_face_witness_census_mismatch"):
+        _shadow_local_face_boundary_census(_wall(), face, witnesses=())
+    with pytest.raises(RuntimeError, match="shadow_source_face_witness_census_mismatch"):
+        _shadow_local_face_boundary_census(_wall(), face, witnesses=(
+            {"face_id":"source-one","bounding_wall_ids":(),
+             "polygon_pdf_pts":((0,0),(1,0),(0,1))},
+            {"face_id":"source-one","bounding_wall_ids":(),
+             "polygon_pdf_pts":((0,0),(1,0),(0,1))},
+        ))
