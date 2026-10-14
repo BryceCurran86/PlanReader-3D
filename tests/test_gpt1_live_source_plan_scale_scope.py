@@ -108,6 +108,6 @@ def test_existing_source_pdf_hash_tampering_cannot_be_translated_to_scope():
     data=_sheet()
     source,pub=_source(data)
     source._producer._store.source_bytes_by_revision[pub.revision.revision_id]=b"not original pdf"
-    with pytest.raises(RuntimeError,match="immutable_bytes_unavailable|source_plan"):
+    with pytest.raises(RuntimeError, match="producer_integrity_failure|immutable_bytes_unavailable|source_plan"):
         unique_plan(source=source,scope_rooms=(_room(data,pub),),
                     page_id="1",snapshot_id=pub.snapshot.snapshot_id)
