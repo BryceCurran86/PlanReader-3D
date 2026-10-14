@@ -94,6 +94,8 @@ def build_four_project_evidence_ledger(
 
     rows: list[dict[str, Any]] = []
     scored: dict[str, tuple] = {}
+    verified_source_hashes: dict[str, tuple[str, ...]] = {}
+    verified_reconciliations: dict[str, bool] = {}
     for manifest in manifests:
         project_id = manifest.project_id
         entry: dict[str, Any] = {
@@ -197,6 +199,8 @@ def build_four_project_evidence_ledger(
                 entry["publication_status"] = "PROJECT_VERIFIED"
                 entry["reason_codes"] = []
                 scored[project_id] = produced
+                verified_source_hashes[project_id] = tuple(hashes)
+                verified_reconciliations[project_id] = True
         except (OSError, UnicodeError, TypeError, ValueError, RuntimeError, KeyError) as exc:
             entry["publication_status"] = "CONFLICT"
             entry["reconciliation_complete"] = False
@@ -217,7 +221,17 @@ def build_four_project_evidence_ledger(
     if len(scored) != 4:
         result["reason_codes"] = ["four_project_signed_source_universe_not_complete"]
         return result
-    official = evaluate_suite_v2(manifests, scored, required_project_count=4)
+    # The immutable suite evaluator requires explicit original-source and
+    # completed-reconciliation receipts for EVERY verified project. Without
+    # these keyword arguments it must (correctly) refuse publication even
+    # when all four source/customer/project gates have passed.
+    official = evaluate_suite_v2(
+        manifests,
+        scored,
+        required_project_count=4,
+        evaluated_source_sha256s_by_project=verified_source_hashes,
+        reconciliation_complete_by_project=verified_reconciliations,
+    )
     result["official_suite_result"] = asdict(official)
     if official.publication_status == "PUBLISHED":
         result["publication_status"] = "PUBLISHED"
