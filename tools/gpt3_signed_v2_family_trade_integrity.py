@@ -29,14 +29,6 @@ _COMPATIBLE_TRADES = {
     "opening_count": frozenset({"doors", "windows"}),
 }
 
-_TYPED_OPENINGS = {
-    "window_area:": "windows",
-    "door_area:": "doors",
-    "window_count:": "windows",
-    "door_count:": "doors",
-}
-
-
 def require_signed_v2_family_trade_integrity(
     *,
     verified_items: Iterable[Any],
