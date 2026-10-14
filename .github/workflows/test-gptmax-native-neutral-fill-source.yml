@@ -77,7 +77,7 @@ jobs:
           # Confirm authentic current source counts and identity-level retention.
           from tools.declared_additive_source_retention import strict_or_declared
           with strict_or_declared(old,new):
-              assert old['summary']==new['summary']=={"physical_existence_claims":21,"host_bindings":14,"host_frames":9}
+              assert old['summary']==new['summary']=={"physical_existence_claims":21,"host_bindings":15,"host_frames":9}
           def keyed(key,report):
               values=report[key]
               ids=[x['opening_identity_id'] for x in values]
@@ -109,7 +109,7 @@ jobs:
           assert not roles.get('opening_count_publication_allowed',False)
           assert not roles.get('metric_quantity_publication_allowed',False)
           print({'correctly_abstained_false_native_opening':sorted(historically_opposed),
-                 'authenticated_existing_hosts':14,'authenticated_existing_frames':9})
+                 'authenticated_existing_hosts':15,'authenticated_existing_frames':9})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
