@@ -21,7 +21,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      # The F.07 source text gate uses independent fixed-scale RapidOCR
+      # corroboration. These optional packages are intentionally absent
+      # from lean production requirements; original-source CI must install
+      # the same real backend as the already-positive #2716 source proof.
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Verify real installed independent visual OCR backend
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          from pb_portable_raster_ocr_authority import (
+              RapidOCRBackend, select_production_ocr_backend
+          )
+          assert RapidOCRBackend().is_available(), "real original OCR backend unavailable"
+          backend, receipt = select_production_ocr_backend()
+          assert isinstance(backend, RapidOCRBackend), (backend.name, receipt)
+          print("SOURCE_OCR_BACKEND", backend.name, backend.version, receipt)
+          PY
       - name: Source-owned positive and competing-plan abstention
         run: |
           PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_owned_physical_w4_shadow.py
