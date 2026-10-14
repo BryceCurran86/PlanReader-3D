@@ -74,8 +74,16 @@ def require_signed_v2_family_trade_integrity(
                     "mapped quantity identity requires its explicit original production family"
                 )
             trade = _field(item, "trade_category")
+            # An unknown source-owned family has NO audited trade meaning.
+            # Never interpret absence from the allowlist as permission to
+            # reclassify an independently bound item into any frozen trade.
+            # Unmapped source quantities are unaffected.
             allowed = _COMPATIBLE_TRADES.get(family)
-            if allowed is not None and trade not in allowed:
+            if allowed is None:
+                raise ValueError(
+                    "mapped quantity family has no verified benchmark trade semantics"
+                )
+            if trade not in allowed:
                 raise ValueError(
                     "bound production family cannot be reclassified as benchmark trade"
                 )
@@ -83,13 +91,26 @@ def require_signed_v2_family_trade_integrity(
                 semantic_key = _field(quantity, "semantic_key")
                 if type(semantic_key) is not str:
                     raise ValueError("source-owned opening semantic identity is missing")
-                for prefix, source_trade in _TYPED_OPENINGS.items():
-                    if semantic_key.startswith(prefix):
-                        if trade != source_trade:
-                            raise ValueError(
-                                "source-owned opening kind disagrees with benchmark trade"
-                            )
-                        break
+                typed_prefixes = (
+                    ("window_area:", "windows"),
+                    ("door_area:", "doors"),
+                ) if family == "opening_area" else (
+                    ("window_count:", "windows"),
+                    ("door_count:", "doors"),
+                )
+                typed_trade = next(
+                    (owned_trade for prefix, owned_trade in typed_prefixes
+                     if semantic_key.startswith(prefix)),
+                    None,
+                )
+                if typed_trade is None:
+                    raise ValueError(
+                        "mapped opening has no source-owned door/window kind"
+                    )
+                if trade != typed_trade:
+                    raise ValueError(
+                        "source-owned opening kind disagrees with benchmark trade"
+                    )
 
 
 __all__ = ["require_signed_v2_family_trade_integrity"]
