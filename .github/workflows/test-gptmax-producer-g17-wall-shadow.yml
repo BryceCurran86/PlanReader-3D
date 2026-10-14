@@ -5,9 +5,11 @@ on:
     paths:
       - "pb_opening_local_g17_wall_shadow.py"
       - "pb_g17_w4_equivalence_competitor_shadow.py"
+      - "pb_g17_dual_dpi_source_correspondence_shadow.py"
       - "pb_raster_g17_source_shadow.py"
       - "tests/test_opening_local_g17_wall_shadow.py"
       - "tests/test_g17_w4_equivalence_competitor_shadow.py"
+      - "tests/test_g17_dual_dpi_source_correspondence_shadow.py"
       - "tools/diag_gptmax_producer_owned_g17_wall_shadow.py"
       - "tools/diag_gptmax_g17_source_only_flanks.py"
       - "tools/diag_gptmax_g17_original_inclusive_source_shadow.py"
@@ -33,8 +35,8 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Actual source producers, tampering, transforms and shared predicate retention
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_g17_w4_equivalence_competitor_shadow.py tests/test_opening_local_g17_wall_shadow.py tests/test_gptmax_original_g17_shadow_one_end_paint.py tests/test_gptmax_g17_source_only_flanks.py tests/test_gptmax_g17_source_owned_jamb_pair.py tests/test_gptmax_g17_original_w2_w4_source_shadow.py tests/test_gptmax_raster_flank_paint_audit.py
-          ruff check --select F821,F823 pb_g17_w4_equivalence_competitor_shadow.py tests/test_g17_w4_equivalence_competitor_shadow.py pb_opening_local_g17_wall_shadow.py pb_raster_g17_source_shadow.py tools/diag_gptmax_producer_owned_g17_wall_shadow.py tests/test_opening_local_g17_wall_shadow.py
+          PYTHONPATH=. python -m pytest -q tests/test_g17_dual_dpi_source_correspondence_shadow.py tests/test_g17_w4_equivalence_competitor_shadow.py tests/test_opening_local_g17_wall_shadow.py tests/test_gptmax_original_g17_shadow_one_end_paint.py tests/test_gptmax_g17_source_only_flanks.py tests/test_gptmax_g17_source_owned_jamb_pair.py tests/test_gptmax_g17_original_w2_w4_source_shadow.py tests/test_gptmax_raster_flank_paint_audit.py
+          ruff check --select F821,F823 pb_g17_dual_dpi_source_correspondence_shadow.py tests/test_g17_dual_dpi_source_correspondence_shadow.py pb_g17_w4_equivalence_competitor_shadow.py tests/test_g17_w4_equivalence_competitor_shadow.py pb_opening_local_g17_wall_shadow.py pb_raster_g17_source_shadow.py tools/diag_gptmax_producer_owned_g17_wall_shadow.py tests/test_opening_local_g17_wall_shadow.py
   original-source-retention:
     runs-on: ubuntu-latest
     timeout-minutes: 80
@@ -66,6 +68,19 @@ jobs:
           assert r['all_original_wall_host_frame_area_receipts_unchanged'] is True
           assert r['new_physical_host_or_metric_granted'] is False
           assert len(r['opening_local_source_shadows'])==6
+          c=r['original_144_300_correspondence_shadow']
+          assert c['original_source_sha256']==r['source_sha256']
+          assert (c['original_144_render_dpi'],c['original_g17_render_dpi'])==(144,300)
+          assert c['original_w4_candidates_examined']==r['original_w4_count']
+          assert len(c['openings'])==6
+          assert all(len(row['flanks'])==2 for row in c['openings'])
+          assert all(row['host_granted'] is False and row['metric_quantity_granted'] is False for row in c['openings'])
+          assert all(not c[k] for k in ('physical_wall_role_granted','cross_source_equivalence_granted',
+              'host_granted','metric_quantity_granted','complete_wall_universe_proven'))
+          assert sum(len(f['source_edges']) for row in c['openings'] for f in row['flanks'])==30
+          assert all(e['w4_cross_source_equivalence_proven'] is False
+              and e['structural_wall_role_proven'] is False
+              for row in c['openings'] for f in row['flanks'] for e in f['source_edges'])
           for item in r['opening_local_source_shadows']:
               comp=item['ordinary_w4_competitor_shadow']
               assert comp['ordinary_w4_records_examined']==r['original_w4_count']

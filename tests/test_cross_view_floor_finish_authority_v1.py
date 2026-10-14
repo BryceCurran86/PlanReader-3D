@@ -680,13 +680,18 @@ def _patch_cross_view_floor_finish_viewports(monkeypatch) -> None:
     )
 
 
-def test_separate_floor_finish_plan_binds_by_exact_native_room_block(
+def test_separate_floor_finish_plan_same_native_text_block_is_not_physical_owner(
     monkeypatch,
 ) -> None:
+    # The original figured-area room and its canonical floor remain valid.
+    # A DIFFERENT finish-plan page having "TEST ROOM" + "FT1" in one
+    # native PDF text block does not prove the same physical room/wall ring.
     _patch_cross_view_floor_finish_viewports(monkeypatch)
     source, room_areas, floors = _source_room_area_and_floor(
         _cross_view_floor_finish_payload(same_block=True)
     )
+    assert len(room_areas.records) == 1
+    assert len(floors.floors) == 1
 
     result = CrossViewFloorFinishProducer.from_source(
         source=source,
@@ -694,19 +699,13 @@ def test_separate_floor_finish_plan_binds_by_exact_native_room_block(
         floors=floors,
     ).publish()
 
-    assert result.status is EvidenceResolutionStatus.CORROBORATED
-    assert len(result.records) == 1
-    record = result.records[0]
-    assert record.finish_code == "FT1"
-    assert record.semantic_finish == "tile"
-    assert record.quantity.value == 8.64
-    assert record.quantity.metadata["source_dimension_page_id"] == "2"
-    assert record.quantity.metadata["support_page_id"] == "3"
-    assert record.quantity.metadata["support_viewport_id"] == "vp-3"
-    assert (
-        record.quantity.metadata["finish_binding_mode"]
-        == "native_block_room_label"
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.quantities == ()
+    assert result.unresolved_canonical_floor_ids == (
+        floors.floors[0].canonical_floor_id,
     )
+    assert room_areas.records[0].area_evidence.normalized_value == 8.64
 
 
 def test_separate_floor_finish_plan_nearby_code_in_different_block_abstains(
