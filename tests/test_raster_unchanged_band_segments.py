@@ -81,7 +81,7 @@ def test_render_extents_and_existing_primitive_cap_fail_closed(monkeypatch):
         capture.detect_unchanged_terminal_band_segments(_png(source), _png(source), dpi=144)
 
 
-def _pdf():
+def _pdf(*, label='1218 SGW'):
     source = np.full((360, 640, 3), 255, dtype=np.uint8)
     cv2.rectangle(source, (200, 150), (240, 164), (0,0,0), -1)
     cv2.rectangle(source, (400, 150), (610, 164), (0,0,0), -1)
@@ -93,7 +93,7 @@ def _pdf():
     page = pdf.new_page(width=320, height=180)
     page.insert_image(page.rect, stream=buf.getvalue())
     page.draw_line((101, 70), (101, 85), color=(1,0,0), width=1)
-    page.insert_text((145, 83), '1218 SGW', fontsize=4)
+    page.insert_text((145, 83), label, fontsize=4)
     result = pdf.tobytes()
     pdf.close()
     return result
@@ -229,3 +229,29 @@ def test_inclusive_g17_terminal_cell_support_preserves_4pt_nomination_gate(monke
             round(right * 72 / 300, 6),
             round((top + bottom) / 2 * 72 / 300, 6),
         )
+
+
+def test_original_g17_complete_flanks_can_nominate_source_without_metric_area():
+    """A genuine figured single-axis mark cannot be treated as a metric area.
+
+    Complete producer-owned G17 face/end evidence independently nominates
+    SOURCE visibility only. No host, frame, height, count or area is granted.
+    """
+    source = SourceVisibilityProducer(
+        producer_method='single-axis-terminal-test', producer_version='1',
+    )
+    published = source.ingest_native_pdf_bytes(
+        document_id='single-axis-terminal-test',
+        source_bytes=_pdf(label='870'),
+        source_locator='memory://single-axis-terminal-test.pdf',
+    )
+    published = source.augment_with_raster_opening_primitives(
+        published.revision.revision_id,
+    )
+    boxes = source._proven_raster_opening_flank_boxes(published, '1')
+    assert len(boxes) == 2
+    assert all(axis == 'horizontal' for axis, _ in boxes)
+    assert len({box for _, box in boxes}) == 2
+    # Nomination itself does not publish walls or opening quantities; the
+    # existing downstream producer must still independently close them.
+    assert boxes == tuple(sorted(boxes))
