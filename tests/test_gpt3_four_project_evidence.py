@@ -98,3 +98,61 @@ def test_malformed_signed_evidence_fails_closed(tmp_path):
     path.write_text('[]', encoding="utf-8")
     with pytest.raises(ValueError, match="JSON object"):
         module._json_object(path)
+
+
+def test_source_byte_change_between_preflight_and_score_fails(tmp_path):
+    import hashlib
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"%PDF-real-original")
+    initial = original.read_bytes()
+    digest = hashlib.sha256(initial).hexdigest()
+    manifest = {
+        "source_documents": [{
+            "name": "original.pdf", "sha256": digest,
+            "size_bytes": len(initial),
+        }],
+    }
+    frozen = tmp_path / "manifest.json"
+    frozen.write_text('{"immutable": true}', encoding="utf-8")
+    initial_files = {frozen: module._sha256(frozen)}
+    module._assert_inputs_unchanged(
+        manifest=manifest, originals=[original],
+        expected_hashes=[digest], signed_hashes=initial_files,
+    )
+    original.write_bytes(b"%PDF-fake-original")
+    with pytest.raises(ValueError, match="original source changed"):
+        module._assert_inputs_unchanged(
+            manifest=manifest, originals=[original],
+            expected_hashes=[digest], signed_hashes=initial_files,
+        )
+
+
+def test_signed_customer_or_frozen_manifest_change_after_score_fails(tmp_path):
+    import hashlib
+    original = tmp_path / "original.pdf"
+    original.write_bytes(b"%PDF-fixed-source")
+    digest = hashlib.sha256(original.read_bytes()).hexdigest()
+    manifest = {
+        "source_documents": [{
+            "name": "original.pdf", "sha256": digest,
+            "size_bytes": original.stat().st_size,
+        }],
+    }
+    signed = [tmp_path / item for item in (
+        "source_manifest.json", "sealed.json", "identity.json", "customer.json"
+    )]
+    for path in signed:
+        path.write_text('{"valid":true}', encoding="utf-8")
+    fingerprints = {path: module._sha256(path) for path in signed}
+    for modified in signed:
+        modified.write_text('{"valid":false}', encoding="utf-8")
+        with pytest.raises(ValueError, match="changed during reconciliation"):
+            module._assert_inputs_unchanged(
+                manifest=manifest, originals=[original],
+                expected_hashes=[digest], signed_hashes=fingerprints,
+            )
+        modified.write_text('{"valid":true}', encoding="utf-8")
+    module._assert_inputs_unchanged(
+        manifest=manifest, originals=[original],
+        expected_hashes=[digest], signed_hashes=fingerprints,
+    )
