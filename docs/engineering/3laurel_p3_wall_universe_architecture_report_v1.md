@@ -30,8 +30,8 @@ Observations come from (a) `tools/diag_gptmax_source_authority_stages.py --pdf <
 
 ## 2. Open discrepancies (not resolved; do not build on them)
 
-- A `collect_live_physical_net_wall_claim(pages=[3], topology_pages=[3])` probe in a scratch checkout took ~6–15 min and returned a **complete-scope** wall composition (104 equivalence-resolved + 1,063 unresolved walls) with **11** canonical-id collisions (2 members each) and again `CONFLICT`, `walls=0`. Its wall candidate ids do not match the stage report's, so it used a different source snapshot. Both paths end in the same collision-guard zeroing, but via different scope states. Which one CI ran is **unverified**.
-- A local Windows run of the full handoff call hung for >55 min after the OCR step while CI finished in ~100 s. Environment divergence is **undiagnosed**.
+- **RESOLVED (2026-10-14, my error):** the `collect_live_physical_net_wall_claim(pages=[3], topology_pages=[3])` probe that showed a complete-scope composition (104 equivalence-resolved + 1,063 unresolved walls, 11 canonical-id collisions) ran **page 4**: the claim API takes 0-based page indices (`_selected_page_indices`), and page 3 is index 2. Re-run with index 2 and the optional OCR modules blocked (to mirror CI), it reproduces CI exactly: `CONFLICT`, 0 walls, 139 openings, 292 rooms/floors/spaces on main; 1,445 candidate walls with Option A. There is one scope path for page 3, not two.
+- A local Windows run of the full handoff call hung for >55 min after the OCR step while CI finished in ~100 s. **Partly explained:** this machine has the optional RapidOCR/onnxruntime installed (absent on CI; `requirements.txt` lists them as deliberately not production dependencies), so OCR text enters the local run and CI is OCR-free. Where the time then goes is still **undiagnosed** (profile and all-pages memory measurements are in the Task 3 notes).
 - Whether the 114 free-ended walls are real terminations or stubs from jambs, swings, symbols or hatch ticks is **unknown** (needs layer/graphic-state of their primitives and a render).
 
 ## 3. Inference
@@ -132,4 +132,4 @@ Status: still **report only, no production change**. Option A (#2680) is indepen
 
 ### 9.8 Limits
 
-One page, Windows, the stage-tool path (CI-matching). My Windows `collect_live_physical_net_wall_claim` path produced a different candidate set (§2); it is unresolved and not used here. Host genuineness is by visual inspection. The structural-class table uses the literal substring convention already in the repo and is descriptive, not a classifier.
+One page, Windows, the stage-tool path (CI-matching). The earlier claim-path discrepancy was my own page-index error (§2), not an environment effect. Host genuineness is by visual inspection. The structural-class table uses the literal substring convention already in the repo and is descriptive, not a classifier.
