@@ -1056,8 +1056,12 @@ class SourceVisibilityProducer:
                     snapshot_id=published.snapshot.snapshot_id,
                     observation_id=first_native,
                 )
-                self.native_dimension_cap_evidence(
-                    selector, opening_support_ids=(first_native,)
+                # `rows` was authenticated a few lines above for this exact
+                # published snapshot; do not repeat the identical whole-source
+                # authentication immediately.
+                self._native_dimension_cap_evidence(
+                    selector, opening_support_ids=(first_native,),
+                    authenticated=(published, rows),
                 )
             # Expose the same already fully authenticated source rows to the
             # internal W4 G17 caller. The enclosing transaction still performs
@@ -1078,9 +1082,15 @@ class SourceVisibilityProducer:
                 # word receipts, source bytes, and exact full-page geometry.
                 # Reusing the old component SHA after a changed text/segment
                 # input is explicitly forbidden, even when atoms look alike.
-                self.native_dimension_cap_evidence(
+                # `fresh` is the exit authentication performed immediately
+                # above for this exact published snapshot; reuse it for the
+                # final reproof instead of authenticating the whole source a
+                # second time back to back. Source bytes, every text receipt
+                # and the full-page geometry are still re-proved by this call.
+                self._native_dimension_cap_evidence(
                     batch['first_selector'],
                     opening_support_ids=batch['first_support'],
+                    authenticated=(published, fresh),
                 )
                 if (not self._native_dimension_component_page_cache
                     or next(reversed(self._native_dimension_component_page_cache))
@@ -1109,6 +1119,26 @@ class SourceVisibilityProducer:
         Missing or damaged source receipts raise the existing integrity error;
         consumers must not mistake failed authentication for no opposition.
         Results are candidate EvidenceAtoms, never metric or non-existence authority.
+        """
+        return self._native_dimension_cap_evidence(
+            selector, opening_support_ids=opening_support_ids, authenticated=None,
+        )
+
+    def _native_dimension_cap_evidence(
+        self, selector: ObservationSelector, *, opening_support_ids: Sequence[str],
+        authenticated,
+    ):
+        """native_dimension_cap_evidence with an optional just-proven source read.
+
+        The public method always authenticates the full visible source itself.
+        _native_dimension_source_proof_batch has already done exactly that
+        (same published snapshot, no code in between) at entry and again at
+        exit, so it hands that fresh (published, rows) read to this method
+        instead of repeating the identical whole-source authentication a
+        second time back to back. Rows are accepted only for the exact
+        published snapshot this call re-derives from the producer; everything
+        else (source bytes, every text receipt, geometry, fingerprints) is
+        still re-proved here on every call.
         """
         from pb_native_dimension_cap_evidence import (
             compile_native_dimension_cap_components,
@@ -1141,7 +1171,12 @@ class SourceVisibilityProducer:
                 source_sha256=selector.source_sha256,
                 snapshot_id=selector.snapshot_id,
             )
-        rows = visibility.authenticated_visible_observations(published)
+        if authenticated is None:
+            rows = visibility.authenticated_visible_observations(published)
+        else:
+            authenticated_published, rows = authenticated
+            if authenticated_published is not published and authenticated_published != published:
+                raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         records = {i: r for i, r in rows if r.observation_kind == NATIVE_PDF_VISIBLE_SEGMENT}
         if not selected or not selected <= records.keys():
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
