@@ -884,7 +884,10 @@ class PhysicalScaleProducer:
             # A page-only derived box is NOT admissible for physical scale.
             # Nor may a new view of the same ID silently overwrite an old,
             # conflicting F.07 candidate.
-            if any(v.view_id == selector.viewport_id for v in usable):
+            if any(v.view_id == selector.viewport_id for v in viewports):
+                # Even an UNSUPPORTED native title/legend is an original
+                # competing address: never silently override it with a
+                # separately derived plan identity.
                 return None, PHYSICAL_SCALE_VIEWPORT_UNAVAILABLE
             # Later source-authenticated F.07 drawing planes can carry a
             # distinct, producer-sealed physical plan viewport. This fallback
