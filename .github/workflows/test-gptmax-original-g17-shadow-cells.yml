@@ -5,6 +5,7 @@ on:
     paths:
       - "pb_raster_unchanged_band_segments.py"
       - "tests/test_gptmax_original_g17_shadow_inclusive_cells.py"
+      - "tools/diag_gptmax_g17_original_inclusive_source_shadow.py"
       - ".github/workflows/test-gptmax-original-g17-shadow-cells.yml"
 permissions:
   contents: read
@@ -53,8 +54,8 @@ jobs:
           PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
           SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-          (cd /tmp/gptmax-shadow-source-before && PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output "$GITHUB_WORKSPACE/artifacts/before.json")
-          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --output artifacts/after.json
+          (cd /tmp/gptmax-shadow-source-before && PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --include-unhosted-raster-flank-source --output "$GITHUB_WORKSPACE/artifacts/before.json")
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --include-unhosted-raster-flank-source --output artifacts/after.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -69,6 +70,34 @@ jobs:
           assert before['summary']['canonical_opening_area_records']==8
           assert len(before['source_owned_wall_scopes'][0]['records'])==2094
           print({'byte_exact_default_source_parity':True,'prior_accepted_hosts':15,'prior_frames':9,'prior_areas':8,'firm_gain':0})
+          PY
+      - name: Prove real 870 original 300DPI painted cells only in read-only shadow
+        shell: bash
+        run: |
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_original_inclusive_source_shadow.py --pdf "$PDF" --source-report artifacts/after.json --page-id 3 --output artifacts/original-G17-inclusive-shadow.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('artifacts/original-G17-inclusive-shadow.json').read_text())
+          assert s['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert s['original_inclusive_shadow_terminal_count'] >= s['original_default_terminal_count']
+          assert len(s['source_openings'])==6
+          bathroom=[r for r in s['source_openings'] if r['physical_opening_id'].startswith('physical_opening_existence_33d277d4')]
+          assert len(bathroom)==1
+          left=[r for r in bathroom[0]['flanks'] if abs(r['source_bbox_pdf_pts'][0]-581.04)<0.01]
+          assert len(left)==1
+          assert left[0]['original_default_count']==0
+          assert left[0]['new_original_painted_cell_candidate_count']>=1
+          assert s['canonical_snapshot_modified'] is False
+          assert s['original_w4_modified'] is False
+          assert s['physical_host_granted'] is False
+          assert s['metric_area_or_count_granted'] is False
+          assert s['customer_quantity_granted'] is False
+          print({'Bathroom870_first_flank_original_shadow_positive':True,
+                 'new_source_painted_candidates':left[0]['new_original_painted_cell_candidate_count'],
+                 'original_pixel_support':left[0]['new_source_pixel_support_bounds'],
+                 'production_host_gain':0})
           PY
       - uses: actions/upload-artifact@v4
         if: always()
