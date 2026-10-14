@@ -66,6 +66,16 @@ def _publish_one(
     canonical_id = _clean(ceiling.canonical_ceiling_id)
     if not canonical_id:
         return None
+    # Matching strings cannot authenticate a copied or invented source SHA.
+    # This validates the source checksum ADDRESS only; original bytes still
+    # need independent producer-side verification before any quantity seals.
+    source_sha = ceiling.source_sha256
+    if (
+        type(source_sha) is not str
+        or len(source_sha) != 64
+        or any(char not in "0123456789abcdefABCDEF" for char in source_sha)
+    ):
+        return None
     if (
         not ceiling.geometry_complete
         or not ceiling.metric_area_complete
