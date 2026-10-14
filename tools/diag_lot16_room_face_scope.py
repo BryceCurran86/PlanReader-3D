@@ -17,6 +17,7 @@ from pathlib import Path
 
 from pb_figured_dimension_scale_consistency_shadow import source_figured_scale_shadow
 from pb_source_figured_plan_plane_shadow import original_figured_plan_plane_shadow
+from pb_source_visibility_authority import SourceVisibilityProducer
 import pb_source_room_face_authority as face_authority
 import pb_source_room_label_authority as label_authority
 import pb_same_view_room_area_authority as same_view_authority
@@ -746,7 +747,7 @@ def _raw_face_bbox_label_candidate_ledger(faces, native_census: dict) -> dict:
 
 
 def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, ...] = (),
-                   on_original_claim=None) -> dict:
+                   on_original_claim=None, source_owned_plan_view: bool = False) -> dict:
     payload = pdf.read_bytes()
     original_native_label_census = _native_word_label_census(
         payload, page_index, labels=diagnostic_labels,
@@ -883,6 +884,40 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
         # source-sealed export caller; no benchmark/truth/identity map input.
         if on_original_claim is not None:
             on_original_claim(claim)
+        # The ordinary room audit historically used page-only F.07, which
+        # misses the newly authenticated source FLOOR_PLAN viewport. Re-prove
+        # that viewport on an independent real producer and retain any
+        # revision/snapshot mismatch to the original room producer as a FIRST
+        # gate, never as permission to borrow a physical room or seal m².
+        source_plan_plane = None
+        if source_owned_plan_view:
+            digest = hashlib.sha256(payload).hexdigest()
+            # The dedicated #2716 native drawing-proof producer is an
+            # independently versioned original-source observation root.
+            # It is NOT the live 1.3.0 measurement producer, and rooms from
+            # that producer are therefore explicitly cross-snapshot ABSTAIN.
+            source = SourceVisibilityProducer(
+                producer_method="live-physical-net-wall",
+                producer_version="1",
+            )
+            owned = source.ingest_native_pdf_bytes(
+                document_id=f"live-source:{digest[:32]}",
+                source_bytes=payload,
+                source_locator="memory://gpt1-source-plan-plane.pdf",
+                page_ids=(str(page_index + 1),),
+            )
+            owned = source.augment_with_raster_opening_primitives(
+                owned.revision.revision_id, page_ids=(str(page_index + 1),)
+            )
+            source_plan_plane = original_figured_plan_plane_shadow(
+                payload, expected_source_sha256=digest,
+                page_index=page_index, rooms=claim.canonical_rooms,
+                witness_audit=witness_audit,
+                source_visibility_producer=source,
+                source_revision_id=owned.revision.revision_id,
+            )
+            if source.published_snapshot_for_revision(owned.revision.revision_id) != owned:
+                raise RuntimeError("source-owned drawing view altered source snapshot")
         return {
             "diagnostic_only": True, "pdf_sha256": hashlib.sha256(payload).hexdigest(),
             "source_page_index_zero_based": page_index,
@@ -904,6 +939,7 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
                 rooms=claim.canonical_rooms,
                 witness_audit=witness_audit,
             ),
+            "source_owned_figured_plan_plane_shadow": source_plan_plane,
             "label_ownership_diagnostic": {
                 "labelled_room_count": sum(bool(room.room_label) for room in claim.canonical_rooms),
                 "unlabelled_room_count": sum(not bool(room.room_label) for room in claim.canonical_rooms),
@@ -968,6 +1004,10 @@ def main() -> None:
     parser.add_argument("--diagnostic-label", action="append", default=[],
                         help="exact source word to locate without granting room identity")
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--source-owned-plan-view", action="store_true",
+        help="re-prove immutable source-owned F07 plan viewport and room snapshot first gate only",
+    )
     args = parser.parse_args()
     if args.page_index < 0:
         parser.error("--page-index must be >= 0")
@@ -976,6 +1016,7 @@ def main() -> None:
     report = inspect_source(
         args.pdf, args.page_index,
         diagnostic_labels=tuple(args.diagnostic_label),
+        source_owned_plan_view=bool(args.source_owned_plan_view),
     )
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps({
