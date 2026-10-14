@@ -77,3 +77,54 @@ def test_bad_page_address_cannot_be_used_to_invent_source_room():
     for page in (0, -1, 1.5, "11", None):
         with pytest.raises(ValueError, match="source_page_number_invalid"):
             replay(b"not-a-pdf", page_number=page)
+
+
+def test_competing_source_wall_ancestors_are_reported_without_winner():
+    from pb_source_room_face_authority import EDGE_OWNERSHIP_COMPETING
+
+    contender_a = SimpleNamespace(
+        wall_candidate_id="wall-a",
+        physical_identity=SimpleNamespace(source_primitive_ids=("native:a",)),
+        source_edge_fragments=(
+            SimpleNamespace(edge_id="edge:a", geometry=(1.0, 2.0, 3.0, 2.0),
+                            source_primitive_ids=("native:a",)),
+        ),
+        source_snap_collapsed_fragments=(),
+    )
+    contender_b = SimpleNamespace(
+        wall_candidate_id="wall-b",
+        physical_identity=SimpleNamespace(source_primitive_ids=("native:b",)),
+        source_edge_fragments=(
+            SimpleNamespace(edge_id="edge:b", geometry=(1.0, 2.0, 3.0, 2.0),
+                            source_primitive_ids=("native:b",)),
+        ),
+        source_snap_collapsed_fragments=(),
+    )
+    finding = SimpleNamespace(
+        face_id="face-one", edge_findings=(SimpleNamespace(
+            kind=EDGE_OWNERSHIP_COMPETING,
+            edge=((1.0, 2.0), (3.0, 2.0)),
+            wall_ids=("wall-a", "wall-b"),
+        ),),
+    )
+    evaluation = SimpleNamespace(
+        status="evaluated", competing_edge_count=1,
+        unowned_edge_count=0, unresolved_face_ids=("face-one",),
+        competing_wall_ids=("wall-a", "wall-b"),
+        unresolved_faces=(finding,),
+    )
+    report = _face_report(
+        _wall(records=(contender_a, contender_b)),
+        _face(ownership_evaluation=evaluation),
+    )
+    edge, = report["competing_source_edges"]
+    assert edge["face_id"] == "face-one"
+    assert edge["unique_source_wall_owner_granted"] is False
+    assert {item["wall_id"] for item in edge["candidate_walls"]} == {
+        "wall-a", "wall-b"
+    }
+    assert {tuple(item["source_primitive_ids"]) for item in edge["candidate_walls"]} == {
+        ("native:a",), ("native:b",)
+    }
+    assert all(not item["structural_wall_role_proven_by_this_report"]
+               for item in edge["candidate_walls"])
