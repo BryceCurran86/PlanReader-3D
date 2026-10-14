@@ -187,6 +187,57 @@ def _infer_finish(description: Any, code: str = "") -> str:
     return ""
 
 
+def _leading_composite_finish_semantic(value: Any) -> str:
+    """Resolve the earliest explicit finish role in one composite description.
+
+    Some source schedules store the primary finish and ancillary notes (for
+    example tile + epoxy grout + painted skirting) in one cell. When legacy
+    finish inference echoes that whole description back as the finish value,
+    later coating words must not override the earlier primary material role.
+    """
+
+    text = _normalise(value)
+    candidates = (
+        ("tile", ("floor tile", "wall tile", "porcelain tile", "ceramic tile")),
+        ("vinyl", ("vinyl flooring", "vinyl floor")),
+        ("epoxy", ("epoxy flooring", "epoxy floor", "epoxy coating")),
+        (
+            "membrane",
+            (
+                "waterproof membrane",
+                "waterproofing membrane",
+                "sheet membrane",
+                "liquid membrane",
+            ),
+        ),
+        (
+            "paint",
+            (
+                "paint",
+                "primer",
+                "undercoat",
+                "topcoat",
+                "low sheen",
+                "semi gloss",
+                "semigloss",
+                "matt",
+                "matte",
+                "satin",
+            ),
+        ),
+    )
+    first: tuple[int, str] | None = None
+    for semantic, phrases in candidates:
+        for phrase in phrases:
+            position = text.find(phrase)
+            if position < 0:
+                continue
+            candidate = (position, semantic)
+            if first is None or candidate < first:
+                first = candidate
+    return first[1] if first is not None else ""
+
+
 def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
     """Return a normalized finish semantic from confirmed schedule authority.
 
@@ -197,7 +248,12 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
 
     if str(entry.get("status") or "").strip().lower() != "confirmed":
         return ""
+    description_text = _normalise(entry.get("description"))
     finish_text = _normalise(entry.get("finish"))
+    if finish_text and finish_text == description_text:
+        leading_semantic = _leading_composite_finish_semantic(description_text)
+        if leading_semantic:
+            return leading_semantic
     if (
         "paint" in finish_text
         or "primer" in finish_text
