@@ -185,3 +185,47 @@ def test_actual_source_capture_closes_host_and_figured_area_without_default_coun
     assert quantities[0].abstained is False
     assert voids.canonical_openings[0].schedule_count_explicit is False
     assert voids.canonical_openings[0].schedule_declared_count is None
+
+
+@pytest.mark.parametrize("columns, expected", [(17, True), (16, False)])
+def test_inclusive_g17_terminal_cell_support_preserves_4pt_nomination_gate(monkeypatch, columns, expected):
+    """Closed producer G17 face/end box at 300 DPI uses source pixel cells.
+
+    Seventeen actual painted cells cover 4.08 pt even though their centre
+    endpoints are 3.84 pt apart. Sixteen painted cells cover only 3.84 pt.
+    Neither geometric opening host nor dimension authority is claimed here.
+    """
+    from types import SimpleNamespace
+    from pb_raster_opening_source_primitives import (
+        RASTER_WALL_BAND_FACE, RASTER_WALL_BAND_END,
+    )
+
+    left, top, bottom = 20, 50, 56
+    right = left + columns - 1
+    source = np.full((100, 100, 3), 255, dtype=np.uint8)
+    source[top:bottom + 1, left:right + 1] = 0
+    primitives = (
+        SimpleNamespace(primitive_kind=RASTER_WALL_BAND_FACE,
+                        pixel_geometry=(left, top, right, top)),
+        SimpleNamespace(primitive_kind=RASTER_WALL_BAND_FACE,
+                        pixel_geometry=(left, bottom, right, bottom)),
+        SimpleNamespace(primitive_kind=RASTER_WALL_BAND_END,
+                        pixel_geometry=(left, top, left, bottom)),
+        SimpleNamespace(primitive_kind=RASTER_WALL_BAND_END,
+                        pixel_geometry=(right, top, right, bottom)),
+    )
+    monkeypatch.setattr(capture, "detect_raster_opening_source_primitives",
+                        lambda *args, **kwargs: primitives)
+    result = capture.detect_unchanged_terminal_band_segments(
+        _png(source), _png(source), dpi=300,
+    )
+    assert bool(result) is expected
+    if expected:
+        assert len(result) == 1
+        assert result[0].pixel_support_bounds == (left, top, right, bottom)
+        assert result[0].geometry_pt == (
+            round(left * 72 / 300, 6),
+            round((top + bottom) / 2 * 72 / 300, 6),
+            round(right * 72 / 300, 6),
+            round((top + bottom) / 2 * 72 / 300, 6),
+        )
