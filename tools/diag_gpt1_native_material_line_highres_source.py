@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import fitz
+import pb_source_material_semantic_authority as material_module
 
 from pb_source_material_semantic_authority import (
     SourceMaterialSemanticProducer,
@@ -56,12 +57,31 @@ def inspect_native_material_row(
             f"source-owned {material_code} candidate ambiguity: {len(candidates)}"
         )
     partition_id, block_no, words, code, _candidate = candidates[0]
-    recovered = _recover_native_material_block(
-        source=source,
-        published=published,
-        raster=producer._raster,
-        block_words=words,
-    )
+    # Diagnostic read-only observer of the exact production OCR routine, to
+    # distinguish a failed source crop, image orientation, missing reading,
+    # disagreement or native punctuation mismatch. Never override a result.
+    views = []
+    original_reader = material_module._single_isolated_material_line_reading
+    def observed_reader(backend, image, *, dpi):
+        reading = original_reader(backend, image, dpi=dpi)
+        views.append({
+            "dpi": dpi,
+            "backend_name": backend.name,
+            "image_size_px": list(image.size),
+            "ocr_reading": reading,
+            "rendered_image_sha256": hashlib.sha256(image.tobytes()).hexdigest(),
+        })
+        return reading
+    material_module._single_isolated_material_line_reading = observed_reader
+    try:
+        recovered = _recover_native_material_block(
+            source=source,
+            published=published,
+            raster=producer._raster,
+            block_words=words,
+        )
+    finally:
+        material_module._single_isolated_material_line_reading = original_reader
     if len(recovered) != len(words):
         raise RuntimeError("source material word cardinality changed")
     before = {word.observation_id: word for word in words}
@@ -98,6 +118,7 @@ def inspect_native_material_row(
         "post_raster_trusted_count": sum(w.trusted for w in recovered),
         "post_raster_untrusted_count": sum(not w.trusted for w in recovered),
         "word_receipts": details,
+        "original_source_material_line_ocr_views_diagnostic_only": views,
         "material_definition_published": False,
         "material_occurrence_published": False,
         "signed_construction_quantity_published": False,
