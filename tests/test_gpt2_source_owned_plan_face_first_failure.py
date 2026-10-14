@@ -21,6 +21,12 @@ def _wall(**changes):
             SimpleNamespace(wall_candidate_id="wall-a"),
             SimpleNamespace(wall_candidate_id="wall-b"),
         ),
+        boundary_evaluation=SimpleNamespace(
+            status="evaluated",
+            evaluated_wall_candidate_ids=("wall-a", "wall-b"),
+            boundary_tainted_wall_candidate_ids=(),
+            excluded_boundary_primitives=(),
+        ),
     )
     return SimpleNamespace(**dict(attrs, **changes))
 
@@ -49,6 +55,10 @@ def _face(**changes):
 def test_real_unresolved_edge_receipts_remain_explicit_abstentions():
     report = _face_report(_wall(), _face())
     assert report["w4_candidate_count"] == 2
+    assert report["w4_boundary_evaluation_status"] == "evaluated"
+    assert report["w4_boundary_tainted_wall_count"] == 0
+    assert report["w4_boundary_evaluated_wall_count"] == 2
+    assert report["w4_boundary_excluded_native_primitive_count"] == 0
     assert report["source_room_face_record_count"] == 0
     assert report["shadow_competing_wall_ids"] == ("wall-a", "wall-b")
     assert report["shadow_unowned_edge_count"] == 2
