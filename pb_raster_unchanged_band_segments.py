@@ -95,7 +95,13 @@ def detect_unchanged_terminal_band_segments(
             first, last = int(first), int(stop) - 1
             if first != 0 and stop != len(solid):
                 continue
-            if (last - first) * 72.0 / dpi < _MIN_LINE_LENGTH_PT:
+            # Original pixel support bounds are inclusive. Count supported
+            # source PIXEL CELLS for this perception-only nomination gate,
+            # not the distance between their endpoint pixel centres. The
+            # existing 4-pt policy remains unchanged for ordinary raster
+            # detection; all real-source flank/paint and host gates remain
+            # independently mandatory downstream.
+            if (last - first + 1) * 72.0 / dpi < _MIN_LINE_LENGTH_PT:
                 continue
             if axis == "horizontal":
                 bounds = (x0 + first, y0, x0 + last, y1)
