@@ -1866,6 +1866,7 @@ _SINGLE_FLOOR_FINISH_PARTITION_MODE = "single_floor_finish_plan_printable_area"
 _SINGLE_FLOOR_FINISH_SHEET_FRAME_MODE = "single_floor_finish_plan_sheet_frame"
 _SINGLE_REFLECTED_CEILING_PARTITION_MODE = "single_reflected_ceiling_printable_area"
 _SINGLE_REFLECTED_CEILING_SHEET_FRAME_MODE = "single_reflected_ceiling_sheet_frame"
+_SOURCE_OWNED_PHYSICAL_PLAN_MODE = "source_owned_physical_plan_component"
 
 
 def is_authoritative_derived_viewport(viewport: Any) -> bool:
@@ -1879,6 +1880,18 @@ def is_authoritative_derived_viewport(viewport: Any) -> bool:
     ):
         return False
     mode = provenance.get("partition_mode")
+    if mode == _SOURCE_OWNED_PHYSICAL_PLAN_MODE:
+        return bool(
+            is_segment_page_viewports_product(viewport)
+            and provenance.get("source_owned_plan_view_proven") is True
+            and provenance.get("explicit_sheet_title_bound") is True
+            and provenance.get("unique_source_component") is True
+            and provenance.get("orthogonal_source_witnesses") is True
+            and provenance.get("source_geometry_observation_ids")
+            and len(provenance.get("source_room_label_observation_ids", ())) >= 2
+            and all(provenance.get(k) for k in
+                    ("document_id", "revision_id", "source_sha256", "snapshot_id"))
+        )
     if mode == _AUTHORITATIVE_DERIVED_PARTITION_MODE:
         return provenance.get("grid_validated") is True
     if mode == _ROTATED_SEMANTIC_FRAME_BAND_MODE:
@@ -2836,6 +2849,23 @@ def _derived_partitions(
             provenance={"partition_axis": "x" if axis == 0 else "y", "title_bbox": anchor.bbox},
         ))
     return out
+
+
+def segment_source_page_viewports(
+    source_visibility_producer, *, revision_id: str, page_id: str,
+    physical_plan_view_shadow: bool = False,
+) -> list[SegmentedViewport]:
+    """Read original producer bytes; opt in to source-owned physical plan proof.
+
+    The reader preserves the published snapshot and ordinary F.07 behavior.
+    A bounded view supplies no scale, physical-room identity or quantity.
+    """
+    from pb_source_plan_view_authority import source_owned_plan_viewports
+
+    return source_owned_plan_viewports(
+        source_visibility_producer, revision_id=revision_id, page_id=page_id,
+        physical_plan_view_shadow=physical_plan_view_shadow,
+    )
 
 
 def segment_page_viewports(page: Any, *, page_number: int) -> list[SegmentedViewport]:
