@@ -1,0 +1,88 @@
+name: GPT1 Original Unframed Plan Source Rail Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_native_dimension_rail_plan_scope_shadow.py"
+      - "tests/test_gpt1_native_dimension_rail_plan_scope_shadow.py"
+      - ".github/workflows/test-gpt1-original-plan-long-rails.yml"
+  workflow_dispatch:
+
+jobs:
+  original-plan-rails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pinned original source toolchain
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Original native rail positives and adversarial ownership negatives
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt1_native_dimension_rail_plan_scope_shadow.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Original Lot16 and Maryborough immutable source audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-original-plan-rail-scope
+          git rev-parse HEAD > artifacts/gpt1-original-plan-rail-scope/producer_sha.txt
+          LOT='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          MARY='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          L='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          M='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$L" "$LOT" | sha256sum --check
+          printf '%s  %s\n' "$M" "$MARY" | sha256sum --check
+          timeout 840s python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_native_dimension_rail_plan_scope_shadow import original_dimension_rail_plan_candidate
+          out=Path("artifacts/gpt1-original-plan-rail-scope")
+          pairs=[
+            ("lot16_p3",Path("documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"),
+             "10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844",2),
+            ("maryborough_p11",Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf"),
+             "b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007",10),
+          ]
+          for label, pdf, sha, index in pairs:
+              result=original_dimension_rail_plan_candidate(pdf.read_bytes(),source_sha256=sha,page_index=index)
+              (out/(label+".json")).write_text(json.dumps(result,indent=2,sort_keys=True)+"\n")
+              assert result["diagnostic_only"] is True
+              assert result["original_source_sha256"]==sha
+              for key in ("source_plan_role_authenticated","source_viewport_authenticated",
+                          "physical_wall_component_authenticated","source_room_floor_owner_authenticated",
+                          "physical_scale_authenticated","metric_area_published",
+                          "benchmark_match_or_score_granted"):
+                  assert result[key] is False, (label,key)
+              assert result["sealed_customer_quantity_ids"]==[]
+              candidate=result["source_native_rail_region_candidate"]
+              if candidate is not None:
+                  assert candidate["viewport_production_allowed"] is False
+                  assert candidate["source_native_closed_frame_proven"] is False
+              if label=="lot16_p3":
+                  assert len(result["original_horizontal_rail_candidates"])==3
+                  assert len(result["original_vertical_rail_candidates"])==2
+                  assert len(result["original_exact_floor_plan_title_lines"])==1
+                  assert result["first_unclosed_gate"]=="source_rail_region_not_plan_viewport_or_room_authority"
+                  assert candidate is not None
+                  observed=candidate["bbox_pdf_pts"]
+                  for measured,expected in zip(observed,(175.2,67.44,1149.48,636.12)):
+                      assert abs(measured-expected)<0.15,(observed,expected)
+              print(label,{
+                  "horizontal_original_native_candidates":len(result["original_horizontal_rail_candidates"]),
+                  "vertical_original_native_candidates":len(result["original_vertical_rail_candidates"]),
+                  "first_unclosed_gate":result["first_unclosed_gate"],
+                  "native_rail_region_candidate":candidate,
+              })
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-unframed-plan-native-rail-proofs
+          path: artifacts/gpt1-original-plan-rail-scope/
+          retention-days: 30
