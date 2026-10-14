@@ -94,10 +94,10 @@ def _exact_runs(lines, text, bbox):
     return matches
 
 
-def _trace_matches(page, text, bbox):
+def _trace_matches(original_texttrace_spans, text, bbox):
     """Independent original PDF texttrace, including font glyph IDs and paint."""
     candidates = []
-    for span in page.get_texttrace():
+    for span in original_texttrace_spans:
         seqno = span.get("seqno")
         font = span.get("font")
         paint_type = span.get("type")
@@ -159,6 +159,7 @@ def inspect_original_glyphs(
             "textflags_words": _native_char_lines(page, fitz.TEXTFLAGS_WORDS),
             "default_rawdict": _native_char_lines(page, 0),
         }
+        original_texttrace_spans = tuple(page.get_texttrace())
         blocks = []
         for block_id, words in sorted(words_by_block.items()):
             if not any(word["text"] == code for word in words):
@@ -169,7 +170,7 @@ def inspect_original_glyphs(
                     name: _exact_runs(lines, word["text"], word["bbox"])
                     for name, lines in profiles.items()
                 }
-                trace = _trace_matches(page, word["text"], word["bbox"])
+                trace = _trace_matches(original_texttrace_spans, word["text"], word["bbox"])
                 results.append({
                     **word,
                     "literal_codepoints": [ord(c) for c in word["text"]],
