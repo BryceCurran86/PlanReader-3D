@@ -43,6 +43,10 @@ def audit_mark_local_faces(*, wall, face, witnesses, marks):
     if len(ids) != len(set(ids)) or set(ids) != set(evaluator.owned_face_ids):
         raise ValueError("source_shadow_witness_universe_incomplete")
     tainted_walls = set(boundary.boundary_tainted_wall_candidate_ids)
+    taint_reasons = {
+        wall_id: tuple(reason_codes)
+        for wall_id, reason_codes in getattr(boundary, "boundary_taint_reason_codes", ())
+    }
     excluded = tuple(boundary.excluded_boundary_primitives)
     degenerate = set(evaluator.degenerate_owned_face_ids)
     obs_ids = [m["source_word_observation_id"] for m in marks]
@@ -94,6 +98,10 @@ def audit_mark_local_faces(*, wall, face, witnesses, marks):
                 "shadow_face_id": w["face_id"],
                 "source_w4_candidate_wall_ids": list(w["bounding_wall_ids"]),
                 "original_boundary_tainted_w4_ids": affected_wall_ids,
+                "producer_boundary_taint_reasons_by_wall": {
+                    wall_id: list(taint_reasons.get(wall_id, ()))
+                    for wall_id in affected_wall_ids
+                },
                 "excluded_original_source_observation_ids": touching,
                 "first_boundary_gates": reasons,
                 "original_polygon_pdf_pts": [list(p) for p in polygon],
