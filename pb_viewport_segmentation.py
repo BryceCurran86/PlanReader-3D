@@ -1731,18 +1731,38 @@ def _frame_resolved_viewports(
                 for frame in candidates
                 if _frame_looks_like_table(frame, page, calibration)
             ]
+            margin = calibration.median_word_height_pt * 0.25
+            enclosed_candidates = [
+                frame for frame in candidates
+                if _bbox_contains(frame, anchor.bbox, margin=margin)
+            ]
             if table_candidates:
-                candidates = table_candidates
-            else:
-                candidates = [
-                    frame
-                    for frame in candidates
-                    if _bbox_contains(
-                        frame,
-                        anchor.bbox,
-                        margin=calibration.median_word_height_pt * 0.25,
-                    )
+                external_table_candidates = [
+                    frame for frame in table_candidates
+                    if not _bbox_contains(frame, anchor.bbox, margin=margin)
                 ]
+                if external_table_candidates:
+                    # Repeated source GRID strokes within a physical plan can
+                    # pass table-shape checks. An *external* schedule title
+                    # cannot elect one such region while a different genuine
+                    # table-shaped native frame also survives. That is
+                    # insufficient source-owned title-to-frame identity.
+                    viable_table_frames = [
+                        frame for frame in frames
+                        if _frame_looks_like_table(frame, page, calibration)
+                        and not _rejected_ownership_frame(
+                            page, frame, calibration, fragments,
+                            view_type=anchor.view_type,
+                        )
+                    ]
+                    if len(viable_table_frames) != 1:
+                        candidates = enclosed_candidates
+                    else:
+                        candidates = table_candidates
+                else:
+                    candidates = table_candidates
+            else:
+                candidates = enclosed_candidates
         usable = [
             frame for frame in candidates
             if not _rejected_ownership_frame(
