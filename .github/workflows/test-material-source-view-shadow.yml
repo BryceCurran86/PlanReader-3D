@@ -1,0 +1,93 @@
+name: TEST Source View to Material Shadow Consumer
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_material_semantic_authority.py"
+      - "tests/test_source_owned_physical_plan_view.py"
+      - ".github/workflows/test-material-source-view-shadow.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Explicit shadow and unchanged legacy material evidence
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_source_owned_physical_plan_view.py tests/test_source_material_semantic_authority_v1.py tests/test_cross_view_floor_finish_authority_v1.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+          PYTHONPATH=. python scripts/check_provider_gold_isolation.py
+
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
+      - name: Exact immutable Maryborough source and no-commercial-view proof
+        env:
+          PYTHONPATH: "."
+          ORT_DISABLE_TELEMETRY: "1"
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          from pb_source_visibility_authority import SourceVisibilityProducer
+          from pb_source_material_semantic_authority import SourceMaterialSemanticProducer
+          from pb_viewport_segmentation import segment_source_page_viewports, is_authoritative_derived_viewport
+
+          path=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
+          data=path.read_bytes()
+          sha=hashlib.sha256(data).hexdigest()
+          assert sha=="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
+          source=SourceVisibilityProducer(producer_method="live-physical-net-wall",producer_version="1")
+          pub=source.ingest_native_pdf_bytes(
+              document_id="source-only:material-viewport",
+              source_bytes=data,source_locator="memory://immutable.pdf",page_ids=("11",),
+          )
+          before=source.published_snapshot_for_revision(pub.revision.revision_id)
+          proven=segment_source_page_viewports(
+              source,revision_id=pub.revision.revision_id,page_id="11",physical_plan_view_shadow=True,
+          )
+          views=[v for v in proven if v.view_type=="floor_finish_plan" and is_authoritative_derived_viewport(v)]
+          assert len(views)==1 and views[0].bounding_box is not None
+
+          legacy=SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+          legacy.publish(pub.revision.revision_id)
+          assert not any(k[-1]==views[0].view_id for k in legacy._occurrence_results)
+          shadow=SourceMaterialSemanticProducer.from_source_visibility_producer(
+              source,physical_plan_view_shadow=True
+          )
+          shadow.publish(pub.revision.revision_id)
+          assert any(k[-1]==views[0].view_id for k in shadow._occurrence_results)
+          assert source.published_snapshot_for_revision(pub.revision.revision_id)==before
+          scopes=shadow.published_occurrence_results()
+          print(json.dumps({
+              "source_sha256":sha,
+              "authenticated_view_id":views[0].view_id,
+              "material_scope_count":len(scopes),
+              "scope_statuses":[str(x.status) for x in scopes],
+              "source_snapshot_unchanged":True,
+              "commercial_quantity_published":False,
+          },sort_keys=True))
+          PY
