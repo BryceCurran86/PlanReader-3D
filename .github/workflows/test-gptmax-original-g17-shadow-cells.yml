@@ -1,0 +1,130 @@
+name: GPT MAX Original G17 Shadow Inclusive Source Cells
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_raster_unchanged_band_segments.py"
+      - "tests/test_gptmax_original_g17_shadow_inclusive_cells.py"
+      - "tests/test_gptmax_original_g17_shadow_one_end_paint.py"
+      - "tools/diag_gptmax_g17_original_inclusive_source_shadow.py"
+      - ".github/workflows/test-gptmax-original-g17-shadow-cells.yml"
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Strict default source parity and adversarial inclusive shadow
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_raster_unchanged_band_segments.py tests/test_gptmax_original_g17_shadow_inclusive_cells.py tests/test_gptmax_original_g17_shadow_one_end_paint.py
+          python -m compileall -q pb_raster_unchanged_band_segments.py
+          ruff check --select F821,F823 pb_raster_unchanged_band_segments.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+  original-lot16-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Immutable original Lot16 physical and customer source stage default-equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          git worktree add --detach /tmp/gptmax-shadow-source-before ${{ github.event.pull_request.base.sha }}
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          (cd /tmp/gptmax-shadow-source-before && PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --include-unhosted-raster-flank-source --output "$GITHUB_WORKSPACE/artifacts/before.json")
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py --pdf "$PDF" --page-id 3 --source-all-pages --include-unhosted-raster-flank-source --output artifacts/after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('artifacts/before.json').read_text())
+          after=json.loads(Path('artifacts/after.json').read_text())
+          assert before==after, "production source record changed when shadow flag omitted"
+          assert before['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert before['primitive_safety_cap']==20000
+          assert before['summary']['physical_existence_claims']==21
+          assert before['summary']['authenticated_hosts']==15
+          assert before['summary']['resolved_source_frames']==9
+          assert before['summary']['canonical_opening_area_records']==8
+          assert len(before['source_owned_wall_scopes'][0]['records'])==2094
+          print({'byte_exact_default_source_parity':True,'prior_accepted_hosts':15,'prior_frames':9,'prior_areas':8,'firm_gain':0})
+          PY
+      - name: Prove real 870 original 300DPI painted cells only in read-only shadow
+        shell: bash
+        run: |
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_original_inclusive_source_shadow.py --pdf "$PDF" --source-report artifacts/after.json --page-id 3 --output artifacts/original-G17-inclusive-shadow.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('artifacts/original-G17-inclusive-shadow.json').read_text())
+          assert s['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert s['original_inclusive_shadow_terminal_count'] >= s['original_default_terminal_count']
+          assert len(s['source_openings'])==6
+          bathroom=[r for r in s['source_openings'] if r['physical_opening_id'].startswith('physical_opening_existence_33d277d4')]
+          assert len(bathroom)==1
+          left=[r for r in bathroom[0]['flanks'] if abs(r['source_bbox_pdf_pts'][0]-581.04)<0.01]
+          assert len(left)==1
+          assert left[0]['original_default_count']==0
+          assert left[0]['inclusive_source_shadow_count']==0
+          # Physical G17 has two authenticated faces and its INNER jamb cap,
+          # not the TWO caps demanded by the generic terminal-box detector.
+          # Original source mass+RGB is separately positive under that
+          # immutable three-observation source topology: nominate SOURCE
+          # evidence only, never a W2/W4 host.
+          paint=left[0]['one_ended_G17_original_source_paint']
+          assert paint['source_one_end_shadow_eligible'] is True
+          assert paint['inclusive_original_painted_cells']==17
+          assert paint['inclusive_original_painted_length_pt']==4.08
+          assert paint['source_original_rgb_solid'] is True
+          assert paint['source_vs_full_rgb_identical'] is True
+          assert paint['original_image_region_owned'] is True
+          assert paint['complete_outer_end_cap_assumed'] is False
+          assert paint['structural_W2_or_W4_proven'] is False
+          other=[r for r in s['source_openings'] if r['physical_opening_id'].startswith('physical_opening_existence_b2489726')]
+          assert len(other)==1
+          dry=[r for r in other[0]['flanks'] if abs(r['source_bbox_pdf_pts'][0]-604.8)<0.01 and r['source_bbox_pdf_pts'][1]<200]
+          assert len(dry)==1
+          missing=dry[0]['one_ended_G17_original_source_paint']
+          assert missing['source_original_rgb_solid'] is False
+          assert missing['source_one_end_shadow_eligible'] is False
+          assert missing['source_shadow_first_failure']=='original_source_ink_not_solid'
+          assert s['canonical_snapshot_modified'] is False
+          assert s['original_w4_modified'] is False
+          assert s['physical_host_granted'] is False
+          assert s['metric_area_or_count_granted'] is False
+          assert s['customer_quantity_granted'] is False
+          print({'Bathroom870_one_end_G17_source_positive':True,
+                 'original_source_pixel_cells':paint['inclusive_original_painted_cells'],
+                 'unproven_second_left_non_solid':True,
+                 'production_host_gain':0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-g17-shadow-default-original-lot16-parity
+          path: artifacts
+          retention-days: 21

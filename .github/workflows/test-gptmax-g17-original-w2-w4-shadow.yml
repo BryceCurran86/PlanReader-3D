@@ -1,0 +1,107 @@
+name: GPT MAX Original G17 Isolated W2 W3 W4 Source Geometry
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_g17_original_w2_w4_source_shadow.py"
+      - "tests/test_gptmax_g17_original_w2_w4_source_shadow.py"
+      - ".github/workflows/test-gptmax-g17-original-w2-w4-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  source-topology-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Exact physical one-jamb face W2 negative, determinism, existing authority barrier
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_g17_original_w2_w4_source_shadow.py
+          python -m compileall -q tools/diag_gptmax_g17_original_w2_w4_source_shadow.py
+          ruff check --select F821,F823 tools/diag_gptmax_g17_original_w2_w4_source_shadow.py tests/test_gptmax_g17_original_w2_w4_source_shadow.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+
+  original-lot16-geometry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run genuine original page3 source source-ink and W2 W3 W4 without changing production
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_source_authority_stages.py \
+            --pdf "$PDF" --page-id 3 --source-all-pages \
+            --include-unhosted-raster-flank-source --output artifacts/original-stage.json
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_original_inclusive_source_shadow.py \
+            --pdf "$PDF" --page-id 3 \
+            --source-report artifacts/original-stage.json \
+            --output artifacts/original-ink.json
+          PYTHONPATH=. python -u tools/diag_gptmax_g17_original_w2_w4_source_shadow.py \
+            --pdf "$PDF" --page-id 3 \
+            --source-report artifacts/original-stage.json \
+            --source-paint-report artifacts/original-ink.json \
+            --output artifacts/original-flank-w2-w4.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          stages=json.loads(Path('artifacts/original-stage.json').read_text())
+          graph=json.loads(Path('artifacts/original-flank-w2-w4.json').read_text())
+          assert stages['source_sha256']==graph['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert stages['primitive_safety_cap']==20000
+          assert stages['summary']['physical_existence_claims']==21
+          assert stages['summary']['authenticated_hosts']==15
+          assert stages['summary']['resolved_source_frames']==9
+          assert stages['summary']['canonical_opening_area_records']==8
+          assert len(stages['source_owned_wall_scopes'][0]['records'])==2094
+          assert graph['original_g17_physical_openings']==6
+          assert graph['individual_flanks']==12
+          assert graph['global_w4_or_snapshot_modified'] is False
+          assert graph['physical_wall_or_opening_host_granted'] is False
+          assert graph['metric_quantity_or_count_granted'] is False
+          assert graph['sealed_customer_output_modified'] is False
+          assert graph['benchmark_accuracy_granted'] is False
+          for row in graph['source_flank_w2_w4_shadows']:
+              for flank in row['flanks']:
+                  assert flank['source_wall_or_host_granted'] is False
+                  if flank['source_ink_shadow_eligible']:
+                      for key in ('default_w2_w3_w4','exact_coordinate_w2_w3_w4'):
+                          obj=flank[key]
+                          assert obj['canonical_w4_wall_id_granted'] is False
+                          assert obj['structural_wall_role_granted'] is False
+                          assert obj['host_binding_granted'] is False
+          print({'authenticated_flanks':12,
+                 'pixel_positive_flanks':sum(f['source_ink_shadow_eligible']
+                     for r in graph['source_flank_w2_w4_shadows'] for f in r['flanks']),
+                 'new_hosts_or_quantities':0})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-g17-w2-w3-w4-physical-shadow
+          path: artifacts/original-flank-w2-w4.json
+          retention-days: 21
