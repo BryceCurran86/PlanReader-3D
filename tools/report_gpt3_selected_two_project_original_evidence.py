@@ -21,7 +21,7 @@ from tools.gpt3_signed_v2_family_trade_integrity import (
 )
 from tools.report_gpt3_four_project_evidence import _json_customer_rows, _json_object
 from tools.run_gpt3_original_byte_gated_exact_project import (
-    FROZEN_ROOT, _original_sha_gate, _sha256, _unchanged_frozen_exact_report,
+    FROZEN_ROOT, _sha256, _unchanged_frozen_exact_report,
 )
 
 _ENTRY_KEYS = frozenset({
@@ -33,6 +33,47 @@ _COUNT_FIELDS = (
     "missed", "partial", "unresolved", "unsupported_extra",
     "abstained_outputs", "lineage_conflicts",
 )
+
+
+def _original_source_subset_gate(
+    manifest: Mapping[str, Any], originals: Sequence[Path],
+) -> tuple[list[str], bool]:
+    """Rehash every *used* original PDF; never require unrelated source PDFs.
+
+    A source-firm architectural opening may be independently measured without
+    ingesting an unrelated structural drawing. The frozen manifest's complete
+    document list is left intact. Missing documents prevent a claim of a
+    complete project source execution, but do not turn a real sealed item into
+    a fabricated zero.
+    """
+    declared = manifest.get("source_documents")
+    if type(declared) is not list or not declared:
+        raise ValueError("frozen source document universe is unavailable")
+    names: dict[str, tuple[str, int]] = {}
+    for doc in declared:
+        if type(doc) is not dict:
+            raise ValueError("malformed frozen source document declaration")
+        name, digest, size = (doc.get("name"), doc.get("sha256"), doc.get("size_bytes"))
+        if (
+            type(name) is not str or not name or Path(name).name != name
+            or name in names or type(digest) is not str or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or type(size) is not int or size <= 0
+        ):
+            raise ValueError("invalid immutable frozen source document declaration")
+        names[name] = (digest, size)
+    if not originals or len({path.name for path in originals}) != len(originals):
+        raise ValueError("original PDF source path universe missing or duplicated")
+    supplied: list[str] = []
+    for original in originals:
+        declared_source = names.get(original.name)
+        if declared_source is None or not original.is_file():
+            raise ValueError("original PDF source is not an independently frozen document")
+        digest, size = declared_source
+        if original.stat().st_size != size or _sha256(original) != digest:
+            raise ValueError("original PDF source SHA/size mismatch")
+        supplied.append(digest)
+    return sorted(supplied), set(path.name for path in originals) == set(names)
 
 
 def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -62,11 +103,9 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
     if paths["manifest"].resolve() != canonical_manifest:
         raise ValueError("cannot substitute a noncanonical frozen V2 manifest")
 
-    source_ok, source_reasons, source_hashes = _original_sha_gate(
+    source_hashes, whole_source_universe_verified = _original_source_subset_gate(
         raw_manifest, originals
     )
-    if not source_ok:
-        raise ValueError("original source SHA evidence unavailable: " + ",".join(source_reasons))
     expected_source_hashes = set(source_hashes)
 
     # Hash the original *file bytes* before processing; any in-place rewrite
@@ -116,9 +155,13 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("exact-project source/scoring receipt incomplete")
 
-    source_ok_after, _, source_hashes_after = _original_sha_gate(raw_manifest, originals)
-    if not source_ok_after or source_hashes_after != source_hashes or any(
-        _sha256(path) != digest for path, digest in digests.items()
+    source_hashes_after, whole_after = _original_source_subset_gate(
+        raw_manifest, originals
+    )
+    if (
+        source_hashes_after != source_hashes
+        or whole_after != whole_source_universe_verified
+        or any(_sha256(path) != digest for path, digest in digests.items())
     ):
         raise ValueError("original source or signed evidence bytes changed during reconciliation")
 
@@ -126,6 +169,7 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
         "project_id": project_id,
         "original_source_sha_verified": True,
         "source_sha256s": source_hashes,
+        "original_source_document_universe_complete": whole_source_universe_verified,
         "sealed_run_id": sealed.run_id,
         "sealed_run_fingerprint": sealed.fingerprint,
         "customer_quantity_ids": list(verified.verified_quantity_ids),
