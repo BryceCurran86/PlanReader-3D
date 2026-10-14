@@ -161,7 +161,7 @@ jobs:
               "four_project_publication_allowed":False,
           }
           Path("artifacts/maryborough-exact-24/reconciliation_integrity_receipt.json").write_text(
-              json.dumps(receipt,indent=2,sort_keys=True)+"\\n"
+              json.dumps(receipt,indent=2,sort_keys=True)+"\n"
           )
           print("MARYBOROUGH_EXACT_24",json.dumps(d,sort_keys=True))
           PY
