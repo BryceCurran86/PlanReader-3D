@@ -107,7 +107,7 @@ jobs:
           # releases can separately change the number of positive hypotheses;
           # do not pin that unrelated historical count to 23.
           assert report["summary"]["physical_existence_claims"]==len(report["opening_bindings"])>0
-          assert report["summary"]["host_bindings"]==14
+          assert report["summary"]["host_bindings"]==15
           assert report["summary"]["host_frames"]==9
           print({"authenticated_pixel_sources":len(records),"unchanged_original_host_frames":True})
           PY
