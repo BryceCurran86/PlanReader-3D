@@ -121,6 +121,11 @@ def test_competing_source_wall_ancestors_are_reported_without_winner():
     edge, = report["competing_source_edges"]
     assert edge["face_id"] == "face-one"
     assert edge["unique_source_wall_owner_granted"] is False
+    assert edge["existing_local_source_interval_proof"] is False
+    assert edge["pairwise_source_equivalence_receipts"] == [{
+        "left_wall_id": "wall-a", "right_wall_id": "wall-b",
+        "sealed_w4_equivalence_classes": (),
+    }]
     assert {item["wall_id"] for item in edge["candidate_walls"]} == {
         "wall-a", "wall-b"
     }
