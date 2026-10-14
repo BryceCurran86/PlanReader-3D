@@ -20,6 +20,10 @@ def _sources(*, tainted=(), excluded=(), degenerate=(), polygons=None):
         records=tuple(range(8)), viewport_bbox=(0, 0, 100, 100),
         boundary_evaluation=SimpleNamespace(
             status="evaluated", boundary_tainted_wall_candidate_ids=tainted,
+            boundary_taint_reason_codes=tuple(
+                (wall_id, ("native_viewport_boundary_contact",))
+                for wall_id in tainted
+            ),
             excluded_boundary_primitives=excluded,
         )
     )
@@ -78,6 +82,9 @@ def test_first_source_boundary_taint_is_preserved_without_electing_owner():
     a = _run([_mark()], tainted=("wall-a",))
     owner, = _one(a)["all_containing_shadow_faces"]
     assert owner["original_boundary_tainted_w4_ids"] == ["wall-a"]
+    assert owner["producer_boundary_taint_reasons_by_wall"] == {
+        "wall-a": ["native_viewport_boundary_contact"]
+    }
     assert owner["first_boundary_gates"] == ["producer_w4_boundary_tainted"]
 
 
