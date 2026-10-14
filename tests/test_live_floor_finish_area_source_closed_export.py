@@ -575,15 +575,21 @@ def test_floor_finish_customer_retains_two_original_figured_dimensions():
 )
 def test_floor_finish_customer_does_not_hide_invalid_original_inventory(invalid):
     """Even an otherwise empty projection must reject foreign source identities."""
-    original = _quantity()
+    original = replace(
+        _quantity(), abstained=True, value=None,
+        blocking_reasons=("source_unresolved",),
+    )
     if invalid == "foreign_family":
-        record = replace(original, family="ceiling_area", abstained=True, value=None)
+        record = replace(original, family="ceiling_area")
     elif invalid == "foreign_object":
         record = object()
     elif invalid == "padded_source_id":
-        record = replace(original, quantity_id=" floor-finish-q1 ", abstained=True, value=None)
+        record = replace(original, quantity_id=" floor-finish-q1 ")
     else:
-        record = replace(original, quantity_id="", abstained=True, value=None)
+        # Original constructors reject empty IDs. Model an adversarial
+        # corrupted in-memory receipt *after* legitimate original creation.
+        record = replace(original)
+        object.__setattr__(record, "quantity_id", "")
     claim = replace(_claim(), floor_finish_quantity_evidence=(record,))
     error = TypeError if invalid == "foreign_object" else SourceClosedRunConflictError
     with pytest.raises(error):
