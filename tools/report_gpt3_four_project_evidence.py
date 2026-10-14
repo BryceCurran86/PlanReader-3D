@@ -14,12 +14,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from benchmarks.frozen_holdout.full_plan_v2.evaluator import evaluate_suite_v2
-from benchmarks.frozen_holdout.full_plan_v2.manifest_io import load_suite_manifests
-from benchmarks.frozen_holdout.full_plan_v2.sealed_reconciliation import (
-    identity_map_from_dict,
-    reconcile_sealed_run_v2,
-)
+import importlib
+import importlib.util
+import sys
+
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 from tools.run_gpt3_original_byte_gated_exact_project import (
@@ -27,6 +25,39 @@ from tools.run_gpt3_original_byte_gated_exact_project import (
     _original_sha_gate,
     _unchanged_frozen_exact_report,
 )
+
+
+
+def _load_unchanged_frozen_modules():
+    """Use a private package alias: tests/benchmarks may shadow benchmarks."""
+    package_name = "_gpt3_four_project_frozen_v2"
+    if package_name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            package_name, FROZEN_ROOT / "__init__.py",
+            submodule_search_locations=[str(FROZEN_ROOT)],
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError("frozen Full Plan V2 package is unavailable")
+        package = importlib.util.module_from_spec(spec)
+        sys.modules[package_name] = package
+        spec.loader.exec_module(package)
+    evaluator = importlib.import_module(f"{package_name}.evaluator")
+    manifest_io = importlib.import_module(f"{package_name}.manifest_io")
+    reconciliation = importlib.import_module(f"{package_name}.sealed_reconciliation")
+    return (
+        evaluator.evaluate_suite_v2,
+        manifest_io.load_suite_manifests,
+        reconciliation.identity_map_from_dict,
+        reconciliation.reconcile_sealed_run_v2,
+    )
+
+
+(
+    evaluate_suite_v2,
+    load_suite_manifests,
+    identity_map_from_dict,
+    reconcile_sealed_run_v2,
+) = _load_unchanged_frozen_modules()
 
 
 def _json_object(path: Path) -> dict[str, Any]:
