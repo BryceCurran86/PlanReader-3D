@@ -1,0 +1,71 @@
+name: GPT MAX Original Lot16 Native Schedule Source Inventory
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gptmax_native_source_opening_schedule_inventory.py"
+      - "tests/test_gptmax_native_source_opening_schedule_inventory.py"
+      - ".github/workflows/test-gptmax-native-opening-schedule-source.yml"
+permissions:
+  contents: read
+jobs:
+  original-native-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Positive and adversarial native-tag source tests
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gptmax_native_source_opening_schedule_inventory.py
+          ruff check --select F821,F823 tools/diag_gptmax_native_source_opening_schedule_inventory.py tests/test_gptmax_native_source_opening_schedule_inventory.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+      - name: Extract exact original native words without measuring openings
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          PYTHONPATH=. python -u tools/diag_gptmax_native_source_opening_schedule_inventory.py --pdf "$PDF" --output artifacts/native-source-words.json
+          python - <<'PY'
+          import fitz,json,re
+          from pathlib import Path
+          src=Path('artifacts/native-source-words.json')
+          x=json.loads(src.read_text())
+          assert x['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          assert x['source_page_count']==13
+          assert x['opening_instance_bound'] is False and x['opening_height_granted'] is False
+          pdf=fitz.open('documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf')
+          summaries=[]
+          for p in x['pages']:
+              words=p['source_native_words']
+              numeric=[w for w in words if re.fullmatch(r'[1-9]\d{2,3}',w['text'].strip())]
+              keywords=[w for w in words if re.search(r'(DOOR|WINDOW|HEIGHT|SCHED|GLAZ|OPENING)',w['text'],re.I)]
+              summaries.append({'page_id':p['page_id'],'rotation':p['page_rotation'],
+                                'native_word_count':p['word_count'],
+                                'numeric_tokens':numeric[:400],
+                                'schedule_keywords':keywords[:200]})
+          Path('artifacts/native-candidate-index.json').write_text(json.dumps(summaries,indent=2))
+          page=pdf[2]
+          clip=fitz.Rect(540,315,820,555) & page.rect
+          if not clip.is_empty:
+              page.get_pixmap(matrix=fitz.Matrix(2,2),clip=clip,alpha=False).save('artifacts/original-p3-source-crop.png')
+          print({'pages':len(summaries),'native_words':sum(s['native_word_count'] for s in summaries),
+                 'native_870_tokens':sum(sum(t['text']=='870' for t in s['numeric_tokens']) for s in summaries),
+                 'quantity_granted':False})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gptmax-original-lot16-native-opening-schedule-source
+          path: artifacts
+          retention-days: 21

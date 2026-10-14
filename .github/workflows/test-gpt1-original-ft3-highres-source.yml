@@ -1,0 +1,72 @@
+name: GPT1 Original FT3 High-Resolution Native Line Proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pb_source_material_semantic_authority.py"
+      - "tools/diag_gpt1_native_material_line_highres_source.py"
+      - "tests/test_gpt1_native_material_line_fixed_dpis.py"
+      - ".github/workflows/test-gpt1-original-ft3-highres-source.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-ft3-highres-source-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Run unit and immutable benchmark gates
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -m pytest -q tests/test_gpt1_native_material_line_fixed_dpis.py tests/test_raster_text_corroboration_authority_v1.py
+          PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Recover each exact original native FT3 word through the real producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=artifacts/gpt1-ft3-highres-source
+          mkdir -p "$OUT"
+          git rev-parse HEAD > "$OUT/head.txt"
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          /usr/bin/time -v timeout 2000s python -u -m tools.diag_gpt1_native_material_line_highres_source \
+            --pdf "$PDF" --source-sha256 "$SHA" --page-id 11 --material-code FT3 \
+            --output "$OUT/word_report.json" 2>&1 | tee "$OUT/console.log"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path("artifacts/gpt1-ft3-highres-source/word_report.json").read_text())
+          assert r["source_sha256_verified"] is True
+          assert r["source_page_id"] == "11" and r["material_code"] == "FT3"
+          assert r["native_word_count"] == 24
+          assert r["original_native_untrusted_count"] == 24
+          assert r["post_raster_trusted_count"] == 24, r["word_receipts"]
+          assert r["post_raster_untrusted_count"] == 0
+          for text in ("-", "“DURA", "GREY”", "R12", "9109024S"):
+              rows = [w for w in r["word_receipts"] if w["native_text"] == text]
+              assert len(rows) == 1 and rows[0]["trusted"] is True, (text, rows)
+          assert r["diagnostic_only"] and not r["material_definition_published"]
+          assert not r["material_occurrence_published"]
+          assert not r["signed_construction_quantity_published"]
+          assert r["frozen_benchmark_accuracy"] is None
+          print("ORIGINAL_SOURCE_FT3_FIVE_WORDS_GENUINELY_CORROBORATED")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-ft3-highres-source-proof
+          path: artifacts/gpt1-ft3-highres-source/
+          retention-days: 30
