@@ -13,9 +13,14 @@ import json
 from pathlib import Path
 
 from pb_migration_contracts import EvidenceResolutionStatus
-from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
+from pb_physical_wall_candidate_authority import (
+    PhysicalWallCandidateProducer,
+    PhysicalWallCandidateScopeResult,
+)
 from pb_source_room_face_authority import (
     EDGE_OWNERSHIP_COMPETING,
+    _excluded_primitive_touches_face,
+    audit_source_room_face_owned_witnesses,
     SourceRoomFaceSelector,
     _source_interval_owner_check,
     build_source_room_face_authority,
@@ -92,6 +97,52 @@ def _competing_source_edges(wall, face):
     return rows
 
 
+def _shadow_local_face_boundary_census(wall, face, *, witnesses=None):
+    """Existing source-owned *shadow* face witnesses, never production rooms."""
+    boundary = wall.boundary_evaluation
+    evaluation = face.ownership_evaluation
+    if (boundary is None or boundary.status != "evaluated"
+            or evaluation.status != "evaluated"):
+        return {
+            "status": "unavailable",
+            "original_edge_owned": None,
+            "boundary_tainted": None,
+            "boundary_clean": None,
+            "boundary_clean_non_degenerate": None,
+            "source_room_publication_granted": False,
+        }
+    if witnesses is None:
+        if type(wall) is not PhysicalWallCandidateScopeResult:
+            # Test fixtures cannot manufacture a production source witness.
+            witnesses = ()
+        else:
+            witnesses = audit_source_room_face_owned_witnesses(wall)
+    witnesses = tuple(witnesses)
+    by_id = {w["face_id"]: w for w in witnesses}
+    if len(by_id) != len(witnesses) or set(by_id) != set(evaluation.owned_face_ids):
+        raise RuntimeError("shadow_source_face_witness_census_mismatch")
+    tainted_walls = set(boundary.boundary_tainted_wall_candidate_ids)
+    excluded = tuple(boundary.excluded_boundary_primitives)
+    tainted_face_ids = set()
+    for w in witnesses:
+        if set(w["bounding_wall_ids"]) & tainted_walls or any(
+            _excluded_primitive_touches_face(p, w["polygon_pdf_pts"])
+            for p in excluded
+        ):
+            tainted_face_ids.add(w["face_id"])
+    clean = set(by_id) - tainted_face_ids
+    nondegenerate = clean - set(evaluation.degenerate_owned_face_ids)
+    return {
+        "status": "evaluated",
+        "original_edge_owned": len(by_id),
+        "boundary_tainted": len(tainted_face_ids),
+        "boundary_clean": len(clean),
+        "boundary_clean_non_degenerate": len(nondegenerate),
+        # A planar face with apparently owned edges is not a physical room.
+        "source_room_publication_granted": False,
+    }
+
+
 def _face_report(wall, face):
     """Preserve producer status and evidence; never promote an abstained ring."""
     w4_owner = (
@@ -164,6 +215,8 @@ def _face_report(wall, face):
         "shadow_largest_owned_face_area_page_pts2":
             evaluation.largest_owned_face_area_pt2,
         "shadow_owned_face_publication_granted": False,
+        "shadow_local_face_boundary_census":
+            _shadow_local_face_boundary_census(wall, face),
         "competing_source_edges": _competing_source_edges(wall, face),
         # An incomplete room face scope is NOT a commercial floor or finish.
         "unique_physical_room_label_claim_granted": False,
@@ -263,6 +316,7 @@ def main():
                 "source_room_face_reason_codes",
                 "shadow_competing_edge_count",
                 "shadow_unowned_edge_count",
+                "shadow_local_face_boundary_census",
             )
         } for row in report["scopes"]],
         "new_commercial_quantities":[],
