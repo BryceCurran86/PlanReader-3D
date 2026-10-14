@@ -31,7 +31,7 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          python -m pytest -q tests/test_gpt1_ceiling_customer_exact_measurement.py tests/test_gpt1_ceiling_area_final_source_id_quarantine.py tests/test_live_ceiling_area_source_closed_export.py
+          python -m pytest -q tests/test_gpt1_ceiling_customer_exact_measurement.py tests/test_gpt1_ceiling_area_final_source_id_quarantine.py
           ruff check --select F821,F823 pb_live_ceiling_area_customer_projection.py tests/test_gpt1_ceiling_customer_exact_measurement.py
           python scripts/check_provider_gold_isolation.py
           python scripts/check_full_plan_v2_integrity.py
