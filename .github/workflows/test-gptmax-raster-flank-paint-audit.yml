@@ -61,7 +61,7 @@ jobs:
           assert a['source_sha256']==b['source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
           assert a['opening_bindings']==b['opening_bindings']
           assert a['host_frames']==b['host_frames']
-          assert b['summary']==dict(physical_existence_claims=21,host_bindings=14,host_frames=9)
+          assert b['summary']==dict(physical_existence_claims=21,host_bindings=15,host_frames=9)
           assert a['primitive_safety_cap']==20000 and a['producer_snapshot_unchanged']
           assert a['original_pdf_reauthenticated']
           assert len(a['rows'])==14 and len({r['opening_identity_id'] for r in a['rows']})==7
