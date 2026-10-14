@@ -50,7 +50,9 @@ jobs:
           set -euo pipefail
           HEAD_SHA="$(git rev-parse HEAD)"
           test "$HEAD_SHA" = "${{ github.event.pull_request.head.sha }}"
-          # Source-signed historical pre-1215 control; current PR base already has the eighth row.\n          # Preserve exact 7->8 source/quantity/customer transition proof, not a current-main comparison.\n          BASE_SHA="f1ce6adcd20eee4004edd995f534694dcdd5c7ad"
+          # Source-signed historical pre-1215 control; current PR base already has the eighth row.
+          # Preserve exact 7->8 source/quantity/customer transition proof, not a current-main comparison.
+          BASE_SHA="f1ce6adcd20eee4004edd995f534694dcdd5c7ad"
           git worktree add --detach /tmp/gpt3-1215-base "$BASE_SHA"
           # The baseline predates the optional read-only original opening sidecar.
           # Backport ONLY that sidecar into the isolated baseline worktree.
