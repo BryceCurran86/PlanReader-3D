@@ -93,6 +93,33 @@ def _assert_inputs_unchanged(
         raise ValueError("frozen manifest or signed artifact changed during reconciliation")
 
 
+def _resolve_original_paths(
+    source_dir: Path, project_id: str, source_documents: tuple,
+) -> tuple[list[Path], list[str]]:
+    """Allow SHA-checked flat or project-scoped original packages.
+
+    If both contain distinct source bytes for one manifest document, refuse
+    to select either. No candidate is preferred by file order or filename.
+    """
+    selected: list[Path] = []
+    conflicts: list[str] = []
+    for doc in source_documents:
+        scoped = source_dir / project_id / doc.name
+        flat = source_dir / doc.name
+        if scoped.is_file() and flat.is_file() and scoped.resolve() != flat.resolve():
+            try:
+                same = (
+                    scoped.stat().st_size == flat.stat().st_size
+                    and _sha256(scoped) == _sha256(flat)
+                )
+            except OSError:
+                same = False
+            if not same:
+                conflicts.append("conflicting_flat_and_scoped_original:" + doc.name)
+        selected.append(scoped if scoped.is_file() else flat)
+    return selected, conflicts
+
+
 def build_four_project_evidence_ledger(
     *, source_dir: Path, sealed_dir: Path,
     identity_map_dir: Path, customer_dir: Path,
@@ -124,9 +151,13 @@ def build_four_project_evidence_ledger(
             "exact_project_report": None,
         }
         rows.append(entry)
-        original_files = [
-            source_dir / project_id / doc.name for doc in manifest.source_documents
-        ]
+        original_files, path_conflicts = _resolve_original_paths(
+            source_dir, project_id, manifest.source_documents,
+        )
+        if path_conflicts:
+            entry["publication_status"] = "CONFLICT"
+            entry["reason_codes"] = path_conflicts
+            continue
         missing = [
             doc.name for doc, path in zip(manifest.source_documents, original_files)
             if not path.is_file()
