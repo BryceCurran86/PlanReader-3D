@@ -890,11 +890,11 @@ _ACTIVE_CYCLIC_GC_MODE = "default"
 
 
 def _cyclic_gc_mode() -> str:
-    """PB_CYCLIC_GC_MODE: default (collector untouched), disabled or staged."""
+    """PB_CYCLIC_GC_MODE: staged (the default), disabled, or default (collector untouched)."""
     if os.environ.get("PB_KEEP_CYCLIC_GC") == "1":
         return "default"
     mode = os.environ.get("PB_CYCLIC_GC_MODE", "").strip().lower()
-    return mode if mode in _CYCLIC_GC_MODES else "disabled"
+    return mode if mode in _CYCLIC_GC_MODES else "staged"
 
 
 def _gc_stage_boundary() -> None:
@@ -912,10 +912,11 @@ def _bulk_source_gc_regime():
     the collector enabled every young and full collection re-traverses them: 22% of a
     Q5446 pages 1-3 run (25 full collections, 22 s of 146 s) and 9% of a 3Laurel page 3
     run, without affecting any result. Reference counting still frees acyclic garbage
-    immediately. Modes (PB_CYCLIC_GC_MODE): disabled pauses the collector for the run;
-    staged also collects once after each major stage so cyclic garbage cannot pile up
-    across stages; default leaves the collector alone (PB_KEEP_CYCLIC_GC=1 is the same).
-    The collector is re-enabled on exit, also on error.
+    immediately. Modes (PB_CYCLIC_GC_MODE): staged (the default) pauses the collector for the
+    run and collects once after each major stage so cyclic garbage cannot pile up across
+    stages; disabled pauses it for the whole run (same CPU saving, but ~1 GB more peak
+    memory in the complete 3Laurel handoff); default leaves the collector alone
+    (PB_KEEP_CYCLIC_GC=1 is the same). The collector is re-enabled on exit, also on error.
     """
     global _ACTIVE_CYCLIC_GC_MODE
     mode = _cyclic_gc_mode()

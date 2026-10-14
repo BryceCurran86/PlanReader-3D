@@ -129,9 +129,9 @@ def test_invalid_inputs_never_reach_the_regime(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("value,expected", [
-    (None, "disabled"), ("disabled", "disabled"), ("staged", "staged"),
+    (None, "staged"), ("disabled", "disabled"), ("staged", "staged"),
     ("default", "default"), ("STAGED", "staged"), (" staged ", "staged"),
-    ("nonsense", "disabled"), ("", "disabled"),
+    ("nonsense", "staged"), ("", "staged"),
 ])
 def test_mode_selection(monkeypatch, value, expected):
     monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
@@ -175,3 +175,43 @@ def test_stage_boundary_collects_only_under_the_staged_regime(monkeypatch):
     calls.clear()
     handoff._gc_stage_boundary()
     assert calls == [], "the staged mode must not leak outside its regime"
+
+
+def test_the_unset_default_is_staged_and_collects_at_stage_boundaries(monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    monkeypatch.delenv("PB_CYCLIC_GC_MODE", raising=False)
+    calls = []
+    monkeypatch.setattr(handoff.gc, "collect", lambda *a, **k: calls.append("collect") or 0)
+    gc.enable()
+    with handoff._bulk_source_gc_regime():
+        assert not gc.isenabled()
+        handoff._gc_stage_boundary()
+    assert calls == ["collect"]
+    assert gc.isenabled()
+
+
+def test_both_major_stages_are_followed_by_a_stage_boundary():
+    """A collector call must be followed immediately by _gc_stage_boundary() in the same block."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(handoff._generate_project_handoff_locked).lstrip())
+    wanted = {"collect_live_physical_net_wall_claim", "collect_live_ceiling_lining_claims"}
+    followed = set()
+    for node in ast.walk(tree):
+        for block in (getattr(node, "body", None), getattr(node, "orelse", None), getattr(node, "finalbody", None)):
+            if not isinstance(block, list):
+                continue
+            for index, statement in enumerate(block[:-1]):
+                value = getattr(statement, "value", None)
+                if isinstance(statement, ast.Assign) and isinstance(value, ast.Call):
+                    name = getattr(value.func, "id", None)
+                    nxt = block[index + 1]
+                    if (
+                        name in wanted
+                        and isinstance(nxt, ast.Expr)
+                        and isinstance(nxt.value, ast.Call)
+                        and getattr(nxt.value.func, "id", None) == "_gc_stage_boundary"
+                    ):
+                        followed.add(name)
+    assert followed == wanted
