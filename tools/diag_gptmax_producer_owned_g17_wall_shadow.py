@@ -11,6 +11,7 @@ from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRA
 from pb_live_physical_opening_void_composition import compose_live_physical_opening_voids
 from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_opening_local_g17_wall_shadow import build_opening_local_g17_wall_shadow
+from pb_g17_w4_equivalence_competitor_shadow import compare_g17_to_ordinary_w4_shadow
 from pb_physical_wall_candidate_authority import MAX_WALL_TOPOLOGY_SOURCE_SEGMENTS
 from pb_source_observation_authority import ObservationSelector
 from pb_source_visibility_authority import SourceVisibilityProducer
@@ -58,6 +59,16 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
         if record is None or record.record_id != trace.opening_identity_id:
             raise ValueError("original source opening universe no longer authenticates")
         original_source_claims[record.record_id] = frozenset(record.source_observation_ids)
+    # Only original, producer-owned page W4 candidates are inspected.
+    # Even a unique geometric match is not cross-source wall authority.
+    ordinary_w4_records = tuple(
+        record
+        for _, scope in sorted(
+            composition.physical_wall_candidate_authority._scopes.items(),
+            key=lambda pair: str(pair[0]),
+        )
+        for record in scope.records
+    )
     shadows = []
     for trace in composition.opening_bindings:
         if trace.host_wall_id is not None:
@@ -72,6 +83,9 @@ def producer_owned_wall_shadow_report(original_pdf: bytes, *, page_id: str) -> d
         if shadow.physical_opening_id != trace.opening_identity_id:
             raise ValueError("source shadow opening identity changed")
         serialized = asdict(shadow)
+        serialized["ordinary_w4_competitor_shadow"] = (
+            compare_g17_to_ordinary_w4_shadow(shadow.flanks, ordinary_w4_records)
+        )
         own_sources = original_source_claims[shadow.physical_opening_id]
         serialized['shared_original_source_observations'] = {
             other: sorted(own_sources & sources)
