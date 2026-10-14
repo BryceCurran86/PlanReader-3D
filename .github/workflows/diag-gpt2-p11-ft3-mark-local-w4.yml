@@ -57,7 +57,20 @@ jobs:
           assert scope['authoritative_source_room_face_records_retained']==0
           assert scope['shadow_edge_owned_witness_count'] == 1235
           assert scope['new_material_occurrence_or_metric_quantity_published'] is False
-          assert len(scope['mark_local_boundary_first_gates'])==5
+          # Preserve the sixth native FT3 schedule token outside the plan.
+          assert len(scope['mark_local_boundary_first_gates'])==6
+          plan_marks=[m for m in scope['mark_local_boundary_first_gates']
+                      if m['within_source_owned_plan_viewport']]
+          schedule_marks=[m for m in scope['mark_local_boundary_first_gates']
+                          if not m['within_source_owned_plan_viewport']]
+          assert len(plan_marks)==5 and len(schedule_marks)==1
+          assert all(m['native_text_or_raster_source_verified'] is True for m in plan_marks)
+          assert all(len(m['all_containing_shadow_faces'])==1 for m in plan_marks)
+          assert all('producer_w4_boundary_tainted' in
+                     m['all_containing_shadow_faces'][0]['first_boundary_gates']
+                     for m in plan_marks)
+          assert all(m['first_unclosed_gate']=='source_mark_outside_authenticated_viewport'
+                     for m in schedule_marks)
           assert a['new_commercial_quantities']==[]
           assert all(not m['physical_room_identity_published'] and not m['ft3_occurrence_published']
              for m in scope['mark_local_boundary_first_gates'])
