@@ -113,3 +113,51 @@ def test_selected_report_writer_cannot_overwrite_an_existing_signed_file(
         module.main(["--entry", str(other), "--entry", str(other),
                      "--output", str(original)])
     assert original.read_text(encoding="utf-8") == '{"signed":true}'
+
+
+
+def test_source_verified_architectural_subset_cannot_claim_whole_pdf_universe(tmp_path):
+    from hashlib import sha256
+    architectural = tmp_path / "original-architectural.pdf"
+    structural = tmp_path / "independent-structural.pdf"
+    architectural.write_bytes(b"%PDF-architectural-original")
+    structural.write_bytes(b"%PDF-structural-original")
+    declared = {
+        "source_documents": [
+            {"name": path.name, "sha256": sha256(path.read_bytes()).hexdigest(),
+             "size_bytes": path.stat().st_size}
+            for path in (architectural, structural)
+        ],
+    }
+    only_arch, entire = module._original_source_subset_gate(
+        declared, [architectural],
+    )
+    assert only_arch == [sha256(architectural.read_bytes()).hexdigest()]
+    assert entire is False
+    both, entire = module._original_source_subset_gate(
+        declared, [architectural, structural],
+    )
+    assert both == sorted(doc["sha256"] for doc in declared["source_documents"])
+    assert entire is True
+    with pytest.raises(ValueError, match="duplicated"):
+        module._original_source_subset_gate(declared, [architectural, architectural])
+    structural.write_bytes(b"%PDF-tampered-structural")
+    with pytest.raises(ValueError, match="SHA/size mismatch"):
+        module._original_source_subset_gate(declared, [structural])
+
+
+def test_unknown_or_missing_source_pdf_cannot_mint_a_selected_project_receipt(tmp_path):
+    from hashlib import sha256
+    source = tmp_path / "included.pdf"
+    source.write_bytes(b"%PDF-source-known")
+    manifest = {"source_documents": [{
+        "name": source.name,
+        "sha256": sha256(source.read_bytes()).hexdigest(),
+        "size_bytes": source.stat().st_size,
+    }]}
+    with pytest.raises(ValueError):
+        module._original_source_subset_gate(manifest, [])
+    foreign = tmp_path / "foreign.pdf"
+    foreign.write_bytes(source.read_bytes())
+    with pytest.raises(ValueError, match="not an independently frozen"):
+        module._original_source_subset_gate(manifest, [foreign])
