@@ -21,6 +21,48 @@ from pb_source_room_face_authority import (
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 
+def _competing_source_edges(wall, face):
+    """Expose every contender's original primitives without electing a wall.
+
+    An original W4 identity and an original source edge are evidence, not
+    structural equivalence; GRID and crop negatives must remain in force.
+    """
+    by_id = {r.wall_candidate_id: r for r in wall.records
+             if hasattr(r, "wall_candidate_id")}
+    rows = []
+    for finding in face.ownership_evaluation.unresolved_faces:
+        for edge in finding.edge_findings:
+            if edge.kind != "competing":
+                continue
+            candidates = []
+            for wall_id in edge.wall_ids:
+                record = by_id.get(wall_id)
+                if record is None:
+                    candidates.append({"wall_id": wall_id, "w4_record_unavailable": True})
+                    continue
+                fragments = tuple(
+                    {"edge_id": f.edge_id,
+                     "geometry": tuple(f.geometry),
+                     "source_primitive_ids": tuple(f.source_primitive_ids)}
+                    for f in record.source_edge_fragments
+                )
+                candidates.append({
+                    "wall_id": wall_id,
+                    "source_primitive_ids": tuple(record.physical_identity.source_primitive_ids),
+                    "source_edge_fragments": fragments,
+                    "source_snap_collapsed_fragment_count":
+                        len(record.source_snap_collapsed_fragments),
+                    "structural_wall_role_proven_by_this_report": False,
+                })
+            rows.append({
+                "face_id": finding.face_id,
+                "competing_planar_edge": tuple(edge.edge),
+                "candidate_walls": candidates,
+                "unique_source_wall_owner_granted": False,
+            })
+    return rows
+
+
 def _face_report(wall, face):
     """Preserve producer status and evidence; never promote an abstained ring."""
     w4_owner = (
@@ -63,6 +105,7 @@ def _face_report(wall, face):
         "shadow_unowned_edge_count": evaluation.unowned_edge_count,
         "shadow_unresolved_face_ids": evaluation.unresolved_face_ids,
         "shadow_competing_wall_ids": evaluation.competing_wall_ids,
+        "competing_source_edges": _competing_source_edges(wall, face),
         # An incomplete room face scope is NOT a commercial floor or finish.
         "unique_physical_room_label_claim_granted": False,
         "physical_cross_sheet_equivalence_granted": False,
