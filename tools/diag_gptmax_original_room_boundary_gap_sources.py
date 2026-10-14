@@ -68,8 +68,8 @@ def short_source_gap_candidates(scope: Mapping[str, Any], *, max_gap_pt: float) 
                 if gap <= 0:
                     continue
                 if gap > max_gap_pt:
-                    # All later successors also start farther away.
-                    continue
+                    # Ordered successors cannot restart earlier along this axis.
+                    break
                 if a["edge_id"] == b["edge_id"] and a["wall_candidate_id"] == b["wall_candidate_id"]:
                     continue
                 key=(axis, fixed, round(a["high"],6), round(b["low"],6))
