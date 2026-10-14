@@ -108,6 +108,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      # Exactly mirror the already SHA-green GPT2 original Maryborough
+      # source-support runner.  Its raster word corroboration requires
+      # the system Tesseract executable, not merely the Python wrapper.
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Preserve exact original three measured floors and customer source closure
         env:
@@ -137,6 +141,18 @@ jobs:
           # Retain all three independently established original floor
           # identities, but do not forbid a later genuinely supported
           # additional measured room from the same original PDF.
+          if not set(control).issubset(source_by_id):
+              # Report original producer first gate rather than concealing
+              # incomplete raster/OCR support under a generic assert.
+              print(json.dumps({
+                  "expected_source_floor_ids": sorted(control),
+                  "actual_source_floor_ids": sorted(source_by_id),
+                  "source_area_receipt_ids": [
+                      q.quantity_id for q in claim.room_area_quantity_evidence
+                  ],
+                  "source_room_count": len(claim.canonical_rooms),
+                  "source_floor_count": len(claim.canonical_floors),
+              },sort_keys=True),flush=True)
           assert set(control).issubset(source_by_id)
           assert all(abs(float(source_by_id[qid].value)-value)<1e-8
                      for qid,value in control.items())
