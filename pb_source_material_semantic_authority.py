@@ -935,21 +935,30 @@ def _recover_admissible_viewport_lines(
             except Exception:
                 line_valid = False
                 break
-            margin_px = max(
-                1,
-                int(
-                    round(
-                        float(dpi)
-                        * _MATERIAL_LINE_OCR_BLANK_MARGIN_MM
-                        / 25.4
-                    )
-                ),
-            )
-            isolated = ImageOps.expand(
-                normalized,
-                border=margin_px,
-                fill="white",
-            )
+            if render_dpis == _MATERIAL_NATIVE_LINE_OCR_DPIS:
+                # Native material blocks already have a producer-owned exact
+                # source glyph boundary. Do not place invented white pixels
+                # around that source view: they change OCR's punctuation and
+                # character segmentation. This fixed path is selected BEFORE
+                # either DPI is read, never because one reading failed.
+                isolated = normalized
+            else:
+                # Preserve the existing non-native viewport-line behavior.
+                margin_px = max(
+                    1,
+                    int(
+                        round(
+                            float(dpi)
+                            * _MATERIAL_LINE_OCR_BLANK_MARGIN_MM
+                            / 25.4
+                        )
+                    ),
+                )
+                isolated = ImageOps.expand(
+                    normalized,
+                    border=margin_px,
+                    fill="white",
+                )
             reading = _single_isolated_material_line_reading(
                 backend,
                 isolated,
