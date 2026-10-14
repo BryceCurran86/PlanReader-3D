@@ -76,6 +76,20 @@ def _original_source_subset_gate(
     return sorted(supplied), set(path.name for path in originals) == set(names)
 
 
+def _json_wire_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Compare exact frozen scorer values as persisted JSON, not Python tuples.
+
+    dataclasses.asdict retains object_refs tuples, while the signed persisted
+    report encodes them as JSON arrays. This only converts serialization types;
+    it must never drop, round, reorder or remap an actual produced quantity.
+    """
+    encoded = json.dumps(report, sort_keys=True, allow_nan=False)
+    decoded = json.loads(encoded)
+    if type(decoded) is not dict:
+        raise ValueError("original frozen scorer report must be a JSON object")
+    return decoded
+
+
 def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
     if type(raw) is not dict or set(raw) != _ENTRY_KEYS:
         raise ValueError("selected project entry must name all six original evidence fields")
@@ -146,9 +160,7 @@ def _checked_one(raw: Mapping[str, Any]) -> dict[str, Any]:
     # object_refs. The persisted JSON report necessarily serialises those as
     # arrays (lists). Compare *wire-equivalent* data, not Python tuple vs list;
     # do not change the evaluator, identity map, quantities or numeric values.
-    recomputed_on_disk = json.loads(
-        json.dumps(recomputed, allow_nan=False, sort_keys=True)
-    )
+    recomputed_on_disk = _json_wire_report(recomputed)
     if stored != recomputed_on_disk:
         # Diagnostic keys only: never log source quantities or substitute a
         # persisted result for the independent unchanged frozen evaluator.
