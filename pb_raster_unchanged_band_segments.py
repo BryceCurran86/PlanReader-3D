@@ -60,10 +60,19 @@ def _closed_source_boxes(primitives):
 def detect_unchanged_terminal_band_segments(
     image_png: bytes, full_png: bytes, *, dpi: int,
     registration_scale: tuple[float, float] = (1.0, 1.0),
+    shadow_inclusive_source_cells: bool = False,
 ) -> tuple[UnchangedRasterBandSegment, ...]:
-    """Return only solid terminal intervals with exact visible RGB agreement."""
+    """Return solid unchanged terminal runs; opt-in inclusive source shadow only.
+
+    The production default intentionally retains the historical endpoint-centre
+    rule and therefore cannot churn signed source snapshots or W4/host receipts.
+    The alternative counts painted SOURCE PIXEL CELLS (not inferred wall
+    length), solely for read-only original source-stage diagnostics.
+    """
     if type(dpi) is not int or dpi <= 0:
         raise ValueError("positive integer DPI required")
+    if type(shadow_inclusive_source_cells) is not bool:
+        raise ValueError("shadow source-cell mode must be bool")
     image, full = (cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
                    for png in (image_png, full_png))
     if image is None or full is None or image.shape != full.shape:
@@ -95,7 +104,12 @@ def detect_unchanged_terminal_band_segments(
             first, last = int(first), int(stop) - 1
             if first != 0 and stop != len(solid):
                 continue
-            if (last - first) * 72.0 / dpi < _MIN_LINE_LENGTH_PT:
+            # The normal producer keeps endpoint-centre distance unchanged.
+            # Read-only source shadow may count all actual original RGB-equal
+            # pixel CELLS, including both end cells. Neither calculation may
+            # become physical wall, metric or quantity authority by itself.
+            painted_cells = last - first + (1 if shadow_inclusive_source_cells else 0)
+            if painted_cells * 72.0 / dpi < _MIN_LINE_LENGTH_PT:
                 continue
             if axis == "horizontal":
                 bounds = (x0 + first, y0, x0 + last, y1)

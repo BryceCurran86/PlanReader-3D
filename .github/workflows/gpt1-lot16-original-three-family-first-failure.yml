@@ -1,0 +1,106 @@
+name: GPT1 Original Lot16 Three-Family Quantity First Failures
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/gpt1-lot16-original-three-family-first-failure.yml"
+      - "tools/diag_lot16_room_face_scope.py"
+      - "pb_figured_dimension_scale_consistency_shadow.py"
+      - "tests/test_gpt1_figured_dimension_scale_consistency_shadow.py"
+      - "pb_live_canonical_floor_surface.py"
+      - "pb_live_ceiling_lining_integration.py"
+      - "pb_live_opening_area_quantity_publication.py"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-lot16-three-family-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact PR head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Adversarial source-scale shadow gate
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt1_figured_dimension_scale_consistency_shadow.py
+      - name: Original source and frozen score firewall
+        run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Execute real Lot16 source -> canonical -> production -> seal gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/gpt1-original-lot16-first-failure
+          PDF='documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf'
+          SHA='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          git rev-parse HEAD > artifacts/gpt1-original-lot16-first-failure/head.txt
+          timeout 3000s env PYTHONPATH=. ORT_DISABLE_TELEMETRY=1 python -u \
+            tools/diag_lot16_room_face_scope.py \
+            --pdf "$PDF" --page-index 2 \
+            --diagnostic-label BED --diagnostic-label 2 --diagnostic-label 3 \
+            --output artifacts/gpt1-original-lot16-first-failure/original.json
+      - name: Produce source-first non-promoting stage summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path("artifacts/gpt1-original-lot16-first-failure")
+          path=out/"original.json"
+          if not path.exists():
+              print("SOURCE_PRODUCTION_LEDGER_UNAVAILABLE")
+              raise SystemExit(0)
+          report=json.loads(path.read_text())
+          fields={
+              "original_source_sha256":report.get("pdf_sha256"),
+              "original_page_index":report.get("source_page_index_zero_based"),
+              "source_room_label_ownership":report.get("label_ownership_diagnostic",{}),
+              "same_view_measurement_prerequisites":report.get("same_view_prerequisite_breakdown",{}),
+              "first_source_producer_failures":report.get("downstream",{}),
+              "floor":{k:v for k,v in report.get("floor_quantity_diagnostic",{}).items() if k!="per_floor"},
+              "ceiling":{k:v for k,v in report.get("ceiling_quantity_diagnostic",{}).items() if k!="per_ceiling"},
+              "wall":{k:v for k,v in report.get("wall_metric_diagnostic",{}).items() if k!="per_wall"},
+              "opening":{k:v for k,v in report.get("opening_quantity_diagnostic",{}).items() if k!="per_opening"},
+              "opening_seal":report.get("opening_sealing_diagnostic",{}),
+              "figured_scale_shadow":report.get("figured_dimension_scale_shadow",{}),
+              "source_area_units_inferred_from_pdf_points":False,
+              "diagnostic_only":True,
+              "new_customer_quantity_created_by_this_workflow":False,
+              "benchmark_score_granted":False,
+          }
+          if fields["original_source_sha256"]!="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844":
+              raise SystemExit("original source SHA mismatch")
+          shadow=fields["figured_scale_shadow"]
+          if not (shadow.get("diagnostic_only") is True and shadow.get("quantity_published") is False
+                  and shadow.get("physical_scale_authority_granted") is False
+                  and shadow.get("room_area_authority_granted") is False
+                  and shadow.get("source_room_to_dimension_owner_proven") is False
+                  and shadow.get("commercial_projection_allowed") is False):
+              raise SystemExit("source figured-scale shadow leaked measurement authority")
+          if shadow.get("first_unclosed_gate")!="source_figured_scale_shadow_consistent_not_authority":
+              raise SystemExit("independent original source figured-axis consistency not proven")
+          for family in ("floor","ceiling","wall","opening"):
+              if not isinstance(fields[family].get("first_failure_frequency"),dict):
+                  raise SystemExit(f"first-failure ledger unavailable: {family}")
+          (out/"stage_summary.json").write_text(json.dumps(fields,indent=2,sort_keys=True)+"\n")
+          print("ORIGINAL_LOT16_SOURCE_FIRST_FAILURES")
+          print(json.dumps({k:fields[k] for k in ("original_source_sha256","floor","ceiling","opening_seal")},sort_keys=True)[:20000])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt1-original-lot16-three-family-first-failures
+          path: artifacts/gpt1-original-lot16-first-failure/
+          retention-days: 14
