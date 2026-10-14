@@ -2,7 +2,7 @@ name: DIAG Claude Full Project Handoff Bounded (3Laurel and Q5446)
 
 # Measurement only. Runs the COMPLETE original-source handoff (all pages decoded as the evidence universe) for the two
 # projects whose full-project production has timed out or been OOM-killed, under a hard timeout, and records wall time,
-# peak resident memory and an RSS timeline. No production file is changed; no quantity or score is claimed.
+# peak resident memory, an RSS timeline and a sampled profile. No production file is changed; no quantity or score is claimed.
 on:
   pull_request:
     paths:
@@ -37,12 +37,12 @@ jobs:
           python-version: "3.13"
           cache: pip
       - name: Install original-source dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt py-spy==0.4.0
       - name: Machine resources
         run: |
           nproc
           free -m
-          python -c "import shutil; print('OCR backends on PATH:', shutil.which('tesseract'))"
+          python -c "import shutil; print('tesseract on PATH:', shutil.which('tesseract'))"
       - name: Verify immutable original source
         env:
           PDF: ${{ matrix.pdf }}
@@ -58,7 +58,7 @@ jobs:
         run: |
           mkdir -p artifacts/full
           ( while true; do
-              pid=$(pgrep -f run_source_closed_project_handoff.py | head -1 || true)
+              pid=$(pgrep -f '^python -u tools/run_source_closed_project_handoff.py' | head -1 || true)
               if [ -n "$pid" ]; then
                 echo "$(date +%s) $(awk '/VmRSS/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)" >> artifacts/full/rss_kb_timeline.txt
               fi
@@ -67,7 +67,8 @@ jobs:
           SAMPLER=$!
           set +e
           /usr/bin/time -v -o artifacts/full/time_v.txt \
-            timeout 3600s python -u tools/run_source_closed_project_handoff.py \
+            timeout -s INT 3500s py-spy record --rate 20 --format raw -o artifacts/full/stacks.txt -- \
+              python -u tools/run_source_closed_project_handoff.py \
               --pdf "$PDF" --project-id "$PROJECT_ID" --family-group all \
               --output-dir artifacts/full/out > artifacts/full/handoff_stdout.txt 2> artifacts/full/handoff_stderr.txt
           code=$?
@@ -80,6 +81,35 @@ jobs:
           fi
           ls -la artifacts/full/out 2>/dev/null || true
           exit 0
+      - name: Where the time went (sampled, inclusive frames)
+        if: always()
+        run: |
+          python - <<'PY'
+          import collections
+          from pathlib import Path
+          p = Path("artifacts/full/stacks.txt")
+          if not p.exists():
+              print("NO stacks.txt")
+          else:
+              inclusive, self_t, total = collections.Counter(), collections.Counter(), 0
+              for line in p.read_text().splitlines():
+                  stack, _, count = line.rpartition(" ")
+                  if not count.isdigit():
+                      continue
+                  n = int(count)
+                  total += n
+                  frames = stack.split(";")
+                  for frame in set(frames):
+                      inclusive[frame] += n
+                  self_t[frames[-1]] += n
+              print("TOTAL_SAMPLES", total, "(20 Hz => about", round(total / 20), "s of sampled wall time)")
+              print("--- top inclusive frames (share of samples)")
+              for frame, n in inclusive.most_common(40):
+                  print(f"{100.0 * n / total:5.1f}%  {frame[:150]}")
+              print("--- top self frames")
+              for frame, n in self_t.most_common(15):
+                  print(f"{100.0 * n / total:5.1f}%  {frame[:150]}")
+          PY
       - name: Read the production summary
         if: always()
         run: |
