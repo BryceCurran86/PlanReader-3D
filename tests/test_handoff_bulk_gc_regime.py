@@ -126,3 +126,52 @@ def test_invalid_inputs_never_reach_the_regime(tmp_path, monkeypatch):
         )
     assert entered == []
     assert gc.isenabled()
+
+
+@pytest.mark.parametrize("value,expected", [
+    (None, "disabled"), ("disabled", "disabled"), ("staged", "staged"),
+    ("default", "default"), ("STAGED", "staged"), (" staged ", "staged"),
+    ("nonsense", "disabled"), ("", "disabled"),
+])
+def test_mode_selection(monkeypatch, value, expected):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    if value is None:
+        monkeypatch.delenv("PB_CYCLIC_GC_MODE", raising=False)
+    else:
+        monkeypatch.setenv("PB_CYCLIC_GC_MODE", value)
+    assert handoff._cyclic_gc_mode() == expected
+
+
+def test_keep_switch_wins_over_the_mode(monkeypatch):
+    monkeypatch.setenv("PB_CYCLIC_GC_MODE", "staged")
+    monkeypatch.setenv("PB_KEEP_CYCLIC_GC", "1")
+    assert handoff._cyclic_gc_mode() == "default"
+
+
+def test_default_mode_leaves_the_collector_alone(monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    monkeypatch.setenv("PB_CYCLIC_GC_MODE", "default")
+    gc.enable()
+    with handoff._bulk_source_gc_regime():
+        assert gc.isenabled()
+
+
+def test_stage_boundary_collects_only_under_the_staged_regime(monkeypatch):
+    monkeypatch.delenv("PB_KEEP_CYCLIC_GC", raising=False)
+    calls = []
+    monkeypatch.setattr(handoff.gc, "collect", lambda *a, **k: calls.append("collect") or 0)
+    gc.enable()
+    handoff._gc_stage_boundary()
+    assert calls == []
+    for mode, expected in (("disabled", 0), ("staged", 1)):
+        monkeypatch.setenv("PB_CYCLIC_GC_MODE", mode)
+        calls.clear()
+        with handoff._bulk_source_gc_regime():
+            assert not gc.isenabled()
+            handoff._gc_stage_boundary()
+            handoff._gc_stage_boundary()
+        assert len(calls) == expected * 2
+        assert gc.isenabled()
+    calls.clear()
+    handoff._gc_stage_boundary()
+    assert calls == [], "the staged mode must not leak outside its regime"

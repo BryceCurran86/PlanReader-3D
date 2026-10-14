@@ -439,6 +439,7 @@ def _generate_project_handoff_locked(
             room_area_support_pages=execution_room_support_pages,
             surface_semantic_pages=semantic_execution_pages,
         )
+        _gc_stage_boundary()
     except Exception as exc:
         summary["status"] = "production_failed"
         summary["production_error_type"] = type(exc).__name__
@@ -596,6 +597,7 @@ def _generate_project_handoff_locked(
                 getattr(claim, "room_area_quantity_evidence", ()) or ()
             ),
         )
+        _gc_stage_boundary()
         published_new_ids = {
             _clean(quantity.quantity_id)
             for quantity in new_ceiling_quantities
@@ -883,6 +885,24 @@ def _generate_project_handoff_locked(
 
 
 
+_CYCLIC_GC_MODES = ("default", "disabled", "staged")
+_ACTIVE_CYCLIC_GC_MODE = "default"
+
+
+def _cyclic_gc_mode() -> str:
+    """PB_CYCLIC_GC_MODE: default (collector untouched), disabled or staged."""
+    if os.environ.get("PB_KEEP_CYCLIC_GC") == "1":
+        return "default"
+    mode = os.environ.get("PB_CYCLIC_GC_MODE", "").strip().lower()
+    return mode if mode in _CYCLIC_GC_MODES else "disabled"
+
+
+def _gc_stage_boundary() -> None:
+    """Under the staged regime, reclaim the cyclic garbage of the stage that just finished."""
+    if _ACTIVE_CYCLIC_GC_MODE == "staged":
+        gc.collect()
+
+
 @contextlib.contextmanager
 def _bulk_source_gc_regime():
     """Pause the cyclic garbage collector while one source run builds its record stores.
@@ -892,16 +912,23 @@ def _bulk_source_gc_regime():
     the collector enabled every young and full collection re-traverses them: 22% of a
     Q5446 pages 1-3 run (25 full collections, 22 s of 146 s) and 9% of a 3Laurel page 3
     run, without affecting any result. Reference counting still frees acyclic garbage
-    immediately and peak memory was unchanged in those runs. The collector is re-enabled
-    on exit (also on error); set PB_KEEP_CYCLIC_GC=1 to keep it enabled throughout.
+    immediately. Modes (PB_CYCLIC_GC_MODE): disabled pauses the collector for the run;
+    staged also collects once after each major stage so cyclic garbage cannot pile up
+    across stages; default leaves the collector alone (PB_KEEP_CYCLIC_GC=1 is the same).
+    The collector is re-enabled on exit, also on error.
     """
-    if os.environ.get("PB_KEEP_CYCLIC_GC") == "1" or not gc.isenabled():
+    global _ACTIVE_CYCLIC_GC_MODE
+    mode = _cyclic_gc_mode()
+    if mode == "default" or not gc.isenabled():
         yield
         return
+    previous_mode = _ACTIVE_CYCLIC_GC_MODE
+    _ACTIVE_CYCLIC_GC_MODE = mode
     gc.disable()
     try:
         yield
     finally:
+        _ACTIVE_CYCLIC_GC_MODE = previous_mode
         gc.enable()
 
 
