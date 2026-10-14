@@ -1,0 +1,74 @@
+name: DIAG GPT2 Original Page11 FT3 Mark-Local W4 Face First Gates
+
+on:
+  pull_request:
+    paths:
+      - tools/diag_gpt2_p11_ft3_mark_local_face_gates.py
+      - tests/test_gpt2_p11_ft3_mark_local_face_gates.py
+      - .github/workflows/diag-gpt2-p11-ft3-mark-local-w4.yml
+
+permissions:
+  contents: read
+
+jobs:
+  original-ft3-shadow-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime ruff
+      - name: Original shadow mark/face tests and no-gold-provider gates
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests/test_gpt2_p11_ft3_mark_local_face_gates.py tests/test_gpt2_source_owned_plan_face_first_failure.py
+          ruff check --select F821,F823 tools/diag_gpt2_p11_ft3_mark_local_face_gates.py tests/test_gpt2_p11_ft3_mark_local_face_gates.py
+          python scripts/check_provider_gold_isolation.py
+          python scripts/check_full_plan_v2_integrity.py
+      - name: Original immutable page11 FT3 marks and every W4 shadow-face boundary first gate
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
+          SHA='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          mkdir -p artifacts/gpt2-p11-ft3-mark-local
+          git rev-parse HEAD > artifacts/gpt2-p11-ft3-mark-local/head.txt
+          timeout 2300s python -u -m tools.diag_gpt2_p11_ft3_mark_local_face_gates \
+            --pdf "$PDF" --sha "$SHA" --page 11 \
+            --output artifacts/gpt2-p11-ft3-mark-local/mark-gates.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('artifacts/gpt2-p11-ft3-mark-local/mark-gates.json')
+          a=json.loads(p.read_text())
+          assert a['source_sha256']=='b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007'
+          assert a['source_snapshot_preserved'] is True
+          assert len(a['scopes']) == 1
+          scope=a['scopes'][0]
+          assert scope['w4_candidate_count']==890
+          assert scope['authoritative_source_room_face_records_retained']==0
+          assert scope['shadow_edge_owned_witness_count'] == 1235
+          assert scope['new_material_occurrence_or_metric_quantity_published'] is False
+          assert len(scope['mark_local_boundary_first_gates'])==5
+          assert a['new_commercial_quantities']==[]
+          assert all(not m['physical_room_identity_published'] and not m['ft3_occurrence_published']
+             for m in scope['mark_local_boundary_first_gates'])
+          print('P11_FT3_MARK_FIRST_GATES', [
+            (m['first_unclosed_gate'],len(m['all_containing_shadow_faces']))
+            for m in scope['mark_local_boundary_first_gates']
+          ])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt2-original-p11-ft3-mark-local-w4-face-gates
+          path: artifacts/gpt2-p11-ft3-mark-local
+          retention-days: 14
