@@ -234,3 +234,108 @@ def test_conflicting_flat_and_scoped_pdfs_fail_before_scoring(tmp_path):
     chosen, reasons = module._resolve_original_paths(tmp_path, "project-x", doc)
     assert chosen == [scoped]  # returned only for audit; caller MUST refuse it
     assert reasons == ["conflicting_flat_and_scoped_original:" + name]
+
+
+def _signed_receipts(*pairs):
+    from types import SimpleNamespace
+    quantities = tuple(SimpleNamespace(quantity_id=qid, abstained=abstain) for qid, abstain in pairs)
+    valid = tuple(sorted(qid for qid, abstain in pairs if not abstain))
+    return (
+        SimpleNamespace(project_id="project", quantities=quantities),
+        SimpleNamespace(
+            project_id="project",
+            sealed_quantity_count=len(pairs),
+            valid_quantity_count=len(valid),
+            abstained_quantity_count=len(pairs)-len(valid),
+            customer_row_count=len(valid),
+            verified_quantity_ids=valid,
+        ),
+        [{"quantity_id":qid} for qid in valid],
+    )
+
+
+def test_signed_firm_and_abstained_quantities_only_publish_firm_customer_rows():
+    sealed, verification, rows = _signed_receipts(
+        ("firm-finish", False), ("abstain-floor", True), ("firm-opening", False),
+    )
+    assert module._verify_customer_counts(sealed, verification, rows) is None
+
+
+def test_all_abstained_signed_quantities_require_zero_customer_rows():
+    sealed, verification, rows = _signed_receipts(
+        ("abstain-wall", True), ("abstain-opening", True),
+    )
+    assert module._verify_customer_counts(sealed, verification, rows) is None
+
+
+def test_abstained_customer_leak_and_missing_firm_bijection_are_rejected():
+    sealed, verification, rows = _signed_receipts(
+        ("firm-floor", False), ("abstain-finish", True),
+    )
+    with pytest.raises(ValueError, match="customer projection"):
+        module._verify_customer_counts(
+            sealed, verification,
+            [*rows, {"quantity_id": "abstain-finish"}],
+        )
+    with pytest.raises(ValueError, match="customer projection"):
+        module._verify_customer_counts(sealed, verification, [])
+
+
+def test_duplicate_quantity_identity_across_firm_and_abstain_is_conflict():
+    sealed, verification, rows = _signed_receipts(
+        ("same-id", False), ("same-id", True),
+    )
+    with pytest.raises(ValueError, match="duplicate or conflicting"):
+        module._verify_customer_counts(sealed, verification, rows)
+
+
+def test_inaccurate_signed_verification_receipts_fail_closed():
+    from types import SimpleNamespace
+    sealed, verification, rows = _signed_receipts(
+        ("firm-area", False), ("abstain-ceiling", True),
+    )
+    wrong = SimpleNamespace(**{
+        **vars(verification),
+        "abstained_quantity_count": 0,
+    })
+    with pytest.raises(ValueError, match="customer projection"):
+        module._verify_customer_counts(sealed, wrong, rows)
+
+
+def test_cross_project_duplicate_signed_quantity_ids_never_publish():
+    from types import SimpleNamespace
+    a = SimpleNamespace(quantities=(
+        SimpleNamespace(quantity_id="shared-q"),
+        SimpleNamespace(quantity_id="a-only"),
+    ))
+    b = SimpleNamespace(quantities=(
+        SimpleNamespace(quantity_id="shared-q"),
+    ))
+    seen = {}
+    module._enforce_cross_project_quantity_uniqueness(
+        a, project_id="project-a", seen=seen,
+    )
+    with pytest.raises(ValueError, match="cross-project"):
+        module._enforce_cross_project_quantity_uniqueness(
+            b, project_id="project-b", seen=seen,
+        )
+    assert seen == {"shared-q": "project-a", "a-only": "project-a"}
+
+
+def test_cross_project_unique_ids_are_retained_and_duplicates_are_atomic():
+    from types import SimpleNamespace
+    a = SimpleNamespace(quantities=(
+        SimpleNamespace(quantity_id="a"),
+        SimpleNamespace(quantity_id="a"),
+    ))
+    seen = {}
+    with pytest.raises(ValueError, match="duplicate"):
+        module._enforce_cross_project_quantity_uniqueness(
+            a, project_id="project-a", seen=seen,
+        )
+    assert seen == {}
+    b = SimpleNamespace(quantities=(SimpleNamespace(quantity_id="b"),))
+    module._enforce_cross_project_quantity_uniqueness(
+        b, project_id="project-b", seen=seen,
+    )
+    assert seen == {"b": "project-b"}
