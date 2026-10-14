@@ -3846,19 +3846,28 @@ class PhysicalWallCandidateProducer:
                 and not selected_page_ids <= decoded_page_ids
             ):
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
-            source_visibility_producer.augment_with_raster_visible_segments(
-                revision_id,
-                page_ids=(
-                    tuple(
-                        sorted(
-                            selected_page_ids,
-                            key=lambda value: int(value),
+            if not physical_plan_view_shadow:
+                # The ordinary production W4 source path retains its
+                # existing producer-owned raster augmentation unchanged.
+                source_visibility_producer.augment_with_raster_visible_segments(
+                    revision_id,
+                    page_ids=(
+                        tuple(
+                            sorted(
+                                selected_page_ids,
+                                key=lambda value: int(value),
+                            )
                         )
-                    )
-                    if selected_page_ids is not None
-                    else None
-                ),
-            )
+                        if selected_page_ids is not None
+                        else None
+                    ),
+                )
+            # The opt-in F.07 plan shadow must not silently replace the
+            # source snapshot before its independently source-attested
+            # title/room/dimension receipts are verified. If raster source
+            # evidence is necessary, only an explicitly already prepared
+            # source snapshot may supply it; missing evidence abstains.
+
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
         store = source_visibility_producer._producer._store
