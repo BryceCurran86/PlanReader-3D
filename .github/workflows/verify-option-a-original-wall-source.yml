@@ -38,7 +38,7 @@ jobs:
           ORT_DISABLE_TELEMETRY: "1"
         run: |
           mkdir -p artifacts/option-a
-          timeout 2200s python -u tools/verify_option_a_original_wall_source.py \
+          timeout 2200s env PYTHONPATH=. python -u tools/verify_option_a_original_wall_source.py \
             --project "$PROJECT" --output "artifacts/option-a/$PROJECT-same-source-snapshot.json"
       - name: Original source readout
         if: success()
