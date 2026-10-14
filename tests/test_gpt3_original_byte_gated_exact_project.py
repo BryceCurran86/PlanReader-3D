@@ -239,3 +239,91 @@ def test_frozen_manifest_mutation_during_scoring_demotes_source_receipt(tmp_path
     assert result["publication_status"] == "UNPUBLISHED"
     assert result["project_evaluation"] is None
     assert result["reason_codes"] == ["source_or_signed_artifact_changed_during_reconciliation"]
+
+
+@pytest.mark.parametrize(
+    "family,trade,semantic_key",
+    [
+        ("floor_area", "tiling", "floor_area:physical-floor"),
+        ("floor_area", "ceilings", "floor_area:physical-floor"),
+        ("opening_area", "doors", "window_area:physical-opening"),
+    ],
+)
+def test_project_only_frozen_scorer_refuses_signed_source_trade_reclassification(
+    tmp_path, monkeypatch, family, trade, semantic_key,
+):
+    manifest, original, sealed, identity, sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    raw_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    raw_manifest["verified_takeoff_items"] = [{
+        "item_id": "target", "trade_category": trade,
+        "denominator_eligible": True,
+    }]
+    manifest.write_text(json.dumps(raw_manifest), encoding="utf-8")
+    sealed.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "quantities": [{
+            "family": family,
+            "semantic_key": semantic_key,
+            "object_identity_refs": ["physical-source-id"],
+        }],
+    }), encoding="utf-8")
+    identity.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "bindings": [{
+            "benchmark_item_id": "target",
+            "production_family": family,
+            "production_object_identity_refs": ["physical-source-id"],
+        }],
+    }), encoding="utf-8")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("bad source family must never reach frozen project evaluator")
+
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", forbidden)
+    with pytest.raises(ValueError, match="reclassified|opening kind"):
+        _report(manifest, original, sealed, identity)
+
+
+def test_project_only_accepts_source_owned_floor_finish_before_frozen_scoring(
+    tmp_path, monkeypatch,
+):
+    manifest, original, sealed, identity, sha = _fixtures(
+        tmp_path, monkeypatch, status="VERIFIED",
+    )
+    raw_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    raw_manifest["verified_takeoff_items"] = [{
+        "item_id": "source-owned-finish", "trade_category": "tiling",
+        "denominator_eligible": True,
+    }]
+    manifest.write_text(json.dumps(raw_manifest), encoding="utf-8")
+    sealed.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "quantities": [{
+            "family": "floor_finish_area",
+            "semantic_key": "tiled_floor_surface:physical-floor",
+            "object_identity_refs": ["physical-floor"],
+        }],
+    }), encoding="utf-8")
+    identity.write_text(json.dumps({
+        "source_sha256s": [sha],
+        "bindings": [{
+            "benchmark_item_id": "source-owned-finish",
+            "production_family": "floor_finish_area",
+            "production_object_identity_refs": ["physical-floor"],
+        }],
+    }), encoding="utf-8")
+    observed = []
+    def exact_report(*_args):
+        observed.append(True)
+        return {
+            "project_id": "source-project", "source_sha_verified": True,
+            "reconciliation_complete": True,
+        }
+
+    monkeypatch.setattr(module, "_unchanged_frozen_exact_report", exact_report)
+    report = _report(manifest, original, sealed, identity)
+    assert observed == [True]
+    assert report["reconciliation_complete"] is True
+    assert report["score_claim"] is False
