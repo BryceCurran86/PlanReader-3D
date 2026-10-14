@@ -45,7 +45,7 @@ Observations come from (a) `tools/diag_gptmax_source_authority_stages.py --pdf <
 
 **Option A — make id collision local, not global (smallest).** When two candidates share a canonical id, do not return `CONFLICT` for the whole page. Retain both as candidates under lineage-disambiguated ids (for example, canonical id + sorted edge/primitive lineage), keep the colliding group `unresolved`, and keep a distinct typed reason. Never delete, merge by first/nearest, or promote. Related: playbook §13 priority 2, #2233. *Expected effect alone:* candidate walls reappear and downstream diagnostics become informative; **no quantity changes** (candidates stay unresolved).
 
-**Option B — align the boundary rule with viewport authority.** Treat an authoritative-derived single-floor-plan-frame viewport as containing in `_scope_boundary_reason_from_viewports`, and likewise for the scale lookup. This is an **authority-promotion decision** (completeness and scale), needs its own review, and may conflict with `test_unresolved_viewport_bounds_do_not_claim_completeness`. Risk: free ends that are not real terminations would no longer taint the scope.
+**Option B — align the boundary rule with viewport authority.** Treat an authoritative-derived single-floor-plan-frame viewport as containing in `_scope_boundary_reason_from_viewports`, and likewise for the scale lookup. This is an **authority-promotion decision** (completeness and scale), needs its own review, and may conflict with `test_unresolved_viewport_bounds_do_not_claim_completeness`. Risk: free ends that are not real terminations would no longer taint the scope. **Superseded by Addendum A (§9): measured to add one false host; do not ship alone.**
 
 **Option C — second root family (semantic opening enumeration / universe completeness).** Out of scope here; needed before openings can publish.
 
@@ -68,3 +68,68 @@ Synthetic: duplicate-geometry pair inside an incomplete scope (positive), look-a
 Three planned tracers (raster source path, opening dependency, prior art) had not returned when this report was written; items 9–11 and §7 rest on the first tracer plus direct inspection. Only page 3 of 3Laurel and only main `6ed1877f` were examined. Q5446 and Maryborough are not covered.
 
 Next step after review: owners choose between Options A and B; then a shadow-mode PR with the §6 tests. No change before that.
+
+
+## 9. Addendum A (v2, 2026-10-14): measured gate trace, and why a boundary alignment alone must not ship
+
+Status: still **report only, no production change**. Option A (#2680) is independent of everything below. Source: original 3Laurel p3 (SHA `014e9f68…`, verified against the frozen manifest), through the stage-tool path that reproduces the CI numbers (1,559 W4 / 114 tainted / 1,445 clean, run 38499859114). All counterfactuals swap module attributes inside a running process; nothing is written to a checkout. Reproduction scripts and expected output: `3laurel_p3_wall_authority_gate_trace/`.
+
+### 9.1 What the 114 tainted candidates are (observed)
+
+- 130 free ends on 114 candidates. 110 candidates lie fully inside the DERIVED plan frame; 4 sit in the title-block strip below it (y 798–819), are 10–33 pt long and are built from non-native, raster-derived primitives with no layer (logo or text strokes).
+- The free ends are mostly **near-misses, not dangling walls**: the nearest other-wall centerline is a median 2.06 pt away (37 ends within 1 pt, 78 within 3 pt, all 114 within 6 pt). They are wall-face contacts typed `ENDPOINT`, or symbol and dimension graphics.
+- A render of the page with the free ends marked shows them on dimension strings and ticks, the compass symbol, the scale bar, title-block text, door and fixture details, and a minority of real wall ends at openings. (`3laurel_p3_wall_authority_gate_trace/evidence/page_free_ends_overview.png`: red = free ends of tainted candidates, blue = the DERIVED frame.)
+- Source layer class of **all 1,559** candidates (layers read from the PDF's optional-content names; descriptive only):
+
+| class | candidates | tainted | ambiguous in equivalence | equivalence representatives |
+|---|---|---|---|---|
+| non-wall layers (floor finish 402, joinery 240, plumbing fixtures 149, elevation markers 72, roof, electrical, slab, ceiling, stormwater …) | 1,004 | 84 | 867 | 137 |
+| wall-named layers only | 369 | 22 | 303 | 65 |
+| mixed wall + other layers | 115 | 1 | 115 | 0 |
+| no layer / raster-derived | 71 | 7 | 69 | 2 |
+
+### 9.2 Two places honor RESOLVED only (observed)
+
+- Boundary rule `_scope_boundary_reason_from_viewports` (`pb_physical_wall_candidate_authority.py` ~L1552) counts only `RESOLVED` viewports as containing a free end, while `_authenticated_viewports_from_rows` (~L440–465) already defines F.07-**eligible** viewports as RESOLVED or authoritative-derived with a non-overlapping sibling set, and viewport scopes use it. The p3 viewport (`derived`, `title_partition`, `single_floor_plan_sheet_frame`, validated) is eligible.
+- `PhysicalScaleProducer._scope_bbox` (`pb_physical_scale_authority.py` L851–883): a page-wide request returns `physical_scale_viewport_required` whenever any usable viewport exists, and a viewport-id request accepts only `RESOLVED`. The docstring of `_producer_owned_points_per_mm` says DERIVED-only viewports intentionally get no scale and that overlapping candidates then stay fail-closed.
+
+### 9.3 Counterfactuals through host binding (measured)
+
+| mode | tainted walls | authenticated hosts | scope complete | pair classes ambiguous / distinct / same |
+|---|---|---|---|---|
+| baseline (production) | 114 | 1 | no | 36,529 / 554 / 53 |
+| eligible viewports honored for free ends | 4 | **2** | no | unchanged |
+| same, only for wall-named-layer candidates | 89 | 1 | no | unchanged |
+| scale accepts the single eligible viewport | 114 | 1 | no | unchanged |
+| boundary and scale | 4 | 2 | no | unchanged |
+| upper bound: nothing tainted (not a candidate rule) | 0 | n/a | yes | 204 representatives, 1,354 still ambiguous |
+
+### 9.4 The extra host is a false positive (observed, rendered)
+
+- The one additional authenticated host is opening `…733d836d…` (`jamb_bounded_two_face_interruption`, x 899–909, y ≈ 509). Its four host-wall candidates are 11 pt lines, all on layer `Service_Gas.Bottled`: the tops of **two gas-cylinder symbols** hanging below the garage wall. (`evidence/false_host_gas_cylinders.png`; the red lines are the four host-wall candidates.) The 114-candidate taint was accidentally preventing this false host.
+- The host production already binds (`…63281952…`, four members on `Enclosure_WallExternal`, a sliding door between the Alfresco and Living areas) is a genuine wall opening. That judgement is from the render, not an authority. (`evidence/genuine_host_sliding_door.png`.)
+- Restricting the relaxation to wall-named layers retains 25 more candidates and adds **no** host.
+
+### 9.5 Scale is a second, independent blocker (observed)
+
+- The sheet carries a real scale bar: native numerals `0 … 10m` spaced about 28.4 pt per metre (1 m at 1:100) over 10 filled blocks. The scale producer's bar detector does not recognize this block style: `scale_probe.py` returns `physical_scale_bar_unavailable` **even when the viewport bbox is forced**.
+- Without scale, parallel longitudinally-overlapping pairs stay in contest regardless of separation by design (`pb_physical_wall_identity.py` L328–333). That is why 36,529 of 37,136 pair classifications are ambiguous.
+
+### 9.6 The exact first impossible authority gate
+
+**No authority separates structural wall geometry from finish, joinery, fixture and annotation geometry.** Candidates are retained from every layer by design. Every relaxation behind it (boundary completeness, scale, equivalence) raises *ownership of non-wall candidates*: the false host above, and two thirds of the upper-bound identities (137 of 204 are non-wall-layer candidates). Today layer tokens are descriptive only by explicit design (`pb_physical_wall_source_metadata_shadow.py`: "not support or opposition"), so no safe local correction exists below that gate. Ordered dependencies:
+
+1. **Structural source evidence** (typed support and opposition atoms from source graphic state: layer token, stroke/width rank, dash, fill, plus geometry roles). Needs an authority review before any consumer exists.
+2. **Producer-owned scale for the plan frame:** (a) the eligibility gate in `_scope_bbox`, and (b) block-style scale-bar detection with label-spacing corroboration.
+3. **Scope completeness for the plan frame:** boundary rule aligned to F.07 eligibility, plus a rule for geometry wholly outside every physical viewport (the 4 title-block artifacts) that withholds it without poisoning the plan.
+4. Equivalence, host bands and opening-universe completeness (already separate blockers).
+
+### 9.7 Recommendation (nothing started)
+
+- Do **not** ship the boundary alignment alone (§4 Option B). The measured result is one more host, and it is wrong.
+- Next work, shadow-first, one PR each, each needing authority review: (1) typed structural-evidence atoms computed from the existing shadow descriptors and consumed by diagnostics only; (2) block-style scale-bar detector in shadow; (3) only then aligned eligibility, with admission gated on (1). Required negative control for (1): the gas-cylinder symbol must never yield an authenticated host.
+- No quantity, score or sealed output is affected by this report or by Option A.
+
+### 9.8 Limits
+
+One page, Windows, the stage-tool path (CI-matching). My Windows `collect_live_physical_net_wall_claim` path produced a different candidate set (§2); it is unresolved and not used here. Host genuineness is by visual inspection. The structural-class table uses the literal substring convention already in the repo and is descriptive, not a classifier.
