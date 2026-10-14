@@ -108,6 +108,7 @@ def _face_report(wall, face):
     records = tuple(asdict(x) for x in face.records)
     rejected = tuple(asdict(x) for x in face.abstained_faces)
     evaluation = face.ownership_evaluation
+    boundary = wall.boundary_evaluation
     return {
         "source_sha256": wall.source_sha256,
         "revision_id": wall.revision_id,
@@ -121,6 +122,26 @@ def _face_report(wall, face):
         "w4_scope_complete": bool(wall.scope_complete),
         "w4_reason_codes": wall.reason_codes,
         "w4_candidate_count": len(wall.records),
+        # Existing producer-owned crop/contamination decisions. No override.
+        "w4_boundary_evaluation_status": (
+            boundary.status if boundary is not None else "unavailable"
+        ),
+        "w4_boundary_tainted_wall_count": (
+            len(boundary.boundary_tainted_wall_candidate_ids)
+            if boundary is not None else None
+        ),
+        "w4_boundary_evaluated_wall_count": (
+            len(boundary.evaluated_wall_candidate_ids)
+            if boundary is not None else None
+        ),
+        "w4_boundary_excluded_native_primitive_count": (
+            len(boundary.excluded_boundary_primitives)
+            if boundary is not None else None
+        ),
+        "w4_boundary_excluded_native_categories": (
+            tuple(sorted({p.category for p in boundary.excluded_boundary_primitives}))
+            if boundary is not None else ()
+        ),
         "source_room_face_status": face.status.value,
         "source_room_face_scope_complete": bool(face.scope_complete),
         "source_room_face_universe_complete": bool(face.face_universe_complete),
@@ -134,6 +155,15 @@ def _face_report(wall, face):
         "shadow_unowned_edge_count": evaluation.unowned_edge_count,
         "shadow_unresolved_face_ids": evaluation.unresolved_face_ids,
         "shadow_competing_wall_ids": evaluation.competing_wall_ids,
+        # Candidate-only. Even a completely edge-owned *shadow* face is NOT a
+        # published SourceRoomFace nor a material/floor/quantity identity.
+        "shadow_evaluated_face_count": evaluation.face_count,
+        "shadow_owned_face_count": len(evaluation.owned_face_ids),
+        "shadow_owned_face_ids": evaluation.owned_face_ids,
+        "shadow_degenerate_owned_face_ids": evaluation.degenerate_owned_face_ids,
+        "shadow_largest_owned_face_area_page_pts2":
+            evaluation.largest_owned_face_area_pt2,
+        "shadow_owned_face_publication_granted": False,
         "competing_source_edges": _competing_source_edges(wall, face),
         # An incomplete room face scope is NOT a commercial floor or finish.
         "unique_physical_room_label_claim_granted": False,
@@ -222,6 +252,10 @@ def main():
         "faces": [{
             k:row[k] for k in (
                 "w4_candidate_count",
+                "w4_boundary_evaluation_status",
+                "w4_boundary_tainted_wall_count",
+                "w4_boundary_evaluated_wall_count",
+                "w4_boundary_excluded_native_primitive_count",
                 "w4_scope_complete",
                 "w4_reason_codes",
                 "source_room_face_record_count",
