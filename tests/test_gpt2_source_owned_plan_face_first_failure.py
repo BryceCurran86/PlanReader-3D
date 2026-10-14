@@ -34,6 +34,7 @@ def _face(**changes):
         ownership_evaluation=SimpleNamespace(
             status="evaluated", competing_edge_count=1,
             unowned_edge_count=2, unresolved_face_ids=("source-face-a",),
+            unresolved_faces=(),
             competing_wall_ids=("wall-a", "wall-b"),
         ),
     )
