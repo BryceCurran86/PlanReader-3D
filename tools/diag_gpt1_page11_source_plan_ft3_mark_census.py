@@ -25,6 +25,9 @@ from pb_viewport_segmentation import (
     segment_page_viewports,
     validate_non_overlapping_viewports,
     is_authoritative_derived_viewport,
+    extract_view_title_anchors,
+    extract_vector_frames,
+    calibrate_viewport_layout,
 )
 from pb_drawing_evidence_binding import DrawingViewType
 
@@ -51,10 +54,14 @@ def source_plan_mark_census(
     with fitz.open(stream=data, filetype="pdf") as document:
         if not 1 <= source_page <= document.page_count:
             raise ValueError("invalid source page")
+        page = document.load_page(source_page - 1)
+        # Retain exact source-derived title+frame alternatives before a
+        # validated viewport owns anything. Diagnostic only.
+        title_anchors = tuple(extract_view_title_anchors(page))
+        layout = calibrate_viewport_layout(page)
+        source_frames = tuple(extract_vector_frames(page, layout))
         viewports = tuple(
-            segment_page_viewports(
-                document.load_page(source_page - 1), page_number=source_page
-            )
+            segment_page_viewports(page, page_number=source_page)
         )
     nonoverlapping = validate_non_overlapping_viewports(viewports)
     source = SourceVisibilityProducer(
@@ -135,11 +142,24 @@ def source_plan_mark_census(
         "material_code": code,
         "source_native_page_decoded": True,
         "viewports_non_overlapping": nonoverlapping,
+        "native_title_anchor_candidates": [
+            {
+                "raw_text": a.text,
+                "view_type": a.view_type,
+                "native_title_bbox": list(a.bbox),
+                "native_direction": list(a.direction) if a.direction else None,
+            }
+            for a in title_anchors
+        ],
+        "native_vector_frame_candidate_count": len(source_frames),
+        "native_vector_frame_candidate_bboxes": [list(x) for x in source_frames[:30]],
         "viewports": [
             {
                 "view_id": v.view_id, "type": v.view_type,
                 "status": v.status, "boundary_source": v.boundary_source,
                 "bbox": list(v.bounding_box) if v.bounding_box else None,
+                "reason_notes": list(v.notes),
+                "authority_provenance": dict(v.provenance),
             } for v in viewports
         ],
         "native_code_word_count": len(marks),
