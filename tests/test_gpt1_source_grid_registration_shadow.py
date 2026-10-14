@@ -10,7 +10,8 @@ from pb_source_grid_registration_shadow import source_grid_registration_shadow
 
 
 def _document(*, letters_shift=25., number_shift=0.,
-              competing=False, incomplete=False, corrupt_letter=False):
+              competing=False, incomplete=False, corrupt_letter=False,
+              physical_grid=False, corrupt_line=False):
     document=fitz.open()
     for p in range(2):
         page=document.new_page(width=800,height=800)
@@ -26,6 +27,25 @@ def _document(*, letters_shift=25., number_shift=0.,
         if competing:
             for token,x in (("C",120.),("B",340.),("A",560.)):
                 page.insert_text((x+(letters_shift if p else 0.),730.),token,fontsize=12)
+        if physical_grid:
+            unique={
+                word[4]:((float(word[0])+float(word[2]))/2.0,
+                         (float(word[1])+float(word[3]))/2.0)
+                for word in page.get_text("words")
+                if word[4] in "ABC234567"
+            }
+            for marker in "ABC":
+                x=unique[marker][0]+(7. if corrupt_line and p and marker=="B" else 0.)
+                for k in range(18):
+                    y=70.+k*35.
+                    page.draw_line((x,y),(x,y+26.),
+                                   color=(1,0,0),width=.24)
+            for marker in "234567":
+                y=unique[marker][1]
+                for k in range(18):
+                    x=70.+k*35.
+                    page.draw_line((x,y),(x+26.,y),
+                                   color=(1,0,0),width=.24)
     b=document.tobytes()
     document.close()
     return b
@@ -109,3 +129,30 @@ def test_non_pdf_bytes_do_not_create_consensus():
             data,expected_sha256=hashlib.sha256(data).hexdigest(),
             first_page_index=0,second_page_index=1,
         )
+
+
+def test_two_original_physical_grid_axes_have_native_path_witnesses():
+    result=_run(_document(physical_grid=True))
+    assert result["source_native_text_grid_candidate"] is True
+    assert result["source_native_vector_grid_candidate"] is True
+    assert result["native_vector_grid_translation_candidate_pdf_pts"]==[25.0,0.0]
+    assert len(result["native_vector_grid_letter_lineage"])==3
+    assert len(result["native_vector_grid_number_lineage"])==6
+    assert all(
+        item["first_original_segment_count"]>=12
+        and item["second_original_segment_count"]>=12
+        for item in result["native_vector_grid_letter_lineage"]
+    )
+    assert result["first_unclosed_gate"]=="source_grid_producer_and_room_physical_equivalence_unverified"
+    assert result["source_grid_line_witness_verified"] is False
+    assert result["source_finish_occurrence_owned"] is False
+    assert result["commercial_projection_allowed"] is False
+
+
+def test_native_text_still_matches_but_one_drawn_grid_axis_conflicts():
+    result=_run(_document(physical_grid=True,corrupt_line=True))
+    assert result["source_native_text_grid_candidate"] is True
+    assert result["source_native_vector_grid_candidate"] is False
+    assert result["source_grid_line_witness_verified"] is False
+    assert result["native_grid_translation_candidate_pdf_pts"]==[25.0,0.0]
+    assert result["commercial_projection_allowed"] is False
