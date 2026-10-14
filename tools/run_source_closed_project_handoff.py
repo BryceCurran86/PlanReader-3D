@@ -395,6 +395,14 @@ def _generate_project_handoff_locked(
         "customer_rows_verified": False,
         "customer_rows_file": None,
         "canonical_counts": {},
+        # Source-owned canonical-wall authority is distinct from overall
+        # publication status. A local canonical-ID conflict must be visible
+        # even when the overall source claim abstains downstream. These
+        # diagnostics cannot change any produced, sealed or customer row.
+        "canonical_wall_status": None,
+        "canonical_wall_reason_codes": [],
+        "canonical_wall_source_pages": [],
+        "unresolved_wall_candidate_count": 0,
         "claim_status": None,
         "claim_reason_codes": [],
     }
@@ -446,6 +454,20 @@ def _generate_project_handoff_locked(
     summary["claim_reason_codes"] = list(
         getattr(claim, "reason_codes", ()) or ()
     )
+    wall_status = getattr(claim, "canonical_wall_status", None)
+    summary["canonical_wall_status"] = (
+        getattr(wall_status, "value", str(wall_status))
+        if wall_status is not None else None
+    )
+    summary["canonical_wall_reason_codes"] = list(
+        getattr(claim, "canonical_wall_reason_codes", ()) or ()
+    )
+    summary["canonical_wall_source_pages"] = list(
+        getattr(claim, "canonical_wall_source_pages", ()) or ()
+    )
+    summary["unresolved_wall_candidate_count"] = len(tuple(
+        getattr(claim, "unresolved_wall_candidate_ids", ()) or ()
+    ))
     summary["canonical_counts"] = {
         "walls": len(tuple(getattr(claim, "canonical_walls", ()) or ())),
         "openings": len(tuple(getattr(claim, "canonical_openings", ()) or ())),
