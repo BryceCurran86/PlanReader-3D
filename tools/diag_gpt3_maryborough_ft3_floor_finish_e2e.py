@@ -14,6 +14,7 @@ from pathlib import Path
 
 from pb_live_floor_area_quantity_publication import publish_live_floor_area_quantities
 from pb_live_floor_finish_area_source_closed_export import seal_live_floor_finish_area_run
+from pb_live_floor_finish_customer_projection import project_live_floor_finish_customer_rows
 from pb_live_physical_net_wall_integration import collect_live_physical_net_wall_claim
 from tools.run_source_closed_project_handoff import _non_abstained, _source_page_scopes
 
@@ -91,6 +92,7 @@ def inspect(pdf: Path, *, expected_sha256: str) -> dict:
         })
 
     sealed = None
+    customer_rows = ()
     if floor_finishes:
         run = seal_live_floor_finish_area_run(
             claim,
@@ -112,6 +114,16 @@ def inspect(pdf: Path, *, expected_sha256: str) -> dict:
             "quantity_ids": sorted(actual_ids),
             "fingerprint": run.fingerprint,
         }
+        # This is the existing production customer adapter. It separately
+        # requires two figured dimensions for DOCUMENTED_DIMENSION authority
+        # and verifies the projected rows against a fresh source-closed seal.
+        customer_rows = project_live_floor_finish_customer_rows(
+            claim,
+            workspace_id=1,
+            project_id="gpt3-maryborough-ft3-source-e2e",
+        )
+        if len(customer_rows) != len(floor_finishes):
+            raise RuntimeError("floor-finish sealed/customer cardinality mismatch")
 
     return {
         "diagnostic_only": True,
@@ -141,6 +153,8 @@ def inspect(pdf: Path, *, expected_sha256: str) -> dict:
             )
         ],
         "sealed_floor_finish_run": sealed,
+        "verified_customer_row_count": len(customer_rows),
+        "customer_rows": list(customer_rows),
     }
 
 
@@ -165,6 +179,7 @@ def main() -> int:
             if row.get("finish_code")
         }),
         "sealed_floor_finish_run": report["sealed_floor_finish_run"],
+        "verified_customer_row_count": report["verified_customer_row_count"],
         "benchmark_score_granted": False,
     }, sort_keys=True))
     return 0
