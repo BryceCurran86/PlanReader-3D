@@ -60,12 +60,27 @@ def test_two_real_original_native_ink_owners_do_not_elect_a_wall():
     report = _report(original, ((ids[0],), (ids[1],)))
     before = deepcopy(report)
     out = inspect_native_ink_against_w2(report, original)
-    assert _status(out) == "original_pdf_multiple_w4_candidates_have_native_ink"
+    assert _status(out) == "original_pdf_distinct_w4_candidates_have_native_ink"
     assert report == before
     assert out["native_ink_independently_read_from_source_pdf"]
     assert out["new_commercial_quantities"] == []
     assert not out["physical_wall_or_room_authority_granted"]
     assert not out["frozen_benchmark_scored"]
+
+
+def test_shared_original_native_path_across_w4_candidates_is_not_two_walls():
+    original, ids = _source([((10, 10), (60, 10))])
+    # The same original native item survives in two W4 graph candidates.
+    out = inspect_native_ink_against_w2(
+        _report(original, ((ids[0],), (ids[0],))), original,
+    )
+    e, = out["scopes"][0]["edges"]
+    assert e["indexed_native_ink_status"] == "original_pdf_w4_candidates_share_same_native_ink"
+    assert e["shared_original_native_source_ids"] == [ids[0]]
+    assert len(e["w4_candidate_original_ink_evidence"]) == 2
+    assert all(not c["physical_wall_equivalence_granted"]
+               for c in e["w4_candidate_original_ink_evidence"])
+    assert not e["source_room_boundary_closed"]
 
 
 def test_orthogonal_original_ink_is_not_horizontal_span_witness():
