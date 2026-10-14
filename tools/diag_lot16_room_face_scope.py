@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from pb_figured_dimension_scale_consistency_shadow import source_figured_scale_shadow
+from pb_source_figured_plan_plane_shadow import original_figured_plan_plane_shadow
 import pb_source_room_face_authority as face_authority
 import pb_source_room_label_authority as label_authority
 import pb_same_view_room_area_authority as same_view_authority
@@ -896,6 +897,13 @@ def inspect_source(pdf: Path, page_index: int, *, diagnostic_labels: tuple[str, 
             "source_label_scope_diagnostic": label_scopes,
             "same_view_witness_intersection_audit": witness_audit,
             "figured_dimension_scale_shadow": source_figured_scale_shadow(witness_audit),
+            "original_figured_plan_plane_shadow": original_figured_plan_plane_shadow(
+                payload,
+                expected_source_sha256=hashlib.sha256(payload).hexdigest(),
+                page_index=page_index,
+                rooms=claim.canonical_rooms,
+                witness_audit=witness_audit,
+            ),
             "label_ownership_diagnostic": {
                 "labelled_room_count": sum(bool(room.room_label) for room in claim.canonical_rooms),
                 "unlabelled_room_count": sum(not bool(room.room_label) for room in claim.canonical_rooms),
