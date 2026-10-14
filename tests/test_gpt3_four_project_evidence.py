@@ -364,7 +364,11 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
         manifests.append(SimpleNamespace(
             project_id=project_id, source_documents=(document,),
             verified_items=tuple(
-                SimpleNamespace(denominator_eligible=True) for _ in range(30)
+                SimpleNamespace(
+                    item_id=f"synthetic-{i}-{j}",
+                    trade_category="flooring",
+                    denominator_eligible=True,
+                ) for j in range(30)
             ),
             status="VERIFIED", source_package_complete=True, reason_codes=(),
         ))
