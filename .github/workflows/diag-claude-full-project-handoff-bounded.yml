@@ -1,12 +1,12 @@
 name: DIAG Claude Full Project Handoff Bounded (3Laurel and Q5446)
 
 # Measurement only. Runs the COMPLETE original-source handoff (all pages decoded as the evidence universe) for the two
-# projects whose full-project production has timed out or been OOM-killed. Each project runs once per code variant in the
-# same workflow run: "base" is the current tip of main and every other variant is main with the named resource-change
-# branches merged in. Each runs under a hard timeout. Wall time, peak resident memory, an RSS timeline and a sampled
-# profile are recorded for all of them, and the deterministic handoff outputs of every variant are compared byte for byte
-# with base. No production file is changed by this workflow and no quantity or score is claimed; a resource change that
-# altered any output would fail the comparison.
+# projects whose full-project production has timed out or been OOM-killed. Shared CI runners differ by up to 2x in speed
+# from job to job, so every code variant for one project runs SEQUENTIALLY ON THE SAME RUNNER, bracketed by two runs of
+# the unchanged baseline to expose drift: "base" is the current tip of main and every other variant is main with the
+# named resource-change branches merged in. CPU time (user+sys), wall time and the sampled peak RSS are recorded per run,
+# and the deterministic handoff outputs of every variant are compared byte for byte with base. No production file is
+# changed by this workflow and no quantity or score is claimed; a resource change that altered any output fails.
 on:
   pull_request:
     paths:
@@ -19,23 +19,11 @@ permissions:
 jobs:
   full-handoff:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
-        project: [3laurel, q5446]
-        variant: [base, A, B, C, ABC]
         include:
-          - variant: base
-            merge: ""
-          - variant: A
-            merge: "claude/source-snapshot-shared-records-20261014"
-          - variant: B
-            merge: "claude/handoff-redundant-source-proof-20261014"
-          - variant: C
-            merge: "claude/handoff-bulk-gc-regime-20261014"
-          - variant: ABC
-            merge: "claude/source-snapshot-shared-records-20261014 claude/handoff-redundant-source-proof-20261014 claude/handoff-bulk-gc-regime-20261014"
           - project: 3laurel
             project_id: au_qld_3laurel
             pdf: "documents/sources/3LAUREL - Construction Plan Set Rev3 08.05.26.pdf"
@@ -49,118 +37,89 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - name: Select the code under test (${{ matrix.variant }})
-        env:
-          MERGE_REFS: ${{ matrix.merge }}
-        run: |
-          set -euo pipefail
-          git checkout --detach origin/main
-          for ref in $MERGE_REFS; do
-            git -c user.name=diag -c user.email=diag@example.invalid merge --no-edit "origin/$ref"
-          done
-          echo "variant=${{ matrix.variant }} code_sha=$(git rev-parse HEAD)"
-          git log --oneline -8
-          echo "CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
       - name: Install original-source dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt py-spy==0.4.0
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Machine resources
         run: |
           nproc
           free -m
-          python -c "import shutil; print('tesseract on PATH:', shutil.which('tesseract'))"
+          lscpu | grep -E "Model name|MHz" || true
       - name: Verify immutable original source
         env:
           PDF: ${{ matrix.pdf }}
           SHA: ${{ matrix.sha }}
         run: |
           printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
-      - name: Complete original-source handoff under a hard timeout
+      - name: Complete original-source handoff per variant, sequentially on this runner
         env:
           PYTHONPATH: .
           ORT_DISABLE_TELEMETRY: "1"
           PDF: ${{ matrix.pdf }}
           PROJECT_ID: ${{ matrix.project_id }}
         run: |
-          mkdir -p artifacts/full
-          echo "$CODE_SHA" > artifacts/full/code_sha.txt
-          ( while true; do
-              pid=$(pgrep -f '^python -u tools/run_source_closed_project_handoff.py' | head -1 || true)
-              if [ -n "$pid" ]; then
-                echo "$(date +%s) $(awk '/VmRSS/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)" >> artifacts/full/rss_kb_timeline.txt
-              fi
-              sleep 5
-            done ) &
-          SAMPLER=$!
-          set +e
-          /usr/bin/time -v -o artifacts/full/time_v.txt \
-            timeout -s INT 3500s py-spy record --rate 20 --format raw -o artifacts/full/stacks.txt -- \
-              python -u tools/run_source_closed_project_handoff.py \
-              --pdf "$PDF" --project-id "$PROJECT_ID" --family-group all \
-              --output-dir artifacts/full/out > artifacts/full/handoff_stdout.txt 2> artifacts/full/handoff_stderr.txt
-          code=$?
-          set -e
-          kill $SAMPLER 2>/dev/null || true
-          echo "handoff_exit_code=$code" | tee artifacts/full/exit_code.txt
-          grep -E "Maximum resident|Elapsed \(wall" artifacts/full/time_v.txt || true
-          if [ -f artifacts/full/rss_kb_timeline.txt ]; then
-            sort -k2 -n artifacts/full/rss_kb_timeline.txt | tail -1 | awk '{printf "sampled_peak_rss_mb=%d\n", $2/1024}'
-          fi
-          ls -la artifacts/full/out 2>/dev/null || true
+          set -uo pipefail
+          git config user.name diag
+          git config user.email diag@example.invalid
+          A=claude/source-snapshot-shared-records-20261014
+          B=claude/handoff-redundant-source-proof-20261014
+          C=claude/handoff-bulk-gc-regime-20261014
+          # name | branches merged into main | PB_CYCLIC_GC_MODE
+          VARIANTS=(
+            "base||default"
+            "AB|$A $B|default"
+            "AB_disabled|$A $B $C|disabled"
+            "AB_staged|$A $B $C|staged"
+            "A|$A|default"
+            "B|$B|default"
+            "base2||default"
+          )
+          mkdir -p artifacts
+          for spec in "${VARIANTS[@]}"; do
+            IFS='|' read -r name refs mode <<< "$spec"
+            echo "=================== variant $name (merge: ${refs:-none}, gc mode: $mode)"
+            git checkout -q --detach origin/main
+            git reset -q --hard
+            git clean -fdq -e artifacts
+            for ref in $refs; do
+              git merge -q --no-edit "origin/$ref" || { echo "MERGE FAILED for $ref"; exit 1; }
+            done
+            dir="artifacts/$name"
+            mkdir -p "$dir"
+            git rev-parse HEAD > "$dir/code_sha.txt"
+            echo "$mode" > "$dir/gc_mode.txt"
+            ( while true; do
+                pid=$(pgrep -f '^python -u tools/run_source_closed_project_handoff.py' | head -1 || true)
+                if [ -n "$pid" ]; then
+                  echo "$(date +%s) $(awk '/VmRSS/{print $2}' /proc/$pid/status 2>/dev/null || echo 0)" >> "$dir/rss_kb_timeline.txt"
+                fi
+                sleep 5
+              done ) &
+            SAMPLER=$!
+            set +e
+            PB_CYCLIC_GC_MODE="$mode" /usr/bin/time -v -o "$dir/time_v.txt" \
+              timeout -s INT 3500s python -u tools/run_source_closed_project_handoff.py \
+                --pdf "$PDF" --project-id "$PROJECT_ID" --family-group all \
+                --output-dir "$dir/out" > "$dir/handoff_stdout.txt" 2> "$dir/handoff_stderr.txt"
+            code=$?
+            set -e
+            kill "$SAMPLER" 2>/dev/null || true
+            wait "$SAMPLER" 2>/dev/null || true
+            echo "handoff_exit_code=$code" | tee "$dir/exit_code.txt"
+            grep -E "User time|System time|Elapsed \(wall|Maximum resident" "$dir/time_v.txt" || true
+            if [ -f "$dir/rss_kb_timeline.txt" ]; then
+              sort -k2 -n "$dir/rss_kb_timeline.txt" | tail -1 | awk '{printf "sampled_peak_rss_mb=%d\n", $2/1024}'
+            fi
+          done
           exit 0
-      - name: Where the time went (sampled, inclusive frames)
-        if: always()
-        run: |
-          python - <<'PY'
-          import collections
-          from pathlib import Path
-          p = Path("artifacts/full/stacks.txt")
-          if not p.exists():
-              print("NO stacks.txt")
-          else:
-              inclusive, self_t, total = collections.Counter(), collections.Counter(), 0
-              for line in p.read_text().splitlines():
-                  stack, _, count = line.rpartition(" ")
-                  if not count.isdigit():
-                      continue
-                  n = int(count)
-                  total += n
-                  frames = stack.split(";")
-                  for frame in set(frames):
-                      inclusive[frame] += n
-                  self_t[frames[-1]] += n
-              print("TOTAL_SAMPLES", total, "(20 Hz => about", round(total / 20), "s of sampled wall time)")
-              print("--- top inclusive frames (share of samples)")
-              for frame, n in inclusive.most_common(40):
-                  print(f"{100.0 * n / total:5.1f}%  {frame[:150]}")
-              print("--- top self frames")
-              for frame, n in self_t.most_common(15):
-                  print(f"{100.0 * n / total:5.1f}%  {frame[:150]}")
-          PY
-      - name: Read the production summary
-        if: always()
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          p = Path("artifacts/full/out/production_summary.json")
-          if not p.exists():
-              print("NO production_summary.json written")
-          else:
-              s = json.loads(p.read_text())
-              keys = ["status", "claim_status", "complete_project_handoff", "topology_mode", "topology_pages",
-                      "execution_pages", "canonical_counts", "canonical_wall_status", "family_counts",
-                      "combined_quantity_count", "verified_customer_row_count", "benchmark_score_granted"]
-              print("FULL_PROJECT_HANDOFF_SUMMARY", json.dumps({k: s.get(k) for k in keys}, sort_keys=True))
-          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: full-handoff-${{ matrix.project }}-${{ matrix.variant }}
-          path: artifacts/full
+          name: full-handoff-${{ matrix.project }}
+          path: artifacts
           retention-days: 14
 
   compare:
@@ -177,70 +136,81 @@ jobs:
         run: |
           python - <<'PY'
           import difflib
+          import json
           import os
           import re
           import sys
           from pathlib import Path
 
           root = Path("artifacts")
+          VARIANTS = ("base", "AB", "AB_disabled", "AB_staged", "A", "B", "base2")
 
-          def wall_seconds(text):
-              match = re.search(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): ([\d:.]+)", text)
-              if not match:
+          def parse_time(text):
+              def get(pattern):
+                  match = re.search(pattern, text)
+                  return None if not match else match.group(1)
+
+              wall = get(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): ([\d:.]+)")
+              seconds = None
+              if wall:
+                  seconds = 0.0
+                  for part in wall.split(":"):
+                      seconds = seconds * 60 + float(part)
+              user, system = get(r"User time \(seconds\): ([\d.]+)"), get(r"System time \(seconds\): ([\d.]+)")
+              cpu = None if user is None or system is None else float(user) + float(system)
+              return seconds, cpu
+
+          def sampled_peak_mib(directory):
+              path = directory / "rss_kb_timeline.txt"
+              if not path.exists():
                   return None
-              total = 0.0
-              for part in match.group(1).split(":"):
-                  total = total * 60 + float(part)
-              return total
+              values = [int(line.split()[1]) for line in path.read_text().splitlines() if len(line.split()) == 2]
+              return max(values) / 1024.0 if values else None
 
-          def peak_mib(text):
-              match = re.search(r"Maximum resident set size \(kbytes\): (\d+)", text)
-              return None if not match else int(match.group(1)) / 1024.0
-
-          VARIANTS = ("base", "A", "B", "C", "ABC")
           failures = []
-          lines = ["| project | variant | code | exit | wall | peak RSS | status | walls |", "|---|---|---|---|---|---|---|---|"]
-          measured = {}
+          lines = []
           for project in ("3laurel", "q5446"):
+              base_dir = root / f"full-handoff-{project}"
+              lines += [f"### {project}", "| variant | code | gc | exit | wall | cpu (user+sys) | cpu/base | sampled peak RSS | rss/base | status | walls |",
+                        "|---|---|---|---|---|---|---|---|---|---|---|"]
+              measured = {}
               for variant in VARIANTS:
-                  d = root / f"full-handoff-{project}-{variant}"
-                  if not d.is_dir():
-                      failures.append(f"{project}/{variant}: artifact missing")
-                      lines.append(f"| {project} | {variant} | - | - | - | - | MISSING | - |")
+                  directory = base_dir / variant
+                  if not directory.is_dir():
+                      failures.append(f"{project}/{variant}: missing")
+                      lines.append(f"| {variant} | - | - | - | - | - | - | - | - | MISSING | - |")
                       continue
-                  exit_code = (d / "exit_code.txt").read_text().strip().split("=")[-1] if (d / "exit_code.txt").exists() else "?"
-                  time_v = (d / "time_v.txt").read_text() if (d / "time_v.txt").exists() else ""
-                  wall, peak = wall_seconds(time_v), peak_mib(time_v)
-                  summary_path = d / "out" / "production_summary.json"
+                  exit_code = (directory / "exit_code.txt").read_text().strip().split("=")[-1] if (directory / "exit_code.txt").exists() else "?"
+                  time_text = (directory / "time_v.txt").read_text() if (directory / "time_v.txt").exists() else ""
+                  wall, cpu = parse_time(time_text)
+                  peak = sampled_peak_mib(directory)
+                  summary_path = directory / "out" / "production_summary.json"
                   status = walls = "-"
                   if summary_path.exists():
-                      import json
                       summary = json.loads(summary_path.read_text())
                       status = f"{summary.get('status')}/{summary.get('claim_status')}"
                       walls = f"{summary.get('canonical_wall_status')}:{(summary.get('canonical_counts') or {}).get('walls')}"
-                  code = (d / "code_sha.txt").read_text().strip()[:8] if (d / "code_sha.txt").exists() else "-"
-                  measured[(project, variant)] = (wall, peak)
-                  fmt_wall = "-" if wall is None else f"{int(wall // 60)}:{wall % 60:04.1f}"
-                  fmt_peak = "-" if peak is None else f"{peak:,.0f} MiB"
-                  lines.append(f"| {project} | {variant} | {code} | {exit_code} | {fmt_wall} | {fmt_peak} | {status} | {walls} |")
+                  code = (directory / "code_sha.txt").read_text().strip()[:8]
+                  mode = (directory / "gc_mode.txt").read_text().strip()
+                  measured[variant] = (wall, cpu, peak, code, mode, exit_code, status, walls)
                   if exit_code != "0":
                       failures.append(f"{project}/{variant}: handoff exit code {exit_code}")
-          lines.append("")
-          for project in ("3laurel", "q5446"):
-              bw, bp = measured.get((project, "base"), (None, None))
-              for variant in VARIANTS[1:]:
-                  vw, vp = measured.get((project, variant), (None, None))
-                  if bw and vw and bp and vp:
-                      lines.append(
-                          f"- {project} {variant}/base: wall time = {vw / bw:.3f}, peak RSS = {vp / bp:.3f}"
-                      )
-
-          lines.append("")
-          for project in ("3laurel", "q5446"):
+              base_wall, base_cpu, base_peak = measured.get("base", (None, None, None))[:3]
+              for variant in VARIANTS:
+                  if variant not in measured:
+                      continue
+                  wall, cpu, peak, code, mode, exit_code, status, walls = measured[variant]
+                  fmt_wall = "-" if wall is None else f"{int(wall // 60)}:{wall % 60:04.1f}"
+                  fmt_cpu = "-" if cpu is None else f"{cpu:,.0f} s"
+                  cpu_ratio = "-" if not (cpu and base_cpu) else f"{cpu / base_cpu:.3f}"
+                  fmt_peak = "-" if peak is None else f"{peak:,.0f} MiB"
+                  rss_ratio = "-" if not (peak and base_peak) else f"{peak / base_peak:.3f}"
+                  lines.append(f"| {variant} | {code} | {mode} | {exit_code} | {fmt_wall} | {fmt_cpu} | {cpu_ratio} | {fmt_peak} | {rss_ratio} | {status} | {walls} |")
+              lines.append("")
               for variant in VARIANTS[1:]:
                   for name in ("production_summary.json", "source_attempt_preflight.json"):
-                      base_path = root / f"full-handoff-{project}-base" / "out" / name
-                      var_path = root / f"full-handoff-{project}-{variant}" / "out" / name
+                      base_path = base_dir / "base" / "out" / name
+                      var_path = base_dir / variant / "out" / name
                       if not base_path.exists() or not var_path.exists():
                           failures.append(f"{project}/{variant}/{name}: missing on base or variant")
                           continue
@@ -253,6 +223,7 @@ jobs:
                               "base", variant, lineterm="",
                           )
                           lines.append(f"- {project}/{variant}/{name}: DIFFERS\n```diff\n" + "\n".join(diff) + "\n```")
+              lines.append("")
 
           report = "\n".join(lines)
           print(report)
