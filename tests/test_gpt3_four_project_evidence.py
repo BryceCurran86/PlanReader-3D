@@ -300,3 +300,42 @@ def test_inaccurate_signed_verification_receipts_fail_closed():
     })
     with pytest.raises(ValueError, match="customer projection"):
         module._verify_customer_counts(sealed, wrong, rows)
+
+
+def test_cross_project_duplicate_signed_quantity_ids_never_publish():
+    from types import SimpleNamespace
+    a = SimpleNamespace(quantities=(
+        SimpleNamespace(quantity_id="shared-q"),
+        SimpleNamespace(quantity_id="a-only"),
+    ))
+    b = SimpleNamespace(quantities=(
+        SimpleNamespace(quantity_id="shared-q"),
+    ))
+    seen = {}
+    module._enforce_cross_project_quantity_uniqueness(
+        a, project_id="project-a", seen=seen,
+    )
+    with pytest.raises(ValueError, match="cross-project"):
+        module._enforce_cross_project_quantity_uniqueness(
+            b, project_id="project-b", seen=seen,
+        )
+    assert seen == {"shared-q": "project-a", "a-only": "project-a"}
+
+
+def test_cross_project_unique_ids_are_retained_and_duplicates_are_atomic():
+    from types import SimpleNamespace
+    a = SimpleNamespace(quantities=(
+        SimpleNamespace(quantity_id="a"),
+        SimpleNamespace(quantity_id="a"),
+    ))
+    seen = {}
+    with pytest.raises(ValueError, match="duplicate"):
+        module._enforce_cross_project_quantity_uniqueness(
+            a, project_id="project-a", seen=seen,
+        )
+    assert seen == {}
+    b = SimpleNamespace(quantities=(SimpleNamespace(quantity_id="b"),))
+    module._enforce_cross_project_quantity_uniqueness(
+        b, project_id="project-b", seen=seen,
+    )
+    assert seen == {"b": "project-b"}
