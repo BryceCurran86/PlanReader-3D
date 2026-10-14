@@ -198,6 +198,23 @@ def semantic_finish_from_schedule_entry(entry: Dict[str, Any]) -> str:
     if str(entry.get("status") or "").strip().lower() != "confirmed":
         return ""
     finish_text = _normalise(entry.get("finish"))
+    # A primary ceramic/floor/wall tile remains a tile when its own
+    # description also mentions epoxy *grout* or satin skirting paint.  A
+    # generic satin string by itself does not prove that the tiled surface is
+    # painted.  Conversely, an explicit independent paint/coating instruction
+    # in the same finish field leaves the dominant surface ambiguous: abstain
+    # rather than arbitrarily making a tile or paint quantity.
+    primary_tile = re.search(
+        r"\\b(?:floor|wall|ceramic|porcelain)\\s+tiles?\\b",
+        finish_text,
+    )
+    if primary_tile:
+        if any(token in finish_text for token in (
+            "paint", "primer", "undercoat", "topcoat", "low sheen",
+            "semi gloss", "semigloss",
+        )):
+            return ""
+        return "tile"
     if (
         "paint" in finish_text
         or "primer" in finish_text
