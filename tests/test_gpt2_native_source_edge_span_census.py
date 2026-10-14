@@ -1,4 +1,4 @@
-"""No-authority tests for original-native vs W4-snapped source edge coverage."""
+"""No-authority tests for surviving W2 graph lineage vs snapped W4 edges."""
 from copy import deepcopy
 import hashlib
 import json
@@ -42,31 +42,31 @@ def _support(audit):
 def test_two_real_native_span_owners_are_not_silently_elected():
     a = _audit(_wall("left", (0, 0, 10, 0)),
                _wall("right", (10, 0, 0, 0)))
-    assert a["source_support_status"] == MULTIPLE
+    assert a["surviving_w2_span_support_status"] == MULTIPLE
     assert a["observed_supported_wall_ids"] == ("left", "right")
     assert not a["physical_room_publication_granted"]
     assert not a["original_source_wall_equivalence_granted"]
     assert not a["commercial_projection_allowed"]
 
 
-def test_native_endpoint_touch_is_not_snap_created_double_owner():
+def test_surviving_w2_endpoint_touch_is_not_snap_created_double_owner():
     # Two actual source intervals meet at 10, but only left covers 9..10.
     a = _audit(_wall("left", (9, 0, 10, 0)),
                _wall("right", (10, 0, 14, 0)),
                edge=((9.2, 0), (10, 0)))
-    assert a["source_support_status"] == ONE
+    assert a["surviving_w2_span_support_status"] == ONE
     assert a["observed_supported_wall_ids"] == ("left",)
-    assert _support(a)["right"]["full_original_native_span_supported"] is False
+    assert _support(a)["right"]["full_surviving_w2_span_supported"] is False
 
 
-def test_original_source_gap_and_orthogonal_contender_remain_zero():
+def test_surviving_w2_gap_and_orthogonal_contender_remain_zero():
     # A drawing-space 0.48 gap must not be bridged by snapped graph endpoints.
     a = _audit(
         _wall("vertical", (4.0, 0, 4.0, 10)),
         _wall("horizontal", (0, 5, 4, 5), (4.48, 5, 10, 5)),
         edge=((4, 5), (4.3, 5)),
     )
-    assert a["source_support_status"] == ZERO
+    assert a["surviving_w2_span_support_status"] == ZERO
     assert a["observed_supported_wall_ids"] == ()
     assert not a["commercial_projection_allowed"]
 
@@ -80,7 +80,7 @@ def test_split_same_native_source_is_order_and_reversal_invariant():
     reverse = _audit(other, _wall("left", (10, 0, 4, 0), (0, 0, 4, 0)),
                      edge=((10, 0), (0, 0)))
     for result in (one, two, reverse):
-        assert result["source_support_status"] == ONE
+        assert result["surviving_w2_span_support_status"] == ONE
         assert result["observed_supported_wall_ids"] == ("left",)
         assert _support(result)["left"]["witness_source_primitive_ids"] == ("native:wall",)
 
@@ -88,7 +88,7 @@ def test_split_same_native_source_is_order_and_reversal_invariant():
 def test_genuine_gap_in_same_native_id_cannot_be_joined():
     a = _audit(_wall("left", (0, 0, 4, 0), (4.48, 0, 10, 0)),
                _wall("right", (0, 1, 10, 1)))
-    assert a["source_support_status"] == ZERO
+    assert a["surviving_w2_span_support_status"] == ZERO
 
 
 def test_different_native_primitive_ids_do_not_fake_continuity():
@@ -99,7 +99,7 @@ def test_different_native_primitive_ids_do_not_fake_continuity():
         "source_primitive_ids": ("source-b",),
     },)
     result = _audit(left, _wall("right", (20, 0, 30, 0)))
-    assert result["source_support_status"] == ZERO
+    assert result["surviving_w2_span_support_status"] == ZERO
 
 
 @pytest.mark.parametrize("invalid", [
@@ -113,15 +113,15 @@ def test_invalid_source_fragments_are_unavailable_not_proof_of_absence(invalid):
         "source_primitive_ids": ("native:wall",),
     },)
     result = _audit(bad, _wall("right", (20, 0, 30, 0)))
-    assert result["source_support_status"] == UNKNOWN
-    assert _support(result)["left"]["full_original_native_span_supported"] is None
+    assert result["surviving_w2_span_support_status"] == UNKNOWN
+    assert _support(result)["left"]["full_surviving_w2_span_supported"] is None
     assert not result["commercial_projection_allowed"]
 
 
 def test_missing_source_candidate_must_abstain_even_when_other_wall_positive():
     absent = {"wall_id": "missing", "w4_record_unavailable": True}
     result = _audit(absent, _wall("present", (0, 0, 10, 0)))
-    assert result["source_support_status"] == UNKNOWN
+    assert result["surviving_w2_span_support_status"] == UNKNOWN
     assert result["observed_supported_wall_ids"] == ("present",)
 
 
@@ -138,7 +138,7 @@ def test_translation_rotation_scale_preserve_original_support(point_fn):
     result = _audit(_wall("owner", geom((0, 0, 10, 0))),
                     _wall("other", geom((10, 0, 20, 0))),
                     edge=(start, end))
-    assert result["source_support_status"] == ONE
+    assert result["surviving_w2_span_support_status"] == ONE
     assert result["observed_supported_wall_ids"] == ("owner",)
 
 
@@ -178,7 +178,7 @@ def test_source_report_retains_abstention_and_never_mutates_inputs():
     assert result["source_sha256"] == src["source_sha256"]
     assert result["source_snapshot_preserved"] is True
     assert result["scopes"][0]["source_room_face_record_count_unchanged"] == 0
-    assert result["scopes"][0]["contested_source_edges"][0]["source_support_status"] == ONE
+    assert result["scopes"][0]["contested_source_edges"][0]["surviving_w2_span_support_status"] == ONE
     assert result["new_commercial_quantities"] == []
     assert result["frozen_evaluation_run"] is False
 
