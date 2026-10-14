@@ -84,7 +84,7 @@ def replay(source_bytes: bytes, *, page_number: int):
     published = source.ingest_native_pdf_bytes(
         document_id=f"live-source:{sha[:32]}",
         source_bytes=source_bytes,
-        source_locator="memory://source-owned-face-original.pdf",
+        source_locator="memory://original-source-view.pdf",
         page_ids=(str(page_number),),
     )
     before = source.published_snapshot_for_revision(published.revision.revision_id)
