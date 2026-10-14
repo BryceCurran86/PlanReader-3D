@@ -532,3 +532,22 @@ def test_unmapped_production_floor_remains_unmapped_without_reclassification():
         mapped_refs=("unrelated-source-object",),
     )
     assert module._enforce_mapped_production_family_trade(*fixture) is None
+
+
+def test_existing_original_lot16_sealed_identity_mapping_remains_compatible():
+    """Real committed producer-signed source evidence; never fixture-mint quantities."""
+    import json
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+    root = Path(__file__).resolve().parents[1]
+    inputs = root / "docs/engineering/lot16_original_identity_reconciliation_20261012"
+    sealed = sealed_source_closed_run_from_dict(
+        json.loads((inputs / "source_sealed_run.json").read_text(encoding="utf-8"))
+    )
+    mapping = module.identity_map_from_dict(
+        json.loads((inputs / "identity_map.json").read_text(encoding="utf-8"))
+    )
+    manifests = module.load_suite_manifests(module.FROZEN_ROOT)
+    manifest = next(m for m in manifests if m.project_id == sealed.project_id)
+    assert module._enforce_mapped_production_family_trade(
+        manifest, sealed, mapping,
+    ) is None
