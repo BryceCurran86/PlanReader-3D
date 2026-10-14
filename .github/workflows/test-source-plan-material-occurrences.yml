@@ -65,8 +65,18 @@ jobs:
             assert report['published_quantities']==[]
             if name=='maryborough':
               ft3=[r for s in report['material_occurrence_scopes'] for r in s['records'] if r['code']=='FT3']
-              assert len(ft3)==5
-              assert all(r['source_text_corroboration_record_ids'] for r in ft3)
+              text=[r for r in report['fixed_original_text_corroboration_results'] if r['status']=='corroborated' and r['corroborated_text']=='FT3']
+              assert len(text)==5 and all(r['record'] for r in text)
+              definition=report['unchanged_nominated_definition_results']['FT3']
+              rows=[r for r in report['original_native_material_block_recovery'] if r['candidate_code']=='FT3']
+              assert rows and {r['phase'] for r in rows}=={'ordinary','physical_plan_shadow'}
+              if definition['status']=='corroborated':
+                assert len(ft3)==5 and all(r['source_text_corroboration_record_ids'] for r in ft3)
+                assert all(r['trusted_word_count']==r['word_count'] for r in rows)
+              else:
+                assert definition['status'] in ('abstained','conflict') and not ft3
+                assert definition['record'] is None
+                assert any(r['unresolved_words'] for r in rows) or definition['status']=='conflict'
               assert report['scope_complete_count']==0
             print(name,'bounded material source proof',report['positive_material_occurrence_count'],flush=True)
           PY

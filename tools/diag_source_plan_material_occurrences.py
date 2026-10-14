@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import fitz
+import pb_source_material_semantic_authority as material_module
 
 from pb_cross_view_floor_finish_authority import _occurrences_on_page
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -41,13 +42,44 @@ def replay(data: bytes, *, page_number: int, raster_supports: bool = False):
     ordinary_views_before = segment_source_page_viewports(
         source, revision_id=revision, page_id=str(page_number)
     )
-    default = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
-    default_authority = default.publish(revision)
-    default_scopes_before = default.published_occurrence_results()
-    producer = SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
-        source, page_ids=(str(page_number),)
-    )
-    authority = producer.publish(revision)
+    native_recovery = []
+    original_recover = material_module._recover_native_material_block
+    phase = "ordinary"
+
+    def observed_recovery(**kwargs):
+        recovered = original_recover(**kwargs)
+        if kwargs["source"] is source and recovered:
+            candidate = material_module._material_definition_candidate(
+                kwargs["block_words"]
+            )
+            native_recovery.append(
+                {
+                    "phase": phase,
+                    "page_id": recovered[0].page_id,
+                    "source_partition_id": recovered[0].source_partition_id,
+                    "block_no": recovered[0].block_no,
+                    "candidate_code": candidate[0] if candidate else "",
+                    "word_count": len(recovered),
+                    "trusted_word_count": sum(w.trusted for w in recovered),
+                    "unresolved_words": [asdict(w) for w in recovered if not w.trusted],
+                }
+            )
+        return recovered
+
+    # A read-only observer: delegate exactly once, return the original result,
+    # restore even on failure. No receipt, cache or decision is substituted.
+    material_module._recover_native_material_block = observed_recovery
+    try:
+        default = SourceMaterialSemanticProducer.from_source_visibility_producer(source)
+        default_authority = default.publish(revision)
+        default_scopes_before = default.published_occurrence_results()
+        phase = "physical_plan_shadow"
+        producer = SourceMaterialSemanticProducer.for_physical_plan_view_shadow(
+            source, page_ids=(str(page_number),)
+        )
+        authority = producer.publish(revision)
+    finally:
+        material_module._recover_native_material_block = original_recover
     views = producer.published_plan_viewports()
     scopes = producer.published_occurrence_results()
     records = tuple(record for scope in scopes for record in scope.records)
@@ -59,7 +91,11 @@ def replay(data: bytes, *, page_number: int, raster_supports: bool = False):
     ) == _signature(ordinary_views_before)
     assert default.published_occurrence_results() == default_scopes_before
     definition_checks = []
-    for code in sorted({record.code for record in records}):
+    nominated_definition_checks = {}
+    codes = {record.code for record in records} | {
+        r["candidate_code"] for r in native_recovery if r["candidate_code"]
+    }
+    for code in sorted(codes):
         selector = SourceMaterialDefinitionSelector(
             published.revision.document_id,
             revision,
@@ -70,11 +106,13 @@ def replay(data: bytes, *, page_number: int, raster_supports: bool = False):
         baseline = default_authority.resolve_definition(selector)
         actual = authority.resolve_definition(selector)
         assert actual == baseline
-        assert (
-            actual.status is EvidenceResolutionStatus.CORROBORATED
-            and actual.record is not None
-        )
-        definition_checks.append(asdict(actual))
+        nominated_definition_checks[code] = asdict(actual)
+        if any(record.code == code for record in records):
+            assert (
+                actual.status is EvidenceResolutionStatus.CORROBORATED
+                and actual.record is not None
+            )
+            definition_checks.append(asdict(actual))
     by_id = {view.view_id: view for view in views}
     for scope in scopes:
         for record in scope.records:
@@ -118,6 +156,8 @@ def replay(data: bytes, *, page_number: int, raster_supports: bool = False):
             asdict(r) for r in producer.published_plan_text_corroboration_results()
         ],
         "unchanged_authenticated_definition_checks": definition_checks,
+        "unchanged_nominated_definition_results": nominated_definition_checks,
+        "original_native_material_block_recovery": native_recovery,
         "default_occurrence_results_unchanged": True,
         "default_segmentation_unchanged": True,
         "published_snapshot_unchanged": True,

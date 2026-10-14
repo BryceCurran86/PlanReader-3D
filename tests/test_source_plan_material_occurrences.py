@@ -257,3 +257,32 @@ def test_replay_and_page_order_produce_stable_original_occurrence_ids():
     _, _, second, _ = _publish(data, page_ids=("1", "1"))
     assert first.published_occurrence_results() == second.published_occurrence_results()
     assert _records(first) == _records(second)
+
+
+def test_original_replay_observer_retains_failed_words_and_restores_reader():
+    from tools.diag_source_plan_material_occurrences import replay
+
+    original = semantic._recover_native_material_block
+    report = replay(_drawing(unrelated_hidden=True), page_number=1)
+    assert semantic._recover_native_material_block is original
+    assert report["positive_material_occurrence_count"] == 1
+    assert report["incomplete_scopes_rejected_by_existing_floor_consumer"]
+    assert (
+        report["unchanged_nominated_definition_results"]["FT9"]["status"]
+        is EvidenceResolutionStatus.CORROBORATED
+    )
+    assert {
+        row["phase"] for row in report["original_native_material_block_recovery"]
+    } == {"ordinary", "physical_plan_shadow"}
+
+
+def test_original_replay_observer_cannot_hide_a_source_recovery_error(monkeypatch):
+    from tools.diag_source_plan_material_occurrences import replay
+
+    def failed_reader(**kwargs):
+        raise RuntimeError("original-source-recovery-error")
+
+    monkeypatch.setattr(semantic, "_recover_native_material_block", failed_reader)
+    with pytest.raises(RuntimeError, match="original-source-recovery-error"):
+        replay(_drawing(), page_number=1)
+    assert semantic._recover_native_material_block is failed_reader
