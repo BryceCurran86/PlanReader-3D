@@ -9,6 +9,7 @@ on:
       - "pb_physical_wall_candidate_authority.py"
       - "pb_opening_host_binding_authority.py"
       - "pb_live_wall_opening_authority_composition.py"
+      - "pb_wall_room_topology_typed_negative_evidence.py"
       - "tests/test_raster_unchanged_band_segments.py"
       - ".github/workflows/score-gpt3-lot16-1215-opening-local.yml"
   workflow_dispatch:
