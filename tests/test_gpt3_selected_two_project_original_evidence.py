@@ -161,3 +161,38 @@ def test_unknown_or_missing_source_pdf_cannot_mint_a_selected_project_receipt(tm
     foreign.write_bytes(source.read_bytes())
     with pytest.raises(ValueError, match="not an independently frozen"):
         module._original_source_subset_gate(manifest, [foreign])
+
+
+
+def test_original_exact_report_compares_stored_json_arrays_to_scorer_tuples():
+    # Original frozen reporter uses dataclasses.asdict: object_refs is a tuple
+    # in memory but a JSON array in the persisted original report.
+    live = {
+        "project_id": "original-source",
+        "denominator": 27,
+        "produced_items": [{
+            "quantity_id": "source-area-q1",
+            "object_refs": ("exact:physical-opening-1",),
+            "trade_category": "windows",
+            "value": 2.16,
+            "unit": "m2",
+            "lineage_ok": True,
+            "abstained": False,
+        }],
+    }
+    stored = json.loads(json.dumps(live, allow_nan=False))
+    assert live != stored  # Python tuple != list, without value disagreement.
+    assert module._json_wire_report(live) == stored
+
+    modified = json.loads(json.dumps(stored))
+    modified["produced_items"][0]["object_refs"] = ["different:source"]
+    assert module._json_wire_report(live) != modified
+
+    modified = json.loads(json.dumps(stored))
+    modified["produced_items"][0]["value"] = 2.17
+    assert module._json_wire_report(live) != modified
+
+
+def test_json_wire_scoring_refuses_non_finite_quantities():
+    with pytest.raises(ValueError):
+        module._json_wire_report({"produced_items": [{"value": float("nan")}]})
