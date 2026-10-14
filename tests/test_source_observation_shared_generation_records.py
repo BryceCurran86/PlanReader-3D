@@ -129,13 +129,18 @@ def test_bulk_visible_reader_binds_records_to_the_queried_snapshot(chain) -> Non
 def test_public_reads_are_defensive_copies_of_shared_records(chain) -> None:
     source, published, store, snapshots = chain
     observation_id = snapshots[0].observation_ids[0]
-    first = _resolve(source, published, snapshots[-1], observation_id)
-    original_text = first.observation.raw_text
-    object.__setattr__(first.observation, "raw_text", "poisoned")
-    for snapshot in snapshots:
-        reread = _resolve(source, published, snapshot, observation_id)
-        assert reread.observation.raw_text == original_text
-    assert store.observations[(snapshots[0].snapshot_id, observation_id)].raw_text == original_text
+    stored = store.observations[(snapshots[0].snapshot_id, observation_id)]
+    original_text = stored.raw_text
+    # A read at a later generation re-binds the shared record; a read at the
+    # generation that stored it needs no re-binding. Both hand out copies.
+    for read_at in (snapshots[-1], snapshots[0]):
+        handed_out = _resolve(source, published, read_at, observation_id).observation
+        assert handed_out is not stored
+        object.__setattr__(handed_out, "raw_text", "poisoned")
+        for snapshot in snapshots:
+            reread = _resolve(source, published, snapshot, observation_id)
+            assert reread.observation.raw_text == original_text
+        assert stored.raw_text == original_text
 
 
 def test_tampering_one_generation_leaves_the_others_resolvable(chain) -> None:
