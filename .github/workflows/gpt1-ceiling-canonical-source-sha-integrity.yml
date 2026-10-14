@@ -62,12 +62,14 @@ jobs:
           subprocess.run([
               sys.executable,"-u","tools/run_source_closed_project_handoff.py",
               "--pdf",str(source),"--project-id","au_qld_3laurel",
-              "--family-group","surfaces","--source-plan-page-index","2",
+              "--family-group","surfaces",
               "--output-dir","artifacts/gpt1-ceiling-source-sha/original",
           ],check=True,timeout=2100)
           summary=json.loads(Path("artifacts/gpt1-ceiling-source-sha/original/production_summary.json").read_text())
           assert summary["source_sha256"]==original_sha
-          assert summary["source_positive_partial_page"]==3
+          # Source-classified topology keeps the full semantic evidence
+          # universe. This is NOT a caller-forced floor-only partial scope.
+          assert summary["source_positive_partial_page"] is None
           assert summary["complete_project_handoff"] is False
           assert summary["benchmark_score_granted"] is False
           assert summary["family_counts"]["ceiling_area"]==0
@@ -78,7 +80,7 @@ jobs:
           Path("artifacts/gpt1-ceiling-source-sha/summary.json").write_text(
               json.dumps({
                   "original_sha_verified":original_sha,
-                  "original_partial_plan_page":3,
+                  "original_partial_plan_page":None,
                   "metric_ceiling_quantity_published":False,
                   "new_floor_finish_quantity_published":False,
                   "signed_customer_rows":0,
