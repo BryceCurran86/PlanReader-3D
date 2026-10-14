@@ -2190,29 +2190,32 @@ class SourceVisibilityProducer:
                 openings[opening.record_id] = opening
         by_id = {r.observation_id: r for r in records}
         boxes = set()
-        from pb_opening_label_dimension_authority import OpeningLabelDimensionProducer
-        labels = OpeningLabelDimensionProducer.from_source_visibility_producer(self)
         for opening in openings.values():
-            # This recovery path addresses individually measurable source
-            # objects. A complete independently authenticated dimension
-            # product nominates capture; its numeric value never determines
-            # geometry, role, host choice or any detector threshold.
-            results = tuple(labels.publish_scope(selectors[oid])
-                for oid in opening.source_observation_ids if oid in selectors)
-            if not any(r.status is EvidenceResolutionStatus.CORROBORATED
-                       and r.evidence is not None and r.evidence.area_m2 is not None
-                       for r in results):
+            # Physical-source nomination must precede and remain independent
+            # of metric quantity authority. A single witnessed opening axis
+            # cannot establish m2 but must not suppress an independently
+            # proved G17 structural flank from source visibility either.
+            # Require the complete source-owned face/end topology already
+            # authenticated by PhysicalOpeningAuthority; this grants only a
+            # bounded supplemental source nomination, never a host or count.
+            source_items = [by_id[oid] for oid in opening.source_observation_ids
+                            if oid in by_id]
+            faces = [item.geometry for item in source_items
+                     if item.observation_kind == RASTER_WALL_BAND_FACE]
+            ends = [item.geometry for item in source_items
+                    if item.observation_kind == RASTER_WALL_BAND_END]
+            if len(faces) != 4 or len(ends) != 2:
                 continue
-            faces = [by_id[oid].geometry for oid in opening.source_observation_ids
-                     if by_id[oid].observation_kind == RASTER_WALL_BAND_FACE]
             grouped = {}
             for x0, y0, x1, y1 in faces:
                 if y0 == y1 and x0 < x1:
                     grouped.setdefault(('horizontal', x0, x1), []).append(y0)
                 elif x0 == x1 and y0 < y1:
                     grouped.setdefault(('vertical', y0, y1), []).append(x0)
+            if len(grouped) != 2:
+                continue
             for (axis, lo, hi), offsets in grouped.items():
-                if len(offsets) == 2:
+                if len(offsets) == 2 and len(set(offsets)) == 2:
                     a, b = sorted(offsets)
                     box = (lo, a, hi, b) if axis == 'horizontal' else (a, lo, b, hi)
                     boxes.add((axis, box))
