@@ -46,7 +46,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      # Original source F.07 proof requires its independent visible text backend.
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
       - name: Reprove original SHA source plan and physical-scale first gate
         run: |
           set -euo pipefail
