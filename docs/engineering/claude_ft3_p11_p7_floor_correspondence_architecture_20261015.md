@@ -1,6 +1,7 @@
 # FT3 page-11 -> page-7 floor correspondence: architecture report (shadow, no authority)
 
 **Read-only. Nothing is published: no material occurrence, floor finish, quantity, scale, customer row or benchmark identity.**
+**Authority level: CANDIDATE relationship evidence. Unique authenticated wall/face equivalence is NOT established (see section 1 and 3.4).**
 Evidence tool: `tools/diag_ft3_p11_p7_floor_correspondence.py` (25 synthetic tests, exact-head CI replay with Tesseract).
 Stop for review per AGENTS.md; no production file is changed in this PR.
 
@@ -22,23 +23,27 @@ Stop for review per AGENTS.md; no production file is changed in this PR.
 
 ## 1. Result
 
-**OFFICE is the one uniquely owned FT3 floor.** The page-11 FT3 plan mark at (327.8, 1437.5) lies 54.8 pt inside the page-11 dimension box
-that measures the OFFICE floor; under the wall-derived registration T = (-78.0, 0.0) that box is a wall-bounded rectangle on **both**
-sheets (identical wall evidence, one registered door opening), contains no other finish code, and is the only measured box holding a
-registered FT3 mark whose region is physically closed. The ownership record for quantity production is:
+**OFFICE is the only measured floor whose page-11 FT3 mark is geometrically owned, uniquely, at CANDIDATE tier.** The page-11 FT3 plan mark at
+(327.8, 1437.5) lies 54.8 pt inside the page-11 dimension box that measures the OFFICE floor; under the wall-derived registration
+T = (-78.0, 0.0) that box is a wall-bounded rectangle on **both** sheets (identical wall evidence, one registered door opening) and holds
+no other finish code. The diagnostic never reports `corroborated`: the wall evidence is W4 *candidate* geometry (p7 viewport scope
+`scope_complete=False`, box-side primitives shared by several candidates or owned by none), page 11 has no source-owned room-face or label
+authority (it is not a topology page; #2726 is open) and no physical-wall-equivalence authority resolves the box sides. A grid or wall-derived
+translation is a candidate; it does not by itself prove the same physical room. The geometric ownership record, ready for the authenticated
+gates to consume, is (identifiers from the exact-head CI replay, which has Tesseract; a machine without it derives different quantity ids):
 
 | field | value |
 |---|---|
 | canonical floor / physical surface | `physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e` |
 | physical room / source face record | `live_physical_room_9eea8a328d9da55c19258c05c282c88c` / `source_room_face_record_735f9b309cca70f513c9fcd9390e3e10` |
-| measured area (existing FIRM evidence) | 9.05352 m2: room-area `qty_2121b8e16e3ad27ffad9`, floor-area reissue `floor_area_quantity_d3f2aeadc5e99db22772`, area evidence `cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5` |
-| FT3 occurrence | p11 native word `(112,0,0)`, bbox `[321.157, 1429.586, 334.402, 1445.359]` |
+| measured area (existing FIRM evidence) | 9.05352 m2: room-area `qty_29e71bd466a9e5fa1783`, floor-area reissue `floor_area_quantity_8bcdc01455538a6a105a`, area evidence `cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5` |
+| FT3 occurrence (candidate, not authenticated) | p11 native word `(112,0,0)`, bbox `[321.157, 1429.586, 334.402, 1445.359]` |
 | registration | identity, scale 1, T = (-78.0, 0.0); 22,338 pt support, 3.66x over the best competitor, 131x over null; independent grid shadow agrees |
 
-**Not claimed:** FOOD PREP (its box holds one FT3 mark but is an open-plan measurement rectangle: two sides lie on grid/dimension lines, so
-"box area = tiled area" is not physically supported), COLD ROOM (wall-bounded but its mark is EPX), and the three FT3 marks outside every
-measured box (DRY STORE, WASH UP, FOOD SERVICE). **Quantity production is still blocked upstream and is not attempted:** the FT3 definition
-authenticates 21/24 words and mark occurrences are withheld (#2719); this report closes only the floor-identity gate.
+**Cannot be bound (and why), per mark:** see section 3.4. FOOD PREP's box holds one FT3 mark but is an open-plan measurement rectangle
+(two sides lie on grid/dimension lines); COLD ROOM is wall-bounded but its mark is EPX; the FT3 marks at DRY STORE, WASH UP and FOOD SERVICE lie
+outside every measured box. **Quantity production is still blocked upstream and is not attempted:** the FT3 definition authenticates 21/24 words
+and mark occurrences are withheld (#2719, #2724/#2728 glyph analysis); this report closes only the geometric floor-identity candidate.
 
 ## 2. Observed repository behavior
 
@@ -85,16 +90,16 @@ Five plan FT3 marks `(112,0,0) (112,1,0) (112,2,0) (113,0,0) (114,0,0)` at p11 c
 
 | floor (box on p11, native pt) | side wall evidence p11 / p7 (face coverage) | wall-bounded both sheets | finish marks in box | outcome |
 |---|---|---|---|---|
-| OFFICE `[251.04, 1382.72, 394.80, 1585.04]` | x0 1.00/1.00, x1 .995/1.00, y1 .997/1.00, y0 .578/.578 (door, IoU 1.0) | yes, identical | FT3 x1 (margin 54.8) | **CORROBORATED** |
-| FOOD PREP `[483.12, 578.48, 678.48, 811.04]` * | x0 .98/.98 and y1 .98/.98 are walls; y0 1.00/1.00 but no second face; x1 0.00/0.71 | **no** | FT3 x1 (64.4) | ABSTAINED: open plan |
-| COLD ROOM `[442.32, 811.04, 666.24, 1175.12]` * | four wall sides, x1 .90/1.00 | yes, not identical | EPX x1 (93.4) | ABSTAINED: other finish code |
+| OFFICE `[251.04, 1382.72, 394.80, 1585.04]` | x0 1.00/1.00, x1 .995/1.00, y1 .997/1.00, y0 .578/.578 (door, IoU 1.0) | yes, identical | FT3 x1 (margin 54.8) | **candidate owner** |
+| FOOD PREP `[483.12, 578.48, 678.48, 811.04]` | x0 .98/.98 and y1 .98/.98 are walls; y0 1.00/1.00 but no second face; x1 0.00/0.71 | **no** | FT3 x1 (64.4) | ABSTAINED: open plan |
+| COLD ROOM `[442.32, 811.04, 666.24, 1175.12]` | four wall sides; x1 .90/1.00 (differs between sheets) | yes, not identical | EPX x1 (93.4) | ABSTAINED: other finish code |
 
-\* FOOD PREP and COLD ROOM are not measurable on a machine without Tesseract; these two rows are a pre-check from the native dimension
-endpoints of the same figured dimensions (3297 x 4025 mm and 3950 x 6425 mm = their documented areas). The exact-head CI replay
-(artifact `claude-ft3-p11-p7-floor-correspondence`) recomputes them from the room-area evidence's own boxes and is the authoritative row.
+All three rows are from the exact-head CI replay of head `22d408dd` (Tesseract present; run 38629073071, artifact `claude-ft3-p11-p7-floor-correspondence`).
+The boxes are the room-area evidence's own `source_dimension_box_pdf_pts`; they equal the native dimension endpoints of the same figured dimensions
+(2536 x 3570, 4025 x 3297 and 6425 x 3950 mm are exactly the documented areas).
 
 OFFICE in detail (`canonical_floor_id physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e`, room-area quantity
-`qty_2121b8e16e3ad27ffad9`, floor-area reissue `floor_area_quantity_d3f2aeadc5e99db22772`, area evidence
+`qty_29e71bd466a9e5fa1783`, floor-area reissue `floor_area_quantity_8bcdc01455538a6a105a`, area evidence
 `cross_view_room_area_4cf27c55d27af1646c2d78f76ee66fa5`, face record `source_room_face_record_735f9b30...`): box
 `[251.04, 1382.72, 394.80, 1585.04]` on p11 maps to `[173.04, 1382.72, 316.80, 1585.04]` on p7. Each side is a wall face on **both** sheets
 (coverage 99.5-100 %, a parallel second face 4.3-6.5 pt away) except one side with a door opening covered 57.8 % on **both** sheets
@@ -102,6 +107,28 @@ with identical intervals (IoU 1.0). Inside the box: one room label, one finish m
 placing the same box at the frame-aligned or alias translation fails the wall test on two sides.
 
 ![OFFICE box on both sheets](figures_ft3_p11_p7_office_box.png)
+
+### 3.4 Why each FT3 mark cannot yet be bound (all alternatives retained)
+
+| mark (p11 centre) | inside a measured box | p11 face holding it -> p7 faces at T (IoU) | first blocker |
+|---|---|---|---|
+| (327.8, 1437.5) | OFFICE | tile cell 1,161 pt2 -> p7 cell .993 (one other overlap .004) | candidate only (below); the measured floor object is the *neighbouring label cell*, so no face-level join exists: only the dimension box relates mark and floor |
+| (324.4, 1022.3) | none | cell -> cell .993 | outside every measured box (DRY STORE has no source ring) |
+| (316.3, 622.9) | none | no exact p7 face (best .79, three other overlaps) | outside every measured box; WASH UP ink has opposing grid sources (GPT2 P3) |
+| (586.7, 642.8) | FOOD PREP | cell -> cell .992 | box not wall-bounded (open plan); the WASH UP and FOOD SERVICE marks sit in the same open region |
+| (737.0, 508.0) | none | cell vs a 70,255 pt2 p7 face (.016) | outside every measured box; the p7 face is a large unclosed region |
+| (1383.4, 2205.6) schedule cell | n/a | no face | unregistered region |
+
+Face-level equivalence is not identity evidence here: 475 of 992 published p11 faces have a p7 face at IoU >= 0.98 under T, and they are tile-grid
+cells (periodic; a one-pitch alias is equally "exact"). The wall-derived registration is a candidate, and OFFICE's box is a *consistent* candidate, not an
+authenticated equivalence, because:
+
+- **W4 ownership behind the OFFICE box sides is not unique.** p7 viewport scope (`scope_complete=False`): x0 has 3 primitives (1 unowned, 1 claimed by
+  several candidates, 8 distinct candidates), x1 3 primitives owned by one candidate, y0 5 primitives (3 unowned), y1 4 (2 unowned, 1 shared). p11 page scope
+  (complete): x0 and y1 each have a primitive claimed by two candidates, y0 has one unowned primitive. No claimant is grid-opposed.
+- Page 11 is not a topology page: no source-owned room face, label or W4 wall authority is published for it (GPT2 #2726 is the open seam).
+- No physical-wall-equivalence authority resolves these W4 candidates (the live claim itself reports `ambiguous_physical_wall_equivalence_for_host`).
+- FT3 definition (21/24 words) and mark occurrences are not authenticated.
 
 Caveat: the p7 W4 viewport scope is `scope_complete=False` (cropped at the viewport boundary, ambiguous primitive ownership). Its candidates are used
 only for geometric coincidence, never for completeness.
