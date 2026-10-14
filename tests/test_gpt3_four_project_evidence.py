@@ -406,6 +406,7 @@ def test_full_four_project_success_passes_required_source_and_completion_receipt
         module, "identity_map_from_dict",
         lambda data: SimpleNamespace(
             project_id=data["project_id"], source_sha256s=data["source_sha256s"],
+            bindings=(),
         ),
     )
     monkeypatch.setattr(
