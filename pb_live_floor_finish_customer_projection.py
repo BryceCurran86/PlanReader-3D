@@ -13,7 +13,7 @@ from pb_live_floor_finish_area_source_closed_export import (
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_source_closed_run_export import SourceClosedRunConflictError, seal_source_closed_run
 from pb_quantity_takeoff_adapter import (
     CommercialMeasurementAuthority,
     MissingCommercialAuthorityError,
@@ -96,6 +96,30 @@ def project_live_floor_finish_customer_rows(
         raise TypeError("claim must be LivePhysicalNetWallClaim")
     if type(workspace_id) is not int or workspace_id <= 0:
         raise ValueError("workspace_id must be an authenticated positive integer")
+
+    # Inspect the ENTIRE original source inventory before customer selection.
+    # A duplicate or foreign record must not vanish merely because every
+    # competing source quantity is ABSTAINED or otherwise nonpublishable.
+    # The source-closed trace builder enforces the same original-ID contract
+    # for positive rows; that builder is not called on an empty projection.
+    original_quantity_ids: set[str] = set()
+    for original in claim.floor_finish_quantity_evidence:
+        if not isinstance(original, QuantityEvidence):
+            raise TypeError("floor_finish_quantity_evidence must contain QuantityEvidence")
+        if original.family != "floor_finish_area":
+            raise SourceClosedRunConflictError(
+                "floor finish customer inventory contains a non-floor-finish quantity"
+            )
+        source_id = original.quantity_id
+        if type(source_id) is not str or not source_id or source_id != source_id.strip():
+            raise SourceClosedRunConflictError(
+                "invalid original floor-finish quantity id in customer projection"
+            )
+        if source_id in original_quantity_ids:
+            raise SourceClosedRunConflictError(
+                f"duplicate original floor-finish quantity id in customer projection: {source_id}"
+            )
+        original_quantity_ids.add(source_id)
 
     quantities = tuple(
         quantity

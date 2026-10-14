@@ -1,0 +1,35 @@
+name: GPT1 Source Complexity Handoff Integrity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/run_source_closed_project_handoff.py"
+      - "tests/test_gpt1_source_complexity_handoff_status.py"
+      - ".github/workflows/gpt1-source-complexity-handoff-status.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt1-source-complexity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source-safety:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Source incomplete vs empty vs signed family contract
+        run: |
+          PYTHONPATH=. python -m pytest -q tests/test_gpt1_source_complexity_handoff_status.py tests/test_source_closed_project_handoff.py tests/test_gpt1_source_positive_scoped_floor_area.py
+          ruff check --select F821,F823 tools/run_source_closed_project_handoff.py tests/test_gpt1_source_complexity_handoff_status.py
+          python scripts/check_full_plan_v2_integrity.py

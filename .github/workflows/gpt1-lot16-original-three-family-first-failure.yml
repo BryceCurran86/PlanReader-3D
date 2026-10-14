@@ -8,6 +8,7 @@ on:
       - "tools/diag_lot16_room_face_scope.py"
       - "pb_source_figured_plan_plane_shadow.py"
       - "tests/test_gpt1_source_figured_plan_plane_shadow.py"
+      - "tests/test_gpt1_source_owned_figured_plan_bridge.py"
       - "pb_figured_dimension_scale_consistency_shadow.py"
       - "tests/test_gpt1_figured_dimension_scale_consistency_shadow.py"
       - "pb_live_canonical_floor_surface.py"
@@ -34,11 +35,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      # Match the already verified original-source F.07 text-corroboration runner.
+      # Without RapidOCR, the private source view correctly abstains.
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt rapidocr onnxruntime
       - name: Adversarial source-scale shadow gate
         run: PYTHONPATH=. python -m pytest -q tests/test_gpt1_figured_dimension_scale_consistency_shadow.py
       - name: Adversarial producer-source plane and measurement firewall
-        run: PYTHONPATH=. python -m pytest -q tests/test_gpt1_source_figured_plan_plane_shadow.py
+        run: PYTHONPATH=. python -m pytest -q tests/test_gpt1_source_figured_plan_plane_shadow.py tests/test_gpt1_source_owned_figured_plan_bridge.py
       - name: Original source and frozen score firewall
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
       - name: Execute real Lot16 source -> canonical -> production -> seal gates
@@ -54,6 +57,7 @@ jobs:
             tools/diag_lot16_room_face_scope.py \
             --pdf "$PDF" --page-index 2 \
             --diagnostic-label BED --diagnostic-label 2 --diagnostic-label 3 \
+            --source-owned-plan-view \
             --output artifacts/gpt1-original-lot16-first-failure/original.json
       - name: Produce source-first non-promoting stage summary
         if: always()
@@ -80,6 +84,7 @@ jobs:
               "opening_seal":report.get("opening_sealing_diagnostic",{}),
               "figured_scale_shadow":report.get("figured_dimension_scale_shadow",{}),
               "original_figured_plan_plane_shadow":report.get("original_figured_plan_plane_shadow",{}),
+              "source_owned_figured_plan_plane_shadow":report.get("source_owned_figured_plan_plane_shadow",{}),
               "source_area_units_inferred_from_pdf_points":False,
               "diagnostic_only":True,
               "new_customer_quantity_created_by_this_workflow":False,
@@ -107,6 +112,20 @@ jobs:
           for member in scope.get("per_room",[]):
               if member.get("metric_room_area_m2") is not None or member.get("signed_quantity_id") is not None:
                   raise SystemExit("unproven room plane cannot produce signed metric area")
+          new=fields["source_owned_figured_plan_plane_shadow"]
+          if not (new.get("diagnostic_only") is True
+                  and new.get("original_source_sha256")==fields["original_source_sha256"]
+                  and new.get("source_plan_view_proof_mode")=="producer_source_owned"
+                  and len(new.get("source_proven_floor_plan_viewports",[]))==1
+                  and new.get("room_metric_area_authority_granted") is False
+                  and new.get("physical_scale_authority_granted") is False
+                  and new.get("commercial_projection_allowed") is False
+                  and new.get("published_quantities")==[]):
+              raise SystemExit("source-owned original plan-view metric firewall failed")
+          for member in new.get("per_room",[]):
+              if (member.get("metric_room_area_m2") is not None
+                      or member.get("signed_quantity_id") is not None):
+                  raise SystemExit("authenticated plan extent cannot mint room area")
           for family in ("floor","ceiling","wall","opening"):
               if not isinstance(fields[family].get("first_failure_frequency"),dict):
                   raise SystemExit(f"first-failure ledger unavailable: {family}")

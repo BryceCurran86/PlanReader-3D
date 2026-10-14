@@ -21,10 +21,12 @@ import fitz
 
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_figured_dimension_scale_consistency_shadow import source_figured_scale_shadow
+from pb_source_visibility_authority import SourceVisibilityProducer
 from pb_viewport_segmentation import (
     ViewportSegmentationStatus,
     is_authoritative_derived_viewport,
     segment_page_viewports,
+    segment_source_page_viewports,
     validate_non_overlapping_viewports,
 )
 
@@ -84,6 +86,8 @@ def original_figured_plan_plane_shadow(
     page_index: int,
     rooms: Sequence[object],
     witness_audit: Mapping,
+    source_visibility_producer: SourceVisibilityProducer | None = None,
+    source_revision_id: str | None = None,
 ) -> dict:
     """Explain first source plane registration failure on exact original PDF.
 
@@ -97,12 +101,51 @@ def original_figured_plan_plane_shadow(
         raise ValueError("original source SHA conflict")
     if type(page_index) is not int or page_index < 0:
         raise ValueError("invalid source page")
+    if (source_visibility_producer is None) != (source_revision_id is None):
+        raise TypeError("source producer and exact revision must be supplied together")
+    if source_visibility_producer is not None:
+        if type(source_visibility_producer) is not SourceVisibilityProducer:
+            raise TypeError("actual source visibility producer required")
+        if type(source_revision_id) is not str or not source_revision_id:
+            raise ValueError("authenticated source revision required")
+        published = source_visibility_producer.published_snapshot_for_revision(
+            source_revision_id
+        )
+        if (
+            published is None
+            or published.revision.source_sha256 != sha
+            or source_visibility_producer._producer.current_revision_id(
+                published.revision.document_id
+            ) != source_revision_id
+            or source_visibility_producer._producer._store.source_bytes_by_revision.get(
+                source_revision_id
+            ) != source_bytes
+            or page_index + 1 not in published.coverage.decoded_pages
+        ):
+            raise ValueError("foreign, stale, or incomplete producer source plan scope")
+        # This existing source-owned F.07 boundary re-proves its complete
+        # extent from the immutable producer, with no caller-supplied box.
+        viewports = tuple(segment_source_page_viewports(
+            source_visibility_producer,
+            revision_id=source_revision_id, page_id=str(page_index + 1),
+            physical_plan_view_shadow=True,
+        ))
+        if source_visibility_producer.published_snapshot_for_revision(
+            source_revision_id
+        ) != published:
+            raise RuntimeError("source plan reader mutated published snapshot")
+    else:
+        published = None
+        with fitz.open(stream=source_bytes, filetype="pdf") as doc:
+            if page_index >= len(doc):
+                raise ValueError("source page out of bounds")
+            viewports = tuple(segment_page_viewports(
+                doc[page_index], page_number=page_index + 1,
+            ))
     with fitz.open(stream=source_bytes, filetype="pdf") as doc:
         if page_index >= len(doc):
             raise ValueError("source page out of bounds")
-        page = doc[page_index]
-        viewports = tuple(segment_page_viewports(page, page_number=page_index + 1))
-        rotation = int(page.rotation)
+        rotation = int(doc[page_index].rotation)
     no_overlap = validate_non_overlapping_viewports(viewports)
     candidates = []
     for v in viewports:
@@ -158,7 +201,21 @@ def original_figured_plan_plane_shadow(
             (view_id, bbox) for view_id, bbox in candidates
             if valid_room and all(_contains(bbox, p) for p in polygons)
         ]
-        full_ownership = len(enclosing) == 1 and original_id == enclosing[0][0]
+        producer_room_snapshot_owned = (
+            published is None or (
+                str(getattr(room, "document_id", "") or "")
+                    == published.revision.document_id
+                and str(getattr(room, "revision_id", "") or "")
+                    == published.revision.revision_id
+                and str(getattr(room, "snapshot_id", "") or "")
+                    == published.snapshot.snapshot_id
+            )
+        )
+        full_ownership = (
+            len(enclosing) == 1
+            and original_id == enclosing[0][0]
+            and producer_room_snapshot_owned
+        )
         two_axis_sources = (
             full_ownership and source_axis_available
             and axis_count("horizontal", enclosing[0][1]) >= 2
@@ -169,6 +226,8 @@ def original_figured_plan_plane_shadow(
             if not valid_room else
             "unique_original_source_floor_plan_viewport_unavailable"
             if len(enclosing) != 1 else
+            "physical_room_source_revision_or_snapshot_unmatched"
+            if not producer_room_snapshot_owned else
             "physical_room_source_viewport_identity_unresolved"
             if not full_ownership else
             "two_source_figured_axis_systems_not_within_owned_viewport"
@@ -179,6 +238,9 @@ def original_figured_plan_plane_shadow(
             "physical_room_id": room_id,
             "source_face_id": str(getattr(room, "source_room_face_record_id", "") or ""),
             "original_room_viewport_id": original_id or None,
+            "source_room_snapshot_owned_by_this_view_producer": bool(
+                producer_room_snapshot_owned
+            ),
             "containing_original_viewport_ids_not_authority": sorted(v[0] for v in enclosing),
             "source_own_viewport_and_axes_candidate": bool(two_axis_sources),
             "first_unclosed_gate": first,
@@ -189,6 +251,12 @@ def original_figured_plan_plane_shadow(
         "diagnostic_only": True,
         "original_source_sha256": sha,
         "source_page_id": str(page_index + 1),
+        "source_plan_view_proof_mode": (
+            "producer_source_owned" if published is not None else "legacy_page_only"
+        ),
+        "source_plan_view_snapshot_id": (
+            published.snapshot.snapshot_id if published is not None else None
+        ),
         "original_page_rotation": rotation,
         "source_viewport_nonoverlap": bool(no_overlap),
         "source_proven_floor_plan_viewports": [
