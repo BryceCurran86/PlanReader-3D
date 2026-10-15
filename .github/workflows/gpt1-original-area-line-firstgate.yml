@@ -64,6 +64,13 @@ jobs:
           from pathlib import Path
           data=json.loads(Path('artifacts/gpt1-area-firstgate/lot16-page3.json').read_text())
           assert data['original_source_sha256']=='10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844'
+          # Independently replay the repository's already-mergable F07 source
+          # proof from the same actual PDF. Do not invent the viewport bbox.
+          from tools.diag_source_owned_physical_plan_view import replay as proven_f07
+          pdf=Path('documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf')
+          baseline=proven_f07(pdf.read_bytes(),page_number=3,raster_supports=True)
+          assert baseline['authoritative_plan_view_count']==1, baseline['viewports']
+          assert len(data['source_plan_positive_viewport_ids'])==1, data['source_raw_viewport_census_diagnostic_only']
           assert data['source_original_snapshot_unchanged'] is True
           assert data['diagnostic_only'] is True
           assert data['published_quantities']==[] and data['customer_rows']==[]
