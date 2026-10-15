@@ -220,3 +220,110 @@ def test_cubic_source_query_gates_reject_bad_or_duplicate():
         census_original_native_cubic_ink(
             drawings(), source_atoms=[((0, 0), (float("inf"), 0))]
         )
+
+
+
+def test_source_native_split_partial_ink_union_and_gaps_are_diagnostic_only():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_partial_linear_ink,
+    )
+    shapes = [
+        {"type": "s", "color": (0, 0, 0), "items": [
+            ("l", fitz.Point(0, 0), fitz.Point(5, 0))]},
+        {"type": "s", "color": (0, 0, 0), "items": [
+            ("l", fitz.Point(10, 0), fitz.Point(5, 0))]},
+        {"type": "f", "fill": (1, 1, 1), "items": [
+            ("l", fitz.Point(5, .1), fitz.Point(7, .1))]},
+        {"type": "s", "items": [
+            ("l", fitz.Point(5, 0), fitz.Point(5, 4))]},
+    ]
+    before = repr(shapes)
+    report = census_original_native_partial_linear_ink(
+        shapes, source_atoms=[((2, 0), (8, 0))]
+    )
+    row = report["source_native_linear_partial_queries"][0]
+    assert [part["original_native_primitive_ref"] for part in row[
+        "original_native_linear_partial_receipts"]] == ["d0i0", "d1i0"]
+    assert row["stroke_only_geometric_coverage"][
+        "source_query_geometrically_covered_diagnostic_only"]
+    assert row["stroke_only_geometric_coverage"]["source_query_gaps_pt"] == []
+    assert not row["source_structural_wall_role_authenticated"]
+    assert report["new_commercial_quantities"] == []
+    assert repr(shapes) == before
+
+
+def test_native_partial_source_gap_and_fill_only_not_stroke():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_partial_linear_ink,
+    )
+    shapes = [
+        {"type": "s", "items": [("l", fitz.Point(0, 0), fitz.Point(4, 0))]},
+        {"type": "f", "items": [("l", fitz.Point(4, 0), fitz.Point(6, 0))]},
+        {"type": "s", "items": [("l", fitz.Point(6, 0), fitz.Point(10, 0))]},
+    ]
+    row = census_original_native_partial_linear_ink(
+        shapes, source_atoms=[((2, 0), (8, 0))]
+    )["source_native_linear_partial_queries"][0]
+    assert row["all_native_paint_geometric_coverage"][
+        "source_query_geometrically_covered_diagnostic_only"]
+    assert not row["stroke_only_geometric_coverage"][
+        "source_query_geometrically_covered_diagnostic_only"]
+    assert row["stroke_only_geometric_coverage"][
+        "source_query_gaps_pt"] == [[2., 4.]]
+    assert row["source_structural_wall_role_authenticated"] is False
+
+
+def test_native_partial_ink_near_miss_and_diagonal_do_not_bridge_gap():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_partial_linear_ink,
+    )
+    shapes = [
+        {"type": "s", "items": [("l", fitz.Point(0, 0), fitz.Point(5, 0))]},
+        {"type": "s", "items": [("l", fitz.Point(5, .0003), fitz.Point(10, .0003))]},
+        {"type": "s", "items": [("l", fitz.Point(5, 0), fitz.Point(10, .01))]},
+        {"type": "s", "items": [("l", fitz.Point(5, -3), fitz.Point(5, 3))]},
+    ]
+    row = census_original_native_partial_linear_ink(
+        shapes, source_atoms=[((0, 0), (10, 0))]
+    )["source_native_linear_partial_queries"][0]
+    assert [x["original_native_primitive_ref"] for x in row[
+        "original_native_linear_partial_receipts"]] == ["d0i0"]
+    assert row["stroke_only_geometric_coverage"]["source_query_gaps_pt"] == [[5., 10.]]
+
+
+def test_native_partial_ink_keeps_duplicated_original_ancestry_and_reverse_query():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_partial_linear_ink,
+    )
+    shapes = [
+        {"type": "s", "items": [("l", fitz.Point(0, 0), fitz.Point(10, 0))]},
+        {"type": "s", "items": [("l", fitz.Point(0, 0), fitz.Point(10, 0))]},
+    ]
+    for query in (((2, 0), (8, 0)), ((8, 0), (2, 0))):
+        row = census_original_native_partial_linear_ink(
+            shapes, source_atoms=[query]
+        )["source_native_linear_partial_queries"][0]
+        assert len(row["original_native_linear_partial_receipts"]) == 2
+        assert {x["original_native_primitive_ref"] for x in row[
+            "original_native_linear_partial_receipts"]} == {"d0i0", "d1i0"}
+        assert row["stroke_only_geometric_coverage"][
+            "source_query_geometrically_covered_diagnostic_only"]
+        assert not row["source_room_ring_closed"]
+
+
+def test_native_partial_ink_invalid_source_and_duplicate_queries_fail_closed():
+    from tools.diag_gpt2_p7_original_native_crossing_ink import (
+        census_original_native_partial_linear_ink,
+    )
+    with pytest.raises(ValueError, match="original_native_drawing_universe_unavailable"):
+        census_original_native_partial_linear_ink(
+            [], source_atoms=[((0, 0), (1, 0))]
+        )
+    with pytest.raises(ValueError, match="duplicate_original_producer_atom_query"):
+        census_original_native_partial_linear_ink(
+            drawings(), source_atoms=[((0, 0), (1, 0)), ((0, 0), (1, 0))]
+        )
+    with pytest.raises(ValueError, match="selected native wall edge invalid"):
+        census_original_native_partial_linear_ink(
+            drawings(), source_atoms=[((float("nan"), 0), (1, 0))]
+        )
