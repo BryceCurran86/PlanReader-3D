@@ -158,3 +158,82 @@ def test_reordering_native_lines_preserves_cycle_evidence_not_role():
         assert not result["role_granted"]
         assert result["component_role_ambiguous"]
     assert before == (repr(first), repr(second))
+
+
+
+def test_true_native_seed_cycle_is_reported_but_never_grants_role():
+    ds = [
+        drawing((0, 0), (2, 0)), drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)), drawing((0, 2), (0, 0)),
+    ]
+    before = repr(ds)
+    result = inspect_native_component(Page(ds), "d0i0")
+    census = result["seed_incident_exact_cycle_census"]
+    assert census["status"] == "COMPLETE_EXACT_SOURCE_PATH_CENSUS"
+    assert census["source_seed_cycle_count"] == 1
+    assert census["source_seed_cycles"][0]["source_edge_count"] == 4
+    assert not census["annotation_or_structural_role_granted"]
+    assert repr(ds) == before
+
+
+def test_chorded_biconnected_block_can_contain_multiple_real_source_cycles():
+    ds = [
+        drawing((0, 0), (2, 0)), drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)), drawing((0, 2), (0, 0)),
+        drawing((0, 0), (2, 2)),
+    ]
+    result = inspect_native_component(Page(ds), "d4i0")
+    assert result["exact_simple_cycle_block_count"] == 0
+    assert [cycle["source_edge_count"] for cycle in result[
+        "seed_incident_exact_cycle_census"]["source_seed_cycles"]] == [3, 3]
+    assert result["seed_incident_exact_cycle_census"]["source_seed_cycle_count"] == 2
+    assert result["structural_role"] == "UNRESOLVED"
+
+
+def test_nearby_sub_rounding_gap_does_not_form_a_true_seed_cycle():
+    ds = [
+        drawing((0, 0), (2, 0)), drawing((2, 0), (2, 2)),
+        drawing((2, 2), (0, 2)), drawing((0, 2.00004), (0, 0)),
+    ]
+    census = inspect_native_component(Page(ds), "d0i0")[
+        "seed_incident_exact_cycle_census"]
+    assert census["source_seed_cycle_count"] == 0
+    assert census["status"] == "COMPLETE_EXACT_SOURCE_PATH_CENSUS"
+
+
+def test_seed_cycle_safety_bound_abstains_without_electing_a_ring():
+    from tools.diag_gpt2_ft3_native_cycle_shadow import (
+        _simple_cycles_containing_seed,
+    )
+    vertices = [(0., 0.), (1., 0.), (1., 1.), (0., 1.)]
+    selected = {}
+    for i, a in enumerate(vertices):
+        for j, b in enumerate(vertices):
+            if i >= j:
+                continue
+            key = f"e{i}_{j}"
+            selected[key] = {"a": a, "b": b}
+    result = _simple_cycles_containing_seed(
+        set(selected), selected, "e0_1", state_limit=1,
+    )
+    assert result["status"] == "INCOMPLETE_SAFETY_BOUND"
+    assert result["search_states"] <= 1
+    assert not result["annotation_or_structural_role_granted"]
+
+
+def test_source_cycle_reorder_still_preserves_lengths_and_no_authority():
+    edges = [
+        ((0, 0), (2, 0)), ((2, 0), (2, 2)),
+        ((2, 2), (0, 2)), ((0, 2), (0, 0)),
+        ((0, 0), (2, 2)),
+    ]
+    first = inspect_native_component(
+        Page([drawing(*edge) for edge in edges]), "d4i0"
+    )["seed_incident_exact_cycle_census"]
+    second = inspect_native_component(
+        Page([drawing(*edge) for edge in reversed(edges)]), "d0i0"
+    )["seed_incident_exact_cycle_census"]
+    assert sorted(x["source_edge_count"] for x in first["source_seed_cycles"]) == [3, 3]
+    assert sorted(x["source_edge_count"] for x in second["source_seed_cycles"]) == [3, 3]
+    assert not first["annotation_or_structural_role_granted"]
+    assert not second["annotation_or_structural_role_granted"]
