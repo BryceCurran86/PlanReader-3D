@@ -393,6 +393,96 @@ def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
     }
 
 
+def verify_original_indexed_split_parent_ink(drawings, selected_node_rows):
+    """Cross-check SOURCE ancestry directly against original indexed PDF ink.
+
+    Native original vector parent corroboration is NOT a structural wall role.
+    Retain every conflict/unavailable parent; no nearest-source substitution.
+    """
+    from tools.diag_gpt2_native_w2_ink_source_role import (
+        read_native_ink_receipt,
+    )
+    if not isinstance(drawings, (tuple, list)) or not drawings:
+        raise ValueError("original_native_ink_universe_unavailable")
+    report, visited = [], set()
+    for node in selected_node_rows:
+        for endpoint in node["all_original_split_endpoint_receipts"]:
+            style = endpoint["original_split_input_graphic_style_receipt"]
+            for original in style["source_style_records"]:
+                native_id = original["original_primitive_id"]
+                source_coords = original["original_native_geometry"]
+                identity = (
+                    native_id,
+                    tuple(str(v) for v in source_coords),
+                )
+                if identity in visited:
+                    continue
+                visited.add(identity)
+                row = {
+                    "original_native_primitive_id": native_id,
+                    "original_producer_source_edge_pdf_pts": (
+                        [source_coords[:2], source_coords[2:]]
+                        if len(source_coords) == 4 else None
+                    ),
+                    "independent_original_pdf_source_status": "UNAVAILABLE",
+                    "independent_original_pdf_ink_evidence": None,
+                    "source_wall_or_annotation_role_granted": False,
+                }
+                if (len(source_coords) != 4 or
+                    not original["original_native_page_coords_present"]):
+                    row["independent_original_pdf_source_status"] = (
+                        "PRODUCER_NATIVE_COORDS_UNAVAILABLE"
+                    )
+                else:
+                    try:
+                        source_edge = (
+                            source_coords[:2], source_coords[2:]
+                        )
+                        ink = read_native_ink_receipt(
+                            drawings, native_id, source_edge,
+                        )
+                    except (ValueError, TypeError, IndexError, KeyError,
+                            OverflowError) as error:
+                        row["independent_original_pdf_source_status"] = (
+                            "INDEXED_SOURCE_LOOKUP_UNAVAILABLE"
+                        )
+                        row["independent_original_pdf_lookup_error_type"] = (
+                            type(error).__name__
+                        )
+                    else:
+                        row["independent_original_pdf_source_status"] = (
+                            "INDEXED_ORIGINAL_INK_FULL_SOURCE_SPAN"
+                            if ink["native_stroke_fully_covers_atomic_wall_candidate"]
+                            else "INDEXED_SOURCE_GEOMETRY_CONFLICT"
+                        )
+                        row["independent_original_pdf_ink_evidence"] = {
+                            "native_source_edge_pdf_pts": ink["native_source_edge_pdf_pts"],
+                            "original_native_paint_metadata_candidate_only":
+                                ink["original_native_paint_metadata_candidate_only"],
+                            "original_native_primitive_ref":
+                                ink["original_native_primitive_ref"],
+                            "native_element_kind": ink["native_element_kind"],
+                            "source_ink_not_physical_role": True,
+                        }
+                report.append(row)
+    report.sort(key=lambda x: (
+        x["original_native_primitive_id"],
+        str(x["original_producer_source_edge_pdf_pts"]),
+    ))
+    return {
+        "status": "INDEXED_ORIGINAL_SOURCE_LOOKUPS_REPORTED_NO_ROLE",
+        "distinct_producer_source_parent_record_count": len(report),
+        "original_indexed_parent_receipts": report,
+        "original_indexed_parent_sources_all_correlated": bool(report) and all(
+            x["independent_original_pdf_source_status"]
+            == "INDEXED_ORIGINAL_INK_FULL_SOURCE_SPAN" for x in report
+        ),
+        "source_structural_wall_role_granted": False,
+        "room_or_metric_published": False,
+        "diagnostic_only": True,
+    }
+
+
 def replay_original_page7_graph(*, source, published, source_bytes,
                                 original_wall_scope, original_w4_ids):
     if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
@@ -471,8 +561,16 @@ def replay_original_page7_graph(*, source, published, source_bytes,
         graph=graph, scoped_inputs=candidates,
         selected_node_ids=selected_node_ids,
     )
+    # Only original indexed drawing items, from the same SHA-verified bytes,
+    # may corroborate original producer parent IDs. No visible-PDF guesses.
+    with fitz.open(stream=source_bytes, filetype="pdf") as original_doc:
+        native_drawings = original_doc[page_no - 1].get_drawings()
+        indexed_ink = verify_original_indexed_split_parent_ink(
+            native_drawings, snap_input_census["selected_original_node_rows"]
+        )
     return {
         **result,
+        "original_indexed_native_parent_ink_firstgate": indexed_ink,
         "original_all_split_input_snap_provenance": snap_input_census,
         "original_source_sha256": published.revision.source_sha256,
         "original_f07_view_id": selected.view_id,
