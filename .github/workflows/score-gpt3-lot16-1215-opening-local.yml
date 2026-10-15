@@ -169,6 +169,11 @@ jobs:
           ))
           rows=json.loads((prod/"verified_customer_rows.json").read_text())
           verified=verify_sealed_customer_output(sealed, rows)
+          # Pin the original signed production receipt, not just quantity totals:
+          # a value-preserving rekey or altered evidence ancestry must fail.
+          assert sealed.fingerprint=="ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb", (
+              "original Lot16 V1 sealed receipt changed", sealed.fingerprint
+          )
           target_rows=[
               q for q in sealed.quantities
               if tuple(q.object_identity_refs)==(target,)
