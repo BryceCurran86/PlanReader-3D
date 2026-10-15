@@ -41,6 +41,15 @@ def classify_independent_f07_siblings(*, viewports, published, page_no: int,
             "diagnostic_only": True,
         }
     all_views, eligible = originals
+    view_ids = [v.view_id for v in all_views]
+    if (any(type(v) is not str or not v or v != v.strip() for v in view_ids)
+            or len(view_ids) != len(set(view_ids))):
+        return {
+            "status": "independent_f07_duplicate_or_invalid_view_identity",
+            "all_source_owned_views": [],
+            "original_w4_scope_id_parity_verified": False,
+            "diagnostic_only": True,
+        }
     siblings = _viewport_sibling_set_fingerprint(all_views)
     rows = []
     candidate_ids = []
