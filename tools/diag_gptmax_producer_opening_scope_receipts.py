@@ -122,10 +122,11 @@ def _observe(source, published, composition, voids):
                      or label.evidence.area_m2 != quantity.value)):
             raise RuntimeError("original figured measurement receipt no longer authenticates")
         trace = traces[identity]
-        first_gate = ("host_wall_identity" if host is None else
+        physical_gate = ("host_wall_identity" if host is None else
                       "host_frame" if evidence is None else
-                      "source_supported_area_measurement" if quantity is None else
-                      "versioned_signed_scope_consumer")
+                      "source_metric_axes_or_vertical_placement" if not opening.geometry_complete else None)
+        first_gate = ("versioned_signed_scope_consumer" if quantity is not None else
+                      physical_gate or "source_supported_area_measurement")
         rows.append({
             "physical_opening_id": identity,
             "canonical_opening_id": opening.canonical_opening_id,
@@ -136,15 +137,21 @@ def _observe(source, published, composition, voids):
             "physical_existence_record": asdict(record),
             "host_record": asdict(host) if host is not None else None,
             "frame_record": asdict(evidence) if evidence is not None else None,
-            "host_status": binding.status.value, "host_reason_codes": binding.reason_codes,
-            "frame_status": frame.status.value if frame is not None else "abstained",
-            "frame_reason_codes": frame.reason_codes if frame is not None else ("frame_selector_unavailable",),
+            "host_status": bindings[identity].status.value,
+            "host_reason_codes": bindings[identity].reason_codes,
+            "original_host_producer_trace": asdict(bindings[identity]),
+            "host_lookup_reason_codes": binding.reason_codes,
+            "frame_status": frames[identity].status.value,
+            "frame_reason_codes": frames[identity].reason_codes,
+            "original_frame_producer_trace": asdict(frames[identity]),
+            "frame_lookup_reason_codes": frame.reason_codes if frame is not None else ("frame_selector_unavailable",),
             "measurement_trace": asdict(trace),
             "original_label_dimension_result": asdict(label),
             "quantity_id": quantity.quantity_id if quantity is not None else None,
             "quantity_measurement_record_id": (quantity.metadata.get("measurement_record_id")
                                                if quantity is not None else None),
             "first_failing_authority_stage": first_gate,
+            "first_failing_physical_geometry_stage": physical_gate,
             "source_scope_record_replayed": host is not None,
             "signed_scope_verified": False,
         })

@@ -58,6 +58,7 @@ jobs:
           assert sum(x['host_record'] is not None for x in rows)==15
           assert sum(x['frame_record'] is not None for x in rows)==9
           assert sum(x['quantity_id'] is not None for x in rows)==8
+          assert all(x['first_failing_authority_stage']=='versioned_signed_scope_consumer' for x in rows if x['quantity_id'])
           assert r['all_original_source_host_frame_quantity_seal_customer_receipts_unchanged']
           assert r['original_production_receipts']['customer_verification']['valid_quantity_count']==8
           assert all(x['decision_scope_id']==x['host_record']['decision_scope_id'] for x in rows if x['host_record'])

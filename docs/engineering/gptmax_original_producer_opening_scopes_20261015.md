@@ -76,3 +76,32 @@ W4 membership, host/frame producer, 20,000 input cap, quantity publisher,
 signature, frozen truth, denominator, mapping or evaluator is changed. No new
 benchmark match is claimed. Each unresolved opening still needs its first
 physical source/host/measurement authority before the user's completion gate.
+
+## Individually inspected unresolved physical hosts
+
+Initial original replay on main 40d8e849 retained 21 physical openings, 15 host
+records, nine frame records and eight existing source-signed area rows. These
+are independently distinct gates: three existing area quantities use their
+valid figured-label/host evidence without a complete host frame. Their area
+publication must not be relabelled as blocked because metric void geometry is
+incomplete. The receipt reader reports physical geometry and quantity-delivery
+blockers separately.
+
+All six still-hostless original identities are listed below (prefix
+`physical_opening_existence_`). Source flank observations are from the exact
+immutable original #2744 artifact 11931953022, with no source-root aliasing.
+
+| Identity suffix | Original source first gate still requiring authority |
+| --- | --- |
+| 33d277d4c6b6ce758b0594f9d47ce4d8 | Both source flanks painted; ordinary W4 same-source ancestry unavailable. Left terminal's 3.84pt centre span remains below the unchanged 4pt production rule. |
+| 81a45c3a33c2a4c0bfdf243aa45a780d | Both source flanks painted; no ordinary W4 same-source ancestry or independent structural wall/equivalence proof. |
+| a68d0b7d738b5de9a1588b4e680e1a8f | Both candidate flanks painted; two actual W3 short-arm junctions remain AMBIGUOUS/ABSTAINED; no ordinary W4 corroboration or host transfer from 1215. |
+| b248972669988c108ebc90c6ca3908fd | First whole source flank not solid; contained source terminal only 0.24pt in separate #2747 original study. No host. |
+| ba7f75a2e5f68bcce87cd00ac1acf90b | First whole source flank not solid; separate #2747 finds 76.8pt contained terminal but no structural wall role/equivalence or host. |
+| f819752382d44a00d9f28feca4b00787 | Both source flanks painted; ordinary W4 same-source ancestry and physical wall/equivalence still unavailable. |
+
+These are stage-specific ABSTAIN results, not permanent physical nonexistence.
+W3 continuation links, same pixels at a second DPI, nearest W4 geometry, source
+sharing with a different opening, or a visible room/door label cannot clear
+them. New complete opening objects remain unproved. Full page-wide raw count
+and native/raster negative evidence are unchanged.
