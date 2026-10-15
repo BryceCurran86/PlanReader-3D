@@ -20,6 +20,9 @@ from pb_physical_wall_candidate_authority import (
 )
 from pb_wall_room_topology_stage_a import (
     build_wall_graph_for_viewport, DEFAULT_GAP_SNAP_TOLERANCE_PT,
+    filter_structural_segments, _segments_to_point_pairs,
+    split_segments_at_intersections, _point_pairs_to_segment_dicts,
+    _snap_geometry_indexed,
 )
 from pb_wall_room_topology_junction_classifier import classify_junctions
 
@@ -195,6 +198,98 @@ def trace_exact_source_w2_nodes(*, original_wall_scope, graph, reconstructed_wal
     }
 
 
+def inspect_all_original_snap_inputs_for_selected_nodes(*, graph, scoped_inputs,
+                                                     selected_node_ids):
+    """Replay W2's exact splitter and running-centroid assignments, no edits.
+
+    Unlike post-merge surviving edges, assignments cover BOTH endpoints of
+    every original split fragment, even if W2 collapsed or merged that edge.
+    """
+    structural, _excluded = filter_structural_segments(scoped_inputs)
+    points = _segments_to_point_pairs(structural)
+    split_pairs = split_segments_at_intersections(points)
+    split = _point_pairs_to_segment_dicts(
+        split_pairs, source_segments=structural,
+    )
+    snapped = _snap_geometry_indexed(
+        split, tolerance_pt=DEFAULT_GAP_SNAP_TOLERANCE_PT,
+        include_endpoint_assignments=True,
+    )
+    actual = graph["nodes"]
+    expected = snapped["nodes"]
+    if len(actual) != len(expected):
+        raise ValueError("original_snap_node_universe_drift")
+    for a, b in zip(actual, expected):
+        if (a["id"], a["x"], a["y"], a["samples"]) != (
+            b["id"], b["x"], b["y"], b["samples"]
+        ):
+            raise ValueError("original_snap_node_centroid_or_sample_drift")
+    ids = set(selected_node_ids)
+    if not ids or any(type(n) is not int or not 0 <= n < len(actual) for n in ids):
+        raise ValueError("original_selected_snap_node_unavailable")
+    assigned = {node_id: [] for node_id in sorted(ids)}
+    mapping = snapped["endpoint_snap_assignments"]
+    if len(mapping) != len(split):
+        raise ValueError("original_split_endpoint_assignments_incomplete")
+    for item in split:
+        a, b = mapping[item["id"]]
+        for endpoint, target, coords in (
+            ("a", a, [item["x1"], item["y1"]]),
+            ("b", b, [item["x2"], item["y2"]]),
+        ):
+            if target not in assigned:
+                continue
+            assigned[target].append({
+                "original_split_segment_id": item["id"],
+                "original_split_endpoint": endpoint,
+                "original_native_split_endpoint_pdf_pts": coords,
+                "original_source_primitive_ids": list(
+                    (item.get("primitive_lineage") or {}).get(
+                        "source_primitive_ids", ()
+                    )
+                ),
+                "input_contributes_to_snapped_node_not_wall_role": True,
+            })
+    rows = []
+    for node_id, receipts in sorted(assigned.items()):
+        node = actual[node_id]
+        if len(receipts) != node["samples"]:
+            raise ValueError("original_snap_input_sample_count_drift")
+        groups = {}
+        for receipt in receipts:
+            raw = receipt["original_native_split_endpoint_pdf_pts"]
+            key = tuple(round(float(value), 6) for value in raw)
+            groups.setdefault(key, []).append(receipt)
+        grouped = [{
+            "original_split_input_coordinate_6dp_report_only": list(key),
+            "original_split_input_sample_count": len(recs),
+            "original_split_input_source_ids": sorted({
+                src for rec in recs for src in rec["original_source_primitive_ids"]
+            }),
+            "original_split_input_fragment_ids": [
+                f"{rec['original_split_segment_id']}:{rec['original_split_endpoint']}"
+                for rec in recs
+            ],
+        } for key, recs in sorted(groups.items())]
+        rows.append({
+            "original_w2_node_id": node_id,
+            "original_snapped_position_pdf_pts": [node["x"], node["y"]],
+            "original_producer_snap_sample_count": node["samples"],
+            "all_input_samples_independently_recovered": True,
+            "original_split_input_coordinate_groups": grouped,
+            "all_original_split_endpoint_receipts": receipts,
+            "source_wall_or_room_role_granted": False,
+        })
+    return {
+        "status": "ORIGINAL_W2_ALL_SPLIT_ENDPOINT_INPUTS_REPLAY_VERIFIED",
+        "original_W2_premerge_node_count": len(expected),
+        "original_split_segment_count": len(split),
+        "selected_original_node_rows": rows,
+        "new_firm_or_physical_room": False,
+        "diagnostic_only": True,
+    }
+
+
 def replay_original_page7_graph(*, source, published, source_bytes,
                                 original_wall_scope, original_w4_ids):
     if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
@@ -263,8 +358,19 @@ def replay_original_page7_graph(*, source, published, source_bytes,
         reconstructed_walls=walls, selected_wall_ids=original_w4_ids,
         junctions=junctions,
     )
+    selected_node_ids = {
+        endpoint["w2_graph_node_id"]
+        for wall in result["selected_original_w4_node_rows"]
+        for fragment in wall["w2_surviving_fragment_nodes"]
+        for endpoint in fragment["endpoints"]
+    }
+    snap_input_census = inspect_all_original_snap_inputs_for_selected_nodes(
+        graph=graph, scoped_inputs=candidates,
+        selected_node_ids=selected_node_ids,
+    )
     return {
         **result,
+        "original_all_split_input_snap_provenance": snap_input_census,
         "original_source_sha256": published.revision.source_sha256,
         "original_f07_view_id": selected.view_id,
         "original_source_owned_viewport_scope_verified": True,
