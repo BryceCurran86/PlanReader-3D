@@ -866,6 +866,55 @@ def filtered_wall_topology_source_segment_count(
     )
 
 
+def repeated_raster_drafting_motif_wall_ids(
+    records: Sequence[PhysicalWallCandidateRecord],
+    *,
+    page_span: float,
+) -> frozenset[str]:
+    """W4 walls that are the raster leftover of a repeated drafting motif.
+
+    Raster-visible segments are injected without a source path_index, so the
+    pre-topology singleton motif filter cannot see them as one-segment paths.
+    This census reuses that filter's orthogonal repeat/span constants on the
+    already-assembled W4 records. It never deletes primitives, never rekeys
+    split IDs, and never classifies a unique short return or a unique aligned
+    competitor as a motif.
+    """
+    if not math.isfinite(page_span) or page_span <= 0.0:
+        return frozenset()
+
+    lengths_angles: list[tuple[str, float, float]] = []
+    signature_counts: Counter[tuple[float, float]] = Counter()
+    for record in records:
+        identity = record.physical_identity
+        primitives = tuple(str(item) for item in identity.source_primitive_ids)
+        if not primitives or any(not item.startswith("raster_segment:") for item in primitives):
+            continue
+        points = tuple(record.wall_candidate.centerline_pts or ())
+        if len(points) != 2:
+            continue
+        start, end = points
+        length = math.hypot(end[0] - start[0], end[1] - start[1])
+        if not math.isfinite(length) or length <= 0.0:
+            continue
+        angle = math.degrees(math.atan2(end[1] - start[1], end[0] - start[0])) % 180.0
+        signature = (round(length, 2), round(angle, 1))
+        lengths_angles.append((record.wall_candidate_id, length, angle))
+        signature_counts[signature] += 1
+
+    orthogonal_span = page_span * _REPEATED_MOTIF_ORTHOGONAL_SPAN_FRACTION
+    motif_ids: set[str] = set()
+    for wall_id, length, angle in lengths_angles:
+        if not _is_orthogonal_angle(angle):
+            continue
+        if length > orthogonal_span:
+            continue
+        if signature_counts[(round(length, 2), round(angle, 1))] < _REPEATED_MOTIF_ORTHOGONAL_REPEAT_MIN:
+            continue
+        motif_ids.add(wall_id)
+    return frozenset(motif_ids)
+
+
 def _segment_geometry(segment: Mapping[str, object]) -> Line:
     return (
         float(segment["x1"]),

@@ -4,9 +4,13 @@ on:
     branches: [main]
     paths:
       - pb_opening_host_frame_authority.py
+      - pb_physical_wall_candidate_authority.py
       - tests/test_gptmax_raster_split_frame_shadow.py
+      - tests/test_physical_wall_candidate_drafting_motif_filter.py
+      - tests/test_raster_connected_host_frame.py
       - tools/diag_gptmax_source_split_frame_shadow.py
       - docs/engineering/gptmax_split_centerline_frame_shadow_20261015.md
+      - docs/engineering/gptmax_aligned_fragment_motif_distinct_20261016.md
       - .github/workflows/test-gptmax-original-split-frame-shadow.yml
 permissions:
   contents: read
@@ -28,8 +32,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - run: |
-          PYTHONPATH=.:tests python -m pytest -q tests/test_gptmax_raster_split_frame_shadow.py tests/test_raster_connected_host_frame.py
-          ruff check --select F821,F823 pb_opening_host_frame_authority.py tests/test_gptmax_raster_split_frame_shadow.py tools/diag_gptmax_source_split_frame_shadow.py
+          PYTHONPATH=.:tests python -m pytest -q tests/test_gptmax_raster_split_frame_shadow.py tests/test_raster_connected_host_frame.py tests/test_physical_wall_candidate_drafting_motif_filter.py
+          ruff check --select F821,F823 pb_opening_host_frame_authority.py pb_physical_wall_candidate_authority.py tests/test_gptmax_raster_split_frame_shadow.py tests/test_physical_wall_candidate_drafting_motif_filter.py tools/diag_gptmax_source_split_frame_shadow.py
   original-sha-pinned-split-host-frame-replay:
     runs-on: ubuntu-latest
     timeout-minutes: 90

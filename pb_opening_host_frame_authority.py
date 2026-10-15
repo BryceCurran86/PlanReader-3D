@@ -40,6 +40,7 @@ from pb_physical_wall_candidate_authority import (
     PHYSICAL_WALL_CANDIDATE_SCOPE_RESOLVED,
     PhysicalWallCandidateAuthority,
     PhysicalWallCandidateSelector,
+    repeated_raster_drafting_motif_wall_ids,
 )
 from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
@@ -119,6 +120,35 @@ def _band_node(side_ids: tuple[str, ...], equivalence) -> _BandNode:
 
 def _node_member_ids(node: _BandNode) -> tuple[str, ...]:
     return tuple(sorted({wall_id for group in node for wall_id in group}))
+
+
+def _span_from_rect(width: float, height: float) -> float | None:
+    if not (math.isfinite(width) and math.isfinite(height)) or width <= 0.0 or height <= 0.0:
+        return None
+    short, long = min(width, height), max(width, height)
+    # A collinear-only wall census is 1-D. Using min() would collapse the
+    # motif span to stroke thickness and exclude every tick.
+    if short / long < 0.05:
+        return long
+    return short
+
+
+def _scope_page_span(wall_scope) -> float | None:
+    """Page span for the drafting-motif census, never a snap tolerance."""
+    bbox = wall_scope.viewport_bbox
+    if bbox is not None and len(bbox) == 4:
+        span = _span_from_rect(float(bbox[2]) - float(bbox[0]), float(bbox[3]) - float(bbox[1]))
+        if span is not None:
+            return span
+    xs: list[float] = []
+    ys: list[float] = []
+    for record in wall_scope.records:
+        for point in record.wall_candidate.centerline_pts or ():
+            xs.append(float(point[0]))
+            ys.append(float(point[1]))
+    if not xs or not ys:
+        return None
+    return _span_from_rect(max(xs) - min(xs), max(ys) - min(ys))
 
 
 def _pair_lookup(equivalence) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
@@ -871,6 +901,14 @@ class OpeningHostFrameProducer:
 
         pair_lookup = _pair_lookup(wall_scope.equivalence)
         component_set = set(component_ids)
+        motif_ids = frozenset()
+        if self._raster_split_frame_shadow and raster_component:
+            span = _scope_page_span(wall_scope)
+            if span is not None:
+                motif_ids = repeated_raster_drafting_motif_wall_ids(
+                    wall_scope.records,
+                    page_span=span,
+                )
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
             if wall_id in component_set:
@@ -902,8 +940,21 @@ class OpeningHostFrameProducer:
             # means whole-wall extent is not proven complete.
             for member_id in component_ids:
                 classification = pair_lookup.get(tuple(sorted((wall_id, member_id))))
-                if classification is not PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
-                    return fail("opening_host_frame_aligned_fragment_distinctness_unproven")
+                if classification is PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS:
+                    continue
+                # Opt-in shadow only. Raster-visible dimension ticks share no
+                # path_index, so they survive W2 as W4 walls. The existing
+                # drafting-motif census positively identifies a repeated
+                # orthogonal family; identity has already refused SAME-wall
+                # candidacy (no stored relation). A unique aligned fragment
+                # still fails closed.
+                if (
+                    wall_id in motif_ids
+                    and member_id not in motif_ids
+                    and classification is None
+                ):
+                    continue
+                return fail("opening_host_frame_aligned_fragment_distinctness_unproven")
 
         host_min_u = min(axis_values)
         host_max_u = max(axis_values)
