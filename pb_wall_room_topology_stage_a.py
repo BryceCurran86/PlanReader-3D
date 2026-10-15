@@ -677,6 +677,7 @@ def build_wall_graph_for_viewport(
     exact_split_parent_lineage_shadow: bool = False,
     preserve_overlapping_spans_shadow: bool = False,
     immutable_exact_endpoints_shadow: bool = False,
+    partition_exact_collinear_overlaps_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -697,6 +698,14 @@ def build_wall_graph_for_viewport(
     intervals and immutable exactly equal vertices. Both are off by default;
     neither supplies structural wall, host, measurement or quantity authority.
     """
+    if type(partition_exact_collinear_overlaps_shadow) is not bool:
+        raise ValueError("exact collinear partition shadow must be explicit boolean")
+    if partition_exact_collinear_overlaps_shadow and not (
+        exact_endpoint_index_shadow and exact_split_parent_lineage_shadow
+        and preserve_overlapping_spans_shadow and immutable_exact_endpoints_shadow
+        and gap_snap_tolerance_pt == 0
+    ):
+        raise ValueError("exact collinear partition shadow requires all exact source-incidence policies")
     if type(immutable_exact_endpoints_shadow) is not bool:
         raise ValueError("immutable exact endpoint shadow must be explicit boolean")
     if immutable_exact_endpoints_shadow and not (exact_endpoint_index_shadow and gap_snap_tolerance_pt == 0):
@@ -719,6 +728,9 @@ def build_wall_graph_for_viewport(
         split_pairs, source_segments=structural_segments,
         source_parent_indexes=parent_indexes,
     )
+    if partition_exact_collinear_overlaps_shadow:
+        from pb_wall_room_topology_collinear_partition_shadow import partition_exact_collinear_fragments
+        split_segment_dicts = partition_exact_collinear_fragments(split_segment_dicts)
     audit_short_source = os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1"
     snapped_graph = _snap_geometry_indexed(
         split_segment_dicts,
