@@ -231,7 +231,7 @@ def test_diagnostic_cli_refuses_to_replace_original_inputs_or_frozen_paths(
               customer_path.read_bytes())
     monkeypatch.setattr(
         consumer, "verify_original_scope_to_v1_customer",
-        lambda *args, **kwargs: {"status": "SOURCE_REPLAY_CONSISTENT_UNSIGNED_UNPUBLISHED"},
+        lambda *args, **kwargs: {"status": "SOURCE_REPLAY_CONSISTENT_UNSIGNED_UNPUBLISHED", "source_owned_quantity_count": 1},
     )
     base = [
         "--pdf", str(source_path), "--page-id", "1",
