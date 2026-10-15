@@ -15,6 +15,7 @@ from pb_physical_wall_candidate_authority import (
     _partition_opening_local_supplemental_segments,
     _filter_repeated_non_physical_drafting_primitives,
     _proven_filled_wall_strips, _filter_proven_wall_strip_geometry,
+    is_structural_candidate_segment,
     _authenticated_viewports_from_rows, _viewport_decision_scope_id,
     _viewport_sibling_set_fingerprint,
 )
@@ -214,6 +215,90 @@ def audit_exact_producer_f07_sibling_receipts(*, viewports, published,
     }
 
 
+def audit_original_incident_source_roles(*, graph_rows, original_owned_segments,
+                                         w2_graph_input_segments):
+    """Preserve ALL native source parents at W2-displaced W4 face endpoints.
+
+    Source classification is a candidate filter, never an independent
+    structural wall proof. Unknown source stays unavailable, not invented.
+    """
+    raw = {}
+    for seg in original_owned_segments:
+        key=str(seg.get("id") or "")
+        if key:
+            raw.setdefault(key, []).append(seg)
+    filtered = {}
+    for seg in w2_graph_input_segments:
+        key=str(seg.get("id") or "")
+        if key:
+            filtered.setdefault(key, []).append(seg)
+    hits={}
+    for case in graph_rows:
+        atom=case["source_negative_face_subedge_pdf_pts"]
+        for f in case["w2_surviving_fragments"]:
+            for endpoint in f["w2_graph_node_endpoints"]:
+                p=endpoint["w2_graph_snapped_node_pdf_pts"]
+                if not any(
+                    math.dist(p,[float(v) for v in vertex])<0.00001
+                    for vertex in atom
+                ):
+                    continue
+                node=endpoint["w2_graph_node_index"]
+                incidents=endpoint["all_original_source_incident_w2_edges_at_same_graph_node"]
+                rows=[]
+                for edge in incidents:
+                    for sid in edge["original_indexed_source_primitive_ids"]:
+                        rows.append((edge["source_w2_edge_id"],sid))
+                record=hits.setdefault(node,{
+                    "graph_node_index":node,
+                    "snapped_node_pdf_pts":list(p),
+                    "snap_input_sample_count":
+                        endpoint.get("w2_graph_node_snap_input_sample_count"),
+                    "original_indexed_source_candidate_roles":[],
+                    "structural_role_independently_proven":False,
+                    "no_source_node_repair_authorized":True,
+                })
+                if record["snapped_node_pdf_pts"]!=list(p):
+                    raise ValueError("displaced_source_node_identity_conflict")
+                for w2_edge, primitive_id in sorted(set(rows)):
+                    before=raw.get(primitive_id,[])
+                    after=filtered.get(primitive_id,[])
+                    if not before:
+                        raise ValueError("original_w2_graph_primitive_not_in_source_view")
+                    for segment in before:
+                        candidate,reasons=is_structural_candidate_segment(segment)
+                        geometry=[segment.get(k) for k in ("x1","y1","x2","y2")]
+                        item={
+                            "w2_split_edge_id":w2_edge,
+                            "source_native_primitive_id":primitive_id,
+                            "source_observation_id":segment.get("source_observation_id"),
+                            "original_source_line_pdf_pts":geometry,
+                            "original_source_kind":segment.get("kind"),
+                            "original_source_layer":segment.get("layer"),
+                            "original_source_path_index":segment.get("path_index"),
+                            "original_source_stroke":segment.get("stroke"),
+                            "original_source_stroke_width":segment.get("width"),
+                            "original_source_fill":segment.get("fill"),
+                            "retained_in_existing_w2_graph_input":
+                                any(x is segment or x==segment for x in after),
+                            "current_producer_structural_candidate_filter":bool(candidate),
+                            "candidate_filter_reasons":list(reasons),
+                            "physical_wall_role_source_proven":False,
+                        }
+                        if item not in record["original_indexed_source_candidate_roles"]:
+                            record["original_indexed_source_candidate_roles"].append(item)
+    for node in hits.values():
+        node["original_indexed_source_candidate_roles"].sort(
+            key=lambda x:(x["source_native_primitive_id"],x["w2_split_edge_id"]))
+    return {
+        "displaced_w2_original_source_node_role_cases": [
+            hits[k] for k in sorted(hits)
+        ],
+        "new_structural_wall_approved":False,
+        "new_physical_room_approved":False,
+    }
+
+
 def replay_graph_for_original_source_scope(*, source, published, pdf_bytes,
                                            original_wall_scope, source_page:int,
                                            first_failures):
@@ -276,8 +361,13 @@ def replay_graph_for_original_source_scope(*, source, published, pdf_bytes,
         first_failures=first_failures,
         graph=graph,junctions=junctions,assembled_walls=assembled,
     )
+    roles=audit_original_incident_source_roles(
+        graph_rows=proof["original_w2_node_junction_first_gate_rows"],
+        original_owned_segments=owned,w2_graph_input_segments=inputs,
+    )
     return {
         "status":"original_w2_w3_graph_lineage_replay_exact_parity",
+        "original_original_source_node_drawing_roles":roles,
         "original_owned_plan_source_segment_count":len(owned),
         "original_w2_graph_input_segment_count":len(inputs),
         "independently_replayed_f07_original_sibling_receipts":f07_receipt,
