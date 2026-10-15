@@ -258,6 +258,21 @@ def test_leftover_chord_is_removed_when_the_cycle_is_proved_earlier():
     assert leftover == ()
 
 
+def test_chorded_component_is_not_an_independent_cycle_block():
+    ring = _ring()
+    chord = _line(
+        "chord", ring[0]["x1"], ring[0]["y1"], ring[4]["x1"], ring[4]["y1"], path=9,
+    )
+    result = classify_exact_annotation_cycles(
+        ring + [chord], [_word()], page_span=PAGE_SPAN, viewport_bbox=VIEW,
+    )
+    assert result["quarantined_primitive_ids"] == []
+    assert any(
+        "cycle_not_an_independent_exact_block" in record["failed_gates"]
+        for record in result["cycles"]
+    )
+
+
 def _rect_edge(sid, x1, y1, x2, y2, *, path, stroke=None, width=0.0, fill=(1.0, 1.0, 1.0)):
     return {
         "id": sid, "kind": "rect_edge", "x1": x1, "y1": y1, "x2": x2, "y2": y2,

@@ -199,6 +199,89 @@ def _smooth_cycles(segments: Sequence[Mapping[str, Any]]) -> List[Tuple[List[str
     return cycles
 
 
+def _simple_cycle_edge_blocks(
+    segments: Sequence[Mapping[str, Any]],
+) -> set[frozenset[str]]:
+    """Return edge sets that are exact simple-cycle blocks.
+
+    A smallest-turn walk inside a larger connected mark is not its own block.
+    Only a block whose every vertex has degree two can later be quarantined.
+    Endpoint identity is the original float, with no snap and no rounding.
+    """
+    graph: Dict[Point, List[Tuple[Point, str]]] = defaultdict(list)
+    selected: Dict[str, Tuple[Point, Point]] = {}
+    for segment in segments:
+        sid = str(segment.get("id") or "")
+        if not sid:
+            continue
+        start = (float(segment["x1"]), float(segment["y1"]))
+        end = (float(segment["x2"]), float(segment["y2"]))
+        if start == end:
+            continue
+        selected[sid] = (start, end)
+        graph[start].append((end, sid))
+        graph[end].append((start, sid))
+    discovery: Dict[Point, int] = {}
+    low: Dict[Point, int] = {}
+    edge_stack: List[str] = []
+    blocks: List[List[str]] = []
+    clock = 0
+    ordered = {
+        vertex: sorted(neighbours, key=lambda item: (item[1], item[0]))
+        for vertex, neighbours in graph.items()
+    }
+    for root in sorted(ordered):
+        if root in discovery:
+            continue
+        clock += 1
+        discovery[root] = low[root] = clock
+        frames: List[Tuple[Point, Optional[str], int]] = [(root, None, 0)]
+        while frames:
+            vertex, parent_edge, cursor = frames[-1]
+            adjacent = ordered[vertex]
+            if cursor < len(adjacent):
+                neighbour, edge_id = adjacent[cursor]
+                frames[-1] = (vertex, parent_edge, cursor + 1)
+                if edge_id == parent_edge:
+                    continue
+                if neighbour not in discovery:
+                    edge_stack.append(edge_id)
+                    clock += 1
+                    discovery[neighbour] = low[neighbour] = clock
+                    frames.append((neighbour, edge_id, 0))
+                elif discovery[neighbour] < discovery[vertex]:
+                    edge_stack.append(edge_id)
+                    low[vertex] = min(low[vertex], discovery[neighbour])
+                continue
+            frames.pop()
+            if not frames:
+                continue
+            parent_vertex = frames[-1][0]
+            low[parent_vertex] = min(low[parent_vertex], low[vertex])
+            if low[vertex] >= discovery[parent_vertex] and parent_edge is not None:
+                block: List[str] = []
+                while edge_stack:
+                    member = edge_stack.pop()
+                    block.append(member)
+                    if member == parent_edge:
+                        break
+                blocks.append(block)
+    simple: set[frozenset[str]] = set()
+    for members in blocks:
+        degrees: Dict[Point, int] = defaultdict(int)
+        for member in members:
+            start, end = selected[member]
+            degrees[start] += 1
+            degrees[end] += 1
+        if (
+            len(members) >= 3
+            and len(degrees) == len(members)
+            and all(degree == 2 for degree in degrees.values())
+        ):
+            simple.add(frozenset(members))
+    return simple
+
+
 def _cycle_record(
     ids: Sequence[str],
     polygon: Sequence[Point],
@@ -209,6 +292,7 @@ def _cycle_record(
     words: Sequence[Mapping[str, Any]],
     outside: Any,
     viewport_bbox: Optional[Sequence[float]],
+    independent_block: bool,
 ) -> Dict[str, Any]:
     members = [by_id[sid] for sid in ids]
     ring = list(polygon)
@@ -240,6 +324,8 @@ def _cycle_record(
         reasons.append("path_ancestry_not_singleton")
     if not solid or not unfilled:
         reasons.append("stroke_or_fill_not_a_bare_solid_mark")
+    if not independent_block:
+        reasons.append("cycle_not_an_independent_exact_block")
     contained = []
     extensions: list[str] = []
     owned = False
@@ -406,6 +492,7 @@ def classify_exact_annotation_cycles(
     nearby = _nearby_segments(list(by_id.values()))
     for family_segments in families.values():
         seen_cycles: set[frozenset[str]] = set()
+        simple_blocks = _simple_cycle_edge_blocks(family_segments)
         for ids, vertices in _smooth_cycles(family_segments):
             identity = frozenset(ids)
             if identity in seen_cycles:
@@ -415,6 +502,7 @@ def classify_exact_annotation_cycles(
             record = _cycle_record(
                 ordered, vertices, by_id, page_span=float(page_span), path_counts=path_counts,
                 words=words, outside=nearby, viewport_bbox=viewport_bbox,
+                independent_block=identity in simple_blocks,
             )
             record["primitive_ids"] = sorted(record["primitive_ids"])
             records.append(record)

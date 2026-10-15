@@ -76,26 +76,14 @@ def _report(page_number: int, page) -> None:
     if page_number != 11:
         return
     print("MARK_QUARANTINED", MARK in withheld, flush=True)
-    mark_cycle = next(
-        row for row in classified["cycles"]
-        if MARK in row["primitive_ids"] and row["status"] == "source_proven_annotation_cycle"
-    )
-    local_ids = set(mark_cycle["primitive_ids"]) | set(GREY)
-    local = [segment for segment in structural if str(segment.get("id")) in local_ids]
-    kept = [segment for segment in local if str(segment.get("id")) not in withheld]
-    for label, rows in (("baseline", local), ("withheld", kept)):
-        graph = build_wall_graph_for_viewport(rows)
-        distance, node = _node_near(graph, CROSSING)
+    mark_rows = [row for row in classified["cycles"] if MARK in row["primitive_ids"]]
+    for row in mark_rows:
         print(
-            label,
-            "segments", len(rows),
-            "x", round(node["x"], 9),
-            "y", round(node["y"], 9),
-            "samples", node["samples"],
-            "degree", len(graph["adjacency"][node["id"]]),
-            "distance_to_grey_crossing", round(distance, 9),
-            flush=True,
+            "MARK_CYCLE", row["status"], "edges", len(row["primitive_ids"]),
+            "failed", row["failed_gates"], flush=True,
         )
+    if MARK not in withheld:
+        print("MARK_RETAINED_IN_WALL_INPUT", flush=True)
     page_baseline = build_wall_graph_for_viewport(filtered)
     distance, node = _node_near(page_baseline, CROSSING)
     print(
@@ -160,7 +148,7 @@ def main() -> None:
         raise SystemExit("sha mismatch")
     pdf = fitz.open(stream=data, filetype="pdf")
     try:
-        for number in (11,):
+        for number in (7, 11):
             _report(number, pdf.load_page(number - 1))
     finally:
         pdf.close()
