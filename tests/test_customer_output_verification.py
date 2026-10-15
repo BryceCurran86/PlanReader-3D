@@ -542,3 +542,29 @@ def test_customer_source_lineage_cannot_hide_noncanonical_extra_id(
     modified["notes"] = json.dumps(provenance)
     with pytest.raises(CustomerOutputVerificationError, match="array of canonical strings"):
         verify_sealed_customer_output(sealed, [modified, rows[1]])
+
+
+@pytest.mark.parametrize("invalid_literal", ["NaN", "Infinity", "-Infinity", "1e10000"])
+def test_persisted_signed_customer_notes_reject_nonfinite_metadata(invalid_literal: str) -> None:
+    sealed, rows = sealed_and_rows()
+    persisted = [dict(row) for row in rows]
+    persisted[0].pop("commercial_projection_provenance", None)
+    # Notes are separately decoded after outer customer row JSON is parsed.
+    notes = persisted[0]["notes"]
+    assert notes.endswith("}")
+    persisted[0]["notes"] = notes[:-1] + ',"unexpected_metadata":' + invalid_literal + "}"
+    with pytest.raises(CustomerOutputVerificationError):
+        verify_sealed_customer_output(sealed, persisted)
+
+
+def test_persisted_signed_customer_notes_only_still_verify() -> None:
+    sealed, rows = sealed_and_rows()
+    persisted = [
+        {key: value for key, value in row.items() if key not in (
+            "commercial_projection_provenance", "quantity_id",
+        )}
+        for row in rows
+    ]
+    assert verify_sealed_customer_output(sealed, persisted).verified_quantity_ids == (
+        "qty-1", "qty-2",
+    )
