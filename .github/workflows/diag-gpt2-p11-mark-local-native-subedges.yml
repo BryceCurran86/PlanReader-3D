@@ -82,6 +82,13 @@ jobs:
               bool(row['original_excluded_primitive_subedge_contact_ids'])
               for row in rows
           ))
+          print('GPT2_TYPED_GRID_NEGATIVE_SUBEDGES',sum(
+              row['producer_full_wall_grid_opposition'] for row in rows
+          ))
+          print('GPT2_FULLY_GRID_OPPOSED_MARK_FACES',sum(
+              row['all_enclosing_w4_walls_typed_grid_opposed']
+              for row in s['mark_local_subedges']
+          ))
           print('GPT2_W2_DROPOUTS',sum(
               bool(row['original_native_source_ids_covering_subedge'])
               and not row['surviving_w2_full_edge_source_primitive_ids']
