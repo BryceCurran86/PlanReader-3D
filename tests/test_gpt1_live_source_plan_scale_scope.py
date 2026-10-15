@@ -111,3 +111,62 @@ def test_existing_source_pdf_hash_tampering_cannot_be_translated_to_scope():
     with pytest.raises(RuntimeError, match="producer_integrity_failure|immutable_bytes_unavailable|source_plan"):
         unique_plan(source=source,scope_rooms=(_room(data,pub),),
                     page_id="1",snapshot_id=pub.snapshot.snapshot_id)
+
+
+def test_same_root_plan_scope_is_input_order_invariant_deterministic_and_nonmutating():
+    data = _sheet()
+    source, published = _source(data)
+    rooms = (
+        _room(data, published),
+        _room(
+            data, published,
+            polygon_pdf_pts=((190., 190.), (210., 190.), (210., 210.), (190., 210.)),
+        ),
+    )
+    source_before = source.published_snapshot_for_revision(published.revision.revision_id)
+    expected = unique_plan(
+        source=source, scope_rooms=rooms, page_id="1",
+        snapshot_id=published.snapshot.snapshot_id,
+    )
+    assert expected is not None
+    for order in (rooms, tuple(reversed(rooms)), rooms):
+        assert unique_plan(
+            source=source, scope_rooms=order, page_id="1",
+            snapshot_id=published.snapshot.snapshot_id,
+        ) == expected
+        assert source.published_snapshot_for_revision(
+            published.revision.revision_id
+        ) == source_before
+
+
+def test_existing_unowned_legacy_w4_selector_does_not_borrow_f07_fallback(monkeypatch):
+    # An authenticated old W4 selector that does not own this room must
+    # block fallback; absence and source disagreement are different claims.
+    from pb_live_physical_net_wall_integration import PhysicalWallCandidateProducer
+
+    class LegacyAuthority:
+        def selectors_for_authenticated_viewports(self, **_kwargs):
+            return (object(),)
+
+        def resolve_scope(self, _selector):
+            return SimpleNamespace(
+                status=EvidenceResolutionStatus.ABSTAINED,
+                viewport_id="old-unowned-plan",
+                viewport_bbox=None,
+            )
+
+    class LegacyProducer:
+        def authority(self):
+            return LegacyAuthority()
+
+    monkeypatch.setattr(
+        PhysicalWallCandidateProducer, "from_authenticated_viewports",
+        staticmethod(lambda *_args, **_kwargs: LegacyProducer()),
+    )
+    data = _sheet()
+    source, published = _source(data)
+    room = _room(data, published)
+    assert unique_plan(
+        source=source, scope_rooms=(room,), page_id="1",
+        snapshot_id=published.snapshot.snapshot_id,
+    ) is None
