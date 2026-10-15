@@ -66,6 +66,121 @@ def _nearest_native_frames_to_title(title_bbox, frames, *, limit=4):
         row["frame_bbox_native_pdf_pts"],
     ))[:limit]
 
+
+def _frame_source_receipts(page, frame, calibration):
+    """Keep *all* indexed native candidate owners for a detected frame.
+
+    This uses the extractor's existing deduplication tolerance to associate
+    source-native shapes for audit; proximity is NOT identity/role authority.
+    """
+    import math
+    from pb_viewport_segmentation import (
+        _closed_four_line_rect, _axis_aligned_quad_bbox,
+    )
+    tol = max(calibration.median_word_height_pt * 0.15, 0.75)
+    dedup_eps = max(calibration.median_word_height_pt * 0.1, 0.25)
+    result = []
+    try:
+        drawings = page.get_drawings() or ()
+    except (AttributeError, RuntimeError, ValueError):
+        return []
+    for path_id, drawing in enumerate(drawings):
+        items = drawing.get("items", ()) or ()
+        candidates = []
+        closed = _closed_four_line_rect(items, tol=tol)
+        if closed is not None:
+            candidates.append((closed, tuple(f"d{path_id}i{i}" for i in range(4)), "four_line_closed"))
+        for item_id, item in enumerate(items):
+            if not item or len(item) < 2:
+                continue
+            bbox = None
+            if item[0] == "re":
+                rect = item[1]
+                bbox = (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+            elif item[0] == "qu":
+                bbox = _axis_aligned_quad_bbox(item[1], tol=tol)
+            if bbox is not None:
+                candidates.append((bbox, (f"d{path_id}i{item_id}",), str(item[0])))
+        for candidate_bbox, source_ids, kind in candidates:
+            try:
+                box = tuple(float(v) for v in candidate_bbox)
+                if (len(box) != 4 or not all(math.isfinite(v) for v in box)
+                    or box[2] <= box[0] or box[3] <= box[1]):
+                    continue
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if all(abs(box[i] - frame[i]) <= dedup_eps for i in range(4)):
+                result.append({
+                    "native_source_ids": list(source_ids),
+                    "source_primitive_kind": kind,
+                    "raw_native_bbox_pdf_pts": list(box),
+                    "candidate_source_match_not_authority": True,
+                })
+    return sorted(result, key=lambda row: (
+        tuple(row["native_source_ids"]), row["source_primitive_kind"],
+        tuple(row["raw_native_bbox_pdf_pts"]),
+    ))
+
+
+def _frame_ownership_matrix(page, frames, anchors, calibration):
+    """Expose native/display geometry, all title rivals and typed negatives."""
+    from pb_viewport_segmentation import (
+        _to_visual_bbox, _rejected_ownership_frame, _text_fragments,
+    )
+    fragments = _text_fragments(page)
+    by_title = []
+    all_candidates = []
+    for idx, anchor in enumerate(anchors):
+        candidates = _frame_candidates_for_title(
+            page, anchor, frames, calibration, anchors=anchors,
+        )
+        all_candidates.append(set(candidates))
+        by_title.append({
+            "source_anchor_ordinal": idx,
+            "reported_view_id": f"view_p9_{idx+1}",
+            "native_title": str(anchor.text),
+            "native_title_bbox_pdf_pts": list(anchor.bbox),
+            "display_title_bbox_pdf_pts": list(_to_visual_bbox(page, anchor.bbox)),
+            "native_direction": list(anchor.direction),
+            "view_type": str(anchor.view_type),
+            "geometric_frame_candidate_count": len(candidates),
+            "no_source_role_or_viewport_granted": True,
+        })
+    frame_rows = []
+    for idx, frame in enumerate(frames):
+        rivals = []
+        for owner_idx, anchor in enumerate(anchors):
+            if frame in all_candidates[owner_idx]:
+                rivals.append({
+                    "source_anchor_ordinal": owner_idx,
+                    "view_id": f"view_p9_{owner_idx+1}",
+                    "native_title": str(anchor.text),
+                    "view_type": str(anchor.view_type),
+                    "production_frame_rejected_for_this_view_type": bool(
+                        _rejected_ownership_frame(
+                            page, frame, calibration, fragments,
+                            view_type=anchor.view_type,
+                        )
+                    ),
+                })
+        frame_rows.append({
+            "source_frame_ordinal": idx,
+            "native_frame_bbox_pdf_pts": list(frame),
+            "display_frame_bbox_pdf_pts": list(_to_visual_bbox(page, frame)),
+            "candidate_native_source_receipts": _frame_source_receipts(
+                page, frame, calibration,
+            ),
+            "candidate_title_rivals": rivals,
+            "no_source_role_or_viewport_granted": True,
+        })
+    return {
+        "source_titles": by_title,
+        "source_frames": frame_rows,
+        "diagnostic_only": True,
+        "frame_candidate_matrix_grants_authority": False,
+    }
+
+
 PDF=Path("documents/sources/Arch_Combined_Maryborough_Service_Station.pdf")
 SOURCE_SHA="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"
 
@@ -83,6 +198,9 @@ def audit(source: bytes) -> dict:
         calibration=calibrate_viewport_layout(page)
         title_anchors=extract_view_title_anchors(page)
         source_frames=extract_vector_frames(page,calibration)
+        source_frame_ownership_matrix=_frame_ownership_matrix(
+            page,source_frames,title_anchors,calibration,
+        )
         title_frame_candidates={}
         for index,anchor in enumerate(title_anchors):
             view_id=f"view_p9_{index+1}"
@@ -148,6 +266,7 @@ def audit(source: bytes) -> dict:
             "source_sha256":sha, "source_page_number":9,
             "source_page_rotation_degrees":int(page.rotation),
             "native_frame_count":len(source_frames),
+            "original_native_frame_ownership_matrix":source_frame_ownership_matrix,
             "title_frame_candidates":title_frame_candidates,
             "non_overlapping_source_viewports":bool(nonoverlap),
             "rcp_rows":rcps,"all_viewports":rows,
