@@ -69,6 +69,15 @@ jobs:
           f07=stage['independently_replayed_f07_original_sibling_receipts']
           assert f07['independent_f07_scope_id_replay_matches_original_w4']
           assert f07['first_w4_scope_id']==s['decision_scope_id']
+          roles=stage['original_original_source_node_drawing_roles']
+          assert roles['new_structural_wall_approved'] is False
+          assert roles['new_physical_room_approved'] is False
+          assert roles['displaced_w2_original_source_node_role_cases']
+          assert all(not row['structural_role_independently_proven']
+                     and row['no_source_node_repair_authorized']
+                     for row in roles['displaced_w2_original_source_node_role_cases'])
+          print('GPT2_DISPLACED_NODE_SOURCE_PRIMITIVE_ROLES',
+                json.dumps(roles,sort_keys=True))
           assert f07['all_original_source_stamped_sibling_count']==3
           assert len(f07['all_siblings_source_fingerprint'])==64
           assert len(f07['all_original_source_f07_siblings'])==3
