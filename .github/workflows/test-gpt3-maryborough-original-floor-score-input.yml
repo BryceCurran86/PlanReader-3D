@@ -92,6 +92,11 @@ jobs:
           ))
           rows=json.loads((prod/"verified_customer_rows.json").read_text())
           verified=verify_sealed_customer_output(sealed, rows)
+          # Preserve the complete historical signed evidence receipt, not just
+          # three unchanged numbers or quantity identities.
+          assert sealed.fingerprint=="9f3ab9ac1497cae5c29f8873af9287a5d6e3b3a386937fdeb37f8b5989fd780d", (
+              "original Maryborough V1 sealed receipt changed", sealed.fingerprint
+          )
           receipt=json.loads((prod/"source_score_readiness_UNPUBLISHED.json").read_text())
           stage=json.loads((prod/"source_stage_diagnostic.json").read_text())
           expected_sha="b1be53531412005f42937c89d0cfce66fbbe608315016bbb56731029ffc9e007"

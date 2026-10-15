@@ -31,6 +31,8 @@ from typing import Mapping, Optional, Sequence
 import fitz
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_migration_provider_envelope import ProviderContext
+from pb_viewport_migration_adapter import adapt_f07_viewport_to_migration
 from pb_pdf_text_integrity_authority import (
     PDF_TEXT_GEOMETRY_TOLERANCE_PT,
     PDF_TEXT_MAJORITY_OVERLAP_RATIO,
@@ -75,6 +77,7 @@ from pb_viewport_segmentation import (
     is_segment_page_viewports_product,
     segmented_viewport_producer_fingerprint,
     segment_page_viewports,
+    segment_source_page_viewports,
     validate_non_overlapping_viewports,
 )
 from pb_wall_room_topology_contracts import JunctionType, WallCandidate
@@ -3457,6 +3460,7 @@ def _build_authenticated_viewport_scope_results(
     resolved_text_receipts: Optional[Sequence[object]] = None,
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
+    physical_plan_view_shadow: bool = False,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -3482,30 +3486,80 @@ def _build_authenticated_viewport_scope_results(
         )
     except WallPageFrameUnresolved:
         return ()
-    viewport_cache_key = _page_viewports_cache_key(
-        published=published,
-        page_id=page_id,
-    )
-    viewport_cache = source_producer._physical_wall_page_viewports_cache
-    if viewport_cache_key in viewport_cache:
-        page_viewports = viewport_cache[viewport_cache_key]
+    if physical_plan_view_shadow:
+        # Opt-in only: source-owned F.07 viewports are generated from actual
+        # immutable producer bytes. Never accept caller-supplied geometry,
+        # role or a pre-authenticated viewport object.
+        page_viewports = tuple(segment_source_page_viewports(
+            source_producer,
+            revision_id=published.revision.revision_id,
+            page_id=page_id,
+            physical_plan_view_shadow=True,
+        ))
     else:
-        pdf = fitz.open(stream=source_bytes, filetype="pdf")
-        try:
-            page = pdf.load_page(page_number - 1)
-            page_viewports = _all_viewports(page, page_number=page_number)
-        finally:
-            pdf.close()
-        viewport_cache[viewport_cache_key] = (
-            None
-            if page_viewports is None
-            else tuple(page_viewports)
+        viewport_cache_key = _page_viewports_cache_key(
+            published=published,
+            page_id=page_id,
         )
+        viewport_cache = source_producer._physical_wall_page_viewports_cache
+        if viewport_cache_key in viewport_cache:
+            page_viewports = viewport_cache[viewport_cache_key]
+        else:
+            pdf = fitz.open(stream=source_bytes, filetype="pdf")
+            try:
+                page = pdf.load_page(page_number - 1)
+                page_viewports = _all_viewports(page, page_number=page_number)
+            finally:
+                pdf.close()
+            viewport_cache[viewport_cache_key] = (
+                None
+                if page_viewports is None
+                else tuple(page_viewports)
+            )
 
     authenticated = _authenticated_viewports_from_rows(page_viewports)
     if authenticated is None:
         return ()
     all_viewports, eligible = authenticated
+    if physical_plan_view_shadow:
+        ids = tuple(view.view_id for view in all_viewports)
+        context = ProviderContext(
+            document_id=published.revision.document_id,
+            revision_id=published.revision.revision_id,
+            source_sha256=published.revision.source_sha256,
+            run_id="source-owned-wall-plan-shadow",
+            workspace_id="source-owned-wall-plan-shadow",
+            project_id="source-only",
+            current_revision_id=published.revision.revision_id,
+            selected_pages=(page_number - 1,),
+            owned_viewport_ids=ids,
+            owned_page_numbers=(page_number,),
+            viewport_page_ownership=tuple((view_id, page_number) for view_id in ids),
+            evidence_snapshot_id=published.snapshot.snapshot_id,
+        )
+        proved = []
+        for viewport in eligible:
+            if (
+                viewport.view_type not in (
+                    DrawingViewType.FLOOR_PLAN.value,
+                    DrawingViewType.FLOOR_FINISH_PLAN.value,
+                )
+                or (getattr(viewport, "provenance", None) or {}).get(
+                    "source_owned_plan_view_proven"
+                ) is not True
+            ):
+                continue
+            adapted = adapt_f07_viewport_to_migration(
+                all_viewports, viewport_id=viewport.view_id,
+                context=context, page_no=page_number,
+            )
+            if (
+                adapted.abstained or adapted.blocking_reasons
+                or adapted.ownership_proof is None
+            ):
+                continue
+            proved.append(viewport)
+        eligible = tuple(proved)
     if not eligible:
         return ()
     sibling_fingerprint = _viewport_sibling_set_fingerprint(all_viewports)
@@ -3666,6 +3720,39 @@ class PhysicalWallCandidateProducer:
         )
 
     @classmethod
+    def from_source_owned_plan_view_shadow(
+        cls,
+        source_visibility_producer,
+        *,
+        page_ids: Sequence[str],
+    ):
+        """Build only F.07-owned physical plan W2/W3/W4 shadow scopes.
+
+        This never changes the ordinary page-wide or authenticated-viewport
+        producer behavior. A bounded plan is not room, scale, structural
+        wall or takeoff authority; only the existing source W4 output is
+        retained for downstream physical-room proof.
+        """
+        if (
+            not isinstance(page_ids, (tuple, list))
+            or not page_ids
+            or any(
+                type(p) is not str or not p.isdecimal()
+                or str(int(p)) != p or int(p) < 1
+                for p in page_ids
+            )
+        ):
+            raise ValueError("page_ids require canonical positive original page IDs")
+        return cls._from_source_visibility_producer(
+            source_visibility_producer,
+            page_ids=tuple(sorted(set(page_ids), key=int)),
+            include_authenticated_viewports=True,
+            include_page_scopes=False,
+            supplemental_only=False,
+            physical_plan_view_shadow=True,
+        )
+
+    @classmethod
     def from_authenticated_viewports(
         cls,
         source_visibility_producer,
@@ -3715,6 +3802,7 @@ class PhysicalWallCandidateProducer:
         include_authenticated_viewports: bool,
         include_page_scopes: bool,
         supplemental_only: bool,
+        physical_plan_view_shadow: bool = False,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -3758,19 +3846,28 @@ class PhysicalWallCandidateProducer:
                 and not selected_page_ids <= decoded_page_ids
             ):
                 raise ValueError(PHYSICAL_WALL_CANDIDATE_SCOPE_UNAVAILABLE)
-            source_visibility_producer.augment_with_raster_visible_segments(
-                revision_id,
-                page_ids=(
-                    tuple(
-                        sorted(
-                            selected_page_ids,
-                            key=lambda value: int(value),
+            if not physical_plan_view_shadow:
+                # The ordinary production W4 source path retains its
+                # existing producer-owned raster augmentation unchanged.
+                source_visibility_producer.augment_with_raster_visible_segments(
+                    revision_id,
+                    page_ids=(
+                        tuple(
+                            sorted(
+                                selected_page_ids,
+                                key=lambda value: int(value),
+                            )
                         )
-                    )
-                    if selected_page_ids is not None
-                    else None
-                ),
-            )
+                        if selected_page_ids is not None
+                        else None
+                    ),
+                )
+            # The opt-in F.07 plan shadow must not silently replace the
+            # source snapshot before its independently source-attested
+            # title/room/dimension receipts are verified. If raster source
+            # evidence is necessary, only an explicitly already prepared
+            # source snapshot may supply it; missing evidence abstains.
+
 
         published_by_revision = dict(source_visibility_producer._published_by_revision)
         store = source_visibility_producer._producer._store
@@ -3852,6 +3949,7 @@ class PhysicalWallCandidateProducer:
                         resolved_text_receipts=text_receipts_by_page.get(page_id, ()),
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
+                        physical_plan_view_shadow=physical_plan_view_shadow,
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,
