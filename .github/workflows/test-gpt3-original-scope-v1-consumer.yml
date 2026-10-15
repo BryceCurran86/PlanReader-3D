@@ -1,0 +1,98 @@
+name: GPT3 Original Scope to V1 Customer
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "tools/diag_gpt3_original_scope_v1_consumer.py"
+      - "tools/diag_gptmax_producer_opening_scope_receipts.py"
+      - "tests/test_gpt3_original_scope_v1_consumer.py"
+      - "pb_*.py"
+      - ".github/workflows/test-gpt3-original-scope-v1-consumer.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gpt3-source-v1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Original-source V1 positive/negative regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_gpt3_original_scope_v1_consumer.py tests/test_gptmax_producer_opening_scope_receipts.py
+          ruff check --select F821,F823 tools/diag_gpt3_original_scope_v1_consumer.py tests/test_gpt3_original_scope_v1_consumer.py
+          python scripts/check_full_plan_v2_integrity.py
+          python scripts/check_provider_gold_isolation.py
+
+  original-lot16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Exact original Lot16 verified V1 customer source replay
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          ROOT="artifacts/gpt3-original-scope-v1"
+          PDF="documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
+          SHA="10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844"
+          mkdir -p "$ROOT"
+          git rev-parse HEAD > "$ROOT/exact_head_sha.txt"
+          printf '%s  %s\n' "$SHA" "$PDF" | sha256sum --check
+          python -u -m tools.run_gpt3_lot16_original_sealed_score_input --pdf "$PDF" --output-dir "$ROOT/production"
+          sha256sum "$ROOT/production/source_sealed_run.json" "$ROOT/production/verified_customer_rows.json" > "$ROOT/before_sha256.txt"
+          python -u -m tools.diag_gpt3_original_scope_v1_consumer \
+            --pdf "$PDF" --page-id 3 --decoded-page-id 3 \
+            --sealed-run "$ROOT/production/source_sealed_run.json" \
+            --customer-rows "$ROOT/production/verified_customer_rows.json" \
+            --expected-source-sha256 "$SHA" \
+            --expected-snapshot-id "source_snapshot_3fcb6bc5c44b51d930e9600080501d27" \
+            --project-id au_qld_lot16_power \
+            --output "$ROOT/scope_v1_UNPUBLISHED.json"
+          sha256sum --check "$ROOT/before_sha256.txt"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("artifacts/gpt3-original-scope-v1")
+          receipt=json.loads((root/"scope_v1_UNPUBLISHED.json").read_text())
+          sealed=json.loads((root/"production/source_sealed_run.json").read_text())
+          customer=json.loads((root/"production/verified_customer_rows.json").read_text())
+          assert receipt["status"]=="SOURCE_REPLAY_CONSISTENT_UNSIGNED_UNPUBLISHED"
+          assert receipt["signed_scope_verified"] is False
+          assert receipt["customer_scope_signature_issued"] is False
+          assert receipt["benchmark_score_granted"] is False
+          assert receipt["source_owned_quantity_count"]==len(customer)==len(sealed["quantities"])==8
+          assert receipt["v1_sealed_run_fingerprint"]==sealed["fingerprint"]
+          assert len({r["host_binding_record_id"] for r in receipt["associations"]})==8
+          assert len({r["measurement_record_id"] for r in receipt["associations"]})==8
+          assert receipt["snapshot_id"]=="source_snapshot_3fcb6bc5c44b51d930e9600080501d27"
+          print("ORIGINAL EIGHT RETAINED; V1 JOIN ONLY; UNSIGNED AND UNPUBLISHED")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpt3-original-v1-scope-consumer
+          path: artifacts/gpt3-original-scope-v1
+          retention-days: 30
