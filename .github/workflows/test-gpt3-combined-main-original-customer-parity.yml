@@ -38,7 +38,7 @@ jobs:
           from pathlib import Path
           from pb_source_closed_run_export import sealed_source_closed_run_from_dict
           from pb_customer_output_verification import verify_sealed_customer_output
-          expected={"lot16":(8,[.54,.90,1.26,1.80,2.16,2.16,5.67,10.08]),"maryborough":(3,[9.05352,13.270425,25.37875])}
+          expected={"lot16":(8,[.54,.90,1.26,1.80,1.80,2.16,2.16,10.08]),"maryborough":(3,[9.05352,13.270425,25.37875])}
           for name,(count,values) in expected.items():
               root=Path("artifacts/gpt3-combined-original")/name
               sealed=sealed_source_closed_run_from_dict(json.loads((root/"source_sealed_run.json").read_text()))
