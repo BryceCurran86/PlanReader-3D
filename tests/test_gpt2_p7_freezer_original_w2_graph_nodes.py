@@ -194,3 +194,81 @@ def test_source_native_single_coordinate_cluster_does_not_claim_problem():
     assert node["source_native_retained_endpoint_diameter_pdf_pt"] == 0.
     assert not node["diameter_exceeds_nominal_tolerance_diagnostic_only"]
     assert not result["room_or_metric_published"]
+
+
+
+def _original_stage_a_source(x1, y1, x2, y2, identity):
+    return {
+        "id": identity, "x1": float(x1), "y1": float(y1),
+        "x2": float(x2), "y2": float(y2), "kind": "line",
+        "width": .48, "stroke": (0.,0.,0.), "layer": "",
+        "dashes": "",
+    }
+
+
+def test_original_all_split_snap_samples_include_collapsed_edges():
+    from pb_wall_room_topology_stage_a import (
+        _segments_to_point_pairs, split_segments_at_intersections,
+        _point_pairs_to_segment_dicts, _snap_geometry_indexed,
+    )
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        inspect_all_original_snap_inputs_for_selected_nodes,
+    )
+    source = [_original_stage_a_source(0., 0., 1., 0., "original_short")]
+    split = _point_pairs_to_segment_dicts(
+        split_segments_at_intersections(_segments_to_point_pairs(source)),
+        source_segments=source,
+    )
+    snapped = _snap_geometry_indexed(
+        split, include_endpoint_assignments=True
+    )
+    assert not snapped["edges"], "short snap-collapsed original source has zero edges"
+    assert snapped["nodes"][0]["samples"] == 2
+    result = inspect_all_original_snap_inputs_for_selected_nodes(
+        graph=snapped, scoped_inputs=source, selected_node_ids=(0,)
+    )
+    row = result["selected_original_node_rows"][0]
+    assert row["original_producer_snap_sample_count"] == 2
+    assert len(row["all_original_split_endpoint_receipts"]) == 2
+    assert all("original_short" in record["original_source_primitive_ids"]
+               for record in row["all_original_split_endpoint_receipts"])
+    assert row["all_input_samples_independently_recovered"]
+    assert not result["new_firm_or_physical_room"]
+
+
+def test_original_all_split_snap_assignments_parity_and_no_mutation():
+    from pb_wall_room_topology_stage_a import (
+        build_wall_graph_for_viewport,
+    )
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        inspect_all_original_snap_inputs_for_selected_nodes as inspect,
+    )
+    inputs = [
+        _original_stage_a_source(0.,0.,10.,0.,"parent_A"),
+        _original_stage_a_source(0.,1.,10.,1.,"parent_B"),
+    ]
+    before = repr(inputs)
+    graph = build_wall_graph_for_viewport(inputs)
+    result = inspect(
+        graph=graph,scoped_inputs=inputs,selected_node_ids=(0,)
+    )
+    assert result["status"] == "ORIGINAL_W2_ALL_SPLIT_ENDPOINT_INPUTS_REPLAY_VERIFIED"
+    assert result["selected_original_node_rows"][0]["all_input_samples_independently_recovered"]
+    assert repr(inputs)==before
+    graph["nodes"][0]["x"] += .01
+    with pytest.raises(ValueError,match="original_snap_node_centroid_or_sample_drift"):
+        inspect(graph=graph,scoped_inputs=inputs,selected_node_ids=(0,))
+
+
+def test_original_all_split_input_rejects_foreign_selected_nodes_and_sample_drift():
+    from pb_wall_room_topology_stage_a import build_wall_graph_for_viewport
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        inspect_all_original_snap_inputs_for_selected_nodes as inspect,
+    )
+    inputs = [_original_stage_a_source(0.,0.,10.,0.,"parent_A")]
+    graph = build_wall_graph_for_viewport(inputs)
+    with pytest.raises(ValueError,match="original_selected_snap_node_unavailable"):
+        inspect(graph=graph,scoped_inputs=inputs,selected_node_ids=(999,))
+    graph["nodes"][0]["samples"] += 1
+    with pytest.raises(ValueError,match="original_snap_node_centroid_or_sample_drift"):
+        inspect(graph=graph,scoped_inputs=inputs,selected_node_ids=(0,))
