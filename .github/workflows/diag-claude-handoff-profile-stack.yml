@@ -69,7 +69,7 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p artifacts
-          sudo -E env "PATH=$PATH" py-spy record --rate 40 --format raw --subprocesses --nonblocking -o artifacts/profile.raw -- \
+          sudo env "PATH=$PATH" PYTHONPATH=. ORT_DISABLE_TELEMETRY=1 PB_CYCLIC_GC_MODE=staged py-spy record --rate 40 --format raw --subprocesses --nonblocking -o artifacts/profile.raw -- \
             timeout -s INT 3400s python -u tools/run_source_closed_project_handoff.py \
               --pdf "$PDF" --project-id "$PROJECT_ID" --family-group all --output-dir artifacts/out \
               > artifacts/stdout.txt 2> artifacts/stderr.txt
