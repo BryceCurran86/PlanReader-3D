@@ -389,6 +389,26 @@ jobs:
                           for j in end["replayed_original_w3_junction_candidates"])
                       assert end["retained_native_coordinate_cluster_count"] >= 1
           assert freezer_graph_firstgate["new_commercial_quantities"]==[]
+          snap_inputs=freezer_graph_firstgate["original_all_split_input_snap_provenance"]
+          assert snap_inputs["status"]=="ORIGINAL_W2_ALL_SPLIT_ENDPOINT_INPUTS_REPLAY_VERIFIED"
+          assert not snap_inputs["new_firm_or_physical_room"]
+          assert all(
+              sum(group["original_split_input_sample_count"]
+                  for group in node["original_split_input_coordinate_groups"])
+                == node["original_producer_snap_sample_count"]
+              == len(node["all_original_split_endpoint_receipts"])
+              for node in snap_inputs["selected_original_node_rows"]
+          )
+          assert any(node["original_producer_snap_sample_count"]==20
+              for node in snap_inputs["selected_original_node_rows"])
+          print("GPT2_FREEZER_ALL_20_ORIGINAL_SNAP_INPUTS",json.dumps([
+              {
+                  "node_id": node["original_w2_node_id"],
+                  "sample_count": node["original_producer_snap_sample_count"],
+                  "native_coordinate_groups": node["original_split_input_coordinate_groups"],
+                  "source_identity_only":True,
+              } for node in snap_inputs["selected_original_node_rows"]
+          ],sort_keys=True))
           # Only assert a source-native diagnostic on the immutable original.
           # A running-centroid snap radius is not a pairwise-diameter bound.
           assert any(
