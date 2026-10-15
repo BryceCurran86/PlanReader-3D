@@ -1303,3 +1303,29 @@ def test_source_owned_plan_finish_rejects_invalid_page_scopes(pages) -> None:
             source=None, room_areas=None, floors=None,
             page_ids=pages,
         )
+
+
+
+def test_source_owned_original_finish_mark_cannot_cross_physical_floor_page_without_wall_proof():
+    """The p11 OFFICE box is not itself a p7 physical wall equivalence seal."""
+    from types import SimpleNamespace
+    from pb_cross_view_floor_finish_authority import (
+        _source_owned_mark_eligible_for_existing_physical_floor,
+    )
+    floor = SimpleNamespace(page_id="7", canonical_floor_id="actual-floor-7")
+    mark = SimpleNamespace(page_id="11", record_id="actual-mark-11")
+    assert not _source_owned_mark_eligible_for_existing_physical_floor(
+        floor=floor, occurrence=mark, source_owned_shadow=True
+    )
+    assert _source_owned_mark_eligible_for_existing_physical_floor(
+        floor=floor, occurrence=SimpleNamespace(page_id="7"),
+        source_owned_shadow=True,
+    )
+    # Existing default quantified dimension-box path is unchanged.
+    assert _source_owned_mark_eligible_for_existing_physical_floor(
+        floor=floor, occurrence=mark, source_owned_shadow=False,
+    )
+    with pytest.raises(ValueError, match="explicit boolean"):
+        _source_owned_mark_eligible_for_existing_physical_floor(
+            floor=floor, occurrence=mark, source_owned_shadow="true",
+        )
