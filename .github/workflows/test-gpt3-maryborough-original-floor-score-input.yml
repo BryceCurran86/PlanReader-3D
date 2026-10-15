@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # every module the replayed production chain can import must re-run the signed-output replay
+      - "pb_*.py"
+      - "tools/run_source_closed_project_handoff.py"
+      - "tools/diag_gpt2_room_measurement_gates.py"
+      - "tools/diag_gpt3_maryborough_floor_customer_gate.py"
       - "tools/run_gpt3_maryborough_original_floor_score_input.py"
       - "tests/test_gpt3_maryborough_original_floor_score_input.py"
       - ".github/workflows/test-gpt3-maryborough-original-floor-score-input.yml"
