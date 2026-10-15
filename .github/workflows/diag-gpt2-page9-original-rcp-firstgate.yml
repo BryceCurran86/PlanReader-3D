@@ -45,7 +45,7 @@ jobs:
           assert not result["original_rcp_view_p9_2_authenticated"]
           assert result["material_occurrences_published"] == 0
           assert result["metric_quantities_published"] == 0
-          Path("page9_rcp_first_gates.json").write_text(json.dumps(result, indent=2, sort_keys=True)+"\\n")
+          Path("page9_rcp_first_gates.json").write_text(json.dumps(result, indent=2, sort_keys=True)+"\n")
           print("P9_ORIGINAL_FRAME_ANCESTRY", len(matrix["source_frames"]),
                 [len(row["candidate_native_source_receipts"]) for row in matrix["source_frames"]])
           print("P9_RCP_FIRST_GATE", result["original_view_p9_2_first_gate"])
