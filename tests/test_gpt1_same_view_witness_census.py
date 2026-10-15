@@ -91,7 +91,7 @@ def test_missing_source_face_and_duplicate_selectors_fail_closed():
             _report(source, rooms, ids)
 
 
-def test_source_pair_conflicts_never_publish_metric_quantity():
+def test_missing_original_vertical_witness_never_publishes_metric_quantity():
     source, rooms = _source_and_rooms(duplicate_dimension_box=True)
     report = _report(source, rooms)
     row = report["rows"][0]
@@ -99,10 +99,7 @@ def test_source_pair_conflicts_never_publish_metric_quantity():
     assert row["quantity_published"] is False
     assert row["producer_area_authority_proven"] is False
     assert len(row["horizontal_dimensions"]) >= 1
-    assert len(row["vertical_dimensions"]) >= 1
-    assert len(row["pairs"]) == (
-        len(row["horizontal_dimensions"]) * len(row["vertical_dimensions"])
-    )
+    # The duplicate box makes the source parser reject every vertical witness.\n    # Retain that native negative; do not modify the scale/witness gates to\n    # manufacture an HxV pair for this synthetic drawing.\n    assert row["vertical_dimensions"] == []\n    assert row["pairs"] == []\n    assert row["reason"] == "source_pair_unavailable"
 
 
 def test_source_face_selector_permutation_cannot_change_receipts():
