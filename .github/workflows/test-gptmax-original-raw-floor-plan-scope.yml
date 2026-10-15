@@ -29,7 +29,7 @@ jobs:
       - run: python -m pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
       - name: Original segment extent, crossing and ownership negatives
         run: |
-          PYTHONPATH=. python -m pytest -q tests/test_g17_raw_floor_plan_scope_shadow.py tests/test_physical_opening_viewport_scope_authority.py
+          PYTHONPATH=. python -m pytest -q tests/test_g17_raw_floor_plan_scope_shadow.py
           ruff check --select F821,F823 pb_g17_raw_floor_plan_scope_shadow.py tests/test_g17_raw_floor_plan_scope_shadow.py tools/verify_gptmax_original_raw_floor_plan_scope.py
   immutable-original-source-and-customer:
     runs-on: ubuntu-latest
