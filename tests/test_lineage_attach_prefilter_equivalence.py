@@ -341,3 +341,43 @@ def test_dense_hatch_inside_one_grid_cell_is_pruned_and_output_is_identical(monk
     assert actual == expected
     assert any(len(f[lin.LINEAGE_KEY]["source_primitive_ids"]) >= 1 for f in actual)
     assert new_calls * 20 < ref_calls, (new_calls, ref_calls)
+
+
+
+def test_finite_overflow_source_remains_a_parent_in_dense_grid_against_original_oracle():
+    """An enormous but finite W2 stroke makes the legacy length/cross/dot overflow.
+
+    It is globally eligible under the unchanged grid, and the exact original
+    predicate accepts a fragment beyond its finite endpoint AABB. Candidate
+    pruning must *never* change that historical source parent universe.
+    """
+    sources = [_source(i, -1e308, float(i), 1e308, float(i)) for i in range(20)]
+    pair = ((1.7e308, 0.0), (1.7e308, 1.0))
+    assert lin.fragment_contained_in_segment(pair, sources[0])
+    assert lin._fragment_box(pair) is None
+    grid, global_indexes = lin._build_source_containment_grid(sources)
+    positions = lin._containment_grid_candidate_indexes(pair, grid, global_indexes)
+    assert len(positions) == 20  # trigger the >=16 AABB fastpath branch
+    # Neither the source-only nor fragment-only fastpath may delete a parent.
+    filt = lin._BoxPrefilter(sources)
+    assert filt.select_indexes(positions, 1.7e308, 1.7e308, 0.0, 1.0) == positions
+    expected = _reference_attach([pair], sources)
+    actual = lin.attach_lineage_to_split_fragments([pair], sources)
+    assert actual == expected
+    assert [list(item) for item in actual] == [list(item) for item in expected]
+    assert actual[0][lin.LINEAGE_KEY]["source_primitive_ids"] == [
+        f"src_{i}" for i in sorted(range(20), key=lambda i: f"src_{i}")
+    ]
+
+
+def test_float_overflow_headroom_is_not_a_source_presence_or_scale_authority():
+    """Ordinary bounded geometry still prunes; overflow-risk sources only defer to exact geometry."""
+    sources = [_source(i, 10.0 * i, 0.0, 10.0 * i + 6.0, 0.0) for i in range(20)]
+    sources.append(_source(20, -1e308, 0.0, 1e308, 0.0))
+    fragments = [((11.0, 0.0), (15.0, 0.0)), ((1.7e308, 0.0), (1.7e308, 1.0))]
+    for fragment in fragments:
+        assert lin.attach_lineage_to_split_fragments([fragment], sources) == _reference_attach(
+            [fragment], sources
+        )
+    assert lin._fragment_box(fragments[0]) is not None
+    assert lin._fragment_box(fragments[1]) is None
