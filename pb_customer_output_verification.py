@@ -69,20 +69,19 @@ def _string_tuple(values: Any) -> tuple[str, ...]:
 
 
 def _strict_customer_notes(notes: str) -> Mapping[str, Any]:
-    """Parse automated notes without last-write-wins or corrupted lineage."""
-    def unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise CustomerOutputVerificationError(
-                    f"customer row notes contain duplicate provenance key: {key}"
-                )
-            result[key] = value
-        return result
+    """Parse persisted automated provenance using the existing strict JSON gate."""
+    from scripts.report_full_plan_v2_readiness import _parse_evidence_json
 
     try:
-        payload = json.loads(notes, object_pairs_hook=unique_keys)
+        payload = _parse_evidence_json(notes)
     except (json.JSONDecodeError, RecursionError, ValueError) as exc:
+        # Preserve the established duplicate-provenance diagnostic for callers.
+        detail = str(exc)
+        if detail.startswith("duplicate JSON key: "):
+            raise CustomerOutputVerificationError(
+                "customer row notes contain duplicate provenance key: "
+                + detail.removeprefix("duplicate JSON key: ")
+            ) from exc
         raise CustomerOutputVerificationError(
             "customer row notes contain invalid projection provenance JSON"
         ) from exc
