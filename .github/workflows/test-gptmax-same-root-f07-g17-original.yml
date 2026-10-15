@@ -68,11 +68,21 @@ jobs:
           assert r['raw_candidate_count']==30 and r['raw_unresolved_count']==9
           assert r['candidate_universe_complete'] is False
           assert all(not v for v in r['authority_grants'].values())
-          assert r['view_result']['status'] in ('SOURCE_VIEW_CANDIDATE_SAME_ROOT_ONLY','ABSTAIN')
-          assert r['view_result']['reason'] in (
-            'cross_family_physical_instance_correspondence_unproven',
-            'unique_source_floor_plan_view_unproven',
-            'foreign_page_view')
+          # The original source actually PROVES a same-root, unique F07 plan.
+          # This exact source-positive regression must never pass on ABSTAIN.
+          assert r['view_result']['status']=='SOURCE_VIEW_CANDIDATE_SAME_ROOT_ONLY'
+          assert r['view_result']['reason']=='cross_family_physical_instance_correspondence_unproven'
+          assert r['view_result']['selected_view_id']=='source_plan_view_67db409f1a44214bbf0766ac'
+          actual=r['view_result']['selected_bbox_pt']
+          expected=[186.60000610351562,98.52000427246094,1128.719970703125,624.8399658203125]
+          assert len(actual)==4 and all(abs(a-b)<0.0001 for a,b in zip(actual,expected))
+          assert sum(x['view_type']=='floor_plan' and x['authoritative']
+                     and x['status']=='derived' and x['source_owned_plan_view_proven']
+                     for x in r['view_result']['views'])==1
+          assert sum(x['view_type']=='legend' and x['status']=='unsupported'
+                     and not x['authoritative']
+                     for x in r['view_result']['views'])==1
+          assert r['view_result']['selected_view_id'] != r['snapshot_id']
           print({'actual_first_view_stage':r['view_result']['status'],
                  'reason':r['view_result']['reason'],
                  'source_snapshot':r['snapshot_id'],
