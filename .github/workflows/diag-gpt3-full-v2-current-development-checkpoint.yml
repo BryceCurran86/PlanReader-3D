@@ -10,7 +10,17 @@ on:
       - "benchmarks/frozen_holdout/full_plan_v2/development_scoreboard.py"
       - "benchmarks/frozen_holdout/full_plan_v2/sealed_reconciliation.py"
       - "docs/engineering/lot16_original_identity_reconciliation_20261012/**"
+      - "tools/report_gpt3_selected_two_project_original_evidence.py"
+      - "pb_source_closed_run_export.py"
+      - "pb_customer_output_verification.py"
+      - "scripts/check_full_plan_v2_integrity.py"
+      - "requirements.txt"
+      - "requirements-ci-v1228.txt"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
   group: gpt3-full-v2-current-development-${{ github.event.pull_request.number || github.ref }}
@@ -30,7 +40,9 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
       - name: Frozen V2 integrity
         run: PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
-      - name: Replay current committed exact evidence through full four-project scoreboard
+      - name: Replay SHA-pinned eight-quantity original Lot16 evidence through the four-project development scoreboard
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -39,9 +51,53 @@ jobs:
           MAPS="$ROOT/identity-maps"
           mkdir -p "$SEALED" "$MAPS"
 
-          cp docs/engineering/lot16_original_identity_reconciliation_20261012/source_sealed_run.json \
+          # The October 12 committed package is the older seven-row seal.
+          # Reuse the independently verified ORIGINAL eight-row artifact from
+          # the source-positive GitHub run; never invent an eighth quantity.
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/11929406140/zip" \
+            -o "$ROOT/verified-original-eight.zip"
+          printf '%s  %s\n' \
+            '950e1074d270e6b1d4558b165e5345cf49b2ac0c962a3cc8edf420f11f67bd91' \
+            "$ROOT/verified-original-eight.zip" | sha256sum --check
+          mkdir -p "$ROOT/original"
+          unzip -q "$ROOT/verified-original-eight.zip" -d "$ROOT/original"
+          test "$(cat "$ROOT/original/producer_head_sha.txt")" = \
+            '4e5aedf085cf63f92dac0935132b1e1c1dbaa178'
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+          from pb_customer_output_verification import verify_sealed_customer_output
+
+          root=Path("artifacts/gpt3-full-v2-current-development/original")
+          sealed=sealed_source_closed_run_from_dict(json.loads(
+              (root/"production/source_sealed_run.json").read_text()
+          ))
+          customers=json.loads(
+              (root/"production/verified_customer_rows.json").read_text()
+          )
+          verification=verify_sealed_customer_output(sealed, customers)
+          identity=json.loads((root/"identity_map_with_1215.json").read_text())
+          exact=json.loads((root/"exact_project_report.json").read_text())
+          assert sealed.fingerprint=="ef58f8ae1a963a5b985edfa6dda752f3f338d9d5c42d56969b0e86f538aadfeb"
+          assert len(sealed.quantities)==len(customers)==verification.valid_quantity_count==8
+          assert len(verification.verified_quantity_ids)==8
+          assert len(identity["bindings"])==8
+          assert exact["source_sha_verified"] and exact["reconciliation_complete"]
+          assert exact["denominator"]==27 and exact["matched_within_tolerance"]==8
+          assert exact["lineage_conflicts"]==exact["unsupported_extra"]==0
+          assert sealed.project_id==identity["project_id"]==exact["project_id"]=="au_qld_lot16_power"
+          assert sealed.fingerprint==exact["sealed_run_fingerprint"]
+          print("EIGHT ORIGINAL SIGNED SOURCE QUANTITIES AND CUSTOMER ROWS VERIFIED")
+          PY
+          cp "$ROOT/original/production/source_sealed_run.json" \
             "$SEALED/au_qld_lot16_power.json"
-          cp docs/engineering/lot16_original_identity_reconciliation_20261012/identity_map.json \
+          cp "$ROOT/original/identity_map_with_1215.json" \
             "$MAPS/au_qld_lot16_power.identity_map.json"
 
           set +e
@@ -71,14 +127,14 @@ jobs:
           assert score["source_closed_truth_items"]==120
           assert score["executed_denominator"]==27
           assert score["execution_coverage"]==27/120
-          assert score["matched_within_tolerance"]==7
+          assert score["matched_within_tolerance"]==8
           assert score["matched_outside_tolerance"]==0
-          assert score["missed"]==20
+          assert score["missed"]==19
           assert score["partial"]==0
           assert score["unresolved"]==0
           assert score["hallucinations"]==0
           assert score["lineage_conflicts"]==0
-          assert score["observed_accuracy"]==7/27
+          assert score["observed_accuracy"]==8/27
           assert score["development_accuracy"] is None
           assert score["precision_adjusted_accuracy"] is None
 
@@ -86,9 +142,9 @@ jobs:
           lot16=projects["au_qld_lot16_power"]
           assert lot16["execution_present"] is True
           assert lot16["truth_denominator"]==27
-          assert lot16["matched_within_tolerance"]==7
-          assert lot16["missed"]==20
-          assert lot16["observed_accuracy"]==7/27
+          assert lot16["matched_within_tolerance"]==8
+          assert lot16["missed"]==19
+          assert lot16["observed_accuracy"]==8/27
 
           missing={
               "au_qld_3laurel",
@@ -101,7 +157,7 @@ jobs:
               if not row["execution_present"]
           } == missing
           assert set(ledger["missing_execution_project_ids"])==missing
-          assert len(ledger["failure_items"])==20
+          assert len(ledger["failure_items"])==19
           assert ledger["unsupported_outputs"]==[]
           assert all(item["project_id"]=="au_qld_lot16_power" for item in ledger["failure_items"])
           assert all(item["state"]=="MISSED" for item in ledger["failure_items"])
