@@ -80,19 +80,35 @@ def _module_file(name: str, root: Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _imported_modules(path: Path) -> set[str]:
+def _imported_modules(path: Path, root: Path) -> set[str]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError, UnicodeDecodeError) as exc:
         raise ValueError(f"unreadable production import: {path}") from exc
     names: set[str] = set()
+    package_parts = path.relative_to(root).parent.parts
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names.add(node.module)
-            # ``from tools import x`` / ``from scripts import x`` import a submodule file
-            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                # Relative imports are genuine producer dependencies too:
+                # tools/entry.py: ``from . import helper`` -> tools.helper;
+                # tools/nested/entry.py: ``from .. import helper`` -> tools.helper.
+                if node.level > len(package_parts):
+                    raise ValueError(f"invalid relative production import: {path}")
+                parts = package_parts[:len(package_parts) - node.level + 1]
+                if node.module:
+                    parts += tuple(node.module.split("."))
+                module = ".".join(parts)
+            else:
+                module = node.module or ""
+            if module:
+                names.add(module)
+                names.update(
+                    f"{module}.{alias.name}" for alias in node.names
+                    if alias.name != "*"
+                )
     return names
 
 
@@ -108,7 +124,7 @@ def import_closure(entries: tuple[str, ...], root: Path) -> set[str]:
         if rel in seen:
             continue
         seen.add(rel)
-        for name in _imported_modules(path):
+        for name in _imported_modules(path, root):
             target = _module_file(name, root)
             if target is not None:
                 pending.append(target)
@@ -277,3 +293,20 @@ def test_unreadable_import_closure_and_deleted_entry_fail_closed(tmp_path):
         import_closure(("tools/entry.py",), tmp_path)
     with pytest.raises(ValueError, match="missing production replay/import entry"):
         import_closure(("tools/absent.py",), tmp_path)
+
+
+def test_import_closure_follows_relative_python_package_imports(tmp_path):
+    _write(tmp_path, "tools/entry.py", "from . import helper\n")
+    _write(tmp_path, "tools/helper.py", "from .nested import child\n")
+    _write(tmp_path, "tools/nested/child.py", "from .. import shared\n")
+    _write(tmp_path, "tools/shared.py", "import pb_added\n")
+    _write(tmp_path, "pb_added.py", "VALUE = 1\n")
+    expected = {
+        "tools/entry.py", "tools/helper.py", "tools/nested/child.py",
+        "tools/shared.py", "pb_added.py",
+    }
+    assert import_closure(("tools/entry.py",), tmp_path) == expected
+    assert uncovered(expected, ["tools/entry.py", "tools/helper.py",
+                                "tools/nested/child.py", "tools/shared.py"]) == [
+        "pb_added.py"
+    ]
