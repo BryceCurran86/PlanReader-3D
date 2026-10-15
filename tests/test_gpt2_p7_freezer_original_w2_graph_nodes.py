@@ -385,3 +385,87 @@ def test_source_graphic_receipts_reorder_preserves_original_style_candidates():
     assert all(not x["style_is_not_structural_or_drafting_role"] is False
                for x in b["source_style_records"])
     assert not b["physical_wall_or_annotation_role_granted"]
+
+
+
+def test_independent_original_indexed_parent_ink_matches_producer_source_geometry():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    originals=[{"type":"s","color":(0.,0.,0.),"width":.48,
+                "items":[("l",fitz.Point(0,0),fitz.Point(10,0))]}]
+    style={
+        "original_primitive_id":"d0i0",
+        "original_native_geometry":[0.,0.,10.,0.],
+        "original_native_page_coords_present":True,
+    }
+    node=[{"all_original_split_endpoint_receipts":[
+        {"original_split_input_graphic_style_receipt":{
+            "source_style_records":[style]}}
+    ]}]
+    before=repr(originals)
+    result=verify(originals,node)
+    assert result["original_indexed_parent_sources_all_correlated"]
+    assert result["distinct_producer_source_parent_record_count"]==1
+    assert result["original_indexed_parent_receipts"][0][
+        "independent_original_pdf_source_status"] == (
+        "INDEXED_ORIGINAL_INK_FULL_SOURCE_SPAN"
+    )
+    assert not result["source_structural_wall_role_granted"]
+    assert repr(originals)==before
+
+
+def test_independent_native_source_rejects_foreign_and_noncollinear_original_parent():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    ink=[{"type":"s","items":[
+        ("l",fitz.Point(0,0),fitz.Point(10,0))]}]
+    def record(identity,coords,present=True):
+        return {
+            "original_primitive_id":identity,
+            "original_native_geometry":coords,
+            "original_native_page_coords_present":present,
+        }
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[
+                record("d0i0",[0.,1.,10.,1.]),
+                record("d999i0",[0.,0.,10.,0.]),
+                record("d0i0",[None,None,None,None],False),
+            ]
+        }}]}]
+    result=verify(ink,node)
+    statuses={q["independent_original_pdf_source_status"] for q in
+              result["original_indexed_parent_receipts"]}
+    assert statuses=={
+        "INDEXED_SOURCE_GEOMETRY_CONFLICT",
+        "INDEXED_SOURCE_LOOKUP_UNAVAILABLE",
+        "PRODUCER_NATIVE_COORDS_UNAVAILABLE",
+    }
+    assert not result["original_indexed_parent_sources_all_correlated"]
+    assert not result["room_or_metric_published"]
+
+
+def test_original_split_ink_reversal_does_not_invent_second_physical_wall():
+    import fitz
+    from tools.diag_gpt2_p7_freezer_original_w2_graph_nodes import (
+        verify_original_indexed_split_parent_ink as verify,
+    )
+    ink=[{"type":"f","fill":(1.,1.,1.),"items":[
+        ("l",fitz.Point(10,0),fitz.Point(0,0))]}]
+    rec={"original_primitive_id":"d0i0",
+         "original_native_geometry":[0.,0.,10.,0.],
+         "original_native_page_coords_present":True}
+    node=[{"all_original_split_endpoint_receipts":[{
+        "original_split_input_graphic_style_receipt":{
+            "source_style_records":[rec,rec]}}]}]
+    result=verify(ink,node)
+    assert result["distinct_producer_source_parent_record_count"]==1
+    assert result["original_indexed_parent_sources_all_correlated"]
+    assert result["original_indexed_parent_receipts"][0][
+        "independent_original_pdf_ink_evidence"][
+        "original_native_paint_metadata_candidate_only"]["native_fill_color"] == [1.,1.,1.]
+    assert not result["source_structural_wall_role_granted"]
