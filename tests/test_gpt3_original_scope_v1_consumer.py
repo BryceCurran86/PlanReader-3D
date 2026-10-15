@@ -418,3 +418,51 @@ def test_original_scope_workflow_triggers_on_local_import_closure():
         + repr(sorted(required - allowed))
     )
     assert "pb_*.py" in allowed  # all root-level production authority modules
+
+
+def test_original_scope_replay_cannot_be_disabled_or_evade_original_inputs():
+    """Use the independently adversarially tested signed-output workflow gate."""
+    from pathlib import Path
+    from tests.test_signed_output_gate_path_coverage import (
+        has_paths_ignore,
+        pull_request_paths,
+        pull_request_trigger_reaches_main,
+        replay_jobs_cannot_be_disabled_or_made_non_blocking,
+        workflow_path_included,
+    )
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/test-gpt3-original-scope-v1-consumer.yml").read_text()
+    pull_request_trigger_reaches_main(workflow)
+    replay_jobs_cannot_be_disabled_or_made_non_blocking(workflow)
+    assert not has_paths_ignore(workflow)
+    patterns = pull_request_paths(workflow)
+    assert patterns is not None
+    for rel in (
+        "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf",
+        "scripts/check_full_plan_v2_integrity.py",
+        "scripts/check_provider_gold_isolation.py",
+        "requirements.txt",
+        "requirements-ci-v1228.txt",
+        "tests/test_signed_output_gate_path_coverage.py",
+    ):
+        assert workflow_path_included(patterns, rel), ("original scope replay PR trigger absent", rel)
+    assert "  original-lot16:\n" in workflow
+    assert "      - name: Exact original Lot16 verified V1 customer source replay\n" in workflow
+    # The whole job must fail if a nonblocking or failure-only condition tries
+    # to hide source/quantity/customer verification in ordinary CI.
+    disabled = workflow.replace(
+        "      - name: Exact original Lot16 verified V1 customer source replay\n",
+        "      - name: Exact original Lot16 verified V1 customer source replay\n"
+        "        if: failure()\n",
+    )
+    with pytest.raises(ValueError, match="condition"):
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(disabled)
+    with pytest.raises(ValueError, match="does not include main"):
+        pull_request_trigger_reaches_main(
+            workflow.replace("    branches: [main]", "    branches: [release]")
+        )
+    with pytest.raises(ValueError, match="non-blocking"):
+        replay_jobs_cannot_be_disabled_or_made_non_blocking(
+            workflow.replace("    runs-on: ubuntu-latest", "    continue-on-error: true\n    runs-on: ubuntu-latest", 1)
+        )
