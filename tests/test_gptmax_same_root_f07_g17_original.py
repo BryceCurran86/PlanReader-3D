@@ -1,5 +1,6 @@
 """Same-root plan-view diagnostic must not elect competing/untrusted F07 products."""
 from types import SimpleNamespace as NS
+from hashlib import sha256
 import pytest
 
 import tools.diag_gptmax_same_root_f07_g17_original as diag
@@ -58,9 +59,9 @@ def test_foreign_page_source_product_abstains(monkeypatch):
 
 @pytest.mark.parametrize("page", ["0","03","-1","bad",3,True])
 def test_noncanonical_original_pdf_page_is_rejected_before_ingest(page):
-    with pytest.raises((ValueError,TypeError)):
+    with pytest.raises((ValueError,TypeError), match="canonical source page"):
         diag.replay_original_live_f07_g17(b"original source",page_id=page,
-                                          expected_sha256="other")
+                                          expected_sha256=sha256(b"original source").hexdigest())
 
 
 def test_original_source_digest_conflict_rejected_before_producer():
