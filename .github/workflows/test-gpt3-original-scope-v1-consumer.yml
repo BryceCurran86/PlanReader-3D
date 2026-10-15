@@ -15,6 +15,12 @@ on:
       - "tools/diag_gptmax_source_authority_stages.py"
       - "tools/diag_gptmax_raster_unhosted_flank_source.py"
       - "tests/test_gpt3_original_scope_v1_consumer.py"
+      - "tests/test_signed_output_gate_path_coverage.py"
+      - "documents/sources/1. Construction Plans - Lot 16 Power (REV E).pdf"
+      - "scripts/check_full_plan_v2_integrity.py"
+      - "scripts/check_provider_gold_isolation.py"
+      - "requirements.txt"
+      - "requirements-ci-v1228.txt"
       - "pb_*.py"
       - ".github/workflows/test-gpt3-original-scope-v1-consumer.yml"
   workflow_dispatch:
